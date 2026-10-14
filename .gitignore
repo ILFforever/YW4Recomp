@@ -1,0 +1,83 @@
+# ---------------------------------------------------------------------------
+# Game data: NEVER commit (CLAUDE.md rule 1).
+# If you need a real file whose name matches one of these, add a narrow
+# "!path" exception below and explain why in the commit message.
+# ---------------------------------------------------------------------------
+
+# Dumps and containers
+*.xci
+*.xcz
+*.nsp
+*.nsz
+*.nca
+*.ncz
+*.pfs0
+*.hfs0
+
+# Executables / modules
+*.nso
+*.nro
+*.nrr
+*.npdm
+*.kip
+*.kip1
+*.elf
+# ExeFS module files have no extension. These names are ignored everywhere,
+# so do not name a source folder "main", "rtld" or "sdk" without an exception.
+main
+rtld
+sdk
+subsdk[0-9]*
+
+# Extracted filesystems
+exefs/
+ExeFS/
+romfs/
+RomFS/
+
+# Keys and firmware
+*.keys
+prod.keys
+title.keys
+dev.keys
+firmware/
+Firmware/
+
+# Reverse-engineering databases (they contain the game's code)
+*.gpr
+*.rep/
+ghidra_projects/
+*.i64
+*.idb
+*.id0
+*.id1
+*.id2
+*.nam
+*.til
+*.bndb
+
+# ---------------------------------------------------------------------------
+# Local config (holds paths to the user's own files; rule 2)
+# ---------------------------------------------------------------------------
+config.local.toml
+
+# ---------------------------------------------------------------------------
+# Generated output, including recompiler output (derived from game code)
+# ---------------------------------------------------------------------------
+build/
+work/
+out/
+**/generated/
+
+# ---------------------------------------------------------------------------
+# Tooling noise
+# ---------------------------------------------------------------------------
+__pycache__/
+*.pyc
+.venv/
+venv/
+.vs/
+*.user
+CMakeUserPresets.json
+.DS_Store
+Thumbs.db

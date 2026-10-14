@@ -1,0 +1,19 @@
+# Copy this file to config.local.toml (gitignored) and fill in your paths.
+# Every path to a file you supplied lives here and nowhere else.
+# Relative paths are resolved from the repo root.
+
+[input]
+# Folder holding your already-extracted ExeFS (main, main.npdm, rtld, sdk, subsdk*).
+exefs_dir = ""
+# Folder holding your already-extracted RomFS.
+romfs_dir = ""
+
+[output]
+# Where generated files go. Must stay gitignored and should NOT be inside a
+# cloud-synced folder (OneDrive, Dropbox, Google Drive).
+work_dir = "work"
+
+[tools]
+# Optional. Only needed for the Ghidra and baseline steps.
+ghidra_dir = ""
+emulator_exe = ""

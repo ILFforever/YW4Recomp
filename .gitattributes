@@ -1,0 +1,2 @@
+# Keep LF in the repo on every platform (project targets Windows and Linux).
+* text=auto eol=lf
