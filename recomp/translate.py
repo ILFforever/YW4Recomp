@@ -16,11 +16,10 @@ from __future__ import annotations
 
 import argparse
 import collections
-import hashlib
 import json
 import sys
 
-from tools.yw4 import config, ingest, recon
+from tools.yw4 import config, recon
 
 from . import coverage, function
 
@@ -28,11 +27,7 @@ CHUNK = 500
 
 
 def load_code(cfg: config.Config) -> tuple[function.Code, dict]:
-    image, mods = recon.load_main(cfg)
-    want = ingest.load_target().get("image_sha256", "")
-    if not want or hashlib.sha256(image).hexdigest() != want:
-        raise config.ConfigError("work/exefs/main.bin does not match target.toml; "
-                                 "run python -m tools.yw4.ingest first")
+    image, mods = recon.load_main(cfg)  # refuses a build that doesn't match target.toml
     return function.Code(image, mods["main"]["segments"]["text"]["size"]), mods
 
 

@@ -9,7 +9,9 @@ mixing edge-case and random values. For loads/stores the base register is
 pointed into a scratch buffer (pi/testcase.h) so the access is safe and the
 result doesn't depend on the buffer's address. The cases go to the Pi
 (decision 0004), run in recomp/pi/harness, and come back as
-work/golden/<form>.in / <form>.out (line format: pi/testcase.h).
+tests/golden/<form>.in.xz / <form>.out.xz (line format: pi/testcase.h).
+They are synthetic (random encodings, not the game's code), so they are committed:
+recomp.check then works without the Pi.
 """
 
 from __future__ import annotations
@@ -18,13 +20,12 @@ import argparse
 import random
 import subprocess
 import sys
-from pathlib import Path
 
 from tools.yw4 import config
 
-from . import lift
+from . import check, lift
 
-PI_DIR = Path(__file__).resolve().parent / "pi"
+PI_DIR = check.PI_DIR
 REMOTE_DIR = "yw4-golden"
 
 EDGE_VALUES = [
@@ -101,12 +102,32 @@ def place_memory(a: lift.MemAccess, regs: list[int], rng: random.Random) -> tupl
     return bit, 0 if loaded_over else bit
 
 
-def make_cases(f: lift.Form, count: int, states: int, rng: random.Random) -> list[str]:
+# Operand pairs that random states almost never produce, in both orders:
+# signed overflow (INT_MIN / -1, INT_MIN - 1, MAX + 1), carries, zero and all-ones,
+# 32-bit values with junk or sign bits in the upper half.
+_MIN64, _MAX64, _ALL = 0x8000000000000000, 0x7FFFFFFFFFFFFFFF, 0xFFFFFFFFFFFFFFFF
+CRITICAL_PAIRS = [
+    (_MIN64, _ALL), (0x80000000, 0xFFFFFFFF), (0xFFFFFFFF80000000, _ALL), (_MAX64, 1),
+    (0x7FFFFFFF, 1), (_MIN64, 1), (_ALL, _ALL), (0, 0), (0, _ALL), (_MIN64, _MIN64),
+    (0xFFFFFFFF, 1), (0x100000000, 0xFFFFFFFF),
+]
+CRITICAL_PAIRS += [(b, a) for a, b in CRITICAL_PAIRS if a != b]
+
+
+def pair_state(rng: random.Random) -> list[int]:
+    """Even registers get one value of a critical pair, odd registers the other, so any
+    instruction reading two registers of different parity sees that exact pair."""
+    v1, v2 = rng.choice(CRITICAL_PAIRS)
+    return [v1 if i % 2 == 0 else v2 for i in range(31)] + [random_value(rng)]
+
+
+def make_cases(f: lift.Form, count: int, states: int, pairs: int, rng: random.Random) -> list[str]:
     lines = []
     for enc in random_encodings(f, count, rng):
         a = f.mem(enc) if f.mem else None
-        for _ in range(states):
-            regs = [random_value(rng) for _ in range(32)]  # x0..x30, SP
+        for k in range(states + pairs):
+            # x0..x30, SP
+            regs = [random_value(rng) for _ in range(32)] if k < states else pair_state(rng)
             inmask = outmask = 0
             if a:
                 inmask, outmask = place_memory(a, regs, rng)
@@ -151,7 +172,8 @@ def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("forms", nargs="*", help="form names (default: all)")
     ap.add_argument("--cases", type=int, default=300, help="encodings per form")
-    ap.add_argument("--states", type=int, default=4, help="register states per encoding")
+    ap.add_argument("--states", type=int, default=4, help="random register states per encoding")
+    ap.add_argument("--pairs", type=int, default=4, help="critical-pair register states per encoding")
     ap.add_argument("--seed", type=int, default=1)
     args = ap.parse_args(argv)
 
@@ -166,15 +188,15 @@ def main(argv: list[str] | None = None) -> int:
         print(f"unknown forms: {', '.join(sorted(unknown))}", file=sys.stderr)
         return 1
 
-    out_dir = cfg.work_dir / "golden"
+    out_dir = check.GOLDEN
     out_dir.mkdir(parents=True, exist_ok=True)
     build_harness(cfg)
     rng = random.Random(args.seed)
     for f in forms:
-        cases = make_cases(f, args.cases, args.states, rng)
+        cases = make_cases(f, args.cases, args.states, args.pairs, rng)
         results = run_on_pi(cfg, cases)
-        (out_dir / f"{f.name}.in").write_text("\n".join(cases) + "\n")
-        (out_dir / f"{f.name}.out").write_text("\n".join(results) + "\n")
+        check.write_golden(out_dir / f"{f.name}.in.xz", cases)
+        check.write_golden(out_dir / f"{f.name}.out.xz", results)
         print(f"{f.name:15} {len(cases):6} cases")
     print(f"wrote {out_dir}")
     return 0

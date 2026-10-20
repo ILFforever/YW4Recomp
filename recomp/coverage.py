@@ -77,10 +77,10 @@ def subgroup(enc: int) -> str:
 def main() -> int:
     try:
         cfg = config.load()
+        image, mods = recon.load_main(cfg)
     except config.ConfigError as e:
         print(f"config error: {e}", file=sys.stderr)
         return 1
-    image, mods = recon.load_main(cfg)
     funcs = json.loads((cfg.work_dir / "ghidra" / "main.functions.json").read_text())["functions"]
     text_size = mods["main"]["segments"]["text"]["size"]
 

@@ -191,6 +191,11 @@ def _adc_sbc(e: int) -> str:
 LOGIC_OPS = {0: "&", 1: "|", 2: "^", 3: "&"}  # AND, ORR, EOR, ANDS
 
 
+def ands(sf: int, d: int, expr: str) -> str:
+    """ANDS/BICS: the result, then NZ from it and C, V cleared."""
+    return f"{{ {utype(sf)} r = {expr}; {wr_reg(d, sf, 'r')} ctx->nzcv = nz{64 if sf else 32}(r); }}"
+
+
 def _logical_imm_valid(e: int) -> bool:
     sf, nbit = bits(e, 31, 31), bits(e, 22, 22)
     if not sf and nbit:
@@ -206,7 +211,7 @@ def _logical_imm(e: int) -> str:
     imm, _ = decode_bit_masks(nbit, imms, immr, True, 64 if sf else 32)
     expr = f"{rd_reg(n, sf)} {LOGIC_OPS[opc]} ({utype(sf)}){imm:#x}"
     if opc == 3:
-        return f"{{ {utype(sf)} r = {expr}; {wr_reg(d, sf, 'r')} ctx->nzcv = nz{64 if sf else 32}(r); }}"
+        return ands(sf, d, expr)
     return wr_reg(d, sf, expr, sp=True)
 
 
@@ -220,7 +225,7 @@ def _logical_shift(e: int) -> str:
         mv = f"({utype(sf)})~{mv}"   # BIC, ORN, EON, BICS
     expr = f"{rd_reg(n, sf)} {LOGIC_OPS[opc]} {mv}"
     if opc == 3:
-        return f"{{ {utype(sf)} r = {expr}; {wr_reg(d, sf, 'r')} ctx->nzcv = nz{64 if sf else 32}(r); }}"
+        return ands(sf, d, expr)
     return wr_reg(d, sf, expr)
 
 

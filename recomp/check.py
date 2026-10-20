@@ -2,6 +2,11 @@
 
     python -m recomp.check                  every form with golden files
     python -m recomp.check addsub_imm       only these forms
+    python -m recomp.check --opt=-O0        another optimisation level (default -O2)
+    python -m recomp.check --ubsan          trap on undefined behaviour in the lifted C
+
+Golden files live in tests/golden/ (xz-compressed, made by recomp.golden), so
+this needs neither the Pi nor the game.
 
 For each form, translates every test encoding with recomp.lift, builds one C
 test program with the host compiler (CC, default gcc), feeds it the same input
@@ -13,19 +18,19 @@ that differ, expected vs actual.
 from __future__ import annotations
 
 import argparse
+import lzma
 import os
 import subprocess
 import sys
 import tempfile
 from pathlib import Path
 
-from tools.yw4 import config
-
 from . import lift
 
 REPO = Path(__file__).resolve().parents[1]
 INCLUDE = REPO / "runtime" / "include"
 PI_DIR = REPO / "recomp" / "pi"
+GOLDEN = REPO / "tests" / "golden"
 
 PROGRAM = r"""
 #include "yw4cpu.h"
@@ -63,15 +68,27 @@ int main(void) {
 """
 
 
-def build_program(encodings: list[int], exe: Path) -> None:
+def read_golden(path: Path) -> list[str]:
+    return lzma.decompress(path.read_bytes()).decode().splitlines()
+
+
+def write_golden(path: Path, lines: list[str]) -> None:
+    path.write_bytes(lzma.compress(("\n".join(lines) + "\n").encode(), preset=9))
+
+
+def build_program(encodings: list[int], exe: Path, flags: list[str]) -> None:
+    """Encodings the lifter rejects are left out; they then print UNSUPPORTED and mismatch."""
     cases = []
     for enc in encodings:
-        cases.append(f"    case 0x{enc:08x}u: {{ {lift.lift(enc)} }} break;")
+        try:
+            cases.append(f"    case 0x{enc:08x}u: {{ {lift.lift(enc)} }} break;")
+        except lift.LiftError:
+            pass
     src = exe.with_suffix(".c")
     src.write_text(PROGRAM % "\n".join(cases))
     cc = os.environ.get("CC", "gcc")
-    proc = subprocess.run([cc, "-std=c11", "-O1", "-w", f"-I{INCLUDE}", f"-I{PI_DIR}", "-o", str(exe), str(src)],
-                          capture_output=True, text=True)
+    proc = subprocess.run([cc, "-std=c11", *flags, "-Wall", "-Werror", f"-I{INCLUDE}", f"-I{PI_DIR}",
+                           "-o", str(exe), str(src)], capture_output=True, text=True)
     if proc.returncode != 0:
         raise RuntimeError(f"compile failed:\n{proc.stderr[-3000:]}")
 
@@ -84,17 +101,18 @@ def describe_diff(inp: str, want: str, got: str) -> str:
     return f"  {w[0]}  " + "; ".join(diffs)
 
 
-def check_form(name: str, golden: Path, tmp: Path) -> tuple[int, int, list[str]]:
-    inputs = (golden / f"{name}.in").read_text().splitlines()
-    expected = (golden / f"{name}.out").read_text().splitlines()
+def check_form(name: str, tmp: Path, flags: list[str]) -> tuple[int, int, list[str]]:
+    inputs = read_golden(GOLDEN / f"{name}.in.xz")
+    expected = read_golden(GOLDEN / f"{name}.out.xz")
     encodings = sorted({int(line.split()[0], 16) for line in inputs})
     exe = tmp / f"check_{name}.exe"
-    build_program(encodings, exe)
+    build_program(encodings, exe, flags)
     proc = subprocess.run([str(exe)], input="\n".join(inputs) + "\n", capture_output=True, text=True)
     actual = proc.stdout.splitlines()
     bad = [describe_diff(i, w, a) for i, w, a in zip(inputs, expected, actual) if w != a]
     if len(actual) != len(expected):
-        bad.append(f"  output has {len(actual)} lines, expected {len(expected)}")
+        bad.append(f"  output has {len(actual)} lines, expected {len(expected)} "
+                   f"(exit code {proc.returncode}: the lifted code may have crashed)")
     return len(inputs), len(bad), bad
 
 
@@ -102,22 +120,19 @@ def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("forms", nargs="*")
     ap.add_argument("--show", type=int, default=8, help="mismatches to print per form")
+    ap.add_argument("--opt", default="-O2", help="host compiler optimisation level")
+    ap.add_argument("--ubsan", action="store_true", help="trap on undefined behaviour in the lifted C")
     args = ap.parse_args(argv)
-    try:
-        cfg = config.load()
-    except config.ConfigError as e:
-        print(f"config error: {e}", file=sys.stderr)
-        return 1
-    golden = cfg.work_dir / "golden"
-    names = args.forms or sorted(p.stem for p in golden.glob("*.in"))
+    names = args.forms or sorted(p.name[:-len(".in.xz")] for p in GOLDEN.glob("*.in.xz"))
     if not names:
-        print(f"no golden files in {golden}; run python -m recomp.golden first", file=sys.stderr)
+        print(f"no golden files in {GOLDEN}; run python -m recomp.golden first", file=sys.stderr)
         return 1
 
+    flags = [args.opt] + (["-fsanitize=undefined", "-fsanitize-undefined-trap-on-error"] if args.ubsan else [])
     failed = 0
     with tempfile.TemporaryDirectory() as t:
         for name in names:
-            total, nbad, bad = check_form(name, golden, Path(t))
+            total, nbad, bad = check_form(name, Path(t), flags)
             status = "ok" if nbad == 0 else f"{nbad} MISMATCHES"
             print(f"{name:15} {total:6} cases  {status}")
             for line in bad[:args.show]:

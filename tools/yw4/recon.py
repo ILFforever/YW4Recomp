@@ -17,13 +17,14 @@ work/ (gitignored). docs/recon.md quotes the summaries.
 from __future__ import annotations
 
 import collections
+import hashlib
 import json
 import re
 import struct
 import sys
 from pathlib import Path
 
-from . import config, cpk, reloc, symbols
+from . import config, cpk, ingest, reloc, symbols
 
 TYPEINFO_VTABLES = {
     "_ZTVN10__cxxabiv117__class_type_infoE": "base",
@@ -60,9 +61,16 @@ RENDER_WORDS = re.compile(
 
 
 def load_main(cfg: config.Config) -> tuple[bytes, dict]:
+    """main's flat image from work/exefs/ and the module info. Refuses (ConfigError) if the
+    image doesn't match target.toml, so no tool can analyse a different build (rule 3)."""
     exefs = cfg.work_dir / "exefs"
     mods = {m["name"]: m for m in json.loads((exefs / "modules.json").read_text())}
-    return (exefs / "main.bin").read_bytes(), mods
+    image = (exefs / "main.bin").read_bytes()
+    want = ingest.load_target().get("image_sha256", "")
+    if not want or hashlib.sha256(image).hexdigest() != want:
+        raise config.ConfigError(f"{exefs / 'main.bin'} does not match target.toml; "
+                                 "run python -m tools.yw4.ingest first")
+    return image, mods
 
 
 def dynsym_names(image: bytes, info: dict) -> list[str]:
@@ -377,10 +385,10 @@ def survey_romfs(romfs: Path) -> str:
 def main() -> int:
     try:
         cfg = config.load()
+        image, mods = load_main(cfg)
     except config.ConfigError as e:
         print(f"config error: {e}", file=sys.stderr)
         return 1
-    image, mods = load_main(cfg)
     sdk_image = (cfg.work_dir / "exefs" / "sdk.bin").read_bytes()
     sdk_exports = {s.name for s in symbols.read_dynsym(sdk_image, mods["sdk"]) if s.defined}
 

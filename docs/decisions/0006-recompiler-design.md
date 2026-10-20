@@ -35,14 +35,14 @@ typedef struct {
 
 Every supported instruction form is tested against real hardware (decision 0004):
 
-1. `recomp/golden.py` makes test cases: random encodings within an instruction form (no PC-relative or branch forms yet), plus register values that mix edge cases (0, 1, -1, signed min/max, sign-boundary values) with random ones.
+1. `recomp/golden.py` makes test cases: random encodings within an instruction form (no PC-relative or branch forms yet), plus register values that mix edge cases (0, 1, -1, signed min/max, sign-boundary values) with random ones. Each encoding also gets *pair states*: every even register holds one value of a known-dangerous pair and every odd register the other (e.g. INT64_MIN and -1), because random states almost never produce such exact combinations.
 2. It copies `recomp/pi/` to the Pi 5 over SSH, builds the harness with the Pi's GCC, and runs the cases. The harness copies each instruction into an executable page between code that loads and stores the full register file (x0–x30, SP) and flags, then runs it.
-3. The results (golden files) come back to `work/golden/`.
-4. `recomp/check.py` translates each test encoding to C, compiles one test program with the host GCC, runs it on the same inputs, and reports every mismatch with the instruction, inputs, expected, and actual.
+3. The results come back as golden files in `tests/golden/` (xz-compressed, about 7 MB).
+4. `recomp/check.py` translates each test encoding to C, compiles one test program with the host GCC (`-O2 -Wall -Werror` by default; `--opt=-O0` and `--ubsan` for other builds), runs it on the same inputs, and reports every mismatch with the instruction, inputs, expected, and actual.
 
 **Loads and stores** (added 2026-10-20). Both machines keep a 128 KiB scratch buffer with the same byte pattern (`recomp/pi/testcase.h`). The generator decodes each test encoding with the lifter's own decoder (`MemAccess`) and sets the base register to an *offset* into the buffer so the access lands inside it. Each case line says which registers hold offsets; each side adds its own buffer address before running and subtracts it after. Results therefore don't depend on where each machine's buffer is. The output lists every changed buffer byte, so stores are checked byte by byte. Cases the scheme can't express are skipped: storing the base register itself (it would store a machine-specific address) and register-offset forms whose offset register is the base. SP-based accesses keep SP 16-byte aligned, because Linux faults on misaligned SP use.
 
-Synthetic test cases (random encodings, not taken from the game) are safe to commit, but they are cheap to regenerate, so they also stay in `work/`.
+The golden files are synthetic (random encodings, not taken from the game), so they are committed (changed 2026-10-20, after review): anyone can re-run `recomp.check` without the Pi, and a lifter change can't silently pass because the old results were lost.
 
 ## Open risk: single-copy atomicity
 

@@ -136,7 +136,7 @@ def main(argv: list[str] | None = None) -> int:
     if not (cfg.exefs_dir / "main").is_file():
         print("extract finished but exefs_dir has no 'main'", file=sys.stderr)
         return 1
-    print(f"done. Next: python -m tools.yw4.ingest")
+    print("done. Next: python -m tools.yw4.ingest")
     return 0
 
 

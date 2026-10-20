@@ -17,7 +17,7 @@ Workflow when adding or changing a form:
 
 ```
 python -m recomp.golden <form>     # needs [tools] pi_host / pi_key
-python -m recomp.check <form>      # must print "all forms match"
+python -m recomp.check <form>      # must print "all forms match" (no Pi needed; also try --ubsan)
 python -m recomp.coverage          # see what's still missing
 ```
 

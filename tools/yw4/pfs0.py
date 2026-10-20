@@ -9,7 +9,6 @@ Layout (little-endian):
 
 from __future__ import annotations
 
-import shutil
 import struct
 from dataclasses import dataclass
 from pathlib import Path

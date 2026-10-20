@@ -22,13 +22,11 @@ from pathlib import Path
 
 from tools.yw4 import config
 
-from . import function, golden
+from . import check, function, golden
 
-REPO = Path(__file__).resolve().parents[1]
-SRC = REPO / "tests" / "functest"
-PI_DIR = REPO / "recomp" / "pi"
-INCLUDE = REPO / "runtime" / "include"
-DISPATCH = REPO / "runtime" / "src" / "dispatch.c"
+SRC = check.REPO / "tests" / "functest"
+PI_DIR, INCLUDE = check.PI_DIR, check.INCLUDE
+DISPATCH = check.REPO / "runtime" / "src" / "dispatch.c"
 REMOTE_DIR = "yw4-functest"
 
 CFLAGS = ("-O2 -mcpu=cortex-a57 -mgeneral-regs-only -fno-jump-tables -ffreestanding -fno-builtin "
