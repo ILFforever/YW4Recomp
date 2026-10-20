@@ -13,7 +13,8 @@ Status: accepted
 - For non-NaN inputs and results, x86-64 SSE rounds exactly like ARM, so the helpers use the plain C operation.
 - **NaNs differ.** ARM returns the first signalling NaN (quietened), else the first quiet NaN, else the positive default NaN. x86 returns a *negative* NaN for invalid operations, and picks NaN operands by instruction-operand order, which the compiler may swap. So every helper handles NaN inputs first and replaces a NaN result with ARM's default NaN.
 - ARM-specific rules are written out: `max(+0, -0) = +0`, `FMAXNM` ignoring one quiet NaN, saturating float→integer conversion with NaN → 0, `FCMP` flags, and NaN payloads in `FCVT`.
-- `FRECPS`/`FRSQRTS` are fused (one rounding). Single precision computes in double: a float × float product is exact in double, and one double operation followed by rounding to float equals a single rounding (2p+2 ≤ 53). Double precision uses FMA.
+- `FRECPS`/`FRSQRTS` are fused (one rounding). Single precision computes in double. A float × float product is exact in double, but adding 2 or 3 to it is not, and rounding that sum first to double and then to float can go wrong. The Pi tests found such a case: the 3 is far below the product's last bit, the double sum drops it, and the float rounding becomes a false tie. The first version assumed the usual double-rounding argument covers this; it doesn't, because the product has 48 bits, not 24. The fix rounds the double sum *to odd* (TwoSum gives the exact error, and a nonzero error forces the last bit to 1), which makes the final rounding to float exact. Double precision uses FMA.
+- Fixed-point `SCVTF`/`UCVTF` (4 uses) divide by 2^fbits after converting; this is exact except for results in the subnormal range.
 - `FRECPE`/`FRSQRTE` implement the Arm ARM estimate tables bit for bit.
 
 **No libm.** The Pi tests found that MinGW's math library is not exact:
@@ -26,13 +27,13 @@ The helpers therefore use the CPU instructions instead: SSE2 `sqrtsd`/`sqrtss`, 
 
 **Vectors** are emitted as loops over lanes of a local copy (sources may alias the destination), using the same scalar helpers. Q=0 forms zero the upper 64 bits.
 
-**Not implemented yet** (they trap): `FMLA`/`FMLS` (unused in `main`), half-precision arithmetic (ARMv8.2, not on the A57), and FP fixed-point conversions (4 uses).
+**Not implemented** (they would trap): `FMLA`/`FMLS` (unused in `main`) and half-precision arithmetic (ARMv8.2, not on the A57). Every SIMD/FP instruction in `main` is implemented.
 
 ## Testing
 
 Golden tests as in 0006. On top of that, the vector registers get float edge cases (signed zeros, infinities, quiet/signalling NaNs with payloads, denormals, conversion limits, rounding ties) and *pair states* (e.g. +inf/−inf, two different NaNs, products near 2 and 3 for the reciprocal steps).
 
-Every helper was checked by planting bugs: 23 planted FP/SIMD bugs are all caught. One planted change was not caught, and it is provably equivalent: the `<`/`<=` in the reciprocal-sqrt table loop can't differ for any reachable input.
+Every helper was checked by planting bugs: 23 planted FP/SIMD bugs are all caught, plus the missing round-to-odd (with curated operand pairs for exactly that case). One planted change was not caught, and it is provably equivalent: the `<`/`<=` in the reciprocal-sqrt table loop can't differ for any reachable input.
 
 Golden files store registers an instruction can't read as `*`: a deterministic filler, `recomp.check.filler`. Output lines store only the registers that changed. This keeps 42 forms at 9 MB.
 

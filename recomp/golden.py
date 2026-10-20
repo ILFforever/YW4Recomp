@@ -112,6 +112,8 @@ F_PAIRS_32 = [
     (0x7FC12345, 0xFFC54321), (0x7FA00001, 0xFFB00002), (0x80000000, 0x80000000), (0x80000000, 0x3F800000),
     # products close to 2 and 3: FRECPS/FRSQRTS (2 - ab, (3 - ab)/2) expose a missing fused rounding
     (0x3FB504F3, 0x3FB504F3), (0x3F8CCCCD, 0x3FE8BA2F), (0x3FDDB3D7, 0x3FDDB3D7), (0xBFB504F3, 0xBFB504F4),
+    # huge product whose float rounding is a tie broken only by the tiny 2 or 3 (needs one rounding)
+    (0xDF957E72, 0x40200000), (0x5F957E72, 0x40200000),
 ]
 F_PAIRS_64 = [
     (0x7FF0000000000000, 0xFFF0000000000000), (0x0000000000000000, 0x8000000000000000),

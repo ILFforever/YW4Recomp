@@ -861,7 +861,7 @@ FP3 = {
 }
 # Integer ops in "three same": (U, opcode) -> kind
 INT3 = {(0, 0x10): "+", (1, 0x10): "-", (0, 0x11): "tst", (1, 0x11): "==", (0, 0x06): "s>", (1, 0x06): "u>",
-        (0, 0x07): "s>=", (1, 0x07): "u>=", (0, 0x17): "addp"}
+        (0, 0x07): "s>=", (1, 0x07): "u>=", (0, 0x17): "addp", (0, 0x08): "sshl", (1, 0x08): "ushl"}
 LOGIC3 = {(0, 0): "&", (0, 1): "&~", (0, 2): "|", (0, 3): "|~", (1, 0): "^", (1, 1): "bsl", (1, 2): "bit", (1, 3): "bif"}
 
 
@@ -923,6 +923,12 @@ def _simd_three_same(e: int) -> str:
     a, b = f"n_.{lane}[i]", f"m_.{lane}[i]"
     if kind in ("+", "-"):
         stmt = f"r_.{lane}[i] = ({ut})({a} {kind} {b});"
+    elif kind in ("sshl", "ushl"):  # shift by the signed low byte of m: left if >= 0, else right
+        w = 8 << size
+        x = f"({st}){a}" if kind == "sshl" else a
+        right = f"({st})({x} >> (-sh_ < {w} ? -sh_ : {w - 1}))" if kind == "sshl" else f"(-sh_ < {w} ? {a} >> -sh_ : 0)"
+        stmt = (f"int sh_ = (int8_t){b}; "
+                f"r_.{lane}[i] = ({ut})(sh_ >= 0 ? (sh_ < {w} ? ({ut})({a} << sh_) : 0) : {right});")
     elif kind == "addp":
         h = count // 2
         stmt = (f"v128 *s_ = i < {h} ? &n_ : &m_; int j = 2 * (i % {h}); "
@@ -1249,6 +1255,112 @@ def _simd_tbl(e: int) -> str:
     if tbx and not q:
         body += " r_.d[1] = 0;"
     return vec(d, {"m_": m}, body, keep_d=bool(tbx))
+
+
+WIDE = {0: "int16_t", 1: "int32_t", 2: "int64_t", 3: "__int128"}
+
+
+def _shift_imm(e: int) -> tuple[int, int, int] | None:
+    """(esize_log, opcode, raw) for shift-by-immediate: esize from immh's top bit."""
+    immh = bits(e, 22, 19)
+    if not immh:
+        return None
+    size = immh.bit_length() - 1
+    return size, bits(e, 15, 11), bits(e, 22, 16)
+
+
+# (U, opcode) -> kind. Narrowing/long forms use immh for the *narrow* element size.
+SHIFT_IMM = {(0, 0x00): "sshr", (1, 0x00): "ushr", (0, 0x04): "srshr", (1, 0x04): "urshr",
+             (0, 0x0A): "shl", (0, 0x14): "sshll", (1, 0x14): "ushll", (0, 0x13): "sqrshrn"}
+
+
+def _shift_imm_valid(e: int) -> bool:
+    s = _shift_imm(e)
+    if s is None:
+        return False
+    size, op, _ = s
+    kind = SHIFT_IMM.get((bits(e, 29, 29), op))
+    if kind is None:
+        return False
+    if kind in ("sshll", "ushll", "sqrshrn"):
+        return size < 3
+    return bool(bits(e, 30, 30)) or size < 3
+
+
+# Advanced SIMD shift by immediate: 0 Q U 011110 immh immb opcode 1 Rn Rd   (immh != 0)
+@form("simd_shift_imm", 0x9F800400, 0x0F000400, valid=_shift_imm_valid, vregs=lambda e: (bits(e, 4, 0), bits(e, 9, 5)))
+def _simd_shift_imm(e: int) -> str:
+    q, u, n, d = bits(e, 30, 30), bits(e, 29, 29), bits(e, 9, 5), bits(e, 4, 0)
+    size, op, raw = _shift_imm(e)
+    kind = SHIFT_IMM[(u, op)]
+    esize = 8 << size
+    lane, ut, st = LANE[size], UINT[size], SINT[size]
+    count = lanes(q, size)
+    if kind in ("sshr", "ushr", "srshr", "urshr"):
+        sh = 2 * esize - raw          # 1..esize
+        signed = kind[0] == "s"
+        wide = WIDE[size] if signed else ("unsigned __int128" if size == 3 else UINT[size + 1])
+        x = f"({wide})({st})n_.{lane}[i]" if signed else f"({wide})n_.{lane}[i]"
+        if kind.endswith("rshr"):
+            x = f"({x} + (({wide})1 << {sh - 1}))"
+        return vec(d, {"n_": n}, per_lane(count, f"r_.{lane}[i] = ({ut})({x} >> {sh});"))
+    if kind == "shl":
+        sh = raw - esize
+        return vec(d, {"n_": n}, per_lane(count, f"r_.{lane}[i] = ({ut})(n_.{lane}[i] << {sh});"))
+    if kind in ("sshll", "ushll"):  # widen the low (Q=0) or high (Q=1, SSHLL2) half, then shift
+        sh = raw - esize
+        half = 8 >> size
+        # sign- or zero-extend, then shift as unsigned (a left shift of a negative int is UB in C)
+        ext = f"({SINT[size + 1]})({st})" if kind == "sshll" else ""
+        src = f"({UINT[size + 1]}){ext}n_.{lane}[{half * q} + i]"
+        return vec(d, {"n_": n}, per_lane(half, f"r_.{LANE[size + 1]}[i] = ({UINT[size + 1]})({src} << {sh});"))
+    # SQRSHRN(2): signed, rounding, saturating shift right and narrow (QC is not modelled)
+    sh = 2 * esize - raw
+    half = 8 >> size
+    lo, hi = -(1 << (esize - 1)), (1 << (esize - 1)) - 1
+    body = per_lane(half, f"__int128 x_ = ((__int128)({SINT[size + 1]})n_.{LANE[size + 1]}[i] + ((__int128)1 << {sh - 1})) >> {sh}; "
+                          f"r_.{lane}[{half * q} + i] = ({ut})({st})(x_ < {lo} ? {lo} : x_ > {hi} ? {hi} : x_);")
+    return vec(d, {"n_": n}, body, keep_d=bool(q))
+
+
+# Advanced SIMD three different, SMULL(2)/SMLSL(2) only: 0 Q U 01110 size 1 Rm opcode 00 Rn Rd
+@form("simd_three_diff", 0x9F200C00, 0x0E200000,
+      valid=lambda e: not bits(e, 29, 29) and bits(e, 15, 12) in (0b1100, 0b1010) and bits(e, 23, 22) < 3,
+      vregs=_rd_rn_rm)
+def _simd_three_diff(e: int) -> str:
+    q, size, m, op, n, d = bits(e, 30, 30), bits(e, 23, 22), bits(e, 20, 16), bits(e, 15, 12), bits(e, 9, 5), bits(e, 4, 0)
+    half = 8 >> size
+    lane, wl, st, wt = LANE[size], LANE[size + 1], SINT[size], SINT[size + 1]
+    prod = f"({wt})({st})n_.{lane}[{half * q} + i] * ({wt})({st})m_.{lane}[{half * q} + i]"
+    if op == 0b1100:  # SMULL
+        stmt = f"r_.{wl}[i] = ({UINT[size + 1]})({prod});"
+        return vec(d, {"n_": n, "m_": m}, per_lane(half, stmt))
+    stmt = f"r_.{wl}[i] = ({UINT[size + 1]})(d_.{wl}[i] - ({UINT[size + 1]})({prod}));"  # SMLSL
+    return vec(d, {"n_": n, "m_": m, "d_": d}, per_lane(half, stmt))
+
+
+def _fp_fixed_valid(e: int) -> bool:
+    sf, ftype, rmode, op, scale = bits(e, 31, 31), bits(e, 23, 22), bits(e, 20, 19), bits(e, 18, 16), bits(e, 15, 10)
+    if ftype not in FP or (not sf and scale < 32):
+        return False
+    return (rmode, op) in ((3, 0), (3, 1), (0, 2), (0, 3))
+
+
+# Conversion between floating-point and fixed-point: sf 0 0 11110 ftype 0 rmode opcode scale Rn Rd
+@form("fp_fixed", 0x7F200000, 0x1E000000, valid=_fp_fixed_valid,
+      vregs=lambda e: (bits(e, 4, 0),) if bits(e, 18, 16) in (2, 3) else (bits(e, 9, 5),))
+def _fp_fixed(e: int) -> str:
+    sf, ftype, op, scale, n, d = bits(e, 31, 31), bits(e, 23, 22), bits(e, 18, 16), bits(e, 15, 10), bits(e, 9, 5), bits(e, 4, 0)
+    fbits = 64 - scale
+    w = 64 if sf else 32
+    if op in (0, 1):  # FCVTZS/FCVTZU: scale by 2^fbits (exact in double), then convert toward zero
+        src = f"{'(double)f32_of' if ftype == 0 else 'f64_of'}({vread(n, ftype)}) * {float(2 ** fbits)!r}"
+        return wr_reg(d, sf, f"({utype(sf)})yw4_to_{'u' if op else 's'}{w}({src}, 'z')") or ";"
+    # SCVTF/UCVTF: integer / 2^fbits, one rounding. Dividing the rounded value by a power of two
+    # is exact unless it lands in the subnormal range (|result| < 2^-126 for single).
+    it = ("uint" if op == 3 else "int") + f"{w}_t"
+    host = "float" if ftype == 0 else "double"
+    return vwrite(d, ftype, f"bits_{FP[ftype][0]}(({host})(({host})({it}){rd_reg(n, sf)} / {float(2 ** fbits)!r}))")
 
 
 # --------------------------------------------------------------------------- SIMD structure loads/stores

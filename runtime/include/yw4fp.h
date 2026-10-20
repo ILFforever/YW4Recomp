@@ -199,8 +199,21 @@ static inline double yw4_round(double x, char mode) {
 }
 
 /* FRECPS / FRSQRTS: 2 - a*b and (3 - a*b) / 2, fused (one rounding). The NaN rules see -a.
- * Single precision is computed in double: a float product is exact there, and rounding
- * double -> float after one double operation gives the same result as a single rounding. */
+ *
+ * Single precision: a float product is exact in double, but c + product is not, and
+ * rounding that sum to double and then to float can round twice wrongly (seen on the Pi:
+ * when c is far below the product's last bit, the double sum drops it and the float
+ * rounding becomes a false tie). yw4_add_odd() therefore rounds the double sum *to odd*:
+ * TwoSum gives the exact error, and a nonzero error forces the last bit to 1. Rounding a
+ * round-to-odd double (53 bits >= 24 + 2) to float gives the correctly rounded result. */
+static inline double yw4_add_odd(double x, double y) {
+    double s = x + y;
+    if (__builtin_isinf(s)) return s;
+    double bb = s - x, err = (x - (s - bb)) + (y - bb);  /* TwoSum: s + err == x + y exactly */
+    uint64_t u = bits_f64(s);
+    if (err != 0 && !(u & 1)) u += ((err > 0) == (s > 0)) ? 1 : -1;  /* step away from / toward zero */
+    return f64_of(u);
+}
 /* Special cases shared by the step functions: 1 and *r set if they decide the result.
  * `a` is already negated. */
 static inline int f32_step_special(uint32_t a, uint32_t b, uint32_t inf_times_zero, uint32_t *r) {
@@ -223,13 +236,13 @@ static inline uint32_t f32_recps(uint32_t a, uint32_t b) {
     uint32_t r;
     a ^= 0x80000000u;
     if (f32_step_special(a, b, 0x40000000u, &r)) return r;  /* 2.0 */
-    return bits_f32((float)(2.0 + (double)f32_of(a) * (double)f32_of(b)));
+    return bits_f32((float)yw4_add_odd(2.0, (double)f32_of(a) * (double)f32_of(b)));
 }
 static inline uint32_t f32_rsqrts(uint32_t a, uint32_t b) {
     uint32_t r;
     a ^= 0x80000000u;
     if (f32_step_special(a, b, 0x3FC00000u, &r)) return r;  /* 1.5 */
-    return bits_f32((float)((3.0 + (double)f32_of(a) * (double)f32_of(b)) / 2.0));
+    return bits_f32((float)(yw4_add_odd(3.0, (double)f32_of(a) * (double)f32_of(b)) / 2.0));  /* halving is exact */
 }
 static inline uint64_t f64_recps(uint64_t a, uint64_t b) {
     uint64_t r;
