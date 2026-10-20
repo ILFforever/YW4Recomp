@@ -23,5 +23,6 @@ hactool_exe = ""
 # Folder holding your console's prod.keys and title.keys. Keep it outside the repo.
 keys_dir = ""
 # Optional. Only needed for the Ghidra and baseline steps.
+# Ghidra 12.1.2 with the Switch loader installed (see docs/ghidra.md).
 ghidra_dir = ""
 emulator_exe = ""

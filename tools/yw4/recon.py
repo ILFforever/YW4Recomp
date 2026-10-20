@@ -239,12 +239,27 @@ def rtti_md(r: dict) -> str:
 
 # --------------------------------------------------------------------------- code
 
-def eh_frame_hdr_functions(image: bytes, start: int) -> int:
-    """Number of FDEs (functions with unwind info) in .eh_frame_hdr's search table."""
-    version, _ptr_enc, count_enc, _table_enc = image[start:start + 4]
-    if version != 1 or count_enc != 0x03:  # 0x03 = DW_EH_PE_udata4
-        return -1
-    return struct.unpack_from("<I", image, start + 8)[0]
+def eh_frame_function_starts(image: bytes) -> list[int]:
+    """Function start offsets from .eh_frame_hdr's binary-search table.
+
+    Header: u8 version (1), u8 eh_frame_ptr encoding, u8 count encoding,
+    u8 table encoding, then the encoded eh_frame pointer and FDE count, then
+    (initial_location, fde_address) pairs. We support what this toolchain emits:
+    count as udata4 (0x03) and table entries as datarel sdata4 (0x3b), i.e.
+    signed 32-bit offsets from the start of .eh_frame_hdr.
+    """
+    start = reloc.read_mod0(image).eh_frame_hdr[0]
+    version, _ptr_enc, count_enc, table_enc = image[start:start + 4]
+    if version != 1 or count_enc != 0x03 or table_enc != 0x3B:
+        raise reloc.RelocError(f"unsupported .eh_frame_hdr encoding {image[start:start + 4].hex()}")
+    count = struct.unpack_from("<I", image, start + 8)[0]
+    return [start + struct.unpack_from("<i", image, start + 12 + 8 * i)[0] for i in range(count)]
+
+
+def address_taken_functions(image: bytes, text_size: int) -> set[int]:
+    """Targets of internal pointers into .text (vtables, callback tables, ...)."""
+    internal, _ = reloc.pointer_map(reloc.read_relocs(image))
+    return {t for t in internal.values() if t < text_size}
 
 
 def survey_code(image: bytes, info: dict) -> dict:
@@ -272,8 +287,12 @@ def survey_code(image: bytes, info: dict) -> dict:
         if (w >> 25) & 0x7 == 0x7:
             c["fp_simd"] += 1
     mod0 = reloc.read_mod0(image)
+    eh = set(eh_frame_function_starts(image))
+    taken = address_taken_functions(image, len(text))
     return {"instructions": len(words), "counts": dict(c),
-            "eh_frame_functions": eh_frame_hdr_functions(image, mod0.eh_frame_hdr[0]),
+            "eh_frame_functions": len(eh),
+            "address_taken": len(taken),
+            "address_taken_with_unwind": len(taken & eh),
             "bss_size": mod0.bss_end - mod0.bss_start}
 
 
@@ -283,6 +302,8 @@ def code_md(code: dict) -> str:
     lines = [
         f"- Instructions in .text: **{n:,}**",
         f"- Functions with unwind info (.eh_frame_hdr): **{code['eh_frame_functions']:,}**",
+        f"- Address-taken functions (relocations into .text): **{code['address_taken']:,}**, "
+        f"of which {code['address_taken_with_unwind']:,} are also unwind-table starts",
         f"- .bss size: {code['bss_size']:,} bytes",
         "", "| Kind | Count | Per 1000 instructions |", "|---|---|---|",
     ]

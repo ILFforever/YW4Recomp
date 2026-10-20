@@ -134,3 +134,80 @@ def peek(path: Path, entry: CpkFile, n: int = 8) -> bytes:
     with path.open("rb") as f:
         f.seek(entry.offset)
         return f.read(n)
+
+
+def crilayla_decompress(src: bytes) -> bytes:
+    """Decompress CRI's CRILAYLA format.
+
+    Layout: "CRILAYLA", u32 LE uncompressed size (excluding the 0x100 prefix),
+    u32 LE offset of the stored prefix (relative to 0x10). The first 0x100
+    output bytes are stored raw at 0x10 + that offset. Everything else is an
+    LZ stream read *backwards*: bits come from the end of the compressed data
+    toward the start (MSB first), and output is written from the end toward
+    the start. Each item is a flag bit: 0 = 8-bit literal; 1 = back-reference
+    with a 13-bit offset (+3) and a length of 3 + a chain of 2,3,5,8,8,...-bit
+    fields that continues while a field is all ones.
+    """
+    if src[:8] != b"CRILAYLA":
+        raise CpkError("not CRILAYLA data")
+    size, prefix_off = struct.unpack_from("<II", src, 8)
+    out = bytearray(size + 0x100)
+    out[:0x100] = src[0x10 + prefix_off:0x10 + prefix_off + 0x100]
+
+    pos = 0x10 + prefix_off - 1  # next byte to read, moving backwards
+    cur = 0
+    left = 0
+
+    def bits(n: int) -> int:
+        nonlocal pos, cur, left
+        v = 0
+        while n:
+            if left == 0:
+                if pos < 0x10:
+                    raise CpkError("CRILAYLA stream ran out")
+                cur = src[pos]
+                pos -= 1
+                left = 8
+            take = min(n, left)
+            v = (v << take) | ((cur >> (left - take)) & ((1 << take) - 1))
+            left -= take
+            n -= take
+        return v
+
+    w = len(out) - 1
+    while w >= 0x100:
+        if bits(1):
+            back = bits(13) + 3
+            length = 3
+            for width in (2, 3, 5):
+                v = bits(width)
+                length += v
+                if v != (1 << width) - 1:
+                    break
+            else:
+                while True:
+                    v = bits(8)
+                    length += v
+                    if v != 0xFF:
+                        break
+            for _ in range(length):
+                if w < 0x100:
+                    break
+                out[w] = out[w + back]
+                w -= 1
+        else:
+            out[w] = bits(8)
+            w -= 1
+    return bytes(out)
+
+
+def read(path: Path, entry: CpkFile) -> bytes:
+    """Return a file's contents, decompressed if needed."""
+    with path.open("rb") as f:
+        f.seek(entry.offset)
+        data = f.read(entry.stored_size)
+    if entry.compressed:
+        data = crilayla_decompress(data)
+    if len(data) != entry.extract_size:
+        raise CpkError(f"{entry.path}: got {len(data)} bytes, expected {entry.extract_size}")
+    return data
