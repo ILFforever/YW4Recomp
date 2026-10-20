@@ -8,6 +8,7 @@ Each instruction *form* (a group of encodings sharing one bit layout, e.g.
     emit(enc)     C statements operating on `ctx` (a CPUState *)
     mem(enc)      loads/stores only: the decoded MemAccess (the test generator
                   uses it to point the base register into its scratch buffer)
+    vregs(enc)    SIMD/FP forms: the V registers it uses (tests must avoid v31)
 
 Semantics follow the Arm ARM pseudocode (DDI 0487), ARMv8.0 only.
 Register field 31 means XZR/WZR unless the form says it means SP.
@@ -127,14 +128,15 @@ class Form:
     valid: Callable[[int], bool]
     emit: Callable[[int], str]
     mem: Callable[[int], "MemAccess | None"] | None = None
+    vregs: Callable[[int], tuple[int, ...]] | None = None
 
 
 FORMS: list[Form] = []
 
 
-def form(name: str, mask: int, value: int, valid=lambda e: True):
+def form(name: str, mask: int, value: int, valid=lambda e: True, vregs=None):
     def register(fn: Callable[[int], str]) -> Callable[[int], str]:
-        FORMS.append(Form(name, mask, value, valid, fn))
+        FORMS.append(Form(name, mask, value, valid, fn, vregs=vregs))
         return fn
     return register
 
@@ -399,6 +401,7 @@ class MemAccess:
     esize: int                        # bytes per register
     sext: int = 0                     # loads: 0 = zero-extend, else sign-extend to 32 or 64 bits
     prefetch: bool = False
+    vec: bool = False                 # regs are SIMD/FP registers (B/H/S/D/Q)
 
     @property
     def writeback(self) -> bool:
@@ -411,7 +414,7 @@ def sign_extend(v: int, width: int) -> int:
 
 def _checked(a: MemAccess) -> MemAccess | None:
     # Both cases are CONSTRAINED UNPREDICTABLE in the Arm ARM; compilers never emit them.
-    if a.writeback and a.n != 31 and a.n in a.regs:
+    if a.writeback and a.n != 31 and a.n in a.regs and not a.vec:
         return None
     if a.load and len(a.regs) == 2 and a.regs[0] == a.regs[1]:
         return None
@@ -478,6 +481,65 @@ def _decode_pair(e: int) -> MemAccess | None:
                               (bits(e, 4, 0), bits(e, 14, 10)), esize, 64 if opc == 1 else 0))
 
 
+def _vsingle(n: int, t: int, size: int, opc: int, imm_units: int, index: str,
+             rm: tuple[int, int] | None = None) -> MemAccess | None:
+    """SIMD/FP single register: size:opc picks B/H/S/D/Q (opc bit 1 set with size 0 = Q)."""
+    if opc & 2:
+        if size:
+            return None
+        log = 4
+    else:
+        log = size
+    return MemAccess(n, imm_units << log, index, (rm[0], rm[1], log if rm[1] else 0) if rm else None,
+                     bool(opc & 1), (t,), 1 << log, vec=True)
+
+
+def _decode_vuimm(e: int) -> MemAccess | None:
+    return _vsingle(bits(e, 9, 5), bits(e, 4, 0), bits(e, 31, 30), bits(e, 23, 22), bits(e, 21, 10), "offset")
+
+
+def _decode_vimm9(e: int) -> MemAccess | None:
+    if bits(e, 11, 10) == 2:
+        return None  # no unprivileged SIMD/FP loads
+    a = _vsingle(bits(e, 9, 5), bits(e, 4, 0), bits(e, 31, 30), bits(e, 23, 22), 0, IMM9_INDEX[bits(e, 11, 10)])
+    return a and MemAccess(a.n, sign_extend(bits(e, 20, 12), 9), a.index, None, a.load, a.regs, a.esize, vec=True)
+
+
+def _decode_vregoff(e: int) -> MemAccess | None:
+    option = bits(e, 15, 13)
+    if not option & 2:
+        return None
+    a = _vsingle(bits(e, 9, 5), bits(e, 4, 0), bits(e, 31, 30), bits(e, 23, 22), 0, "offset",
+                 rm=(bits(e, 20, 16), bits(e, 12, 12)))
+    return a and MemAccess(a.n, 0, "offset", (a.rm[0], option, a.rm[2]), a.load, a.regs, a.esize, vec=True)
+
+
+def _decode_vpair(e: int) -> MemAccess | None:
+    opc, load, idx = bits(e, 31, 30), bits(e, 22, 22), bits(e, 24, 23)
+    if opc == 3:
+        return None
+    esize = 4 << opc
+    return _checked(MemAccess(bits(e, 9, 5), sign_extend(bits(e, 21, 15), 7) * esize, PAIR_INDEX[idx], None,
+                              bool(load), (bits(e, 4, 0), bits(e, 14, 10)), esize, vec=True))
+
+
+def emit_vmem(a: MemAccess, addr: str) -> list[str]:
+    out = []
+    w = a.esize * 8
+    lane = {1: "b", 2: "h", 4: "s", 8: "d"}
+    for k, t in enumerate(a.regs):
+        at = f"a + {k * a.esize}" if k else "a"
+        if a.load and a.esize == 16:
+            out.append(f"ctx->v[{t}].d[0] = ld64({at}); ctx->v[{t}].d[1] = ld64({at} + 8);")
+        elif a.load:  # scalar load: the rest of the register is zeroed
+            out.append(f"ctx->v[{t}].d[0] = ld{w}({at}); ctx->v[{t}].d[1] = 0;")
+        elif a.esize == 16:
+            out.append(f"st64({at}, ctx->v[{t}].d[0]); st64({at} + 8, ctx->v[{t}].d[1]);")
+        else:
+            out.append(f"st{w}({at}, ctx->v[{t}].{lane[a.esize]}[0]);")
+    return out
+
+
 def emit_mem(a: MemAccess) -> str:
     if a.prefetch:
         return ";"  # PRFM is a hint with no architectural effect
@@ -490,7 +552,9 @@ def emit_mem(a: MemAccess) -> str:
         addr = f"{base} {'-' if a.imm < 0 else '+'} {abs(a.imm):#x}"
     out = [f"uint64_t a = {addr};"]
     w = a.esize * 8
-    for k, t in enumerate(a.regs):
+    if a.vec:
+        out += emit_vmem(a, addr)
+    for k, t in enumerate(a.regs if not a.vec else ()):
         at = f"a + {k * a.esize}" if k else "a"
         if a.load:
             v = f"ld{w}({at})"
@@ -518,6 +582,11 @@ mem_form("ldst_imm9", 0x3F200000, 0x38000000, _decode_imm9)
 mem_form("ldst_regoff", 0x3F200C00, 0x38200800, _decode_regoff)
 # Load/store pair (no-allocate / post-index / offset / pre-index): opc 101 0 idx L imm7 Rt2 Rn Rt
 mem_form("ldst_pair", 0x3E000000, 0x28000000, _decode_pair)
+# The same four layouts with V=1: SIMD/FP registers B/H/S/D/Q
+mem_form("vldst_uimm", 0x3F000000, 0x3D000000, _decode_vuimm)
+mem_form("vldst_imm9", 0x3F200000, 0x3C000000, _decode_vimm9)
+mem_form("vldst_regoff", 0x3F200C00, 0x3C200800, _decode_vregoff)
+mem_form("vldst_pair", 0x3E000000, 0x2C000000, _decode_vpair)
 
 
 # --------------------------------------------------------------------------- lookup

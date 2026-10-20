@@ -46,17 +46,95 @@ def random_value(rng: random.Random) -> int:
     return rng.getrandbits(64)
 
 
+# --------------------------------------------------------------------------- SIMD/FP values
+
+F32_EDGES = [
+    0x00000000, 0x80000000, 0x3F800000, 0xBF800000, 0x3F000000, 0x40490FDB,  # 0, -0, 1, -1, 0.5, pi
+    0x7F800000, 0xFF800000,                                                  # +-inf
+    0x7FC00000, 0xFFC00000, 0x7FC12345, 0x7FA00000, 0x7F800001, 0xFF812345,  # quiet / signalling NaNs
+    0x00000001, 0x807FFFFF, 0x00800000, 0x7F7FFFFF, 0xFF7FFFFF,              # denormals, min normal, max
+    0x4F000000, 0xCF000000, 0x5F000000, 0xDF000000, 0x4F800000, 0x4B000000,  # 2^31, -2^31, 2^63, 2^32, 2^23
+    0x3EFFFFFF, 0x3FC00000, 0xBFC00000, 0x40200000,                          # rounding: 0.49.., 1.5, -1.5, 2.5
+]
+F64_EDGES = [
+    0x0000000000000000, 0x8000000000000000, 0x3FF0000000000000, 0xBFF0000000000000, 0x3FE0000000000000,
+    0x7FF0000000000000, 0xFFF0000000000000,
+    0x7FF8000000000000, 0xFFF8000000000000, 0x7FF8000000012345, 0x7FF4000000000000, 0x7FF0000000000001,
+    0x0000000000000001, 0x800FFFFFFFFFFFFF, 0x0010000000000000, 0x7FEFFFFFFFFFFFFF,
+    0x41E0000000000000, 0xC1E0000000000000, 0x43E0000000000000, 0xC3E0000000000000, 0x41F0000000000000,
+    0x3810000000000000, 0x47EFFFFFE0000000, 0x36A0000000000000,  # float min normal, float max, float denorm
+    0x3FF8000000000000, 0xBFF8000000000000, 0x4004000000000000,  # 1.5, -1.5, 2.5
+]
+
+
+def random_f32(rng: random.Random) -> int:
+    r = rng.random()
+    if r < 0.3:
+        return rng.choice(F32_EDGES)
+    if r < 0.85:  # an ordinary number of moderate size
+        return rng.getrandbits(1) << 31 | rng.randrange(127 - 24, 127 + 24) << 23 | rng.getrandbits(23)
+    return rng.getrandbits(32)
+
+
+def random_f64(rng: random.Random) -> int:
+    r = rng.random()
+    if r < 0.3:
+        return rng.choice(F64_EDGES)
+    if r < 0.85:
+        return rng.getrandbits(1) << 63 | rng.randrange(1023 - 60, 1023 + 60) << 52 | rng.getrandbits(52)
+    return rng.getrandbits(64)
+
+
+def random_vreg(rng: random.Random) -> int:
+    """A 128-bit SIMD register value."""
+    r = rng.random()
+    if r < 0.4:
+        return sum(random_f32(rng) << (32 * i) for i in range(4))
+    if r < 0.7:
+        return random_f64(rng) | random_f64(rng) << 64
+    if r < 0.85:
+        return sum((random_value(rng) & 0xFFFFFFFF) << (32 * i) for i in range(4))  # integer lanes
+    return rng.getrandbits(128)
+
+
+def _rep32(v: int) -> int:
+    return v * 0x00000001_00000001_00000001_00000001
+
+
+def _rep64(v: int) -> int:
+    return v | v << 64
+
+
+F_PAIRS_32 = [
+    (0x7F800000, 0xFF800000), (0x7F800000, 0x00000000), (0x00000000, 0x80000000), (0x7FC12345, 0x3F800000),
+    (0x7FA00000, 0x7FC00000), (0x3F800000, 0xFF812345), (0x00000001, 0x00800000), (0x7F7FFFFF, 0x7F7FFFFF),
+    (0x7F7FFFFF, 0xFF7FFFFF), (0x4F000000, 0xCF000000), (0x3F000000, 0x3FC00000), (0x7F800000, 0x7F800000),
+]
+F_PAIRS_64 = [
+    (0x7FF0000000000000, 0xFFF0000000000000), (0x0000000000000000, 0x8000000000000000),
+    (0x7FF8000000012345, 0x3FF0000000000000), (0x7FF4000000000000, 0x7FF8000000000000),
+    (0x0000000000000001, 0x0010000000000000), (0x7FEFFFFFFFFFFFFF, 0x7FEFFFFFFFFFFFFF),
+    (0x41E0000000000000, 0xC3E0000000000000), (0x47EFFFFFE0000000, 0x36A0000000000000),
+]
+V_PAIRS = [(_rep32(a), _rep32(b)) for a, b in F_PAIRS_32] + [(_rep64(a), _rep64(b)) for a, b in F_PAIRS_64]
+V_PAIRS += [(b, a) for a, b in V_PAIRS]
+
+
 MEM_SIZE = 0x20000  # must match TEST_MEM_SIZE in pi/testcase.h
-# Accesses land in [MEM_LO, MEM_HI) plus the immediate: at most +32760 (scaled imm12) or
-# -512 (pair imm7), plus 16 bytes, which stays inside the buffer.
-MEM_LO, MEM_HI = 0x8000, 0x17FF0
+# Effective addresses land in [MEM_LO, MEM_HI); with up to 32 bytes accessed (a Q pair)
+# and post-index offsets of at most +-1024, everything stays inside the buffer.
+MEM_LO, MEM_HI = 0x8000, 0x17FC0
 
 
 def testable(f: lift.Form, enc: int) -> bool:
+    if f.vregs and 31 in f.vregs(enc):
+        return False  # the harness parks its state in v31
     a = f.mem(enc) if f.mem else None
     if a is None:
         return True
-    if not a.load and a.n != 31 and a.n in a.regs:
+    if a.vec and 31 in a.regs:
+        return False
+    if not a.load and not a.vec and a.n != 31 and a.n in a.regs:
         return False  # would store the buffer's absolute address, which differs per machine
     if a.rm and a.rm[0] == a.n != 31:
         return False  # base and offset in one register: can't rebase the base alone
@@ -92,13 +170,16 @@ def place_memory(a: lift.MemAccess, regs: list[int], rng: random.Random) -> tupl
     target = rng.randrange(MEM_LO, MEM_HI)
     if rng.random() < 0.6:
         target &= ~(a.esize - 1)  # mostly aligned, some unaligned
-    offset = extend_value(regs[a.rm[0]], a.rm[1], a.rm[2]) if a.rm and a.rm[0] != 31 else 0
+    if a.rm:
+        offset = extend_value(regs[a.rm[0]], a.rm[1], a.rm[2]) if a.rm[0] != 31 else 0
+    else:
+        offset = 0 if a.index == "post" else a.imm
     base = (target - offset) & lift.ones(64)
     if a.n == 31:
         base &= ~15  # Linux faults on SP-based accesses when SP isn't 16-byte aligned
     regs[a.n] = base
     bit = 1 << a.n
-    loaded_over = a.load and a.n in a.regs and a.n != 31
+    loaded_over = a.load and not a.vec and a.n in a.regs and a.n != 31
     return bit, 0 if loaded_over else bit
 
 
@@ -121,6 +202,11 @@ def pair_state(rng: random.Random) -> list[int]:
     return [v1 if i % 2 == 0 else v2 for i in range(31)] + [random_value(rng)]
 
 
+def pair_vregs(rng: random.Random) -> list[int]:
+    v1, v2 = rng.choice(V_PAIRS)
+    return [v1 if i % 2 == 0 else v2 for i in range(31)] + [0]
+
+
 def make_cases(f: lift.Form, count: int, states: int, pairs: int, rng: random.Random) -> list[str]:
     lines = []
     for enc in random_encodings(f, count, rng):
@@ -128,12 +214,13 @@ def make_cases(f: lift.Form, count: int, states: int, pairs: int, rng: random.Ra
         for k in range(states + pairs):
             # x0..x30, SP
             regs = [random_value(rng) for _ in range(32)] if k < states else pair_state(rng)
+            vregs = [random_vreg(rng) for _ in range(31)] + [0] if k < states else pair_vregs(rng)
             inmask = outmask = 0
             if a:
                 inmask, outmask = place_memory(a, regs, rng)
             nzcv = rng.randrange(16) << 28
-            lines.append(" ".join([f"{enc:08x}"] + [f"{v:x}" for v in regs] +
-                                  [f"{nzcv:x}", f"{inmask:x}", f"{outmask:x}"]))
+            lines.append(" ".join([f"{enc:08x}"] + [f"{v:x}" for v in regs] + [f"{nzcv:x}"] +
+                                  [f"{v:032x}" for v in vregs] + ["0", f"{inmask:x}", f"{outmask:x}"]))
     return lines
 
 

@@ -9,10 +9,23 @@
 #include <stdint.h>
 #include <string.h>
 
+/* One SIMD/FP register. Lane 0 is the lowest-addressed (little-endian), as on ARM. */
+typedef union {
+    uint8_t b[16];
+    uint16_t h[8];
+    uint32_t s[4];
+    uint64_t d[2];
+    float f[4];
+    double df[2];
+} v128;
+
 typedef struct {
     uint64_t x[31];  /* x0..x30 */
     uint64_t sp;
     uint64_t nzcv;   /* N=bit31 Z=bit30 C=bit29 V=bit28, as in the NZCV register */
+    v128 v[32];      /* v0..v31 (b/h/s/d/q views of the same register) */
+    uint32_t fpcr;   /* not used yet: main never changes it (docs/decisions/0008) */
+    uint32_t fpsr;   /* cumulative FP exception flags: not modelled, main never reads them */
 } CPUState;
 
 #define NZCV_N 0x80000000u
@@ -119,5 +132,7 @@ static inline void st8(uint64_t a, uint8_t v) { *(uint8_t *)(uintptr_t)a = v; }
 static inline void st16(uint64_t a, uint16_t v) { memcpy((void *)(uintptr_t)a, &v, 2); }
 static inline void st32(uint64_t a, uint32_t v) { memcpy((void *)(uintptr_t)a, &v, 4); }
 static inline void st64(uint64_t a, uint64_t v) { memcpy((void *)(uintptr_t)a, &v, 8); }
+
+#include "yw4fp.h"
 
 #endif

@@ -56,10 +56,13 @@ int main(void) {
         memcpy(s.x, t.x, sizeof t.x);
         s.sp = t.sp;
         s.nzcv = t.nzcv;
+        memcpy(s.v, t.v, sizeof t.v);
+        s.fpcr = (uint32_t)t.fpcr;
         if (!run(enc, &s)) { printf("%%08" PRIx32 " UNSUPPORTED\n", enc); continue; }
         memcpy(t.x, s.x, sizeof t.x);
         t.sp = s.sp;
         t.nzcv = s.nzcv;
+        memcpy(t.v, s.v, sizeof t.v);
         test_rebase(&t, outmask, 0 - base);
         test_write(stdout, enc, &t);
     }
@@ -87,7 +90,7 @@ def build_program(encodings: list[int], exe: Path, flags: list[str]) -> None:
     src = exe.with_suffix(".c")
     src.write_text(PROGRAM % "\n".join(cases))
     cc = os.environ.get("CC", "gcc")
-    proc = subprocess.run([cc, "-std=c11", *flags, "-Wall", "-Werror", f"-I{INCLUDE}", f"-I{PI_DIR}",
+    proc = subprocess.run([cc, "-std=c11", *flags, "-ffp-contract=off", "-Wall", "-Werror", f"-I{INCLUDE}", f"-I{PI_DIR}",
                            "-o", str(exe), str(src)], capture_output=True, text=True)
     if proc.returncode != 0:
         raise RuntimeError(f"compile failed:\n{proc.stderr[-3000:]}")
@@ -95,8 +98,8 @@ def build_program(encodings: list[int], exe: Path, flags: list[str]) -> None:
 
 def describe_diff(inp: str, want: str, got: str) -> str:
     i, w, g = inp.split(), want.split(), got.split()
-    names = ["enc"] + [f"x{k}" for k in range(31)] + ["sp", "nzcv", "mem"]
-    diffs = [f"{names[k]}: in={i[k] if k < 34 else '-'} want={w[k]} got={g[k] if k < len(g) else '?'}"
+    names = ["enc"] + [f"x{k}" for k in range(31)] + ["sp", "nzcv"] + [f"v{k}" for k in range(32)] + ["mem"]
+    diffs = [f"{names[k]}: in={i[k] if k < 66 else '-'} want={w[k]} got={g[k] if k < len(g) else '?'}"
              for k in range(1, len(w)) if k >= len(g) or w[k] != g[k]]
     return f"  {w[0]}  " + "; ".join(diffs)
 
