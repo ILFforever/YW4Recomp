@@ -1,0 +1,50 @@
+/* What generated code needs from the runtime besides the CPU helpers in yw4cpu.h.
+ *
+ * Every guest function is `void f_<offset>(CPUState *ctx)` (decision 0007).
+ */
+#ifndef YW4RT_H
+#define YW4RT_H
+
+#include <stddef.h>
+#include <stdint.h>
+
+#include "yw4cpu.h"
+
+typedef void (*GuestFn)(CPUState *ctx);
+
+/* Host address of main's image. Guest addresses are host addresses (decision 0005), so
+ * PC-relative values and return addresses are image offsets plus this. Must be 4 KiB
+ * aligned, because ADRP results are computed at translation time from page offsets. */
+extern uint64_t yw4_image_base;
+
+/* The recompiler's table of every translated function, sorted by offset (generated). */
+typedef struct {
+    uint64_t offset;
+    GuestFn fn;
+} FuncEntry;
+extern const FuncEntry yw4_funcs[];
+extern const size_t yw4_nfuncs;
+
+/* Function at a guest address, or NULL. */
+GuestFn yw4_lookup(uint64_t addr);
+
+/* Function at a guest address for an indirect call or tail call (BLR, BR).
+ * Traps if no translated function starts there. */
+GuestFn yw4_resolve(uint64_t target);
+
+/* An instruction the recompiler can't translate yet, or a guest trap (UDF/BRK). */
+_Noreturn void yw4_unimplemented(CPUState *ctx, uint64_t pc, uint32_t enc);
+_Noreturn void yw4_guest_trap(CPUState *ctx, uint64_t pc, uint32_t enc);
+
+/* Tail call to another guest function. Clang guarantees no host stack growth with musttail,
+ * which matters for loops that go through tail calls; other compilers usually optimise the
+ * plain call+return to a jump at -O2 but don't promise it. */
+#if defined(__clang__)
+#define TAILCALL(f) __attribute__((musttail)) return f(ctx)
+#define TAILCALL_INDIRECT(t) do { GuestFn fn_ = yw4_resolve(t); __attribute__((musttail)) return fn_(ctx); } while (0)
+#else
+#define TAILCALL(f) do { f(ctx); return; } while (0)
+#define TAILCALL_INDIRECT(t) do { yw4_resolve(t)(ctx); return; } while (0)
+#endif
+
+#endif

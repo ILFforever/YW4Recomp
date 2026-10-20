@@ -38,14 +38,14 @@ static void test_mem_init(void) {
     memcpy(test_mem, test_mem_ref, TEST_MEM_SIZE);
 }
 
-static void test_rebase(TestState *s, uint64_t mask, uint64_t delta) {
+__attribute__((unused)) static void test_rebase(TestState *s, uint64_t mask, uint64_t delta) {
     for (int i = 0; i < 31; i++)
         if (mask >> i & 1) s->x[i] += delta;
     if (mask >> 31 & 1) s->sp += delta;
 }
 
 /* Returns 0 at end of input. */
-static int test_read(FILE *f, uint32_t *enc, TestState *s, uint64_t *inmask, uint64_t *outmask) {
+__attribute__((unused)) static int test_read(FILE *f, uint32_t *enc, TestState *s, uint64_t *inmask, uint64_t *outmask) {
     char line[1024];
     if (!fgets(line, sizeof line, f)) return 0;
     char *p = line;
@@ -58,10 +58,8 @@ static int test_read(FILE *f, uint32_t *enc, TestState *s, uint64_t *inmask, uin
     return 1;
 }
 
-static void test_write(FILE *f, uint32_t enc, const TestState *s) {
-    fprintf(f, "%08" PRIx32, enc);
-    for (int i = 0; i < 31; i++) fprintf(f, " %" PRIx64, s->x[i]);
-    fprintf(f, " %" PRIx64 " %" PRIx64 " ", s->sp, s->nzcv);
+/* Prints the changed buffer bytes ("-" if none) and resets them. */
+static void test_write_mem(FILE *f) {
     int any = 0;
     for (uint32_t c = 0; c < TEST_MEM_SIZE; c += 64) {
         if (!memcmp(test_mem + c, test_mem_ref + c, 64)) continue;
@@ -73,6 +71,13 @@ static void test_write(FILE *f, uint32_t enc, const TestState *s) {
         }
     }
     fprintf(f, "%s\n", any ? "" : "-");
+}
+
+__attribute__((unused)) static void test_write(FILE *f, uint32_t enc, const TestState *s) {
+    fprintf(f, "%08" PRIx32, enc);
+    for (int i = 0; i < 31; i++) fprintf(f, " %" PRIx64, s->x[i]);
+    fprintf(f, " %" PRIx64 " %" PRIx64 " ", s->sp, s->nzcv);
+    test_write_mem(f);
 }
 
 #endif

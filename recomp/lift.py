@@ -144,7 +144,7 @@ def addsub(sf: int, d: int, n_expr: str, m_expr: str, sub: int, setflags: int, d
     if setflags:
         m = f"~{m_expr}" if sub else m_expr
         return (f"{{ uint64_t f; {utype(sf)} r = awc{w}({n_expr}, ({utype(sf)}){m}, {sub}, &f); "
-                f"{wr_reg(d, sf, 'r')} ctx->nzcv = f; }}")
+                f"{wr_reg(d, sf, 'r') or '(void)r;'} ctx->nzcv = f; }}")
     op = "-" if sub else "+"
     return wr_reg(d, sf, f"{n_expr} {op} {m_expr}", sp=d_sp)
 
@@ -185,7 +185,7 @@ def _adc_sbc(e: int) -> str:
     mv = f"~{rd_reg(m, sf)}" if sub else rd_reg(m, sf)
     flags = "ctx->nzcv = f; " if s else ""
     return (f"{{ uint64_t f; {utype(sf)} r = awc{w}({rd_reg(n, sf)}, ({utype(sf)}){mv}, "
-            f"(unsigned)((ctx->nzcv >> 29) & 1), &f); {wr_reg(d, sf, 'r')} {flags}}}")
+            f"(unsigned)((ctx->nzcv >> 29) & 1), &f); {wr_reg(d, sf, 'r') or '(void)r;'} {flags}}}")
 
 
 LOGIC_OPS = {0: "&", 1: "|", 2: "^", 3: "&"}  # AND, ORR, EOR, ANDS
@@ -491,7 +491,7 @@ def emit_mem(a: MemAccess) -> str:
             v = f"ld{w}({at})"
             if a.sext:
                 v = f"(uint{a.sext}_t)(int{a.sext}_t)(int{w}_t){v}"
-            out.append(wr_reg(t, 1 if a.sext != 32 else 0, v))
+            out.append(wr_reg(t, 1 if a.sext != 32 else 0, v) or f"(void){v};")  # XZR: access, discard
         else:
             out.append(f"st{w}({at}, (uint{w}_t){rd_reg(t, 1)});")
     if a.writeback:
