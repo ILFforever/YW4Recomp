@@ -22,6 +22,10 @@ work_dir = "work"
 hactool_exe = ""
 # Folder holding your console's prod.keys and title.keys. Keep it outside the repo.
 keys_dir = ""
+# Optional. An ARM64 Linux machine (e.g. Raspberry Pi 5) that generates golden
+# results for recompiler tests (decision 0004), reached over SSH with a key.
+pi_host = ""   # e.g. "pi@192.168.1.49"
+pi_key = ""    # private key file, e.g. "~/.ssh/yw4_pi"
 # Optional. Only needed for the Ghidra and baseline steps.
 # Ghidra 12.1.2 with the Switch loader installed (see docs/ghidra.md).
 ghidra_dir = ""

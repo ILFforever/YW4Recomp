@@ -29,6 +29,8 @@ class Config:
     work_dir: Path
     hactool_exe: Path | None
     keys_dir: Path | None
+    pi_host: str
+    pi_key: Path | None
     ghidra_dir: Path | None
     emulator_exe: Path | None
 
@@ -68,6 +70,8 @@ def load(path: Path = CONFIG_PATH, require_exefs: bool = True) -> Config:
         work_dir=_resolve(out.get("work_dir", "work")),
         hactool_exe=_optional(tools.get("hactool_exe", "")),
         keys_dir=_optional(tools.get("keys_dir", "")),
+        pi_host=tools.get("pi_host", ""),
+        pi_key=_optional(tools.get("pi_key", "")),
         ghidra_dir=_optional(tools.get("ghidra_dir", "")),
         emulator_exe=_optional(tools.get("emulator_exe", "")),
     )
