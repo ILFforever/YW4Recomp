@@ -7,6 +7,10 @@
 exefs_dir = ""
 # Folder holding your already-extracted RomFS.
 romfs_dir = ""
+# Optional. Your own base-game and latest-update NSPs. If set, `python -m
+# tools.yw4.extract` fills exefs_dir and romfs_dir from them (update applied).
+base_nsp = ""
+update_nsp = ""
 
 [output]
 # Where generated files go. Must stay gitignored and should NOT be inside a
@@ -14,6 +18,10 @@ romfs_dir = ""
 work_dir = "work"
 
 [tools]
+# Optional. Only needed to extract ExeFS/RomFS from your own NSPs.
+hactool_exe = ""
+# Folder holding your console's prod.keys and title.keys. Keep it outside the repo.
+keys_dir = ""
 # Optional. Only needed for the Ghidra and baseline steps.
 ghidra_dir = ""
 emulator_exe = ""

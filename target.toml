@@ -3,5 +3,5 @@
 # image_sha256 = SHA-256 of main's flat memory image (see docs/decisions/0002).
 
 [main]
-image_sha256 = ""
-build_id = ""
+image_sha256 = "dcd40ec54d9d3bc17a0375475f3bf885d41654c8bb83251992b44b6f826f0b50"
+build_id = "C7DAB27F22ACD2EDFA334AEEC30E57867AA60E59"

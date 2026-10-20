@@ -14,9 +14,11 @@ This is also a learning project. The owner (Dean, computer engineering student w
 6. Small, reviewable commits. Ask before large refactors or new dependencies.
 
 ## Target facts (fill in during Phase 0)
-- Title ID: `TODO`
-- Update version: `TODO` (final 4++ update; the English translation mod targets this version)
-- Main NSO SHA-256: `TODO`
+- Title ID: `010086C00AF7C000` (update `010086C00AF7C800`)
+- Update version: `2.2.0` (v917504; final 4++ update; the English translation mod targets this version)
+- Main NSO SHA-256: `dcd40ec54d9d3bc17a0375475f3bf885d41654c8bb83251992b44b6f826f0b50` (flat image, see `target.toml` and docs/decisions/0002)
+- Main build ID: `C7DAB27F22ACD2EDFA334AEEC30E57867AA60E59`
+- SDK version: 7.3.2. ExeFS modules: `rtld`, `main`, `sdk` (no `subsdk*`).
 - Engine: believed to be Level-5's in-house engine. **Verify.**
 
 ## Phase 0 — Recon & tooling (current phase)

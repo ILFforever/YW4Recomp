@@ -24,7 +24,11 @@ class ConfigError(Exception):
 class Config:
     exefs_dir: Path
     romfs_dir: Path
+    base_nsp: Path | None
+    update_nsp: Path | None
     work_dir: Path
+    hactool_exe: Path | None
+    keys_dir: Path | None
     ghidra_dir: Path | None
     emulator_exe: Path | None
 
@@ -38,7 +42,8 @@ def _optional(value: str) -> Path | None:
     return _resolve(value) if value else None
 
 
-def load(path: Path = CONFIG_PATH) -> Config:
+def load(path: Path = CONFIG_PATH, require_exefs: bool = True) -> Config:
+    """require_exefs=False is for the extract step, which creates exefs_dir's contents."""
     if not path.is_file():
         raise ConfigError(
             f"{path.name} not found. Copy {EXAMPLE_PATH.name} to {path.name} "
@@ -58,7 +63,11 @@ def load(path: Path = CONFIG_PATH) -> Config:
     cfg = Config(
         exefs_dir=_resolve(inp["exefs_dir"]),
         romfs_dir=_resolve(inp["romfs_dir"]),
+        base_nsp=_optional(inp.get("base_nsp", "")),
+        update_nsp=_optional(inp.get("update_nsp", "")),
         work_dir=_resolve(out.get("work_dir", "work")),
+        hactool_exe=_optional(tools.get("hactool_exe", "")),
+        keys_dir=_optional(tools.get("keys_dir", "")),
         ghidra_dir=_optional(tools.get("ghidra_dir", "")),
         emulator_exe=_optional(tools.get("emulator_exe", "")),
     )
@@ -67,7 +76,7 @@ def load(path: Path = CONFIG_PATH) -> Config:
         d = getattr(cfg, name)
         if not d.is_dir():
             raise ConfigError(f"[input] {name} does not exist or is not a folder: {d}")
-    if not (cfg.exefs_dir / "main").is_file():
+    if require_exefs and not (cfg.exefs_dir / "main").is_file():
         raise ConfigError(f"No 'main' file in exefs_dir: {cfg.exefs_dir}")
 
     return cfg

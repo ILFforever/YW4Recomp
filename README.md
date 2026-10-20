@@ -12,6 +12,9 @@ Requirements: Python 3.11+, Git. CMake 3.24+ and a C++20 compiler come later (Ph
 
 1. Copy `config.example.toml` to `config.local.toml`.
 2. Fill in `exefs_dir` and `romfs_dir` with the folders of your already-extracted ExeFS and RomFS.
+   If you have your base and update NSPs instead, also set `base_nsp`, `update_nsp`, `hactool_exe`
+   ([hactool](https://github.com/SciresM/hactool) 1.4.0) and `keys_dir` (your console's `prod.keys` and
+   `title.keys`), point `exefs_dir`/`romfs_dir` at empty folders, and run `python -m tools.yw4.extract`.
 3. Keep `work_dir` outside any cloud-synced folder.
 4. Check it:
 
