@@ -26,6 +26,11 @@ typedef struct {
     v128 v[32];      /* v0..v31 (b/h/s/d/q views of the same register) */
     uint32_t fpcr;   /* not used yet: main never changes it (docs/decisions/0008) */
     uint32_t fpsr;   /* cumulative FP exception flags: not modelled, main never reads them */
+    /* Exclusive monitor (LDXR/STXR, decision 0009): address and value of the last exclusive
+     * load; excl_size = 0 means no reservation. */
+    uint64_t excl_addr;
+    uint64_t excl_val;
+    uint32_t excl_size;
 } CPUState;
 
 #define NZCV_N 0x80000000u

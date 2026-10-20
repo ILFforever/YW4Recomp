@@ -35,10 +35,11 @@ CFLAGS = ("-O2 -mcpu=cortex-a57 -mgeneral-regs-only -fno-jump-tables -ffreestand
 BUILD = f"""set -e
 gcc {CFLAGS} -c funcs.c -o funcs.o
 gcc -c jumptable.S -o jumptable.o
-if readelf -rW funcs.o jumptable.o | grep -q -E 'ABS64|GOT|TLS'; then
+gcc -c atomics.S -o atomics.o
+if readelf -rW funcs.o jumptable.o atomics.o | grep -q -E 'ABS64|GOT|TLS'; then
     echo 'test code needs load-time relocations; the flat image cannot have them' >&2; exit 1
 fi
-ld -T flat.ld -o funcs.elf funcs.o jumptable.o
+ld -T flat.ld -o funcs.elf funcs.o jumptable.o atomics.o
 objcopy -O binary funcs.elf funcs.bin
 nm funcs.elf > funcs.sym
 gcc -O1 -Wall -o funcrun funcrun.c
@@ -90,7 +91,7 @@ int main(int argc, char **argv) {
 
 def build_on_pi(cfg: config.Config, out: Path) -> None:
     opts = golden.ssh_base(cfg)
-    files = [SRC / "funcs.c", SRC / "jumptable.S", SRC / "flat.ld", PI_DIR / "funcrun.c", PI_DIR / "testcase.h"]
+    files = [SRC / "funcs.c", SRC / "jumptable.S", SRC / "atomics.S", SRC / "flat.ld", PI_DIR / "funcrun.c", PI_DIR / "testcase.h"]
     subprocess.run(["ssh", *opts, cfg.pi_host, f"mkdir -p {REMOTE_DIR}"], check=True)
     subprocess.run(["scp", "-q", *opts, *map(str, files), f"{cfg.pi_host}:{REMOTE_DIR}/"], check=True)
     subprocess.run(["ssh", *opts, cfg.pi_host, f"cd {REMOTE_DIR} && sh -s"], input=BUILD.encode(), check=True)

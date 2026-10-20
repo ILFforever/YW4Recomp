@@ -111,6 +111,8 @@ def emit_system(enc: int) -> str | None:
         return "__atomic_thread_fence(__ATOMIC_SEQ_CST);"
     if enc & 0xFFFFF0FF == 0xD50330DF:                       # ISB
         return ";"
+    if enc & 0xFFFFF0FF == 0xD503305F:                       # CLREX: drop the exclusive reservation
+        return "ctx->excl_size = 0;"
     return None
 
 

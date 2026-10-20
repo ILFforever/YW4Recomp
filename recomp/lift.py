@@ -402,6 +402,7 @@ class MemAccess:
     sext: int = 0                     # loads: 0 = zero-extend, else sign-extend to 32 or 64 bits
     prefetch: bool = False
     vec: bool = False                 # regs are SIMD/FP registers (B/H/S/D/Q)
+    aligned: bool = False             # faults unless naturally aligned (exclusives, acquire/release)
 
     @property
     def writeback(self) -> bool:
@@ -587,6 +588,67 @@ mem_form("vldst_uimm", 0x3F000000, 0x3D000000, _decode_vuimm)
 mem_form("vldst_imm9", 0x3F200000, 0x3C000000, _decode_vimm9)
 mem_form("vldst_regoff", 0x3F200C00, 0x3C200800, _decode_vregoff)
 mem_form("vldst_pair", 0x3E000000, 0x2C000000, _decode_vpair)
+
+
+# --------------------------------------------------------------------------- atomics
+#
+# Guest threads run as host threads on shared memory, so these must be real host atomics
+# (decision 0009). Exclusive pairs become a compare-and-swap: LDXR records the address and
+# the value it saw, STXR succeeds only if the memory still holds that value.
+
+def _atomic_ptr(size: int) -> str:
+    return f"({UINT[size]} *)(uintptr_t)a"
+
+
+def _excl_decode(e: int) -> MemAccess | None:
+    size, load, rs, rt2, n, t = bits(e, 31, 30), bits(e, 22, 22), bits(e, 20, 16), bits(e, 14, 10), bits(e, 9, 5), bits(e, 4, 0)
+    if rt2 != 31 or (load and rs != 31):
+        return None
+    if not load and (rs == t or (rs == n and n != 31)):
+        return None  # CONSTRAINED UNPREDICTABLE
+    return MemAccess(n, 0, "offset", None, bool(load), (t,), 1 << size, aligned=True)
+
+
+def _excl_emit(e: int) -> str:
+    size, load, acqrel, rs, n, t = bits(e, 31, 30), bits(e, 22, 22), bits(e, 15, 15), bits(e, 20, 16), bits(e, 9, 5), bits(e, 4, 0)
+    ut, nbytes = UINT[size], 1 << size
+    base = rd_reg(n, 1, sp=True)
+    if load:  # LDXR, LDAXR
+        order = "__ATOMIC_ACQUIRE" if acqrel else "__ATOMIC_RELAXED"
+        return (f"{{ uint64_t a = {base}; {ut} v_ = __atomic_load_n({_atomic_ptr(size)}, {order}); "
+                f"ctx->excl_addr = a; ctx->excl_val = v_; ctx->excl_size = {nbytes}; {wr_reg(t, 1, 'v_')} }}")
+    # STXR, STLXR: status 0 = stored, 1 = failed; the reservation is always cleared
+    return (f"{{ uint64_t a = {base}; {ut} new_ = ({ut}){rd_reg(t, 1)}; int ok_ = 0; "
+            f"if (ctx->excl_size == {nbytes} && ctx->excl_addr == a) {{ {ut} old_ = ({ut})ctx->excl_val; "
+            f"ok_ = __atomic_compare_exchange_n({_atomic_ptr(size)}, &old_, new_, 0, __ATOMIC_SEQ_CST, __ATOMIC_SEQ_CST); }} "
+            f"ctx->excl_size = 0; {wr_reg(rs, 0, '!ok_') or '(void)ok_;'} }}")
+
+
+# Load/store exclusive register: size 001000 0 L 0 Rs o0 Rt2 Rn Rt   (LDXR/LDAXR/STXR/STLXR; no pairs)
+FORMS.append(Form("excl", 0x3FA00000, 0x08000000, valid=lambda e: _excl_decode(e) is not None,
+                  emit=_excl_emit, mem=_excl_decode))
+
+
+def _acqrel_decode(e: int) -> MemAccess | None:
+    if not bits(e, 15, 15) or bits(e, 20, 16) != 31 or bits(e, 14, 10) != 31:
+        return None  # o0 = 0 is LDLAR/STLLR (ARMv8.1)
+    return MemAccess(bits(e, 9, 5), 0, "offset", None, bool(bits(e, 22, 22)), (bits(e, 4, 0),),
+                     1 << bits(e, 31, 30), aligned=True)
+
+
+def _acqrel_emit(e: int) -> str:
+    size, load, n, t = bits(e, 31, 30), bits(e, 22, 22), bits(e, 9, 5), bits(e, 4, 0)
+    ut = UINT[size]
+    base = rd_reg(n, 1, sp=True)
+    if load:  # LDAR
+        return f"{{ uint64_t a = {base}; {ut} v_ = __atomic_load_n({_atomic_ptr(size)}, __ATOMIC_ACQUIRE); {wr_reg(t, 1, 'v_') or '(void)v_;'} }}"
+    # STLR is sequentially consistent with LDAR on ARM (RCsc); a plain release store isn't on x86
+    return f"{{ uint64_t a = {base}; __atomic_store_n({_atomic_ptr(size)}, ({ut}){rd_reg(t, 1)}, __ATOMIC_SEQ_CST); }}"
+
+
+# Load-acquire / store-release register: size 001000 1 L 0 11111 1 11111 Rn Rt   (LDAR, STLR)
+FORMS.append(Form("acqrel", 0x3FA00000, 0x08800000, valid=lambda e: _acqrel_decode(e) is not None,
+                  emit=_acqrel_emit, mem=_acqrel_decode))
 
 
 # --------------------------------------------------------------------------- scalar floating point

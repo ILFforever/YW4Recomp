@@ -140,6 +140,8 @@ def testable(f: lift.Form, enc: int) -> bool:
         return True
     if a.vec and 31 in a.regs:
         return False
+    if f.name == "excl" and not a.load:
+        return False  # a lone STXR's result is IMPLEMENTATION DEFINED; functest covers LDXR/STXR loops
     if not a.load and not a.vec and a.n != 31 and a.n in a.regs:
         return False  # would store the buffer's absolute address, which differs per machine
     if a.rm and a.rm[0] == a.n != 31:
@@ -174,8 +176,8 @@ def place_memory(a: lift.MemAccess, regs: list[int], rng: random.Random) -> tupl
     Returns (inmask, outmask) for the harness: which registers hold buffer offsets
     before and after the instruction."""
     target = rng.randrange(MEM_LO, MEM_HI)
-    if rng.random() < 0.6:
-        target &= ~(a.esize - 1)  # mostly aligned, some unaligned
+    if a.aligned or rng.random() < 0.6:
+        target &= ~(a.esize - 1)  # mostly aligned, some unaligned (never for exclusives/acquire/release)
     if a.rm:
         offset = extend_value(regs[a.rm[0]], a.rm[1], a.rm[2]) if a.rm[0] != 31 else 0
     else:
