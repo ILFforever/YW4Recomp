@@ -32,6 +32,12 @@ Requirements: Python 3.11+, Git. CMake 3.24+ and a C++20 compiler come later (Ph
 
    It refuses to continue unless `main` matches the build pinned in `target.toml`. Outputs go to `<work_dir>/exefs/`.
 
+6. Measure the binary and assets (tables go to `<work_dir>/recon/`, summary in `docs/recon.md`):
+
+   ```
+   python -m tools.yw4.recon
+   ```
+
 Tests (synthetic data only): `python -m unittest discover -s tests -t .`
 
 ## Layout
