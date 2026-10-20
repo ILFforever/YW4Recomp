@@ -140,6 +140,10 @@ def testable(f: lift.Form, enc: int) -> bool:
         return True
     if a.vec and 31 in a.regs:
         return False
+    if f.name.startswith("simd_ldst_"):
+        st = lift._decode_struct(enc)
+        if st.m is not None and st.m == st.n != 31:
+            return False  # post-index by the base register itself: can't rebase
     if f.name == "excl" and not a.load:
         return False  # a lone STXR's result is IMPLEMENTATION DEFINED; functest covers LDXR/STXR loops
     if not a.load and not a.vec and a.n != 31 and a.n in a.regs:

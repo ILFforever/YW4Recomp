@@ -1251,6 +1251,127 @@ def _simd_tbl(e: int) -> str:
     return vec(d, {"m_": m}, body, keep_d=bool(tbx))
 
 
+# --------------------------------------------------------------------------- SIMD structure loads/stores
+#
+# LD1-LD4 / ST1-ST4 (multiple structures), LD1-LD4 / ST1-ST4 (single lane), LD1R-LD4R, with
+# optional post-index (Rm = 31: by the transfer size, else by Xm). Emitted as the
+# pseudocode's loop, unrolled at translation time.
+
+@dataclass(frozen=True)
+class Struct:
+    load: bool
+    q: int
+    n: int
+    t: int
+    m: int | None        # post-index register (31 = immediate), None = no writeback
+    ebytes: int
+    selem: int           # registers per structure (LD2 = 2, ...)
+    rpt: int             # repetitions (LD1 with 2-4 registers)
+    index: int | None    # single-lane forms: the lane
+    replicate: bool = False
+
+    @property
+    def regs(self) -> tuple[int, ...]:
+        return tuple((self.t + k) % 32 for k in range(self.selem * self.rpt))
+
+    @property
+    def nbytes(self) -> int:
+        if self.index is not None or self.replicate:
+            return self.ebytes * self.selem
+        return (16 if self.q else 8) * self.selem * self.rpt
+
+
+MULTI = {0b0000: (4, 1), 0b0010: (1, 4), 0b0100: (3, 1), 0b0110: (1, 3), 0b0111: (1, 1), 0b1000: (2, 1), 0b1010: (1, 2)}
+
+
+def _decode_struct(e: int) -> Struct | None:
+    q, load, post, single = bits(e, 30, 30), bool(bits(e, 22, 22)), bits(e, 23, 23), bits(e, 24, 24)
+    n, t = bits(e, 9, 5), bits(e, 4, 0)
+    m = bits(e, 20, 16) if post else None
+    if not post and bits(e, 20, 16):
+        return None
+    if not single:
+        if bits(e, 21, 21) or bits(e, 15, 12) not in MULTI:
+            return None
+        size = bits(e, 11, 10)
+        if size == 3 and not q and MULTI[bits(e, 15, 12)][0] != 1:
+            return None  # .1d only for LD1/ST1
+        selem, rpt = MULTI[bits(e, 15, 12)]
+        return Struct(load, q, n, t, m, 1 << size, selem, rpt, None)
+    r, opcode, s, size = bits(e, 21, 21), bits(e, 15, 13), bits(e, 12, 12), bits(e, 11, 10)
+    selem = ((opcode & 1) << 1 | r) + 1
+    scale = opcode >> 1
+    if scale == 3:  # LDnR
+        if not load or s:
+            return None
+        return Struct(load, q, n, t, m, 1 << size, selem, 1, None, replicate=True)
+    if scale == 0:
+        index = q << 3 | s << 2 | size
+    elif scale == 1:
+        if size & 1:
+            return None
+        index = q << 2 | s << 1 | size >> 1
+    elif size == 0:
+        index = q << 1 | s
+    elif size == 1 and not s:
+        scale, index = 3, q
+    else:
+        return None
+    return Struct(load, q, n, t, m, 1 << scale, selem, 1, index)
+
+
+def _struct_mem(e: int) -> MemAccess | None:
+    st = _decode_struct(e)
+    if st is None:
+        return None
+    return MemAccess(st.n, 0, "post" if st.m is not None else "offset", None, st.load, st.regs, st.ebytes, vec=True)
+
+
+def _struct_emit(e: int) -> str:
+    st = _decode_struct(e)
+    lane = LANE[{1: 0, 2: 1, 4: 2, 8: 3}[st.ebytes]]
+    w = st.ebytes * 8
+    out = [f"uint64_t a = {rd_reg(st.n, 1, sp=True)};"]
+    if st.load:  # build the new registers in locals: all reads come from memory
+        out += [f"v128 t{k}_ = {'ctx->v[%d]' % r if st.index is not None else '{{0}}'};" for k, r in enumerate(st.regs)]
+    off = 0
+    if st.index is not None or st.replicate:
+        for k in range(st.selem):
+            if st.replicate:
+                count = (16 if st.q else 8) // st.ebytes
+                out.append(f"{{ uint{w}_t x_ = ld{w}(a + {off}); for (int i = 0; i < {count}; i++) t{k}_.{lane}[i] = x_; }}")
+            elif st.load:
+                out.append(f"t{k}_.{lane}[{st.index}] = ld{w}(a + {off});")
+            else:
+                out.append(f"st{w}(a + {off}, ctx->v[{st.regs[k]}].{lane}[{st.index}]);")
+            off += st.ebytes
+    else:
+        elements = (16 if st.q else 8) // st.ebytes
+        for r in range(st.rpt):
+            for el in range(elements):
+                for s in range(st.selem):
+                    k = r + s  # register index within regs (rpt > 1 implies selem == 1 and vice versa)
+                    if st.load:
+                        out.append(f"t{k}_.{lane}[{el}] = ld{w}(a + {off});")
+                    else:
+                        out.append(f"st{w}(a + {off}, ctx->v[{st.regs[k]}].{lane}[{el}]);")
+                    off += st.ebytes
+    if st.load:
+        out += [f"ctx->v[{r}] = t{k}_;" for k, r in enumerate(st.regs)]
+    if st.m is not None:
+        step = f"{st.nbytes:#x}" if st.m == 31 else rd_reg(st.m, 1)
+        out.append(wr_reg(st.n, 1, f"a + {step}", sp=True))
+    return "{ " + " ".join(out) + " }"
+
+
+# Advanced SIMD load/store multiple structures (+ post-index): 0 Q 0011 00 P L 0|1 Rm opcode size Rn Rt
+FORMS.append(Form("simd_ldst_multi", 0xBF000000, 0x0C000000, valid=lambda e: _decode_struct(e) is not None,
+                  emit=_struct_emit, mem=_struct_mem))
+# Advanced SIMD load/store single structure (+ post-index): 0 Q 0011 01 P L R Rm opcode S size Rn Rt
+FORMS.append(Form("simd_ldst_single", 0xBF000000, 0x0D000000, valid=lambda e: _decode_struct(e) is not None,
+                  emit=_struct_emit, mem=_struct_mem))
+
+
 # --------------------------------------------------------------------------- lookup
 
 def find_form(enc: int) -> Form | None:

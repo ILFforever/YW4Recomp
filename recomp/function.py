@@ -76,6 +76,8 @@ def decode_flow(enc: int, pc: int) -> Flow | None:
         return Flow("ret", reg=bits(enc, 9, 5))
     if enc & 0xFFFF0000 == 0 or enc & 0xFFE0001F in (0xD4200000, 0xD4400000):  # UDF, BRK, HLT
         return Flow("trap")
+    if enc == 0xE7FFDEFE:  # unallocated in A64; main uses it as a trap word on assert-failure paths
+        return Flow("trap")
     return None
 
 
