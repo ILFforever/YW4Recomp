@@ -589,6 +589,171 @@ mem_form("vldst_regoff", 0x3F200C00, 0x3C200800, _decode_vregoff)
 mem_form("vldst_pair", 0x3E000000, 0x2C000000, _decode_vpair)
 
 
+# --------------------------------------------------------------------------- scalar floating point
+#
+# ftype 0 = single (S registers), 1 = double (D). Half precision arithmetic is ARMv8.2, which
+# the Switch's A57 lacks. Arithmetic goes through yw4fp.h so NaNs behave as on ARM.
+# Writing an S or D register zeroes the rest of the V register.
+
+FP = {0: ("f32", "uint32_t", "s"), 1: ("f64", "uint64_t", "d")}
+
+
+def vread(n: int, ftype: int) -> str:
+    return f"ctx->v[{n}].{FP[ftype][2]}[0]"
+
+
+def vwrite(d: int, ftype: int, expr: str) -> str:
+    """Scalar write; the value is computed first, since expr may read v[d]."""
+    return f"{{ {FP[ftype][1]} r_ = {expr}; ctx->v[{d}].d[0] = r_; ctx->v[{d}].d[1] = 0; }}"
+
+
+def sign_bit(ftype: int) -> str:
+    return "0x80000000u" if ftype == 0 else "0x8000000000000000ull"
+
+
+def _ftype_ok(e: int) -> bool:
+    return bits(e, 23, 22) in FP
+
+
+def _rd_rn_rm(e: int) -> tuple[int, ...]:
+    return bits(e, 4, 0), bits(e, 9, 5), bits(e, 20, 16)
+
+
+FP_DP2 = ["mul", "div", "add", "sub", "max", "min", "maxnm", "minnm", "nmul"]
+
+
+# Floating-point data-processing (2 source): 0 0 0 11110 ftype 1 Rm opcode 10 Rn Rd
+@form("fp_dp2", 0xFF200C00, 0x1E200800, valid=lambda e: _ftype_ok(e) and bits(e, 15, 12) < 9, vregs=_rd_rn_rm)
+def _fp_dp2(e: int) -> str:
+    ftype, d, n, m = bits(e, 23, 22), bits(e, 4, 0), bits(e, 9, 5), bits(e, 20, 16)
+    p = FP[ftype][0]
+    op = FP_DP2[bits(e, 15, 12)]
+    if op == "nmul":  # FNMUL negates the product, NaN or not
+        return vwrite(d, ftype, f"{p}_mul({vread(n, ftype)}, {vread(m, ftype)}) ^ {sign_bit(ftype)}")
+    return vwrite(d, ftype, f"{p}_{op}({vread(n, ftype)}, {vread(m, ftype)})")
+
+
+FRINT = {0b001000: "n", 0b001001: "p", 0b001010: "m", 0b001011: "z", 0b001100: "a", 0b001110: "n", 0b001111: "n"}
+
+
+def _fp_dp1_valid(e: int) -> bool:
+    op = bits(e, 20, 15)
+    if not _ftype_ok(e):
+        return False
+    if op in (0b000100, 0b000101):  # FCVT to single / double: not to the same type
+        return op - 0b000100 != bits(e, 23, 22)
+    return op <= 3 or op in FRINT
+
+
+# Floating-point data-processing (1 source): 0 0 0 11110 ftype 1 opcode 10000 Rn Rd
+@form("fp_dp1", 0xFF207C00, 0x1E204000, valid=_fp_dp1_valid, vregs=lambda e: (bits(e, 4, 0), bits(e, 9, 5)))
+def _fp_dp1(e: int) -> str:
+    ftype, op, n, d = bits(e, 23, 22), bits(e, 20, 15), bits(e, 9, 5), bits(e, 4, 0)
+    p, a = FP[ftype][0], vread(n, ftype)
+    if op == 0:
+        return vwrite(d, ftype, a)                              # FMOV (register)
+    if op == 1:
+        return vwrite(d, ftype, f"{a} & ~{sign_bit(ftype)}")     # FABS: NaNs too, no NaN processing
+    if op == 2:
+        return vwrite(d, ftype, f"{a} ^ {sign_bit(ftype)}")      # FNEG
+    if op == 3:
+        return vwrite(d, ftype, f"{p}_sqrt({a})")
+    if op == 0b000101:
+        return vwrite(d, 1, f"f32_to_f64({a})")                  # FCVT Dd, Sn
+    if op == 0b000100:
+        return vwrite(d, 0, f"f64_to_f32({a})")                  # FCVT Sd, Dn
+    return vwrite(d, ftype, f"{p}_rint({a}, '{FRINT[op]}')")     # FRINTN/P/M/Z/A/X/I
+
+
+# Floating-point compare: 0 0 0 11110 ftype 1 Rm 00 1000 Rn opc 000   (FCMP, FCMPE; opc bit 3 = with #0.0)
+@form("fp_cmp", 0xFF20FC07, 0x1E202000, valid=_ftype_ok,
+      vregs=lambda e: (bits(e, 9, 5),) if bits(e, 3, 3) else (bits(e, 9, 5), bits(e, 20, 16)))
+def _fp_cmp(e: int) -> str:
+    ftype, m, n = bits(e, 23, 22), bits(e, 20, 16), bits(e, 9, 5)
+    b = "0" if bits(e, 3, 3) else vread(m, ftype)
+    return f"ctx->nzcv = {FP[ftype][0]}_cmp({vread(n, ftype)}, {b});"
+
+
+# Floating-point conditional compare: 0 0 0 11110 ftype 1 Rm cond 01 Rn op nzcv   (FCCMP, FCCMPE)
+@form("fp_ccmp", 0xFF200C00, 0x1E200400, valid=_ftype_ok, vregs=lambda e: (bits(e, 9, 5), bits(e, 20, 16)))
+def _fp_ccmp(e: int) -> str:
+    ftype, m, cond, n, nzcv = bits(e, 23, 22), bits(e, 20, 16), bits(e, 15, 12), bits(e, 9, 5), bits(e, 3, 0)
+    return (f"ctx->nzcv = cond_holds(ctx->nzcv, {cond}) ? "
+            f"{FP[ftype][0]}_cmp({vread(n, ftype)}, {vread(m, ftype)}) : {nzcv << 28:#x};")
+
+
+# Floating-point conditional select: 0 0 0 11110 ftype 1 Rm cond 11 Rn Rd
+@form("fp_csel", 0xFF200C00, 0x1E200C00, valid=_ftype_ok, vregs=_rd_rn_rm)
+def _fp_csel(e: int) -> str:
+    ftype, m, cond, n, d = bits(e, 23, 22), bits(e, 20, 16), bits(e, 15, 12), bits(e, 9, 5), bits(e, 4, 0)
+    return vwrite(d, ftype, f"cond_holds(ctx->nzcv, {cond}) ? {vread(n, ftype)} : {vread(m, ftype)}")
+
+
+def vfp_expand_imm(imm8: int, ftype: int) -> int:
+    """VFPExpandImm: sign, a short exponent, 4 fraction bits."""
+    sign, b6, rest = imm8 >> 7, (imm8 >> 6) & 1, imm8 & 0x3F
+    if ftype == 0:
+        exp = (b6 ^ 1) << 7 | (0x1F if b6 else 0) << 2 | (rest >> 4)
+        return sign << 31 | exp << 23 | (rest & 0xF) << 19
+    exp = (b6 ^ 1) << 10 | (0xFF if b6 else 0) << 2 | (rest >> 4)
+    return sign << 63 | exp << 52 | (rest & 0xF) << 48
+
+
+# Floating-point move (immediate): 0 0 0 11110 ftype 1 imm8 100 00000 Rd
+@form("fp_imm", 0xFF201FE0, 0x1E201000, valid=_ftype_ok, vregs=lambda e: (bits(e, 4, 0),))
+def _fp_imm(e: int) -> str:
+    ftype = bits(e, 23, 22)
+    return vwrite(bits(e, 4, 0), ftype, f"{vfp_expand_imm(bits(e, 20, 13), ftype):#x}u")
+
+
+FCVT_MODE = {0: "n", 1: "p", 2: "m", 3: "z"}
+
+
+def _fp_int_kind(e: int) -> str | None:
+    sf, ftype, rmode, op = bits(e, 31, 31), bits(e, 23, 22), bits(e, 20, 19), bits(e, 18, 16)
+    if op in (0, 1) and ftype in FP:
+        return "fcvt"                      # FCVT{N,P,M,Z}{S,U}
+    if op in (4, 5) and rmode == 0 and ftype in FP:
+        return "fcvta"                     # FCVTAS/AU
+    if op in (2, 3) and rmode == 0 and ftype in FP:
+        return "cvtf"                      # SCVTF/UCVTF
+    if op in (6, 7) and (sf, ftype, rmode) in ((0, 0, 0), (1, 1, 0)):
+        return "fmov"                      # FMOV Wd<->Sn, Xd<->Dn
+    if op in (6, 7) and (sf, ftype, rmode) == (1, 2, 1):
+        return "fmov_top"                  # FMOV Xd<->Vn.D[1]
+    return None
+
+
+def _fp_int_vregs(e: int) -> tuple[int, ...]:
+    to_fp = bits(e, 18, 16) in (2, 3, 7)
+    return (bits(e, 4, 0),) if to_fp else (bits(e, 9, 5),)
+
+
+# Conversion between floating-point and integer: sf 0 0 11110 ftype 1 rmode opcode 000000 Rn Rd
+@form("fp_int", 0x7F20FC00, 0x1E200000, valid=lambda e: _fp_int_kind(e) is not None, vregs=_fp_int_vregs)
+def _fp_int(e: int) -> str:
+    sf, ftype, rmode, op = bits(e, 31, 31), bits(e, 23, 22), bits(e, 20, 19), bits(e, 18, 16)
+    n, d = bits(e, 9, 5), bits(e, 4, 0)
+    kind = _fp_int_kind(e)
+    w = 64 if sf else 32
+    if kind in ("fcvt", "fcvta"):
+        mode = "a" if kind == "fcvta" else FCVT_MODE[rmode]
+        src = f"{'(double)f32_of' if ftype == 0 else 'f64_of'}({vread(n, ftype)})"
+        conv = f"yw4_to_{'u' if op & 1 else 's'}{w}({src}, '{mode}')"
+        return wr_reg(d, sf, f"({utype(sf)}){conv}") or ";"
+    if kind == "cvtf":
+        ctype = ("uint" if op & 1 else "int") + f"{w}_t"
+        host = "float" if ftype == 0 else "double"
+        return vwrite(d, ftype, f"bits_{FP[ftype][0]}(({host})({ctype}){rd_reg(n, sf)})")
+    if kind == "fmov":
+        if op == 6:
+            return wr_reg(d, sf, vread(n, ftype)) or ";"
+        return vwrite(d, ftype, rd_reg(n, sf))
+    if op == 6:
+        return wr_reg(d, 1, f"ctx->v[{n}].d[1]") or ";"
+    return f"ctx->v[{d}].d[1] = {rd_reg(n, 1)};"          # the low half is kept
+
+
 # --------------------------------------------------------------------------- lookup
 
 def find_form(enc: int) -> Form | None:

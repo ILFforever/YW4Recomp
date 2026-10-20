@@ -109,12 +109,15 @@ F_PAIRS_32 = [
     (0x7F800000, 0xFF800000), (0x7F800000, 0x00000000), (0x00000000, 0x80000000), (0x7FC12345, 0x3F800000),
     (0x7FA00000, 0x7FC00000), (0x3F800000, 0xFF812345), (0x00000001, 0x00800000), (0x7F7FFFFF, 0x7F7FFFFF),
     (0x7F7FFFFF, 0xFF7FFFFF), (0x4F000000, 0xCF000000), (0x3F000000, 0x3FC00000), (0x7F800000, 0x7F800000),
+    (0x7FC12345, 0xFFC54321), (0x7FA00001, 0xFFB00002), (0x80000000, 0x80000000), (0x80000000, 0x3F800000),
 ]
 F_PAIRS_64 = [
     (0x7FF0000000000000, 0xFFF0000000000000), (0x0000000000000000, 0x8000000000000000),
     (0x7FF8000000012345, 0x3FF0000000000000), (0x7FF4000000000000, 0x7FF8000000000000),
     (0x0000000000000001, 0x0010000000000000), (0x7FEFFFFFFFFFFFFF, 0x7FEFFFFFFFFFFFFF),
     (0x41E0000000000000, 0xC3E0000000000000), (0x47EFFFFFE0000000, 0x36A0000000000000),
+    (0x7FF8000000012345, 0xFFF8000000054321), (0x7FF4000000000001, 0xFFF4000000000002),
+    (0x8000000000000000, 0x8000000000000000),
 ]
 V_PAIRS = [(_rep32(a), _rep32(b)) for a, b in F_PAIRS_32] + [(_rep64(a), _rep64(b)) for a, b in F_PAIRS_64]
 V_PAIRS += [(b, a) for a, b in V_PAIRS]
@@ -211,7 +214,8 @@ def make_cases(f: lift.Form, count: int, states: int, pairs: int, rng: random.Ra
     lines = []
     for enc in random_encodings(f, count, rng):
         a = f.mem(enc) if f.mem else None
-        for k in range(states + pairs):
+        npairs = pairs * 3 if f.vregs or (a and a.vec) else pairs  # FP edge pairs are the point there
+        for k in range(states + npairs):
             # x0..x30, SP
             regs = [random_value(rng) for _ in range(32)] if k < states else pair_state(rng)
             vregs = [random_vreg(rng) for _ in range(31)] + [0] if k < states else pair_vregs(rng)

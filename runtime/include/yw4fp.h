@@ -167,6 +167,24 @@ static inline double yw4_round(double x, char mode) {
     default: return trunc(x);
     }
 }
+/* FRINT*: round to an integral value in the same format (signs of zero kept, NaNs quietened). */
+static inline uint32_t f32_rint(uint32_t a, char mode) {
+    if (f32_isnan(a)) return a | 0x00400000u;
+    float x = f32_of(a), r;
+    switch (mode) {
+    case 'n': r = nearbyintf(x); break;
+    case 'a': r = roundf(x); break;
+    case 'p': r = ceilf(x); break;
+    case 'm': r = floorf(x); break;
+    default: r = truncf(x); break;
+    }
+    return bits_f32(r);
+}
+static inline uint64_t f64_rint(uint64_t a, char mode) {
+    if (f64_isnan(a)) return a | 0x0008000000000000ull;
+    return bits_f64(yw4_round(f64_of(a), mode));
+}
+
 static inline int64_t yw4_to_s64(double x, char mode) {
     if (x != x) return 0;
     x = yw4_round(x, mode);
