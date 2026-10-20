@@ -6,8 +6,8 @@ Measured on 2026-10-20 from the pinned build (`target.toml`). Numbers come from
 the summaries and what they mean for the port.
 
 Status: sections 1–7 done, including the Ghidra-based NVN trace (setup in
-`docs/ghidra.md`). Still open: baseline benchmark and the Phase 1
-recommendation; see "Open questions".
+`docs/ghidra.md`). The Phase 1 runtime approach is decided
+(`docs/decisions/0005`). Still open: the baseline benchmark; see "Open questions".
 
 ## TL;DR
 
@@ -85,7 +85,7 @@ From `work/recon/rtti.md` and `code.md`:
 - **1,842 vtables** with **37,957 virtual-function slots** (largest: 88 slots); 1,549 slots are pure-virtual.
 - RTTI by top-level namespace: `lives` 1,012, `yw` 926, `nn` 623 (statically linked NEX/Pia etc.), `pead` 34, `std` 32, `physx` 21.
 
-Instruction mix in `.text` (4,335,852 instructions):
+Instruction mix in `.text` (4,335,852 instructions: every 4-byte word of `.text`, including padding and data between functions; `python -m recomp.coverage` counts only the 4,241,773 words inside functions, so its percentages are slightly higher, e.g. 7.8% FP/SIMD):
 
 | Kind | Count | Per 1000 | Meaning for the recompiler |
 |---|---|---|---|
@@ -203,6 +203,6 @@ Existing tools: whether community Level-5 tools already parse the G4 formats is 
 1. ~~Which NVN functions are actually called, and by whom.~~ Answered statically (section 5): 177 used, 108 wrappers, 96 producers. Still open: following the producers up to the frame loop (Phase 4b, best done in the Ghidra GUI or with runtime tracing).
 2. ~~Shader binary format.~~ Answered: `HBH1` wrapper with Maxwell code **and** NV_gpu_program5 assembly (section 6). Still open: the exact `HBH1` header layout (bindings), and what `.fxbin` describes.
 3. **G4 formats.** Check existing Level-5 modding tools before writing parsers.
-4. **`sdk` strategy.** `main` uses 578 of `sdk`'s 25,077 exports. HLE those 578, or recompile `sdk` too and HLE at the syscall level? This is the main Phase 1 decision. The small import list favors HLE at the `sdk` boundary.
+4. ~~**`sdk` strategy.**~~ Decided in `docs/decisions/0005`: implement the 578 `sdk` imports natively, recompile only `main`.
 5. **Translation mod packaging:** loose-file replacements vs. rebuilt CPKs.
 6. **Baseline benchmark** (Phase 0 step 6): needs an emulator choice.

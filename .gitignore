@@ -35,6 +35,29 @@ ExeFS/
 romfs/
 RomFS/
 
+# RomFS file types, so a stray file outside romfs/ can't be committed either
+# (list from the RomFS survey, docs/recon.md section 6)
+*.cpk
+*.bin
+*.col
+*.acb
+*.awb
+*.acf
+*.usm
+*.p3lip
+*.vsb
+*.fsb
+*.gsb
+*.esb
+*.csb
+*.fxbin
+*.g4*
+*.objbin
+*.mevbin
+*.ptlb
+*.linb
+*.clobin
+
 # Keys and firmware
 *.keys
 prod.keys

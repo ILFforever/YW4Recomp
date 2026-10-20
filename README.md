@@ -4,12 +4,13 @@ A fan static-recompilation project to run Yo-kai Watch 4++ (Nintendo Switch, fin
 
 This repo contains only tools, runtime code, and patches. It contains no game data. Provide your own dump of the final 4++ update.
 
-Status: Phase 0 (recon and tooling). Nothing runs yet.
+Status: Phase 2 (recompiler). All of `main` translates to C and compiles; nothing runs yet.
 
 ## Setup
 
 Requirements: Python 3.11+, Git. CMake 3.24+ and a C++20 compiler come later (Phase 1+).
 
+0. Install the game-data guard as a pre-commit hook: `python -m tools.yw4.guard --install`.
 1. Copy `config.example.toml` to `config.local.toml`.
 2. Fill in `exefs_dir` and `romfs_dir` with the folders of your already-extracted ExeFS and RomFS.
    If you have your base and update NSPs instead, also set `base_nsp`, `update_nsp`, `hactool_exe`
