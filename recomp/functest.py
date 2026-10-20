@@ -13,7 +13,6 @@ and every changed byte of the scratch buffer must match.
 from __future__ import annotations
 
 import argparse
-import os
 import random
 import subprocess
 import sys
@@ -173,7 +172,7 @@ def main(argv: list[str] | None = None) -> int:
     with tempfile.TemporaryDirectory() as t:
         c, exe = Path(t) / "functest.c", Path(t) / "functest.exe"
         c.write_text(src)
-        cc = os.environ.get("CC", "gcc")
+        cc = check.host_cc()
         build = subprocess.run([cc, "-std=c11", args.opt, "-Wall", "-Wno-unused-label", f"-I{INCLUDE}",
                                 f"-I{PI_DIR}", "-o", str(exe), str(c), str(DISPATCH)],
                                capture_output=True, text=True)

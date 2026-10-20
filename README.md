@@ -8,7 +8,7 @@ Status: Phase 2 (recompiler). All of `main` translates to C and compiles; nothin
 
 ## Setup
 
-Requirements: Python 3.11+, Git. CMake 3.24+ and a C++20 compiler come later (Phase 1+).
+Requirements: Python 3.11+, Git, and a C11 compiler for the recompiler tests: Clang preferred ([llvm-mingw](https://github.com/mstorsjo/llvm-mingw) on Windows; set `[tools] cc`), GCC works too. The host CPU needs FMA3 (any x86-64 CPU since 2013). CMake comes later.
 
 0. Install the game-data guard as a pre-commit hook: `python -m tools.yw4.guard --install`.
 1. Copy `config.example.toml` to `config.local.toml`.

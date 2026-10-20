@@ -26,6 +26,9 @@ keys_dir = ""
 # results for recompiler tests (decision 0004), reached over SSH with a key.
 pi_host = ""   # e.g. "pi@192.168.1.49"
 pi_key = ""    # private key file, e.g. "~/.ssh/yw4_pi"
+# Host C compiler for the recompiler tests and generated code (default: gcc). Clang is
+# preferred: it guarantees tail calls (musttail). The CC environment variable overrides it.
+cc = ""        # e.g. "C:/tools/llvm-mingw-20261006-ucrt-x86_64/bin/clang.exe"
 # Optional. Only needed for the Ghidra and baseline steps.
 # Ghidra 12.1.2 with the Switch loader installed (see docs/ghidra.md).
 ghidra_dir = ""

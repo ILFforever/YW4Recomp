@@ -33,6 +33,7 @@ class Config:
     pi_key: Path | None
     ghidra_dir: Path | None
     emulator_exe: Path | None
+    cc: str
 
 
 def _resolve(value: str) -> Path:
@@ -74,6 +75,7 @@ def load(path: Path = CONFIG_PATH, require_exefs: bool = True) -> Config:
         pi_key=_optional(tools.get("pi_key", "")),
         ghidra_dir=_optional(tools.get("ghidra_dir", "")),
         emulator_exe=_optional(tools.get("emulator_exe", "")),
+        cc=tools.get("cc", ""),
     )
 
     for name in ("exefs_dir", "romfs_dir"):

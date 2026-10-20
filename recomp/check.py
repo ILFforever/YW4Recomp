@@ -134,6 +134,17 @@ def load_cases(name: str) -> tuple[list[str], list[str]]:
     return inputs, expected
 
 
+def host_cc() -> str:
+    """The host C compiler: $CC, else [tools] cc from config.local.toml, else gcc."""
+    if os.environ.get("CC"):
+        return os.environ["CC"]
+    try:
+        from tools.yw4 import config
+        return config.load().cc or "gcc"
+    except Exception:  # no config: the checker still works with gcc
+        return "gcc"
+
+
 def build_program(encodings: list[int], exe: Path, flags: list[str]) -> None:
     """Encodings the lifter rejects are left out; they then print UNSUPPORTED and mismatch."""
     cases = []
@@ -144,8 +155,7 @@ def build_program(encodings: list[int], exe: Path, flags: list[str]) -> None:
             pass
     src = exe.with_suffix(".c")
     src.write_text(PROGRAM % "\n".join(cases))
-    cc = os.environ.get("CC", "gcc")
-    proc = subprocess.run([cc, "-std=c11", *flags, "-ffp-contract=off", "-Wall", "-Werror", f"-I{INCLUDE}", f"-I{PI_DIR}",
+    proc = subprocess.run([host_cc(), "-std=c11", *flags, "-ffp-contract=off", "-Wall", "-Werror", f"-I{INCLUDE}", f"-I{PI_DIR}",
                            "-o", str(exe), str(src)], capture_output=True, text=True)
     if proc.returncode != 0:
         raise RuntimeError(f"compile failed:\n{proc.stderr[-3000:]}")

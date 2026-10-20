@@ -40,7 +40,8 @@ _Noreturn void yw4_guest_trap(CPUState *ctx, uint64_t pc, uint32_t enc);
  * which matters for loops that go through tail calls; other compilers usually optimise the
  * plain call+return to a jump at -O2 but don't promise it. */
 #if defined(__clang__)
-#define TAILCALL(f) __attribute__((musttail)) return f(ctx)
+/* Wrapped in a block: right after a label, a bare attribute would attach to a declaration. */
+#define TAILCALL(f) do { __attribute__((musttail)) return f(ctx); } while (0)
 #define TAILCALL_INDIRECT(t) do { GuestFn fn_ = yw4_resolve(t); __attribute__((musttail)) return fn_(ctx); } while (0)
 #else
 #define TAILCALL(f) do { f(ctx); return; } while (0)
