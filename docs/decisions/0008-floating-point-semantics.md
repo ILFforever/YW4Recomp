@@ -1,11 +1,27 @@
 # 0008 — Floating-point and SIMD semantics
 
 Date: 2026-10-20
-Status: accepted
+Status: accepted (FPCR = 0 verified 2026-10-21)
 
 ## Decision
 
-**FP mode.** Generated code implements ARM floating point with FPCR = 0: round to nearest even, no flush-to-zero, no default-NaN mode. `main` contains no `MRS`/`MSR` of any system register at all (measured: its only system instructions are 1,189 `clrex`, 505 `nop`, 16 `dmb`), so it never changes FPCR itself. **Assumption to verify** once the runtime runs: that Horizon starts the game's threads with FPCR = 0 (the `sdk` could set it; check with an emulator's thread context or by reading FPCR in a homebrew test).
+**FP mode.** Generated code implements ARM floating point with FPCR = 0: round to nearest even, no flush-to-zero, no default-NaN mode.
+
+**Verified (2026-10-21) that every game thread runs with FPCR = 0:**
+- **`main`** contains no `MRS`/`MSR` of any system register (its only system instructions are 1,189 `clrex`, 505 `nop`, 16 `dmb`). It does import `fegetenv`, `fesetenv` and `fesetround`, but calls them from exactly two tiny functions:
+  - `0x10048c0`: `fegetenv(saved)`, then `fesetenv(FE_DFL_ENV)` and `fesetround(0)`;
+  - `0x10048e0`: `fesetenv(saved)`.
+
+  That is a save / set-default / restore guard (typical of physics code), so the only mode the game itself sets is the default.
+- **`sdk`** writes FPCR in three places:
+  - `nn::os::detail::UserExceptionHandler` saves and restores FPCR around a callback;
+  - `__fesetround` (reached only from `fesetround`);
+  - `fesetenv`, which writes FPCR = 0 for `FE_DFL_ENV` (reached from `main`'s guard and from `feupdateenv`).
+
+  The only internal callers of `fesetround` are in `fmal`, which saves the rounding mode, uses nearest, and restores it. `rtld` never touches FPCR.
+- **Kernel** (Atmosphère's reimplementation, read as a reference: `KThreadContext::Initialize` and `svc::CreateThread`): a thread's context starts with FPCR = 0. `CreateThread` then copies the *creating* thread's FPCR into the new thread. So the first thread starts at 0, and since nothing above leaves FPCR non-zero, every later thread inherits 0 as well.
+
+**For the runtime (Phase 3):** `fegetenv`/`fesetenv`/`fesetround` can be implemented as storing and returning the environment value. If one is ever called with a non-default mode, it must trap loudly, because generated code only implements FPCR = 0.
 
 **FPSR** (cumulative exception flags) is not modelled. `main` never reads it.
 
