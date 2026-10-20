@@ -10,7 +10,7 @@ This is also a learning project. The owner (Dean, computer engineering student w
 2. All paths to user-supplied files come from a gitignored local config (`config.local.toml`). Never hardcode them.
 3. Version lock: we target exactly one build. Identify it by **SHA-256 of the decompressed main NSO**. Tools must refuse to run on a mismatched binary with a clear error. Store only hashes in the repo.
 4. Never write dumping, key-extraction, or console-modding instructions into the repo or docs. Docs simply say "provide your own dump of version X."
-5. Licensing: if we reuse code from an emulator (Ryujinx/Ryubing, Eden, Suyu forks are GPL), the project becomes GPL. Flag this **before** copying any emulator code and record the decision.
+5. Licensing: if we reuse code from an emulator (Eden, Citron, Suyu and other yuzu forks are GPL; Ryujinx/Ryubing is reportedly MIT, so verify), the project's license may change. Flag this **before** copying any emulator code and record the decision. Per decision 0005 we currently link no emulator code.
 6. Small, reviewable commits. Ask before large refactors or new dependencies.
 
 ## Target facts (fill in during Phase 0)
@@ -19,9 +19,9 @@ This is also a learning project. The owner (Dean, computer engineering student w
 - Main NSO SHA-256: `dcd40ec54d9d3bc17a0375475f3bf885d41654c8bb83251992b44b6f826f0b50` (flat image, see `target.toml` and docs/decisions/0002)
 - Main build ID: `C7DAB27F22ACD2EDFA334AEEC30E57867AA60E59`
 - SDK version: 7.3.2. ExeFS modules: `rtld`, `main`, `sdk` (no `subsdk*`).
-- Engine: believed to be Level-5's in-house engine. **Verify.**
+- Engine: Level-5's in-house C++ engine (namespace `lives`), game code in `yw`, Lua 5.2 scripting. Middleware: CRI ADX2/Sofdec/FileSystem, PhysX 3.4, NEX 4.6.2 + Pia 5.17. Verified in `docs/recon.md`.
 
-## Phase 0 — Recon & tooling (current phase)
+## Phase 0 — Recon & tooling (nearly done: only the baseline benchmark is left)
 Goal: understand what we're dealing with before writing a recompiler.
 
 1. **Repo scaffold**: CMake project, `tools/` (Python for analysis scripts), `runtime/`, `recomp/`, `docs/`. A `.gitignore` that blocks every file type in rule 1, plus `config.local.toml` and a `build/`/`work/` directory for generated output.
@@ -43,15 +43,15 @@ Goal: understand what we're dealing with before writing a recompiler.
 
 **Phase 0 is done when** `docs/recon.md` and `docs/baseline.md` exist, the hash-verified pipeline works end-to-end on the owner's files, and there's a written recommendation for Phase 1's runtime approach.
 
-## Later phases (outline only, don't start yet)
-- **Phase 1: runtime strategy decision.** Hybrid (reuse an emulator's HLE services and GPU layer, swap in statically recompiled CPU code, with a JIT/interpreter fallback for missed indirect targets) vs. a custom runtime. Hybrid is the expected start.
-- **Phase 2: AArch64 → C recompiler.** Function discovery, instruction lifting (start with the integer subset, then FP/NEON), indirect-call dispatch table, per-function config for stubs and patches (TOML, N64Recomp-style).
-- **Phase 3: HLE services.** Implement only what the import list from Phase 0 requires.
+## Later phases
+- **Phase 1: runtime strategy — decided (docs/decisions/0005).** Custom runtime, no emulator code linked. Recompile **only `main`**. Implement the 578 `sdk` imports natively on the host. Graphics at the NVN API level (the 177 NVN functions the game uses) on Vulkan. An emulator is used only as an **external reference** (screenshots, frame captures, timings). Guest pointers are host pointers (both 64-bit little-endian); verify the game doesn't assume a 39-bit address space.
+- **Phase 2: AArch64 → C recompiler.** Function list from `.eh_frame_hdr` + address-taken targets (docs/ghidra.md). Instruction lifting (integer first, FP/NEON right after: 7.7% of instructions). Indirect-call lookup table with a loud trap for unknown targets (interpreter fallback only if the trap fires in practice). Exclusive pairs → host compare-and-swap. Per-function config for stubs and patches (TOML, N64Recomp-style). Instruction tests against golden results from the Pi 5 (decision 0004). Plan for split output files and a parallel build from the start.
+- **Phase 3: HLE services.** Implement only what the import list from Phase 0 requires (`work/recon/imports.md`); online/peripheral services start as stubs.
 - **Phase 4: Graphics — engine-level renderer (the project's main goal).**
-  - 4a. Fallback path: keep the emulator's GPU layer running on the same Vulkan device, with all shaders translated ahead of time. This is scaffolding and a correctness reference, not the product.
-  - 4b. Trace the engine's frame: per-frame pass order, render targets, how meshes/materials/cameras reach the draw calls.
-  - 4c. Replace passes one at a time with our own Vulkan renderer, hooked at the engine level in the recompiled code. Each replaced pass must match the fallback's output (screenshot diffs) before adding enhancements. Shared resources (render targets, textures) live on one Vulkan device so replaced and fallback passes can coexist.
-  - We are deliberately **skipping a full NVN → Vulkan reimplementation**; the fallback covers whatever isn't replaced yet.
+  - 4a. Fallback path: our own NVN → Vulkan layer for the **177 used NVN functions**, with all shaders translated ahead of time from the NV_gpu_program5 assembly they ship with. This is scaffolding, not the product. Correctness is checked against captures from the original game running in an emulator.
+  - 4b. Trace the engine's frame: per-frame pass order, render targets, how meshes/materials/cameras reach the draw calls. Starting points from recon: `lives::CDeviceUnitNX`, `yw::CMainComponent` vtable slots 11/12, the draw-submission producers in `work/recon/nvn.md`.
+  - 4c. Replace passes one at a time with our own Vulkan renderer, hooked at the engine level in the recompiled code. Each replaced pass must match the fallback's output (screenshot diffs) before adding enhancements. Replaced and fallback passes share one Vulkan device and its resources.
+  - We still skip a *full* NVN → Vulkan reimplementation: only the 177 functions the game uses.
   - Enhancements unlocked by owning the renderer: internal resolution scaling, widescreen/ultrawide with correct UI layout, stable 60fps+ (requires patching delta-time game logic), better shadows/AA.
 - **Phase 5: Quality-of-life.** LayeredFS mod loading (translation mod), input remapping, Linux packaging, benchmark comparison against `docs/baseline.md`.
 
