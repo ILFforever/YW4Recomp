@@ -754,6 +754,441 @@ def _fp_int(e: int) -> str:
     return f"ctx->v[{d}].d[1] = {rd_reg(n, 1)};"          # the low half is kept
 
 
+# --------------------------------------------------------------------------- Advanced SIMD (vector)
+#
+# Every vector instruction is emitted the same way: copy the source registers into locals
+# (a destination may also be a source), build the result in a zeroed local, store it. With
+# Q=0 only the low 64 bits are produced and the upper half of the destination is zeroed.
+
+LANE = {0: "b", 1: "h", 2: "s", 3: "d"}
+UINT = {0: "uint8_t", 1: "uint16_t", 2: "uint32_t", 3: "uint64_t"}
+SINT = {0: "int8_t", 1: "int16_t", 2: "int32_t", 3: "int64_t"}
+
+
+def lanes(q: int, size: int) -> int:
+    return (128 if q else 64) >> (3 + size)
+
+
+def vec(d: int, srcs: dict[str, int], body: str, keep_d: bool = False) -> str:
+    """`body` assigns r_ from the locals named in srcs (e.g. {"n_": 5}); keep_d starts r_
+    from the old destination instead of zero (for ops that only change some lanes)."""
+    loads = " ".join(f"v128 {k} = ctx->v[{v}];" for k, v in srcs.items())
+    init = f"v128 r_ = ctx->v[{d}];" if keep_d else "v128 r_ = {{0}};"
+    return f"{{ {loads} {init} {body} ctx->v[{d}] = r_; }}"
+
+
+def per_lane(count: int, stmt: str) -> str:
+    return f"for (int i = 0; i < {count}; i++) {{ {stmt} }}"
+
+
+def _q_size_ok(e: int) -> bool:
+    return bool(bits(e, 30, 30)) or bits(e, 23, 22) != 3
+
+
+# Float ops in "three same": (U, size<1>, opcode) -> (kind, helper)
+FP3 = {
+    (0, 0, 0x18): ("lane", "maxnm"), (0, 0, 0x1A): ("lane", "add"), (0, 0, 0x1C): ("cmp", "=="),
+    (0, 0, 0x1E): ("lane", "max"), (0, 0, 0x1F): ("lane", "recps"),
+    (0, 1, 0x18): ("lane", "minnm"), (0, 1, 0x1A): ("lane", "sub"), (0, 1, 0x1E): ("lane", "min"),
+    (0, 1, 0x1F): ("lane", "rsqrts"),
+    (1, 0, 0x18): ("pair", "maxnm"), (1, 0, 0x1A): ("pair", "add"), (1, 0, 0x1B): ("lane", "mul"),
+    (1, 0, 0x1C): ("cmp", ">="), (1, 0, 0x1D): ("acmp", ">="), (1, 0, 0x1E): ("pair", "max"),
+    (1, 0, 0x1F): ("lane", "div"),
+    (1, 1, 0x18): ("pair", "minnm"), (1, 1, 0x1A): ("abd", "sub"), (1, 1, 0x1C): ("cmp", ">"),
+    (1, 1, 0x1D): ("acmp", ">"), (1, 1, 0x1E): ("pair", "min"),
+}
+# Integer ops in "three same": (U, opcode) -> kind
+INT3 = {(0, 0x10): "+", (1, 0x10): "-", (0, 0x11): "tst", (1, 0x11): "==", (0, 0x06): "s>", (1, 0x06): "u>",
+        (0, 0x07): "s>=", (1, 0x07): "u>=", (0, 0x17): "addp"}
+LOGIC3 = {(0, 0): "&", (0, 1): "&~", (0, 2): "|", (0, 3): "|~", (1, 0): "^", (1, 1): "bsl", (1, 2): "bit", (1, 3): "bif"}
+
+
+def _three_same_valid(e: int) -> bool:
+    u, size, op, q = bits(e, 29, 29), bits(e, 23, 22), bits(e, 15, 11), bits(e, 30, 30)
+    if op >= 0x18:
+        return (u, size >> 1, op) in FP3 and (q or not size & 1)  # .1d is not a float arrangement
+    if op == 0x03:
+        return True
+    return (u, op) in INT3 and _q_size_ok(e)
+
+
+def float_cmp(p: str, a: str, b: str, op: str, absolute: bool = False) -> str:
+    host = "f32_of" if p == "f32" else "f64_of"
+    x, y = f"{host}({a})", f"{host}({b})"
+    if absolute:
+        x, y = f"fabs({x})", f"fabs({y})"
+    return f"({x} {op} {y})"  # false for NaNs, as on ARM
+
+
+# Advanced SIMD three same: 0 Q U 01110 size 1 Rm opcode 1 Rn Rd
+@form("simd_three_same", 0x9F200400, 0x0E200400, valid=_three_same_valid, vregs=_rd_rn_rm)
+def _simd_three_same(e: int) -> str:
+    q, u, size, m, op, n, d = (bits(e, 30, 30), bits(e, 29, 29), bits(e, 23, 22), bits(e, 20, 16),
+                               bits(e, 15, 11), bits(e, 9, 5), bits(e, 4, 0))
+    srcs = {"n_": n, "m_": m}
+    if op == 0x03:  # logical, on 64-bit halves
+        kind = LOGIC3[(u, size)]
+        count = 2 if q else 1
+        if kind in ("bsl", "bit", "bif"):
+            srcs["d_"] = d
+            expr = {"bsl": "(d_.d[i] & n_.d[i]) | (~d_.d[i] & m_.d[i])",
+                    "bit": "(m_.d[i] & n_.d[i]) | (~m_.d[i] & d_.d[i])",
+                    "bif": "(~m_.d[i] & n_.d[i]) | (m_.d[i] & d_.d[i])"}[kind]
+        elif kind.endswith("~"):
+            expr = f"n_.d[i] {kind[0]} ~m_.d[i]"
+        else:
+            expr = f"n_.d[i] {kind} m_.d[i]"
+        return vec(d, srcs, per_lane(count, f"r_.d[i] = {expr};"))
+    if op >= 0x18:
+        sz = size & 1
+        p, lane, count = FP[sz][0], LANE[2 + sz], lanes(q, 2 + sz)
+        kind, fn = FP3[(u, size >> 1, op)]
+        a, b = f"n_.{lane}[i]", f"m_.{lane}[i]"
+        ones = "~(uint32_t)0" if sz == 0 else "~(uint64_t)0"
+        if kind == "lane":
+            stmt = f"r_.{lane}[i] = {p}_{fn}({a}, {b});"
+        elif kind == "abd":
+            stmt = f"r_.{lane}[i] = {p}_sub({a}, {b}) & ~{sign_bit(sz)};"
+        elif kind in ("cmp", "acmp"):
+            stmt = f"r_.{lane}[i] = {float_cmp(p, a, b, fn, kind == 'acmp')} ? {ones} : 0;"
+        else:  # pairwise over the concatenation m:n
+            h = count // 2
+            stmt = (f"v128 *s_ = i < {h} ? &n_ : &m_; int j = 2 * (i % {h}); "
+                    f"r_.{lane}[i] = {p}_{fn}(s_->{lane}[j], s_->{lane}[j + 1]);")
+        return vec(d, srcs, per_lane(count, stmt))
+    lane, count, ut, st = LANE[size], lanes(q, size), UINT[size], SINT[size]
+    kind = INT3[(u, op)]
+    a, b = f"n_.{lane}[i]", f"m_.{lane}[i]"
+    if kind in ("+", "-"):
+        stmt = f"r_.{lane}[i] = ({ut})({a} {kind} {b});"
+    elif kind == "addp":
+        h = count // 2
+        stmt = (f"v128 *s_ = i < {h} ? &n_ : &m_; int j = 2 * (i % {h}); "
+                f"r_.{lane}[i] = ({ut})(s_->{lane}[j] + s_->{lane}[j + 1]);")
+    else:
+        cond = {"tst": f"({a} & {b}) != 0", "==": f"{a} == {b}", "s>": f"({st}){a} > ({st}){b}",
+                "u>": f"{a} > {b}", "s>=": f"({st}){a} >= ({st}){b}", "u>=": f"{a} >= {b}"}[kind]
+        stmt = f"r_.{lane}[i] = ({cond}) ? ({ut})~({ut})0 : 0;"
+    return vec(d, srcs, per_lane(count, stmt))
+
+
+# Two-register misc, float ops with size<1> = 1: (U, opcode) -> kind
+FP2 = {(0, 0x0F): "abs", (1, 0x0F): "neg", (1, 0x1F): "sqrt", (0, 0x1D): "recpe", (1, 0x1D): "rsqrte",
+       (0, 0x1B): "cvtzs", (1, 0x1B): "cvtzu", (0, 0x0C): ">", (0, 0x0D): "==", (0, 0x0E): "<",
+       (1, 0x0C): ">=", (1, 0x0D): "<="}
+# size<1> = 0 float ops (sz = size<0>)
+FP2_LO = {(0, 0x1D): "scvtf", (1, 0x1D): "ucvtf"}
+# Integer ops: (U, opcode) -> kind
+INT2 = {(0, 0x12): "xtn", (1, 0x05): "not", (0, 0x00): "rev64", (0, 0x09): "==0", (1, 0x08): ">=0",
+        (0, 0x08): ">0", (1, 0x09): "<=0", (0, 0x0A): "<0"}
+
+
+def _two_misc_valid(e: int) -> bool:
+    q, u, size, op = bits(e, 30, 30), bits(e, 29, 29), bits(e, 23, 22), bits(e, 16, 12)
+    if size >> 1 and (u, op) in FP2:
+        return q or not size & 1
+    if not size >> 1 and (u, op) in FP2_LO:
+        return q or not size & 1
+    kind = INT2.get((u, op))
+    if kind == "xtn":
+        return size < 3
+    if kind == "not":
+        return size == 0
+    if kind == "rev64":
+        return size < 3
+    return kind is not None and _q_size_ok(e)
+
+
+# Advanced SIMD two-register misc: 0 Q U 01110 size 10000 opcode 10 Rn Rd
+@form("simd_two_misc", 0x9F3E0C00, 0x0E200800, valid=_two_misc_valid,
+      vregs=lambda e: (bits(e, 4, 0), bits(e, 9, 5)))
+def _simd_two_misc(e: int) -> str:
+    q, u, size, op, n, d = bits(e, 30, 30), bits(e, 29, 29), bits(e, 23, 22), bits(e, 16, 12), bits(e, 9, 5), bits(e, 4, 0)
+    srcs = {"n_": n}
+    if (size >> 1 and (u, op) in FP2) or (not size >> 1 and (u, op) in FP2_LO):
+        sz = size & 1
+        p, lane, count = FP[sz][0], LANE[2 + sz], lanes(q, 2 + sz)
+        kind = FP2[(u, op)] if size >> 1 else FP2_LO[(u, op)]
+        a, ut = f"n_.{lane}[i]", UINT[2 + sz]
+        w = 32 << sz
+        if kind == "abs":
+            v = f"{a} & ~{sign_bit(sz)}"
+        elif kind == "neg":
+            v = f"{a} ^ {sign_bit(sz)}"
+        elif kind in ("sqrt", "recpe", "rsqrte"):
+            v = f"{p}_{kind}({a})"
+        elif kind in ("cvtzs", "cvtzu"):
+            host = "(double)f32_of" if sz == 0 else "f64_of"
+            v = f"({ut})yw4_to_{kind[-1]}{w}({host}({a}), 'z')"
+        elif kind in ("scvtf", "ucvtf"):
+            it = ("int" if kind == "scvtf" else "uint") + f"{w}_t"
+            v = f"bits_{p}(({'float' if sz == 0 else 'double'})({it}){a})"
+        else:  # compare with zero
+            v = f"{float_cmp(p, a, '0', kind)} ? ~({ut})0 : 0"
+        return vec(d, srcs, per_lane(count, f"r_.{lane}[i] = {v};"))
+    kind = INT2[(u, op)]
+    lane, count, ut, st = LANE[size], lanes(q, size), UINT[size], SINT[size]
+    if kind == "xtn":  # narrow each 2*esize lane; XTN2 (Q=1) writes the upper half, keeping the lower
+        half = 8 >> size
+        src = LANE[size + 1]
+        base = half if q else 0
+        return vec(d, srcs, per_lane(half, f"r_.{lane}[{base} + i] = ({ut})n_.{src}[i];"), keep_d=bool(q)) \
+            if q else vec(d, srcs, per_lane(half, f"r_.{lane}[i] = ({ut})n_.{src}[i];"))
+    if kind == "not":
+        return vec(d, srcs, per_lane(2 if q else 1, "r_.d[i] = ~n_.d[i];"))
+    if kind == "rev64":  # reverse the lanes inside each 64-bit doubleword
+        per = 8 >> size
+        return vec(d, srcs, per_lane(count, f"r_.{lane}[i] = n_.{lane}[(i / {per}) * {per} + {per - 1} - i % {per}];"))
+    cond = {"==0": f"n_.{lane}[i] == 0", ">=0": f"({st})n_.{lane}[i] >= 0", ">0": f"({st})n_.{lane}[i] > 0",
+            "<=0": f"({st})n_.{lane}[i] <= 0", "<0": f"({st})n_.{lane}[i] < 0"}[kind]
+    return vec(d, srcs, per_lane(count, f"r_.{lane}[i] = ({cond}) ? ({ut})~({ut})0 : 0;"))
+
+
+def _imm5_size(imm5: int) -> int | None:
+    for s in range(4):
+        if imm5 >> s & 1:
+            return s
+    return None
+
+
+def _copy_kind(e: int) -> str | None:
+    q, op, imm5, imm4 = bits(e, 30, 30), bits(e, 29, 29), bits(e, 20, 16), bits(e, 14, 11)
+    size = _imm5_size(imm5)
+    if size is None:
+        return None
+    if op:
+        return "ins_elem" if q else None
+    if imm4 == 0:
+        return "dup_elem" if q or size < 3 else None
+    if imm4 == 1:
+        return "dup_gen" if q or size < 3 else None
+    if imm4 == 3:
+        return "ins_gen" if q else None
+    if imm4 == 5:
+        return "smov" if size < (3 if q else 2) else None
+    if imm4 == 7:
+        return "umov" if (size == 3) == bool(q) else None
+    return None
+
+
+def _copy_vregs(e: int) -> tuple[int, ...]:
+    kind = _copy_kind(e)
+    if kind in ("smov", "umov"):
+        return (bits(e, 9, 5),)
+    if kind in ("dup_gen", "ins_gen"):
+        return (bits(e, 4, 0),)
+    return bits(e, 4, 0), bits(e, 9, 5)
+
+
+# Advanced SIMD copy: 0 Q op 01110000 imm5 0 imm4 1 Rn Rd   (DUP, INS, SMOV, UMOV; MOV aliases)
+@form("simd_copy", 0x9FE08400, 0x0E000400, valid=lambda e: _copy_kind(e) is not None, vregs=_copy_vregs)
+def _simd_copy(e: int) -> str:
+    q, imm5, imm4, n, d = bits(e, 30, 30), bits(e, 20, 16), bits(e, 14, 11), bits(e, 9, 5), bits(e, 4, 0)
+    kind = _copy_kind(e)
+    size = _imm5_size(imm5)
+    lane, ut, idx = LANE[size], UINT[size], imm5 >> (size + 1)
+    if kind == "dup_elem":
+        return vec(d, {"n_": n}, per_lane(lanes(q, size), f"r_.{lane}[i] = n_.{lane}[{idx}];"))
+    if kind == "dup_gen":
+        return vec(d, {}, per_lane(lanes(q, size), f"r_.{lane}[i] = ({ut}){rd_reg(n, 1)};"))
+    if kind == "ins_gen":
+        return vec(d, {}, f"r_.{lane}[{idx}] = ({ut}){rd_reg(n, 1)};", keep_d=True)
+    if kind == "ins_elem":
+        return vec(d, {"n_": n}, f"r_.{lane}[{idx}] = n_.{lane}[{imm4 >> size}];", keep_d=True)
+    if kind == "umov":
+        return wr_reg(d, q, f"ctx->v[{n}].{lane}[{idx}]") or ";"
+    return wr_reg(d, q, f"({utype(q)})({'int64_t' if q else 'int32_t'})({SINT[size]})ctx->v[{n}].{lane}[{idx}]") or ";"
+
+
+# Advanced SIMD scalar copy: 01 0 11110000 imm5 0 0000 1 Rn Rd   (DUP/MOV scalar from a lane)
+@form("simd_scalar_dup", 0xFFE0FC00, 0x5E000400, valid=lambda e: _imm5_size(bits(e, 20, 16)) is not None,
+      vregs=lambda e: (bits(e, 4, 0), bits(e, 9, 5)))
+def _simd_scalar_dup(e: int) -> str:
+    imm5, n, d = bits(e, 20, 16), bits(e, 9, 5), bits(e, 4, 0)
+    size = _imm5_size(imm5)
+    lane = LANE[size]
+    return vec(d, {"n_": n}, f"r_.{lane}[0] = n_.{lane}[{imm5 >> (size + 1)}];")
+
+
+# Advanced SIMD extract: 0 Q 101110 00 0 Rm 0 imm4 0 Rn Rd
+@form("simd_ext", 0xBFE08400, 0x2E000000, valid=lambda e: bits(e, 30, 30) or not bits(e, 14, 14), vregs=_rd_rn_rm)
+def _simd_ext(e: int) -> str:
+    q, m, pos, n, d = bits(e, 30, 30), bits(e, 20, 16), bits(e, 14, 11), bits(e, 9, 5), bits(e, 4, 0)
+    count = 16 if q else 8
+    return vec(d, {"n_": n, "m_": m},
+               per_lane(count, f"int j = i + {pos}; r_.b[i] = j < {count} ? n_.b[j] : m_.b[j - {count}];"))
+
+
+def adv_simd_expand_imm(op: int, cmode: int, imm8: int) -> int:
+    """AdvSIMDExpandImm: the 64-bit pattern (replicated to 128 bits by the caller)."""
+    def rep(v: int, width: int) -> int:
+        return replicate(v, width, 64)
+    c = cmode >> 1
+    if c == 0:
+        return rep(imm8, 32)
+    if c == 1:
+        return rep(imm8 << 8, 32)
+    if c == 2:
+        return rep(imm8 << 16, 32)
+    if c == 3:
+        return rep(imm8 << 24, 32)
+    if c == 4:
+        return rep(imm8, 16)
+    if c == 5:
+        return rep(imm8 << 8, 16)
+    if c == 6:
+        return rep(imm8 << 8 | 0xFF, 32) if not cmode & 1 else rep(imm8 << 16 | 0xFFFF, 32)
+    if not cmode & 1 and not op:
+        return rep(imm8, 8)
+    if not cmode & 1:
+        return sum(0xFF << (8 * i) for i in range(8) if imm8 >> i & 1)
+    a, b, rest = imm8 >> 7, (imm8 >> 6) & 1, imm8 & 0x3F
+    if not op:  # single-precision FMOV
+        f = a << 31 | (b ^ 1) << 30 | (0x1F if b else 0) << 25 | rest << 19
+        return rep(f, 32)
+    return a << 63 | (b ^ 1) << 62 | (0xFF if b else 0) << 54 | rest << 48
+
+
+def _modimm_kind(e: int) -> str | None:
+    q, op, cmode, o2 = bits(e, 30, 30), bits(e, 29, 29), bits(e, 15, 12), bits(e, 11, 11)
+    if o2:
+        return None  # FMOV (half precision), ARMv8.2
+    if cmode == 0xF:
+        return "movi" if not op or q else None
+    if cmode == 0xE:
+        return "movi"
+    if cmode < 0xC and cmode & 1:  # 32-bit or 16-bit ORR/BIC
+        return "bic" if op else "orr"
+    return "mvni" if op else "movi"
+
+
+# Advanced SIMD modified immediate: 0 Q op 0111100000 abc cmode o2 1 defgh Rd   (MOVI, MVNI, ORR, BIC, FMOV)
+@form("simd_modimm", 0x9FF80400, 0x0F000400, valid=lambda e: _modimm_kind(e) is not None,
+      vregs=lambda e: (bits(e, 4, 0),))
+def _simd_modimm(e: int) -> str:
+    q, op, cmode, d = bits(e, 30, 30), bits(e, 29, 29), bits(e, 15, 12), bits(e, 4, 0)
+    imm8 = bits(e, 18, 16) << 5 | bits(e, 9, 5)
+    imm = adv_simd_expand_imm(op, cmode, imm8)
+    kind = _modimm_kind(e)
+    count = 2 if q else 1
+    if kind == "movi":
+        return vec(d, {}, per_lane(count, f"r_.d[i] = {imm:#x}ull;"))
+    if kind == "mvni":
+        return vec(d, {}, per_lane(count, f"r_.d[i] = {~imm & ones(64):#x}ull;"))
+    opx = "|" if kind == "orr" else "& ~"
+    return vec(d, {"d_": d}, per_lane(count, f"r_.d[i] = d_.d[i] {opx}{imm:#x}ull;"))
+
+
+def _elem_index(e: int) -> tuple[int, int] | None:
+    """(Rm, index) for FP by-element forms; None if reserved."""
+    size, l, mbit, h = bits(e, 23, 22), bits(e, 21, 21), bits(e, 20, 20), bits(e, 11, 11)
+    m = mbit << 4 | bits(e, 19, 16)
+    if size == 2:
+        return m, h << 1 | l
+    if size == 3 and not l:
+        return m, h
+    return None
+
+
+def _by_elem_valid(e: int) -> bool:
+    if bits(e, 29, 29) or bits(e, 15, 12) != 0b1001:
+        return False  # only FMUL (by element); FMLA/FMLS/FMULX/integer forms are not used by main
+    if _elem_index(e) is None:
+        return False
+    return bool(bits(e, 30, 30)) or bits(e, 23, 22) == 2
+
+
+# Advanced SIMD vector x indexed element: 0 Q U 01111 size L M Rm opcode H 0 Rn Rd
+@form("simd_by_elem", 0x9F000400, 0x0F000000, valid=_by_elem_valid,
+      vregs=lambda e: (bits(e, 4, 0), bits(e, 9, 5), (_elem_index(e) or (0, 0))[0]))
+def _simd_by_elem(e: int) -> str:
+    q, size, n, d = bits(e, 30, 30), bits(e, 23, 22), bits(e, 9, 5), bits(e, 4, 0)
+    m, idx = _elem_index(e)
+    sz = size & 1
+    p, lane = FP[sz][0], LANE[2 + sz]
+    return vec(d, {"n_": n, "m_": m},
+               f"{FP[sz][1]} k_ = m_.{lane}[{idx}]; " + per_lane(lanes(q, 2 + sz), f"r_.{lane}[i] = {p}_mul(n_.{lane}[i], k_);"))
+
+
+# Advanced SIMD scalar x indexed element: 01 U 11111 size L M Rm opcode H 0 Rn Rd   (FMUL only)
+@form("simd_scalar_by_elem", 0xDF000400, 0x5F000000,
+      valid=lambda e: not bits(e, 29, 29) and bits(e, 15, 12) == 0b1001 and _elem_index(e) is not None,
+      vregs=lambda e: (bits(e, 4, 0), bits(e, 9, 5), (_elem_index(e) or (0, 0))[0]))
+def _simd_scalar_by_elem(e: int) -> str:
+    size, n, d = bits(e, 23, 22), bits(e, 9, 5), bits(e, 4, 0)
+    m, idx = _elem_index(e)
+    sz = size & 1
+    lane = LANE[2 + sz]
+    return vec(d, {"n_": n, "m_": m}, f"r_.{lane}[0] = {FP[sz][0]}_mul(n_.{lane}[0], m_.{lane}[{idx}]);")
+
+
+# Advanced SIMD scalar three same, FABD only: 01 1 11110 1 sz 1 Rm 11010 1 Rn Rd
+@form("simd_scalar_fabd", 0xFFA0FC00, 0x7EA0D400, vregs=_rd_rn_rm)
+def _simd_scalar_fabd(e: int) -> str:
+    sz, m, n, d = bits(e, 22, 22), bits(e, 20, 16), bits(e, 9, 5), bits(e, 4, 0)
+    lane = LANE[2 + sz]
+    return vec(d, {"n_": n, "m_": m}, f"r_.{lane}[0] = {FP[sz][0]}_sub(n_.{lane}[0], m_.{lane}[0]) & ~{sign_bit(sz)};")
+
+
+# Advanced SIMD scalar pairwise, FADDP only: 01 1 11110 0 sz 11000 01101 10 Rn Rd
+@form("simd_scalar_faddp", 0xFFBFFC00, 0x7E30D800, vregs=lambda e: (bits(e, 4, 0), bits(e, 9, 5)))
+def _simd_scalar_faddp(e: int) -> str:
+    sz, n, d = bits(e, 22, 22), bits(e, 9, 5), bits(e, 4, 0)
+    lane = LANE[2 + sz]
+    return vec(d, {"n_": n}, f"r_.{lane}[0] = {FP[sz][0]}_add(n_.{lane}[0], n_.{lane}[1]);")
+
+
+# Advanced SIMD scalar two-register misc, SCVTF/UCVTF only: 01 U 11110 0 sz 10000 11101 10 Rn Rd
+@form("simd_scalar_cvtf", 0xDFBFFC00, 0x5E21D800, vregs=lambda e: (bits(e, 4, 0), bits(e, 9, 5)))
+def _simd_scalar_cvtf(e: int) -> str:
+    u, sz, n, d = bits(e, 29, 29), bits(e, 22, 22), bits(e, 9, 5), bits(e, 4, 0)
+    w = 32 << sz
+    it = ("uint" if u else "int") + f"{w}_t"
+    host = "float" if sz == 0 else "double"
+    return vwrite(d, sz, f"bits_{FP[sz][0]}(({host})({it})ctx->v[{n}].{LANE[2 + sz]}[0])")
+
+
+PERMUTE = {1: "uzp1", 2: "trn1", 3: "zip1", 5: "uzp2", 6: "trn2", 7: "zip2"}
+
+
+# Advanced SIMD permute: 0 Q 001110 size 0 Rm 0 opcode 10 Rn Rd   (UZP/TRN/ZIP)
+@form("simd_permute", 0xBF208C00, 0x0E000800, valid=lambda e: bits(e, 14, 12) in PERMUTE and _q_size_ok(e),
+      vregs=_rd_rn_rm)
+def _simd_permute(e: int) -> str:
+    q, size, m, op, n, d = bits(e, 30, 30), bits(e, 23, 22), bits(e, 20, 16), bits(e, 14, 12), bits(e, 9, 5), bits(e, 4, 0)
+    lane, count = LANE[size], lanes(q, size)
+    h = count // 2
+    kind = PERMUTE[op]
+    part = 1 if kind.endswith("2") else 0
+    if kind.startswith("zip"):
+        stmt = f"int j = {part * h} + i / 2; r_.{lane}[i] = (i & 1) ? m_.{lane}[j] : n_.{lane}[j];"
+    elif kind.startswith("uzp"):
+        stmt = f"int j = 2 * (i % {h}) + {part}; r_.{lane}[i] = i < {h} ? n_.{lane}[j] : m_.{lane}[j];"
+    else:
+        stmt = f"int j = (i & ~1) + {part}; r_.{lane}[i] = (i & 1) ? m_.{lane}[j] : n_.{lane}[j];"
+    return vec(d, {"n_": n, "m_": m}, per_lane(count, stmt))
+
+
+def _tbl_vregs(e: int) -> tuple[int, ...]:
+    n, length = bits(e, 9, 5), bits(e, 14, 13)
+    return (bits(e, 4, 0), bits(e, 20, 16)) + tuple((n + k) % 32 for k in range(length + 1))
+
+
+# Advanced SIMD table lookup: 0 Q 001110 000 Rm 0 len op 00 Rn Rd   (TBL, TBX)
+@form("simd_tbl", 0xBFE09C00, 0x0E000000, vregs=_tbl_vregs)
+def _simd_tbl(e: int) -> str:
+    q, m, length, tbx, n, d = bits(e, 30, 30), bits(e, 20, 16), bits(e, 14, 13), bits(e, 12, 12), bits(e, 9, 5), bits(e, 4, 0)
+    regs = [(n + k) % 32 for k in range(length + 1)]
+    table = " ".join(f"memcpy(t_ + {16 * k}, ctx->v[{r}].b, 16);" for k, r in enumerate(regs))
+    size = 16 * len(regs)
+    miss = "r_.b[i]" if tbx else "0"
+    body = (f"uint8_t t_[{size}]; {table} " +
+            per_lane(16 if q else 8, f"r_.b[i] = m_.b[i] < {size} ? t_[m_.b[i]] : {miss};"))
+    if tbx and not q:
+        body += " r_.d[1] = 0;"
+    return vec(d, {"m_": m}, body, keep_d=bool(tbx))
+
+
 # --------------------------------------------------------------------------- lookup
 
 def find_form(enc: int) -> Form | None:

@@ -18,6 +18,7 @@ that differ, expected vs actual.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import lzma
 import os
 import subprocess
@@ -71,12 +72,66 @@ int main(void) {
 """
 
 
+# Case lines (pi/testcase.h): field 0 enc, 1-31 x0-x30, 32 sp, 33 nzcv, 34-65 v0-v31, then
+# fpcr, inmask, outmask (input) or the memory changes (output).
+#
+# Stored compactly in tests/golden/: a register the test doesn't care about holds filler(),
+# a fixed pseudo-random value per (encoding, field), written as "*"; an output line lists
+# only the fields that differ from its input ("k=value,..." or "=" for none).
+STATE = range(1, 66)
+
+
+def filler(enc: int, k: int) -> str:
+    v = int.from_bytes(hashlib.blake2b(f"{enc:08x}/{k}".encode(), digest_size=16).digest(), "little")
+    return f"{v:032x}" if 34 <= k < 66 else f"{v & 0xFFFFFFFFFFFFFFFF:x}"
+
+
+def compact_in(line: str) -> str:
+    f = line.split()
+    enc = int(f[0], 16)
+    return " ".join("*" if k in STATE and f[k] == filler(enc, k) else f[k] for k in range(len(f)))
+
+
+def expand_in(line: str) -> str:
+    f = line.split()
+    enc = int(f[0], 16)
+    return " ".join(filler(enc, k) if x == "*" else x for k, x in enumerate(f))
+
+
+def compact_out(inp: str, out: str) -> str:
+    i, o = inp.split(), out.split()
+    if len(o) != 67:
+        return out  # malformed: keep as is
+    diff = ",".join(f"{k}={o[k]}" for k in STATE if o[k] != i[k])
+    return f"{o[0]} {diff or '='} {o[66]}"
+
+
+def expand_out(inp: str, line: str) -> str:
+    c = line.split()
+    if len(c) != 3:
+        return line
+    o = inp.split()[:66]
+    if c[1] != "=":
+        for item in c[1].split(","):
+            k, v = item.split("=")
+            o[int(k)] = v
+    o[0] = c[0]
+    return " ".join(o + [c[2]])
+
+
 def read_golden(path: Path) -> list[str]:
     return lzma.decompress(path.read_bytes()).decode().splitlines()
 
 
 def write_golden(path: Path, lines: list[str]) -> None:
     path.write_bytes(lzma.compress(("\n".join(lines) + "\n").encode(), preset=9))
+
+
+def load_cases(name: str) -> tuple[list[str], list[str]]:
+    """Full (expanded) input and expected output lines of a form."""
+    inputs = [expand_in(x) for x in read_golden(GOLDEN / f"{name}.in.xz")]
+    expected = [expand_out(i, x) for i, x in zip(inputs, read_golden(GOLDEN / f"{name}.out.xz"))]
+    return inputs, expected
 
 
 def build_program(encodings: list[int], exe: Path, flags: list[str]) -> None:
@@ -105,8 +160,7 @@ def describe_diff(inp: str, want: str, got: str) -> str:
 
 
 def check_form(name: str, tmp: Path, flags: list[str]) -> tuple[int, int, list[str]]:
-    inputs = read_golden(GOLDEN / f"{name}.in.xz")
-    expected = read_golden(GOLDEN / f"{name}.out.xz")
+    inputs, expected = load_cases(name)
     encodings = sorted({int(line.split()[0], 16) for line in inputs})
     exe = tmp / f"check_{name}.exe"
     build_program(encodings, exe, flags)

@@ -110,6 +110,8 @@ F_PAIRS_32 = [
     (0x7FA00000, 0x7FC00000), (0x3F800000, 0xFF812345), (0x00000001, 0x00800000), (0x7F7FFFFF, 0x7F7FFFFF),
     (0x7F7FFFFF, 0xFF7FFFFF), (0x4F000000, 0xCF000000), (0x3F000000, 0x3FC00000), (0x7F800000, 0x7F800000),
     (0x7FC12345, 0xFFC54321), (0x7FA00001, 0xFFB00002), (0x80000000, 0x80000000), (0x80000000, 0x3F800000),
+    # products close to 2 and 3: FRECPS/FRSQRTS (2 - ab, (3 - ab)/2) expose a missing fused rounding
+    (0x3FB504F3, 0x3FB504F3), (0x3F8CCCCD, 0x3FE8BA2F), (0x3FDDB3D7, 0x3FDDB3D7), (0xBFB504F3, 0xBFB504F4),
 ]
 F_PAIRS_64 = [
     (0x7FF0000000000000, 0xFFF0000000000000), (0x0000000000000000, 0x8000000000000000),
@@ -118,6 +120,7 @@ F_PAIRS_64 = [
     (0x41E0000000000000, 0xC3E0000000000000), (0x47EFFFFFE0000000, 0x36A0000000000000),
     (0x7FF8000000012345, 0xFFF8000000054321), (0x7FF4000000000001, 0xFFF4000000000002),
     (0x8000000000000000, 0x8000000000000000),
+    (0x3FF6A09E667F3BCD, 0x3FF6A09E667F3BCD), (0x3FFBB67AE8584CAA, 0x3FFBB67AE8584CAA),
 ]
 V_PAIRS = [(_rep32(a), _rep32(b)) for a, b in F_PAIRS_32] + [(_rep64(a), _rep64(b)) for a, b in F_PAIRS_64]
 V_PAIRS += [(b, a) for a, b in V_PAIRS]
@@ -210,6 +213,26 @@ def pair_vregs(rng: random.Random) -> list[int]:
     return [v1 if i % 2 == 0 else v2 for i in range(31)] + [0]
 
 
+# SIMD forms that read X registers keep random X values (edge cases matter there).
+X_READERS = {"fp_int", "simd_copy"}
+
+
+def apply_filler(f: lift.Form, enc: int, a: lift.MemAccess | None, regs: list[int], vregs: list[int]) -> None:
+    """Registers the instruction can't read get check.filler() values, which the golden
+    files store as "*" (keeps them small; the harness still loads and compares them)."""
+    if f.vregs:
+        used_v = set(f.vregs(enc))
+    elif a and a.vec:
+        used_v = set(a.regs)
+    else:
+        used_v = set()
+    for i in range(31):
+        if i not in used_v:
+            vregs[i] = int(check.filler(enc, 34 + i), 16)
+        if f.vregs and f.name not in X_READERS:
+            regs[i] = int(check.filler(enc, 1 + i), 16)
+
+
 def make_cases(f: lift.Form, count: int, states: int, pairs: int, rng: random.Random) -> list[str]:
     lines = []
     for enc in random_encodings(f, count, rng):
@@ -219,6 +242,7 @@ def make_cases(f: lift.Form, count: int, states: int, pairs: int, rng: random.Ra
             # x0..x30, SP
             regs = [random_value(rng) for _ in range(32)] if k < states else pair_state(rng)
             vregs = [random_vreg(rng) for _ in range(31)] + [0] if k < states else pair_vregs(rng)
+            apply_filler(f, enc, a, regs, vregs)
             inmask = outmask = 0
             if a:
                 inmask, outmask = place_memory(a, regs, rng)
@@ -286,8 +310,9 @@ def main(argv: list[str] | None = None) -> int:
     for f in forms:
         cases = make_cases(f, args.cases, args.states, args.pairs, rng)
         results = run_on_pi(cfg, cases)
-        check.write_golden(out_dir / f"{f.name}.in.xz", cases)
-        check.write_golden(out_dir / f"{f.name}.out.xz", results)
+        check.write_golden(out_dir / f"{f.name}.in.xz", [check.compact_in(c) for c in cases])
+        check.write_golden(out_dir / f"{f.name}.out.xz",
+                           [check.compact_out(c, r) for c, r in zip(cases, results)])
         print(f"{f.name:15} {len(cases):6} cases")
     print(f"wrote {out_dir}")
     return 0
