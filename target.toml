@@ -1,0 +1,7 @@
+# The one game build this project targets (CLAUDE.md rule 3).
+# Hashes only. Filled in by `python -m tools.yw4.ingest --pin`.
+# image_sha256 = SHA-256 of main's flat memory image (see docs/decisions/0002).
+
+[main]
+image_sha256 = ""
+build_id = ""

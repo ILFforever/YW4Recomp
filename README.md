@@ -21,6 +21,16 @@ Requirements: Python 3.11+, Git. CMake 3.24+ and a C++20 compiler come later (Ph
 
    It prints the resolved paths, or a clear error saying what is missing.
 
+5. Decompress and verify the ExeFS modules:
+
+   ```
+   python -m tools.yw4.ingest
+   ```
+
+   It refuses to continue unless `main` matches the build pinned in `target.toml`. Outputs go to `<work_dir>/exefs/`.
+
+Tests (synthetic data only): `python -m unittest discover -s tests -t .`
+
 ## Layout
 
 | Path | What |
