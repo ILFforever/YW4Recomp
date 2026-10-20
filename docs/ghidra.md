@@ -39,6 +39,28 @@ python -m tools.yw4.ghidra --export   # only re-export from the existing project
 
 To start fresh instead: create a project, **File → Import File →** your ExeFS `main`. The format should show as "Nintendo Switch Binary". Accept the default analyzers.
 
+## Seeding functions (do this after the first analysis)
+
+```
+python -m tools.yw4.ghidra --seed
+```
+
+Auto-analysis alone finds functions mainly through direct calls. On `main` it found 17,605 functions in 15 minutes, but only **2,645 of the 17,853** functions reached through vtables and pointer tables. `--seed` passes every `.eh_frame_hdr` start and address-taken target to `tools/ghidra/SeedFunctions.java`, which creates the missing functions and re-runs analysis on them.
+
+Result (2026-10-20): 22,572 functions created, 6 failed. Ghidra now has **40,223 functions** in `.text`.
+
 ## Cross-checking Ghidra against our own parsers
 
-`docs/recon.md` already has two independent function lists: 39,094 starts from `.eh_frame_hdr`, and 17,853 address-taken targets from relocations. Ghidra's function list should contain almost all of both. Big gaps mean either Ghidra missed functions (common after indirect jumps) or our parsing is wrong, so the comparison is worth running whenever the export changes.
+```
+python -m tools.yw4.compare_functions
+```
+
+| Source | Count | Missing from Ghidra |
+|---|---|---|
+| `.eh_frame_hdr` starts | 39,094 | 5 |
+| address-taken targets | 17,853 | 4 |
+| Ghidra-only (neither list) | 1,132 | – |
+
+Missing addresses go to `work/ghidra/function_gaps.json`.
+
+Takeaway for the recompiler: **the unwind table is the main source of function boundaries**, plus the address-taken set. Ghidra is for reading code and cross-references. The 1,132 Ghidra-only functions (thunks and small leaf functions without unwind info) are worth checking before Phase 2 decides whether to trust them.

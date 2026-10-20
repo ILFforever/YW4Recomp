@@ -17,7 +17,7 @@ import os
 import subprocess
 import sys
 
-from . import config, ingest, nso
+from . import config, ingest, nso, recon
 
 SCRIPT_DIR = config.REPO_ROOT / "tools" / "ghidra"
 PROJECT_NAME = "yw4"
@@ -25,7 +25,11 @@ PROJECT_NAME = "yw4"
 
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--export", action="store_true", help="skip import/analysis, only export")
+    mode = ap.add_mutually_exclusive_group()
+    mode.add_argument("--export", action="store_true", help="skip import/analysis, only export")
+    mode.add_argument("--seed", action="store_true",
+                      help="on the existing project, create functions at every .eh_frame_hdr start "
+                           "and address-taken target, re-analyze, then export")
     args = ap.parse_args(argv)
 
     try:
@@ -53,14 +57,22 @@ def main(argv: list[str] | None = None) -> int:
     out_json = proj / "main.functions.json"
 
     cmd = [str(headless), str(proj), PROJECT_NAME]
-    if args.export:
-        cmd += ["-process", "main", "-noanalysis"]
+    if args.export or args.seed:
+        cmd += ["-process", "main", "-noanalysis", "-scriptPath", str(SCRIPT_DIR)]
     else:
-        cmd += ["-import", str(main_nso), "-overwrite"]
-    cmd += ["-scriptPath", str(SCRIPT_DIR), "-postScript", "ExportFunctions.java", str(out_json)]
+        cmd += ["-import", str(main_nso), "-overwrite", "-scriptPath", str(SCRIPT_DIR)]
+    if args.seed:
+        image, mods = recon.load_main(cfg)
+        text_size = mods["main"]["segments"]["text"]["size"]
+        starts = set(recon.eh_frame_function_starts(image))
+        starts |= recon.address_taken_functions(image, text_size)
+        seed_file = proj / "seed_functions.txt"
+        seed_file.write_text("".join(f"{a:#x}\n" for a in sorted(starts) if a < text_size))
+        cmd += ["-postScript", "SeedFunctions.java", str(seed_file)]
+    cmd += ["-postScript", "ExportFunctions.java", str(out_json)]
 
     print(" ".join(f'"{c}"' if " " in c else c for c in cmd))
-    log = proj / ("export.log" if args.export else "analyze.log")
+    log = proj / ("export.log" if args.export else "seed.log" if args.seed else "analyze.log")
     # Ghidra's default 2 GB heap is too small for a 17 MB .text; allow an override.
     env = dict(os.environ)
     env.setdefault("GHIDRA_HEADLESS_MAXMEM", "12G")
