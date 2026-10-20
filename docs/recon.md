@@ -196,13 +196,26 @@ Inside the 2,185 CPKs (63,504 files, all readable; most entries compressed with 
 
 Translation mod / LayeredFS note: text lives in `data/common/text` and fonts in `data/common/font` + `data/nx/font`. A file-level override inside `nn::fs` can redirect any path. Overriding single files *inside* a CPK would need CPK-level support. Check how the existing translation mod packages its files before designing this.
 
-Existing tools: whether community Level-5 tools already parse the G4 formats is **not yet checked**.
+Existing tools (checked 2026-10-20 by web/GitHub search; none tested on our files yet). Most target *Inazuma Eleven: Victory Road*, which uses the same Level-5 G4 engine family, so YW4 files may differ in version:
+
+| Tool | Formats | License | Notes |
+|---|---|---|---|
+| [G4_Blender](https://github.com/The-RealBobi/G4_Blender) | G4MD, G4PKM, G4TX | GPL-3.0 | Blender import and re-export; active (Oct 2026) |
+| [Kuriimu2](https://github.com/FanTranslatorsInternational/Kuriimu2) | G4TX (via plugin), many Level-5 archives | GPL-3.0 | Large fan-translation toolkit ([G4TX issue](https://github.com/FanTranslatorsInternational/Kuriimu2/issues/18)) |
+| [Metanoia](https://github.com/Ploaj/Metanoia) | G4PKM ("Yokai watch model", marked incomplete) | none | |
+| [IEVR Noesis script](https://github.com/AFGRocha/Inazuma-Eleven-Victory-Road-Noesis-Script) | G4MD, G4PKM | none | |
+| [IEVR-Viewer](https://github.com/DaniKH1/IEVR-Viewer) | G4TX, G4MD | none | |
+| [G4TX-G4TG-Tool](https://github.com/blashy101/G4TX-G4TG-Tool) | G4TX, G4TG | none | |
+
+Forum notes ([ResHax](https://reshax.com/topic/981-inazuma-eleven-victory-road-g4mdg4pkmg4tx/)): G4MG is mesh data, G4MD model data; G4SK skeletons and G4MT animations were still not fully decoded in 2025 ([thread](https://reshax.com/topic/18115-level-5s-custom-engines-g4sk-skeleton-and-g4mt-animation-files/)).
+
+For us: these are **references for reading formats, not code to copy**. The GPL ones would change our license (rule 5). The unlicensed ones are all-rights-reserved by default. Our renderer reads these formats at runtime through the game's own recompiled loaders anyway, so we only need format knowledge for debugging and tooling.
 
 ## Open questions
 
 1. ~~Which NVN functions are actually called, and by whom.~~ Answered statically (section 5): 177 used, 108 wrappers, 96 producers. Still open: following the producers up to the frame loop (Phase 4b, best done in the Ghidra GUI or with runtime tracing).
 2. ~~Shader binary format.~~ Answered: `HBH1` wrapper with Maxwell code **and** NV_gpu_program5 assembly (section 6). Still open: the exact `HBH1` header layout (bindings), and what `.fxbin` describes.
-3. **G4 formats.** Check existing Level-5 modding tools before writing parsers.
+3. ~~**G4 formats.**~~ Existing tools listed in section 6 (references only, see licenses). Still open: whether they read YW4's versions of the formats.
 4. ~~**`sdk` strategy.**~~ Decided in `docs/decisions/0005`: implement the 578 `sdk` imports natively, recompile only `main`.
 5. **Translation mod packaging:** loose-file replacements vs. rebuilt CPKs.
 6. **Baseline benchmark** (Phase 0 step 6): needs an emulator choice.
