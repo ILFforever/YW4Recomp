@@ -1,23 +1,13 @@
 // Golden-result harness: runs ARM64 test instructions natively on the Pi 5.
 //
-// Input (stdin), one case per line, all hex:
-//     <encoding> <x0> ... <x30> <nzcv>
-// Output (stdout), one line per case:
-//     <encoding> <x0> ... <x30> <nzcv>      (state after the instruction)
+// Reads test cases on stdin and writes results on stdout, one line each
+// (format and memory handling: testcase.h).
 //
 // Build on the Pi: gcc -O1 -o harness harness.c trampoline.S
 
-#include <inttypes.h>
-#include <stdint.h>
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
 #include <sys/mman.h>
 
-typedef struct {
-    uint64_t x[31];
-    uint64_t nzcv;
-} TestState;
+#include "testcase.h"
 
 extern const uint32_t tramp_start[], tramp_slot[], tramp_end[];
 
@@ -32,23 +22,19 @@ int main(void) {
     }
     memcpy(page, tramp_start, len);
     void (*run)(TestState *) = (void (*)(TestState *))page;
+    test_mem_init();
+    uint64_t base = (uint64_t)(uintptr_t)test_mem;
 
-    char line[1024];
-    while (fgets(line, sizeof line, stdin)) {
-        TestState s;
-        uint32_t enc;
-        char *p = line;
-        enc = (uint32_t)strtoul(p, &p, 16);
-        for (int i = 0; i < 31; i++) s.x[i] = strtoull(p, &p, 16);
-        s.nzcv = strtoull(p, &p, 16);
-
+    TestState s;
+    uint32_t enc;
+    uint64_t inmask, outmask;
+    while (test_read(stdin, &enc, &s, &inmask, &outmask)) {
         page[slot] = enc;
         __builtin___clear_cache((char *)page, (char *)page + len);
+        test_rebase(&s, inmask, base);
         run(&s);
-
-        printf("%08" PRIx32, enc);
-        for (int i = 0; i < 31; i++) printf(" %" PRIx64, s.x[i]);
-        printf(" %" PRIx64 "\n", s.nzcv);
+        test_rebase(&s, outmask, 0 - base);
+        test_write(stdout, enc, &s);
     }
     return 0;
 }

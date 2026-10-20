@@ -35,6 +35,10 @@ class FormLookupTest(unittest.TestCase):
         0x9B027C20: "dp3",            # mul x0, x1, x2
         0x9A821020: "csel",           # csel x0, x1, x2, ne
         0xD3401C20: "bitfield",       # ubfx x0, x1, #0, #8 (uxtb)
+        0xF9400420: "ldst_uimm",      # ldr x0, [x1, #8]
+        0xB8404C20: "ldst_imm9",      # ldr w0, [x1, #4]!
+        0xF8617820: "ldst_regoff",    # ldr x0, [x1, x1, lsl #3]
+        0xA9BF7BFD: "ldst_pair",      # stp x29, x30, [sp, #-16]!
     }
 
     def test_known_encodings(self):
@@ -48,6 +52,14 @@ class FormLookupTest(unittest.TestCase):
         # cmp x1, x2 writes only flags
         self.assertNotIn("ctx->x[31]", lift.lift(0xEB02003F))
         self.assertIn("ctx->nzcv", lift.lift(0xEB02003F))
+
+    def test_unpredictable_loads_are_rejected(self):
+        for enc in (0x29400441,   # ldp w1, w1, [x2]
+                    0xF8408421):  # ldr x1, [x1], #8 (writeback into the loaded register)
+            self.assertFalse(lift.find_form(enc).valid(enc), hex(enc))
+
+    def test_prefetch_is_a_no_op(self):
+        self.assertEqual(lift.lift(0xF98003E0), ";")  # prfm pldl1keep, [sp]
 
     def test_unknown(self):
         with self.assertRaises(lift.LiftError):

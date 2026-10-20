@@ -4,12 +4,12 @@
     python -m recomp.golden addsub_imm dp3  only these forms
     python -m recomp.golden --cases 2000    encodings per form (default 300)
 
-For each form: random valid encodings that don't touch SP, each run with a few
-register states mixing edge-case and random values. The cases go to the Pi
+For each form: random valid encodings, each run with a few register states
+mixing edge-case and random values. For loads/stores the base register is
+pointed into a scratch buffer (pi/testcase.h) so the access is safe and the
+result doesn't depend on the buffer's address. The cases go to the Pi
 (decision 0004), run in recomp/pi/harness, and come back as
-work/golden/<form>.in / <form>.out (one case per line, hex):
-
-    <encoding> <x0> ... <x30> <nzcv>
+work/golden/<form>.in / <form>.out (line format: pi/testcase.h).
 """
 
 from __future__ import annotations
@@ -45,6 +45,23 @@ def random_value(rng: random.Random) -> int:
     return rng.getrandbits(64)
 
 
+MEM_SIZE = 0x20000  # must match TEST_MEM_SIZE in pi/testcase.h
+# Accesses land in [MEM_LO, MEM_HI) plus the immediate: at most +32760 (scaled imm12) or
+# -512 (pair imm7), plus 16 bytes, which stays inside the buffer.
+MEM_LO, MEM_HI = 0x8000, 0x17FF0
+
+
+def testable(f: lift.Form, enc: int) -> bool:
+    a = f.mem(enc) if f.mem else None
+    if a is None:
+        return True
+    if not a.load and a.n != 31 and a.n in a.regs:
+        return False  # would store the buffer's absolute address, which differs per machine
+    if a.rm and a.rm[0] == a.n != 31:
+        return False  # base and offset in one register: can't rebase the base alone
+    return True
+
+
 def random_encodings(f: lift.Form, count: int, rng: random.Random) -> list[int]:
     free = ~f.mask & 0xFFFFFFFF
     out: set[int] = set()
@@ -52,18 +69,50 @@ def random_encodings(f: lift.Form, count: int, rng: random.Random) -> list[int]:
     while len(out) < count and tries < count * 200:
         tries += 1
         enc = (rng.getrandbits(32) & free) | f.value
-        if f.valid(enc) and not f.uses_sp(enc):
+        if f.valid(enc) and testable(f, enc):
             out.add(enc)
     return sorted(out)
+
+
+def extend_value(v: int, option: int, shift: int) -> int:
+    """ExtendReg, the same as the lifter's extend_expr but on a Python int."""
+    width = 8 << (option & 3)
+    v &= lift.ones(width)
+    if option & 4:
+        v = lift.sign_extend(v, width)
+    return (v << shift) & lift.ones(64)
+
+
+def place_memory(a: lift.MemAccess, regs: list[int], rng: random.Random) -> tuple[int, int]:
+    """Point the base register (regs[31] = SP) into the scratch buffer.
+
+    Returns (inmask, outmask) for the harness: which registers hold buffer offsets
+    before and after the instruction."""
+    target = rng.randrange(MEM_LO, MEM_HI)
+    if rng.random() < 0.6:
+        target &= ~(a.esize - 1)  # mostly aligned, some unaligned
+    offset = extend_value(regs[a.rm[0]], a.rm[1], a.rm[2]) if a.rm and a.rm[0] != 31 else 0
+    base = (target - offset) & lift.ones(64)
+    if a.n == 31:
+        base &= ~15  # Linux faults on SP-based accesses when SP isn't 16-byte aligned
+    regs[a.n] = base
+    bit = 1 << a.n
+    loaded_over = a.load and a.n in a.regs and a.n != 31
+    return bit, 0 if loaded_over else bit
 
 
 def make_cases(f: lift.Form, count: int, states: int, rng: random.Random) -> list[str]:
     lines = []
     for enc in random_encodings(f, count, rng):
+        a = f.mem(enc) if f.mem else None
         for _ in range(states):
-            regs = [random_value(rng) for _ in range(31)]
+            regs = [random_value(rng) for _ in range(32)]  # x0..x30, SP
+            inmask = outmask = 0
+            if a:
+                inmask, outmask = place_memory(a, regs, rng)
             nzcv = rng.randrange(16) << 28
-            lines.append(" ".join([f"{enc:08x}"] + [f"{v:x}" for v in regs] + [f"{nzcv:x}"]))
+            lines.append(" ".join([f"{enc:08x}"] + [f"{v:x}" for v in regs] +
+                                  [f"{nzcv:x}", f"{inmask:x}", f"{outmask:x}"]))
     return lines
 
 
@@ -80,6 +129,7 @@ def build_harness(cfg: config.Config) -> None:
     opts = ssh_base(cfg)
     subprocess.run(["ssh", *opts, cfg.pi_host, f"mkdir -p {REMOTE_DIR}"], check=True)
     subprocess.run(["scp", "-q", *opts, str(PI_DIR / "harness.c"), str(PI_DIR / "trampoline.S"),
+                    str(PI_DIR / "testcase.h"),
                     f"{cfg.pi_host}:{REMOTE_DIR}/"], check=True)
     subprocess.run(["ssh", *opts, cfg.pi_host,
                     f"cd {REMOTE_DIR} && gcc -O1 -Wall -o harness harness.c trampoline.S"], check=True)

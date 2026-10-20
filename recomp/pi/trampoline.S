@@ -2,13 +2,19 @@
 //
 //   void run_case(TestState *s)   (s in x0)
 //
-// TestState layout (must match harness.c):
+// TestState layout (must match testcase.h):
 //   0x000  x[31]   x0..x30
-//   0x0F8  nzcv    flags in bits 31..28
+//   0x0F8  sp
+//   0x100  nzcv    flags in bits 31..28
 //
 // The harness copies this whole routine into an executable page and patches
 // the word at `slot` with the instruction under test. The test instruction
-// must not use SP or branch (the generator guarantees that for now).
+// must not branch.
+//
+// SP is a test register too, so while the test runs the host stack is not
+// usable. The state pointer and the host SP are parked in d30/d31 and the
+// test's x0 in d29 (caller-saved SIMD registers, which the integer tests
+// never touch; SIMD tests will have to avoid v29-v31).
 
     .text
     .global tramp_start, tramp_slot, tramp_end
@@ -21,10 +27,14 @@ tramp_start:
     stp x23, x24, [sp, #48]
     stp x25, x26, [sp, #64]
     stp x27, x28, [sp, #80]
-    str x0, [sp, #-16]!          // keep the state pointer on the stack
+    fmov d30, x0                 // state pointer
+    mov x1, sp
+    fmov d31, x1                 // host SP
 
-    ldr x1, [x0, #0xF8]
+    ldr x1, [x0, #0x100]
     msr nzcv, x1
+    ldr x1, [x0, #0xF8]
+    mov sp, x1
     ldp x1, x2, [x0, #0x08]
     ldp x3, x4, [x0, #0x18]
     ldp x5, x6, [x0, #0x28]
@@ -45,8 +55,8 @@ tramp_start:
 tramp_slot:
     nop                          // patched with the instruction under test
 
-    str x0, [sp, #-16]!          // free x0 to hold the state pointer again
-    ldr x0, [sp, #16]
+    fmov d29, x0                 // free x0 to hold the state pointer again
+    fmov x0, d30
     stp x1, x2, [x0, #0x08]
     stp x3, x4, [x0, #0x18]
     stp x5, x6, [x0, #0x28]
@@ -62,11 +72,14 @@ tramp_slot:
     stp x25, x26, [x0, #0xC8]
     stp x27, x28, [x0, #0xD8]
     stp x29, x30, [x0, #0xE8]
-    mrs x1, nzcv
+    mov x1, sp
     str x1, [x0, #0xF8]
-    ldr x1, [sp], #16            // the test's x0 result
+    mrs x1, nzcv
+    str x1, [x0, #0x100]
+    fmov x1, d29                 // the test's x0 result
     str x1, [x0, #0x00]
-    add sp, sp, #16              // drop the saved state pointer
+    fmov x1, d31
+    mov sp, x1                   // host stack back
 
     ldp x19, x20, [sp, #16]
     ldp x21, x22, [sp, #32]

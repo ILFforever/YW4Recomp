@@ -35,12 +35,18 @@ typedef struct {
 
 Every supported instruction form is tested against real hardware (decision 0004):
 
-1. `recomp/golden.py` makes test cases: random encodings within an instruction form (only fields that don't touch SP or the PC for now), plus register values that mix edge cases (0, 1, -1, signed min/max, sign-boundary values) with random ones.
-2. It copies `recomp/pi/` to the Pi 5 over SSH, builds the harness with the Pi's GCC, and runs the cases. The harness copies each instruction into an executable page between code that loads and stores the full register file and flags, then runs it.
+1. `recomp/golden.py` makes test cases: random encodings within an instruction form (no PC-relative or branch forms yet), plus register values that mix edge cases (0, 1, -1, signed min/max, sign-boundary values) with random ones.
+2. It copies `recomp/pi/` to the Pi 5 over SSH, builds the harness with the Pi's GCC, and runs the cases. The harness copies each instruction into an executable page between code that loads and stores the full register file (x0–x30, SP) and flags, then runs it.
 3. The results (golden files) come back to `work/golden/`.
 4. `recomp/check.py` translates each test encoding to C, compiles one test program with the host GCC, runs it on the same inputs, and reports every mismatch with the instruction, inputs, expected, and actual.
 
+**Loads and stores** (added 2026-10-20). Both machines keep a 128 KiB scratch buffer with the same byte pattern (`recomp/pi/testcase.h`). The generator decodes each test encoding with the lifter's own decoder (`MemAccess`) and sets the base register to an *offset* into the buffer so the access lands inside it. Each case line says which registers hold offsets; each side adds its own buffer address before running and subtracts it after. Results therefore don't depend on where each machine's buffer is. The output lists every changed buffer byte, so stores are checked byte by byte. Cases the scheme can't express are skipped: storing the base register itself (it would store a machine-specific address) and register-offset forms whose offset register is the base. SP-based accesses keep SP 16-byte aligned, because Linux faults on misaligned SP use.
+
 Synthetic test cases (random encodings, not taken from the game) are safe to commit, but they are cheap to regenerate, so they also stay in `work/`.
+
+## Open risk: single-copy atomicity
+
+Loads and stores are emitted as `memcpy` into a local, which compilers turn into one host load/store. ARMv8 guarantees that aligned accesses up to 64 bits are not torn, and multithreaded game code may rely on that for plain (non-exclusive) shared variables. x86-64 gives the same guarantee for aligned accesses, but C does not promise the compiler keeps one access as one instruction. If torn or merged accesses ever show up, switch the helpers to `__atomic_load_n`/`__atomic_store_n` with relaxed order (same code on x86, but guaranteed).
 
 ## Why
 

@@ -25,12 +25,11 @@ from . import lift
 
 REPO = Path(__file__).resolve().parents[1]
 INCLUDE = REPO / "runtime" / "include"
+PI_DIR = REPO / "recomp" / "pi"
 
 PROGRAM = r"""
-#include <inttypes.h>
-#include <stdio.h>
-#include <stdlib.h>
 #include "yw4cpu.h"
+#include "testcase.h"
 
 static int run(uint32_t enc, CPUState *ctx) {
     switch (enc) {
@@ -41,17 +40,23 @@ static int run(uint32_t enc, CPUState *ctx) {
 }
 
 int main(void) {
-    char line[1024];
-    while (fgets(line, sizeof line, stdin)) {
+    test_mem_init();
+    uint64_t base = (uint64_t)(uintptr_t)test_mem;
+    TestState t;
+    uint32_t enc;
+    uint64_t inmask, outmask;
+    while (test_read(stdin, &enc, &t, &inmask, &outmask)) {
+        test_rebase(&t, inmask, base);
         CPUState s = {0};
-        char *p = line;
-        uint32_t enc = (uint32_t)strtoul(p, &p, 16);
-        for (int i = 0; i < 31; i++) s.x[i] = strtoull(p, &p, 16);
-        s.nzcv = strtoull(p, &p, 16);
+        memcpy(s.x, t.x, sizeof t.x);
+        s.sp = t.sp;
+        s.nzcv = t.nzcv;
         if (!run(enc, &s)) { printf("%%08" PRIx32 " UNSUPPORTED\n", enc); continue; }
-        printf("%%08" PRIx32, enc);
-        for (int i = 0; i < 31; i++) printf(" %%" PRIx64, s.x[i]);
-        printf(" %%" PRIx64 "\n", s.nzcv);
+        memcpy(t.x, s.x, sizeof t.x);
+        t.sp = s.sp;
+        t.nzcv = s.nzcv;
+        test_rebase(&t, outmask, 0 - base);
+        test_write(stdout, enc, &t);
     }
     return 0;
 }
@@ -65,7 +70,7 @@ def build_program(encodings: list[int], exe: Path) -> None:
     src = exe.with_suffix(".c")
     src.write_text(PROGRAM % "\n".join(cases))
     cc = os.environ.get("CC", "gcc")
-    proc = subprocess.run([cc, "-std=c11", "-O1", "-w", f"-I{INCLUDE}", "-o", str(exe), str(src)],
+    proc = subprocess.run([cc, "-std=c11", "-O1", "-w", f"-I{INCLUDE}", f"-I{PI_DIR}", "-o", str(exe), str(src)],
                           capture_output=True, text=True)
     if proc.returncode != 0:
         raise RuntimeError(f"compile failed:\n{proc.stderr[-3000:]}")
@@ -73,8 +78,8 @@ def build_program(encodings: list[int], exe: Path) -> None:
 
 def describe_diff(inp: str, want: str, got: str) -> str:
     i, w, g = inp.split(), want.split(), got.split()
-    names = ["enc"] + [f"x{k}" for k in range(31)] + ["nzcv"]
-    diffs = [f"{names[k]}: in={i[k]} want={w[k]} got={g[k] if k < len(g) else '?'}"
+    names = ["enc"] + [f"x{k}" for k in range(31)] + ["sp", "nzcv", "mem"]
+    diffs = [f"{names[k]}: in={i[k] if k < 34 else '-'} want={w[k]} got={g[k] if k < len(g) else '?'}"
              for k in range(1, len(w)) if k >= len(g) or w[k] != g[k]]
     return f"  {w[0]}  " + "; ".join(diffs)
 

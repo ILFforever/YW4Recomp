@@ -5,8 +5,9 @@ Each instruction *form* (a group of encodings sharing one bit layout, e.g.
 
     mask, value   enc & mask == value identifies the form
     valid(enc)    False for unallocated/reserved encodings within the form
-    uses_sp(enc)  True if a register field 31 means SP here (tests avoid those for now)
     emit(enc)     C statements operating on `ctx` (a CPUState *)
+    mem(enc)      loads/stores only: the decoded MemAccess (the test generator
+                  uses it to point the base register into its scratch buffer)
 
 Semantics follow the Arm ARM pseudocode (DDI 0487), ARMv8.0 only.
 Register field 31 means XZR/WZR unless the form says it means SP.
@@ -124,16 +125,16 @@ class Form:
     mask: int
     value: int
     valid: Callable[[int], bool]
-    uses_sp: Callable[[int], bool]
     emit: Callable[[int], str]
+    mem: Callable[[int], "MemAccess | None"] | None = None
 
 
 FORMS: list[Form] = []
 
 
-def form(name: str, mask: int, value: int, valid=lambda e: True, uses_sp=lambda e: False):
+def form(name: str, mask: int, value: int, valid=lambda e: True):
     def register(fn: Callable[[int], str]) -> Callable[[int], str]:
-        FORMS.append(Form(name, mask, value, valid, uses_sp, fn))
+        FORMS.append(Form(name, mask, value, valid, fn))
         return fn
     return register
 
@@ -149,8 +150,7 @@ def addsub(sf: int, d: int, n_expr: str, m_expr: str, sub: int, setflags: int, d
 
 
 # Add/subtract (immediate): sf op S 100010 sh imm12 Rn Rd
-@form("addsub_imm", 0x1F800000, 0x11000000,
-      uses_sp=lambda e: bits(e, 9, 5) == 31 or (not bits(e, 29, 29) and bits(e, 4, 0) == 31))
+@form("addsub_imm", 0x1F800000, 0x11000000)
 def _addsub_imm(e: int) -> str:
     sf, sub, s, sh, imm = bits(e, 31, 31), bits(e, 30, 30), bits(e, 29, 29), bits(e, 22, 22), bits(e, 21, 10)
     n, d = bits(e, 9, 5), bits(e, 4, 0)
@@ -169,8 +169,7 @@ def _addsub_shift(e: int) -> str:
 
 # Add/subtract (extended register): sf op S 01011 00 1 Rm option imm3 Rn Rd
 @form("addsub_ext", 0x1FE00000, 0x0B200000,
-      valid=lambda e: bits(e, 12, 10) <= 4,
-      uses_sp=lambda e: bits(e, 9, 5) == 31 or (not bits(e, 29, 29) and bits(e, 4, 0) == 31))
+      valid=lambda e: bits(e, 12, 10) <= 4)
 def _addsub_ext(e: int) -> str:
     sf, sub, s = bits(e, 31, 31), bits(e, 30, 30), bits(e, 29, 29)
     m, option, imm3, n, d = bits(e, 20, 16), bits(e, 15, 13), bits(e, 12, 10), bits(e, 9, 5), bits(e, 4, 0)
@@ -200,8 +199,7 @@ def _logical_imm_valid(e: int) -> bool:
 
 
 # Logical (immediate): sf opc 100100 N immr imms Rn Rd
-@form("logical_imm", 0x1F800000, 0x12000000, valid=_logical_imm_valid,
-      uses_sp=lambda e: bits(e, 30, 29) != 3 and bits(e, 4, 0) == 31)
+@form("logical_imm", 0x1F800000, 0x12000000, valid=_logical_imm_valid)
 def _logical_imm(e: int) -> str:
     sf, opc, nbit = bits(e, 31, 31), bits(e, 30, 29), bits(e, 22, 22)
     immr, imms, n, d = bits(e, 21, 16), bits(e, 15, 10), bits(e, 9, 5), bits(e, 4, 0)
@@ -376,6 +374,145 @@ def _ccmp(e: int) -> str:
         mv = f"({t})~{mv}"
     return (f"if (cond_holds(ctx->nzcv, {cond})) {{ uint64_t f; (void)awc{w}({rd_reg(n, sf)}, {mv}, {sub}, &f); "
             f"ctx->nzcv = f; }} else {{ ctx->nzcv = {nzcv << 28:#x}; }}")
+
+
+# --------------------------------------------------------------------------- loads and stores
+#
+# Integer loads/stores only (V=0); SIMD/FP ones come with the SIMD work. Guest addresses are
+# host addresses (decision 0005), so an access is a plain host access at the computed address
+# (ld*/st* in yw4cpu.h). Base register 31 is SP; data register 31 is XZR.
+
+@dataclass(frozen=True)
+class MemAccess:
+    """Decoded operands of one load/store, shared by the emitter and the test generator."""
+    n: int                            # base register, 31 = SP
+    imm: int                          # byte offset, already scaled and sign-extended
+    index: str                        # "offset", "pre" or "post"
+    rm: tuple[int, int, int] | None   # register offset: (m, extend option, shift)
+    load: bool
+    regs: tuple[int, ...]             # Rt, or Rt and Rt2 for pairs; empty for prefetch
+    esize: int                        # bytes per register
+    sext: int = 0                     # loads: 0 = zero-extend, else sign-extend to 32 or 64 bits
+    prefetch: bool = False
+
+    @property
+    def writeback(self) -> bool:
+        return self.index != "offset"
+
+
+def sign_extend(v: int, width: int) -> int:
+    return v - (1 << width) if v >> (width - 1) & 1 else v
+
+
+def _checked(a: MemAccess) -> MemAccess | None:
+    # Both cases are CONSTRAINED UNPREDICTABLE in the Arm ARM; compilers never emit them.
+    if a.writeback and a.n != 31 and a.n in a.regs:
+        return None
+    if a.load and len(a.regs) == 2 and a.regs[0] == a.regs[1]:
+        return None
+    return a
+
+
+def _single_kind(size: int, opc: int, allow_prefetch: bool) -> tuple[bool, int, bool] | None:
+    """(load, sext, prefetch) for the size/opc fields of single-register loads/stores."""
+    if opc == 0:
+        return False, 0, False       # STR/STRB/STRH
+    if opc == 1:
+        return True, 0, False        # LDR/LDRB/LDRH, zero-extended
+    if size == 3:
+        return (True, 0, True) if opc == 2 and allow_prefetch else None  # PRFM
+    if opc == 2:
+        return True, 64, False       # LDRSB/LDRSH/LDRSW to 64 bits
+    return (True, 32, False) if size < 2 else None  # LDRSB/LDRSH to 32 bits
+
+
+def _single(n: int, t: int, size: int, opc: int, imm: int, index: str,
+            rm: tuple[int, int, int] | None = None) -> MemAccess | None:
+    kind = _single_kind(size, opc, allow_prefetch=index == "offset")
+    if kind is None:
+        return None
+    load, sext, prefetch = kind
+    return _checked(MemAccess(n, imm, index, rm, load, () if prefetch else (t,), 1 << size, sext, prefetch))
+
+
+def _decode_uimm(e: int) -> MemAccess | None:
+    size = bits(e, 31, 30)
+    return _single(bits(e, 9, 5), bits(e, 4, 0), size, bits(e, 23, 22), bits(e, 21, 10) << size, "offset")
+
+
+IMM9_INDEX = {0: "offset", 1: "post", 2: "offset", 3: "pre"}  # 0 = LDUR/STUR, 2 = LDTR/STTR
+
+
+def _decode_imm9(e: int) -> MemAccess | None:
+    idx = bits(e, 11, 10)
+    if idx == 2 and bits(e, 31, 30) == 3 and bits(e, 23, 22) == 2:
+        return None  # no unprivileged prefetch
+    return _single(bits(e, 9, 5), bits(e, 4, 0), bits(e, 31, 30), bits(e, 23, 22),
+                   sign_extend(bits(e, 20, 12), 9), IMM9_INDEX[idx])
+
+
+def _decode_regoff(e: int) -> MemAccess | None:
+    size, option = bits(e, 31, 30), bits(e, 15, 13)
+    if not option & 2:
+        return None  # only UXTW, LSL (UXTX), SXTW, SXTX
+    shift = size if bits(e, 12, 12) else 0
+    return _single(bits(e, 9, 5), bits(e, 4, 0), size, bits(e, 23, 22), 0, "offset",
+                   rm=(bits(e, 20, 16), option, shift))
+
+
+PAIR_INDEX = {0: "offset", 1: "post", 2: "offset", 3: "pre"}  # 0 = LDNP/STNP (a cache hint only)
+
+
+def _decode_pair(e: int) -> MemAccess | None:
+    opc, load, idx = bits(e, 31, 30), bits(e, 22, 22), bits(e, 24, 23)
+    if opc == 3 or (opc == 1 and (not load or idx == 0)):
+        return None  # opc=01: only LDPSW (STGP is ARMv8.5)
+    esize = 8 if opc == 2 else 4
+    imm = sign_extend(bits(e, 21, 15), 7) * esize
+    return _checked(MemAccess(bits(e, 9, 5), imm, PAIR_INDEX[idx], None, bool(load),
+                              (bits(e, 4, 0), bits(e, 14, 10)), esize, 64 if opc == 1 else 0))
+
+
+def emit_mem(a: MemAccess) -> str:
+    if a.prefetch:
+        return ";"  # PRFM is a hint with no architectural effect
+    base = rd_reg(a.n, 1, sp=True)
+    if a.rm:
+        addr = f"{base} + {extend_expr(a.rm[0], a.rm[1], a.rm[2], 1)}"
+    elif a.index == "post" or a.imm == 0:
+        addr = base
+    else:
+        addr = f"{base} {'-' if a.imm < 0 else '+'} {abs(a.imm):#x}"
+    out = [f"uint64_t a = {addr};"]
+    w = a.esize * 8
+    for k, t in enumerate(a.regs):
+        at = f"a + {k * a.esize}" if k else "a"
+        if a.load:
+            v = f"ld{w}({at})"
+            if a.sext:
+                v = f"(uint{a.sext}_t)(int{a.sext}_t)(int{w}_t){v}"
+            out.append(wr_reg(t, 1 if a.sext != 32 else 0, v))
+        else:
+            out.append(f"st{w}({at}, (uint{w}_t){rd_reg(t, 1)});")
+    if a.writeback:
+        new = "a" if a.index == "pre" else f"a {'-' if a.imm < 0 else '+'} {abs(a.imm):#x}"
+        out.append(wr_reg(a.n, 1, new, sp=True))
+    return "{ " + " ".join(s for s in out if s) + " }"
+
+
+def mem_form(name: str, mask: int, value: int, decode: Callable[[int], MemAccess | None]) -> None:
+    FORMS.append(Form(name, mask, value, valid=lambda e: decode(e) is not None,
+                      emit=lambda e: emit_mem(decode(e)), mem=decode))
+
+
+# Load/store register (unsigned immediate): size 111 0 01 opc imm12 Rn Rt
+mem_form("ldst_uimm", 0x3F000000, 0x39000000, _decode_uimm)
+# Load/store register (unscaled / post-index / unprivileged / pre-index): size 111 0 00 opc 0 imm9 idx Rn Rt
+mem_form("ldst_imm9", 0x3F200000, 0x38000000, _decode_imm9)
+# Load/store register (register offset): size 111 0 00 opc 1 Rm option S 10 Rn Rt
+mem_form("ldst_regoff", 0x3F200C00, 0x38200800, _decode_regoff)
+# Load/store pair (no-allocate / post-index / offset / pre-index): opc 101 0 idx L imm7 Rt2 Rn Rt
+mem_form("ldst_pair", 0x3E000000, 0x28000000, _decode_pair)
 
 
 # --------------------------------------------------------------------------- lookup

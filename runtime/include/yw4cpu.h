@@ -7,6 +7,7 @@
 #define YW4CPU_H
 
 #include <stdint.h>
+#include <string.h>
 
 typedef struct {
     uint64_t x[31];  /* x0..x30 */
@@ -106,5 +107,17 @@ static inline uint64_t umulh64(uint64_t a, uint64_t b) {
 static inline uint64_t smulh64(uint64_t a, uint64_t b) {
     return (uint64_t)(((__int128)(int64_t)a * (int64_t)b) >> 64);
 }
+
+/* Guest memory. Guest addresses are host addresses (decision 0005), so these are plain
+ * host accesses. memcpy keeps them legal for unaligned addresses and under strict aliasing;
+ * compilers turn each into one load/store instruction. Assumes a little-endian host. */
+static inline uint8_t ld8(uint64_t a) { return *(const uint8_t *)(uintptr_t)a; }
+static inline uint16_t ld16(uint64_t a) { uint16_t v; memcpy(&v, (const void *)(uintptr_t)a, 2); return v; }
+static inline uint32_t ld32(uint64_t a) { uint32_t v; memcpy(&v, (const void *)(uintptr_t)a, 4); return v; }
+static inline uint64_t ld64(uint64_t a) { uint64_t v; memcpy(&v, (const void *)(uintptr_t)a, 8); return v; }
+static inline void st8(uint64_t a, uint8_t v) { *(uint8_t *)(uintptr_t)a = v; }
+static inline void st16(uint64_t a, uint16_t v) { memcpy((void *)(uintptr_t)a, &v, 2); }
+static inline void st32(uint64_t a, uint32_t v) { memcpy((void *)(uintptr_t)a, &v, 4); }
+static inline void st64(uint64_t a, uint64_t v) { memcpy((void *)(uintptr_t)a, &v, 8); }
 
 #endif
