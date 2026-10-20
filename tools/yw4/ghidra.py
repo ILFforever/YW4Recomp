@@ -30,6 +30,8 @@ def main(argv: list[str] | None = None) -> int:
     mode.add_argument("--seed", action="store_true",
                       help="on the existing project, create functions at every .eh_frame_hdr start "
                            "and address-taken target, re-analyze, then export")
+    mode.add_argument("--script", nargs="+", metavar=("NAME.java", "ARG"),
+                      help="run one script from tools/ghidra on the existing project (no export)")
     args = ap.parse_args(argv)
 
     try:
@@ -57,6 +59,11 @@ def main(argv: list[str] | None = None) -> int:
     out_json = proj / "main.functions.json"
 
     cmd = [str(headless), str(proj), PROJECT_NAME]
+    if args.script:
+        cmd += ["-process", "main", "-noanalysis", "-scriptPath", str(SCRIPT_DIR),
+                "-postScript", *args.script]
+        log = proj / f"{args.script[0].removesuffix('.java')}.log"
+        return run_headless(cmd, log)
     if args.export or args.seed:
         cmd += ["-process", "main", "-noanalysis", "-scriptPath", str(SCRIPT_DIR)]
     else:
@@ -71,18 +78,22 @@ def main(argv: list[str] | None = None) -> int:
         cmd += ["-postScript", "SeedFunctions.java", str(seed_file)]
     cmd += ["-postScript", "ExportFunctions.java", str(out_json)]
 
-    print(" ".join(f'"{c}"' if " " in c else c for c in cmd))
     log = proj / ("export.log" if args.export else "seed.log" if args.seed else "analyze.log")
+    if run_headless(cmd, log) != 0 or not out_json.is_file():
+        return 1
+    print(f"wrote {out_json}")
+    return 0
+
+
+def run_headless(cmd: list[str], log) -> int:
+    print(" ".join(f'"{c}"' if " " in c else c for c in cmd))
     # Ghidra's default 2 GB heap is too small for a 17 MB .text; allow an override.
     env = dict(os.environ)
     env.setdefault("GHIDRA_HEADLESS_MAXMEM", "12G")
     with log.open("w", encoding="utf-8") as f:
         rc = subprocess.run(cmd, stdout=f, stderr=subprocess.STDOUT, env=env).returncode
     print(f"analyzeHeadless exit {rc}; log: {log}")
-    if rc != 0 or not out_json.is_file():
-        return 1
-    print(f"wrote {out_json}")
-    return 0
+    return rc
 
 
 if __name__ == "__main__":

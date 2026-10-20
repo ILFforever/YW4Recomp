@@ -5,8 +5,9 @@ Measured on 2026-10-20 from the pinned build (`target.toml`). Numbers come from
 (gitignored, because they contain names taken from the game). This file keeps
 the summaries and what they mean for the port.
 
-Status: sections 1–6 done. Ghidra notes (Phase 0 step 4) and the call-site
-level of the renderer recon are still open, see "Open questions".
+Status: sections 1–7 done, including the Ghidra-based NVN trace (setup in
+`docs/ghidra.md`). Still open: baseline benchmark and the Phase 1
+recommendation; see "Open questions".
 
 ## TL;DR
 
@@ -96,14 +97,39 @@ Instruction mix in `.text` (4,335,852 instructions):
 | `svc` | 0 | 0 | no syscalls in `main` |
 | FP/SIMD | 332,994 | 76.8 | **7.7% of all instructions**: FP/NEON lifting is needed from day one, not later |
 
+**Threads and atomics** (`code.md`):
+
+| Instruction | Count | Meaning |
+|---|---|---|
+| `ldxr` / `stxr` (exclusive pairs) | 2,632 / 2,631 | ARMv8.0 atomics (read-modify-write loops), in 680 functions |
+| `ldar` (acquire load) | 8,296 | atomic loads. Many are probably static-initialisation guard checks |
+| `stlr` (release store) | 456 | atomic stores |
+| `dmb` | 16 | explicit barriers |
+| `cas`, LSE atomics | 0 | as expected: the Switch's Cortex-A57 is ARMv8.0 |
+| `mrs tpidr_el0` | 0 | `main` never reads the TLS register itself; thread-local access goes through `sdk` |
+
+Thread creation: only 7 direct call sites (`nn::os::CreateThread` x6, `nnosCreateThread` x1), plus 4 `SetThreadName` calls. The game is multithreaded, with a small, fixed set of threads.
+
+What this means for the recompiler:
+- Exclusive pairs map to compare-and-swap loops on the host (standard technique).
+- **x86-64 first helps here.** x86's memory model is stronger than ARM's, so ordinary ARM loads and stores are never *more* ordered than what x86 gives for free. The generated C still needs compiler barriers or `atomic` operations at `ldar`/`stlr`/`dmb`/exclusives, so the C compiler doesn't reorder across them. An ARM host would need real barriers in more places.
+
 **Indirect-call targets are mostly known statically.** 46,622 pointer relocations point into `.text`, at 17,853 distinct functions. 17,850 of those are also function starts in `.eh_frame_hdr`. Two independent sources agree, so function discovery can seed from the unwind table (39,094 starts) and the dispatch table can start from the address-taken set. Gap: function pointers built in code with `adrp`+`add` produce no relocation. Those still show up as unwind-table starts, so registering every unwind-table function in the dispatch table covers them, unless a function has no unwind info at all. A runtime fallback (interpreter/JIT) is still needed for that leftover case, as CLAUDE.md expects.
 
 ## 5. NVN usage
 
 - `main` imports only `nvnBootstrapLoader`, plus `nv::InitializeGraphics` and allocator setup.
 - It contains **513 `nvn*` function-name strings**, about the whole NVN API. That is the standard loader pattern: get `nvnDeviceGetProcAddress` from the bootstrap loader, then fill a table of every NVN entry point by name. 144 of the names are `nvnCommandBuffer*`.
-- So the names say what the game *can* call, not what it does call. Which ones are actually used, and which engine functions call the draw/submit entry points, needs call-site analysis in Ghidra (open question 1).
-- For the port this is convenient: hooking `nvnBootstrapLoader` / `GetProcAddress` gives one place to swap in the fallback GPU layer or our own implementation per function.
+- The loader stores the pointers in **one contiguous table of 512 slots** (one per name, `0x5863c98`–`0x5864c98` in `.bss`). Traced with `python -m tools.yw4.nvn_report` (Ghidra script `NvnCallers.java`); details in `work/recon/nvn.md`.
+- **177 of the 513 NVN functions are actually used** (read from the table by some code). By object: command buffer 54, texture + texture builder 26, memory pool 10, sampler builder 9, queue builder 8, device 8, and so on.
+- Each used NVN function is read by a thin **wrapper** function (108 wrappers in total). Draw, dispatch, submit, and present each have exactly one wrapper.
+- **Draw wrappers are never called directly.** Their addresses are built in code (`adrp`+`add`) and stored, presumably as function pointers in render commands that get run later. This is the case section 4 warned about: pointers with no relocation. All of them are unwind-table function starts, so the dispatch table plan still covers them.
+- **96 "producer" functions** take the address of NVN wrappers. They are the bottom of the engine's render layer:
+  - One large setup function references 24 wrappers (device builder and init): NVN device creation.
+  - About 7 functions each reference the same 6 draw variants (arrays, elements, instanced, indirect). They look like per-mesh draw-submission paths that pick a draw call by type.
+  - `yw::CMainComponent` vtable slots 11 and 12 reference buffer map/flush/invalidate and barriers: likely the per-frame begin/end. This is the first place to start tracing the frame (Phase 4b).
+  - `lives::CDeviceUnitNX` owns the present (`QueuePresentTexture`) and submit (`QueueSubmitCommands`) wrappers: the engine's Switch graphics-device class.
+- For the port: hooking `nvnBootstrapLoader` / `GetProcAddress` still gives one place to redirect any NVN function, and the 177-function list is how much of NVN a direct NVN→Vulkan layer would need, if we ever wrote one.
 
 ## 6. Renderer recon (static part)
 
@@ -174,7 +200,7 @@ Existing tools: whether community Level-5 tools already parse the G4 formats is 
 
 ## Open questions
 
-1. **Which NVN functions are actually called, and by whom.** Needs Ghidra: find the function-pointer table filled by the loader, then cross-reference loads from it. (Phase 0 step 4–5.)
+1. ~~Which NVN functions are actually called, and by whom.~~ Answered statically (section 5): 177 used, 108 wrappers, 96 producers. Still open: following the producers up to the frame loop (Phase 4b, best done in the Ghidra GUI or with runtime tracing).
 2. ~~Shader binary format.~~ Answered: `HBH1` wrapper with Maxwell code **and** NV_gpu_program5 assembly (section 6). Still open: the exact `HBH1` header layout (bindings), and what `.fxbin` describes.
 3. **G4 formats.** Check existing Level-5 modding tools before writing parsers.
 4. **`sdk` strategy.** `main` uses 578 of `sdk`'s 25,077 exports. HLE those 578, or recompile `sdk` too and HLE at the syscall level? This is the main Phase 1 decision. The small import list favors HLE at the `sdk` boundary.

@@ -283,6 +283,20 @@ def survey_code(image: bytes, info: dict) -> dict:
             c["adrp"] += 1
         elif w & 0xFF000000 == 0x58000000:
             c["ldr_literal"] += 1
+        elif w & 0x3F000000 == 0x08000000:   # load/store exclusive and ordered
+            o2, load, o1 = (w >> 23) & 1, (w >> 22) & 1, (w >> 21) & 1
+            if o2 == 0:
+                c["ldxr" if load else "stxr"] += 1        # exclusive pair (v8.0 atomics)
+            elif o1 == 0:
+                c["ldar" if load else "stlr"] += 1        # acquire load / release store
+            else:
+                c["cas"] += 1                             # v8.1 CAS (Switch A57 lacks it)
+        elif w & 0x3F200C00 == 0x38200000:
+            c["lse"] += 1                                 # v8.1 LSE atomics (should be 0)
+        elif w & 0xFFFFF0FF == 0xD50330BF:
+            c["dmb"] += 1
+        elif w & 0xFFFFFFE0 == 0xD53BD040:
+            c["mrs_tpidr"] += 1                           # thread-local storage pointer read
         # FP/SIMD data-processing: bits 28-25 = x111
         if (w >> 25) & 0x7 == 0x7:
             c["fp_simd"] += 1
@@ -307,7 +321,8 @@ def code_md(code: dict) -> str:
         f"- .bss size: {code['bss_size']:,} bytes",
         "", "| Kind | Count | Per 1000 instructions |", "|---|---|---|",
     ]
-    for k in ("bl", "b", "blr", "br", "ret", "svc", "adrp", "ldr_literal", "fp_simd"):
+    for k in ("bl", "b", "blr", "br", "ret", "svc", "adrp", "ldr_literal", "fp_simd",
+              "ldxr", "stxr", "ldar", "stlr", "cas", "lse", "dmb", "mrs_tpidr"):
         lines.append(f"| `{k}` | {c.get(k, 0):,} | {1000 * c.get(k, 0) / n:.1f} |")
     return "\n".join(lines) + "\n"
 
