@@ -1029,32 +1029,53 @@ void gpu_execute(uint64_t handle) {
 
 /* ================================================================== present */
 
-/* YW4_DUMP_IMAGE=<guest address in hex> (with YW4_DUMP_IMAGE_AT=<frame>): at that frame, reads
- * back every image at that address (depth or RGBA8 only), prints per layer its minimum, maximum
- * and how much of it still holds the first texel's value, and writes work/dump/image_<addr>_<n>.pgm
- * (depth scaled to its own range). For checking what a pass really drew. gpu_lock held. */
+/* YW4_DUMP_IMAGE=<guest addresses in hex, comma separated> (with YW4_DUMP_IMAGE_AT=<frame>): at
+ * that frame, reads back every image at those addresses (depth, RGBA8, RGBA16F or R11G11B10F),
+ * prints per layer the minimum, maximum and how much of it still holds the first texel's value
+ * (red for colour), and writes work/dump/image_<addr>_<n>.pgm (scaled to its own range) and, for
+ * colour, image_<addr>_<n>.rgbaf (u32 width, height, then RGBA floats). Images are reused within a
+ * frame: this is the last thing drawn into them (YW4_CAPTURE_FS, gpu_draw.c, is mid-frame).
+ * gpu_lock held. */
 static int dump_request;
 void gpu_request_dump(void) { __atomic_store_n(&dump_request, 1, __ATOMIC_RELEASE); }
 
+static float dump_half(uint16_t h) {
+    uint32_t s = (h >> 15) & 1, e = (h >> 10) & 31, m = h & 1023;
+    float v = e == 0 ? ldexpf((float)m, -24) : e == 31 ? 65504.0f : ldexpf((float)(m | 1024), (int)e - 25);
+    return s ? -v : v;
+}
+
+/* an unsigned small float with a 5-bit exponent and mbits of mantissa (R11G11B10) */
+static float dump_small(uint32_t v, int mbits) {
+    uint32_t e = v >> mbits, m = v & ((1u << mbits) - 1);
+    return e == 0 ? ldexpf((float)m, -14 - mbits) : e == 31 ? 65504.0f : ldexpf((float)(m | (1u << mbits)), (int)e - 15 - mbits);
+}
+
 static void dump_images(uint64_t frame) {
     int all = __atomic_exchange_n(&dump_request, 0, __ATOMIC_ACQ_REL);
-    static uint64_t want = UINT64_MAX, at;
-    if (want == UINT64_MAX) {
+    static uint64_t want[16], at;
+    static int nwant = -1;
+    if (nwant < 0) {
+        nwant = 0;
         const char *a = getenv("YW4_DUMP_IMAGE");
-        want = a ? strtoull(a, NULL, 16) : 0;
+        for (char *end; a && *a && nwant < 16; a = *end ? end + 1 : end) want[nwant++] = strtoull(a, &end, 16);
         at = getenv("YW4_DUMP_IMAGE_AT") ? strtoull(getenv("YW4_DUMP_IMAGE_AT"), NULL, 10) : 0;
     }
-    if (!all && (!want || frame != at)) return;
+    if (!all && (!nwant || frame != at)) return;
     for (int b = 0; b < IMAGE_BUCKETS; b++)
         for (GpuImage *g = images[b]; g; g = g->next) {
-            if (!all && g->key.addr != want) continue;
+            int wanted = 0;
+            for (int k = 0; k < nwant; k++) wanted |= g->key.addr == want[k];
+            if (!all && !wanted) continue;
             if (all && (g->layers < 2 || !(g->aspect & VK_IMAGE_ASPECT_DEPTH_BIT))) continue;
             uint64_t addr = g->key.addr;
             int depth = g->aspect & VK_IMAGE_ASPECT_DEPTH_BIT;
-            uint32_t bpp = depth ? (g->format == VK_FORMAT_D16_UNORM ? 2 : 4) : 4;
-            if (depth && g->format != VK_FORMAT_D32_SFLOAT && g->format != VK_FORMAT_D16_UNORM &&
-                g->format != VK_FORMAT_D32_SFLOAT_S8_UINT) continue;
-            if (!depth && g->format != VK_FORMAT_R8G8B8A8_UNORM && g->format != VK_FORMAT_R8G8B8A8_SRGB) continue;
+            int half = g->format == VK_FORMAT_R16G16B16A16_SFLOAT, packed = g->format == VK_FORMAT_B10G11R11_UFLOAT_PACK32;
+            uint32_t bpp = depth ? (g->format == VK_FORMAT_D16_UNORM ? 2 : 4) : half ? 8 : 4;
+            int d24 = g->format == VK_FORMAT_D24_UNORM_S8_UINT;
+            if (depth && !d24 && g->format != VK_FORMAT_D32_SFLOAT && g->format != VK_FORMAT_D16_UNORM &&
+                g->format != VK_FORMAT_D32_SFLOAT_S8_UINT) { fprintf(stderr, "yw4: image %#" PRIx64 ": depth format %d not dumped\n", addr, (int)g->format); continue; }
+            if (!depth && !half && !packed && g->format != VK_FORMAT_R8G8B8A8_UNORM && g->format != VK_FORMAT_R8G8B8A8_SRGB) { fprintf(stderr, "yw4: image %#" PRIx64 ": format %d not dumped\n", addr, (int)g->format); continue; }
             size_t layer_bytes = (size_t)g->width * g->height * bpp, total = layer_bytes * g->layers;
             VkBufferCreateInfo bci = {.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO, .size = total,
                                       .usage = VK_BUFFER_USAGE_TRANSFER_DST_BIT};
@@ -1089,8 +1110,11 @@ static void dump_images(uint64_t frame) {
                 double *v = malloc(n * sizeof *v);
                 for (size_t i = 0; i < n; i++) {
                     double x;
-                    if (depth && bpp == 4) x = ((const float *)src)[i];
+                    if (d24) x = (((const uint32_t *)src)[i] & 0xFFFFFF) / 16777215.0;
+                    else if (depth && bpp == 4) x = ((const float *)src)[i];
                     else if (depth) x = ((const uint16_t *)src)[i] / 65535.0;
+                    else if (half) x = dump_half(((const uint16_t *)src)[i * 4]);  /* red */
+                    else if (packed) x = dump_small(((const uint32_t *)src)[i] & 0x7ff, 6);
                     else x = src[i * 4] / 255.0;  /* red */
                     v[i] = x;
                     if (x < mn) mn = x;
@@ -1111,6 +1135,22 @@ static void dump_images(uint64_t frame) {
                     }
                     fclose(f);
                 }
+                if (!depth) {  /* colour as raw RGBA floats, for tools */
+                    snprintf(path, sizeof path, "work/dump/image_%" PRIx64 "_%u.rgbaf", addr, l);
+                    f = fopen(path, "wb");
+                    if (f) {
+                        fwrite(&g->width, 4, 1, f), fwrite(&g->height, 4, 1, f);
+                        for (size_t i = 0; i < n * 4; i++) {
+                            uint32_t w_ = packed ? ((const uint32_t *)src)[i / 4] : 0;
+                            float x = half ? dump_half(((const uint16_t *)src)[i])
+                                    : packed ? (i % 4 == 0 ? dump_small(w_ & 0x7ff, 6) : i % 4 == 1 ? dump_small((w_ >> 11) & 0x7ff, 6)
+                                                : i % 4 == 2 ? dump_small(w_ >> 22, 5) : 1.0f)
+                                    : src[i] / 255.0f;
+                            fwrite(&x, 4, 1, f);
+                        }
+                        fclose(f);
+                    }
+                }
                 free(v);
             }
             vkDestroyBuffer(vk.device, buf, NULL);
@@ -1130,6 +1170,10 @@ void gpu_present(NvnTexture *t, uint64_t frame, const int crop[4]) {
         submit(cb);
     }
     g->last_frame = present_count;
+    if (gpu_capture_pending()) {
+        gpu_wait(gpu_submitted(), UINT64_MAX);
+        gpu_capture_flush();
+    }
     dump_images(present_count);
     if (getenv("YW4_COMPUTE_TRACE")) {
         gpu_wait(gpu_submitted(), UINT64_MAX);

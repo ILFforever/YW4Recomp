@@ -110,5 +110,9 @@ void gpu_draw(VkCommandBuffer cb, GpuState *s, const CmdRec *r);
 void gpu_dispatch(VkCommandBuffer cb, GpuState *s, const CmdRec *r);
 /* YW4_COMPUTE_TRACE=n: every n frames, the inputs and results of the last dispatch of each compute shader. */
 void gpu_compute_trace(uint64_t frame);
+/* YW4_CAPTURE_FS: colour targets copied after chosen draws (gpu_draw.c). Pending copies are written
+ * out by gpu_capture_flush once the GPU has finished them. */
+int gpu_capture_pending(void);
+void gpu_capture_flush(void);
 
 #endif

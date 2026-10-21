@@ -767,6 +767,86 @@ void gpu_dispatch(VkCommandBuffer cb, GpuState *s, const CmdRec *r) {
     full_barrier(cb);
 }
 
+/* YW4_CAPTURE_FS=<fragment shader key prefixes, comma separated> with YW4_DUMP_IMAGE_AT=<frame>:
+ * after each draw with such a fragment shader in that frame, its colour targets are copied to host
+ * memory and written as work/dump/cap_<n>_<fs>_t<target>.raw (u32 width, height, VkFormat, then
+ * the texels). Unlike YW4_DUMP_IMAGE this sees a target mid-frame, before later passes reuse it. */
+typedef struct {
+    VkBuffer buf;
+    VkDeviceMemory mem;
+    uint32_t w, h, format, size;
+    char name[48];
+} Capture;
+static Capture caps[64];
+static int ncaps;
+
+int gpu_capture_pending(void) { return ncaps; }
+
+static void capture_after_draw(VkCommandBuffer cb, GpuState *s, const Program *g) {
+    static const char *want;
+    static uint64_t at;
+    static int init;
+    if (!init) {
+        init = 1;
+        want = getenv("YW4_CAPTURE_FS");
+        at = getenv("YW4_DUMP_IMAGE_AT") ? strtoull(getenv("YW4_DUMP_IMAGE_AT"), NULL, 10) : 0;
+    }
+    if (!want || gpu_frames() != at || !g->sh[ST_FRAG]) return;
+    char key[17];
+    snprintf(key, sizeof key, "%016" PRIx64, g->sh[ST_FRAG]->key);
+    int hit = 0;
+    for (const char *w = want; *w;) {
+        size_t n = strcspn(w, ",");
+        if (n && !strncmp(key, w, n)) hit = 1;
+        w += n + (w[n] == ',');
+    }
+    if (!hit) return;
+    gpu_end_rendering(cb, s);
+    for (int i = 0; i < s->ncolor && ncaps < 64; i++) {
+        GpuImage *im = s->rt.color[i] ? image_find(s->rt.color[i]) : NULL;
+        if (!im) continue;
+        uint32_t bpp = im->format == VK_FORMAT_R16G16B16A16_SFLOAT   ? 8
+                       : im->format == VK_FORMAT_R32G32B32A32_SFLOAT ? 16
+                                                                     : 4;
+        Capture *c = &caps[ncaps++];
+        c->w = im->width, c->h = im->height, c->format = (uint32_t)im->format, c->size = im->width * im->height * bpp;
+        snprintf(c->name, sizeof c->name, "cap_%02d_%.8s_t%d", ncaps - 1, key, i);
+        VkBufferCreateInfo bci = {.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO, .size = c->size,
+                                  .usage = VK_BUFFER_USAGE_TRANSFER_DST_BIT};
+        CHECK(vkCreateBuffer(vk.device, &bci, NULL, &c->buf));
+        VkMemoryRequirements mr;
+        vkGetBufferMemoryRequirements(vk.device, c->buf, &mr);
+        VkMemoryAllocateInfo mai = {
+            .sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO, .allocationSize = mr.size,
+            .memoryTypeIndex = vk_memory_type(mr.memoryTypeBits,
+                                              VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT)};
+        CHECK(vkAllocateMemory(vk.device, &mai, NULL, &c->mem));
+        CHECK(vkBindBufferMemory(vk.device, c->buf, c->mem, 0));
+        VkBufferImageCopy cp = {.imageSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1},
+                                .imageExtent = {im->width, im->height, 1}};
+        vkCmdCopyImageToBuffer(cb, im->image, VK_IMAGE_LAYOUT_GENERAL, c->buf, 1, &cp);
+        full_barrier(cb);
+    }
+}
+
+void gpu_capture_flush(void) {
+    for (int i = 0; i < ncaps; i++) {
+        Capture *c = &caps[i];
+        void *p;
+        CHECK(vkMapMemory(vk.device, c->mem, 0, VK_WHOLE_SIZE, 0, &p));
+        char path[96];
+        snprintf(path, sizeof path, "work/dump/%s.raw", c->name);
+        FILE *f = fopen(path, "wb");
+        if (f) {
+            uint32_t hdr[3] = {c->w, c->h, c->format};
+            fwrite(hdr, 4, 3, f), fwrite(p, 1, c->size, f), fclose(f);
+        }
+        vkDestroyBuffer(vk.device, c->buf, NULL), vkFreeMemory(vk.device, c->mem, NULL);
+        fprintf(stderr, "yw4: captured %s (%ux%u format %u)\n", c->name, c->w, c->h, c->format);
+    }
+    ncaps = 0;
+}
+
 void gpu_draw(VkCommandBuffer cb, GpuState *s, const CmdRec *r) {
     Program *g = s->program ? program_of(s->program) : NULL;
     if (!g) {
@@ -995,4 +1075,5 @@ void gpu_draw(VkCommandBuffer cb, GpuState *s, const CmdRec *r) {
         vkCmdDrawIndexed(cb, (uint32_t)r->x[2], (uint32_t)r->x[6] ? (uint32_t)r->x[6] : 1, 0, (int32_t)r->x[4],
                          (uint32_t)r->x[5]);
     }
+    capture_after_draw(cb, s, g);
 }

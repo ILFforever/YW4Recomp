@@ -96,7 +96,8 @@ Environment variables read by the runtime; the most useful ones:
 | `YW4_LOG=0` | Turn off the log file (on by default: everything printed on stderr is also saved in `work/logs/yw4_<time>.log`; `YW4_LOG_DIR` moves it) |
 | F12 / F11 / F10 (keys) | F12: screenshot of the next frame. F11: describe the draws of the next frame in the log (targets, shaders, textures, the vertex stage's matrices; `YW4_GPU_TRACE=<n>` with `YW4_GPU_TRACE_AT=<frame>` does the same from a start frame). F10: dump multi-layer depth images (shadow maps) to `work/dump/*.pgm` |
 | `YW4_RECORD=0` / `YW4_REPLAY=<file>` | Every input change and capture key is recorded in `work/inputs/rec_<time>.txt` (on by default); a replay feeds a recording back at the same ticks, so a route can be run without a person (long routes can drift a little) |
-| `YW4_DUMP_IMAGE=<hex addr>` `YW4_DUMP_IMAGE_AT=<frame>` | Read back the image at that guest address at that frame: per-layer min/max/cleared share and `work/dump/image_*.pgm` |
+| `YW4_DUMP_IMAGE=<hex addr>[,<hex addr>...]` `YW4_DUMP_IMAGE_AT=<frame>` | Read back the images at those guest addresses at that frame (depth, RGBA8, RGBA16F, R11G11B10F): per-layer min/max/cleared share, `work/dump/image_*.pgm`, and for colour `image_*.rgbaf` (raw floats) |
+| `YW4_CAPTURE_FS=<fs key prefix>[,...]` with `YW4_DUMP_IMAGE_AT=<frame>` | Copy the colour targets right after each draw with that fragment shader in that frame, to `work/dump/cap_*.raw`; shows a pass's output before later passes reuse the target. `python -m tools.yw4.capview` makes a contact sheet |
 | `YW4_COMPUTE_TRACE=<n>` | Every n frames, the inputs and results of the last dispatch of each compute shader |
 | `YW4_HEADLESS=1` | No window, no Vulkan |
 | `YW4_VULKAN_VALIDATION=1` | Turn on the Vulkan validation layer |
