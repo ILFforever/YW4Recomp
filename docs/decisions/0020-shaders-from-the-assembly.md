@@ -38,7 +38,7 @@ Key = FNV-1a 64 of the assembly text, `!!NV` through `END`. `python -m tools.yw4
 - **One GLSL statement per instruction**, preceded by the instruction as a comment. The GPU driver's compiler removes the redundancy; readability is what matters for Phase 4.
 - `MAD` → `fma()` (Maxwell fuses it). `ROUND` → `roundEven`. `TRUNC.U` clamps negatives to 0 (Maxwell's conversion saturates; GLSL's is undefined). `RSQ` takes the absolute value (spec).
 - `H` registers (fp16 on the Switch) are fp32 here. Precision can differ; screenshot diffs will show if it matters.
-- Bindings: descriptor set = stage; constant buffer n → binding n, texture/image slot k → 16 + k, storage buffer n → 32 + n; inputs/varyings/colour outputs by location. Vertex inputs are `vec4` or `uvec4` by how they are read (two passes); varyings are `vec4` carrying bits, `flat` when read as integers.
+- Bindings: descriptor set = stage; constant buffer n → binding n, texture/image slot k → 16 + k, storage buffer n → 64 + n (texture slots reach 32); inputs/varyings/colour outputs by location. Vertex inputs are `vec4` or `uvec4` by how they are read (two passes); varyings are `vec4` carrying bits, `flat` when read as integers.
 - Depth: NVN's default clip space has z in [-w, w]; a push-constant bit maps it to Vulkan's [0, w] in the last stage before rasterisation. Y orientation is left to the viewport.
 - `vertex.instance` excludes the base instance (as on Maxwell): `gl_InstanceIndex - gl_BaseInstance`.
 

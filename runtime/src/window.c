@@ -343,7 +343,9 @@ static int screenshot_wanted(uint64_t n) {
  * Otherwise src is the draw path's image in that layout (GENERAL, decision 0021); with
  * `readback` it is also copied into the staging buffer and this waits for the GPU, so the
  * caller can read the texels. present_lock held, frame_resources done. 0 when presented. */
-static int present_image(VkImage src, VkImageLayout layout, uint32_t w, uint32_t h, int readback) {
+static int present_image(VkImage src, VkImageLayout layout, VkRect2D r0, int readback) {
+    uint32_t w = r0.extent.width, h = r0.extent.height;
+    int32_t sx = r0.offset.x, sy = r0.offset.y;
     vkWaitForFences(vk.device, 1, &fence, VK_TRUE, UINT64_MAX);
     uint32_t index;
     VkResult r = vkAcquireNextImageKHR(vk.device, swapchain, UINT64_MAX, acquired, VK_NULL_HANDLE, &index);
@@ -365,7 +367,8 @@ static int present_image(VkImage src, VkImageLayout layout, uint32_t w, uint32_t
     } else {
         barrier(src, layout, layout, VK_ACCESS_MEMORY_WRITE_BIT, VK_ACCESS_TRANSFER_READ_BIT);
         if (readback) {
-            VkBufferImageCopy copy = {.imageSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1}, .imageExtent = {w, h, 1}};
+            VkBufferImageCopy copy = {.imageSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1}, .imageOffset = {sx, sy, 0},
+                                      .imageExtent = {w, h, 1}};
             vkCmdCopyImageToBuffer(cmd, src, layout, staging, 1, &copy);
         }
     }
@@ -382,7 +385,7 @@ static int present_image(VkImage src, VkImageLayout layout, uint32_t w, uint32_t
     if (bh > wh) bh = wh, bw = (uint32_t)((uint64_t)wh * w / h);
     int32_t x0 = (int32_t)(ww - bw) / 2, y0 = (int32_t)(wh - bh) / 2;
     VkImageBlit blit = {.srcSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1},
-                        .srcOffsets = {{0, 0, 0}, {(int32_t)w, (int32_t)h, 1}},
+                        .srcOffsets = {{sx, sy, 0}, {sx + (int32_t)w, sy + (int32_t)h, 1}},
                         .dstSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1},
                         .dstOffsets = {{x0, y0, 0}, {x0 + (int32_t)bw, y0 + (int32_t)bh, 1}}};
     vkCmdBlitImage(cmd, src, layout, dst, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &blit, VK_FILTER_LINEAR);
@@ -412,12 +415,13 @@ void window_present_rgba(const uint8_t *rgba, uint32_t w, uint32_t h, uint64_t n
     if (!(swapchain_stale && create_swapchain()) && !frame_resources(w, h)) {
         vkWaitForFences(vk.device, 1, &fence, VK_TRUE, UINT64_MAX);  /* the staging buffer is free */
         memcpy(staging_ptr, rgba, (size_t)w * h * 4);
-        present_image(frame, VK_IMAGE_LAYOUT_UNDEFINED, w, h, 0);
+        present_image(frame, VK_IMAGE_LAYOUT_UNDEFINED, (VkRect2D){{0, 0}, {w, h}}, 0);
     }
     host_unlock(&present_lock);
 }
 
-void window_present_image(VkImage image, VkFormat format, uint32_t w, uint32_t h, uint64_t n) {
+void window_present_image(VkImage image, VkFormat format, VkRect2D rect, uint64_t n) {
+    uint32_t w = rect.extent.width, h = rect.extent.height;
     if (!have_vulkan || !w || !h) return;
     int shot = screenshot_wanted(n);
     int bgra = format == VK_FORMAT_B8G8R8A8_UNORM || format == VK_FORMAT_B8G8R8A8_SRGB;
@@ -427,7 +431,7 @@ void window_present_image(VkImage image, VkFormat format, uint32_t w, uint32_t h
     }
     host_lock(&present_lock);
     if (!(swapchain_stale && create_swapchain()) && !frame_resources(w, h) &&
-        !present_image(image, VK_IMAGE_LAYOUT_GENERAL, w, h, shot) && shot) {
+        !present_image(image, VK_IMAGE_LAYOUT_GENERAL, rect, shot) && shot) {
         uint8_t *px = staging_ptr;
         if (bgra)
             for (size_t i = 0; i < (size_t)w * h * 4; i += 4) {

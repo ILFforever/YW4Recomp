@@ -3,26 +3,29 @@
  * Memory: every memory pool is imported with VK_EXT_external_memory_host and covered by
  * one VkBuffer, so an NVN buffer address is (that buffer, offset) and the GPU reads and
  * writes the game's memory in place. Textures are VkImages, one per NVN texture, made at
- * first use; those in CPU-no-access pools (render targets) are only ever written by the GPU.
+ * first use: those in CPU-no-access pools (render targets) are only ever written by the
+ * GPU; the others are uploaded from the game's memory (de-swizzled with tegra.c) when made
+ * and again after WriteTexels changes them.
  *
  * Execution: gpu_execute records one Vulkan command buffer per NVN command list and submits
  * it, signalling a timeline semaphore with the submission's number; NVN syncs wait for
  * numbers. Every image stays in layout GENERAL and a full memory barrier separates the
- * operations: simple and correct; finer barriers when profiling asks for them.
- *
- * Step 1 (0021): clears and present. Draws and dispatches are counted, not run yet.
+ * operations: simple and correct; finer barriers when profiling asks for them. Draws are
+ * in gpu_draw.c.
  *
  * The NVN -> Vulkan format table follows LAS Recomp (runtime/nvn/vulkan/textures.c; MIT, see
- * third_party/lasrecomp).
+ * third_party/lasrecomp), as does the sampler translation.
  */
 #include <inttypes.h>
+#include <math.h>
+#include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
-#include "gpu.h"
+#include "gpu_internal.h"
 #include "host.h"
-#include "vk.h"
+#include "tegra.h"
 #include "window.h"
 
 static int ready;
@@ -31,18 +34,38 @@ static VkCommandPool cmd_pool;
 static VkSemaphore timeline;
 static uint64_t submitted;  /* number of the last submission */
 
-enum { RING = 16 };
-static struct {
+/* Command buffers in a ring; each slot also owns what its submission needs until it has
+ * run: descriptor pools and staging buffers. */
+enum { RING = 16, MAX_DESC_POOLS = 16, MAX_STAGING = 256 };
+typedef struct {
     VkCommandBuffer cb;
     uint64_t seq;  /* the submission that last used it */
-} ring[RING];
+    VkDescriptorPool desc[MAX_DESC_POOLS];
+    int ndesc;
+    struct {
+        VkBuffer buf;
+        VkDeviceMemory mem;
+    } staging[MAX_STAGING];
+    int nstaging;
+} Slot;
+static Slot ring[RING];
 static int ring_next;
+static Slot *cur;  /* the slot being recorded */
 
-static _Noreturn void gpu_fatal(const char *what, VkResult r) {
+void gpu_fatal(const char *what, VkResult r) {
     fprintf(stderr, "yw4: gpu: %s failed (VkResult %d)\n", what, (int)r);
     exit(3);
 }
-#define CHECK(x) do { VkResult r_ = (x); if (r_ != VK_SUCCESS) gpu_fatal(#x, r_); } while (0)
+
+void gpu_stop(const char *fmt, ...) {
+    va_list ap;
+    va_start(ap, fmt);
+    fprintf(stderr, "yw4: gpu: ");
+    vfprintf(stderr, fmt, ap);
+    fprintf(stderr, " (not supported yet)\n");
+    va_end(ap);
+    exit(3);
+}
 
 int gpu_ready(void) { return ready; }
 
@@ -86,17 +109,25 @@ int gpu_wait(uint64_t seq, uint64_t timeout_ns) {
     return 1;
 }
 
-/* The next command buffer of the ring, begun; waits if the GPU still runs it. gpu_lock held. */
+/* The next slot of the ring, its command buffer begun; waits if the GPU still runs it, then
+ * frees what its last submission used. gpu_lock held. */
 static VkCommandBuffer begin(void) {
-    int i = ring_next;
+    Slot *s = &ring[ring_next];
     ring_next = (ring_next + 1) % RING;
-    gpu_wait(ring[i].seq, UINT64_MAX);
-    CHECK(vkResetCommandBuffer(ring[i].cb, 0));
+    gpu_wait(s->seq, UINT64_MAX);
+    for (int i = 0; i < s->ndesc; i++) CHECK(vkResetDescriptorPool(vk.device, s->desc[i], 0));
+    for (int i = 0; i < s->nstaging; i++) {
+        vkDestroyBuffer(vk.device, s->staging[i].buf, NULL);
+        vkFreeMemory(vk.device, s->staging[i].mem, NULL);
+    }
+    s->nstaging = 0;
+    CHECK(vkResetCommandBuffer(s->cb, 0));
     VkCommandBufferBeginInfo bi = {.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,
                                    .flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT};
-    CHECK(vkBeginCommandBuffer(ring[i].cb, &bi));
-    ring[i].seq = submitted + 1;
-    return ring[i].cb;
+    CHECK(vkBeginCommandBuffer(s->cb, &bi));
+    s->seq = submitted + 1;
+    cur = s;
+    return s->cb;
 }
 
 static void submit(VkCommandBuffer cb) {
@@ -109,17 +140,66 @@ static void submit(VkCommandBuffer cb) {
     host_lock(&vk.queue_lock);
     VkResult r = vkQueueSubmit(vk.queue, 1, &si, VK_NULL_HANDLE);
     host_unlock(&vk.queue_lock);
+    if (r == VK_ERROR_DEVICE_LOST) {
+        fprintf(stderr, "yw4: gpu: device lost in submission %" PRIu64 "\n", seq);
+        exit(3);
+    }
     if (r != VK_SUCCESS) gpu_fatal("vkQueueSubmit", r);
     __atomic_store_n(&submitted, seq, __ATOMIC_RELEASE);
+    cur = NULL;
 }
 
-/* Everything before it, in any stage, finishes and is visible to everything after. */
-static void full_barrier(VkCommandBuffer cb) {
+void full_barrier(VkCommandBuffer cb) {
     VkMemoryBarrier mb = {.sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER,
                           .srcAccessMask = VK_ACCESS_MEMORY_WRITE_BIT,
                           .dstAccessMask = VK_ACCESS_MEMORY_READ_BIT | VK_ACCESS_MEMORY_WRITE_BIT};
     vkCmdPipelineBarrier(cb, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, 0, 1, &mb, 0, NULL,
                          0, NULL);
+}
+
+VkDescriptorSet gpu_alloc_set(VkDescriptorSetLayout layout) {
+    VkDescriptorSetAllocateInfo ai = {.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO, .descriptorSetCount = 1,
+                                      .pSetLayouts = &layout};
+    VkDescriptorSet set;
+    if (cur->ndesc) {
+        ai.descriptorPool = cur->desc[cur->ndesc - 1];
+        VkResult r = vkAllocateDescriptorSets(vk.device, &ai, &set);
+        if (r == VK_SUCCESS) return set;
+        if (r != VK_ERROR_OUT_OF_POOL_MEMORY && r != VK_ERROR_FRAGMENTED_POOL) gpu_fatal("vkAllocateDescriptorSets", r);
+    }
+    if (cur->ndesc == MAX_DESC_POOLS) gpu_stop("more than %d descriptor pools in one submission", MAX_DESC_POOLS);
+    VkDescriptorPoolSize sizes[] = {{VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 16384},
+                                    {VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 16384},
+                                    {VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 2048},
+                                    {VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, 512}};
+    VkDescriptorPoolCreateInfo pci = {.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO, .maxSets = 4096,
+                                      .poolSizeCount = 4, .pPoolSizes = sizes};
+    CHECK(vkCreateDescriptorPool(vk.device, &pci, NULL, &cur->desc[cur->ndesc]));
+    ai.descriptorPool = cur->desc[cur->ndesc++];
+    CHECK(vkAllocateDescriptorSets(vk.device, &ai, &set));
+    return set;
+}
+
+/* A host-visible buffer of `size` bytes, alive until the current submission has run. */
+static void *staging(VkDeviceSize size, VkBuffer *buf) {
+    if (cur->nstaging == MAX_STAGING) gpu_stop("more than %d uploads in one submission", MAX_STAGING);
+    VkBufferCreateInfo bci = {.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO, .size = size,
+                              .usage = VK_BUFFER_USAGE_TRANSFER_SRC_BIT};
+    CHECK(vkCreateBuffer(vk.device, &bci, NULL, buf));
+    VkMemoryRequirements mr;
+    vkGetBufferMemoryRequirements(vk.device, *buf, &mr);
+    VkMemoryAllocateInfo mai = {
+        .sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO, .allocationSize = mr.size,
+        .memoryTypeIndex = vk_memory_type(mr.memoryTypeBits,
+                                          VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT)};
+    VkDeviceMemory mem;
+    CHECK(vkAllocateMemory(vk.device, &mai, NULL, &mem));
+    CHECK(vkBindBufferMemory(vk.device, *buf, mem, 0));
+    void *p;
+    CHECK(vkMapMemory(vk.device, mem, 0, VK_WHOLE_SIZE, 0, &p));
+    cur->staging[cur->nstaging].buf = *buf, cur->staging[cur->nstaging].mem = mem;
+    cur->nstaging++;
+    return p;
 }
 
 /* ================================================================== memory pools */
@@ -129,6 +209,10 @@ typedef struct {
     VkBuffer buf;
 } GpuPool;
 
+enum { MAX_POOLS = 64 };
+static NvnPool *pools[MAX_POOLS];
+static int npools;
+
 void gpu_pool_init(NvnPool *p) {
     if (!ready || !p->size) return;
     void *host = (void *)(uintptr_t)p->storage;
@@ -136,6 +220,7 @@ void gpu_pool_init(NvnPool *p) {
         fprintf(stderr, "yw4: gpu: pool %#" PRIx64 " + %#" PRIx64 " is not aligned for import\n", p->storage, p->size);
         exit(3);
     }
+    if (npools == MAX_POOLS) gpu_stop("more than %d memory pools", MAX_POOLS);
     VkMemoryHostPointerPropertiesEXT hp = {.sType = VK_STRUCTURE_TYPE_MEMORY_HOST_POINTER_PROPERTIES_EXT};
     CHECK(vkGetMemoryHostPointerPropertiesEXT(vk.device, VK_EXTERNAL_MEMORY_HANDLE_TYPE_HOST_ALLOCATION_BIT_EXT, host,
                                               &hp));
@@ -151,10 +236,7 @@ void gpu_pool_init(NvnPool *p) {
     VkMemoryRequirements mr;
     vkGetBufferMemoryRequirements(vk.device, g->buf, &mr);
     uint32_t type = vk_memory_type(mr.memoryTypeBits & hp.memoryTypeBits, 0);
-    if (type == UINT32_MAX) {
-        fprintf(stderr, "yw4: gpu: no memory type to import pool %#" PRIx64 "\n", p->storage);
-        exit(3);
-    }
+    if (type == UINT32_MAX) gpu_stop("no memory type to import pool %#" PRIx64, p->storage);
     VkImportMemoryHostPointerInfoEXT imp = {.sType = VK_STRUCTURE_TYPE_IMPORT_MEMORY_HOST_POINTER_INFO_EXT,
                                             .handleType = VK_EXTERNAL_MEMORY_HANDLE_TYPE_HOST_ALLOCATION_BIT_EXT,
                                             .pHostPointer = host};
@@ -163,21 +245,40 @@ void gpu_pool_init(NvnPool *p) {
     CHECK(vkAllocateMemory(vk.device, &mai, NULL, &g->mem));
     CHECK(vkBindBufferMemory(vk.device, g->buf, g->mem, 0));
     p->gpu = g;
+    host_lock(&gpu_lock);
+    pools[npools++] = p;
+    host_unlock(&gpu_lock);
 }
 
 void gpu_pool_finalize(NvnPool *p) {
     GpuPool *g = p->gpu;
     if (!g) return;
     gpu_wait(gpu_submitted(), UINT64_MAX);
+    host_lock(&gpu_lock);
+    for (int i = 0; i < npools; i++)
+        if (pools[i] == p) pools[i] = pools[--npools];
+    host_unlock(&gpu_lock);
     vkDestroyBuffer(vk.device, g->buf, NULL);
     vkFreeMemory(vk.device, g->mem, NULL);
     free(g);
     p->gpu = NULL;
 }
 
-/* ================================================================== textures */
+int gpu_buffer_at(uint64_t addr, uint64_t size, VkBuffer *buf, VkDeviceSize *off) {
+    for (int i = 0; i < npools; i++) {
+        const NvnPool *p = pools[i];
+        if (addr >= p->storage && addr + size <= p->storage + p->size) {
+            *buf = ((GpuPool *)p->gpu)->buf;
+            *off = addr - p->storage;
+            return 1;
+        }
+    }
+    return 0;
+}
 
-static VkFormat vk_format(uint32_t f) {
+/* ================================================================== formats */
+
+VkFormat gpu_format(uint32_t f) {
     switch (f) {
     case 0x01: return VK_FORMAT_R8_UNORM;
     case 0x02: return VK_FORMAT_R8_SNORM;
@@ -241,7 +342,7 @@ static VkFormat vk_format(uint32_t f) {
     case 0x4E: return VK_FORMAT_BC7_SRGB_BLOCK;
     case 0x4F: return VK_FORMAT_BC6H_SFLOAT_BLOCK;
     case 0x50: return VK_FORMAT_BC6H_UFLOAT_BLOCK;
-    /* RGBX / BGRX: alpha unused (reads as 1: to do with the sampler views) */
+    /* RGBX / BGRX: alpha unused, reads as 1 (gpu_format_alpha_one) */
     case 0x37: return VK_FORMAT_R8G8B8A8_SRGB;
     case 0x6D: return VK_FORMAT_R8G8B8A8_UNORM;
     case 0x71: return VK_FORMAT_R16G16B16A16_SFLOAT;
@@ -254,13 +355,9 @@ static VkFormat vk_format(uint32_t f) {
     }
 }
 
-typedef struct {
-    VkImage image;
-    VkDeviceMemory mem;
-    VkFormat format;
-    VkImageAspectFlags aspect;
-    uint32_t width, height, depth, layers, levels;
-} GpuImage;
+int gpu_format_alpha_one(uint32_t f) {
+    return f == 0x37 || f == 0x6D || f == 0x71 || f == 0x76 || f == 0x98 || f == 0x9A;
+}
 
 static VkImageAspectFlags aspect_of(VkFormat f) {
     switch (f) {
@@ -272,19 +369,56 @@ static VkImageAspectFlags aspect_of(VkFormat f) {
     }
 }
 
-/* t's image, made (and cleared to zero) on first use. cb: where its first barrier goes. */
-static GpuImage *image_of(VkCommandBuffer cb, NvnTexture *t) {
-    if (t->gpu) return t->gpu;
-    VkFormat fmt = vk_format(t->format);
-    if (fmt == VK_FORMAT_UNDEFINED || t->target == TARGET_BUFFER || t->samples > 1) {
-        fprintf(stderr, "yw4: gpu: texture format %#x target %u samples %u not supported yet\n", t->format, t->target,
-                t->samples);
-        exit(3);
+/* ================================================================== images */
+
+/* Copies t's texels from the game's memory into its image: every level and layer. */
+static void upload(VkCommandBuffer cb, NvnTexture *t, GpuImage *g) {
+    const TexLayout *L = &t->layout;
+    const FormatInfo *f = L->fmt;
+    if (g->aspect != VK_IMAGE_ASPECT_COLOR_BIT) return;  /* depth/stencil: rendered, not loaded */
+    VkDeviceSize total = 0;
+    for (uint32_t l = 0; l < g->levels; l++) {
+        LevelLayout lv = tegra_level(L, l);
+        total += (VkDeviceSize)lv.wb * lv.hb * lv.d * f->bpb * g->layers;
     }
-    GpuImage *g = calloc(1, sizeof *g);
+    VkBuffer buf;
+    uint8_t *dst = staging(total, &buf);
+    VkBufferImageCopy copies[16];
+    uint32_t ncopies = 0;
+    VkDeviceSize off = 0;
+    for (uint32_t l = 0; l < g->levels && l < 16; l++) {
+        LevelLayout lv = tegra_level(L, l);
+        VkDeviceSize layer_bytes = (VkDeviceSize)lv.wb * lv.hb * lv.d * f->bpb;
+        for (uint32_t k = 0; k < g->layers; k++)
+            tegra_read_region(L, (const uint8_t *)(uintptr_t)t->addr, l, k, 0, 0, 0, lv.w, lv.h, lv.d,
+                              dst + off + k * layer_bytes);
+        copies[ncopies++] = (VkBufferImageCopy){
+            .bufferOffset = off, .imageSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, l, 0, g->layers},
+            .imageExtent = {lv.w, lv.h, lv.d}};
+        off += layer_bytes * g->layers;
+    }
+    full_barrier(cb);
+    vkCmdCopyBufferToImage(cb, buf, g->image, VK_IMAGE_LAYOUT_GENERAL, ncopies, copies);
+    full_barrier(cb);
+}
+
+GpuImage *image_of(VkCommandBuffer cb, NvnTexture *t) {
+    GpuImage *g = t->gpu;
+    if (g) {
+        if (t->cpu_written) {
+            t->cpu_written = 0;
+            upload(cb, t, g);
+        }
+        return g;
+    }
+    VkFormat fmt = gpu_format(t->format);
+    if (fmt == VK_FORMAT_UNDEFINED || t->target == TARGET_BUFFER || t->samples > 1)
+        gpu_stop("texture format %#x target %u samples %u", t->format, t->target, t->samples);
+    if (t->levels > 16) gpu_stop("texture with %u levels", t->levels);
+    g = calloc(1, sizeof *g);
     g->format = fmt;
     g->aspect = aspect_of(fmt);
-    g->width = t->layout.width, g->height = t->layout.height, g->depth = t->layout.depth;
+    g->width = t->layout.width, g->height = t->layout.height, g->depth = t->layout.depth ? t->layout.depth : 1;
     g->layers = t->layout.layers ? t->layout.layers : 1, g->levels = t->layout.levels ? t->layout.levels : 1;
     VkFormatProperties fp;
     vkGetPhysicalDeviceFormatProperties(vk.gpu, fmt, &fp);
@@ -294,10 +428,11 @@ static GpuImage *image_of(VkCommandBuffer cb, NvnTexture *t) {
     if (fp.optimalTilingFeatures & VK_FORMAT_FEATURE_DEPTH_STENCIL_ATTACHMENT_BIT)
         usage |= VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT;
     if (fp.optimalTilingFeatures & VK_FORMAT_FEATURE_STORAGE_IMAGE_BIT) usage |= VK_IMAGE_USAGE_STORAGE_BIT;
-    int cube = t->target == TARGET_CUBE || t->target == TARGET_CUBE_ARRAY;
+    int cube = (t->target == TARGET_CUBE || t->target == TARGET_CUBE_ARRAY) && g->layers % 6 == 0;
     VkImageCreateInfo ici = {
         .sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO,
-        .flags = VK_IMAGE_CREATE_MUTABLE_FORMAT_BIT | (cube ? VK_IMAGE_CREATE_CUBE_COMPATIBLE_BIT : 0),
+        .flags = VK_IMAGE_CREATE_MUTABLE_FORMAT_BIT | (cube ? VK_IMAGE_CREATE_CUBE_COMPATIBLE_BIT : 0) |
+                 (t->target == TARGET_3D ? VK_IMAGE_CREATE_2D_ARRAY_COMPATIBLE_BIT : 0),
         .imageType = t->target == TARGET_3D ? VK_IMAGE_TYPE_3D
                      : t->target == TARGET_1D || t->target == TARGET_1D_ARRAY ? VK_IMAGE_TYPE_1D
                                                                                 : VK_IMAGE_TYPE_2D,
@@ -318,29 +453,186 @@ static GpuImage *image_of(VkCommandBuffer cb, NvnTexture *t) {
                               .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED, .image = g->image, .subresourceRange = all};
     vkCmdPipelineBarrier(cb, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, 0, 0, NULL, 0, NULL, 1,
                          &b);
-    if (g->aspect == VK_IMAGE_ASPECT_COLOR_BIT) {
-        VkClearColorValue zero = {{0}};
-        vkCmdClearColorImage(cb, g->image, VK_IMAGE_LAYOUT_GENERAL, &zero, 1, &all);
-    } else {
-        VkClearDepthStencilValue zero = {0};
-        vkCmdClearDepthStencilImage(cb, g->image, VK_IMAGE_LAYOUT_GENERAL, &zero, 1, &all);
-    }
-    full_barrier(cb);
     t->gpu = g;
+    t->cpu_written = 0;
+    if (t->addr && !(t->pool_flags & POOL_CPU_NO_ACCESS)) {
+        upload(cb, t, g);
+    } else {  /* rendered by the GPU: starts as zeros */
+        if (g->aspect == VK_IMAGE_ASPECT_COLOR_BIT) {
+            VkClearColorValue zero = {{0}};
+            vkCmdClearColorImage(cb, g->image, VK_IMAGE_LAYOUT_GENERAL, &zero, 1, &all);
+        } else {
+            VkClearDepthStencilValue zero = {0};
+            vkCmdClearDepthStencilImage(cb, g->image, VK_IMAGE_LAYOUT_GENERAL, &zero, 1, &all);
+        }
+        full_barrier(cb);
+    }
     return g;
+}
+
+struct GpuView {
+    GpuView *next;
+    VkImageViewType type;
+    VkFormat format;
+    uint32_t level0, nlevels, layer0, nlayers;
+    VkComponentMapping sw;
+    VkImageAspectFlags aspect;
+    VkImageView view;
+};
+
+static VkImageView view_of(GpuImage *g, VkImageViewType type, VkFormat fmt, uint32_t level0, uint32_t nlevels,
+                           uint32_t layer0, uint32_t nlayers, VkComponentMapping sw, VkImageAspectFlags aspect) {
+    for (GpuView *v = g->views; v; v = v->next)
+        if (v->type == type && v->format == fmt && v->level0 == level0 && v->nlevels == nlevels && v->layer0 == layer0 &&
+            v->nlayers == nlayers && !memcmp(&v->sw, &sw, sizeof sw) && v->aspect == aspect)
+            return v->view;
+    GpuView *v = calloc(1, sizeof *v);
+    *v = (GpuView){g->views, type, fmt, level0, nlevels, layer0, nlayers, sw, aspect, VK_NULL_HANDLE};
+    VkImageViewCreateInfo ci = {.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO, .image = g->image, .viewType = type,
+                                .format = fmt, .components = sw,
+                                .subresourceRange = {aspect, level0, nlevels, layer0, nlayers}};
+    CHECK(vkCreateImageView(vk.device, &ci, NULL, &v->view));
+    g->views = v;
+    return v->view;
+}
+
+VkImageView gpu_render_view(VkCommandBuffer cb, NvnTexture *t, const NvnTextureView *v, int has_view, uint32_t *w,
+                            uint32_t *h) {
+    GpuImage *g = image_of(cb, t);
+    uint32_t level = has_view && v->setmask & 1 ? v->base_level : 0;
+    uint32_t layer0 = has_view && v->setmask & 2 ? v->min_layer : 0;
+    uint32_t nlayers = has_view && v->setmask & 2 && v->num_layers ? v->num_layers : 1;
+    VkFormat fmt = has_view && v->setmask & 4 ? gpu_format(v->format) : g->format;
+    if (fmt == VK_FORMAT_UNDEFINED) gpu_stop("render target view format %#x", v->format);
+    if (level >= g->levels || layer0 + nlayers > g->layers) gpu_stop("render target view outside its texture");
+    *w = g->width >> level ? g->width >> level : 1;
+    *h = g->height >> level ? g->height >> level : 1;
+    VkComponentMapping id = {0};
+    return view_of(g, nlayers > 1 ? VK_IMAGE_VIEW_TYPE_2D_ARRAY : VK_IMAGE_VIEW_TYPE_2D, fmt, level, 1, layer0, nlayers,
+                   id, g->aspect);
+}
+
+VkImageView gpu_sample_view(VkCommandBuffer cb, NvnTexture *t, const NvnTextureView *v, int has_view,
+                            VkImageViewType type) {
+    GpuImage *g = image_of(cb, t);
+    if ((type == VK_IMAGE_VIEW_TYPE_3D) != (t->target == TARGET_3D)) return gpu_dummy_view(cb, type);
+    uint32_t level0 = has_view && v->setmask & 1 ? v->base_level : 0;
+    uint32_t nlevels = has_view && v->setmask & 1 && v->num_levels ? v->num_levels : g->levels - level0;
+    uint32_t layer0 = has_view && v->setmask & 2 ? v->min_layer : 0;
+    uint32_t nlayers = has_view && v->setmask & 2 && v->num_layers ? v->num_layers : g->layers - layer0;
+    if (level0 >= g->levels || layer0 >= g->layers) return gpu_dummy_view(cb, type);
+    if (level0 + nlevels > g->levels) nlevels = g->levels - level0;
+    if (layer0 + nlayers > g->layers) nlayers = g->layers - layer0;
+    if (type == VK_IMAGE_VIEW_TYPE_2D || type == VK_IMAGE_VIEW_TYPE_3D) nlayers = 1;
+    if (type == VK_IMAGE_VIEW_TYPE_CUBE) {
+        if (nlayers < 6) return gpu_dummy_view(cb, type);
+        nlayers = 6;
+    }
+    VkFormat fmt = has_view && v->setmask & 4 ? gpu_format(v->format) : g->format;
+    if (fmt == VK_FORMAT_UNDEFINED) gpu_stop("texture view format %#x", v->format);
+    VkImageAspectFlags aspect = g->aspect & VK_IMAGE_ASPECT_DEPTH_BIT ? VK_IMAGE_ASPECT_DEPTH_BIT : g->aspect;
+    VkComponentMapping sw = {0};  /* identity */
+    if (aspect == VK_IMAGE_ASPECT_COLOR_BIT) {
+        /* NVN swizzle: 0 zero, 1 one, 2..5 r g b a; all zero means never set (identity) */
+        const uint8_t *s = has_view && v->setmask & 8 ? v->swizzle : t->swizzle;
+        int set = s[0] | s[1] | s[2] | s[3];
+        uint8_t c[4];
+        for (int i = 0; i < 4; i++) c[i] = set && s[i] <= 5 ? s[i] : (uint8_t)(2 + i);
+        if (gpu_format_alpha_one(has_view && v->setmask & 4 ? v->format : t->format))
+            for (int i = 0; i < 4; i++)
+                if (c[i] == 5) c[i] = 1;
+        sw = (VkComponentMapping){(VkComponentSwizzle)(c[0] + 1), (VkComponentSwizzle)(c[1] + 1),
+                                  (VkComponentSwizzle)(c[2] + 1), (VkComponentSwizzle)(c[3] + 1)};
+    }
+    return view_of(g, type, fmt, level0, nlevels, layer0, nlayers, sw, aspect);
+}
+
+/* A black 1x1 texture of each view type, for unbound texture slots. */
+VkImageView gpu_dummy_view(VkCommandBuffer cb, VkImageViewType type) {
+    static NvnTexture dummies[8];
+    NvnTexture *t = &dummies[type & 7];
+    if (!t->gpu) {
+        int cube = type == VK_IMAGE_VIEW_TYPE_CUBE || type == VK_IMAGE_VIEW_TYPE_CUBE_ARRAY;
+        t->target = type == VK_IMAGE_VIEW_TYPE_3D ? TARGET_3D : cube ? TARGET_CUBE : TARGET_2D_ARRAY;
+        t->format = 0x25;  /* RGBA8 */
+        t->pool_flags = POOL_CPU_NO_ACCESS;
+        t->layout.width = t->layout.height = t->layout.depth = t->layout.levels = 1;
+        t->layout.layers = cube ? 6 : 1;
+        t->width = t->height = t->depth = t->levels = 1;
+    }
+    return gpu_sample_view(cb, t, NULL, 0, type);
 }
 
 void gpu_texture_finalize(NvnTexture *t) {
     GpuImage *g = t ? t->gpu : NULL;
     if (!g) return;
     gpu_wait(gpu_submitted(), UINT64_MAX);
+    for (GpuView *v = g->views, *n; v; v = n) {
+        n = v->next;
+        vkDestroyImageView(vk.device, v->view, NULL);
+        free(v);
+    }
     vkDestroyImage(vk.device, g->image, NULL);
     vkFreeMemory(vk.device, g->mem, NULL);
     free(g);
     t->gpu = NULL;
 }
 
-/* The level and layers a render-target view selects (all layers of level 0 without a view). */
+/* ================================================================== samplers */
+
+static VkCompareOp compare_op(uint32_t f) {
+    static const VkCompareOp ops[9] = {VK_COMPARE_OP_ALWAYS, VK_COMPARE_OP_NEVER, VK_COMPARE_OP_LESS,
+                                       VK_COMPARE_OP_EQUAL, VK_COMPARE_OP_LESS_OR_EQUAL, VK_COMPARE_OP_GREATER,
+                                       VK_COMPARE_OP_NOT_EQUAL, VK_COMPARE_OP_GREATER_OR_EQUAL, VK_COMPARE_OP_ALWAYS};
+    return f < 9 ? ops[f] : VK_COMPARE_OP_ALWAYS;
+}
+
+VkSampler gpu_sampler(const NvnSamplerDesc *d) {
+    enum { MAX_SAMPLERS = 1024 };
+    static struct {
+        NvnSamplerDesc desc;
+        VkSampler s;
+    } cache[MAX_SAMPLERS];
+    static int n;
+    for (int i = 0; i < n; i++)
+        if (!memcmp(&cache[i].desc, d, sizeof *d)) return cache[i].s;
+    if (n == MAX_SAMPLERS) gpu_stop("more than %d different samplers", MAX_SAMPLERS);
+    VkSamplerCreateInfo si = {.sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO};
+    si.magFilter = d->mag_filter == 1 ? VK_FILTER_LINEAR : VK_FILTER_NEAREST;
+    uint32_t mf = d->min_filter;
+    si.minFilter = mf == 1 || mf == 3 || mf == 5 ? VK_FILTER_LINEAR : VK_FILTER_NEAREST;
+    si.mipmapMode = mf == 4 || mf == 5 ? VK_SAMPLER_MIPMAP_MODE_LINEAR : VK_SAMPLER_MIPMAP_MODE_NEAREST;
+    VkSamplerAddressMode modes[3];
+    int border = 0;
+    for (int i = 0; i < 3; i++) switch (d->wrap[i]) {
+        case 0: case 7: modes[i] = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE; break;
+        case 1: modes[i] = VK_SAMPLER_ADDRESS_MODE_REPEAT; break;
+        case 2: case 3: modes[i] = VK_SAMPLER_ADDRESS_MODE_MIRROR_CLAMP_TO_EDGE; break;
+        case 4: case 5: modes[i] = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_BORDER, border = 1; break;
+        case 6: modes[i] = VK_SAMPLER_ADDRESS_MODE_MIRRORED_REPEAT; break;
+        default: modes[i] = VK_SAMPLER_ADDRESS_MODE_REPEAT;
+        }
+    si.addressModeU = modes[0], si.addressModeV = modes[1], si.addressModeW = modes[2];
+    si.minLod = d->lod_min;
+    si.maxLod = d->lod_max > 1000 ? VK_LOD_CLAMP_NONE : d->lod_max;
+    if (mf <= 1) si.maxLod = si.minLod + 0.25f;  /* no mipmapping: the base level */
+    if (si.maxLod < si.minLod) si.maxLod = si.minLod;
+    si.mipLodBias = d->lod_bias;
+    if (d->max_aniso > 1) si.anisotropyEnable = VK_TRUE, si.maxAnisotropy = fminf(d->max_aniso, 16);
+    if (d->compare_mode) si.compareEnable = VK_TRUE, si.compareOp = compare_op(d->compare_func);
+    if (border) {  /* nearest standard border colour (custom colours: to do) */
+        const float *c = d->border;
+        si.borderColor = c[3] < 0.5f ? VK_BORDER_COLOR_FLOAT_TRANSPARENT_BLACK
+                         : c[0] + c[1] + c[2] > 1.5f ? VK_BORDER_COLOR_FLOAT_OPAQUE_WHITE
+                                                     : VK_BORDER_COLOR_FLOAT_OPAQUE_BLACK;
+    }
+    cache[n].desc = *d;
+    CHECK(vkCreateSampler(vk.device, &si, NULL, &cache[n].s));
+    return cache[n++].s;
+}
+
+/* ================================================================== command lists */
+
 static VkImageSubresourceRange target_range(const GpuImage *g, const NvnTextureView *v, int has_view) {
     VkImageSubresourceRange r = {g->aspect, 0, 1, 0, g->layers};
     if (has_view && v->setmask & 1) r.baseMipLevel = v->base_level;
@@ -348,18 +640,14 @@ static VkImageSubresourceRange target_range(const GpuImage *g, const NvnTextureV
     return r;
 }
 
-/* ================================================================== command lists */
-
-typedef struct {
-    RenderTargets rt;
-    int ncolor;
-} State;
-
 void gpu_execute(uint64_t handle) {
     host_lock(&gpu_lock);
     VkCommandBuffer cb = begin();
     full_barrier(cb);  /* after the previous submission, and the CPU's writes before it */
-    State s = {0};
+    /* GPU state belongs to the queue, not to a list: it carries over between submissions */
+    static GpuState s;
+    static int state_ready;
+    if (!state_ready) gpu_state_init(&s), state_ready = 1;
     uint64_t at = handle;
     for (int n = 0;; n++) {
         const CmdRec *r = (const CmdRec *)(uintptr_t)at;
@@ -374,18 +662,74 @@ void gpu_execute(uint64_t handle) {
             continue;
         }
         switch (r->op) {
+        /* ---- state */
+        case CMD_BIND_PROGRAM: s.program = (NvnProgram *)(uintptr_t)r->x[0]; break;
+        case CMD_BIND_BLEND: memcpy(s.blend[r->extra[0] & 7], r->extra, 8); break;
+        case CMD_BIND_COLOR: memcpy(s.color, r->extra, 4); break;
+        case CMD_BIND_CHANNEL_MASK: memcpy(&s.channel_mask, r->extra, 4); break;
+        case CMD_BIND_DEPTH_STENCIL: memcpy(s.depth_stencil, r->extra, 8); break;
+        case CMD_BIND_POLYGON: memcpy(s.polygon, r->extra, 4); break;
+        case CMD_BIND_MULTISAMPLE: break;  /* single-sampled for now */
+        case CMD_BIND_VERTEX_ATTRIB:
+            s.nattribs = r->x[0] < 16 ? (uint32_t)r->x[0] : 16;
+            memcpy(s.attribs, r->extra, s.nattribs * 4);
+            break;
+        case CMD_BIND_VERTEX_STREAM:
+            s.nstreams = r->x[0] < 16 ? (uint32_t)r->x[0] : 16;
+            memcpy(s.streams, r->extra, s.nstreams * 8);
+            break;
+        case CMD_BIND_VERTEX_BUFFERS:  /* (index, address, size) */
+            if (r->x[0] < 16) s.vbuf[r->x[0]] = (GpuRange){r->x[1], r->x[2]};
+            break;
+        case CMD_BIND_UNIFORM_BUFFERS:  /* (stage, index, address, size) */
+            if (r->x[0] < STAGES && r->x[1] < UBOS) s.ubo[r->x[0]][r->x[1]] = (GpuRange){r->x[2], r->x[3]};
+            break;
+        case CMD_BIND_STORAGE_BUFFERS:
+            if (r->x[0] < STAGES && r->x[1] < SSBOS) s.ssbo[r->x[0]][r->x[1]] = (GpuRange){r->x[2], r->x[3]};
+            break;
+        case CMD_BIND_TEXTURES:  /* (stage, index, handle) */
+            if (r->x[0] < STAGES && r->x[1] < TEXTURES) s.tex[r->x[0]][r->x[1]] = r->x[2];
+            break;
+        case CMD_BIND_IMAGES:
+            if (r->x[0] < STAGES && r->x[1] < TEXTURES) s.img[r->x[0]][r->x[1]] = r->x[2];
+            break;
+        case CMD_SET_TEXTURE_POOL: s.tex_pool = (const NvnDescPool *)(uintptr_t)r->x[0]; break;
+        case CMD_SET_SAMPLER_POOL: s.sampler_pool = (const NvnDescPool *)(uintptr_t)r->x[0]; break;
         case CMD_SET_RENDER_TARGETS:
+            gpu_end_rendering(cb, &s);
             memcpy(&s.rt, r->extra, sizeof s.rt);
             s.ncolor = (int)r->x[0];
             break;
+        case CMD_SET_VIEWPORTS:  /* (x, y, w, h) */
+            for (int i = 0; i < 4; i++) s.viewport[i] = (int32_t)r->x[i];
+            s.have_viewport = 1;
+            break;
+        case CMD_SET_SCISSORS:
+            for (int i = 0; i < 4; i++) s.scissor[i] = (int32_t)r->x[i];
+            s.have_scissor = 1;
+            break;
+        case CMD_SET_DEPTH_RANGES: s.depth_range[0] = r->f[0], s.depth_range[1] = r->f[1]; break;
+        case CMD_SET_BLEND_COLOR: memcpy(s.blend_color, r->extra, 16); break;
+        case CMD_SET_STENCIL: {  /* (faces, value); x[6]: 0 reference, 1 write mask, 2 value mask */
+            uint32_t *v = r->x[6] == 0 ? s.stencil_ref : r->x[6] == 1 ? s.stencil_mask : s.stencil_value_mask;
+            if (r->x[0] & 1) v[0] = (uint32_t)r->x[1];
+            if (r->x[0] & 2) v[1] = (uint32_t)r->x[1];
+            break;
+        }
+        case CMD_SET_POLYGON_OFFSET: memcpy(s.polygon_offset, r->f, 12); break;
+        case CMD_SET_RASTERIZER_DISCARD: s.rasterizer_discard = (int)r->x[0]; break;
+        case CMD_SET_DEPTH_CLAMP: s.depth_clamp = (int)r->x[0]; break;
+
+        /* ---- work */
         case CMD_CLEAR_COLOR: {  /* (index, colour, mask) */
             int i = (int)r->x[0];
             NvnTexture *t = i < s.ncolor ? s.rt.color[i] : NULL;
             if (!t) break;
+            gpu_end_rendering(cb, &s);
             if ((r->x[2] & 0xF) != 0xF) {
                 static int logged;
-                if (!logged++) fprintf(stderr, "yw4: gpu: clear with channel mask %#x: whole texels for now\n",
-                                       (unsigned)r->x[2]);
+                if (!logged++)
+                    fprintf(stderr, "yw4: gpu: clear with channel mask %#x: whole texels for now\n", (unsigned)r->x[2]);
             }
             GpuImage *g = image_of(cb, t);
             VkClearColorValue color;
@@ -398,6 +742,7 @@ void gpu_execute(uint64_t handle) {
         case CMD_CLEAR_DEPTH_STENCIL: {  /* (depth in s0; depth mask, stencil, stencil mask in x1..x3) */
             NvnTexture *t = s.rt.depth;
             if (!t) break;
+            gpu_end_rendering(cb, &s);
             GpuImage *g = image_of(cb, t);
             VkImageSubresourceRange range = target_range(g, &s.rt.depth_view, s.rt.has_depth_view);
             range.aspectMask = 0;
@@ -409,6 +754,24 @@ void gpu_execute(uint64_t handle) {
             full_barrier(cb);
             break;
         }
+        case CMD_DRAW_ARRAYS: case CMD_DRAW_ELEMENTS:
+            gpu_draw(cb, &s, r);
+            break;
+        case CMD_DRAW_ARRAYS_INDIRECT: case CMD_DRAW_ELEMENTS_INDIRECT: case CMD_DRAW_TRANSFORM_FEEDBACK: {
+            static int logged;
+            if (!logged++) fprintf(stderr, "yw4: gpu: indirect / transform feedback draws skipped for now\n");
+            break;
+        }
+        case CMD_DISPATCH: {
+            gpu_end_rendering(cb, &s);
+            static int logged;
+            if (!logged++) fprintf(stderr, "yw4: gpu: compute dispatches skipped for now\n");
+            break;
+        }
+        case CMD_BARRIER:
+            gpu_end_rendering(cb, &s);
+            full_barrier(cb);
+            break;
         case CMD_REPORT_COUNTER: {  /* (counter, address): NVNcounterData {u64 value, u64 GPU ticks at 614.4 MHz} */
             uint64_t *out = (uint64_t *)(uintptr_t)r->x[1];
             out[0] = 0;
@@ -418,13 +781,14 @@ void gpu_execute(uint64_t handle) {
         }
         at += r->size;
     }
+    gpu_end_rendering(cb, &s);
     submit(cb);
     host_unlock(&gpu_lock);
 }
 
 /* ================================================================== present */
 
-void gpu_present(NvnTexture *t, uint64_t frame) {
+void gpu_present(NvnTexture *t, uint64_t frame, const int crop[4]) {
     host_lock(&gpu_lock);
     GpuImage *g = t->gpu;
     if (!g) {  /* never drawn to: make it (black) */
@@ -433,5 +797,9 @@ void gpu_present(NvnTexture *t, uint64_t frame) {
         submit(cb);
     }
     host_unlock(&gpu_lock);
-    window_present_image(g->image, g->format, g->width, g->height, frame);
+    VkRect2D r = {{0, 0}, {g->width, g->height}};
+    if (crop[2] > 0 && crop[3] > 0 && crop[0] >= 0 && crop[1] >= 0 && (uint32_t)(crop[0] + crop[2]) <= g->width &&
+        (uint32_t)(crop[1] + crop[3]) <= g->height)
+        r = (VkRect2D){{crop[0], crop[1]}, {(uint32_t)crop[2], (uint32_t)crop[3]}};
+    window_present_image(g->image, g->format, r, frame);
 }

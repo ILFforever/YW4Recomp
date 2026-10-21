@@ -30,7 +30,16 @@
     X(vkCmdPipelineBarrier) X(vkCmdCopyBufferToImage) X(vkCmdCopyImageToBuffer) X(vkCmdBlitImage)            \
     X(vkCmdClearColorImage) X(vkCmdClearDepthStencilImage) X(vkDeviceWaitIdle) X(vkResetCommandBuffer)       \
     X(vkWaitSemaphores) X(vkGetSemaphoreCounterValue) X(vkGetMemoryHostPointerPropertiesEXT)                 \
-    X(vkCreateImageView) X(vkDestroyImageView)
+    X(vkCreateImageView) X(vkDestroyImageView) X(vkCreateSampler) X(vkCreateShaderModule)                   \
+    X(vkCreateDescriptorSetLayout) X(vkCreatePipelineLayout) X(vkCreateGraphicsPipelines)                     \
+    X(vkCreateDescriptorPool) X(vkResetDescriptorPool) X(vkAllocateDescriptorSets) X(vkUpdateDescriptorSets) \
+    X(vkCmdBindPipeline) X(vkCmdBindDescriptorSets) X(vkCmdBindVertexBuffers) X(vkCmdBindIndexBuffer)        \
+    X(vkCmdDraw) X(vkCmdDrawIndexed) X(vkCmdBeginRendering) X(vkCmdEndRendering) X(vkCmdSetViewport)         \
+    X(vkCmdSetScissor) X(vkCmdSetCullMode) X(vkCmdSetFrontFace) X(vkCmdSetDepthTestEnable)                  \
+    X(vkCmdSetDepthWriteEnable) X(vkCmdSetDepthCompareOp) X(vkCmdSetStencilTestEnable) X(vkCmdSetStencilOp)  \
+    X(vkCmdSetStencilCompareMask) X(vkCmdSetStencilWriteMask) X(vkCmdSetStencilReference)                    \
+    X(vkCmdSetDepthBias) X(vkCmdSetDepthBiasEnable) X(vkCmdSetBlendConstants) X(vkCmdPushConstants)          \
+    X(vkCmdSetRasterizerDiscardEnable) X(vkCmdSetDepthBoundsTestEnable) X(vkCmdSetPrimitiveRestartEnable)
 
 #define VK_DECLARE_EXTERN(f) extern PFN_##f f;
 VK_GLOBAL_FNS(VK_DECLARE_EXTERN)

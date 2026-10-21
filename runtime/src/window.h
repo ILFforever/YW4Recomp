@@ -16,9 +16,9 @@ void window_run(void (*guest)(void *), void *arg);
  * screenshot when asked (F12, or YW4_SCREENSHOTS=<frame>,<frame>,...). */
 void window_present_rgba(const uint8_t *rgba, uint32_t w, uint32_t h, uint64_t frame);
 
-/* The same for an image of the draw path (gpu.c, decision 0021): w x h colour texels in
- * layout GENERAL, written by earlier submissions on the queue. Screenshots need an RGBA8 or
- * BGRA8 format. */
-void window_present_image(VkImage image, VkFormat format, uint32_t w, uint32_t h, uint64_t frame);
+/* The same for an image of the draw path (gpu.c, decision 0021): the rectangle `rect` of a
+ * colour image in layout GENERAL, written by earlier submissions on the queue, scaled to the
+ * window. Screenshots (of the rectangle) need an RGBA8 or BGRA8 format. */
+void window_present_image(VkImage image, VkFormat format, VkRect2D rect, uint64_t frame);
 
 #endif

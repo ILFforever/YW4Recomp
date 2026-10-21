@@ -26,13 +26,13 @@ of input (each instruction is emitted as a comment above its GLSL):
 Vulkan interface (the runtime builds its descriptor layouts from <key>.json):
 - descriptor set = stage (vertex 0, fragment 1, geometry 2; compute 0)
 - constant buffer slot n -> binding n; texture slot k -> binding 16 + k;
-  storage buffer n -> binding 32 + n
+  storage buffer n -> binding 64 + n (texture slots reach 32)
 - vertex input / varying / colour output n -> location n. Varyings are vec4; integer
   data is carried as float bits (fragment inputs read as integers are `flat`).
-- Push constant `yw4.pos_fix` (vertex and geometry): bit 0 maps the stage's clip-space
-  z from OpenGL's [-w, w] to Vulkan's [0, w] (NVN's default depth mode). The runtime
-  sets it only for the last stage before rasterisation. Y orientation is left to the
-  viewport.
+- Push constant `yw4.pos_fix` (vertex and geometry): bit 0 (vertex) or bit 1 (geometry)
+  maps the stage's clip-space z from OpenGL's [-w, w] to Vulkan's [0, w] (NVN's default
+  depth mode). The runtime sets the bit of the last stage before rasterisation only. Y
+  orientation is left to the viewport.
 """
 
 from __future__ import annotations
@@ -49,7 +49,7 @@ from pathlib import Path
 from tools.yw4 import config
 
 SET = {"vert": 0, "frag": 1, "geom": 2, "comp": 0}
-TEX_BINDING, STORAGE_BINDING = 16, 32
+TEX_BINDING, STORAGE_BINDING = 16, 64
 SWZ = "xyzw"
 GLSL_TYPE = {"f": "vec4", "u": "uvec4", "s": "ivec4"}
 
@@ -734,7 +734,8 @@ class Translator:
         if p.stage in ("vert", "geom"):
             o += ["layout(push_constant) uniform YW4 { uint pos_fix; } yw4;",
                   "void yw4_fix_position() {",
-                  "    if ((yw4.pos_fix & 1u) != 0u) gl_Position.z = (gl_Position.z + gl_Position.w) * 0.5;",
+                  f"    if ((yw4.pos_fix & {1 if p.stage == 'vert' else 2}u) != 0u) "
+                  "gl_Position.z = (gl_Position.z + gl_Position.w) * 0.5;",
                   "}"]
         if "ld2" in p.uses:
             o += ["uvec4 yw4_ld2(uvec4 v, uint half_index) {",
@@ -751,6 +752,19 @@ class Translator:
             o.append("    yw4_fix_position();")
         o.append("}")
         return "\n".join(o) + "\n"
+
+
+def iface_text(iface: dict) -> str:
+    """The interface for the runtime (gpu.c), one item per line:
+    c <slot> (constant buffer), t <slot> <target> (texture), i <slot> (image),
+    s <n> (storage buffer), a <location> f|u (vertex input type)."""
+    lines = [f"c {n}" for n in iface["cbuffers"]]
+    lines += [f"t {k} {v}" for k, v in iface["textures"].items()]
+    lines += [f"i {k}" for k in iface["images"]]
+    lines += [f"s {n}" for n in iface["storage"]]
+    if iface["stage"] == "vert":
+        lines += [f"a {k} {v}" for k, v in iface["inputs"].items()]
+    return "\n".join(lines) + "\n"
 
 
 def translate(key: str, stage: str, text: str) -> tuple[str, dict]:
@@ -801,6 +815,7 @@ def main(argv: list[str] | None = None) -> int:
         g = out / f"{key}.{stage}"
         g.write_text(glsl)
         (out / f"{key}.json").write_text(json.dumps(iface))
+        (out / f"{key}.iface").write_text(iface_text(iface))
         written.append((key, stage, g))
 
     def compile_one(item):

@@ -36,10 +36,18 @@ NVN(nvnDeviceInitialize) {
     fprintf(stderr, "yw4: NVN device initialised (flags %#x), headless\n", G(uint32_t, A(1), 0));
     RET(1);
 }
-/* Window origin (lower/upper left) and depth range (-1..1 or 0..1): they matter to the
- * renderer, which doesn't exist yet. */
-NVN(nvnDeviceSetWindowOriginMode) { (void)c; }
-NVN(nvnDeviceSetDepthMode) { (void)c; }
+/* Window origin (lower/upper left) and clip-space depth (-w..w or 0..w): the draw path
+ * follows them (gpu_draw.c). */
+uint32_t nvn_window_origin, nvn_depth_mode;
+NVN(nvnDeviceSetWindowOriginMode) {
+    if (nvn_window_origin != (uint32_t)A(1))
+        fprintf(stderr, "yw4: NVN window origin %s\n", A(1) ? "upper left" : "lower left");
+    nvn_window_origin = (uint32_t)A(1);
+}
+NVN(nvnDeviceSetDepthMode) {
+    if (nvn_depth_mode != (uint32_t)A(1)) fprintf(stderr, "yw4: NVN depth mode: near at %s\n", A(1) ? "0" : "-w");
+    nvn_depth_mode = (uint32_t)A(1);
+}
 NVN(nvnDeviceRegisterFastClearDepth) { RET(1); }  /* (device, depth): a hint for compression */
 NVN(nvnDeviceFinalizeCommandHandle) { (void)c; }
 /* Handles a shader uses to name descriptors: texture ID in the low 20 bits, sampler ID above. */
@@ -85,12 +93,12 @@ NVN(nvnQueueSubmitCommands) {  /* (queue, count, const NVNcommandHandle*) */
 static uint64_t next_flip;
 
 /* The presented texture, read back from the game's memory as RGBA8 rows for the window. */
-static void show(NvnTexture *t, uint64_t frame) {
+static void show(NvnTexture *t, uint64_t frame, const int crop[4]) {
     static uint8_t *texels, *rgba;
     static size_t cap;
     static uint32_t logged_format;
     if (t && gpu_ready()) {
-        gpu_present(t, frame);
+        gpu_present(t, frame, crop);
         return;
     }
     if (!t || !t->addr || t->target != 1 /* 2D */ || t->layout.fmt->bw != 1) return;
@@ -115,7 +123,7 @@ static void show(NvnTexture *t, uint64_t frame) {
 NVN(nvnQueuePresentTexture) {  /* (queue, window, texture index) */
     NvnWindow *w = HOST(NvnWindow, A(1));
     int index = (int)A(2);
-    if (index >= 0 && index < w->num) show(HOST(NvnTexture, w->textures[index]), frames + 1);
+    if (index >= 0 && index < w->num) show(HOST(NvnTexture, w->textures[index]), frames + 1, w->crop);
     yw4_vsync_start();
     uint64_t now = yw4_vsync_count();
     if (next_flip < now + 1) next_flip = now + 1;
@@ -331,6 +339,7 @@ NVN(nvnTextureWriteTexels) {
     uint64_t slice = (uint64_t)((rw + f->bw - 1) / f->bw) * ((rh + f->bh - 1) / f->bh) * f->bpb;
     const uint8_t *src = AP(3);
     nvn_stats_texels(slice * rd);
+    t->cpu_written = 1;
     if (layered) {
         for (uint32_t k = 0; k < rd; k++)
             tegra_write_region(&t->layout, (uint8_t *)(uintptr_t)t->addr, level, layer + z + k, x, y, 0, rw, rh, 1,
@@ -424,7 +433,11 @@ NVN(nvnSamplerPoolRegisterSamplerBuilder) {  /* (pool, id, builder) */
 /* ================================================================== programs */
 
 NVN(nvnProgramInitialize) { SET_HOST(A(0), alloc(sizeof(NvnProgram))); RET(1); }
-NVN(nvnProgramFinalize) { free(HOST(NvnProgram, A(0))); SET_HOST(A(0), 0); }
+NVN(nvnProgramFinalize) {
+    gpu_program_finalize(HOST(NvnProgram, A(0)));
+    free(HOST(NvnProgram, A(0)));
+    SET_HOST(A(0), 0);
+}
 /* (program, count, const NVNshaderData*): each {u64 code address, const void *control}. The
  * stage comes from the Maxwell shader program header after the 0x30-byte NVN header; code
  * without the header magic is compute. */
@@ -432,6 +445,7 @@ NVN(nvnProgramSetShaders) {
     NvnProgram *p = HOST(NvnProgram, A(0));
     int n = (int)A(1);
     const uint64_t *data = AP(2);
+    gpu_program_finalize(p);
     memset(p, 0, sizeof *p);
     for (int i = 0; i < n; i++) {
         uint64_t code = data[2 * i], control = data[2 * i + 1];

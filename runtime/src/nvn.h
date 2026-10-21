@@ -67,6 +67,7 @@ typedef struct {
     TexLayout layout;
     uint32_t pool_flags;  /* of the memory pool it lives in */
     void *gpu;            /* the draw path's image (gpu.c) */
+    int cpu_written;      /* WriteTexels changed its storage: upload before the GPU uses it */
 } NvnTexture;
 
 typedef struct {
@@ -115,7 +116,12 @@ typedef struct {
 typedef struct {
     NvnShaderStage stages[6];  /* vertex, fragment, geometry, tess control, tess eval, compute */
     uint32_t stage_mask;
+    void *gpu;                 /* the draw path's shaders and layouts (gpu_draw.c) */
 } NvnProgram;
+
+/* Device modes (nvnDeviceSetWindowOriginMode / SetDepthMode): 0 lower-left / near at -w
+ * (OpenGL, the defaults), 1 upper-left / near at 0. */
+extern uint32_t nvn_window_origin, nvn_depth_mode;
 
 typedef struct {
     uint64_t textures[8];  /* guest NVNtexture* */

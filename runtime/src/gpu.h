@@ -16,6 +16,7 @@ int gpu_ready(void);
 void gpu_pool_init(NvnPool *p);  /* imports the pool's memory into Vulkan */
 void gpu_pool_finalize(NvnPool *p);
 void gpu_texture_finalize(NvnTexture *t);
+void gpu_program_finalize(NvnProgram *p);
 
 /* Runs a recorded command list (nvn_cmdbuf.c) on the GPU: one submission. */
 void gpu_execute(uint64_t handle);
@@ -25,7 +26,9 @@ uint64_t gpu_submitted(void);
 /* 0: done before the call, 1: done within the timeout, 2: still running. */
 int gpu_wait(uint64_t seq, uint64_t timeout_ns);
 
-/* Shows texture t (the window's) once everything submitted before has run. */
-void gpu_present(NvnTexture *t, uint64_t frame);
+/* Shows texture t (the window's) once everything submitted before has run: its crop
+ * rectangle (x, y, w, h; all zero: the whole texture), scaled to the window. The game
+ * renders at a lower resolution and crops to it (dynamic resolution). */
+void gpu_present(NvnTexture *t, uint64_t frame, const int crop[4]);
 
 #endif
