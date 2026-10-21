@@ -12,12 +12,10 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#ifdef _WIN32
-#include <windows.h>
-#endif
 #include <time.h>
 
 #include "hle.h"
+#include "ipc.h"
 #include "kernel.h"
 #include "yw4load.h"
 
@@ -29,6 +27,7 @@
 #define R_INVALID_HANDLE 0xE401u
 #define R_INVALID_ENUM 0xF001u
 #define R_TIMEOUT 0xEA01u
+#define R_INVALID_STATE 0xFA01u
 
 #define WAITERS_BIT 0x40000000u  /* in a mutex word: other threads are waiting */
 
@@ -116,11 +115,6 @@ static uint32_t set_heap_size(uint64_t size) {
 
 /* ---- handles */
 
-typedef enum { KOBJ_THREAD = 1 } KType;
-typedef struct {
-    KType type;
-} KObject;
-
 typedef struct {
     KObject obj;
     uint64_t id;
@@ -131,7 +125,7 @@ typedef struct {
 static KObject *handles[MAX_HANDLES];
 static KThread main_thread = {{KOBJ_THREAD}, 1, 0, 0};
 
-static uint32_t handle_new(KObject *o) {
+uint32_t yw4_handle_new(KObject *o) {
     for (uint32_t i = 1; i < MAX_HANDLES; i++)
         if (!handles[i]) {
             handles[i] = o;
@@ -141,24 +135,51 @@ static uint32_t handle_new(KObject *o) {
     exit(3);
 }
 
-static KObject *handle_get(uint32_t h) {
+KObject *yw4_handle_get(uint32_t h) {
     if (h == PSEUDO_CURRENT_THREAD) return &main_thread.obj;  /* one guest thread so far */
     return h - 0x100 < MAX_HANDLES ? handles[h - 0x100] : NULL;
 }
 
+void yw4_handle_close(uint32_t h) {
+    if (h - 0x100 < MAX_HANDLES) handles[h - 0x100] = NULL;
+}
+
 static KThread *thread_get(uint32_t h) {
-    KObject *o = handle_get(h);
+    KObject *o = yw4_handle_get(h);
     return o && o->type == KOBJ_THREAD ? (KThread *)o : NULL;
 }
 
 uint32_t yw4_kernel_init(uint64_t stack, uint64_t stack_size, uint64_t tlr) {
-    for (size_t i = 0; i < yw4_nmodules; i++)
-        region_add(*yw4_modules[i].base, yw4_modules[i].mem_size, MEM_CODE_STATIC, PERM_RX);
+    for (size_t i = 0; i < yw4_nmodules; i++) {  /* as Horizon maps an NSO: three regions */
+        const Yw4Module *m = &yw4_modules[i];
+        uint64_t b = *m->base;
+        region_add(b, m->ro_offset, MEM_CODE_STATIC, PERM_RX);                                  /* .text */
+        region_add(b + m->ro_offset, m->data_offset - m->ro_offset, MEM_CODE_STATIC, PERM_R);    /* .rodata */
+        region_add(b + m->data_offset, m->mem_size - m->data_offset, MEM_CODE_MUTABLE, PERM_RW); /* .data, .bss */
+    }
     region_add(stack, stack_size, MEM_STACK, PERM_RW);
     region_add(tlr, 0x1000, MEM_THREAD_LOCAL, PERM_RW);
     main_thread.priority = (int32_t)yw4_main_priority;
     main_thread.core = 0;  /* the NPDM's default core */
-    return handle_new(&main_thread.obj);
+    return yw4_handle_new(&main_thread.obj);
+}
+
+/* ---- events */
+
+KEvent *yw4_event_new(uint32_t *handle) {
+    KEvent *e = calloc(1, sizeof *e);
+    if (!e) exit(3);
+    e->obj.type = KOBJ_EVENT;
+    *handle = yw4_handle_new(&e->obj);
+    return e;
+}
+
+void yw4_event_signal(KEvent *e) { e->signaled = 1; }
+void yw4_event_clear(KEvent *e) { e->signaled = 0; }
+
+static KEvent *event_get(uint32_t h) {
+    KObject *o = yw4_handle_get(h);
+    return o && o->type == KOBJ_EVENT ? (KEvent *)o : NULL;
 }
 
 /* ---- synchronisation, single guest thread
@@ -171,22 +192,27 @@ uint32_t yw4_kernel_init(uint64_t stack, uint64_t stack_size, uint64_t tlr) {
 
 static uint32_t *u32p(uint64_t a) { return GPTR(a); }
 
-static void sleep_ns(int64_t ns) {
-    if (ns <= 0) return;
-#ifdef _WIN32
-    Sleep((DWORD)((ns + 999999) / 1000000));  /* millisecond resolution; precise waits come with threads */
-#else
-    struct timespec ts = {(time_t)(ns / 1000000000), (long)(ns % 1000000000)};
-    nanosleep(&ts, NULL);
-#endif
-}
+static void sleep_ns(int64_t ns) { yw4_host_sleep_ns(ns); }
 
 static _Noreturn void deadlock(const char *what, uint64_t addr) {
     fprintf(stderr, "yw4: kernel: %s at %#" PRIx64 " would wait forever: only one guest thread exists\n", what, addr);
     exit(3);
 }
 
-/* ---- the system calls */
+/* The guest call stack, from the frame-pointer chain (x29 -> [previous x29, return address]). */
+static void backtrace(const CPUState *ctx) {
+    char where[48];
+    uint64_t fp = ctx->x[29];
+    fprintf(stderr, "     guest backtrace:\n");
+    for (int i = 0; i < 16 && fp >= YW4_GUEST_LO && fp < YW4_GUEST_HI && !(fp & 7); i++) {
+        uint64_t ret = *(const uint64_t *)GPTR(fp + 8);
+        if (!ret) break;
+        fprintf(stderr, "       %s\n", yw4_describe(ret - 4, where));
+        fp = *(const uint64_t *)GPTR(fp);
+    }
+}
+
+
 
 static uint64_t entropy(uint64_t which) {
     /* Fixed for now, so runs are reproducible; real entropy can come later. */
@@ -296,15 +322,74 @@ static void svc(CPUState *ctx, uint32_t imm) {
         __atomic_store_n(u32p(x[0]), 0, __ATOMIC_SEQ_CST);
         x[0] = R_OK;
         return;
+    case 0x11: case 0x12: case 0x17: {  /* SignalEvent / ClearEvent / ResetSignal(handle) */
+        KEvent *e = event_get((uint32_t)x[0]);
+        if (!e) x[0] = R_INVALID_HANDLE;
+        else if (imm == 0x11) yw4_event_signal(e), x[0] = R_OK;
+        else if (imm == 0x17 && !e->signaled) x[0] = R_INVALID_STATE;
+        else yw4_event_clear(e), x[0] = R_OK;
+        return;
+    }
+    case 0x18: {  /* WaitSynchronization(_, handles, count, timeout ns) -> index */
+        const uint32_t *hs = GPTR(x[1]);
+        int32_t n = (int32_t)x[2];
+        int64_t timeout = (int64_t)x[3];
+        for (int32_t i = 0; i < n; i++) {
+            KObject *o = yw4_handle_get(hs[i]);
+            if (!o) { x[0] = R_INVALID_HANDLE; return; }
+            if (o->type == KOBJ_EVENT && ((KEvent *)o)->signaled) { x[0] = R_OK; x[1] = (uint64_t)i; return; }
+        }
+        if (timeout < 0) deadlock("WaitSynchronization", x[1]);  /* nothing else can signal them */
+        sleep_ns(timeout);
+        x[0] = R_TIMEOUT;
+        return;
+    }
+    case 0x16:  /* CloseHandle(handle) */
+        if (!ipc_close_handle((uint32_t)x[0])) yw4_handle_close((uint32_t)x[0]);
+        x[0] = R_OK;
+        return;
+    case 0x1F: {  /* ConnectToNamedPort(_, name) -> session */
+        uint32_t h = 0;
+        x[0] = ipc_connect_named_port((const char *)GPTR(x[1]), &h);
+        x[1] = h;
+        return;
+    }
+    case 0x21:  /* SendSyncRequest(session): the message is in this thread's TLR */
+        x[0] = ipc_send_request((uint32_t)x[0], ctx->tpidrro_el0);
+        return;
+    case 0x22:  /* SendSyncRequestWithUserBuffer(buffer, size, session) */
+        x[0] = ipc_send_request((uint32_t)x[2], x[0]);
+        return;
     case 0x1E:  /* GetSystemTick */
         x[0] = yw4_cntpct();
         return;
+    case 0x45: {  /* CreateEvent -> writable, readable (one object behind both handles) */
+        uint32_t w;
+        KEvent *e = yw4_event_new(&w);
+        x[0] = R_OK;
+        x[1] = w;
+        x[2] = yw4_handle_new(&e->obj);
+        return;
+    }
     case 0x25: {  /* GetThreadId(_, handle) -> id */
         KThread *t = thread_get((uint32_t)x[1]);
         x[0] = t ? R_OK : R_INVALID_HANDLE;
         x[1] = t ? t->id : 0;
         return;
     }
+    case 0x26: {  /* Break(reason, info, size): the program stops itself */
+        char where[48];
+        fprintf(stderr, "yw4: guest svcBreak(reason %#" PRIx64 ") at %s", x[0], yw4_describe(x[30], where));
+        if (x[1] && x[2] == 4)
+            fprintf(stderr, ", result %#x (module %u, description %u)", *u32p(x[1]), *u32p(x[1]) & 0x1FF, *u32p(x[1]) >> 9);
+        fprintf(stderr, "\n");
+        backtrace(ctx);
+        exit(3);
+    }
+    case 0x27:  /* OutputDebugString(text, size) */
+        fprintf(stderr, "[game debug] %.*s\n", (int)x[1], (const char *)GPTR(x[0]));
+        x[0] = R_OK;
+        return;
     case 0x29: {  /* GetInfo(_, id0, handle, id1) -> value */
         uint64_t v = 0;
         x[0] = get_info((uint32_t)x[1], (uint32_t)x[2], x[3], &v);

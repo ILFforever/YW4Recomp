@@ -137,7 +137,8 @@ def image_info(modules: list[Module], relative: list[list], symbolic: list[list]
         init = reloc.read_dynamic(m.image, reloc.read_mod0(m.image)).get(DT_INIT, 0)
         rows.append(f'    {{"{m.name}", "{m.name}.bin", "{hashlib.sha256(m.image).hexdigest()}", {len(m.image)}, '
                     f"{m.mem_size:#x}, {m.preferred:#x}, &{m.base},\n"
-                    f"     relative_{m.name}, {len(relative[i])}, symrelocs_{m.name}, {len(symbolic[i])}, {init:#x}}}")
+                    f"     relative_{m.name}, {len(relative[i])}, symrelocs_{m.name}, {len(symbolic[i])}, {init:#x}, "
+                    f"{m.info['segments']['ro']['mem_offset']:#x}, {m.info['segments']['data']['mem_offset']:#x}}}")
     start = {name: v for name, _, shndx, v in raw_dynsym(modules[1].image, modules[1].info) if shndx}[INIT_START]
     if npdm[:4] != b"META":
         raise RuntimeError("main.npdm: no META header")

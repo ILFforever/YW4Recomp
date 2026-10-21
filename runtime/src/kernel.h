@@ -13,6 +13,25 @@ enum {
 };
 enum { PERM_NONE = 0, PERM_R = 1, PERM_W = 2, PERM_X = 4, PERM_RW = 3, PERM_RX = 5 };
 
+/* Kernel objects behind handles. Each kind embeds KObject first. */
+typedef enum { KOBJ_THREAD = 1, KOBJ_SESSION, KOBJ_EVENT } KType;
+typedef struct {
+    KType type;
+} KObject;
+
+uint32_t yw4_handle_new(KObject *o);
+KObject *yw4_handle_get(uint32_t h);   /* NULL if not a valid handle */
+void yw4_handle_close(uint32_t h);     /* forgets the handle; the object's owner frees it */
+
+/* Events: signalled by the kernel or a service, waited on by the game (WaitSynchronization). */
+typedef struct {
+    KObject obj;
+    int signaled;
+} KEvent;
+KEvent *yw4_event_new(uint32_t *handle);  /* a new unsignalled event and a handle to it */
+void yw4_event_signal(KEvent *e);
+void yw4_event_clear(KEvent *e);
+
 /* Sets up the memory map (modules, main stack, its thread-local region) and the main
  * thread; returns the main thread's handle. Call after yw4_load_modules. */
 uint32_t yw4_kernel_init(uint64_t stack, uint64_t stack_size, uint64_t tlr);

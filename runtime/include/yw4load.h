@@ -39,6 +39,7 @@ typedef struct {
     const Yw4SymReloc *symrelocs;
     size_t nsymrelocs;
     uint64_t dt_init;           /* offset of DT_INIT (registers the module, runs its constructors) */
+    uint64_t ro_offset, data_offset;  /* .text is [0, ro), .rodata [ro, data), .data + .bss [data, mem_size) */
 } Yw4Module;
 
 /* Generated */
@@ -68,6 +69,8 @@ void *yw4_reserve(uint64_t want, size_t size);
 void *yw4_reserve_range(uint64_t want, size_t size);
 int yw4_commit(uint64_t addr, size_t size);
 void yw4_decommit(uint64_t addr, size_t size);
+/* Sleeps the calling host thread (no-op for ns <= 0). */
+void yw4_host_sleep_ns(int64_t ns);
 
 /* Reads, verifies (size + SHA-256) and relocates every module from `exefs_dir`. Returns 0 on
  * success; prints why not. */

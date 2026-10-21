@@ -54,12 +54,13 @@ Tests (synthetic data only): `python -m unittest discover -s tests -t .`
 
 Where the recompiled game stops right now, and how it got there. Newest first. Each step links to the decision record that explains it.
 
-**Current stop:** the recompiled `sdk`'s start-up connects to the service manager (`SVC 0x1F ConnectToNamedPort("sm:")`): the first IPC.
+**Current stop:** the sdk's start-up and the game's `nninitStartup` run (Nintendo's own code, recompiled); `main`'s static constructors have started and ask for the clock service `time:u`.
 
-**Direction change (0014):** the `sdk` will be recompiled too, instead of re-implementing its 578 functions by hand; native code moves to the kernel/service level. Done: every instruction in `sdk` translates; both modules are translated, loaded and linked. Next: IPC and the service manager, then the services the game opens.
+**Direction change (0014):** the `sdk` will be recompiled too, instead of re-implementing its 578 functions by hand; native code moves to the kernel/service level. Done: every instruction in `sdk` translates; both modules are translated, loaded and linked. Next: the services the constructors and `nnMain` open.
 
 | Date | Step | Result |
 |---|---|---|
+| 2026-10-21 | IPC: message codec (HIPC/CMIF, domains, control messages), service manager, first services (`appletOE`, `apm`, `lm`, `aoc:u`, `pctl`), kernel events, `svcBreak` with a guest backtrace, Horizon's three-region module layout in `QueryMemory` (0014) | Through the sdk's start-up and the game's `nninitStartup` into `main`'s constructors |
 | 2026-10-21 | Minimal kernel: address-space layout, `GetInfo`, heap (`SetHeapSize`, reserved and committed as it grows), `QueryMemory`, thread properties, single-thread mutex/condition-variable calls, sleep, system tick (0014) | The sdk's start-up runs through 50 system calls to its first IPC |
 | 2026-10-21 | Translate and load both modules: symbols resolved at translation time in load order, one dispatch over both, start-up through the sdk's own `nn::init::Start` (0014) | 73,844 functions; Nintendo's start-up code runs natively until its first system call |
 | 2026-10-21 | Instructions the `sdk` needs: AES/SHA/PMULL crypto, SIMD integer (`addv`, `smlal`, `sqadd`...), CRC32, fused multiply-add, `MRS`/`MSR`, cache ops, `SVC` (0014) | All of `sdk` translates; 13 forms Pi-checked (120,000 cases), 3 planted bugs caught |
