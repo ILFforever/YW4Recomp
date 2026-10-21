@@ -23,7 +23,7 @@ compute shaders next to it) is an HBH1 container, little-endian:
 Shaders are identified by the FNV-1a 64-bit hash of the assembly text, from "!!NV"
 through "END" inclusive. The runtime computes the same hash from the control
 pointer, so the translated shader is found without knowing which file it came from.
-1,891 programs have 1,201 distinct texts.
+1,891 programs have 1,349 distinct texts.
 
 Writes <work_dir>/shaders/asm/<key>.<stage>.asm and <work_dir>/shaders/index.json.
 """
@@ -32,6 +32,7 @@ from __future__ import annotations
 
 import collections
 import json
+import re
 import struct
 import sys
 from pathlib import Path
@@ -58,10 +59,10 @@ def assembly(control: bytes) -> bytes:
     a = control.find(b"!!NV")
     if a < 0:
         raise ShaderError("no NV_gpu_program5 assembly")
-    end = control.find(b"\nEND", a)
-    if end < 0:
+    m = re.compile(rb"\nEND(?![A-Z])").search(control, a)   # not ENDIF / ENDREP
+    if not m:
         raise ShaderError("assembly has no END")
-    return control[a:end + 4]
+    return control[a:m.end()]
 
 
 def parse(data: bytes) -> dict:

@@ -11,7 +11,8 @@ import unittest
 
 from tools.yw4 import shaders
 
-ASM = b"!!NVfp5.0\nOPTION NV_bindless_texture;\nMOV.F result.color, {1, 0, 0, 1};\nEND"
+ASM = (b"!!NVfp5.0\nOPTION NV_bindless_texture;\nTEMP R0;\nMOV.U.CC R0.x, {1, 0, 0, 0};\n"
+       b"IF NE.x;\nMOV.F result.color, {1, 0, 0, 1};\nENDIF;\nREP.S ;\nBRK (NE.x);\nENDREP;\nEND")
 
 
 def container() -> bytes:
@@ -53,6 +54,64 @@ class ShaderTest(unittest.TestCase):
             shaders.parse(b"XXXX" + container()[4:])
         with self.assertRaises(shaders.ShaderError):
             shaders.assembly(b"!!NVfp5.0\nMOV.F result.color, 0;\n")
+
+
+FRAG = """!!NVfp5.0
+OPTION NV_internal;
+OPTION NV_bindless_texture;
+CBUFFER buf2[] = { program.buffer[2] };
+CBUFFER buf14[] = { program.buffer[14] };
+ATTRIB fragment_attrib[] = { fragment.attrib[0..3] };
+TEMP R0, R1;
+LONG TEMP D0;
+OUTPUT result_color0 = result.color;
+LDC.U64 D0.x, buf14[16];
+TEX.F R0, fragment.attrib[3], handle(D0.x), 2D;
+LDC.F32X4 R1, buf2[R0.x + 32];
+MAD.F32.SAT R1, R0, -R1.x, |R1|;
+TRUNC.U.CC R0.x, R1.y;
+IF NE.x;
+MOV.F R1.y (EQ.x), {0.5, 0, 0, 0}.x;
+ELSE;
+KIL NE.x;
+ENDIF;
+SGE.S R0.z, R0.x, {0xffffffff, 0, 0, 0}.x;
+MOV.F result_color0, R1;
+END"""
+
+
+class TranslatorTest(unittest.TestCase):
+    def test_fragment(self):
+        from recomp import shader
+        glsl, iface = shader.translate("k", "frag", FRAG)
+        for line in (
+            "layout(set = 1, binding = 2, std140) uniform CB2 { uvec4 d[4096]; } cb2;",
+            "layout(set = 1, binding = 18) uniform sampler2D tex2;",       # buf14[16] -> slot 2
+            "layout(location = 3) in vec4 i_attr3;",
+            "R0 = floatBitsToUint(texture(tex2, i_attr3.xy));",
+            "R1 = cb2.d[(R0.x + 32u) >> 4];",
+            "R1 = floatBitsToUint(clamp(fma(uintBitsToFloat(R0), (-uintBitsToFloat(R1.xxxx)), "
+            "abs(uintBitsToFloat(R1))), 0.0, 1.0));",
+            "tu = uvec4(max(trunc(uintBitsToFloat(R1.yyyy)), 0.0));",
+            "cc.x = notEqual(tu, uvec4(0u)).x;",
+            "if (cc.x) {",
+            "R1.y = mix(R1, floatBitsToUint(vec4(0.5, 0.0, 0.0, 0.0).xxxx), not(cc.xxxx)).y;",
+            "if (cc.x) discard;",
+            "R0.z = mix(uvec4(0u), uvec4(0xFFFFFFFFu), greaterThanEqual(ivec4(R0.xxxx), ivec4(-1, 0, 0, 0).xxxx)).z;",
+            "o_color0 = uintBitsToFloat(R1);",
+        ):
+            self.assertIn(line, glsl)
+        self.assertEqual(iface["textures"], {"2": "2D"})
+        self.assertEqual(iface["cbuffers"], [2])
+        self.assertEqual(iface["colors"], [0])
+
+    def test_rejects(self):
+        from recomp import shader
+        for bad in ("LDC.U64 D0.x, buf14[R0.x];", "LDC.F32 R0.x, buf14[0];", "FOO.F R0, R1;",
+                    "IF GT.x;", "TEX.F R0, R1, handle(D9.x), 2D;"):
+            with self.assertRaises(shader.ShaderError, msg=bad):
+                shader.translate("k", "frag", f"!!NVfp5.0\nCBUFFER buf14[] = {{ program.buffer[14] }};\n"
+                                              f"TEMP R0, R1;\n{bad}\nEND")
 
 
 if __name__ == "__main__":
