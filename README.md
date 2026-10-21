@@ -54,12 +54,13 @@ Tests (synthetic data only): `python -m unittest discover -s tests -t .`
 
 Where the recompiled game stops right now, and how it got there. Newest first. Each step links to the decision record that explains it.
 
-**Current stop:** the sdk's start-up and the game's `nninitStartup` run (Nintendo's own code, recompiled); `main`'s static constructors have started and ask for the clock service `time:u`.
+**Current stop:** inside `main`'s static constructors, the game creates its first thread (`SVC 0x8 CreateThread`). Before that: clock, filesystem with the RomFS (4,518 files, served from the owner's folder), and the thread's stack mapping all work.
 
-**Direction change (0014):** the `sdk` will be recompiled too, instead of re-implementing its 578 functions by hand; native code moves to the kernel/service level. Done: every instruction in `sdk` translates; both modules are translated, loaded and linked. Next: the services the constructors and `nnMain` open.
+**Direction change (0014):** the `sdk` will be recompiled too, instead of re-implementing its 578 functions by hand; native code moves to the kernel/service level. Done: every instruction in `sdk` translates; both modules are translated, loaded and linked. Next: real guest threads (host thread per guest thread, blocking synchronisation).
 
 | Date | Step | Result |
 |---|---|---|
+| 2026-10-21 | Clock service with shared memory; filesystem service with a virtual RomFS image of the owner's folder (tables built at start-up, file data read on demand, no copy); `MapMemory` (0014) | Through the constructors' clock and file set-up to the first `CreateThread` |
 | 2026-10-21 | IPC: message codec (HIPC/CMIF, domains, control messages), service manager, first services (`appletOE`, `apm`, `lm`, `aoc:u`, `pctl`), kernel events, `svcBreak` with a guest backtrace, Horizon's three-region module layout in `QueryMemory` (0014) | Through the sdk's start-up and the game's `nninitStartup` into `main`'s constructors |
 | 2026-10-21 | Minimal kernel: address-space layout, `GetInfo`, heap (`SetHeapSize`, reserved and committed as it grows), `QueryMemory`, thread properties, single-thread mutex/condition-variable calls, sleep, system tick (0014) | The sdk's start-up runs through 50 system calls to its first IPC |
 | 2026-10-21 | Translate and load both modules: symbols resolved at translation time in load order, one dispatch over both, start-up through the sdk's own `nn::init::Start` (0014) | 73,844 functions; Nintendo's start-up code runs natively until its first system call |
@@ -77,7 +78,7 @@ Where the recompiled game stops right now, and how it got there. Newest first. E
 Still open from Phase 0: the baseline benchmark (`docs/baseline.md`), which needs the owner's emulator runs.
 
 Known gaps, in the order they will come up:
-- Recompiling `sdk` (0014): IPC and system services; real threads (the kernel is single-threaded so far).
+- Recompiling `sdk` (0014): real threads (the kernel is single-threaded so far), then more system services.
 - `qsort`, `printf`-family float output, `strtod`, `strerror`: same approach as the math functions (musl source, checked against the sdk), not done yet.
 - Threads (one guest thread so far), `setjmp`/`longjmp` for Lua, contents of the 20 data imports (RTTI, `stdio`).
 - C++ exceptions are not supported: nothing in `main` throws (0012).

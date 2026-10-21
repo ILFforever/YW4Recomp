@@ -285,6 +285,26 @@ static void svc(CPUState *ctx, uint32_t imm) {
         x[1] = r == R_OK ? YW4_HEAP_BASE : 0;
         return;
     }
+    case 0x04:  /* MapMemory(dst, src, size): dst aliases src, src is inaccessible meanwhile */
+    case 0x05: {  /* UnmapMemory(dst, src, size) */
+        uint64_t dst = x[0], src = x[1], size = x[2];
+        if ((dst | src | size) & 0xFFF || !size) { x[0] = R_INVALID_SIZE; return; }
+        if (imm == 0x04) {
+            /* Copying is equivalent to aliasing: nothing may touch src until UnmapMemory. */
+            if (yw4_commit(dst, size)) {
+                fprintf(stderr, "yw4: kernel: MapMemory: cannot map %#" PRIx64 " bytes at %#" PRIx64 "\n", size, dst);
+                exit(3);
+            }
+            memcpy(GPTR(dst), GPTR(src), size);
+            region_add(dst, size, dst - YW4_STACK_BASE < YW4_STACK_SIZE ? MEM_STACK : MEM_ALIAS, PERM_RW);
+        } else {
+            memcpy(GPTR(src), GPTR(dst), size);
+            yw4_decommit(dst, size);
+            region_remove(dst);
+        }
+        x[0] = R_OK;
+        return;
+    }
     case 0x06:  /* QueryMemory(MemoryInfo *out, PageInfo *_, addr) -> page info */
         query_memory(x[2], x[0]);
         x[0] = R_OK;

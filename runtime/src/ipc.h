@@ -80,5 +80,6 @@ void svc_lm(Service *s, IpcRequest *req, IpcResponse *resp);
 void svc_aoc_u(Service *s, IpcRequest *req, IpcResponse *resp);
 void svc_pctl(Service *s, IpcRequest *req, IpcResponse *resp);
 void svc_time(Service *s, IpcRequest *req, IpcResponse *resp);
+void svc_fsp_srv(Service *s, IpcRequest *req, IpcResponse *resp);
 
 #endif

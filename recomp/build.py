@@ -115,7 +115,7 @@ def main(argv: list[str] | None = None) -> int:
         return 1
     print(f"built {exe} in {time.time() - t0:.0f} s")
     if args.run:
-        return subprocess.run([str(exe), str(cfg.work_dir / "exefs")]).returncode
+        return subprocess.run([str(exe), str(cfg.work_dir / "exefs"), str(cfg.romfs_dir)]).returncode
     return 0
 
 

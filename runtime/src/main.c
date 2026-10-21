@@ -1,6 +1,6 @@
 /* yw4: load main and the sdk, then start the game the way the Switch does (decision 0014).
  *
- *   yw4 <exefs work directory: main.bin, sdk.bin>
+ *   yw4 <exefs work directory: main.bin, sdk.bin> <romfs folder>
  *
  * rtld is not needed: the loader relocates both modules. Then the main guest thread calls
  * the sdk's nn::init::Start(thread handle, argument region, init, fini), as rtld would. It
@@ -13,6 +13,7 @@
 #include <stdlib.h>
 
 #include "kernel.h"
+#include "romfs.h"
 #include "yw4load.h"
 
 #define TLR_SIZE 0x200              /* Horizon's thread-local region per thread */
@@ -27,11 +28,11 @@ static void init_sdk(CPUState *ctx) { init_module(ctx, YW4_SDK); }
 static void init_main(CPUState *ctx) { init_module(ctx, YW4_MAIN); }
 
 int main(int argc, char **argv) {
-    if (argc != 2) {
-        fprintf(stderr, "usage: yw4 <exefs work directory with main.bin and sdk.bin>\n");
+    if (argc != 3) {
+        fprintf(stderr, "usage: yw4 <exefs work directory with main.bin and sdk.bin> <romfs folder>\n");
         return 1;
     }
-    if (yw4_load_modules(argv[1])) return 1;
+    if (yw4_load_modules(argv[1]) || romfs_open(argv[2])) return 1;
 
     CPUState *ctx = calloc(1, sizeof *ctx);
     uint8_t *stack = yw4_reserve(YW4_STACK_BASE, yw4_main_stack_size);

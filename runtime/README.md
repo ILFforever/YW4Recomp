@@ -12,4 +12,5 @@ So far:
 - `src/hle_math.c`: the 40 libm imports, bit-exact with the sdk: musl 1.1.19 (`third_party/musl`) plus exact instruction models; checked with `python -m tools.yw4.sdkref --check` (decision 0013).
 - `src/crypto.c`: AES/SHA instructions (Crypto extension).
 - `src/ipc.h`, `src/ipc.c`, `src/ipc_simple.h`, `src/svc_*.c`: IPC message codec, sessions and domains, and the native system services (decision 0014). `YW4_TRACE_IPC=1` traces requests; `YW4_IPC_STUB=1` stubs unknown ones for surveying.
+- `src/romfs.h`, `src/romfs.c`: the game's RomFS as a virtual image of the owner's folder (decision 0014).
 - `src/kernel.h`, `src/kernel.c`: the Horizon kernel the recompiled sdk calls through `SVC`: memory map, heap, thread properties, single-thread synchronisation, system counter, `FPCR` writes (decision 0014). `YW4_TRACE_SVC=1` traces calls.

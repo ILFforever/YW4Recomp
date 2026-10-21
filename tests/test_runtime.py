@@ -209,3 +209,93 @@ class StringTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+ROMFS_DRIVER = r"""
+#include <stdio.h>
+#include <stdlib.h>
+#include "romfs.h"
+int main(int argc, char **argv) {
+    if (romfs_open(argv[1])) return 1;
+    uint64_t n = romfs_size();
+    unsigned char *img = malloc(n);
+    /* read in odd-sized pieces, so reads cross file and padding boundaries */
+    for (uint64_t at = 0; at < n;) {
+        uint64_t k = n - at < 37 ? n - at : 37;
+        if (romfs_read(at, img + at, k)) return 2;
+        at += k;
+    }
+    FILE *out = fopen(argv[2], "wb");  /* not stdout: Windows text mode would change the bytes */
+    if (!out || fwrite(img, 1, n, out) != n) return 3;
+    fclose(out);
+    return 0;
+}
+"""
+
+
+def romfs_lookup(img: bytes, path: str) -> bytes | None:
+    """Finds a file the way the game does: through the RomFS hash tables (independent of romfs.c)."""
+    import struct as st
+    hv = st.unpack_from("<10Q", img, 0)
+    dhash, dhash_size, dmeta, _, fhash, fhash_size, fmeta, _, data = hv[1], hv[2], hv[3], hv[4], hv[5], hv[6], hv[7], hv[8], hv[9]
+
+    def h(parent: int, name: bytes) -> int:
+        x = parent ^ 123456789
+        for c in name:
+            x = (((x >> 5) | (x << 27)) & 0xFFFFFFFF) ^ c
+        return x
+
+    def find(table, nbuckets, meta, parent, name, entry_size):
+        e = st.unpack_from("<I", img, table + 4 * (h(parent, name) % nbuckets))[0]
+        while e != 0xFFFFFFFF:
+            off = meta + e
+            p = st.unpack_from("<I", img, off)[0]
+            next_ = st.unpack_from("<I", img, off + entry_size - 8)[0]
+            nl = st.unpack_from("<I", img, off + entry_size - 4)[0]
+            if p == parent and img[off + entry_size:off + entry_size + nl] == name:
+                return e, off
+            e = next_
+        return None
+
+    parts = path.encode().split(b"/")
+    parent = 0
+    for d in parts[:-1]:
+        r = find(dhash, dhash_size // 4, dmeta, parent, d, 0x18)
+        if not r:
+            return None
+        parent = r[0]
+    r = find(fhash, fhash_size // 4, fmeta, parent, parts[-1], 0x20)
+    if not r:
+        return None
+    doff, size = st.unpack_from("<QQ", img, r[1] + 8)
+    return img[data + doff:data + doff + size]
+
+
+class RomfsTest(unittest.TestCase):
+    """The virtual RomFS image (runtime/src/romfs.c): what the game's RomFS code would find."""
+
+    def test_files_found_through_hash_tables(self):
+        rng = random.Random(7)
+        with tempfile.TemporaryDirectory() as t:
+            t = Path(t)
+            root = t / "romfs"
+            want = {}
+            for path, size in [("a.bin", 0), ("b.txt", 1), ("dir1/x", 17), ("dir1/sub/deep/file.dat", 100),
+                               ("dir1/sub/y", 4096 + 3), ("dir2/abcdefghijklm.n", 33), ("z/1", 15), ("z/2", 16)]:
+                p = root / path
+                p.parent.mkdir(parents=True, exist_ok=True)
+                data = bytes(rng.getrandbits(8) for _ in range(size))
+                p.write_bytes(data)
+                want[path] = data
+            (root / "emptydir").mkdir()
+            (t / "drv.c").write_text(ROMFS_DRIVER)
+            exe = t / "romfs.exe"
+            subprocess.run([check.host_cc(), "-std=c11", "-O1", "-Wall", f"-I{RUNTIME / 'src'}", "-o", str(exe),
+                            str(t / "drv.c"), str(RUNTIME / "src" / "romfs.c")], check=True, capture_output=True)
+            subprocess.run([str(exe), str(root), str(t / "image.bin")], capture_output=True, check=True)
+            img = (t / "image.bin").read_bytes()
+            self.assertEqual(int.from_bytes(img[:8], "little"), 0x50)
+            for path, data in want.items():
+                self.assertEqual(romfs_lookup(img, path), data, path)
+            self.assertIsNone(romfs_lookup(img, "dir1/missing"))
+            self.assertIsNone(romfs_lookup(img, "nodir/x"))
