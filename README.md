@@ -4,7 +4,7 @@ A fan static-recompilation project to run Yo-kai Watch 4++ (Nintendo Switch, fin
 
 This repo contains only tools, runtime code, and patches. It contains no game data. Provide your own dump of the final 4++ update.
 
-Status: Phase 2 (recompiler). All of `main` translates to C and compiles; nothing runs yet.
+Status: Phase 3 started. All of `main` translates to C, builds into one executable, loads at its Switch address and runs until the first `sdk` function it needs (`nn::os::QueryMemoryInfo`).
 
 ## Setup
 

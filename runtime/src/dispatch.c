@@ -5,7 +5,13 @@
 
 #include "yw4rt.h"
 
+GuestFn (*yw4_lookup_hook)(uint64_t addr);
+
 GuestFn yw4_lookup(uint64_t addr) {
+    if (yw4_lookup_hook) {
+        GuestFn fn = yw4_lookup_hook(addr);
+        if (fn) return fn;
+    }
     uint64_t off = addr - yw4_image_base;
     size_t lo = 0, hi = yw4_nfuncs;
     while (lo < hi) {

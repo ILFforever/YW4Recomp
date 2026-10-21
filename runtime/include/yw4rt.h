@@ -28,6 +28,9 @@ extern const size_t yw4_nfuncs;
 /* Function at a guest address, or NULL. */
 GuestFn yw4_lookup(uint64_t addr);
 
+/* Optional extra lookup tried first (the loader uses it for import stub addresses). */
+extern GuestFn (*yw4_lookup_hook)(uint64_t addr);
+
 /* Function at a guest address for an indirect call or tail call (BLR, BR).
  * Traps if no translated function starts there. */
 GuestFn yw4_resolve(uint64_t target);
