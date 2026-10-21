@@ -96,15 +96,7 @@ static void query_memory(uint64_t addr, uint64_t out) {
 static uint64_t heap_size;
 
 static uint32_t set_heap_size(uint64_t size) {
-    static int reserved;
     if (size % 0x200000 || size > YW4_HEAP_SIZE) return R_INVALID_SIZE;
-    if (!reserved) {
-        if (!yw4_reserve_range(YW4_HEAP_BASE, YW4_HEAP_SIZE)) {
-            fprintf(stderr, "yw4: kernel: cannot reserve the heap region at %#llx\n", (unsigned long long)YW4_HEAP_BASE);
-            exit(3);
-        }
-        reserved = 1;
-    }
     if (size > heap_size && yw4_commit(YW4_HEAP_BASE + heap_size, size - heap_size)) return R_OUT_OF_MEMORY;
     if (size < heap_size) yw4_decommit(YW4_HEAP_BASE + size, heap_size - size);
     heap_size = size;
@@ -159,6 +151,12 @@ uint32_t yw4_kernel_init(uint64_t stack, uint64_t stack_size, uint64_t tlr) {
     }
     region_add(stack, stack_size, MEM_STACK, PERM_RW);
     region_add(tlr, 0x1000, MEM_THREAD_LOCAL, PERM_RW);
+    /* The heap's range first, then everything else that is free: later mappings are commits. */
+    if (!yw4_reserve_range(YW4_HEAP_BASE, YW4_HEAP_SIZE)) {
+        fprintf(stderr, "yw4: kernel: cannot reserve the heap region at %#llx\n", (unsigned long long)YW4_HEAP_BASE);
+        exit(3);
+    }
+    yw4_reserve_free(YW4_GUEST_LO, YW4_GUEST_HI);
     main_thread.priority = (int32_t)yw4_main_priority;
     main_thread.core = 0;  /* the NPDM's default core */
     return yw4_handle_new(&main_thread.obj);
@@ -180,6 +178,33 @@ void yw4_event_clear(KEvent *e) { e->signaled = 0; }
 static KEvent *event_get(uint32_t h) {
     KObject *o = yw4_handle_get(h);
     return o && o->type == KOBJ_EVENT ? (KEvent *)o : NULL;
+}
+
+/* ---- shared memory */
+
+KSharedMemory *yw4_shared_memory_new(uint64_t size, void (*on_map)(KSharedMemory *), uint32_t *handle) {
+    KSharedMemory *m = calloc(1, sizeof *m);
+    if (!m) exit(3);
+    m->obj.type = KOBJ_SHARED_MEMORY;
+    m->size = size;
+    m->on_map = on_map;
+    *handle = yw4_handle_new(&m->obj);
+    return m;
+}
+
+static uint32_t map_shared_memory(uint32_t handle, uint64_t addr, uint64_t size) {
+    KObject *o = yw4_handle_get(handle);
+    if (!o || o->type != KOBJ_SHARED_MEMORY) return R_INVALID_HANDLE;
+    KSharedMemory *m = (KSharedMemory *)o;
+    if (size != m->size || addr & 0xFFF) return R_INVALID_SIZE;
+    if (yw4_commit(addr, size)) {  /* the game chose a free range (reserved at start-up): put memory there */
+        fprintf(stderr, "yw4: kernel: cannot map shared memory at %#" PRIx64 "\n", addr);
+        exit(3);
+    }
+    region_add(addr, size, MEM_SHARED, PERM_RW);
+    m->guest_addr = addr;
+    if (m->on_map) m->on_map(m);
+    return R_OK;
 }
 
 /* ---- synchronisation, single guest thread
@@ -344,6 +369,9 @@ static void svc(CPUState *ctx, uint32_t imm) {
         x[0] = R_TIMEOUT;
         return;
     }
+    case 0x13:  /* MapSharedMemory(handle, address, size, permission) */
+        x[0] = map_shared_memory((uint32_t)x[0], x[1], x[2]);
+        return;
     case 0x16:  /* CloseHandle(handle) */
         if (!ipc_close_handle((uint32_t)x[0])) yw4_handle_close((uint32_t)x[0]);
         x[0] = R_OK;
@@ -421,12 +449,14 @@ void yw4_svc(CPUState *ctx, uint32_t imm) {
             imm, in[0], in[1], in[2], in[3], ctx->x[0], ctx->x[1]);
 }
 
-/* CNTPCT_EL0 counts at 19.2 MHz on the Switch. */
+/* CNTPCT_EL0 counts at 19.2 MHz from boot on the Switch: here, from the first call. */
 uint64_t yw4_cntpct(void) {
+    static unsigned __int128 start;
     struct timespec ts;
     timespec_get(&ts, TIME_UTC);  /* C11; a monotonic clock comes with threads */
     unsigned __int128 ns = (unsigned __int128)ts.tv_sec * 1000000000u + (uint64_t)ts.tv_nsec;
-    return (uint64_t)(ns * 192u / 10000u);
+    if (!start) start = ns;
+    return (uint64_t)((ns - start) * 192u / 10000u);
 }
 
 void yw4_msr_fpcr(CPUState *ctx, uint64_t value) {

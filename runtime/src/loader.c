@@ -55,7 +55,28 @@ int yw4_commit(uint64_t addr, size_t size) {
 #ifdef _WIN32
     return VirtualAlloc((void *)(uintptr_t)addr, size, MEM_COMMIT, PAGE_READWRITE) ? 0 : -1;
 #else
-    return mprotect((void *)(uintptr_t)addr, size, PROT_READ | PROT_WRITE);
+    if (mprotect((void *)(uintptr_t)addr, size, PROT_READ | PROT_WRITE) == 0) return 0;
+    void *p = mmap((void *)(uintptr_t)addr, size, PROT_READ | PROT_WRITE,  /* not reserved: map it */
+                   MAP_PRIVATE | MAP_ANONYMOUS | MAP_FIXED_NOREPLACE, -1, 0);
+    return p == (void *)(uintptr_t)addr ? 0 : -1;
+#endif
+}
+
+/* Reserves every free part of [lo, hi), so later commits work at any 4 KiB page: Windows
+ * places reservations only at 64 KiB boundaries, but the game picks page-aligned addresses
+ * for its mappings. Linux maps pages anywhere, so there is nothing to do there. */
+void yw4_reserve_free(uint64_t lo, uint64_t hi) {
+#ifdef _WIN32
+    for (uint64_t a = lo; a < hi;) {
+        MEMORY_BASIC_INFORMATION mbi;
+        if (!VirtualQuery((void *)(uintptr_t)a, &mbi, sizeof mbi)) break;
+        uint64_t end = (uint64_t)(uintptr_t)mbi.BaseAddress + mbi.RegionSize;
+        if (end > hi) end = hi;
+        if (mbi.State == MEM_FREE) VirtualAlloc((void *)(uintptr_t)a, (size_t)(end - a), MEM_RESERVE, PAGE_NOACCESS);
+        a = end;
+    }
+#else
+    (void)lo, (void)hi;
 #endif
 }
 

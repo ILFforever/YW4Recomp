@@ -37,6 +37,9 @@ static const struct {
     {"pctl:s", svc_pctl},  /* the same interface with other access rights */
     {"pctl:a", svc_pctl},
     {"pctl:r", svc_pctl},
+    {"time:u", svc_time},
+    {"time:a", svc_time},
+    {"time:s", svc_time},
 };
 
 static int stub_mode(void) {
