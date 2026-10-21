@@ -12,7 +12,7 @@
 </p>
 
 <p align="center">
-  <img src="docs/screenshots/07-title-screen.jpg" alt="The title screen, running recompiled on Windows" width="820">
+  <img src="docs/screenshots/05-title-screen.jpg" alt="The title screen, running recompiled on Windows" width="820">
   <br>
   <sub>The title screen, recompiled and running natively on Windows (Vulkan, 30 frames/s).</sub>
 </p>
@@ -32,12 +32,8 @@ All captured from the recompiled build on Windows (`YW4_SCREENSHOTS`, see [Setup
 |---|---|
 | ![Copyright warning](docs/screenshots/01-copyright-warning.jpg) | ![LEVEL-5 logo](docs/screenshots/02-level5-logo.jpg) |
 | Copyright warning | LEVEL-5 logo |
-| ![Autosave notice](docs/screenshots/03-autosave-notice.jpg) | ![Opening movie](docs/screenshots/04-opening-movie-sky.jpg) |
+| ![Autosave notice](docs/screenshots/03-autosave-notice.jpg) | ![Opening movie](docs/screenshots/04-opening-movie.jpg) |
 | Autosave notice (waits for A) | Opening movie |
-| ![Opening movie](docs/screenshots/05-opening-movie.jpg) | ![Opening movie](docs/screenshots/06-opening-movie-stars.jpg) |
-| Opening movie | Opening movie |
-| ![Title screen](docs/screenshots/07-title-screen.jpg) | ![Title screen, animated background](docs/screenshots/08-title-screen-2.jpg) |
-| Title menu | Title menu (the background animates) |
 
 ## Setup
 
