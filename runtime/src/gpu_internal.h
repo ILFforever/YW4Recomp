@@ -106,5 +106,9 @@ void gpu_state_init(GpuState *s);
 void gpu_end_rendering(VkCommandBuffer cb, GpuState *s);
 /* A draw record: CMD_DRAW_ARRAYS or CMD_DRAW_ELEMENTS. */
 void gpu_draw(VkCommandBuffer cb, GpuState *s, const CmdRec *r);
+/* A CMD_DISPATCH record: runs the bound program's compute shader, then a full barrier. */
+void gpu_dispatch(VkCommandBuffer cb, GpuState *s, const CmdRec *r);
+/* YW4_COMPUTE_TRACE=n: every n frames, the inputs and results of the last dispatch of each compute shader. */
+void gpu_compute_trace(uint64_t frame);
 
 #endif

@@ -27,10 +27,10 @@
 
 #include "gpu_internal.h"
 
-enum { ST_VERT, ST_FRAG, ST_GEOM, NSETS = 3 };
-static const char *const stage_names[NSETS] = {"vert", "frag", "geom"};
-static const VkShaderStageFlagBits stage_bits[NSETS] = {VK_SHADER_STAGE_VERTEX_BIT, VK_SHADER_STAGE_FRAGMENT_BIT,
-                                                        VK_SHADER_STAGE_GEOMETRY_BIT};
+enum { ST_VERT, ST_FRAG, ST_GEOM, NSETS = 3, ST_COMP = 3 };  /* NSETS: the graphics stages; compute is separate */
+static const char *const stage_names[4] = {"vert", "frag", "geom", "comp"};
+static const VkShaderStageFlagBits stage_bits[4] = {VK_SHADER_STAGE_VERTEX_BIT, VK_SHADER_STAGE_FRAGMENT_BIT,
+                                                    VK_SHADER_STAGE_GEOMETRY_BIT, VK_SHADER_STAGE_COMPUTE_BIT};
 /* NVN shader stage numbers used by Bind*(stage, ...) and NvnProgram.stages */
 static const int nvn_stage[NSETS] = {0, 1, 2};
 
@@ -170,10 +170,13 @@ typedef struct {
     Shader *sh[NSETS];
     VkPipelineLayout layout;
     Pipe *pipes;
+    Shader *comp;  /* the compute stage, if any (set 0, no push constants) */
+    VkPipelineLayout comp_layout;
+    VkPipeline comp_pipe;
 } Program;
 
 static Program *program_of(NvnProgram *p) {
-    if (p->gpu) return p->gpu;
+    if (p->gpu) return ((Program *)p->gpu)->sh[ST_VERT] ? p->gpu : NULL;  /* a compute-only program has no draws */
     if (!(p->stage_mask & 1)) return NULL;  /* compute only, or nothing */
     if (p->stage_mask & 0x18) gpu_stop("tessellation shaders");
     Program *g = calloc(1, sizeof *g);
@@ -189,6 +192,25 @@ static Program *program_of(NvnProgram *p) {
                                       .pSetLayouts = layouts, .pushConstantRangeCount = 1, .pPushConstantRanges = &pc};
     CHECK(vkCreatePipelineLayout(vk.device, &pli, NULL, &g->layout));
     p->gpu = g;
+    return g;
+}
+
+/* The program with its compute pipeline made (a compute-only program is a Program with no graphics stages). */
+static Program *compute_program_of(NvnProgram *p) {
+    if (!(p->stage_mask & 0x20)) return NULL;
+    Program *g = p->gpu;
+    if (!g) p->gpu = g = calloc(1, sizeof *g);
+    if (g->comp_pipe) return g;
+    g->comp = shader(p->stages[5].key, ST_COMP);
+    VkPipelineLayoutCreateInfo pli = {.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO, .setLayoutCount = 1,
+                                      .pSetLayouts = &g->comp->layout};
+    CHECK(vkCreatePipelineLayout(vk.device, &pli, NULL, &g->comp_layout));
+    VkComputePipelineCreateInfo ci = {.sType = VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO,
+                                      .stage = {.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
+                                                .stage = VK_SHADER_STAGE_COMPUTE_BIT, .module = g->comp->module,
+                                                .pName = "main"},
+                                      .layout = g->comp_layout};
+    CHECK(vkCreateComputePipelines(vk.device, VK_NULL_HANDLE, 1, &ci, NULL, &g->comp_pipe));
     return g;
 }
 
@@ -585,11 +607,11 @@ static int needs_transfers(const GpuState *s, const Program *g) {
     return 0;
 }
 
-static void bind_sets(VkCommandBuffer cb, const GpuState *s, const Program *g) {
-    for (int st = 0; st < NSETS; st++) {
-        const Shader *sh = g->sh[st];
-        if (!sh || !sh->nb) continue;
-        int ns = nvn_stage[st];
+/* Writes and binds the descriptor set of one shader stage (ns: its NVN stage number) at set `setno`.
+ * 0 if the shader needs something not supported yet (storage images). */
+static int bind_stage_set(VkCommandBuffer cb, const GpuState *s, const Shader *sh, int ns, VkPipelineBindPoint bp,
+                          VkPipelineLayout layout, uint32_t setno) {
+    {
         VkDescriptorSet set = gpu_alloc_set(sh->layout);
         VkWriteDescriptorSet w[MAX_BINDINGS];
         VkDescriptorBufferInfo bi[MAX_BINDINGS];
@@ -609,6 +631,10 @@ static void bind_sets(VkCommandBuffer cb, const GpuState *s, const Program *g) {
                                                         : vk.props.limits.minStorageBufferOffsetAlignment;
                     if (bi[i].offset % align) gpu_stop("buffer address %#" PRIx64 " not %llu-aligned", r.addr,
                                                        (unsigned long long)align);
+                    /* The game binds storage buffers with a size smaller than what its shaders access (the
+                     * brightness shaders get 4 bytes and use 256); the Switch's GPU and emulators don't enforce
+                     * it, so neither do we: the range runs to the end of the memory pool. */
+                    if (b->kind == 's') range = VK_WHOLE_SIZE;
                 }
                 bi[i].range = range;
                 w[i].dstBinding = b->kind == 'c' ? b->slot : 64 + b->slot;
@@ -629,12 +655,110 @@ static void bind_sets(VkCommandBuffer cb, const GpuState *s, const Program *g) {
                 w[i].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
                 w[i].pImageInfo = &ii[i];
             } else {
-                gpu_stop("image bindings in draws");
+                return 0;
             }
         }
         vkUpdateDescriptorSets(vk.device, (uint32_t)sh->nb, w, 0, NULL);
-        vkCmdBindDescriptorSets(cb, VK_PIPELINE_BIND_POINT_GRAPHICS, g->layout, (uint32_t)st, 1, &set, 0, NULL);
+        vkCmdBindDescriptorSets(cb, bp, layout, setno, 1, &set, 0, NULL);
     }
+    return 1;
+}
+
+static void bind_sets(VkCommandBuffer cb, const GpuState *s, const Program *g) {
+    for (int st = 0; st < NSETS; st++) {
+        const Shader *sh = g->sh[st];
+        if (!sh || !sh->nb) continue;
+        if (!bind_stage_set(cb, s, sh, nvn_stage[st], VK_PIPELINE_BIND_POINT_GRAPHICS, g->layout, (uint32_t)st))
+            gpu_stop("image bindings in draws");
+    }
+}
+
+/* ---- YW4_COMPUTE_TRACE: what the compute shaders were given, and what they left in the buffers */
+typedef struct {
+    uint64_t key;
+    GpuRange ubo0, ssbo[3];
+    uint32_t groups[3];
+    int ntex;
+    struct { uint64_t handle; int found; uint32_t w, h, fmt; } tex[4];
+} ComputeTrace;
+static ComputeTrace ctrace[16];
+static int nctrace;
+
+static void record_compute(const GpuState *s, const Shader *sh, const CmdRec *r) {
+    ComputeTrace *t = NULL;
+    for (int i = 0; i < nctrace; i++)
+        if (ctrace[i].key == sh->key) t = &ctrace[i];
+    if (!t && nctrace < 16) t = &ctrace[nctrace++];
+    if (!t) return;
+    memset(t, 0, sizeof *t);
+    t->key = sh->key;
+    t->ubo0 = s->ubo[5][0];
+    for (int i = 0; i < 3; i++) t->ssbo[i] = s->ssbo[5][i];
+    for (int i = 0; i < 3; i++) t->groups[i] = (uint32_t)r->x[i];
+    for (int i = 0; i < sh->nb && t->ntex < 4; i++) {
+        if (sh->b[i].kind != 't') continue;
+        uint64_t h = sh->b[i].slot < TEXTURES ? s->tex[5][sh->b[i].slot] : 0;
+        NvnTexEntry *e = tex_entry(s, h);
+        int k = t->ntex++;
+        t->tex[k].handle = h, t->tex[k].found = e != NULL;
+        if (e) t->tex[k].w = e->tex->width, t->tex[k].h = e->tex->height, t->tex[k].fmt = e->tex->format;
+    }
+}
+
+void gpu_compute_trace(uint64_t frame) {
+    static long every = -1;
+    if (every < 0) every = getenv("YW4_COMPUTE_TRACE") ? atol(getenv("YW4_COMPUTE_TRACE")) : 0;
+    if (!every || frame % (uint64_t)every) return;
+    for (int i = 0; i < nctrace; i++) {
+        const ComputeTrace *t = &ctrace[i];
+        fprintf(stderr, "yw4: compute %016" PRIx64 " frame %" PRIu64 ": groups %ux%ux%u\n", t->key, frame, t->groups[0],
+                t->groups[1], t->groups[2]);
+        for (int k = 0; k < t->ntex; k++)
+            fprintf(stderr, "    texture %d: handle %#" PRIx64 " %s %ux%u format %#x\n", k, t->tex[k].handle,
+                    t->tex[k].found ? "found" : "NOT FOUND", t->tex[k].w, t->tex[k].h, t->tex[k].fmt);
+        if (t->ubo0.size && host_readable(t->ubo0.addr, 16)) {
+            const uint32_t *u = (const uint32_t *)(uintptr_t)t->ubo0.addr;
+            fprintf(stderr, "    ubo0 (%#" PRIx64 "): %#x %#x %#x %#x\n", t->ubo0.addr, u[0], u[1], u[2], u[3]);
+        }
+        for (int b = 0; b < 3; b++) {
+            if (!t->ssbo[b].size || !host_readable(t->ssbo[b].addr, 32)) continue;
+            const float *f = (const float *)(uintptr_t)t->ssbo[b].addr;
+            fprintf(stderr, "    ssbo%d (%#" PRIx64 ", %" PRIu64 " bytes): %g %g %g %g %g %g %g %g\n", b, t->ssbo[b].addr,
+                    t->ssbo[b].size, f[0], f[1], f[2], f[3], f[4], f[5], f[6], f[7]);
+        }
+    }
+}
+
+void gpu_dispatch(VkCommandBuffer cb, GpuState *s, const CmdRec *r) {
+    Program *g = s->program ? compute_program_of(s->program) : NULL;
+    if (!g) {
+        static int logged;
+        if (logged++ < 8) fprintf(stderr, "yw4: gpu: compute dispatch skipped: no compute program bound\n");
+        return;
+    }
+    gpu_end_rendering(cb, s);
+    /* Textures that need uploading or a new image first. */
+    for (int i = 0; i < g->comp->nb; i++) {
+        const Binding *b = &g->comp->b[i];
+        NvnTexEntry *e = b->kind == 't' && b->slot < TEXTURES ? tex_entry(s, s->tex[5][b->slot]) : NULL;
+        if (e && gpu_needs_transfer(e->tex)) image_of(cb, e->tex);
+    }
+    vkCmdBindPipeline(cb, VK_PIPELINE_BIND_POINT_COMPUTE, g->comp_pipe);
+    if (g->comp->nb && !bind_stage_set(cb, s, g->comp, 5, VK_PIPELINE_BIND_POINT_COMPUTE, g->comp_layout, 0)) {
+        static uint64_t seen[16];
+        static int nseen;
+        int known = 0;
+        for (int i = 0; i < nseen; i++) known |= seen[i] == g->comp->key;
+        if (!known && nseen < 16) {
+            seen[nseen++] = g->comp->key;
+            fprintf(stderr, "yw4: gpu: compute shader %016" PRIx64 " uses storage images: dispatch skipped for now\n",
+                    g->comp->key);
+        }
+        return;
+    }
+    record_compute(s, g->comp, r);
+    vkCmdDispatch(cb, (uint32_t)r->x[0], (uint32_t)r->x[1], (uint32_t)r->x[2]);
+    full_barrier(cb);
 }
 
 void gpu_draw(VkCommandBuffer cb, GpuState *s, const CmdRec *r) {

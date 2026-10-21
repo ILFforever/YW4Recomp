@@ -1001,18 +1001,7 @@ void gpu_execute(uint64_t handle) {
             break;
         }
         case CMD_DISPATCH: {
-            gpu_end_rendering(cb, &s);
-            /* each different compute shader, once */
-            static uint64_t seen[64];
-            static int nseen;
-            uint64_t key = s.program ? s.program->stages[5].key : 0;
-            int known = 0;
-            for (int i = 0; i < nseen; i++) known |= seen[i] == key;
-            if (!known && nseen < 64) {
-                seen[nseen++] = key;
-                fprintf(stderr, "yw4: gpu: compute dispatch %ux%ux%u skipped for now (shader %016" PRIx64 ", frame %" PRIu64 ")\n",
-                        (unsigned)r->x[0], (unsigned)r->x[1], (unsigned)r->x[2], key, present_count);
-            }
+            gpu_dispatch(cb, &s, r);
             break;
         }
         case CMD_BARRIER:
@@ -1052,6 +1041,10 @@ void gpu_present(NvnTexture *t, uint64_t frame, const int crop[4]) {
         submit(cb);
     }
     g->last_frame = present_count;
+    if (getenv("YW4_COMPUTE_TRACE")) {
+        gpu_wait(gpu_submitted(), UINT64_MAX);
+        gpu_compute_trace(present_count);
+    }
     host_unlock(&gpu_lock);
     VkRect2D r = {{0, 0}, {g->width, g->height}};
     if (crop[2] > 0 && crop[3] > 0 && crop[0] >= 0 && crop[1] >= 0 && (uint32_t)(crop[0] + crop[2]) <= g->width &&
