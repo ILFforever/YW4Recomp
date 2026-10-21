@@ -89,6 +89,7 @@ typedef struct {
 typedef struct {
     uint64_t code;     /* guest address of the stage's code (NVN header + Maxwell program) */
     uint64_t control;  /* guest address of its control section */
+    uint64_t key;      /* the translated shader: FNV-1a 64 of its assembly (nvn_shader.c) */
 } NvnShaderStage;
 
 typedef struct {
@@ -142,5 +143,15 @@ enum {
 void nvn_execute(uint64_t handle);
 /* Draw and dispatch counts since the last call (for the frame log). */
 uint64_t nvn_take_draw_count(void);
+
+/* nvn_shader.c: shader keys (decision 0020) and YW4_NVN_STATS usage statistics */
+uint64_t nvn_shader_key(uint64_t control);
+int nvn_stats_enabled(void);
+void nvn_stats_shader(uint64_t key, const char *stage);
+void nvn_stats_pool(uint32_t flags, uint64_t size);
+void nvn_stats_texels(uint64_t bytes);
+void nvn_stats_draw(int kind);
+void nvn_stats_program(const void *program);
+void nvn_stats_frame(uint64_t frame);
 
 #endif

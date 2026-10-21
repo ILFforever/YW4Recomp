@@ -120,6 +120,7 @@ NVN(nvnQueuePresentTexture) {  /* (queue, window, texture index) */
     static uint64_t last_frames;
     frames++;
     uint64_t draws = nvn_take_draw_count();
+    nvn_stats_frame(frames);
     if (frames <= 3 || frames % 300 == 0) {
         int64_t now = host_now_ns();
         double fps = last_log ? (double)(frames - last_frames) * 1e9 / (double)(now - last_log) : 0;
@@ -149,6 +150,7 @@ NVN(nvnMemoryPoolInitialize) {
     p->storage = G(uint64_t, A(1), 0x10);
     p->size = G(uint64_t, A(1), 0x18);
     p->flags = G(uint32_t, A(1), 8);
+    nvn_stats_pool(p->flags, p->size);
     SET_HOST(A(0), p);
     RET(1);
 }
@@ -309,6 +311,7 @@ NVN(nvnTextureWriteTexels) {
     const FormatInfo *f = t->layout.fmt;
     uint64_t slice = (uint64_t)((rw + f->bw - 1) / f->bw) * ((rh + f->bh - 1) / f->bh) * f->bpb;
     const uint8_t *src = AP(3);
+    nvn_stats_texels(slice * rd);
     if (layered) {
         for (uint32_t k = 0; k < rd; k++)
             tegra_write_region(&t->layout, (uint8_t *)(uintptr_t)t->addr, level, layer + z + k, x, y, 0, rw, rh, 1,
@@ -421,7 +424,11 @@ NVN(nvnProgramSetShaders) {
             case 2: stage = 3; break;  /* tessellation control */
             case 3: stage = 4; break;  /* tessellation evaluation */
             }
-        p->stages[stage] = (NvnShaderStage){code, control};
+        uint64_t key = nvn_shader_key(control);
+        if (!key) nvn_fatal(c, "shader stage %d has no NV_gpu_program5 assembly in its control section", stage);
+        static const char *const names[6] = {"vert", "frag", "geom", "tesc", "tese", "comp"};
+        nvn_stats_shader(key, names[stage]);
+        p->stages[stage] = (NvnShaderStage){code, control, key};
         p->stage_mask |= 1u << stage;
     }
     RET(1);

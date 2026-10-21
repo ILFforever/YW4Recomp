@@ -218,6 +218,10 @@ void nvn_execute(uint64_t handle) {
         case CMD_DRAW_ARRAYS: case CMD_DRAW_ELEMENTS: case CMD_DRAW_ARRAYS_INDIRECT: case CMD_DRAW_ELEMENTS_INDIRECT:
         case CMD_DRAW_TRANSFORM_FEEDBACK: case CMD_DISPATCH:
             __atomic_add_fetch(&draws, 1, __ATOMIC_RELAXED);
+            nvn_stats_draw(r->op == CMD_DRAW_ARRAYS ? 0 : r->op == CMD_DRAW_ELEMENTS ? 1 : r->op == CMD_DISPATCH ? 3 : 2);
+            break;
+        case CMD_BIND_PROGRAM:
+            nvn_stats_program((const void *)(uintptr_t)r->x[0]);
             break;
         case CMD_SET_RENDER_TARGETS: {
             const RenderTargets *rt = (const RenderTargets *)r->extra;
