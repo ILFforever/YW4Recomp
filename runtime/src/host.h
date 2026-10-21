@@ -45,4 +45,12 @@ void host_timer_init(void);
 /* Nanoseconds from an arbitrary start, never going backwards. */
 int64_t host_now_ns(void);
 
+/* Address space at exactly `want` with no memory behind it yet, in which the host tracks
+ * which pages get written (Windows: MEM_WRITE_WATCH). NULL if the range is taken. */
+void *host_reserve_watched(uint64_t want, size_t size);
+/* Pages of [addr, addr + size) written since the last call for them: fn(page address) for
+ * each, then their tracking starts over. Returns the number of pages, or -1 where the host
+ * can't track writes (then anything may have changed). */
+long host_written_pages(uint64_t addr, uint64_t size, void (*fn)(uint64_t page, void *arg), void *arg);
+
 #endif

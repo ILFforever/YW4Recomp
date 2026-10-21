@@ -238,7 +238,20 @@ static int read_file_part(const File *f, uint64_t at, uint8_t *out, uint64_t n) 
 #else
     if (fseeko(fp, (off_t)at, SEEK_SET)) return -1;
 #endif
-    return fread(out, 1, (size_t)n, fp) == n ? 0 : -1;
+    /* Through a bounce buffer: the OS writing the game's memory directly (a large fread
+     * becomes ReadFile into it) isn't seen by write tracking, and the draw path relies on
+     * that to notice textures loaded after they were made (decision 0021). Callers hold
+     * the kernel lock, so one buffer is enough. */
+    static uint8_t *bounce;
+    enum { BOUNCE = 1 << 20 };
+    if (!bounce && !(bounce = malloc(BOUNCE))) return -1;
+    while (n) {
+        size_t k = n < BOUNCE ? (size_t)n : BOUNCE;
+        if (fread(bounce, 1, k, fp) != k) return -1;
+        memcpy(out, bounce, k);
+        out += k, n -= k;
+    }
+    return 0;
 }
 
 int romfs_read(uint64_t offset, void *out_, uint64_t size) {

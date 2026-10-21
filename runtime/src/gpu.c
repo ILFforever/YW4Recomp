@@ -207,11 +207,58 @@ static void *staging(VkDeviceSize size, VkBuffer *buf) {
 typedef struct {
     VkDeviceMemory mem;
     VkBuffer buf;
+    uint32_t *page_gen;  /* per 4 KiB page: the write generation it was last seen written in */
+    int untracked;       /* the host can't track writes to it: every page counts as written */
 } GpuPool;
+
+/* CPU writes to the pools (decision 0021): once a frame, the pages written since the last
+ * frame get the new write generation (host_written_pages; Windows tracks writes per page).
+ * A texture is uploaded again when one of its pages is newer than its last upload. This
+ * catches what the game writes without WriteTexels, like the movie decoder's frames. */
+static uint32_t write_gen = 1;
+static uint64_t present_count;  /* frames presented */
+
+static void mark_written(uint64_t page, void *arg) {
+    const NvnPool *p = arg;
+    ((GpuPool *)p->gpu)->page_gen[(page - p->storage) >> 12] = write_gen;
+}
 
 enum { MAX_POOLS = 64 };
 static NvnPool *pools[MAX_POOLS];
 static int npools;
+
+static NvnPool *pool_of(uint64_t addr) {
+    for (int i = 0; i < npools; i++)
+        if (addr >= pools[i]->storage && addr < pools[i]->storage + pools[i]->size) return pools[i];
+    return NULL;
+}
+
+static void scan_writes(void) {
+    write_gen++;
+    for (int i = 0; i < npools; i++) {
+        NvnPool *p = pools[i];
+        GpuPool *g = p->gpu;
+        if (p->flags & POOL_CPU_NO_ACCESS || g->untracked) continue;
+        if (host_written_pages(p->storage, p->size, mark_written, p) < 0) g->untracked = 1;
+    }
+}
+
+/* Has the CPU written t's storage since it was last uploaded? */
+static int cpu_changed(const NvnTexture *t) {
+    GpuImage *g = t->gpu;
+    if (!g || !t->addr || t->pool_flags & POOL_CPU_NO_ACCESS || g->checked_gen == write_gen) return 0;
+    NvnPool *p = pool_of(t->addr);
+    if (!p) return 0;
+    const GpuPool *gp = p->gpu;
+    if (gp->untracked) return 1;
+    uint64_t end = t->addr + tegra_total_size(&t->layout);
+    if (end > p->storage + p->size) end = p->storage + p->size;
+    for (uint64_t a = (t->addr - p->storage) >> 12, z = (end - 1 - p->storage) >> 12; a <= z; a++)
+        if (gp->page_gen[a] > g->upload_gen) return 1;
+    g->checked_gen = write_gen;
+    return 0;
+}
+
 
 void gpu_pool_init(NvnPool *p) {
     if (!ready || !p->size) return;
@@ -244,7 +291,10 @@ void gpu_pool_init(NvnPool *p) {
                                 .allocationSize = p->size, .memoryTypeIndex = type};
     CHECK(vkAllocateMemory(vk.device, &mai, NULL, &g->mem));
     CHECK(vkBindBufferMemory(vk.device, g->buf, g->mem, 0));
+    g->page_gen = calloc(p->size >> 12, sizeof *g->page_gen);
+    if (!g->page_gen) gpu_stop("no memory for write tracking");
     p->gpu = g;
+    host_written_pages(p->storage, p->size, mark_written, p);  /* writes before now: uploads read them anyway */
     host_lock(&gpu_lock);
     pools[npools++] = p;
     host_unlock(&gpu_lock);
@@ -260,6 +310,7 @@ void gpu_pool_finalize(NvnPool *p) {
     host_unlock(&gpu_lock);
     vkDestroyBuffer(vk.device, g->buf, NULL);
     vkFreeMemory(vk.device, g->mem, NULL);
+    free(g->page_gen);
     free(g);
     p->gpu = NULL;
 }
@@ -376,6 +427,8 @@ static void upload(VkCommandBuffer cb, NvnTexture *t, GpuImage *g) {
     const TexLayout *L = &t->layout;
     const FormatInfo *f = L->fmt;
     if (g->aspect != VK_IMAGE_ASPECT_COLOR_BIT) return;  /* depth/stencil: rendered, not loaded */
+    g->upload_gen = g->checked_gen = write_gen;
+    g->uploaded_frame = present_count;
     VkDeviceSize total = 0;
     for (uint32_t l = 0; l < g->levels; l++) {
         LevelLayout lv = tegra_level(L, l);
@@ -397,12 +450,30 @@ static void upload(VkCommandBuffer cb, NvnTexture *t, GpuImage *g) {
             .imageExtent = {lv.w, lv.h, lv.d}};
         off += layer_bytes * g->layers;
     }
+    /* YW4_DUMP_UPLOAD=<w>x<h>: write level 0 of uploads of that size to work/dump/ (raw texels) */
+    static const char *dump = (const char *)1;
+    if (dump == (const char *)1) dump = getenv("YW4_DUMP_UPLOAD");
+    char want[32];
+    snprintf(want, sizeof want, "%ux%u", g->width, g->height);
+    static int n;  /* ... the first 8 from frame YW4_DUMP_AT (default 0) on */
+    static uint64_t dump_at = UINT64_MAX;
+    if (dump_at == UINT64_MAX) dump_at = getenv("YW4_DUMP_AT") ? strtoull(getenv("YW4_DUMP_AT"), NULL, 10) : 0;
+    if (dump && !strcmp(dump, want) && n < 8 && present_count >= dump_at) {
+        char path[128];
+        snprintf(path, sizeof path, "work/dump/tex_%" PRIx64 "_%03d_fmt%x.raw", t->addr, n++, t->format);
+        FILE *fp = fopen(path, "wb");
+        if (fp) {
+            LevelLayout lv = tegra_level(L, 0);
+            fwrite(dst, 1, (size_t)lv.wb * lv.hb * f->bpb, fp);
+            fclose(fp);
+            fprintf(stderr, "yw4: gpu: dumped %s\n", path);
+        }
+    }
     full_barrier(cb);
     vkCmdCopyBufferToImage(cb, buf, g->image, VK_IMAGE_LAYOUT_GENERAL, ncopies, copies);
     full_barrier(cb);
 }
 
-static uint64_t present_count;  /* frames presented */
 uint64_t gpu_frames(void) { return present_count; }
 
 /* YW4_GPU_REUPLOAD=1 (diagnostic): upload every CPU-visible texture again once per frame,
@@ -415,7 +486,8 @@ static int reupload(void) {
 
 static int reupload_due(const NvnTexture *t) {
     const GpuImage *g = t->gpu;
-    return reupload() && g && t->addr && !(t->pool_flags & POOL_CPU_NO_ACCESS) && g->uploaded_frame != present_count;
+    if (reupload()) return g && t->addr && !(t->pool_flags & POOL_CPU_NO_ACCESS) && g->uploaded_frame != present_count;
+    return cpu_changed(t);
 }
 
 int gpu_needs_transfer(const NvnTexture *t) { return !t->gpu || t->cpu_written || reupload_due(t); }
@@ -423,10 +495,7 @@ int gpu_needs_transfer(const NvnTexture *t) { return !t->gpu || t->cpu_written |
 GpuImage *image_of(VkCommandBuffer cb, NvnTexture *t) {
     GpuImage *g = t->gpu;
     if (g) {
-        if (reupload_due(t)) {
-            g->uploaded_frame = present_count;
-            upload(cb, t, g);
-        } else if (t->cpu_written) {
+        if (reupload_due(t) || t->cpu_written) {
             t->cpu_written = 0;
             upload(cb, t, g);
         }
@@ -815,6 +884,7 @@ void gpu_execute(uint64_t handle) {
 void gpu_present(NvnTexture *t, uint64_t frame, const int crop[4]) {
     host_lock(&gpu_lock);
     present_count++;
+    scan_writes();
     GpuImage *g = t->gpu;
     if (!g) {  /* never drawn to: make it (black) */
         VkCommandBuffer cb = begin();

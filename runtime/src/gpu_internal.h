@@ -31,6 +31,8 @@ typedef struct {
     uint32_t width, height, depth, layers, levels;
     GpuView *views;  /* cached image views */
     uint64_t uploaded_frame;  /* YW4_GPU_REUPLOAD: the frame it was last uploaded in */
+    uint32_t upload_gen;      /* write generation (gpu.c) when it was last uploaded */
+    uint32_t checked_gen;     /* ... when its pages were last found unchanged */
 } GpuImage;
 
 /* t's image: made on first use, uploaded from the game's memory unless the GPU owns it. */

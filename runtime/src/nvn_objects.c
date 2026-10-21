@@ -296,6 +296,10 @@ NVN(nvnTextureInitialize) {
     t->addr = pool ? HOST(NvnPool, pool)->storage + G(uint64_t, b, 0x40) : 0;
     t->pool_flags = pool ? HOST(NvnPool, pool)->flags : 0;
     if (t->target != TARGET_BUFFER) builder_layout(c, b, &t->layout);
+    if (nvn_stats_enabled() && (t->format == 0x4d || t->flags & FLAG_LINEAR))
+        fprintf(stderr, "yw4: NVN texture %ux%u format %#x flags %#x packaged %#llx stride %llu block height log2 %u\n",
+                t->width, t->height, t->format, t->flags, (unsigned long long)G(uint64_t, b, 0x50),
+                (unsigned long long)t->stride, t->layout.block_height_log2);
     SET_HOST(A(0), t);
     RET(1);
 }

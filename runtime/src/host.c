@@ -99,7 +99,26 @@ int64_t host_now_ns(void) {
     return (int64_t)((unsigned __int128)now.QuadPart * 1000000000u / (uint64_t)freq.QuadPart);
 }
 
+void *host_reserve_watched(uint64_t want, size_t size) {
+    return VirtualAlloc((void *)(uintptr_t)want, size, MEM_RESERVE | MEM_WRITE_WATCH, PAGE_NOACCESS);
+}
+
+long host_written_pages(uint64_t addr, uint64_t size, void (*fn)(uint64_t page, void *arg), void *arg) {
+    enum { BATCH = 4096 };
+    static void *pages[BATCH];  /* callers hold the draw path's lock */
+    long total = 0;
+    for (;;) {
+        ULONG_PTR n = BATCH;
+        DWORD gran;
+        if (GetWriteWatch(WRITE_WATCH_FLAG_RESET, (void *)(uintptr_t)addr, (SIZE_T)size, pages, &n, &gran)) return -1;
+        for (ULONG_PTR i = 0; i < n; i++) fn((uint64_t)(uintptr_t)pages[i], arg);
+        total += (long)n;
+        if (n < BATCH) return total;  /* a full batch: there may be more */
+    }
+}
+
 #else
+#include <sys/mman.h>
 #include <sched.h>
 #include <signal.h>
 
@@ -188,5 +207,21 @@ int64_t host_now_ns(void) {
     struct timespec ts;
     clock_gettime(CLOCK_MONOTONIC, &ts);
     return (int64_t)ts.tv_sec * 1000000000 + ts.tv_nsec;
+}
+
+/* No write tracking on Linux yet (to do: soft-dirty bits or mprotect): plain reservation,
+ * and every page counts as written. */
+void *host_reserve_watched(uint64_t want, size_t size) {
+    void *p = mmap((void *)(uintptr_t)want, size, PROT_NONE, MAP_PRIVATE | MAP_ANONYMOUS | MAP_NORESERVE, -1, 0);
+    if (p != MAP_FAILED && p != (void *)(uintptr_t)want) {
+        munmap(p, size);
+        return NULL;
+    }
+    return p == MAP_FAILED ? NULL : p;
+}
+
+long host_written_pages(uint64_t addr, uint64_t size, void (*fn)(uint64_t page, void *arg), void *arg) {
+    (void)addr, (void)size, (void)fn, (void)arg;
+    return -1;
 }
 #endif
