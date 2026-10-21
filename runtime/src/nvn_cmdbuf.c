@@ -15,6 +15,7 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "gpu.h"
 #include "host.h"
 #include "nvn.h"
 #include "pixels.h"
@@ -115,14 +116,6 @@ NVN(nvnCommandBufferSetSamplerPool) { record(c, CMD_SET_SAMPLER_POOL, 0)->x[0] =
 
 /* SetRenderTargets(cmd, count, const NVNtexture *const *colours, const NVNtextureView *const *views,
  * const NVNtexture *depth, const NVNtextureView *depth view): host textures and copies of the views */
-typedef struct {
-    NvnTexture *color[8];
-    NvnTextureView views[8];
-    uint8_t has_view[8];
-    NvnTexture *depth;
-    NvnTextureView depth_view;
-    uint8_t has_depth_view;
-} RenderTargets;
 NVN(nvnCommandBufferSetRenderTargets) {
     int n = (int)A(1);
     if (n < 0 || n > 8) nvn_fatal(c, "%d render targets", n);
@@ -204,6 +197,8 @@ static void clear_color(NvnTexture *t, const float color[4], uint32_t mask) {
 }
 
 void nvn_execute(uint64_t handle) {
+    int gpu = gpu_ready();
+    if (gpu) gpu_execute(handle);  /* the draw path (0021); the walk below then only counts */
     uint64_t at = handle;
     for (int n = 0;; n++) {
         const CmdRec *r = (const CmdRec *)(uintptr_t)at;
@@ -230,7 +225,7 @@ void nvn_execute(uint64_t handle) {
         }
         case CMD_CLEAR_COLOR: {  /* (index, colour, mask) */
             NvnTexture *t = r->x[0] < 8 ? render_targets[r->x[0]] : NULL;
-            if (t && t->addr) {
+            if (!gpu && t && t->addr) {
                 float color[4];
                 memcpy(color, r->extra, 16);
                 clear_color(t, color, (uint32_t)r->x[2]);
@@ -238,6 +233,7 @@ void nvn_execute(uint64_t handle) {
             break;
         }
         case CMD_REPORT_COUNTER: {  /* (counter, address): NVNcounterData {u64 value, u64 GPU ticks at 614.4 MHz} */
+            if (gpu) break;
             uint64_t *out = (uint64_t *)(uintptr_t)r->x[1];
             out[0] = 0;
             out[1] = (uint64_t)((unsigned __int128)(uint64_t)host_now_ns() * 384 / 625);

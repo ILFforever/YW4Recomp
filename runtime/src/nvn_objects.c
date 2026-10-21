@@ -12,6 +12,7 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "gpu.h"
 #include "host.h"
 #include "kernel.h"
 #include "nvn.h"
@@ -88,6 +89,10 @@ static void show(NvnTexture *t, uint64_t frame) {
     static uint8_t *texels, *rgba;
     static size_t cap;
     static uint32_t logged_format;
+    if (t && gpu_ready()) {
+        gpu_present(t, frame);
+        return;
+    }
     if (!t || !t->addr || t->target != 1 /* 2D */ || t->layout.fmt->bw != 1) return;
     uint32_t w = t->width, h = t->height, bpb = t->layout.fmt->bpb;
     size_t n = (size_t)w * h;
@@ -130,12 +135,16 @@ NVN(nvnQueuePresentTexture) {  /* (queue, window, texture index) */
     }
 }
 
-/* Headless, GPU work is done the moment it is submitted: every sync is signalled. */
-NVN(nvnQueueFenceSync) { (void)c; }  /* (queue, sync, condition, flags) */
-NVN(nvnQueueWaitSync) { RET(1); }    /* (queue, sync): the GPU waits; nothing to wait for */
-NVN(nvnSyncInitialize) { RET(1); }
+/* Syncs: a sync keeps, in the game's NVNsync at +0, the number of the GPU submission it
+ * waits for (gpu.c, decision 0021). Fencing takes the latest submission. Headless, GPU work
+ * is done the moment it is submitted and every sync is signalled. One queue: the GPU never
+ * has to wait for another queue (QueueWaitSync). */
+NVN(nvnQueueFenceSync) { G(uint64_t, A(1), 0) = gpu_submitted(); }  /* (queue, sync, condition, flags) */
+NVN(nvnQueueWaitSync) { RET(1); }  /* (queue, sync) */
+NVN(nvnSyncInitialize) { G(uint64_t, A(0), 0) = 0; RET(1); }
 NVN(nvnSyncFinalize) { (void)c; }
-NVN(nvnSyncWait) { RET(0); }  /* (sync, timeout) -> NVN_SYNC_WAIT_RESULT_ALREADY_SIGNALED */
+/* (sync, timeout ns) -> ALREADY_SIGNALED 0, CONDITION_SATISFIED 1, TIMEOUT_EXPIRED 2 */
+NVN(nvnSyncWait) { RET(gpu_wait(G(uint64_t, A(0), 0), A(1))); }
 
 /* ================================================================== memory pools
  * Builder: device@0 flags@8 storage@0x10 size@0x18. GPU addresses are guest addresses. */
@@ -151,10 +160,18 @@ NVN(nvnMemoryPoolInitialize) {
     p->size = G(uint64_t, A(1), 0x18);
     p->flags = G(uint32_t, A(1), 8);
     nvn_stats_pool(p->flags, p->size);
+    if (nvn_stats_enabled())
+        fprintf(stderr, "yw4: NVN pool %#llx + %#llx flags %#x\n", (unsigned long long)p->storage,
+                (unsigned long long)p->size, p->flags);
+    gpu_pool_init(p);
     SET_HOST(A(0), p);
     RET(1);
 }
-NVN(nvnMemoryPoolFinalize) { free(HOST(NvnPool, A(0))); SET_HOST(A(0), 0); }
+NVN(nvnMemoryPoolFinalize) {
+    gpu_pool_finalize(HOST(NvnPool, A(0)));
+    free(HOST(NvnPool, A(0)));
+    SET_HOST(A(0), 0);
+}
 NVN(nvnMemoryPoolMap) { RET(HOST(NvnPool, A(0))->storage); }
 NVN(nvnMemoryPoolGetFlags) { RET(HOST(NvnPool, A(0))->flags); }
 NVN(nvnMemoryPoolFlushMappedRange) { (void)c; }       /* CPU writes visible to the GPU: shared memory already */
@@ -186,9 +203,6 @@ NVN(nvnBufferInvalidateMappedRange) { (void)c; }
  *   packaged layout@0x50 */
 
 #define TB(T, off) G(T, A(0), off)
-enum { TARGET_1D, TARGET_2D, TARGET_3D, TARGET_1D_ARRAY, TARGET_2D_ARRAY, TARGET_2D_MS, TARGET_2D_MS_ARRAY,
-       TARGET_RECTANGLE, TARGET_CUBE, TARGET_CUBE_ARRAY, TARGET_BUFFER };
-#define FLAG_LINEAR 0x10u
 
 NVN(nvnTextureBuilderSetDevice) { TB(uint64_t, 0) = A(1); }
 NVN(nvnTextureBuilderSetDefaults) {
@@ -272,11 +286,16 @@ NVN(nvnTextureInitialize) {
     t->stride = G(uint64_t, b, 0x30);
     uint64_t pool = G(uint64_t, b, 0x38);
     t->addr = pool ? HOST(NvnPool, pool)->storage + G(uint64_t, b, 0x40) : 0;
+    t->pool_flags = pool ? HOST(NvnPool, pool)->flags : 0;
     if (t->target != TARGET_BUFFER) builder_layout(c, b, &t->layout);
     SET_HOST(A(0), t);
     RET(1);
 }
-NVN(nvnTextureFinalize) { free(HOST(NvnTexture, A(0))); SET_HOST(A(0), 0); }
+NVN(nvnTextureFinalize) {
+    gpu_texture_finalize(HOST(NvnTexture, A(0)));
+    free(HOST(NvnTexture, A(0)));
+    SET_HOST(A(0), 0);
+}
 NVN(nvnTextureGetFlags) { RET(HOST(NvnTexture, A(0))->flags); }
 
 /* (texture, view or NULL, const NVNcopyRegion*, data): tightly packed linear texels into the
@@ -461,6 +480,7 @@ NVN(nvnWindowSetPresentInterval) {
 }
 NVN(nvnWindowAcquireTexture) {  /* (window, sync signalled when it's free, int *index) */
     NvnWindow *w = HOST(NvnWindow, A(0));
+    if (A(1)) G(uint64_t, A(1), 0) = gpu_submitted();  /* free once what was submitted has run */
     *(int32_t *)AP(2) = w->next;
     w->next = (w->next + 1) % w->active;
     RET(0);  /* NVN_WINDOW_ACQUIRE_TEXTURE_RESULT_SUCCESS */

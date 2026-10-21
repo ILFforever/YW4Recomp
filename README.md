@@ -62,6 +62,7 @@ Where the recompiled game stops right now, and how it got there. Newest first. E
 
 | Date | Step | Result |
 |---|---|---|
+| 2026-10-21 | Draw path step 1 (0021): the game's memory pools imported into Vulkan in place, an image per texture, clears and present on the GPU, NVN syncs on a timeline semaphore; shader keys checked at run time | 30 frames/s on the GPU path; all 33 shaders the game loads are translated; still black (draws next) |
 | 2026-10-21 | Shader translator `recomp/shader.py`: NV_gpu_program5 → GLSL 4.60, registers as raw bits, one statement per instruction with the source as a comment, Vulkan binding scheme (0020) | All 1,349 programs translate and compile to SPIR-V (`--check` with glslang) |
 | 2026-10-21 | Decision: translate shaders from their shipped NV_gpu_program5 assembly; `HBH1` container decoded; `tools/yw4/shaders.py` extracts them keyed by a hash of the text (0020) | 1,891 programs, 1,349 distinct, 58 opcodes, structured control flow; all texture handles come from fixed slots, so no bindless emulation |
 | 2026-10-21 | The window: SDL3 (fetched, pinned) and Vulkan (headers vendored, loaded at run time); colour clears on the CPU; present reads the window texture back; screenshots (0019) | A window at 30 frames/s, black until draws exist; clears show a 1600×900 deferred G-buffer |

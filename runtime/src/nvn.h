@@ -50,7 +50,14 @@ void nvn_guest_call(CPUState *c, uint64_t fn);
 typedef struct {
     uint64_t storage, size;  /* guest address of the game's memory */
     uint32_t flags;
+    void *gpu;               /* the draw path's import of it (gpu.c) */
 } NvnPool;
+
+#define POOL_CPU_NO_ACCESS 0x1u  /* NVN memory pool flag: only the GPU uses it (render targets) */
+
+enum { TARGET_1D, TARGET_2D, TARGET_3D, TARGET_1D_ARRAY, TARGET_2D_ARRAY, TARGET_2D_MS, TARGET_2D_MS_ARRAY,
+       TARGET_RECTANGLE, TARGET_CUBE, TARGET_CUBE_ARRAY, TARGET_BUFFER };
+#define FLAG_LINEAR 0x10u
 
 typedef struct {
     uint32_t target, format, flags, width, height, depth, levels, samples, ds_mode;
@@ -58,6 +65,8 @@ typedef struct {
     uint64_t stride;
     uint64_t addr;  /* guest address of the texels */
     TexLayout layout;
+    uint32_t pool_flags;  /* of the memory pool it lives in */
+    void *gpu;            /* the draw path's image (gpu.c) */
 } NvnTexture;
 
 typedef struct {
@@ -79,6 +88,17 @@ typedef struct {
     NvnTextureView view;
     int has_view;
 } NvnTexEntry;
+
+/* The data of a SetRenderTargets record (x[0] = colour count): host textures and copies
+ * of the views */
+typedef struct {
+    NvnTexture *color[8];
+    NvnTextureView views[8];
+    uint8_t has_view[8];
+    NvnTexture *depth;
+    NvnTextureView depth_view;
+    uint8_t has_depth_view;
+} RenderTargets;
 
 typedef struct {
     uint64_t addr;

@@ -15,38 +15,23 @@
 #include <stdlib.h>
 #include <string.h>
 
-#define VK_NO_PROTOTYPES
 #include <SDL3/SDL.h>
 #include <SDL3/SDL_vulkan.h>
-#include <vulkan/vulkan.h>
 
 #include "host.h"
+#include "gpu.h"
+#include "vk.h"
 #include "window.h"
 
 #define GUEST_HOST_STACK (64u << 20)  /* the guest main thread's host stack: reserved, not committed */
 
-/* ---- Vulkan functions, loaded at run time */
+/* ---- Vulkan functions (vk.h), loaded at run time */
 
-#define GLOBAL_FNS(X) X(vkCreateInstance) X(vkEnumerateInstanceLayerProperties)
-#define INSTANCE_FNS(X)                                                                                         \
-    X(vkEnumeratePhysicalDevices) X(vkGetPhysicalDeviceProperties) X(vkGetPhysicalDeviceQueueFamilyProperties) \
-    X(vkGetPhysicalDeviceSurfaceSupportKHR) X(vkGetPhysicalDeviceSurfaceCapabilitiesKHR)                       \
-    X(vkGetPhysicalDeviceSurfaceFormatsKHR) X(vkGetPhysicalDeviceMemoryProperties) X(vkCreateDevice)          \
-    X(vkGetDeviceProcAddr)
-#define DEVICE_FNS(X)                                                                                         \
-    X(vkGetDeviceQueue) X(vkCreateSwapchainKHR) X(vkDestroySwapchainKHR) X(vkGetSwapchainImagesKHR)          \
-    X(vkAcquireNextImageKHR) X(vkQueuePresentKHR) X(vkCreateCommandPool) X(vkAllocateCommandBuffers)         \
-    X(vkBeginCommandBuffer) X(vkEndCommandBuffer) X(vkQueueSubmit) X(vkCreateFence) X(vkWaitForFences)       \
-    X(vkResetFences) X(vkCreateSemaphore) X(vkDestroySemaphore) X(vkCreateBuffer) X(vkDestroyBuffer)         \
-    X(vkGetBufferMemoryRequirements) X(vkAllocateMemory) X(vkFreeMemory) X(vkBindBufferMemory) X(vkMapMemory) \
-    X(vkCreateImage) X(vkDestroyImage) X(vkGetImageMemoryRequirements) X(vkBindImageMemory)                  \
-    X(vkCmdPipelineBarrier) X(vkCmdCopyBufferToImage) X(vkCmdBlitImage) X(vkCmdClearColorImage)              \
-    X(vkDeviceWaitIdle)
-
-#define DECLARE(f) static PFN_##f f;
-GLOBAL_FNS(DECLARE)
-INSTANCE_FNS(DECLARE)
-DEVICE_FNS(DECLARE)
+#define DEFINE(f) PFN_##f f;
+VK_GLOBAL_FNS(DEFINE)
+VK_INSTANCE_FNS(DEFINE)
+VK_DEVICE_FNS(DEFINE)
+VkContext vk = {.queue_lock = HOST_LOCK_INIT};
 
 /* ---- state */
 
@@ -54,12 +39,7 @@ static SDL_Window *window;
 static int have_vulkan;
 static HostLock present_lock = HOST_LOCK_INIT;
 
-static VkInstance instance;
 static VkSurfaceKHR surface;
-static VkPhysicalDevice gpu;
-static VkDevice device;
-static VkQueue queue;
-static uint32_t queue_family;
 static VkCommandPool pool;
 static VkCommandBuffer cmd;
 static VkFence fence;
@@ -86,18 +66,18 @@ static int vk_fail(const char *what, VkResult r) {
     return -1;
 }
 
-static uint32_t memory_type(uint32_t bits, VkMemoryPropertyFlags want) {
+uint32_t vk_memory_type(uint32_t bits, VkMemoryPropertyFlags want) {
     VkPhysicalDeviceMemoryProperties p;
-    vkGetPhysicalDeviceMemoryProperties(gpu, &p);
+    vkGetPhysicalDeviceMemoryProperties(vk.gpu, &p);
     for (uint32_t i = 0; i < p.memoryTypeCount; i++)
         if (bits & (1u << i) && (p.memoryTypes[i].propertyFlags & want) == want) return i;
     return UINT32_MAX;
 }
 
 static int create_swapchain(void) {
-    vkDeviceWaitIdle(device);
+    vkDeviceWaitIdle(vk.device);
     VkSurfaceCapabilitiesKHR caps;
-    vkGetPhysicalDeviceSurfaceCapabilitiesKHR(gpu, surface, &caps);
+    vkGetPhysicalDeviceSurfaceCapabilitiesKHR(vk.gpu, surface, &caps);
     VkExtent2D extent = caps.currentExtent;
     if (extent.width == UINT32_MAX) {
         int w, h;
@@ -107,9 +87,9 @@ static int create_swapchain(void) {
     if (!extent.width || !extent.height) return -1;  /* minimised: try again later */
     uint32_t nfmt = 0;
     VkSurfaceFormatKHR fmts[64];
-    vkGetPhysicalDeviceSurfaceFormatsKHR(gpu, surface, &nfmt, NULL);
+    vkGetPhysicalDeviceSurfaceFormatsKHR(vk.gpu, surface, &nfmt, NULL);
     if (nfmt > 64) nfmt = 64;
-    vkGetPhysicalDeviceSurfaceFormatsKHR(gpu, surface, &nfmt, fmts);
+    vkGetPhysicalDeviceSurfaceFormatsKHR(vk.gpu, surface, &nfmt, fmts);
     VkSurfaceFormatKHR fmt = fmts[0];
     for (uint32_t i = 0; i < nfmt; i++)  /* UNORM: the game's bytes are shown as they are, as on the Switch */
         if (fmts[i].format == VK_FORMAT_B8G8R8A8_UNORM || fmts[i].format == VK_FORMAT_R8G8B8A8_UNORM) fmt = fmts[i];
@@ -132,18 +112,18 @@ static int create_swapchain(void) {
         .clipped = VK_TRUE,
         .oldSwapchain = old,
     };
-    VkResult r = vkCreateSwapchainKHR(device, &ci, NULL, &swapchain);
-    if (old) vkDestroySwapchainKHR(device, old, NULL);
+    VkResult r = vkCreateSwapchainKHR(vk.device, &ci, NULL, &swapchain);
+    if (old) vkDestroySwapchainKHR(vk.device, old, NULL);
     if (r != VK_SUCCESS) {
         swapchain = VK_NULL_HANDLE;
         return vk_fail("vkCreateSwapchainKHR", r);
     }
     nswap = 8;
-    vkGetSwapchainImagesKHR(device, swapchain, &nswap, swap_images);
+    vkGetSwapchainImagesKHR(vk.device, swapchain, &nswap, swap_images);
     for (uint32_t i = 0; i < nswap; i++) {
-        if (rendered[i]) vkDestroySemaphore(device, rendered[i], NULL);
+        if (rendered[i]) vkDestroySemaphore(vk.device, rendered[i], NULL);
         VkSemaphoreCreateInfo si = {.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO};
-        vkCreateSemaphore(device, &si, NULL, &rendered[i]);
+        vkCreateSemaphore(vk.device, &si, NULL, &rendered[i]);
     }
     swap_extent = extent;
     swapchain_stale = 0;
@@ -157,7 +137,7 @@ static int vk_init(void) {
         return -1;
     }
 #define LOAD_GLOBAL(f) f = (PFN_##f)gipa(NULL, #f);
-    GLOBAL_FNS(LOAD_GLOBAL)
+    VK_GLOBAL_FNS(LOAD_GLOBAL)
     Uint32 next = 0;
     const char *const *exts = SDL_Vulkan_GetInstanceExtensions(&next);
     const char *layers[1];
@@ -174,15 +154,15 @@ static int vk_init(void) {
         fprintf(stderr, "yw4: window: Vulkan validation %s\n", nlayers ? "on" : "asked for, but the layer isn't installed");
     }
     VkApplicationInfo app = {.sType = VK_STRUCTURE_TYPE_APPLICATION_INFO, .pApplicationName = "yw4",
-                             .apiVersion = VK_API_VERSION_1_1};
+                             .apiVersion = VK_API_VERSION_1_3};
     VkInstanceCreateInfo ici = {.sType = VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO, .pApplicationInfo = &app,
                                 .enabledExtensionCount = next, .ppEnabledExtensionNames = exts,
                                 .enabledLayerCount = nlayers, .ppEnabledLayerNames = layers};
-    VkResult r = vkCreateInstance(&ici, NULL, &instance);
+    VkResult r = vkCreateInstance(&ici, NULL, &vk.instance);
     if (r != VK_SUCCESS) return vk_fail("vkCreateInstance", r);
-#define LOAD_INSTANCE(f) f = (PFN_##f)gipa(instance, #f);
-    INSTANCE_FNS(LOAD_INSTANCE)
-    if (!SDL_Vulkan_CreateSurface(window, instance, NULL, &surface)) {
+#define LOAD_INSTANCE(f) f = (PFN_##f)gipa(vk.instance, #f);
+    VK_INSTANCE_FNS(LOAD_INSTANCE)
+    if (!SDL_Vulkan_CreateSurface(window, vk.instance, NULL, &surface)) {
         fprintf(stderr, "yw4: window: SDL_Vulkan_CreateSurface: %s\n", SDL_GetError());
         return -1;
     }
@@ -190,7 +170,7 @@ static int vk_init(void) {
     /* A GPU with a queue that draws and presents to this window; a discrete one if there is one. */
     uint32_t ngpu = 16;
     VkPhysicalDevice gpus[16];
-    vkEnumeratePhysicalDevices(instance, &ngpu, gpus);
+    vkEnumeratePhysicalDevices(vk.instance, &ngpu, gpus);
     int best = -1;
     for (uint32_t i = 0; i < ngpu; i++) {
         uint32_t nq = 32;
@@ -203,7 +183,7 @@ static int vk_init(void) {
             VkPhysicalDeviceProperties p;
             vkGetPhysicalDeviceProperties(gpus[i], &p);
             int score = p.deviceType == VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU ? 2 : 1;
-            if (score > best) best = score, gpu = gpus[i], queue_family = q;
+            if (score > best) best = score, vk.gpu = gpus[i], vk.queue_family = q;
             break;
         }
     }
@@ -212,62 +192,116 @@ static int vk_init(void) {
         return -1;
     }
     VkPhysicalDeviceProperties props;
-    vkGetPhysicalDeviceProperties(gpu, &props);
-    fprintf(stderr, "yw4: window: Vulkan on %s\n", props.deviceName);
+    vkGetPhysicalDeviceProperties(vk.gpu, &props);
+    vk.props = props;
+    fprintf(stderr, "yw4: window: Vulkan on %s (API %u.%u.%u)\n", props.deviceName, VK_API_VERSION_MAJOR(props.apiVersion),
+            VK_API_VERSION_MINOR(props.apiVersion), VK_API_VERSION_PATCH(props.apiVersion));
+    if (props.apiVersion < VK_API_VERSION_1_3) {
+        fprintf(stderr, "yw4: window: the draw path needs Vulkan 1.3 (decision 0021)\n");
+        return -1;
+    }
+    const char *dexts[2] = {VK_KHR_SWAPCHAIN_EXTENSION_NAME};
+    uint32_t ndexts = 1;
+    {
+        uint32_t n = 0;
+        vkEnumerateDeviceExtensionProperties(vk.gpu, NULL, &n, NULL);
+        VkExtensionProperties *e = calloc(n, sizeof *e);
+        vkEnumerateDeviceExtensionProperties(vk.gpu, NULL, &n, e);
+        for (uint32_t i = 0; i < n; i++)
+            if (!strcmp(e[i].extensionName, VK_EXT_EXTERNAL_MEMORY_HOST_EXTENSION_NAME)) vk.host_import = 1;
+        free(e);
+    }
+    if (vk.host_import) {
+        dexts[ndexts++] = VK_EXT_EXTERNAL_MEMORY_HOST_EXTENSION_NAME;
+        VkPhysicalDeviceExternalMemoryHostPropertiesEXT hp = {
+            .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_EXTERNAL_MEMORY_HOST_PROPERTIES_EXT};
+        VkPhysicalDeviceProperties2 p2 = {.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2, .pNext = &hp};
+        vkGetPhysicalDeviceProperties2(vk.gpu, &p2);
+        vk.host_import_align = hp.minImportedHostPointerAlignment;
+    }
+    fprintf(stderr, "yw4: window: host memory import: %s\n", vk.host_import ? "yes" : "no (no draw path)");
+
+    /* Features: what the translated shaders (0020) and NVN's state use, where the GPU has it. */
+    VkPhysicalDeviceVulkan13Features f13 = {.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_3_FEATURES};
+    VkPhysicalDeviceVulkan12Features f12 = {.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES, .pNext = &f13};
+    VkPhysicalDeviceVulkan11Features f11 = {.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_1_FEATURES, .pNext = &f12};
+    VkPhysicalDeviceFeatures2 have = {.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2, .pNext = &f11};
+    vkGetPhysicalDeviceFeatures2(vk.gpu, &have);
+    const VkPhysicalDeviceFeatures *h = &have.features;
+    VkPhysicalDeviceVulkan13Features e13 = {.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_3_FEATURES,
+                                            .dynamicRendering = f13.dynamicRendering,
+                                            .synchronization2 = f13.synchronization2};
+    VkPhysicalDeviceVulkan12Features e12 = {.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES, .pNext = &e13,
+                                            .timelineSemaphore = f12.timelineSemaphore};
+    VkPhysicalDeviceVulkan11Features e11 = {.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_1_FEATURES, .pNext = &e12,
+                                            .shaderDrawParameters = f11.shaderDrawParameters};
+    VkPhysicalDeviceFeatures2 enable = {
+        .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2, .pNext = &e11,
+        .features = {.geometryShader = h->geometryShader, .independentBlend = h->independentBlend,
+                     .depthClamp = h->depthClamp, .depthBiasClamp = h->depthBiasClamp,
+                     .fillModeNonSolid = h->fillModeNonSolid, .samplerAnisotropy = h->samplerAnisotropy,
+                     .fragmentStoresAndAtomics = h->fragmentStoresAndAtomics,
+                     .vertexPipelineStoresAndAtomics = h->vertexPipelineStoresAndAtomics,
+                     .shaderStorageImageWriteWithoutFormat = h->shaderStorageImageWriteWithoutFormat,
+                     .imageCubeArray = h->imageCubeArray, .dualSrcBlend = h->dualSrcBlend, .logicOp = h->logicOp,
+                     .multiDrawIndirect = h->multiDrawIndirect, .textureCompressionBC = h->textureCompressionBC}};
+    if (!f13.dynamicRendering || !f12.timelineSemaphore || !f11.shaderDrawParameters) {
+        fprintf(stderr, "yw4: window: the GPU lacks dynamic rendering, timeline semaphores or draw parameters\n");
+        return -1;
+    }
 
     float prio = 1.0f;
-    VkDeviceQueueCreateInfo qci = {.sType = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO, .queueFamilyIndex = queue_family,
+    VkDeviceQueueCreateInfo qci = {.sType = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO, .queueFamilyIndex = vk.queue_family,
                                    .queueCount = 1, .pQueuePriorities = &prio};
-    const char *dexts[] = {VK_KHR_SWAPCHAIN_EXTENSION_NAME};
-    VkDeviceCreateInfo dci = {.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO, .queueCreateInfoCount = 1,
-                              .pQueueCreateInfos = &qci, .enabledExtensionCount = 1, .ppEnabledExtensionNames = dexts};
-    r = vkCreateDevice(gpu, &dci, NULL, &device);
+    VkDeviceCreateInfo dci = {.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO, .pNext = &enable, .queueCreateInfoCount = 1,
+                              .pQueueCreateInfos = &qci, .enabledExtensionCount = ndexts, .ppEnabledExtensionNames = dexts};
+    r = vkCreateDevice(vk.gpu, &dci, NULL, &vk.device);
     if (r != VK_SUCCESS) return vk_fail("vkCreateDevice", r);
-#define LOAD_DEVICE(f) f = (PFN_##f)vkGetDeviceProcAddr(device, #f);
-    DEVICE_FNS(LOAD_DEVICE)
-    vkGetDeviceQueue(device, queue_family, 0, &queue);
+#define LOAD_DEVICE(f) f = (PFN_##f)vkGetDeviceProcAddr(vk.device, #f);
+    VK_DEVICE_FNS(LOAD_DEVICE)
+    vkGetDeviceQueue(vk.device, vk.queue_family, 0, &vk.queue);
 
     VkCommandPoolCreateInfo pci = {.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO,
                                    .flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT,
-                                   .queueFamilyIndex = queue_family};
-    vkCreateCommandPool(device, &pci, NULL, &pool);
+                                   .queueFamilyIndex = vk.queue_family};
+    vkCreateCommandPool(vk.device, &pci, NULL, &pool);
     VkCommandBufferAllocateInfo cai = {.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO, .commandPool = pool,
                                        .level = VK_COMMAND_BUFFER_LEVEL_PRIMARY, .commandBufferCount = 1};
-    vkAllocateCommandBuffers(device, &cai, &cmd);
+    vkAllocateCommandBuffers(vk.device, &cai, &cmd);
     VkFenceCreateInfo fci = {.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO, .flags = VK_FENCE_CREATE_SIGNALED_BIT};
-    vkCreateFence(device, &fci, NULL, &fence);
+    vkCreateFence(vk.device, &fci, NULL, &fence);
     VkSemaphoreCreateInfo sci = {.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO};
-    vkCreateSemaphore(device, &sci, NULL, &acquired);
+    vkCreateSemaphore(vk.device, &sci, NULL, &acquired);
     return create_swapchain();
 }
 
 /* The staging buffer and the image a w x h frame goes through. */
 static int frame_resources(uint32_t w, uint32_t h) {
     if (frame && w == frame_w && h == frame_h) return 0;
-    vkDeviceWaitIdle(device);
-    if (frame) vkDestroyImage(device, frame, NULL), vkFreeMemory(device, frame_mem, NULL);
-    if (staging) vkDestroyBuffer(device, staging, NULL), vkFreeMemory(device, staging_mem, NULL);
+    vkDeviceWaitIdle(vk.device);
+    if (frame) vkDestroyImage(vk.device, frame, NULL), vkFreeMemory(vk.device, frame_mem, NULL);
+    if (staging) vkDestroyBuffer(vk.device, staging, NULL), vkFreeMemory(vk.device, staging_mem, NULL);
     VkBufferCreateInfo bci = {.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO, .size = (VkDeviceSize)w * h * 4,
-                              .usage = VK_BUFFER_USAGE_TRANSFER_SRC_BIT};
-    vkCreateBuffer(device, &bci, NULL, &staging);
+                              .usage = VK_BUFFER_USAGE_TRANSFER_SRC_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT};
+    vkCreateBuffer(vk.device, &bci, NULL, &staging);
     VkMemoryRequirements mr;
-    vkGetBufferMemoryRequirements(device, staging, &mr);
+    vkGetBufferMemoryRequirements(vk.device, staging, &mr);
     VkMemoryAllocateInfo mai = {.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO, .allocationSize = mr.size,
-                                .memoryTypeIndex = memory_type(mr.memoryTypeBits, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT |
+                                .memoryTypeIndex = vk_memory_type(mr.memoryTypeBits, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT |
                                                                                       VK_MEMORY_PROPERTY_HOST_COHERENT_BIT)};
-    if (vkAllocateMemory(device, &mai, NULL, &staging_mem) != VK_SUCCESS) return -1;
-    vkBindBufferMemory(device, staging, staging_mem, 0);
-    vkMapMemory(device, staging_mem, 0, VK_WHOLE_SIZE, 0, &staging_ptr);
+    if (vkAllocateMemory(vk.device, &mai, NULL, &staging_mem) != VK_SUCCESS) return -1;
+    vkBindBufferMemory(vk.device, staging, staging_mem, 0);
+    vkMapMemory(vk.device, staging_mem, 0, VK_WHOLE_SIZE, 0, &staging_ptr);
     VkImageCreateInfo ici = {.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO, .imageType = VK_IMAGE_TYPE_2D,
                              .format = VK_FORMAT_R8G8B8A8_UNORM, .extent = {w, h, 1}, .mipLevels = 1, .arrayLayers = 1,
                              .samples = VK_SAMPLE_COUNT_1_BIT, .tiling = VK_IMAGE_TILING_OPTIMAL,
                              .usage = VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT};
-    vkCreateImage(device, &ici, NULL, &frame);
-    vkGetImageMemoryRequirements(device, frame, &mr);
+    vkCreateImage(vk.device, &ici, NULL, &frame);
+    vkGetImageMemoryRequirements(vk.device, frame, &mr);
     mai.allocationSize = mr.size;
-    mai.memoryTypeIndex = memory_type(mr.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
-    if (vkAllocateMemory(device, &mai, NULL, &frame_mem) != VK_SUCCESS) return -1;
-    vkBindImageMemory(device, frame, frame_mem, 0);
+    mai.memoryTypeIndex = vk_memory_type(mr.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
+    if (vkAllocateMemory(vk.device, &mai, NULL, &frame_mem) != VK_SUCCESS) return -1;
+    vkBindImageMemory(vk.device, frame, frame_mem, 0);
     frame_w = w, frame_h = h;
     return 0;
 }
@@ -277,7 +311,9 @@ static void barrier(VkImage image, VkImageLayout from, VkImageLayout to, VkAcces
                               .oldLayout = from, .newLayout = to, .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
                               .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED, .image = image,
                               .subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1}};
-    vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0, NULL, 0, NULL, 1, &b);
+    /* ALL_COMMANDS: also waits for the draw path's earlier submissions writing `image` */
+    vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0, NULL, 0, NULL, 1,
+                         &b);
 }
 
 static void save_screenshot(const uint8_t *rgba, uint32_t w, uint32_t h, uint64_t n) {
@@ -302,29 +338,37 @@ static int screenshot_wanted(uint64_t n) {
     return 0;
 }
 
-void window_present_rgba(const uint8_t *rgba, uint32_t w, uint32_t h, uint64_t n) {
-    if (screenshot_wanted(n)) save_screenshot(rgba, w, h, n);
-    if (!have_vulkan || !w || !h) return;
-    host_lock(&present_lock);
-    if ((swapchain_stale && create_swapchain()) || frame_resources(w, h)) goto out;
-    vkWaitForFences(device, 1, &fence, VK_TRUE, UINT64_MAX);
+/* Scales src (w x h colour texels) into the next swapchain image and presents it.
+ * layout UNDEFINED: src is `frame`, filled from the staging buffer (the CPU path).
+ * Otherwise src is the draw path's image in that layout (GENERAL, decision 0021); with
+ * `readback` it is also copied into the staging buffer and this waits for the GPU, so the
+ * caller can read the texels. present_lock held, frame_resources done. 0 when presented. */
+static int present_image(VkImage src, VkImageLayout layout, uint32_t w, uint32_t h, int readback) {
+    vkWaitForFences(vk.device, 1, &fence, VK_TRUE, UINT64_MAX);
     uint32_t index;
-    VkResult r = vkAcquireNextImageKHR(device, swapchain, UINT64_MAX, acquired, VK_NULL_HANDLE, &index);
+    VkResult r = vkAcquireNextImageKHR(vk.device, swapchain, UINT64_MAX, acquired, VK_NULL_HANDLE, &index);
     if (r == VK_ERROR_OUT_OF_DATE_KHR) {
         swapchain_stale = 1;
-        goto out;
+        return -1;
     }
-    vkResetFences(device, 1, &fence);
-    memcpy(staging_ptr, rgba, (size_t)w * h * 4);
-
+    vkResetFences(vk.device, 1, &fence);
     VkCommandBufferBeginInfo bi = {.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,
                                    .flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT};
     vkBeginCommandBuffer(cmd, &bi);
-    barrier(frame, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 0, VK_ACCESS_TRANSFER_WRITE_BIT);
-    VkBufferImageCopy copy = {.imageSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1}, .imageExtent = {w, h, 1}};
-    vkCmdCopyBufferToImage(cmd, staging, frame, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &copy);
-    barrier(frame, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
-            VK_ACCESS_TRANSFER_WRITE_BIT, VK_ACCESS_TRANSFER_READ_BIT);
+    if (layout == VK_IMAGE_LAYOUT_UNDEFINED) {
+        barrier(src, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 0, VK_ACCESS_TRANSFER_WRITE_BIT);
+        VkBufferImageCopy copy = {.imageSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1}, .imageExtent = {w, h, 1}};
+        vkCmdCopyBufferToImage(cmd, staging, src, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &copy);
+        barrier(src, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+                VK_ACCESS_TRANSFER_WRITE_BIT, VK_ACCESS_TRANSFER_READ_BIT);
+        layout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
+    } else {
+        barrier(src, layout, layout, VK_ACCESS_MEMORY_WRITE_BIT, VK_ACCESS_TRANSFER_READ_BIT);
+        if (readback) {
+            VkBufferImageCopy copy = {.imageSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1}, .imageExtent = {w, h, 1}};
+            vkCmdCopyImageToBuffer(cmd, src, layout, staging, 1, &copy);
+        }
+    }
     VkImage dst = swap_images[index];
     barrier(dst, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 0, VK_ACCESS_TRANSFER_WRITE_BIT);
     VkClearColorValue black = {{0, 0, 0, 1}};
@@ -341,8 +385,7 @@ void window_present_rgba(const uint8_t *rgba, uint32_t w, uint32_t h, uint64_t n
                         .srcOffsets = {{0, 0, 0}, {(int32_t)w, (int32_t)h, 1}},
                         .dstSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1},
                         .dstOffsets = {{x0, y0, 0}, {x0 + (int32_t)bw, y0 + (int32_t)bh, 1}}};
-    vkCmdBlitImage(cmd, frame, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, dst, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &blit,
-                   VK_FILTER_LINEAR);
+    vkCmdBlitImage(cmd, src, layout, dst, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &blit, VK_FILTER_LINEAR);
     barrier(dst, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR, VK_ACCESS_TRANSFER_WRITE_BIT, 0);
     vkEndCommandBuffer(cmd);
 
@@ -350,13 +393,49 @@ void window_present_rgba(const uint8_t *rgba, uint32_t w, uint32_t h, uint64_t n
     VkSubmitInfo si = {.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO, .waitSemaphoreCount = 1, .pWaitSemaphores = &acquired,
                        .pWaitDstStageMask = &wait_stage, .commandBufferCount = 1, .pCommandBuffers = &cmd,
                        .signalSemaphoreCount = 1, .pSignalSemaphores = &rendered[index]};
-    vkQueueSubmit(queue, 1, &si, fence);
     VkPresentInfoKHR pi = {.sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR, .waitSemaphoreCount = 1,
                            .pWaitSemaphores = &rendered[index], .swapchainCount = 1, .pSwapchains = &swapchain,
                            .pImageIndices = &index};
-    r = vkQueuePresentKHR(queue, &pi);
+    host_lock(&vk.queue_lock);
+    vkQueueSubmit(vk.queue, 1, &si, fence);
+    r = vkQueuePresentKHR(vk.queue, &pi);
+    host_unlock(&vk.queue_lock);
     if (r == VK_ERROR_OUT_OF_DATE_KHR || r == VK_SUBOPTIMAL_KHR) swapchain_stale = 1;
-out:
+    if (readback) vkWaitForFences(vk.device, 1, &fence, VK_TRUE, UINT64_MAX);
+    return 0;
+}
+
+void window_present_rgba(const uint8_t *rgba, uint32_t w, uint32_t h, uint64_t n) {
+    if (screenshot_wanted(n)) save_screenshot(rgba, w, h, n);
+    if (!have_vulkan || !w || !h) return;
+    host_lock(&present_lock);
+    if (!(swapchain_stale && create_swapchain()) && !frame_resources(w, h)) {
+        vkWaitForFences(vk.device, 1, &fence, VK_TRUE, UINT64_MAX);  /* the staging buffer is free */
+        memcpy(staging_ptr, rgba, (size_t)w * h * 4);
+        present_image(frame, VK_IMAGE_LAYOUT_UNDEFINED, w, h, 0);
+    }
+    host_unlock(&present_lock);
+}
+
+void window_present_image(VkImage image, VkFormat format, uint32_t w, uint32_t h, uint64_t n) {
+    if (!have_vulkan || !w || !h) return;
+    int shot = screenshot_wanted(n);
+    int bgra = format == VK_FORMAT_B8G8R8A8_UNORM || format == VK_FORMAT_B8G8R8A8_SRGB;
+    if (shot && !bgra && format != VK_FORMAT_R8G8B8A8_UNORM && format != VK_FORMAT_R8G8B8A8_SRGB) {
+        fprintf(stderr, "yw4: screenshot of Vulkan format %d not supported yet\n", (int)format);
+        shot = 0;
+    }
+    host_lock(&present_lock);
+    if (!(swapchain_stale && create_swapchain()) && !frame_resources(w, h) &&
+        !present_image(image, VK_IMAGE_LAYOUT_GENERAL, w, h, shot) && shot) {
+        uint8_t *px = staging_ptr;
+        if (bgra)
+            for (size_t i = 0; i < (size_t)w * h * 4; i += 4) {
+                uint8_t t = px[i];
+                px[i] = px[i + 2], px[i + 2] = t;
+            }
+        save_screenshot(px, w, h, n);
+    }
     host_unlock(&present_lock);
 }
 
@@ -387,6 +466,7 @@ void window_run(void (*guest)(void *), void *arg) {
             fprintf(stderr, "yw4: window: no Vulkan; the window stays empty\n");
         } else {
             have_vulkan = 1;
+            gpu_init();
         }
     }
     if (!window) {

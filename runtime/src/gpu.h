@@ -1,0 +1,31 @@
+/* The draw path: NVN command lists run on Vulkan (decision 0021).
+ *
+ * Without a window (YW4_HEADLESS=1) or a capable GPU, gpu_ready() is 0 and NVN keeps its
+ * headless behaviour (0017, 0019): lists are walked on the CPU and every sync is signalled.
+ */
+#ifndef YW4_GPU_H
+#define YW4_GPU_H
+
+#include <stdint.h>
+
+#include "nvn.h"
+
+void gpu_init(void);  /* window.c, once the Vulkan device exists */
+int gpu_ready(void);
+
+void gpu_pool_init(NvnPool *p);  /* imports the pool's memory into Vulkan */
+void gpu_pool_finalize(NvnPool *p);
+void gpu_texture_finalize(NvnTexture *t);
+
+/* Runs a recorded command list (nvn_cmdbuf.c) on the GPU: one submission. */
+void gpu_execute(uint64_t handle);
+
+/* Submissions are numbered from 1; an NVN sync remembers a number and waits for it. */
+uint64_t gpu_submitted(void);
+/* 0: done before the call, 1: done within the timeout, 2: still running. */
+int gpu_wait(uint64_t seq, uint64_t timeout_ns);
+
+/* Shows texture t (the window's) once everything submitted before has run. */
+void gpu_present(NvnTexture *t, uint64_t frame);
+
+#endif
