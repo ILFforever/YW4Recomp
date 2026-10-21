@@ -122,7 +122,7 @@ def main(argv: list[str] | None = None) -> int:
         print(f"{len(errors)} file(s) failed", file=sys.stderr)
         return 1
     exe = cfg.work_dir / "build" / "yw4.exe"
-    libs = [*sdl_libs, "-pthread"] + (["-lwinmm"] if sys.platform == "win32" else [])  # winmm: timeBeginPeriod
+    libs = [*sdl_libs, "-pthread"] + (["-lwinmm", "-lpsapi"] if sys.platform == "win32" else [])  # winmm: timeBeginPeriod
     if sys.platform == "win32":
         shutil.copy2(sdl / "bin" / "SDL3.dll", exe.parent / "SDL3.dll")  # found next to yw4.exe
     link = subprocess.run([cc, "-o", str(exe), *map(str, objs), *libs], capture_output=True, text=True)

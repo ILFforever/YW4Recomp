@@ -45,6 +45,9 @@ void host_timer_init(void);
 /* Nanoseconds from an arbitrary start, never going backwards. */
 int64_t host_now_ns(void);
 
+/* This process's CPU time so far (user + kernel, all threads) and its memory in use (working set), for the performance log. */
+void host_process_usage(int64_t *cpu_ns, uint64_t *rss_bytes);
+
 /* Address space at exactly `want` with no memory behind it yet, in which the host tracks
  * which pages get written (Windows: MEM_WRITE_WATCH). NULL if the range is taken. */
 void *host_reserve_watched(uint64_t want, size_t size);

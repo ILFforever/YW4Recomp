@@ -172,7 +172,9 @@ static void show(NvnTexture *t, uint64_t frame, const int crop[4]) {
 NVN(nvnQueuePresentTexture) {  /* (queue, window, texture index) */
     NvnWindow *w = HOST(NvnWindow, A(1));
     int index = (int)A(2);
+    int64_t perf_enter = host_now_ns();
     if (index >= 0 && index < w->num) show(HOST(NvnTexture, w->textures[index]), frames + 1, w->crop);
+    int64_t perf_shown = host_now_ns();
     yw4_vsync_start();
     uint64_t now = yw4_vsync_count();
     if (next_flip < now + 1) next_flip = now + 1;
@@ -182,6 +184,7 @@ NVN(nvnQueuePresentTexture) {  /* (queue, window, texture index) */
     static uint64_t last_frames;
     frames++;
     uint64_t draws = nvn_take_draw_count();
+    yw4_perf_frame(frames, perf_enter, perf_shown, host_now_ns(), draws);
     nvn_stats_frame(frames);
     if (frames <= 3 || frames % 300 == 0) {
         int64_t now = host_now_ns();

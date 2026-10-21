@@ -10,6 +10,7 @@
 #include <process.h>
 #include <windows.h>
 #include <timeapi.h>
+#include <psapi.h>
 
 void host_lock_init(HostLock *l) { InitializeSRWLock((PSRWLOCK)l); }
 void host_lock(HostLock *l) { AcquireSRWLockExclusive((PSRWLOCK)l); }
@@ -98,6 +99,15 @@ int64_t host_now_ns(void) {
     if (!freq.QuadPart) QueryPerformanceFrequency(&freq);
     QueryPerformanceCounter(&now);
     return (int64_t)((unsigned __int128)now.QuadPart * 1000000000u / (uint64_t)freq.QuadPart);
+}
+
+void host_process_usage(int64_t *cpu_ns, uint64_t *rss_bytes) {
+    FILETIME created, exited, kernel, user;
+    PROCESS_MEMORY_COUNTERS pmc = {sizeof pmc};
+    GetProcessTimes(GetCurrentProcess(), &created, &exited, &kernel, &user);
+    *cpu_ns = (int64_t)((((uint64_t)kernel.dwHighDateTime << 32 | kernel.dwLowDateTime) +
+                         ((uint64_t)user.dwHighDateTime << 32 | user.dwLowDateTime)) * 100);  /* 100 ns units */
+    *rss_bytes = GetProcessMemoryInfo(GetCurrentProcess(), &pmc, sizeof pmc) ? pmc.WorkingSetSize : 0;
 }
 
 void *host_reserve_watched(uint64_t want, size_t size) {
@@ -257,6 +267,19 @@ int64_t host_now_ns(void) {
     struct timespec ts;
     clock_gettime(CLOCK_MONOTONIC, &ts);
     return (int64_t)ts.tv_sec * 1000000000 + ts.tv_nsec;
+}
+
+void host_process_usage(int64_t *cpu_ns, uint64_t *rss_bytes) {
+    struct timespec ts;
+    clock_gettime(CLOCK_PROCESS_CPUTIME_ID, &ts);
+    *cpu_ns = (int64_t)ts.tv_sec * 1000000000 + ts.tv_nsec;
+    unsigned long pages = 0, resident = 0;
+    FILE *f = fopen("/proc/self/statm", "r");
+    if (f) {
+        if (fscanf(f, "%lu %lu", &pages, &resident) != 2) resident = 0;
+        fclose(f);
+    }
+    *rss_bytes = (uint64_t)resident * 4096;
 }
 
 /* No write tracking on Linux yet (to do: soft-dirty bits or mprotect): plain reservation,

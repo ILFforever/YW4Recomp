@@ -190,6 +190,8 @@ int nvn_trace_texpool(uint32_t id);
 void nvn_execute(uint64_t handle);
 /* Draw and dispatch counts since the last call (for the frame log). */
 uint64_t nvn_take_draw_count(void);
+/* perf.c: one row of the performance log per presented frame (times from host_now_ns). */
+void yw4_perf_frame(uint64_t frame, int64_t enter, int64_t shown, int64_t exit_, uint64_t draws);
 
 /* nvn_shader.c: shader keys (decision 0020) and YW4_NVN_STATS usage statistics */
 uint64_t nvn_shader_key(uint64_t control);
