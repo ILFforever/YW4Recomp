@@ -26,6 +26,7 @@
 #include <string.h>
 
 #include "gpu_internal.h"
+#include "kernel.h"
 
 enum { ST_VERT, ST_FRAG, ST_GEOM, NSETS = 3, ST_COMP = 3 };  /* NSETS: the graphics stages; compute is separate */
 static const char *const stage_names[4] = {"vert", "frag", "geom", "comp"};
@@ -731,6 +732,9 @@ void gpu_compute_trace(uint64_t frame) {
     }
 }
 
+static int trace_request;
+void gpu_request_trace(int draws) { __atomic_store_n(&trace_request, draws, __ATOMIC_RELEASE); }
+
 void gpu_dispatch(VkCommandBuffer cb, GpuState *s, const CmdRec *r) {
     Program *g = s->program ? compute_program_of(s->program) : NULL;
     if (!g) {
@@ -861,6 +865,8 @@ void gpu_draw(VkCommandBuffer cb, GpuState *s, const CmdRec *r) {
         trace = getenv("YW4_GPU_TRACE") ? atol(getenv("YW4_GPU_TRACE")) : 0;
         trace_at = getenv("YW4_GPU_TRACE_AT") ? atol(getenv("YW4_GPU_TRACE_AT")) : 0;
     }
+    int requested = __atomic_exchange_n(&trace_request, 0, __ATOMIC_ACQ_REL);
+    if (requested) trace = requested, trace_at = 0;
     if (trace > 0 && gpu_frames() >= (uint64_t)trace_at) {
         trace--;
         fprintf(stderr, "yw4: gpu draw: vs %016" PRIx64 " fs %016" PRIx64 " prim %u count %u target %ux%u (%d colour, %s depth)"
@@ -870,6 +876,21 @@ void gpu_draw(VkCommandBuffer cb, GpuState *s, const CmdRec *r) {
                 s->have_viewport ? "" : "(none) ", s->viewport[0], s->viewport[1], s->viewport[2], s->viewport[3],
                 s->have_scissor ? "" : "(none) ", s->scissor[0], s->scissor[1], s->scissor[2], s->scissor[3],
                 s->color[0]);
+        fprintf(stderr, "yw4: gpu draw:   depth range %g..%g clamp %d discard %d polygon %u,%u,%u,%u depth/stencil %u,%u,%u,%u,%#x offset %g,%g,%g\n",
+                s->depth_range[0], s->depth_range[1], s->depth_clamp, s->rasterizer_discard, s->polygon[0], s->polygon[1],
+                s->polygon[2], s->polygon[3], s->depth_stencil[0], s->depth_stencil[1], s->depth_stencil[2],
+                s->depth_stencil[3], s->depth_stencil[4], s->polygon_offset[0], s->polygon_offset[1], s->polygon_offset[2]);
+        if (s->rt.depth)
+            fprintf(stderr, "yw4: gpu draw:   depth target at %#" PRIx64 " kind %u layers %u format %#x view %s layer %u+%u\n",
+                    s->rt.depth->addr, s->rt.depth->target, s->rt.depth->depth, s->rt.depth->format,
+                    s->rt.has_depth_view ? "yes" : "no", s->rt.has_depth_view ? s->rt.depth_view.min_layer : 0,
+                    s->rt.has_depth_view ? s->rt.depth_view.num_layers : 0);
+        for (int ci = 0; ci < s->ncolor && ci < 8; ci++)
+            if (s->rt.color[ci])
+                fprintf(stderr, "yw4: gpu draw:   colour target %d at %#" PRIx64 " kind %u layers %u format %#x view %s layer %u+%u\n",
+                        ci, s->rt.color[ci]->addr, s->rt.color[ci]->target, s->rt.color[ci]->depth,
+                        s->rt.color[ci]->format, s->rt.has_view[ci] ? "yes" : "no",
+                        s->rt.has_view[ci] ? s->rt.views[ci].min_layer : 0, s->rt.has_view[ci] ? s->rt.views[ci].num_layers : 0);
         for (int st = 0; st < NSETS; st++)
             for (int i = 0; g->sh[st] && i < g->sh[st]->nb; i++) {
                 const Binding *b = &g->sh[st]->b[i];
@@ -878,10 +899,34 @@ void gpu_draw(VkCommandBuffer cb, GpuState *s, const CmdRec *r) {
                 uint64_t h = s->tex[nvn_stage[st]][b->slot];
                 fprintf(stderr, "yw4: gpu draw:   %s texture %u: handle %#" PRIx64 " (id %u, sampler %u) -> ", stage_names[st],
                         b->slot, h, (unsigned)(h & 0xFFFFF), (unsigned)(h >> 20 & 0xFFF));
-                if (e) fprintf(stderr, "%ux%u format %#x at %#" PRIx64 "\n", e->tex->width, e->tex->height, e->tex->format,
-                               e->tex->addr);
+                if (e) fprintf(stderr, "%ux%u format %#x at %#" PRIx64 " kind %u layers %u view %s layer %u+%u\n", e->tex->width,
+                               e->tex->height, e->tex->format, e->tex->addr, e->tex->target, e->tex->depth,
+                               e->has_view ? "yes" : "no", e->has_view ? e->view.min_layer : 0,
+                               e->has_view ? e->view.num_layers : 0);
                 else fprintf(stderr, "none\n");
             }
+        /* the vertex stage's constant buffers: where, how big, and their first 16 floats */
+        for (int i = 0; i < vs->nb; i++) {
+            const Binding *b = &vs->b[i];
+            if (b->kind != 'c' || b->slot >= UBOS) continue;
+            GpuRange ub = s->ubo[0][b->slot];
+            fprintf(stderr, "yw4: gpu draw:   vs cbuf %u at %#" PRIx64 " size %" PRIu64 ":", b->slot, ub.addr, ub.size);
+            if (ub.size >= 192 && host_readable(ub.addr, 192)) {  /* floats 32..47: where the shadow shaders keep a matrix */
+                const float *f = (const float *)(uintptr_t)ub.addr;
+                for (int k = 32; k < 48; k++) fprintf(stderr, " %g", f[k]);
+                /* a matrix whose second row is 0 0 0 1 and third row 0: the broken shadow cascade */
+                static int scanned;
+                #define NEAR0(x) ((x) > -1e-4f && (x) < 1e-4f)
+                if (!scanned && vs->nb && NEAR0(f[36]) && NEAR0(f[37]) && NEAR0(f[38]) && f[39] > 0.999f && f[39] < 1.001f &&
+                    NEAR0(f[40]) && NEAR0(f[41]) && NEAR0(f[42]) && NEAR0(f[43]) && !NEAR0(f[32])) {
+                    scanned = 1;
+                    fprintf(stderr, "\nyw4: scan: broken matrix in the cbuf at %#" PRIx64 ": write watch on its matrix %#" PRIx64 "\n",
+                            ub.addr, ub.addr + 128);
+                    /* watch disabled: the command-level watch is armed in the generated code */  
+                }
+            }
+            fprintf(stderr, "\n");
+        }
     }
 
     /* Dynamic state */

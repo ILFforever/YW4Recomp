@@ -27,4 +27,7 @@ void window_present_image(VkImage image, VkFormat format, VkRect2D rect, uint64_
  * x, y, right x, y; -32767..32767, up positive). Zero without a window. Any thread. */
 void window_input(uint64_t *buttons, int32_t sticks[4]);
 
+/* The same as pressing F12 (a screenshot of the next frame), for replays. */
+void window_request_screenshot(void);
+
 #endif

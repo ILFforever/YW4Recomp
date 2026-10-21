@@ -75,12 +75,151 @@ static uint64_t scripted(uint64_t tick) {
     return b;
 }
 
+/* ---- Input recording and replay (YW4_RECORD=0 turns recording off; YW4_REPLAY=<file> plays one)
+ *
+ * Every change of the physical input (buttons, sticks) and every capture key (F10/F11/F12) is
+ * written, with the vsync tick (60 per second since start), to work/inputs/rec_<time>.txt:
+ *     s <tick> <buttons hex> <lx> <ly> <rx> <ry>
+ *     k <tick> <F10|F11|F12>
+ * A replay feeds the same states back at the same ticks (instead of the keyboard and gamepad)
+ * and presses the same capture keys, so a route a person played can be run again by a script.
+ * The game's loading times vary a little from run to run, so long routes can drift. */
+#include <time.h>
+#ifdef _WIN32
+#include <direct.h>
+#define MKDIR(p) _mkdir(p)
+#else
+#include <sys/stat.h>
+#define MKDIR(p) mkdir(p, 0777)
+#endif
+
+void gpu_request_trace(int draws);
+void gpu_request_dump(void);
+
+static FILE *rec_file;
+static uint64_t rec_tick;  /* the tick of the latest update, for key notes from the window thread */
+static HostLock rec_lock = HOST_LOCK_INIT;
+
+static void rec_open(void) {
+    static int tried;
+    if (tried) return;
+    tried = 1;
+    const char *on = getenv("YW4_RECORD");
+    if (on && *on == '0') return;
+    MKDIR("work");
+    MKDIR("work/inputs");
+    time_t now = time(NULL);
+    struct tm tmv;
+#ifdef _WIN32
+    localtime_s(&tmv, &now);
+#else
+    localtime_r(&now, &tmv);
+#endif
+    char when[32], path[256];
+    strftime(when, sizeof when, "%Y%m%d_%H%M%S", &tmv);
+    snprintf(path, sizeof path, "work/inputs/rec_%s.txt", when);
+    rec_file = fopen(path, "w");
+    if (rec_file) fprintf(stderr, "yw4: recording input in %s\n", path);
+}
+
+void yw4_hid_note_key(const char *name) {
+    host_lock(&rec_lock);
+    rec_open();
+    if (rec_file) {
+        fprintf(rec_file, "k %llu %s\n", (unsigned long long)rec_tick, name);
+        fflush(rec_file);
+    }
+    host_unlock(&rec_lock);
+}
+
+typedef struct {
+    uint64_t tick, buttons;
+    int32_t sticks[4];
+} RecState;
+typedef struct {
+    uint64_t tick;
+    char name[8];
+} RecKey;
+static RecState *replay_states;
+static RecKey *replay_keys;
+static size_t n_states, n_keys, next_key;
+static int replay_loaded;
+
+static void replay_load(void) {
+    replay_loaded = 1;
+    const char *path = getenv("YW4_REPLAY");
+    if (!path || !*path) return;
+    FILE *f = fopen(path, "r");
+    if (!f) {
+        fprintf(stderr, "yw4: replay: cannot open %s\n", path);
+        return;
+    }
+    char line[256];
+    while (fgets(line, sizeof line, f)) {
+        unsigned long long tick, buttons;
+        int lx, ly, rx, ry;
+        char name[8];
+        if (sscanf(line, "s %llu %llx %d %d %d %d", &tick, &buttons, &lx, &ly, &rx, &ry) == 6) {
+            replay_states = realloc(replay_states, (n_states + 1) * sizeof *replay_states);
+            replay_states[n_states++] = (RecState){tick, buttons, {lx, ly, rx, ry}};
+        } else if (sscanf(line, "k %llu %7s", &tick, name) == 2) {
+            replay_keys = realloc(replay_keys, (n_keys + 1) * sizeof *replay_keys);
+            replay_keys[n_keys].tick = tick;
+            snprintf(replay_keys[n_keys].name, sizeof replay_keys[n_keys].name, "%s", name);
+            n_keys++;
+        }
+    }
+    fclose(f);
+    fprintf(stderr, "yw4: replay: %zu input states and %zu key presses from %s\n", n_states, n_keys, path);
+}
+
+/* The state a replay gives at `tick`; 0 if there is no replay. */
+static int replay_state(uint64_t tick, uint64_t *buttons, int32_t sticks[4]) {
+    if (!replay_loaded) replay_load();
+    if (!n_states && !n_keys) return 0;
+    static size_t cur;
+    while (cur + 1 < n_states && replay_states[cur + 1].tick <= tick) cur++;
+    if (n_states && replay_states[cur].tick <= tick) {
+        *buttons = replay_states[cur].buttons;
+        memcpy(sticks, replay_states[cur].sticks, 4 * sizeof(int32_t));
+    } else {
+        *buttons = 0;
+        memset(sticks, 0, 4 * sizeof(int32_t));
+    }
+    for (; next_key < n_keys && replay_keys[next_key].tick <= tick; next_key++) {
+        const char *k = replay_keys[next_key].name;
+        fprintf(stderr, "yw4: replay: key %s at tick %llu\n", k, (unsigned long long)tick);
+        if (!strcmp(k, "F11")) gpu_request_trace(450);
+        else if (!strcmp(k, "F10")) gpu_request_dump();
+        else if (!strcmp(k, "F12")) window_request_screenshot();
+    }
+    return 1;
+}
+
 void yw4_hid_update(uint64_t tick) {
     KSharedMemory *m = __atomic_load_n(&shared_memory, __ATOMIC_ACQUIRE);
     if (!m || !__atomic_load_n(&m->guest_addr, __ATOMIC_ACQUIRE)) return;
     uint64_t buttons;
     int32_t sticks[4];
-    window_input(&buttons, sticks);
+    rec_tick = tick;
+    if (!replay_state(tick, &buttons, sticks)) {
+        window_input(&buttons, sticks);
+        /* record changes of the physical input */
+        static uint64_t last_buttons = ~0ull;
+        static int32_t last_sticks[4];
+        if (buttons != last_buttons || memcmp(sticks, last_sticks, sizeof last_sticks)) {
+            host_lock(&rec_lock);
+            rec_open();
+            if (rec_file) {
+                fprintf(rec_file, "s %llu %llx %d %d %d %d\n", (unsigned long long)tick, (unsigned long long)buttons,
+                        sticks[0], sticks[1], sticks[2], sticks[3]);
+                fflush(rec_file);
+            }
+            host_unlock(&rec_lock);
+            last_buttons = buttons;
+            memcpy(last_sticks, sticks, sizeof last_sticks);
+        }
+    }
     buttons |= scripted(tick);
     /* the sticks' direction bits, as the hardware sets them past about half way */
     static const int dir[4][2] = {{16, 18}, {19, 17}, {20, 22}, {23, 21}};  /* (negative, positive) bits */

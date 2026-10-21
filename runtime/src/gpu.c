@@ -1029,6 +1029,95 @@ void gpu_execute(uint64_t handle) {
 
 /* ================================================================== present */
 
+/* YW4_DUMP_IMAGE=<guest address in hex> (with YW4_DUMP_IMAGE_AT=<frame>): at that frame, reads
+ * back every image at that address (depth or RGBA8 only), prints per layer its minimum, maximum
+ * and how much of it still holds the first texel's value, and writes work/dump/image_<addr>_<n>.pgm
+ * (depth scaled to its own range). For checking what a pass really drew. gpu_lock held. */
+static int dump_request;
+void gpu_request_dump(void) { __atomic_store_n(&dump_request, 1, __ATOMIC_RELEASE); }
+
+static void dump_images(uint64_t frame) {
+    int all = __atomic_exchange_n(&dump_request, 0, __ATOMIC_ACQ_REL);
+    static uint64_t want = UINT64_MAX, at;
+    if (want == UINT64_MAX) {
+        const char *a = getenv("YW4_DUMP_IMAGE");
+        want = a ? strtoull(a, NULL, 16) : 0;
+        at = getenv("YW4_DUMP_IMAGE_AT") ? strtoull(getenv("YW4_DUMP_IMAGE_AT"), NULL, 10) : 0;
+    }
+    if (!all && (!want || frame != at)) return;
+    for (int b = 0; b < IMAGE_BUCKETS; b++)
+        for (GpuImage *g = images[b]; g; g = g->next) {
+            if (!all && g->key.addr != want) continue;
+            if (all && (g->layers < 2 || !(g->aspect & VK_IMAGE_ASPECT_DEPTH_BIT))) continue;
+            uint64_t addr = g->key.addr;
+            int depth = g->aspect & VK_IMAGE_ASPECT_DEPTH_BIT;
+            uint32_t bpp = depth ? (g->format == VK_FORMAT_D16_UNORM ? 2 : 4) : 4;
+            if (depth && g->format != VK_FORMAT_D32_SFLOAT && g->format != VK_FORMAT_D16_UNORM &&
+                g->format != VK_FORMAT_D32_SFLOAT_S8_UINT) continue;
+            if (!depth && g->format != VK_FORMAT_R8G8B8A8_UNORM && g->format != VK_FORMAT_R8G8B8A8_SRGB) continue;
+            size_t layer_bytes = (size_t)g->width * g->height * bpp, total = layer_bytes * g->layers;
+            VkBufferCreateInfo bci = {.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO, .size = total,
+                                      .usage = VK_BUFFER_USAGE_TRANSFER_DST_BIT};
+            VkBuffer buf;
+            CHECK(vkCreateBuffer(vk.device, &bci, NULL, &buf));
+            VkMemoryRequirements mr;
+            vkGetBufferMemoryRequirements(vk.device, buf, &mr);
+            VkMemoryAllocateInfo mai = {.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO, .allocationSize = mr.size,
+                                        .memoryTypeIndex = vk_memory_type(mr.memoryTypeBits,
+                                                                          VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT |
+                                                                              VK_MEMORY_PROPERTY_HOST_COHERENT_BIT)};
+            VkDeviceMemory mem;
+            CHECK(vkAllocateMemory(vk.device, &mai, NULL, &mem));
+            CHECK(vkBindBufferMemory(vk.device, buf, mem, 0));
+            VkCommandBuffer cb = begin();
+            full_barrier(cb);
+            VkBufferImageCopy cp = {.imageSubresource = {depth ? VK_IMAGE_ASPECT_DEPTH_BIT : VK_IMAGE_ASPECT_COLOR_BIT, 0, 0,
+                                                         g->layers},
+                                    .imageExtent = {g->width, g->height, 1}};
+            vkCmdCopyImageToBuffer(cb, g->image, VK_IMAGE_LAYOUT_GENERAL, buf, 1, &cp);
+            full_barrier(cb);
+            submit(cb);
+            gpu_wait(gpu_submitted(), UINT64_MAX);
+            void *p;
+            CHECK(vkMapMemory(vk.device, mem, 0, VK_WHOLE_SIZE, 0, &p));
+            for (uint32_t l = 0; l < g->layers; l++) {
+                const uint8_t *src = (const uint8_t *)p + l * layer_bytes;
+                size_t n = (size_t)g->width * g->height;
+                double mn = 1e30, mx = -1e30;
+                size_t same = 0;
+                double first = 0;
+                double *v = malloc(n * sizeof *v);
+                for (size_t i = 0; i < n; i++) {
+                    double x;
+                    if (depth && bpp == 4) x = ((const float *)src)[i];
+                    else if (depth) x = ((const uint16_t *)src)[i] / 65535.0;
+                    else x = src[i * 4] / 255.0;  /* red */
+                    v[i] = x;
+                    if (x < mn) mn = x;
+                    if (x > mx) mx = x;
+                    if (i == 0) first = x;
+                    same += x == first;
+                }
+                fprintf(stderr, "yw4: image %#" PRIx64 " frame %" PRIu64 " %ux%u format %d layer %u: min %g max %g, %.1f%% equal to the first texel (%g)\n",
+                        addr, frame, g->width, g->height, (int)g->format, l, mn, mx, 100.0 * (double)same / (double)n, first);
+                char path[256];
+                snprintf(path, sizeof path, "work/dump/image_%" PRIx64 "_%u.pgm", addr, l);
+                FILE *f = fopen(path, "wb");
+                if (f) {
+                    fprintf(f, "P5\n%u %u\n255\n", g->width, g->height);
+                    for (size_t i = 0; i < n; i++) {
+                        double u = mx > mn ? (v[i] - mn) / (mx - mn) : 0;
+                        fputc((int)(u * 255.0 + 0.5), f);
+                    }
+                    fclose(f);
+                }
+                free(v);
+            }
+            vkDestroyBuffer(vk.device, buf, NULL);
+            vkFreeMemory(vk.device, mem, NULL);
+        }
+}
+
 void gpu_present(NvnTexture *t, uint64_t frame, const int crop[4]) {
     host_lock(&gpu_lock);
     present_count++;
@@ -1041,6 +1130,7 @@ void gpu_present(NvnTexture *t, uint64_t frame, const int crop[4]) {
         submit(cb);
     }
     g->last_frame = present_count;
+    dump_images(present_count);
     if (getenv("YW4_COMPUTE_TRACE")) {
         gpu_wait(gpu_submitted(), UINT64_MAX);
         gpu_compute_trace(present_count);

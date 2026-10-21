@@ -94,6 +94,10 @@ Environment variables read by the runtime; the most useful ones:
 | `YW4_INPUT=2400:1:10` | Scripted presses, `tick:buttons(hex):length`, comma separated; `1` is A. A at tick 2400 gets past the autosave notice |
 | `YW4_PERF=0` | Turn off the performance log (on by default: `work/perf/perf_<time>.csv` per frame and a `.txt` summary: frame interval, game work, GPU busy/span from timestamp queries, CPU, memory; `YW4_PERF_DIR` moves it) |
 | `YW4_LOG=0` | Turn off the log file (on by default: everything printed on stderr is also saved in `work/logs/yw4_<time>.log`; `YW4_LOG_DIR` moves it) |
+| F12 / F11 / F10 (keys) | F12: screenshot of the next frame. F11: describe the draws of the next frame in the log (targets, shaders, textures, the vertex stage's matrices; `YW4_GPU_TRACE=<n>` with `YW4_GPU_TRACE_AT=<frame>` does the same from a start frame). F10: dump multi-layer depth images (shadow maps) to `work/dump/*.pgm` |
+| `YW4_RECORD=0` / `YW4_REPLAY=<file>` | Every input change and capture key is recorded in `work/inputs/rec_<time>.txt` (on by default); a replay feeds a recording back at the same ticks, so a route can be run without a person (long routes can drift a little) |
+| `YW4_DUMP_IMAGE=<hex addr>` `YW4_DUMP_IMAGE_AT=<frame>` | Read back the image at that guest address at that frame: per-layer min/max/cleared share and `work/dump/image_*.pgm` |
+| `YW4_COMPUTE_TRACE=<n>` | Every n frames, the inputs and results of the last dispatch of each compute shader |
 | `YW4_HEADLESS=1` | No window, no Vulkan |
 | `YW4_VULKAN_VALIDATION=1` | Turn on the Vulkan validation layer |
 

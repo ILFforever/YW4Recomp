@@ -12,6 +12,10 @@
 
 void gpu_init(void);  /* window.c, once the Vulkan device exists */
 int gpu_ready(void);
+/* From the window's key presses: F11 describes the draws of the next frame in the log (gpu_draw.c),
+ * F10 dumps every multi-layer depth image (shadow maps) at the next present (gpu.c). */
+void gpu_request_trace(int draws);
+void gpu_request_dump(void);
 
 void gpu_pool_init(NvnPool *p);  /* imports the pool's memory into Vulkan */
 void gpu_pool_finalize(NvnPool *p);

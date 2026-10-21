@@ -58,6 +58,8 @@ static void *staging_ptr;
 static VkImage frame;
 static uint32_t frame_w, frame_h;
 
+void gpu_request_trace(int draws);  /* gpu_draw.c */
+void gpu_request_dump(void);        /* gpu.c */
 static int screenshot_requested;  /* F12 */
 static char screenshot_dir[512] = "screenshots";
 
@@ -518,6 +520,10 @@ static void guest_main(void *p) {
     exit(0);  /* the game's main returned */
 }
 
+void window_request_screenshot(void) { __atomic_store_n(&screenshot_requested, 1, __ATOMIC_RELEASE); }
+
+void yw4_hid_note_key(const char *name);  /* svc_hid.c: key presses go into the input recording */
+
 void window_run(void (*guest)(void *), void *arg) {
     const char *dir = getenv("YW4_SCREENSHOT_DIR");
     if (dir && *dir) snprintf(screenshot_dir, sizeof screenshot_dir, "%s", dir);
@@ -566,7 +572,9 @@ void window_run(void (*guest)(void *), void *arg) {
             fprintf(stderr, "yw4: window closed\n");
             exit(0);
         case SDL_EVENT_KEY_DOWN:
-            if (e.key.key == SDLK_F12) __atomic_store_n(&screenshot_requested, 1, __ATOMIC_RELEASE);
+            if (e.key.key == SDLK_F12) __atomic_store_n(&screenshot_requested, 1, __ATOMIC_RELEASE), yw4_hid_note_key("F12");
+            if (e.key.key == SDLK_F11) gpu_request_trace(450), yw4_hid_note_key("F11");  /* the draws of the next frame, in the log */
+            if (e.key.key == SDLK_F10) gpu_request_dump(), yw4_hid_note_key("F10");      /* shadow maps etc.: work/dump/ */
             break;
         case SDL_EVENT_WINDOW_PIXEL_SIZE_CHANGED:
             host_lock(&present_lock);
