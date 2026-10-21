@@ -230,17 +230,45 @@ NVN(nvnTextureInitialize) {
 NVN(nvnTextureFinalize) { free(HOST(NvnTexture, A(0))); SET_HOST(A(0), 0); }
 NVN(nvnTextureGetFlags) { RET(HOST(NvnTexture, A(0))->flags); }
 
-/* (texture, view, const NVNcopyRegion*, data): linear texels into the texture's storage.
- * Region: x, y, z offsets, then width, height, depth. */
+/* (texture, view or NULL, const NVNcopyRegion*, data): tightly packed linear texels into the
+ * texture's storage. Region: x, y, z offsets, then width, height, depth, in texels; for
+ * array and cube textures z and depth pick layers. The view can choose the level (its base
+ * level) and the first layer. */
 NVN(nvnTextureWriteTexels) {
     NvnTexture *t = HOST(NvnTexture, A(0));
+    const NvnTextureView *v = AP(1);
     const int32_t *r = AP(2);
-    if (A(1) || !r || r[0] || r[1] || r[2] || (uint32_t)r[3] != t->width || (uint32_t)r[4] != t->height)
-        nvn_fatal(c, "WriteTexels of part of a texture or through a view");
-    if (t->flags & FLAG_LINEAR) nvn_fatal(c, "WriteTexels to a linear texture");
-    LevelLayout l = tegra_level(&t->layout, 0);
-    tegra_swizzle(AP(3), (uint8_t *)(uintptr_t)t->addr + l.offset, l.wb, l.hb, r[5] > 0 ? (uint32_t)r[5] : 1,
-                  t->layout.fmt->bpb, l.block_height_log2, l.block_depth_log2);
+    if (t->flags & FLAG_LINEAR || t->target == TARGET_BUFFER) nvn_fatal(c, "WriteTexels to a linear texture");
+    if (v && v->setmask & ~0xFu) nvn_fatal(c, "WriteTexels through a view with target or depth-stencil mode set (%#x)", v->setmask);
+    if (v && v->setmask & 4) {  /* a view format: the bytes go in as they are if its blocks have the same size */
+        const FormatInfo *vf = format_of(c, v->format);
+        if (vf->bpb != t->layout.fmt->bpb || vf->bw != t->layout.fmt->bw || vf->bh != t->layout.fmt->bh)
+            nvn_fatal(c, "WriteTexels through a view of format %#x, texture format %#x", v->format, t->format);
+    }  /* a view swizzle changes how shaders read, not the bytes */
+    if (!r || r[0] < 0 || r[1] < 0 || r[2] < 0 || r[3] <= 0 || r[4] <= 0 || r[5] <= 0) nvn_fatal(c, "WriteTexels region");
+    uint32_t level = v && v->setmask & 1 ? v->base_level : 0, layer = v && v->setmask & 2 ? v->min_layer : 0;
+    uint32_t w = t->layout.width >> level, h = t->layout.height >> level, d = t->layout.depth >> level;
+    if (!w) w = 1;
+    if (!h) h = 1;
+    if (!d) d = 1;
+    int layered = t->layout.layers > 1 || t->target == TARGET_2D_ARRAY || t->target == TARGET_CUBE ||
+                  t->target == TARGET_CUBE_ARRAY || t->target == TARGET_1D_ARRAY;
+    uint32_t x = (uint32_t)r[0], y = (uint32_t)r[1], z = (uint32_t)r[2], rw = (uint32_t)r[3], rh = (uint32_t)r[4],
+             rd = (uint32_t)r[5];
+    if (level >= t->layout.levels || x + rw > w || y + rh > h ||
+        (layered ? layer + z + rd > t->layout.layers : z + rd > d))
+        nvn_fatal(c, "WriteTexels region (%u,%u,%u)+(%u,%u,%u) outside level %u (%ux%ux%u, %u layers)", x, y, z, rw, rh,
+                  rd, level, w, h, d, t->layout.layers);
+    const FormatInfo *f = t->layout.fmt;
+    uint64_t slice = (uint64_t)((rw + f->bw - 1) / f->bw) * ((rh + f->bh - 1) / f->bh) * f->bpb;
+    const uint8_t *src = AP(3);
+    if (layered) {
+        for (uint32_t k = 0; k < rd; k++)
+            tegra_write_region(&t->layout, (uint8_t *)(uintptr_t)t->addr, level, layer + z + k, x, y, 0, rw, rh, 1,
+                               src + k * slice);
+    } else {
+        tegra_write_region(&t->layout, (uint8_t *)(uintptr_t)t->addr, level, layer, x, y, z, rw, rh, rd, src);
+    }
 }
 
 /* Texture views: our layout of the 0x28-byte NVNtextureView, a set-mask and the fields */

@@ -39,7 +39,39 @@ static void time_shared_memory(KSharedMemory *m) {
 
 static void system_clock(Service *s, IpcRequest *req, IpcResponse *resp) { ipc_unimplemented(s, req, resp); }
 static void steady_clock(Service *s, IpcRequest *req, IpcResponse *resp) { ipc_unimplemented(s, req, resp); }
-static void time_zone(Service *s, IpcRequest *req, IpcResponse *resp) { ipc_unimplemented(s, req, resp); }
+/* ITimeZoneService: the device's time zone is the host's local one. */
+static void time_zone(Service *s, IpcRequest *req, IpcResponse *resp) {
+    switch (req->cmd) {
+    case 101: {  /* ToCalendarTimeWithMyRule(PosixTime) -> CalendarTime, CalendarAdditionalInfo */
+        time_t t = (time_t)IPC_IN(int64_t, 0);
+        struct tm local, utc;
+#ifdef _WIN32
+        localtime_s(&local, &t);
+        gmtime_s(&utc, &t);
+#else
+        localtime_r(&t, &local);
+        gmtime_r(&t, &utc);
+#endif
+        utc.tm_isdst = local.tm_isdst;
+        int32_t offset = (int32_t)difftime(mktime(&local), mktime(&utc));  /* seconds east of UTC */
+        uint8_t *o = resp->data;
+        /* CalendarTime (8): year u16, month, day, hour, minute, second, pad */
+        uint16_t year = (uint16_t)(local.tm_year + 1900);
+        memcpy(o, &year, 2);
+        o[2] = (uint8_t)(local.tm_mon + 1), o[3] = (uint8_t)local.tm_mday;
+        o[4] = (uint8_t)local.tm_hour, o[5] = (uint8_t)local.tm_min, o[6] = (uint8_t)local.tm_sec;
+        /* CalendarAdditionalInfo (0x18): day of week, day of year, zone name[8], is DST, UTC offset */
+        IPC_OUT(uint32_t, 8) = (uint32_t)local.tm_wday;
+        IPC_OUT(uint32_t, 12) = (uint32_t)local.tm_yday;
+        memcpy(o + 16, "LOCAL", 6);
+        IPC_OUT(uint32_t, 24) = local.tm_isdst > 0;
+        IPC_OUT(int32_t, 28) = offset;
+        ipc_out_size(resp, 0x20);
+        return;
+    }
+    }
+    ipc_unimplemented(s, req, resp);
+}
 
 static uint32_t shared_memory_handle;
 

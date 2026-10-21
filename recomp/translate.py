@@ -196,9 +196,43 @@ def write_if_changed(path, text: str) -> None:
         path.write_text(text)
 
 
-def translate(cfg: config.Config, m: Module, overrides: dict[int, str]) -> tuple[list[function.Function], list[str]]:
+SETJMP = ("_setjmp", "setjmp", "__setjmp")
+
+
+def plt_slot(code: function.Code, e: int) -> int | None:
+    """The GOT slot a PLT stub at e jumps through (adrp x16; ldr x17, [x16, #o]; add x16, x16, #o;
+    br x17), or None."""
+    if e + 16 > code.text_end:
+        return None
+    w = [code.word(e + 4 * i) for i in range(4)]
+    if (w[0] & 0x9F00001F != 0x90000010 or w[1] & 0xFFC003FF != 0xF9400211
+            or w[2] & 0xFFC003FF != 0x91000210 or w[3] != 0xD61F0220):
+        return None
+    page = ((w[0] >> 29) & 3 | ((w[0] >> 5) & 0x7FFFF) << 2) << 12
+    if page & (1 << 32):
+        page -= 1 << 33
+    return (e & ~0xFFF) + page + ((w[1] >> 10) & 0xFFF) * 8
+
+
+def setjmp_entries(modules: list[Module], symbolic: list[list], entries: list[set[int]]) -> list[frozenset[int]]:
+    """Per module, the functions that are setjmp: its definition, and PLT stubs to it (decision 0018)."""
+    where = set()
+    for i, m in enumerate(modules):
+        for name, typ, shndx, v in raw_dynsym(m.image, m.info):
+            if shndx and typ == STT_FUNC and name in SETJMP:
+                where.add((i, v))
+    out = []
+    for i, m in enumerate(modules):
+        got = {o: (mod, v) for o, mod, v in symbolic[i]}
+        found = {v for mod, v in where if mod == i}
+        found |= {e for e in entries[i] if got.get(plt_slot(m.code, e)) in where}
+        out.append(frozenset(found))
+    return out
+
+
+def translate(cfg: config.Config, m: Module, overrides: dict[int, str], entries: set[int],
+              setjmps: frozenset[int]) -> tuple[list[function.Function], list[str]]:
     code = m.code
-    entries = entry_points(cfg, m)
     funcs = [function.discover(code, e, entries) for e in sorted(entries)]
     stats = function.EmitStats()
     sources = []
@@ -209,7 +243,7 @@ def translate(cfg: config.Config, m: Module, overrides: dict[int, str]) -> tuple
             sources.append(f"void {native}(CPUState *ctx);  /* override (recomp/overrides.toml) */\n"
                            f"void {name}(CPUState *ctx) {{ {native}(ctx); }}")
         else:
-            sources.append(function.emit_function(code, fn, entries, coverage.subgroup, stats))
+            sources.append(function.emit_function(code, fn, entries, coverage.subgroup, stats, setjmps))
     missing = set(overrides) - {fn.entry for fn in funcs}
     if missing:
         raise RuntimeError(f"{m.name}: overridden functions not found: {sorted(map(hex, missing))}")
@@ -232,7 +266,7 @@ def translate(cfg: config.Config, m: Module, overrides: dict[int, str]) -> tuple
     for g, n in sorted(stats.unimplemented.items(), key=lambda kv: -kv[1]):
         print(f"    {n:10,}  {g}")
     print(f"BR: {dict(brs)}")
-    print(f"overridden by native code: {len(overrides)}")
+    print(f"overridden by native code: {len(overrides)}; setjmp functions: {len(setjmps)}")
     print(f"flow problems: {len(problems)}")
     for p in problems[:10]:
         print(f"    {p}")
@@ -251,8 +285,10 @@ def main(argv: list[str] | None = None) -> int:
         return 1
 
     overrides = load_overrides(modules)
-    results = [translate(cfg, m, overrides[m.name]) for m in modules]
     relative, symbolic, unresolved = resolve_relocations(modules)
+    entries = [entry_points(cfg, m) for m in modules]
+    setjmps = setjmp_entries(modules, symbolic, entries)
+    results = [translate(cfg, m, overrides[m.name], entries[i], setjmps[i]) for i, m in enumerate(modules)]
     print(f"== relocations: " + ", ".join(f"{m.name} {len(relative[i]):,} relative + {len(symbolic[i]):,} symbolic"
                                           for i, m in enumerate(modules)))
     print(f"   weak symbols defined nowhere (-> 0): {dict(unresolved)}")

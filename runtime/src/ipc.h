@@ -91,6 +91,10 @@ void svc_pctl(Service *s, IpcRequest *req, IpcResponse *resp);
 void svc_time(Service *s, IpcRequest *req, IpcResponse *resp);
 void svc_fsp_srv(Service *s, IpcRequest *req, IpcResponse *resp);
 void svc_acc(Service *s, IpcRequest *req, IpcResponse *resp);
+void svc_hid(Service *s, IpcRequest *req, IpcResponse *resp);
+void svc_nifm(Service *s, IpcRequest *req, IpcResponse *resp);
+void svc_audren(Service *s, IpcRequest *req, IpcResponse *resp);
+void svc_audout(Service *s, IpcRequest *req, IpcResponse *resp);
 
 /* The one user account (svc_acc.c): its 16-byte id. */
 void yw4_account_user_id(uint8_t out[16]);

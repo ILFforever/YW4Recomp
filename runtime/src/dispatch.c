@@ -3,6 +3,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 
+#include "kernel.h"
 #include "yw4rt.h"
 
 GuestFn (*yw4_lookup_hook)(uint64_t addr);
@@ -42,9 +43,10 @@ GuestFn yw4_lookup(uint64_t addr) {
 GuestFn yw4_resolve(uint64_t target) {
     GuestFn fn = yw4_lookup(target);
     if (!fn) {
+        yw4_setjmp_resume(target);  /* a longjmp back to a setjmp's return address? */
         char where[48];
         fprintf(stderr, "yw4: indirect call to %s: no translated function there\n", yw4_describe(target, where));
-        abort();
+        yw4_stop();
     }
     return fn;
 }

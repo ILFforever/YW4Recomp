@@ -8,6 +8,7 @@
 #include <string.h>
 
 #include "ipc_simple.h"
+#include "savefs.h"
 
 /* ---- the message queue the system uses to tell the application things */
 
@@ -118,9 +119,10 @@ static Service *storage_new(const void *data, uint64_t size) {
 }
 
 static const SimpleCommand application_functions_simple[] = {
-    /* LanguageCode: the language's tag as up to 8 chars in a u64; the game only has Japanese */
     {21, SIMPLE_U64, 0x616A, "GetDesiredLanguage: \"ja\""},
     {22, SIMPLE_OK, 0, "SetTerminateResult"},
+    {40, SIMPLE_OK, 0, "NotifyRunning / FinishStartupLogo: the boot logo goes away"},
+    /* LanguageCode: the language's tag as up to 8 chars in a u64; the game only has Japanese */
 };
 
 static void application_functions(Service *s, IpcRequest *req, IpcResponse *resp) {
@@ -138,6 +140,12 @@ static void application_functions(Service *s, IpcRequest *req, IpcResponse *resp
         p[4] = 1;
         yw4_account_user_id(p + 8);
         ipc_return_object(resp, storage_new(p, sizeof p));
+        return;
+    }
+    if (req->cmd == 20) {  /* EnsureSaveData(uid) -> u64 size still needed: creates the save if missing */
+        resp->result = savefs_open(YW4_PROGRAM_ID, req->data, 1, NULL);
+        IPC_OUT(uint64_t, 0) = 0;
+        ipc_out_size(resp, 8);
         return;
     }
     if (!IPC_SIMPLE(application_functions_simple, req, resp)) ipc_unimplemented(s, req, resp);

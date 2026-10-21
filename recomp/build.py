@@ -115,7 +115,9 @@ def main(argv: list[str] | None = None) -> int:
         return 1
     print(f"built {exe} in {time.time() - t0:.0f} s")
     if args.run:
-        return subprocess.run([str(exe), str(cfg.work_dir / "exefs"), str(cfg.romfs_dir)]).returncode
+        save = cfg.work_dir / "save"  # the game's save data (the owner's: never commit)
+        save.mkdir(exist_ok=True)
+        return subprocess.run([str(exe), str(cfg.work_dir / "exefs"), str(cfg.romfs_dir), str(save)]).returncode
     return 0
 
 

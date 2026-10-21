@@ -1,4 +1,5 @@
 /* Host threads, locks, condition variables and a monotonic clock (host.h). */
+#include <stdio.h>
 #include <stdlib.h>
 #include <time.h>
 
@@ -49,6 +50,26 @@ int host_thread_start(void (*fn)(void *), void *arg, size_t stack_size) {
 
 void host_yield(void) { SwitchToThread(); }
 
+static void (*crash_report)(const char *, uint64_t, uint64_t);
+
+static LONG WINAPI crash_filter(EXCEPTION_POINTERS *e) {
+    EXCEPTION_RECORD *r = e->ExceptionRecord;
+    const char *what = r->ExceptionCode == EXCEPTION_ACCESS_VIOLATION ? "access violation"
+                     : r->ExceptionCode == EXCEPTION_STACK_OVERFLOW ? "host stack overflow"
+                     : r->ExceptionCode == EXCEPTION_ILLEGAL_INSTRUCTION ? "illegal instruction"
+                     : "exception";
+    fprintf(stderr, "yw4: crash in yw4.exe+%#llx\n",
+            (unsigned long long)((uintptr_t)r->ExceptionAddress - (uintptr_t)GetModuleHandleW(NULL)));
+    crash_report(what, (uint64_t)(uintptr_t)r->ExceptionAddress,
+                 r->NumberParameters >= 2 ? (uint64_t)r->ExceptionInformation[1] : 0);
+    return EXCEPTION_CONTINUE_SEARCH;
+}
+
+void host_install_crash_handler(void (*report)(const char *, uint64_t, uint64_t)) {
+    crash_report = report;
+    SetUnhandledExceptionFilter(crash_filter);
+}
+
 int64_t host_now_ns(void) {
     static LARGE_INTEGER freq;
     LARGE_INTEGER now;
@@ -59,6 +80,7 @@ int64_t host_now_ns(void) {
 
 #else
 #include <sched.h>
+#include <signal.h>
 
 void host_lock_init(HostLock *l) { pthread_mutex_init(l, NULL); }
 void host_lock(HostLock *l) { pthread_mutex_lock(l); }
@@ -114,6 +136,24 @@ int host_thread_start(void (*fn)(void *), void *arg, size_t stack_size) {
 }
 
 void host_yield(void) { sched_yield(); }
+
+static void (*crash_report)(const char *, uint64_t, uint64_t);
+
+static void crash_signal(int sig, siginfo_t *info, void *uc) {
+    (void)uc;
+    crash_report(sig == SIGSEGV ? "segmentation fault" : sig == SIGBUS ? "bus error" : "illegal instruction", 0,
+                 (uint64_t)(uintptr_t)info->si_addr);
+}
+
+void host_install_crash_handler(void (*report)(const char *, uint64_t, uint64_t)) {
+    crash_report = report;
+    struct sigaction sa = {0};
+    sa.sa_sigaction = crash_signal;
+    sa.sa_flags = SA_SIGINFO;
+    sigaction(SIGSEGV, &sa, NULL);
+    sigaction(SIGBUS, &sa, NULL);
+    sigaction(SIGILL, &sa, NULL);
+}
 
 int64_t host_now_ns(void) {
     struct timespec ts;

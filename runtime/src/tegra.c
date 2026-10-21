@@ -98,12 +98,14 @@ LevelLayout tegra_level(const TexLayout *t, uint32_t level) {
     return l;
 }
 
-uint64_t tegra_total_size(const TexLayout *t) {
+uint64_t tegra_layer_size(const TexLayout *t) {
     uint64_t layer = 0;
     for (uint32_t i = 0; i < t->levels; i++) layer += level_size(t, i, NULL);
     if (t->layers > 1) layer = align_up(layer, 512ull << t->block_height_log2);  /* layers start on a block */
-    return layer * (t->layers ? t->layers : 1);
+    return layer;
 }
+
+uint64_t tegra_total_size(const TexLayout *t) { return tegra_layer_size(t) * (t->layers ? t->layers : 1); }
 
 /* Byte offset of (x bytes, row y, slice z) in a block-linear surface. */
 static uint64_t gob_offset(uint32_t xb, uint32_t y, uint32_t z, uint32_t width_gobs, uint32_t bh, uint32_t bd,
@@ -115,6 +117,22 @@ static uint64_t gob_offset(uint32_t xb, uint32_t y, uint32_t z, uint32_t width_g
     off += ((uint64_t)(z & ((1u << bd) - 1)) << bh | (gob_y & ((1u << bh) - 1))) * 512;
     uint32_t xi = xb & 63, yi = y & 7;  /* inside the GOB: 16-byte sectors */
     return off + (((xi >> 5) << 8) | ((yi >> 1) << 6) | (((xi >> 4) & 1) << 5) | ((yi & 1) << 4) | (xi & 15));
+}
+
+void tegra_write_region(const TexLayout *t, uint8_t *base, uint32_t level, uint32_t layer, uint32_t x, uint32_t y,
+                        uint32_t z, uint32_t w, uint32_t h, uint32_t d, const uint8_t *src) {
+    LevelLayout l = tegra_level(t, level);
+    uint8_t *dst = base + (uint64_t)layer * tegra_layer_size(t) + l.offset;
+    uint32_t bpb = t->fmt->bpb, bw = t->fmt->bw, bh = t->fmt->bh;
+    uint32_t x0 = x / bw, y0 = y / bh, wb = div_up(w, bw), hb = div_up(h, bh);
+    uint32_t width_gobs = div_up(l.wb * bpb, 64);
+    uint64_t block_rows = div_up(l.hb, 8u << l.block_height_log2);
+    for (uint32_t k = 0; k < d; k++)
+        for (uint32_t j = 0; j < hb; j++)
+            for (uint32_t i = 0; i < wb; i++)
+                memcpy(dst + gob_offset((x0 + i) * bpb, y0 + j, z + k, width_gobs, l.block_height_log2,
+                                        l.block_depth_log2, block_rows),
+                       src + (((uint64_t)k * hb + j) * wb + i) * bpb, bpb);
 }
 
 void tegra_swizzle(const uint8_t *src, uint8_t *dst, uint32_t wb, uint32_t hb, uint32_t d, uint32_t bpb, uint32_t bh,

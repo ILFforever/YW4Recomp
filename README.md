@@ -54,12 +54,13 @@ Tests (synthetic data only): `python -m unittest discover -s tests -t .`
 
 Where the recompiled game stops right now, and how it got there. Newest first. Each step links to the decision record that explains it.
 
-**Current stop:** input (`hid`, `nn::hid::InitializeNpad`). Before that: headless NVN (device, window, 177 functions written), display and vsync, account, language (0017); the sdk's own GPU driver skipped (0016); 8 guest threads running in parallel as host threads (file loading and others), clock, filesystem with the RomFS (4,518 files, served from the owner's folder).
+**Current state:** no stop. The game runs its frame loop headless (no window yet): 8,400 frames in 13 minutes, the same 27 draws each, so probably one screen it waits on, and about 11 frames per second instead of 60 (both still to explain). Before that: Lua's error handling (setjmp/longjmp, 0018), save data, audio output, input, headless NVN (0017); the sdk's own GPU driver skipped (0016); 8 guest threads running in parallel as host threads (file loading and others), clock, filesystem with the RomFS (4,518 files, served from the owner's folder).
 
 **Direction change (0014):** the `sdk` will be recompiled too, instead of re-implementing its 578 functions by hand; native code moves to the kernel/service level. Done: every instruction in `sdk` translates; both modules are translated, loaded and linked; real guest threads. NVN runs headless (0017: owner chose headless first, then SDL3 + Vulkan); next: input, then the services the frame loop needs.
 
 | Date | Step | Result |
 |---|---|---|
+| 2026-10-21 | Input (`hid`: shared memory, vibration), network (offline), time zone, audio (`audout` played in real time, `audren` device events), save data in host folders, `WriteTexels` for any region, address arbiter type 2; setjmp/longjmp for Lua's errors; a crash handler (0017, 0018) | The frame loop runs: 8,400 frames without a stop |
 | 2026-10-21 | Headless NVN: the game's 177 NVN functions (objects, builders, state, command recording into the game's memory), Tegra texture layout; `nn::vi` overridden with a 60 Hz vsync thread; guest symbols for native code; host-signalled events; account, launch parameter, operation mode, language (0017) | NVN device and window set up; through display set-up to input (`hid`) |
 | 2026-10-21 | Native overrides by symbol in the translator (`recomp/overrides.toml`); NVN entered at `nvnBootstrapLoader`, the sdk's GPU driver (`nv::InitializeGraphics`, `nvdrv`) skipped; `tools/yw4/where.py` names addresses (0016) | The game asks for its NVN functions and makes its first NVN call |
 | 2026-10-21 | Guest threads as host threads: one kernel lock, blocking mutexes, condition variables, events, thread exit/join, address arbiter, cancel, a deadlock detector; transfer memory (0015) | 8 threads start and run in parallel; through to the first graphics service, `nvdrv` |

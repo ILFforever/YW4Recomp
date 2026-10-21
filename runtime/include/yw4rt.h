@@ -5,6 +5,7 @@
 #ifndef YW4RT_H
 #define YW4RT_H
 
+#include <setjmp.h>
 #include <stddef.h>
 #include <stdint.h>
 
@@ -47,6 +48,14 @@ extern GuestFn (*yw4_lookup_hook)(uint64_t addr);
 /* Function at a guest address for an indirect call or tail call (BLR, BR).
  * Traps if no translated function starts there. */
 GuestFn yw4_resolve(uint64_t target);
+
+/* setjmp in recompiled code (decision 0018, runtime/src/setjmp.c): the translator puts a
+ * host setjmp(jb) (the C library's, not __builtin_setjmp: see 0018) at each call to the
+ * guest's setjmp and registers it here, so the guest longjmp's branch to `ret` can come
+ * back into this frame. yw4_resolve calls yw4_setjmp_resume on a miss; it does not return
+ * if `target` is a registered point. */
+void yw4_setjmp_register(CPUState *ctx, uint64_t ret, jmp_buf jb);
+void yw4_setjmp_resume(uint64_t target);
 
 /* An instruction the recompiler can't translate yet, or a guest trap (UDF/BRK). */
 _Noreturn void yw4_unimplemented(CPUState *ctx, uint64_t pc, uint32_t enc);

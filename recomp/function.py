@@ -331,11 +331,15 @@ class EmitStats:
 
 
 def emit_function(code: Code, fn: Function, entries: set[int], subgroup=None,
-                  stats: EmitStats | None = None) -> str:
+                  stats: EmitStats | None = None, setjmps: frozenset[int] = frozenset()) -> str:
+    """setjmps: entries that are setjmp (or a stub that jumps to it). A call to one is a
+    host setjmp in this function's frame, registered so that the guest longjmp's jump back
+    to the return address can return here (decision 0018)."""
     order = sorted(fn.body)
     body = fn.body
     labels: set[int] = set()
     lines: list[str] = []
+    njb = 0
 
     def addr(off: int) -> str:
         return image_addr(off, code.base)
@@ -375,6 +379,10 @@ def emit_function(code: Code, fn: Function, entries: set[int], subgroup=None,
         elif f.kind == "bl":
             if f.target not in entries:
                 stmt = f"yw4_unimplemented(ctx, {pc}, {enc:#010x}u); /* call to non-entry {f.target:#x} */"
+            elif f.target in setjmps:
+                stmt = (f"ctx->x[30] = {addr(off + 4)}; if (!setjmp(yw4_jb[{njb}])) "
+                        f"{{ yw4_setjmp_register(ctx, {addr(off + 4)}, yw4_jb[{njb}]); {name(f.target)}(ctx); }}")
+                njb += 1
             else:
                 stmt = f"ctx->x[30] = {addr(off + 4)}; {name(f.target)}(ctx);"
         elif f.kind == "blr":
@@ -400,6 +408,8 @@ def emit_function(code: Code, fn: Function, entries: set[int], subgroup=None,
                 lines.append((None, jump(nxt)))
 
     out = [f"void {name(fn.entry)}(CPUState *ctx) {{"]
+    if njb:  # host jump buffers live as long as this frame does
+        out.append(f"    jmp_buf yw4_jb[{njb}];")
     for off, stmt in lines:
         if off is not None and off in labels:
             out.append(f"{label(off)}:")

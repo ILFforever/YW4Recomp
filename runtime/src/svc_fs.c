@@ -1,5 +1,6 @@
 /* fsp-srv: the filesystem service (decision 0014). The game's data is the RomFS image
- * (romfs.c); save data and the rest come as the game first uses them. Command ids:
+ * (romfs.c); save data lives in host folders (savefs.c); the rest comes as the game first
+ * uses it. Command ids:
  * Switchbrew "Filesystem_services"; LAS Recomp's services/fs.c (MIT) as the cross-check. */
 #include <inttypes.h>
 #include <stdio.h>
@@ -7,6 +8,7 @@
 
 #include "ipc_simple.h"
 #include "romfs.h"
+#include "savefs.h"
 
 #define FS_OUT_OF_RANGE 0x3EA02u  /* fs ResultOutOfRange (module 2, description 3001) */
 
@@ -44,8 +46,25 @@ static const SimpleCommand fsp_simple[] = {
     {1005, SIMPLE_U32, 0, "GetGlobalAccessLogMode: off"},
 };
 
+
+/* SaveDataAttribute (0x40): program id, user id, system save id, type, rank, index */
+static uint64_t attribute_program(const uint8_t *a) {
+    uint64_t id;
+    memcpy(&id, a, 8);
+    return id ? id : YW4_PROGRAM_ID;  /* 0 means this game */
+}
+
 void svc_fsp_srv(Service *s, IpcRequest *req, IpcResponse *resp) {
     switch (req->cmd) {
+    case 22:  /* CreateSaveDataFileSystem(attribute, creation info, meta info) */
+        resp->result = savefs_open(attribute_program(req->data), req->data + 8, 1, NULL);
+        return;
+    case 51: {  /* OpenSaveDataFileSystem(u8 space id, attribute at +8) -> IFileSystem */
+        Service *fs = NULL;
+        resp->result = savefs_open(attribute_program(req->data + 8), req->data + 16, 0, &fs);
+        if (fs) ipc_return_object(resp, fs);
+        return;
+    }
     case 200:  /* OpenDataStorageByCurrentProcess: the game's RomFS */
         ipc_return_object(resp, ipc_service_new("IStorage (RomFS)", romfs_storage, NULL));
         return;

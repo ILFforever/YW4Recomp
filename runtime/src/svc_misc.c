@@ -5,6 +5,7 @@
 /* ---- aoc:u: add-on content. None is installed. */
 
 static const SimpleCommand aoc_simple[] = {
+    {3, SIMPLE_U32, 0, "ListAddOnContent(offset, count, pid, B: ids) -> count: none"},
 };
 
 void svc_aoc_u(Service *s, IpcRequest *req, IpcResponse *resp) {

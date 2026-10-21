@@ -214,6 +214,14 @@ static void backtrace(const CPUState *ctx) {
     }
 }
 
+/* ---- host crashes (a bad guest pointer, or a runtime bug): say where the guest was */
+
+static void report_crash(const char *what, uint64_t pc, uint64_t addr) {
+    fprintf(stderr, "yw4: crash: %s at host pc %#" PRIx64 ", address %#" PRIx64 "\n", what, pc, addr);
+    if (cur) yw4_stop();  /* the guest thread and its backtrace */
+    exit(3);
+}
+
 void yw4_kernel_lock(void) { host_lock(&klock); }
 void yw4_kernel_unlock(void) { host_unlock(&klock); }
 
@@ -390,15 +398,16 @@ static void thread_exit(KThread *t) {
     thread_free_if_done(t);
 }
 
-/* ExitThread leaves the guest code through a jump back to the thread's host entry. */
-static _Thread_local void **exit_jump;
+/* ExitThread leaves the guest code through a jump back to the thread's host entry
+ * (setjmp/longjmp of the C library: see decision 0018 for why not __builtin_setjmp). */
+static _Thread_local jmp_buf *exit_jump;
 
 static void thread_main(void *p) {
     KThread *t = p;
-    void *jump[5];  /* __builtin_setjmp's buffer: frame pointer, resume address, stack pointer */
+    jmp_buf jump;
     cur = t;
-    exit_jump = jump;
-    if (__builtin_setjmp(jump) == 0) {
+    exit_jump = &jump;
+    if (setjmp(jump) == 0) {
         yw4_resolve(t->entry)(t->ctx);
         host_lock(&klock);  /* the entry function returned: the thread ends as if by ExitThread */
         thread_exit(t);
@@ -451,6 +460,7 @@ static uint32_t start_thread(uint32_t handle) {
 
 uint32_t yw4_kernel_init(CPUState *ctx, uint64_t stack, uint64_t stack_size) {
     host_lock_init(&klock);
+    host_install_crash_handler(report_crash);
     for (size_t i = 0; i < yw4_nmodules; i++) {  /* as Horizon maps an NSO: three regions */
         const Yw4Module *m = &yw4_modules[i];
         uint64_t b = *m->base;
@@ -670,9 +680,19 @@ static uint32_t signal_to_address(uint64_t addr, uint32_t type, int32_t value, i
             return R_INVALID_STATE;
         break;
     }
-    case 2:  /* SignalAndModifyByWaitingCountIfEqual: its value rule isn't verified yet */
-        fprintf(stderr, "yw4: kernel: SignalToAddress type 2 (modify by waiting count): not implemented\n");
-        exit(3);
+    case 2: {  /* SignalAndModifyByWaitingCountIfEqual: the new value depends on who waits, as in
+                * mesosphere's KAddressArbiter (read 2026-10-21): with waiters, -1 if this signal wakes
+                * them all, else unchanged; with none, +1 */
+        int n;
+        first_waiter(WAIT_ADDRESS, addr, &n);
+        int32_t new_value = !n ? value + 1 : count <= 0 || n <= count ? value - 1 : value;
+        int32_t v = value;
+        if (new_value != value
+                ? !__atomic_compare_exchange_n(word, &v, new_value, 0, __ATOMIC_SEQ_CST, __ATOMIC_SEQ_CST)
+                : __atomic_load_n(word, __ATOMIC_SEQ_CST) != value)
+            return R_INVALID_STATE;
+        break;
+    }
     default:
         return R_INVALID_ENUM;
     }
@@ -780,7 +800,7 @@ static void svc(CPUState *ctx, uint32_t imm) {
         }
         thread_exit(cur);
         host_unlock(&klock);
-        __builtin_longjmp(exit_jump, 1);
+        longjmp(*exit_jump, 1);
     case 0x0B:  /* SleepThread(ns): 0 / -1 / -2 are yields */
         sleep_thread((int64_t)x[0]);
         return;

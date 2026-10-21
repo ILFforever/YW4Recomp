@@ -32,6 +32,10 @@ void host_cond_wait(HostCond *c, HostLock *l, int64_t timeout_ns);
 int host_thread_start(void (*fn)(void *), void *arg, size_t stack_size);
 void host_yield(void);
 
+/* Calls report(what, host pc, faulting address) when the process crashes (access
+ * violation, segmentation fault...). report should not return. */
+void host_install_crash_handler(void (*report)(const char *what, uint64_t pc, uint64_t addr));
+
 /* Nanoseconds from an arbitrary start, never going backwards. */
 int64_t host_now_ns(void);
 

@@ -182,11 +182,49 @@ static void wait_counter(uint32_t want) {
     for (int k = 0; k < 2000 && __atomic_load_n(&counter, __ATOMIC_SEQ_CST) != want; k++) sv(&main_ctx, 0x0B, 1000000, 0, 0, 0);
 }
 
+/* setjmp/longjmp as generated code does them (decision 0018): the caller of setjmp has a
+ * big frame (on Windows x64 that puts rbp above rsp, which broke __builtin_setjmp); the
+ * "guest longjmp" restores sp and branches to the setjmp's return address from deep down. */
+#define SETJMP_RET 0x7100001234ull  /* no translated function there */
+static uint64_t saved_sp;
+static void guest_longjmp(CPUState *c) {
+    c->sp = saved_sp;
+    c->x[0] = 7;  /* longjmp's value */
+    yw4_resolve(SETJMP_RET)(c);
+    FAIL("the jump back to the setjmp point returned");
+}
+static void deep(CPUState *c, int n) {
+    volatile char frame[300];
+    frame[0] = (char)n;
+    c->sp -= 0x40;  /* the guest stack grows as the calls nest */
+    if (n) deep(c, n - 1);
+    else guest_longjmp(c);
+    FAIL("deep returned %d", frame[0]);
+}
+static void protected_call(CPUState *ctx) {
+    volatile uint64_t locals[40];
+    for (int i = 0; i < 40; i++) locals[i] = (uint64_t)i * 3 + 1;
+    jmp_buf jb;
+    saved_sp = ctx->sp;
+    ctx->x[30] = SETJMP_RET;
+    if (!setjmp(jb)) {
+        yw4_setjmp_register(ctx, SETJMP_RET, jb);
+        ctx->x[0] = 0;
+        deep(ctx, 6);
+    }
+    if (ctx->x[0] != 7 || ctx->sp != saved_sp) FAIL("after longjmp: x0 %llu sp %llx", (unsigned long long)ctx->x[0], (unsigned long long)ctx->sp);
+    for (int i = 0; i < 40; i++)
+        if (locals[i] != (uint64_t)i * 3 + 1) FAIL("local %d lost across longjmp", i);
+}
+
 int main(int argc, char **argv) {
     CPUState *c = &main_ctx;
     c->x[28] = yw4_kernel_init(c, 0x7000000000ull, 0x1000);
     sv(c, 0x45, 0, 0, 0, 0);
     ev_w = (uint32_t)c->x[1], ev_r = (uint32_t)c->x[2];
+
+    c->sp = 0x7000000f00ull;
+    for (int k = 0; k < 3; k++) protected_call(c);  /* again and again: points are reused, not piled up */
 
     if (argc > 1 && !strcmp(argv[1], "deadlock")) {  /* nobody can signal this: must stop, not hang */
         which = 3, start(1);
@@ -266,7 +304,7 @@ class KernelThreadTest(unittest.TestCase):
         (t / "drv.c").write_text(src)
         cls.exe = t / "kernel.exe"
         rt = RUNTIME / "src"
-        files = [rt / f for f in ("kernel.c", "host.c", "loader.c", "dispatch.c", "sha256.c")]
+        files = [rt / f for f in ("kernel.c", "host.c", "loader.c", "dispatch.c", "setjmp.c", "sha256.c")]
         subprocess.run([check.host_cc(), "-std=c11", "-O1", "-Wall", "-Werror", f"-I{RUNTIME / 'include'}", f"-I{rt}",
                         "-o", str(cls.exe), str(t / "drv.c"), *map(str, files), "-pthread"], check=True)
 
