@@ -41,6 +41,8 @@ Requirements: Python 3.11+, Git, and a C11 compiler for the recompiler tests: Cl
 
 Tests (synthetic data only): `python -m unittest discover -s tests -t .`
 
+The runtime's window needs SDL3: `recomp.build` fetches it on Windows (`python -m tools.yw4.deps`, pinned and hash-checked); on Linux install it (`pkg-config sdl3`). F12 saves a screenshot to `<work_dir>/screenshots/`.
+
 7. Recompile `main` and run it (Phase 3; details in `recomp/README.md`):
 
    ```
@@ -54,12 +56,13 @@ Tests (synthetic data only): `python -m unittest discover -s tests -t .`
 
 Where the recompiled game stops right now, and how it got there. Newest first. Each step links to the decision record that explains it.
 
-**Current state:** no stop. The game runs its frame loop headless (no window yet): a steady 30 frames per second (the game's real rate: present interval 2), the same 27 draws each frame, so probably one screen it waits on. Before that: Lua's error handling (setjmp/longjmp, 0018), save data, audio output, input, headless NVN (0017); the sdk's own GPU driver skipped (0016); 8 guest threads running in parallel as host threads (file loading and others), clock, filesystem with the RomFS (4,518 files, served from the owner's folder).
+**Current state:** no stop. The game runs in a window (SDL3 + Vulkan, 0019) at a steady 30 frames per second, but the window is black: nothing draws yet (shaders come next). It renders deferred into a 1600×900 G-buffer and draws the final picture into the window texture (the game's real rate: present interval 2), the same 27 draws each frame, so probably one screen it waits on. Before that: Lua's error handling (setjmp/longjmp, 0018), save data, audio output, input, headless NVN (0017); the sdk's own GPU driver skipped (0016); 8 guest threads running in parallel as host threads (file loading and others), clock, filesystem with the RomFS (4,518 files, served from the owner's folder).
 
 **Direction change (0014):** the `sdk` will be recompiled too, instead of re-implementing its 578 functions by hand; native code moves to the kernel/service level. Done: every instruction in `sdk` translates; both modules are translated, loaded and linked; real guest threads. NVN runs headless (0017: owner chose headless first, then SDL3 + Vulkan); next: input, then the services the frame loop needs.
 
 | Date | Step | Result |
 |---|---|---|
+| 2026-10-21 | The window: SDL3 (fetched, pinned) and Vulkan (headers vendored, loaded at run time); colour clears on the CPU; present reads the window texture back; screenshots (0019) | A window at 30 frames/s, black until draws exist; clears show a 1600×900 deferred G-buffer |
 | 2026-10-21 | Precise timing on Windows (1 ms system timer, high-resolution sleeps; before, a 16.7 ms sleep took ~31 ms); presenting waits for the display's flip like the Switch does | 11 frames/s → a steady 30.0 frames/s |
 | 2026-10-21 | Input (`hid`: shared memory, vibration), network (offline), time zone, audio (`audout` played in real time, `audren` device events), save data in host folders, `WriteTexels` for any region, address arbiter type 2; setjmp/longjmp for Lua's errors; a crash handler (0017, 0018) | The frame loop runs: 8,400 frames without a stop |
 | 2026-10-21 | Headless NVN: the game's 177 NVN functions (objects, builders, state, command recording into the game's memory), Tegra texture layout; `nn::vi` overridden with a 60 Hz vsync thread; guest symbols for native code; host-signalled events; account, launch parameter, operation mode, language (0017) | NVN device and window set up; through display set-up to input (`hid`) |

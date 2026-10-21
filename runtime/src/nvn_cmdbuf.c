@@ -17,6 +17,7 @@
 
 #include "host.h"
 #include "nvn.h"
+#include "pixels.h"
 
 #define JUMP_RESERVE (sizeof(CmdRec) + 8)  /* room always kept for the record that leaves a chunk */
 
@@ -176,6 +177,32 @@ PLAIN(nvnCommandBufferResetCounter, CMD_RESET_COUNTER)                     /* (c
 
 static uint64_t draws;
 
+/* ---- what runs on the CPU for now (decision 0019): colour clears, written into the
+ * texture's storage in the game's memory, so the presented frame shows them */
+
+static NvnTexture *render_targets[8];  /* bound by the last SetRenderTargets */
+
+/* Level 0 of layer 0 of t, every texel set to the clear colour in the channels of `mask`. */
+static void clear_color(NvnTexture *t, const float color[4], uint32_t mask) {
+    static uint32_t unknown_logged[8];
+    uint8_t texel[16];
+    int n = pixel_encode(t->format, color, texel);
+    if (!n || n != t->layout.fmt->bpb) {
+        for (int i = 0; i < 8; i++)
+            if (unknown_logged[i] == t->format) return;
+            else if (!unknown_logged[i]) { unknown_logged[i] = t->format; break; }
+        fprintf(stderr, "yw4: NVN: clear of format %#x not done on the CPU yet\n", t->format);
+        return;
+    }
+    uint8_t *base = (uint8_t *)(uintptr_t)t->addr;
+    uint64_t level0 = t->layout.levels > 1 ? tegra_level(&t->layout, 1).offset : tegra_layer_size(&t->layout);
+    if ((mask & 0xF) == 0xF && 16 % n == 0) {  /* every texel equal: the layout doesn't matter */
+        for (uint64_t i = 0; i < level0; i += (uint64_t)n) memcpy(base + i, texel, (size_t)n);
+        return;
+    }
+    fprintf(stderr, "yw4: NVN: clear with channel mask %#x not done on the CPU yet\n", mask);
+}
+
 void nvn_execute(uint64_t handle) {
     uint64_t at = handle;
     for (int n = 0;; n++) {
@@ -192,6 +219,20 @@ void nvn_execute(uint64_t handle) {
         case CMD_DRAW_TRANSFORM_FEEDBACK: case CMD_DISPATCH:
             __atomic_add_fetch(&draws, 1, __ATOMIC_RELAXED);
             break;
+        case CMD_SET_RENDER_TARGETS: {
+            const RenderTargets *rt = (const RenderTargets *)r->extra;
+            for (int i = 0; i < 8; i++) render_targets[i] = i < (int)r->x[0] ? rt->color[i] : NULL;
+            break;
+        }
+        case CMD_CLEAR_COLOR: {  /* (index, colour, mask) */
+            NvnTexture *t = r->x[0] < 8 ? render_targets[r->x[0]] : NULL;
+            if (t && t->addr) {
+                float color[4];
+                memcpy(color, r->extra, 16);
+                clear_color(t, color, (uint32_t)r->x[2]);
+            }
+            break;
+        }
         case CMD_REPORT_COUNTER: {  /* (counter, address): NVNcounterData {u64 value, u64 GPU ticks at 614.4 MHz} */
             uint64_t *out = (uint64_t *)(uintptr_t)r->x[1];
             out[0] = 0;

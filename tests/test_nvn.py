@@ -20,8 +20,39 @@ RUNTIME = check.REPO / "runtime"
 DRIVER = r"""
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 #include "tegra.h"
+/* region <format> <width> <height>: tegra_write_region of a whole level must equal
+ * tegra_swizzle; then regions read back must equal the source, at aligned and unaligned x */
+static int region_test(uint32_t fmt, uint32_t w, uint32_t h) {
+    TexLayout t = {0};
+    t.fmt = nvn_format_info(fmt), t.width = w, t.height = h, t.depth = 1, t.layers = 1, t.levels = 1;
+    tegra_layout_init(&t);
+    uint32_t bpb = t.fmt->bpb;
+    size_t n = (size_t)w * h * bpb, size = (size_t)tegra_total_size(&t);
+    unsigned char *src = malloc(n), *a = calloc(1, size), *b = calloc(1, size), *back = malloc(n);
+    for (size_t i = 0; i < n; i++) src[i] = (unsigned char)(i * 13 + 5);
+    tegra_swizzle(src, a, w, h, 1, bpb, t.block_height_log2, 0);
+    tegra_write_region(&t, b, 0, 0, 0, 0, 0, w, h, 1, src);
+    if (memcmp(a, b, size)) { puts("write_region differs from swizzle"); return 1; }
+    tegra_read_region(&t, b, 0, 0, 0, 0, 0, w, h, 1, back);
+    if (memcmp(back, src, n)) { puts("read_region of the whole level differs"); return 1; }
+    for (uint32_t x = 0; x < 9 && x < w; x++) {  /* parts starting at aligned and unaligned x */
+        uint32_t rw = w - x, rh = h > 3 ? h - 3 : h;
+        tegra_read_region(&t, b, 0, 0, x, 1 % h, 0, rw, rh - 1 % h, 1, back);
+        for (uint32_t j = 0; j < rh - 1 % h; j++)
+            if (memcmp(back + (size_t)j * rw * bpb, src + (((size_t)(j + 1 % h)) * w + x) * bpb, (size_t)rw * bpb)) {
+                printf("read_region at x %u, row %u differs\n", x, j);
+                return 1;
+            }
+    }
+    puts("ok");
+    return 0;
+}
+
 int main(int argc, char **argv) {
+    if (argc == 5 && !strcmp(argv[1], "region"))
+        return region_test((uint32_t)strtoul(argv[2], 0, 0), (uint32_t)atoi(argv[3]), (uint32_t)atoi(argv[4]));
     if (argc == 7) {  /* size <format> <width> <height> <depth> <layers> <levels> */
         TexLayout t = {0};
         t.fmt = nvn_format_info((uint32_t)strtoul(argv[1], 0, 0));
@@ -99,6 +130,11 @@ class TegraTest(unittest.TestCase):
         bh = self.size(RGBA8, 100, 20)[1]
         block = 512 << bh
         self.assertEqual(self.size(RGBA8, 100, 20, layers=3)[0], 3 * (-(-single // block) * block))
+
+    def test_regions(self):
+        for fmt, w, h in [(0x25, 100, 37), (0x25, 1920, 1080), (0x01, 77, 20), (0x29, 33, 17), (0x2E, 9, 9)]:
+            got = subprocess.run([str(self.exe), "region", hex(fmt), str(w), str(h)], capture_output=True, text=True)
+            self.assertEqual(got.stdout.strip(), "ok", f"format {fmt:#x} {w}x{h}")
 
     def test_swizzle_matches_layout(self):
         rng = random.Random(4)

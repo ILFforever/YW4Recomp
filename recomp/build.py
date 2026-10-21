@@ -18,7 +18,9 @@ import sys
 import time
 from pathlib import Path
 
-from tools.yw4 import config
+import shutil
+
+from tools.yw4 import config, deps
 
 from . import check
 
@@ -86,6 +88,16 @@ def main(argv: list[str] | None = None) -> int:
     objdir = cfg.work_dir / "build" / "obj"
     objdir.mkdir(parents=True, exist_ok=True)
     includes = [f"-I{RUNTIME / 'include'}", f"-I{cfg.work_dir / 'recomp'}"]
+    # The window (decision 0019): SDL3 (fetched on Windows, the system's elsewhere), Vulkan headers
+    includes.append(f"-I{check.REPO / 'third_party' / 'vulkan' / 'include'}")
+    if sys.platform == "win32":
+        sdl = deps.fetch_sdl(cfg)
+        includes.append(f"-I{sdl / 'include'}")
+        sdl_libs = [str(sdl / "lib" / "libSDL3.dll.a")]
+    else:
+        pc = lambda *a: subprocess.run(["pkg-config", *a, "sdl3"], capture_output=True, text=True, check=True).stdout.split()
+        includes += pc("--cflags")
+        sdl_libs = pc("--libs")
     hdr = newest_header(cfg)
     # runtime/src/*.h are private to the runtime: changing one doesn't rebuild generated code
     rt_hdr = max([hdr, *(h.stat().st_mtime for h in (RUNTIME / "src").glob("*.h"))])
@@ -109,7 +121,9 @@ def main(argv: list[str] | None = None) -> int:
         print(f"{len(errors)} file(s) failed", file=sys.stderr)
         return 1
     exe = cfg.work_dir / "build" / "yw4.exe"
-    libs = ["-pthread"] + (["-lwinmm"] if sys.platform == "win32" else [])  # winmm: timeBeginPeriod
+    libs = [*sdl_libs, "-pthread"] + (["-lwinmm"] if sys.platform == "win32" else [])  # winmm: timeBeginPeriod
+    if sys.platform == "win32":
+        shutil.copy2(sdl / "bin" / "SDL3.dll", exe.parent / "SDL3.dll")  # found next to yw4.exe
     link = subprocess.run([cc, "-o", str(exe), *map(str, objs), *libs], capture_output=True, text=True)
     if link.returncode != 0:
         print(f"link failed:\n{link.stderr[-3000:]}", file=sys.stderr)
@@ -118,7 +132,10 @@ def main(argv: list[str] | None = None) -> int:
     if args.run:
         save = cfg.work_dir / "save"  # the game's save data (the owner's: never commit)
         save.mkdir(exist_ok=True)
-        return subprocess.run([str(exe), str(cfg.work_dir / "exefs"), str(cfg.romfs_dir), str(save)]).returncode
+        shots = cfg.work_dir / "screenshots"  # F12 / YW4_SCREENSHOTS (images of the game: never commit)
+        shots.mkdir(exist_ok=True)
+        env = {**os.environ, "YW4_SCREENSHOT_DIR": os.environ.get("YW4_SCREENSHOT_DIR", str(shots))}
+        return subprocess.run([str(exe), str(cfg.work_dir / "exefs"), str(cfg.romfs_dir), str(save)], env=env).returncode
     return 0
 
 

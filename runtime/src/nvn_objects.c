@@ -15,6 +15,8 @@
 #include "host.h"
 #include "kernel.h"
 #include "nvn.h"
+#include "pixels.h"
+#include "window.h"
 
 static void *alloc(size_t n) {
     void *p = calloc(1, n);
@@ -81,8 +83,34 @@ NVN(nvnQueueSubmitCommands) {  /* (queue, count, const NVNcommandHandle*) */
  * for that flip directly, which paces the game as the Switch does (60 / interval). */
 static uint64_t next_flip;
 
+/* The presented texture, read back from the game's memory as RGBA8 rows for the window. */
+static void show(NvnTexture *t, uint64_t frame) {
+    static uint8_t *texels, *rgba;
+    static size_t cap;
+    static uint32_t logged_format;
+    if (!t || !t->addr || t->target != 1 /* 2D */ || t->layout.fmt->bw != 1) return;
+    uint32_t w = t->width, h = t->height, bpb = t->layout.fmt->bpb;
+    size_t n = (size_t)w * h;
+    if (n > cap) {
+        free(texels), free(rgba);
+        texels = malloc(n * bpb), rgba = malloc(n * 4);
+        if (!texels || !rgba) exit(3);
+        cap = n;
+    }
+    tegra_read_region(&t->layout, (const uint8_t *)(uintptr_t)t->addr, 0, 0, 0, 0, 0, w, h, 1, texels);
+    for (size_t i = 0; i < n; i++)
+        if (!pixel_to_rgba8(t->format, texels + i * bpb, rgba + 4 * i)) {
+            if (logged_format != t->format) fprintf(stderr, "yw4: NVN: can't show window format %#x yet\n", t->format);
+            logged_format = t->format;
+            return;
+        }
+    window_present_rgba(rgba, w, h, frame);
+}
+
 NVN(nvnQueuePresentTexture) {  /* (queue, window, texture index) */
     NvnWindow *w = HOST(NvnWindow, A(1));
+    int index = (int)A(2);
+    if (index >= 0 && index < w->num) show(HOST(NvnTexture, w->textures[index]), frames + 1);
     yw4_vsync_start();
     uint64_t now = yw4_vsync_count();
     if (next_flip < now + 1) next_flip = now + 1;

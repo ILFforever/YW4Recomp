@@ -119,20 +119,48 @@ static uint64_t gob_offset(uint32_t xb, uint32_t y, uint32_t z, uint32_t width_g
     return off + (((xi >> 5) << 8) | ((yi >> 1) << 6) | (((xi >> 4) & 1) << 5) | ((yi & 1) << 4) | (xi & 15));
 }
 
-void tegra_write_region(const TexLayout *t, uint8_t *base, uint32_t level, uint32_t layer, uint32_t x, uint32_t y,
-                        uint32_t z, uint32_t w, uint32_t h, uint32_t d, const uint8_t *src) {
+/* Copies a region between block-linear storage and tightly packed linear rows. */
+static void copy_region(const TexLayout *t, uint8_t *base, uint32_t level, uint32_t layer, uint32_t x, uint32_t y,
+                        uint32_t z, uint32_t w, uint32_t h, uint32_t d, uint8_t *linear, int to_linear) {
     LevelLayout l = tegra_level(t, level);
-    uint8_t *dst = base + (uint64_t)layer * tegra_layer_size(t) + l.offset;
+    uint8_t *surface = base + (uint64_t)layer * tegra_layer_size(t) + l.offset;
     uint32_t bpb = t->fmt->bpb, bw = t->fmt->bw, bh = t->fmt->bh;
     uint32_t x0 = x / bw, y0 = y / bh, wb = div_up(w, bw), hb = div_up(h, bh);
     uint32_t width_gobs = div_up(l.wb * bpb, 64);
     uint64_t block_rows = div_up(l.hb, 8u << l.block_height_log2);
+    if ((x0 * bpb) % 16 == 0 && 16 % bpb == 0) {  /* 16-byte runs are contiguous in both layouts */
+        uint32_t row = wb * bpb;
+        for (uint32_t k = 0; k < d; k++)
+            for (uint32_t j = 0; j < hb; j++)
+                for (uint32_t xb = 0; xb < row; xb += 16) {
+                    uint8_t *b = surface + gob_offset(x0 * bpb + xb, y0 + j, z + k, width_gobs, l.block_height_log2,
+                                                      l.block_depth_log2, block_rows);
+                    uint8_t *lin = linear + ((uint64_t)k * hb + j) * row + xb;
+                    size_t n = row - xb < 16 ? row - xb : 16;
+                    if (to_linear) memcpy(lin, b, n);
+                    else memcpy(b, lin, n);
+                }
+        return;
+    }
     for (uint32_t k = 0; k < d; k++)
         for (uint32_t j = 0; j < hb; j++)
-            for (uint32_t i = 0; i < wb; i++)
-                memcpy(dst + gob_offset((x0 + i) * bpb, y0 + j, z + k, width_gobs, l.block_height_log2,
-                                        l.block_depth_log2, block_rows),
-                       src + (((uint64_t)k * hb + j) * wb + i) * bpb, bpb);
+            for (uint32_t i = 0; i < wb; i++) {
+                uint8_t *b = surface + gob_offset((x0 + i) * bpb, y0 + j, z + k, width_gobs, l.block_height_log2,
+                                                  l.block_depth_log2, block_rows);
+                uint8_t *lin = linear + (((uint64_t)k * hb + j) * wb + i) * bpb;
+                if (to_linear) memcpy(lin, b, bpb);
+                else memcpy(b, lin, bpb);
+            }
+}
+
+void tegra_write_region(const TexLayout *t, uint8_t *base, uint32_t level, uint32_t layer, uint32_t x, uint32_t y,
+                        uint32_t z, uint32_t w, uint32_t h, uint32_t d, const uint8_t *src) {
+    copy_region(t, base, level, layer, x, y, z, w, h, d, (uint8_t *)src, 0);
+}
+
+void tegra_read_region(const TexLayout *t, const uint8_t *base, uint32_t level, uint32_t layer, uint32_t x, uint32_t y,
+                       uint32_t z, uint32_t w, uint32_t h, uint32_t d, uint8_t *dst) {
+    copy_region(t, (uint8_t *)base, level, layer, x, y, z, w, h, d, dst, 1);
 }
 
 void tegra_swizzle(const uint8_t *src, uint8_t *dst, uint32_t wb, uint32_t hb, uint32_t d, uint32_t bpb, uint32_t bh,

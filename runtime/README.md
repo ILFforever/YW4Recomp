@@ -18,5 +18,7 @@ So far:
 - `src/svc_hid.c`, `src/svc_nifm.c`, `src/svc_audio.c`, `src/svc_acc.c`: input (shared memory, still zeroed), network (offline), audio (`audout` timed at 48 kHz), the one user account.
 - `src/savefs.c`: save data as host folders, `<save dir>/<program id>/<user id>/` (yw4's third argument; `build.py --run` uses `<work_dir>/save`).
 - `src/setjmp.c`: the guest's setjmp/longjmp in recompiled code (decision 0018).
+- `src/window.c`, `src/window.h`: the window (SDL3) and the Vulkan presenter; screenshots (decision 0019).
+- `src/pixels.c`: NVN colour formats on the CPU (clear colours, display pixels).
 - `src/vi.c`: `nn::vi` overrides and the 60 Hz vsync thread (decision 0017).
 - `src/host.h`, `src/host.c`: what the kernel needs from the host OS (threads, locks, condition variables, monotonic clock), for Windows and Linux (decision 0015).
