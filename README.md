@@ -54,10 +54,11 @@ Tests (synthetic data only): `python -m unittest discover -s tests -t .`
 
 Where the recompiled game stops right now, and how it got there. Newest first. Each step links to the decision record that explains it.
 
-**Current stop:** inside the static constructors (DT_INIT), at `nn::account::AsyncContext::AsyncContext()`. Native `sdk` functions: 59 of 578.
+**Current stop:** inside the static constructors (DT_INIT), at `nn::account::AsyncContext::AsyncContext()`. Native `sdk` functions: 99 of 578.
 
 | Date | Step | Result |
 |---|---|---|
+| 2026-10-21 | Math library: musl 1.1.19's C (`third_party/musl`), checked against the sdk's own functions run on the Pi; sdk version-locked in `target.toml` (0013) | All 40 math functions match the Switch bit for bit on 800,000 inputs |
 | 2026-10-21 | C library basics: memory, strings, ctype, integer parsing; `__cxa_guard_*`; `__nnmusl_init_dso` (0012) | The 830 constructors start running |
 | 2026-10-21 | First native `sdk` functions: start-up memory (`nn::os`), logging and asserts (`nn::diag`), the game's heap (`nn::mem::StandardAllocator` on a TLSF allocator) (0011) | `nninitStartup` runs to the end; the game logs `Remain Memory Size 198MiB` |
 | 2026-10-21 | Loader and import stubs (0010) | `main` loads at its Switch address `0x7100000000`, relocates, and runs natively until its first `sdk` call |
@@ -70,7 +71,7 @@ Still open from Phase 0: the baseline benchmark (`docs/baseline.md`), which need
 
 Known gaps, in the order they will come up:
 - More `sdk` functions as the constructors and `nnMain` reach them (`nn::account`, `nn::fs`, `nn::os` threads...).
-- Math (`sin`, `pow`...), `qsort`, `printf`-family float output, `strerror`: the host's results can differ from musl's, so they need musl's own code. That's a dependency decision, not made yet.
+- `qsort`, `printf`-family float output, `strtod`, `strerror`: same approach as the math functions (musl source, checked against the sdk), not done yet.
 - Threads (one guest thread so far), `setjmp`/`longjmp` for Lua, contents of the 20 data imports (RTTI, `stdio`).
 - C++ exceptions are not supported: nothing in `main` throws (0012).
 
@@ -82,6 +83,7 @@ Known gaps, in the order they will come up:
 | `runtime/` | Native runtime (Phase 1+) |
 | `recomp/` | AArch64 â†’ C recompiler (Phase 2+) |
 | `docs/` | Recon report, baseline, decision records |
+| `third_party/musl/` | musl 1.1.19's math functions (MIT), see its README |
 | `work/`, `build/` | Generated output (gitignored) |
 
 See `docs/decisions/` for why things are set up this way.

@@ -1,4 +1,4 @@
-"""Build the recompiled game: work/recomp/*.c + runtime/src/*.c -> work/build/yw4.exe.
+"""Build the recompiled game: work/recomp/*.c + runtime/src/*.c + musl's math -> work/build/yw4.exe.
 
     python -m recomp.build           compile what changed, link
     python -m recomp.build --run     ... then run it on work/exefs/main.bin
@@ -25,10 +25,21 @@ from . import check
 RUNTIME = check.REPO / "runtime"
 CFLAGS = ["-std=c11", "-O1", "-ffp-contract=off", "-Wall", "-Wno-unused-label"]
 
+# musl 1.1.19's math (third_party/musl, decision 0013). These are the flags its results were
+# verified with against the sdk (tools/yw4/sdkref.py --check uses this same list): no FMA
+# contraction, no builtins (the host must not constant-fold with its own libm).
+MUSL = check.REPO / "third_party" / "musl"
+MUSL_CFLAGS = ["-std=c99", "-O2", "-ffp-contract=off", "-fno-builtin", "-frounding-math",
+               "-include", str(MUSL / "yw4" / "glue.h"), f"-I{MUSL / 'yw4'}", f"-I{MUSL / 'src' / 'internal'}"]
+
+
+def musl_sources() -> list[Path]:
+    return sorted((MUSL / "src" / "math").glob("*.c"))
+
 
 def sources(cfg: config.Config) -> list[Path]:
     gen = cfg.work_dir / "recomp"
-    return sorted(gen.glob("*.c")) + sorted((RUNTIME / "src").glob("*.c"))
+    return sorted(gen.glob("*.c")) + sorted((RUNTIME / "src").glob("*.c")) + musl_sources()
 
 
 def newest_header(cfg: config.Config) -> float:
@@ -37,7 +48,8 @@ def newest_header(cfg: config.Config) -> float:
 
 
 def compile_one(cc: str, src: Path, obj: Path, includes: list[str]) -> str | None:
-    proc = subprocess.run([cc, *CFLAGS, *includes, "-c", str(src), "-o", str(obj)], capture_output=True, text=True)
+    flags = MUSL_CFLAGS if MUSL in src.parents else [*CFLAGS, *includes]
+    proc = subprocess.run([cc, *flags, "-c", str(src), "-o", str(obj)], capture_output=True, text=True)
     if proc.returncode != 0:
         return f"{src.name}:\n{proc.stderr[-2000:]}"
     if proc.stderr.strip():
@@ -66,12 +78,15 @@ def main(argv: list[str] | None = None) -> int:
     hdr = newest_header(cfg)
     # runtime/src/*.h are private to the runtime: changing one doesn't rebuild generated code
     rt_hdr = max([hdr, *(h.stat().st_mtime for h in (RUNTIME / "src").glob("*.h"))])
+    musl_hdr = max(h.stat().st_mtime for h in MUSL.rglob("*.h"))
     todo, objs = [], []
     for src in sources(cfg):
-        rt = src.parent.name == "src"
-        obj = objdir / (("rt_" if rt else "") + src.stem + ".o")
+        rt = src.parent == RUNTIME / "src"
+        musl = MUSL in src.parents
+        obj = objdir / (("rt_" if rt else "musl_" if musl else "") + src.stem + ".o")
         objs.append(obj)
-        if not obj.exists() or obj.stat().st_mtime < max(src.stat().st_mtime, rt_hdr if rt else hdr):
+        dep = musl_hdr if musl else rt_hdr if rt else hdr
+        if not obj.exists() or obj.stat().st_mtime < max(src.stat().st_mtime, dep):
             todo.append((src, obj))
 
     t0 = time.time()

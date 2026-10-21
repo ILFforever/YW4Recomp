@@ -30,8 +30,9 @@ def load_target() -> dict[str, str]:
 
 def pin_target(image_sha256: str, build_id: str) -> None:
     text = TARGET_PATH.read_text(encoding="utf-8")
-    text = re.sub(r'(?m)^image_sha256 = ".*"$', f'image_sha256 = "{image_sha256}"', text)
-    text = re.sub(r'(?m)^build_id = ".*"$', f'build_id = "{build_id}"', text)
+    # only the [main] entries, which come first; [sdk] is pinned separately (tools/yw4/sdkref.py)
+    text = re.sub(r'(?m)^image_sha256 = ".*"$', f'image_sha256 = "{image_sha256}"', text, count=1)
+    text = re.sub(r'(?m)^build_id = ".*"$', f'build_id = "{build_id}"', text, count=1)
     TARGET_PATH.write_text(text, encoding="utf-8", newline="\n")
 
 

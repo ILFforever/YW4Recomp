@@ -8,3 +8,4 @@ So far:
 - `include/yw4load.h`, `src/loader.c`, `src/sha256.c`, `src/hle.c`, `src/main.c`: load and relocate main (refusing any other build), import stubs, start-up order (decision 0010).
 - `src/hle.h`, `src/hle_os.c`, `src/hle_diag.c`, `src/hle_mem.c`, `src/heap.c`: first sdk imports: start-up memory, diag logging/asserts, `nn::mem::StandardAllocator` on a TLSF heap (decision 0011).
 - `src/hle_libc.c`, `src/hle_string.c`: musl start-up (`__nnmusl_init_dso`), static-local guards, and the exact C library functions: memory, strings, ctype, integer parsing (decision 0012).
+- `src/hle_math.c`: the 40 libm imports, bit-exact with the sdk: musl 1.1.19 (`third_party/musl`) plus exact instruction models; checked with `python -m tools.yw4.sdkref --check` (decision 0013).
