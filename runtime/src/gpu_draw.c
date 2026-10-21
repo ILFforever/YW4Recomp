@@ -516,8 +516,9 @@ void gpu_end_rendering(VkCommandBuffer cb, GpuState *s) {
 }
 
 /* The attachments of s->rt; begins rendering into them unless already. Fills the formats. */
-static void begin_rendering(VkCommandBuffer cb, GpuState *s, VkFormat color[8], VkFormat *depth, uint32_t *w,
-                            uint32_t *h) {
+/* 0 if no render target is set (nothing to draw into). */
+static int begin_rendering(VkCommandBuffer cb, GpuState *s, VkFormat color[8], VkFormat *depth, uint32_t *w,
+                           uint32_t *h) {
     VkRenderingAttachmentInfo ca[8] = {0}, da = {0};
     uint32_t aw = UINT32_MAX, ah = UINT32_MAX, n = (uint32_t)s->ncolor;
     for (uint32_t i = 0; i < n; i++) {
@@ -544,9 +545,9 @@ static void begin_rendering(VkCommandBuffer cb, GpuState *s, VkFormat color[8], 
         if (tw < aw) aw = tw;
         if (th < ah) ah = th;
     }
-    if (aw == UINT32_MAX) gpu_stop("a draw without render targets");
+    if (aw == UINT32_MAX) return 0;
     *w = aw, *h = ah;
-    if (s->rendering) return;
+    if (s->rendering) return 1;
     int has_depth = *depth != VK_FORMAT_UNDEFINED && *depth != VK_FORMAT_S8_UINT;
     int has_stencil = *depth == VK_FORMAT_S8_UINT || *depth == VK_FORMAT_D24_UNORM_S8_UINT ||
                       *depth == VK_FORMAT_D32_SFLOAT_S8_UINT;
@@ -555,6 +556,7 @@ static void begin_rendering(VkCommandBuffer cb, GpuState *s, VkFormat color[8], 
                           .pDepthAttachment = has_depth ? &da : NULL, .pStencilAttachment = has_stencil ? &da : NULL};
     vkCmdBeginRendering(cb, &ri);
     s->rendering = 1;
+    return 1;
 }
 
 /* The texture and sampler a handle names in the current pools. */
@@ -792,7 +794,15 @@ void gpu_draw(VkCommandBuffer cb, GpuState *s, const CmdRec *r) {
     PipeKey k;
     memset(&k, 0, sizeof k);
     uint32_t w, h;
-    begin_rendering(cb, s, k.color, &k.depth, &w, &h);
+    if (!begin_rendering(cb, s, k.color, &k.depth, &w, &h)) {
+        static int logged;
+        if (logged++ < 8)
+            fprintf(stderr, "yw4: gpu: draw without render targets skipped (colour targets %d, depth %p, shaders %016" PRIx64
+                            " %016" PRIx64 ", rasterizer discard %d, frame %" PRIu64 ")\n",
+                    s->ncolor, (void *)s->rt.depth, g->sh[ST_VERT] ? g->sh[ST_VERT]->key : 0,
+                    g->sh[ST_FRAG] ? g->sh[ST_FRAG]->key : 0, s->rasterizer_discard, gpu_frames());
+        return;
+    }
     k.ncolor = (uint8_t)s->ncolor;
     memcpy(k.blend, s->blend, sizeof k.blend);
     for (int i = 0; i < 8; i++) k.blend[i][0] = 0;

@@ -43,7 +43,7 @@ typedef struct {
 
 static FILE *csv;
 static char summary_path[600];
-static int enabled = -1;
+static int enabled = -1, exiting;
 static int64_t t0, last_exit, last_cpu;
 static uint64_t peak_rss;
 static Row *rows;
@@ -113,7 +113,9 @@ static void write_rows(size_t upto) {
     for (; written < upto; written++) {
         Row *r = &rows[written];
         double busy, span;
-        int has = gpu_frame_time(r->frame, &busy, &span);
+        /* At exit the GPU lock may be held by the thread that is exiting (a stop inside a draw):
+         * asking for GPU times then would deadlock, so the last rows go without them. */
+        int has = exiting ? 0 : gpu_frame_time(r->frame, &busy, &span);
         fprintf(csv, "%" PRIu64 ",%.3f,%.2f,%.2f,%.2f,%.2f,%" PRIu64 ",%.0f,%.0f,", r->frame, r->t, r->interval, r->work,
                 r->present, r->wait, r->draws, r->cpu, r->rss);
         if (has) {
@@ -135,6 +137,7 @@ static void write_summary(void) {
 
 static void finish(void) {
     if (!csv) return;
+    exiting = 1;
     write_rows(nrows);
     fclose(csv);
     csv = NULL;

@@ -89,3 +89,11 @@ module = "sdk"
 symbol = "_ZN2nn5swkbd12ShowKeyboardEPNS0_6StringERKNS0_15ShowKeyboardArgE"
 native = "yw4_swkbd_ShowKeyboard"
 why = "nn::swkbd::ShowKeyboard launches the keyboard applet (CreateLibraryApplet), which has no host equivalent"
+
+# nn::ec, the eShop: a library applet on the Switch, which we don't have. The game's
+# "additional content" menu entry calls this; it returns at once, as if the shop were closed.
+[[override]]
+module = "sdk"
+symbol = "_ZN2nn2ec24ShowShopAddOnContentListERKNS_7account10UserHandleE"
+native = "yw4_ec_ShowShopAddOnContentList"
+why = "nn::ec::ShowShopAddOnContentList opens the eShop applet; there is no shop to show"
