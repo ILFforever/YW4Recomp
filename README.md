@@ -4,7 +4,7 @@ A fan static-recompilation project to run Yo-kai Watch 4++ (Nintendo Switch, fin
 
 This repo contains only tools, runtime code, and patches. It contains no game data. Provide your own dump of the final 4++ update.
 
-Status: Phase 3 started. All of `main` translates to C, builds into one executable, loads at its Switch address and runs until the first `sdk` function it needs (`nn::os::QueryMemoryInfo`).
+Status: Phase 3 (native `sdk` functions). See [Progress](#progress) below.
 
 ## Setup
 
@@ -41,13 +41,46 @@ Requirements: Python 3.11+, Git, and a C11 compiler for the recompiler tests: Cl
 
 Tests (synthetic data only): `python -m unittest discover -s tests -t .`
 
+7. Recompile `main` and run it (Phase 3; details in `recomp/README.md`):
+
+   ```
+   python -m recomp.translate      # all of main -> <work_dir>/recomp/ (C, never committed)
+   python -m recomp.build --run    # build <work_dir>/build/yw4.exe and run it
+   ```
+
+   It runs until the first `sdk` function that has no native version yet and prints its name and caller.
+
+## Progress
+
+Where the recompiled game stops right now, and how it got there. Newest first. Each step links to the decision record that explains it.
+
+**Current stop:** inside the static constructors (DT_INIT), at `nn::account::AsyncContext::AsyncContext()`. Native `sdk` functions: 59 of 578.
+
+| Date | Step | Result |
+|---|---|---|
+| 2026-10-21 | C library basics: memory, strings, ctype, integer parsing; `__cxa_guard_*`; `__nnmusl_init_dso` (0012) | The 830 constructors start running |
+| 2026-10-21 | First native `sdk` functions: start-up memory (`nn::os`), logging and asserts (`nn::diag`), the game's heap (`nn::mem::StandardAllocator` on a TLSF allocator) (0011) | `nninitStartup` runs to the end; the game logs `Remain Memory Size 198MiB` |
+| 2026-10-21 | Loader and import stubs (0010) | `main` loads at its Switch address `0x7100000000`, relocates, and runs natively until its first `sdk` call |
+| 2026-10-21 | Every instruction in `main` translates (0006, 0007) | 40,228 functions, 4.25 M instructions, 0 untranslated; compiles and links with Clang |
+| 2026-10-20 – 21 | Recompiler: integer, loads/stores, floating point and SIMD, atomics, whole functions (0006–0009) | Each instruction form checked against a real ARM64 CPU (Raspberry Pi 5, 0004) |
+| 2026-10-20 | Phase 1 decision: custom runtime, recompile only `main`, NVN on Vulkan (0005) | |
+| 2026-10-14 – 20 | Phase 0: scaffold, NSO pipeline with version lock, recon report, Ghidra setup (0001–0003) | `docs/recon.md` |
+
+Still open from Phase 0: the baseline benchmark (`docs/baseline.md`), which needs the owner's emulator runs.
+
+Known gaps, in the order they will come up:
+- More `sdk` functions as the constructors and `nnMain` reach them (`nn::account`, `nn::fs`, `nn::os` threads...).
+- Math (`sin`, `pow`...), `qsort`, `printf`-family float output, `strerror`: the host's results can differ from musl's, so they need musl's own code. That's a dependency decision, not made yet.
+- Threads (one guest thread so far), `setjmp`/`longjmp` for Lua, contents of the 20 data imports (RTTI, `stdio`).
+- C++ exceptions are not supported: nothing in `main` throws (0012).
+
 ## Layout
 
 | Path | What |
 |---|---|
 | `tools/` | Python analysis and input-pipeline scripts |
 | `runtime/` | Native runtime (Phase 1+) |
-| `recomp/` | AArch64 → C recompiler (Phase 2+) |
+| `recomp/` | AArch64 â†’ C recompiler (Phase 2+) |
 | `docs/` | Recon report, baseline, decision records |
 | `work/`, `build/` | Generated output (gitignored) |
 

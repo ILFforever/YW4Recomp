@@ -131,5 +131,81 @@ class HeapTest(unittest.TestCase):
             self.assertEqual(got.stdout.strip(), "ok")
 
 
+STRING_DRIVER = r"""
+#include <stdio.h>
+#include <string.h>
+#include "hle.h"
+static CPUState c;
+static long long call(GuestFn f, uint64_t a, uint64_t b, uint64_t n) {
+    c.x[0] = a; c.x[1] = b; c.x[2] = n; f(&c); return (long long)c.x[0];
+}
+#define S(p) ((uint64_t)(uintptr_t)(p))
+#define EXPECT(e, want) do { long long g_ = (e); if (g_ != (want)) { printf("%s = %lld, want %lld\n", #e, g_, (long long)(want)); return 1; } } while (0)
+int main(void) {
+    /* musl returns the byte difference, as unsigned chars */
+    EXPECT(call(hle_libc_strcmp, S("abc"), S("abd"), 0), 'c' - 'd');
+    EXPECT(call(hle_libc_strcmp, S("\xff"), S("a"), 0), 0xff - 'a');
+    EXPECT(call(hle_libc_strcmp, S("ab"), S("abc"), 0), -'c');
+    EXPECT(call(hle_libc_memcmp, S("a\x80"), S("a\x01"), 2), 0x7f);
+    EXPECT(call(hle_libc_memcmp, S("xyz"), S("abc"), 0), 0);
+    EXPECT(call(hle_libc_strncmp, S("abcx"), S("abcy"), 3), 0);
+    EXPECT(call(hle_libc_strncmp, S("abcx"), S("abcy"), 4), 'x' - 'y');
+    EXPECT(call(hle_libc_strncmp, S("a"), S("b"), 0), 0);
+    EXPECT(call(hle_libc_strcasecmp, S("HeLLo"), S("hello"), 0), 0);
+    EXPECT(call(hle_libc_strcasecmp, S("A"), S("b"), 0), 'a' - 'b');
+    /* "C" locale ctype: nothing above 127, EOF in no class */
+    EXPECT(call(hle_libc_isspace, 0xa0, 0, 0), 0);
+    EXPECT(call(hle_libc_isspace, '\v', 0, 0), 1);
+    EXPECT(call(hle_libc_isalnum, '@', 0, 0), 0);
+    EXPECT(call(hle_libc_isalnum, 'Z', 0, 0), 1);
+    EXPECT(call(hle_libc_ispunct, '~', 0, 0), 1);
+    EXPECT(call(hle_libc_ispunct, ' ', 0, 0), 0);
+    EXPECT(call(hle_libc_isxdigit, 'g', 0, 0), 0);
+    EXPECT(call(hle_libc_isdigit, (uint32_t)-1, 0, 0), 0);
+    EXPECT(call(hle_libc_toupper, 0xe9, 0, 0), 0xe9);
+    EXPECT(call(hle_libc_tolower, 'Q', 0, 0), 'q');
+    /* integers: guest long is 64-bit; atoi wraps like musl */
+    EXPECT(call(hle_libc_atoi, S("  -42z"), 0, 0), -42);
+    EXPECT(call(hle_libc_atoi, S("2147483648"), 0, 0), -2147483647 - 1);
+    EXPECT(call(hle_libc_abs, (uint32_t)-7, 0, 0), 7);
+    char *end = 0;
+    EXPECT(call(hle_libc_strtol, S("0x7fffffffff!"), S(&end), 0), 0x7fffffffffLL);
+    EXPECT(*end, '!');
+    EXPECT(call(hle_libc_strtoul, S("-1"), 0, 10), -1);
+    EXPECT(call(hle_libc_strtol, S("99999999999999999999"), 0, 10), 0x7fffffffffffffffLL);
+    call(hle_libc_errno_location, 0, 0, 0);
+    EXPECT(*(int *)(uintptr_t)c.x[0], 34);
+    char buf[] = "a,,b;c";
+    EXPECT(call(hle_libc_strtok, S(buf), S(",;"), 0), S(buf));
+    EXPECT(call(hle_libc_strtok, 0, S(",;"), 0), S(buf + 3));
+    EXPECT(call(hle_libc_strtok, 0, S(",;"), 0), S(buf + 5));
+    EXPECT(call(hle_libc_strtok, 0, S(",;"), 0), 0);
+    EXPECT(call(hle_libc_strnlen, S("abcdef"), 4, 0), 4);
+    unsigned char m[8] = {0};
+    EXPECT(call(hle_libc_memset_s, S(m), 4, 0x55) , 0);  /* x3 = 0 here: n = 0 */
+    c.x[0] = S(m); c.x[1] = 4; c.x[2] = 0x55; c.x[3] = 8; hle_libc_memset_s(&c);
+    EXPECT((long long)c.x[0], 22);
+    EXPECT(m[3] == 0x55 && m[4] == 0, 1);
+    puts("ok");
+    return 0;
+}
+"""
+
+
+class StringTest(unittest.TestCase):
+    """C library functions where musl's exact result is reproduced (hle_string.c, decision 0012)."""
+
+    def test_musl_conventions(self):
+        with tempfile.TemporaryDirectory() as t:
+            t = Path(t)
+            (t / "drv.c").write_text(STRING_DRIVER)
+            exe = t / "str.exe"
+            subprocess.run([check.host_cc(), "-std=c11", "-O1", "-Wall", f"-I{RUNTIME / 'include'}",
+                            f"-I{RUNTIME / 'src'}", "-o", str(exe), str(t / "drv.c"),
+                            str(RUNTIME / "src" / "hle_string.c")], check=True, capture_output=True)
+            got = subprocess.run([str(exe)], capture_output=True, text=True)
+            self.assertEqual(got.stdout.strip(), "ok")
+
+
 if __name__ == "__main__":
     unittest.main()
