@@ -62,7 +62,7 @@ Where the recompiled game stops right now, and how it got there. Newest first. E
 
 | Date | Step | Result |
 |---|---|---|
-| 2026-10-21 | Shader translator `recomp/shader.py`: NV_gpu_program5 → GLSL 4.60, registers as raw bits, one statement per instruction with the source as a comment, Vulkan binding scheme (0020) | All 1,349 programs translate; compiling them waits for the Vulkan SDK (`--check`) |
+| 2026-10-21 | Shader translator `recomp/shader.py`: NV_gpu_program5 → GLSL 4.60, registers as raw bits, one statement per instruction with the source as a comment, Vulkan binding scheme (0020) | All 1,349 programs translate and compile to SPIR-V (`--check` with glslang) |
 | 2026-10-21 | Decision: translate shaders from their shipped NV_gpu_program5 assembly; `HBH1` container decoded; `tools/yw4/shaders.py` extracts them keyed by a hash of the text (0020) | 1,891 programs, 1,349 distinct, 58 opcodes, structured control flow; all texture handles come from fixed slots, so no bindless emulation |
 | 2026-10-21 | The window: SDL3 (fetched, pinned) and Vulkan (headers vendored, loaded at run time); colour clears on the CPU; present reads the window texture back; screenshots (0019) | A window at 30 frames/s, black until draws exist; clears show a 1600×900 deferred G-buffer |
 | 2026-10-21 | Precise timing on Windows (1 ms system timer, high-resolution sleeps; before, a 16.7 ms sleep took ~31 ms); presenting waits for the display's flip like the Switch does | 11 frames/s → a steady 30.0 frames/s |

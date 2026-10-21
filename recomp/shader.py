@@ -121,6 +121,16 @@ def balanced(s: str) -> bool:
     return depth == 0
 
 
+def paren(e: str) -> str:
+    """`e` safe to follow with a swizzle: names and single calls as they are, else (e)."""
+    if re.fullmatch(r"[\w.\[\]]+", e):
+        return e
+    m = re.fullmatch(r"\w+\((.*)\)(\.[xyzw]+)?", e)
+    if m and balanced(m.group(1)):
+        return e
+    return f"({e})"
+
+
 def parse_operand(text: str) -> Operand:
     op = Operand(text)
     t = text.strip()
@@ -373,12 +383,12 @@ class Translator:
         if dtyp == "f1":
             if when:
                 raise ShaderError("conditional depth write")
-            self.emit(f"gl_FragDepth = {convert(expr, typ, 'f')}.z;")
+            self.emit(f"gl_FragDepth = {paren(convert(expr, typ, 'f'))}.z;")
         elif when:
             self.emit(f"{lv}.{mask} = mix({lv}, {convert(expr, typ, dtyp)}, {when}).{mask};")
         else:
             v = convert(expr, typ, dtyp)
-            self.emit(f"{lv}.{mask} = {v}.{mask};" if mask != "xyzw" else f"{lv} = {v};")
+            self.emit(f"{lv}.{mask} = {paren(v)}.{mask};" if mask != "xyzw" else f"{lv} = {v};")
         if cc:
             self.emit(f"cc.{mask} = notEqual({expr}, {zero}).{mask};")
 
@@ -747,14 +757,15 @@ def translate(key: str, stage: str, text: str) -> tuple[str, dict]:
     return Translator(key, stage, text).translate()
 
 
-def glslang() -> str | None:
+def glslang(cfg: config.Config) -> str | None:
+    """[tools] glslang, else glslangValidator from the Vulkan SDK or PATH."""
     import os
-    exe = shutil.which("glslangValidator")
+    if cfg.glslang:
+        return str(cfg.glslang) if cfg.glslang.is_file() else None
     sdk = os.environ.get("VULKAN_SDK")
-    if not exe and sdk:
-        cand = Path(sdk) / "Bin" / "glslangValidator.exe"
-        exe = str(cand) if cand.exists() else None
-    return exe
+    if sdk and (Path(sdk) / "Bin" / "glslangValidator.exe").is_file():
+        return str(Path(sdk) / "Bin" / "glslangValidator.exe")
+    return shutil.which("glslangValidator") or shutil.which("glslang")
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -772,12 +783,13 @@ def main(argv: list[str] | None = None) -> int:
         return 1
     if args.keys:
         files = [f for f in files if f.name.split(".")[0] in args.keys]
-    exe = glslang() if args.check else None
+    exe = glslang(cfg) if args.check else None
     if args.check and not exe:
-        print("glslangValidator not found (install the Vulkan SDK)", file=sys.stderr)
+        print("glslang not found: install the Vulkan SDK or set [tools] glslang", file=sys.stderr)
         return 1
     errors: dict[str, list[str]] = {}
     bad_compile = []
+    written = []
     for f in files:
         key, stage = f.name.split(".")[:2]
         try:
@@ -789,19 +801,31 @@ def main(argv: list[str] | None = None) -> int:
         g = out / f"{key}.{stage}"
         g.write_text(glsl)
         (out / f"{key}.json").write_text(json.dumps(iface))
-        if exe:
-            r = subprocess.run([exe, "-V", "--target-env", "vulkan1.2", "-o", str(g) + ".spv", str(g)],
-                               capture_output=True, text=True)
-            if r.returncode:
-                bad_compile.append((key, stage, r.stdout.strip().splitlines()[1:3]))
+        written.append((key, stage, g))
+
+    def compile_one(item):
+        key, stage, g = item
+        r = subprocess.run([exe, "-V", "--target-env", "vulkan1.2", "-o", str(g) + ".spv", str(g)],
+                           capture_output=True, text=True)
+        msgs = [ln for ln in (r.stdout + r.stderr).splitlines() if ln.startswith("ERROR") and "compilation" not in ln]
+        return (key, stage, msgs) if r.returncode else None
+
+    if exe:
+        from concurrent.futures import ThreadPoolExecutor
+        with ThreadPoolExecutor() as pool:
+            bad_compile = [b for b in pool.map(compile_one, written) if b]
     done = len(files) - sum(len(v) for v in errors.values())
     print(f"translated {done}/{len(files)}")
     for msg, keys in sorted(errors.items(), key=lambda kv: -len(kv[1])):
         print(f"  {len(keys):4} {msg}  (e.g. {keys[0]})")
     if exe:
         print(f"glslang: {done - len(bad_compile)}/{done} compile")
-        for key, stage, msg in bad_compile[:10]:
-            print(f"  {key}.{stage}: {' | '.join(msg)}")
+        kinds: dict[str, list[str]] = {}
+        for key, stage, msg in bad_compile:
+            first = re.sub(r"^ERROR: \S+:\d+: ", "", msg[0]) if msg else "(no message)"
+            kinds.setdefault(re.sub(r"\d+", "N", first)[:110], []).append(f"{key}.{stage}")
+        for msg, keys in sorted(kinds.items(), key=lambda kv: -len(kv[1]))[:12]:
+            print(f"  {len(keys):4} {msg}  (e.g. {keys[0]})")
     return 0 if not errors and not bad_compile else 1
 
 

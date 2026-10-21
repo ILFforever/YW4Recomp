@@ -42,8 +42,10 @@ Key = FNV-1a 64 of the assembly text, `!!NV` through `END`. `python -m tools.yw4
 - Depth: NVN's default clip space has z in [-w, w]; a push-constant bit maps it to Vulkan's [0, w] in the last stage before rasterisation. Y orientation is left to the viewport.
 - `vertex.instance` excludes the base instance (as on Maxwell): `gl_InstanceIndex - gl_BaseInstance`.
 
-Result: **all 1,349 programs translate**; the translator stops loudly on anything it does not know. Not yet verified: that the output compiles (waiting for the SDK) and that it renders correctly (needs the draw path; checked by screenshot diffs against the emulator reference).
+Result: **all 1,349 programs translate and compile to SPIR-V** (`--check`, glslang 16.6.0, Vulkan 1.2 target, 47 s in parallel); the translator stops loudly on anything it does not know. Not yet verified: that they render correctly (needs the draw path; checked by screenshot diffs against the emulator reference).
+
+The SDK installer needs administrator rights, so `[tools] glslang` can instead point at a standalone Khronos glslang release (no install; the owner's copy is in the tools folder outside the repo). The SDK is still wanted for the validation layer.
 
 ## Next
 
-`--check` on all programs once the SDK is installed; then the Vulkan draw path: pipelines from NVN state, vertex input, descriptors from bound buffers and textures, draws, first real pixels.
+The Vulkan draw path: pipelines from NVN state, vertex input, descriptors from bound buffers and textures, draws, first real pixels.

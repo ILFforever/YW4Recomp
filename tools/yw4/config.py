@@ -34,6 +34,7 @@ class Config:
     ghidra_dir: Path | None
     emulator_exe: Path | None
     cc: str
+    glslang: Path | None = None
 
 
 def _resolve(value: str) -> Path:
@@ -76,6 +77,7 @@ def load(path: Path = CONFIG_PATH, require_exefs: bool = True) -> Config:
         ghidra_dir=_optional(tools.get("ghidra_dir", "")),
         emulator_exe=_optional(tools.get("emulator_exe", "")),
         cc=tools.get("cc", ""),
+        glslang=_optional(tools.get("glslang", "")),
     )
 
     for name in ("exefs_dir", "romfs_dir"):
