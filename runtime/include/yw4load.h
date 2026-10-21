@@ -79,6 +79,10 @@ int yw4_load_modules(const char *exefs_dir);
 
 /* A guest address that, when called, runs `fn` on the calling guest thread. */
 uint64_t yw4_host_function(GuestFn fn);
+/* The same, with a pointer `fn` gets back from yw4_host_data(): one host function can then
+ * stand behind many addresses. Read it first thing, before calling any guest code. */
+uint64_t yw4_host_function_data(GuestFn fn, void *data);
+void *yw4_host_data(void);
 
 /* SHA-256 of a buffer as 64 lowercase hex digits + NUL. */
 void yw4_sha256_hex(const uint8_t *data, size_t len, char out[65]);

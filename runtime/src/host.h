@@ -10,10 +10,12 @@
 /* SRWLOCK and CONDITION_VARIABLE are one pointer each; zero is their initial state. */
 typedef struct { void *p; } HostLock;
 typedef struct { void *p; } HostCond;
+#define HOST_LOCK_INIT {0}
 #else
 #include <pthread.h>
 typedef pthread_mutex_t HostLock;
 typedef pthread_cond_t HostCond;
+#define HOST_LOCK_INIT PTHREAD_MUTEX_INITIALIZER
 #endif
 
 void host_lock_init(HostLock *l);

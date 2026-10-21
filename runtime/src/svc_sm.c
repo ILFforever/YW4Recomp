@@ -16,7 +16,7 @@ void svc_sm(Service *s, IpcRequest *req, IpcResponse *resp) {
         Service *svc = ipc_service_lookup(name);
         if (!svc) {
             fprintf(stderr, "yw4: sm: no native service \"%s\" yet\n", name);
-            exit(3);
+            yw4_stop();
         }
         ipc_return_object(resp, svc);
         return;

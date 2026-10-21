@@ -54,6 +54,10 @@ typedef struct {
 } KTransferMemory;
 KTransferMemory *yw4_transfer_memory_get(uint32_t handle);  /* NULL if not one */
 
+/* Stops the program after printing the current guest thread and its backtrace: for "not
+ * implemented yet" stops reached from guest code (any guest thread, lock held or not). */
+_Noreturn void yw4_stop(void);
+
 /* Sets up the memory map (modules, main stack, thread-local regions) and the main thread,
  * which runs on the calling host thread with `ctx` (its TPIDRRO_EL0 is set here); returns
  * the main thread's handle. Call after yw4_load_modules. */

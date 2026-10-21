@@ -66,7 +66,7 @@ void ipc_unimplemented(Service *s, IpcRequest *req, IpcResponse *resp) {
         fprintf(stderr, "yw4: unimplemented IPC command %u on %s (%u bytes of arguments, X%d A%d B%d C%d, "
                         "%d copy / %d move handles)\n", req->cmd, s->name, req->data_size, req->nx, req->na, req->nb,
                 req->nc, req->ncopy, req->nmove);
-        exit(3);
+        yw4_stop();
     }
     fprintf(stderr, "yw4: [stub] %s command %u -> success, zeroed output\n", s->name, req->cmd);
     ipc_out_size(resp, 0x40);

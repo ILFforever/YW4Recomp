@@ -20,6 +20,7 @@
 #include <sys/mman.h>
 #endif
 
+#include "host.h"
 #include "yw4load.h"
 
 uint64_t yw4_image_base;
@@ -117,18 +118,25 @@ static uint8_t *read_file(const char *path, size_t *len) {
 
 /* ---- host callbacks: a guest address per host function, found through the lookup hook */
 
-#define MAX_HOST_FNS 256
-static GuestFn host_fns[MAX_HOST_FNS];
-static size_t nhost_fns;
+#define MAX_HOST_FNS 4096
+static struct {
+    GuestFn fn;
+    void *data;
+} host_fns[MAX_HOST_FNS];
+static size_t nhost_fns;  /* entries below this are complete (published with release order) */
 static uint64_t host_fn_base;
+static HostLock host_fns_lock = HOST_LOCK_INIT;
+static _Thread_local void *host_data;
 
 static GuestFn host_lookup(uint64_t a) {
     uint64_t off = a - host_fn_base;
-    if (!host_fn_base || off >= nhost_fns * 16 || off % 16) return NULL;
-    return host_fns[off / 16];
+    if (!host_fn_base || off >= __atomic_load_n(&nhost_fns, __ATOMIC_ACQUIRE) * 16 || off % 16) return NULL;
+    host_data = host_fns[off / 16].data;  /* the call follows the lookup on this same thread */
+    return host_fns[off / 16].fn;
 }
 
-uint64_t yw4_host_function(GuestFn fn) {
+uint64_t yw4_host_function_data(GuestFn fn, void *data) {
+    host_lock(&host_fns_lock);  /* guest threads may register callbacks at the same time */
     if (!host_fn_base) {
         host_fn_base = (uint64_t)(uintptr_t)yw4_reserve(YW4_HOST_FN_BASE, MAX_HOST_FNS * 16);
         yw4_lookup_hook = host_lookup;
@@ -137,9 +145,17 @@ uint64_t yw4_host_function(GuestFn fn) {
         fprintf(stderr, "yw4: no room for host callbacks\n");
         exit(1);
     }
-    host_fns[nhost_fns] = fn;
-    return host_fn_base + 16 * nhost_fns++;
+    size_t i = nhost_fns;
+    host_fns[i].fn = fn;
+    host_fns[i].data = data;
+    __atomic_store_n(&nhost_fns, i + 1, __ATOMIC_RELEASE);
+    host_unlock(&host_fns_lock);
+    return host_fn_base + 16 * i;
 }
+
+uint64_t yw4_host_function(GuestFn fn) { return yw4_host_function_data(fn, NULL); }
+
+void *yw4_host_data(void) { return host_data; }
 
 /* ---- modules */
 

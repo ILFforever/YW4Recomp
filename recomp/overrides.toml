@@ -1,0 +1,27 @@
+# Recompiled functions replaced by native runtime code (decision 0016).
+#
+# The function at the symbol's address keeps its name (s_<offset> / f_<offset>) but its
+# body becomes a call to `native`, so every caller reaches the native code: direct calls,
+# calls through the PLT, function pointers. Natives follow the AArch64 calling convention
+# on the CPUState (arguments in x0-x7 / v0-v7, result in x0 / v0). Only symbol names live
+# here, never game code. Each entry says why it is native.
+
+# NVN, the graphics API, is implemented natively on Vulkan (decision 0005). The sdk's own
+# NVN driver, which writes Maxwell GPU commands through nvdrv, never runs.
+[[override]]
+module = "sdk"
+symbol = "nvnBootstrapLoader"
+native = "yw4_nvn_BootstrapLoader"
+why = "NVN's only entry point: returns our native NVN functions"
+
+[[override]]
+module = "sdk"
+symbol = "_ZN2nv18InitializeGraphicsEPvm"
+native = "yw4_nv_InitializeGraphics"
+why = "nv::InitializeGraphics(memory, size) starts the sdk's GPU driver (nvdrv); our NVN needs no driver"
+
+[[override]]
+module = "sdk"
+symbol = "_ZN2nv16FinalizeGraphicsEv"
+native = "yw4_nv_FinalizeGraphics"
+why = "the counterpart of nv::InitializeGraphics"

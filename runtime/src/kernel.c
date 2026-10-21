@@ -214,6 +214,12 @@ static void backtrace(const CPUState *ctx) {
     }
 }
 
+_Noreturn void yw4_stop(void) {
+    fprintf(stderr, "     on thread %" PRIu64 "\n", cur->id);
+    backtrace(cur->ctx);
+    exit(3);
+}
+
 /* ---- waiting and waking (klock held) */
 
 static int is_signaled(const KObject *o) {

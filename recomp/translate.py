@@ -14,6 +14,9 @@ Output (derived from the game's code, so it stays in work/ and is never committe
     work/recomp/func_table.c     yw4_code[]: each module's sorted function table (yw4_resolve)
     work/recomp/image_info.c     yw4_modules[]: what the loader needs (sizes, hashes, relocations)
 
+Functions listed in recomp/overrides.toml get a body that calls native runtime code
+instead (decision 0016).
+
 Symbols are resolved here, not at run time: both modules are known, so every symbolic
 relocation becomes "module + offset" in load order (main first, then the sdk, as the
 Switch's dynamic loader searches), or 0 for weak symbols nobody defines.
@@ -27,7 +30,9 @@ import hashlib
 import json
 import struct
 import sys
+import tomllib
 from dataclasses import dataclass
+from pathlib import Path
 
 from tools.yw4 import config, recon, reloc, sdkref
 
@@ -41,6 +46,7 @@ STT_FUNC = 2
 DT_INIT = 0xC
 NO_MODULE = 0xFFFFFFFF
 INIT_START = "_ZN2nn4init5StartEmmPFvvES2_"  # nn::init::Start(u64, u64, void (*)(), void (*)())
+OVERRIDES = Path(__file__).with_name("overrides.toml")
 
 
 @dataclass
@@ -81,6 +87,20 @@ def raw_dynsym(image: bytes, info: dict) -> list[tuple[str, int, int, int]]:
     for i in range(size // 24):
         _, st_info, _, shndx, value, _ = struct.unpack_from("<IBBHQQ", image, ro + start + 24 * i)
         out.append((names[i], st_info & 0xF, shndx, value))
+    return out
+
+
+def load_overrides(modules: list[Module]) -> dict[str, dict[int, str]]:
+    """Per module: function offset -> the native function that replaces its body."""
+    out: dict[str, dict[int, str]] = {m.name: {} for m in modules}
+    for o in tomllib.loads(OVERRIDES.read_text()).get("override", []):
+        m = next((m for m in modules if m.name == o["module"]), None)
+        if m is None:
+            raise RuntimeError(f"overrides.toml: no module {o['module']!r}")
+        funcs = {name: v for name, typ, shndx, v in raw_dynsym(m.image, m.info) if shndx and typ == STT_FUNC}
+        if o["symbol"] not in funcs:
+            raise RuntimeError(f"overrides.toml: {m.name} defines no function {o['symbol']}")
+        out[m.name][funcs[o["symbol"]]] = o["native"]
     return out
 
 
@@ -157,12 +177,23 @@ def write_if_changed(path, text: str) -> None:
         path.write_text(text)
 
 
-def translate(cfg: config.Config, m: Module) -> tuple[list[function.Function], list[str]]:
+def translate(cfg: config.Config, m: Module, overrides: dict[int, str]) -> tuple[list[function.Function], list[str]]:
     code = m.code
     entries = entry_points(cfg, m)
     funcs = [function.discover(code, e, entries) for e in sorted(entries)]
     stats = function.EmitStats()
-    sources = [function.emit_function(code, fn, entries, coverage.subgroup, stats) for fn in funcs]
+    sources = []
+    for fn in funcs:
+        native = overrides.get(fn.entry)
+        if native:  # the address stays a function; its body is the native code
+            name = function.fname(fn.entry, m.prefix)
+            sources.append(f"void {native}(CPUState *ctx);  /* override (recomp/overrides.toml) */\n"
+                           f"void {name}(CPUState *ctx) {{ {native}(ctx); }}")
+        else:
+            sources.append(function.emit_function(code, fn, entries, coverage.subgroup, stats))
+    missing = set(overrides) - {fn.entry for fn in funcs}
+    if missing:
+        raise RuntimeError(f"{m.name}: overridden functions not found: {sorted(map(hex, missing))}")
 
     brs = collections.Counter()
     for fn in funcs:
@@ -182,6 +213,7 @@ def translate(cfg: config.Config, m: Module) -> tuple[list[function.Function], l
     for g, n in sorted(stats.unimplemented.items(), key=lambda kv: -kv[1]):
         print(f"    {n:10,}  {g}")
     print(f"BR: {dict(brs)}")
+    print(f"overridden by native code: {len(overrides)}")
     print(f"flow problems: {len(problems)}")
     for p in problems[:10]:
         print(f"    {p}")
@@ -199,7 +231,8 @@ def main(argv: list[str] | None = None) -> int:
         print(f"config error: {e}", file=sys.stderr)
         return 1
 
-    results = [translate(cfg, m) for m in modules]
+    overrides = load_overrides(modules)
+    results = [translate(cfg, m, overrides[m.name]) for m in modules]
     relative, symbolic, unresolved = resolve_relocations(modules)
     print(f"== relocations: " + ", ".join(f"{m.name} {len(relative[i]):,} relative + {len(symbolic[i]):,} symbolic"
                                           for i, m in enumerate(modules)))
