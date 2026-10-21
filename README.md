@@ -1,10 +1,43 @@
-# YW4 Recomp
+<h1 align="center">YW4 Recomp</h1>
 
-A fan static-recompilation project to run Yo-kai Watch 4++ (Nintendo Switch, final update) natively on Windows and Linux, in the style of N64Recomp.
+<p align="center">
+  A fan static recompilation of <b>Yo-kai Watch 4++</b> (Nintendo Switch, update 2.2.0) that runs natively on Windows and Linux, in the style of <a href="https://github.com/N64Recomp/N64Recomp">N64Recomp</a>.
+</p>
 
-This repo contains only tools, runtime code, and patches. It contains no game data. Provide your own dump of the final 4++ update.
+<p align="center">
+  <img alt="Phase 3: kernel and services" src="https://img.shields.io/badge/phase-3%20·%20kernel%20%26%20services-6f42c1">
+  <img alt="Platforms" src="https://img.shields.io/badge/platforms-Windows%20%7C%20Linux-informational">
+  <img alt="Graphics" src="https://img.shields.io/badge/graphics-Vulkan-ac162c">
+  <img alt="Boots to the title screen" src="https://img.shields.io/badge/boots%20to-title%20screen-success">
+</p>
 
-Status: Phase 3 (kernel and system services). See [Progress](#progress) below.
+<p align="center">
+  <img src="docs/screenshots/07-title-screen.jpg" alt="The title screen, running recompiled on Windows" width="820">
+  <br>
+  <sub>The title screen, recompiled and running natively on Windows (Vulkan, 30 frames/s).</sub>
+</p>
+
+> [!IMPORTANT]
+> This repo contains only tools, runtime code, and patches. It contains **no game data** and no recompiler output. Provide your own dump of the final 4++ update (2.2.0).
+
+**What it is:** every ARM64 function in the game's `main` and `sdk` modules is translated to C ahead of time, compiled with Clang, and linked against a native runtime that stands in for the Switch's kernel, system services and NVN graphics (on Vulkan). No emulator code is linked. The game's own shaders are translated from the assembly they ship with.
+
+**Status:** Phase 3 (kernel and system services). The game boots through its splash screens and opening movie to the title menu. See [Progress](#progress) below.
+
+## Screenshots
+
+All captured from the recompiled build on Windows (`YW4_SCREENSHOTS`, see [Setup](#setup)).
+
+| | |
+|---|---|
+| ![Copyright warning](docs/screenshots/01-copyright-warning.jpg) | ![LEVEL-5 logo](docs/screenshots/02-level5-logo.jpg) |
+| Copyright warning | LEVEL-5 logo |
+| ![Autosave notice](docs/screenshots/03-autosave-notice.jpg) | ![Opening movie](docs/screenshots/04-opening-movie-sky.jpg) |
+| Autosave notice (waits for A) | Opening movie |
+| ![Opening movie](docs/screenshots/05-opening-movie.jpg) | ![Opening movie](docs/screenshots/06-opening-movie-stars.jpg) |
+| Opening movie | Opening movie |
+| ![Title screen](docs/screenshots/07-title-screen.jpg) | ![Title screen, animated background](docs/screenshots/08-title-screen-2.jpg) |
+| Title menu | Title menu (the background animates) |
 
 ## Setup
 
@@ -43,14 +76,30 @@ Tests (synthetic data only): `python -m unittest discover -s tests -t .`
 
 The runtime's window needs SDL3: `recomp.build` fetches it on Windows (`python -m tools.yw4.deps`, pinned and hash-checked); on Linux install it (`pkg-config sdl3`). F12 saves a screenshot to `<work_dir>/screenshots/`.
 
-7. Recompile `main` and run it (Phase 3; details in `recomp/README.md`):
+7. Recompile `main` and `sdk` and run them (Phase 3; details in `recomp/README.md`):
 
    ```
-   python -m recomp.translate      # all of main -> <work_dir>/recomp/ (C, never committed)
+   python -m recomp.translate      # both modules -> <work_dir>/recomp/ (C, never committed)
+   python -m tools.yw4.shaders     # pull the game's shader assembly out -> <work_dir>/shaders/asm/
+   python -m recomp.shader --check # translate to GLSL, compile to SPIR-V (needs [tools] glslang)
    python -m recomp.build --run    # build <work_dir>/build/yw4.exe and run it
    ```
 
-   It runs until the first system call (`SVC`) the runtime doesn't implement yet and prints its number.
+   Run it from the repo root: shaders are looked up under `work/shaders/`. It opens a window and boots to the title menu.
+
+### Run options
+
+Environment variables read by the runtime; the most useful ones:
+
+| Variable | What it does |
+|---|---|
+| `YW4_SCREENSHOTS=600,2500` | Save a screenshot at these frame numbers (also F12 at any time) |
+| `YW4_SCREENSHOT_DIR=path` | Where screenshots go (default `<work_dir>/screenshots/`) |
+| `YW4_INPUT=2400:1:10` | Scripted presses, `tick:buttons(hex):length`, comma separated; `1` is A. A at tick 2400 gets past the autosave notice |
+| `YW4_HEADLESS=1` | No window, no Vulkan |
+| `YW4_VULKAN_VALIDATION=1` | Turn on the Vulkan validation layer |
+
+Tracing and probes (`YW4_TRACE_*`, `YW4_PROBE*`, `YW4_WATCH*`, `YW4_GPU_TRACE*`) are described where they are read in `runtime/src/`.
 
 ## Progress
 
@@ -91,9 +140,8 @@ Where the recompiled game stops right now, and how it got there. Newest first. E
 Still open from Phase 0: the baseline benchmark (`docs/baseline.md`), which needs the owner's emulator runs.
 
 Known gaps, in the order they will come up:
-- Recompiling `sdk` (0014): real threads (the kernel is single-threaded so far), then more system services.
-- `qsort`, `printf`-family float output, `strtod`, `strerror`: same approach as the math functions (musl source, checked against the sdk), not done yet.
-- Threads (one guest thread so far), `setjmp`/`longjmp` for Lua, contents of the 20 data imports (RTTI, `stdio`).
+- Graphics: compute dispatches, alpha test, streaks in movies, the "4++" logo variant (add-on ownership).
+- The translation mod (LayeredFS, Phase 5).
 - C++ exceptions are not supported: nothing in `main` throws (0012).
 
 ## Layout
@@ -102,8 +150,8 @@ Known gaps, in the order they will come up:
 |---|---|
 | `tools/` | Python analysis and input-pipeline scripts |
 | `runtime/` | Native runtime (Phase 1+) |
-| `recomp/` | AArch64 â†’ C recompiler (Phase 2+) |
-| `docs/` | Recon report, baseline, decision records |
+| `recomp/` | AArch64 → C recompiler (Phase 2+) |
+| `docs/` | Recon report, baseline, decision records, README screenshots |
 | `third_party/musl/` | musl 1.1.19's math functions (MIT), see its README |
 | `work/`, `build/` | Generated output (gitignored) |
 
