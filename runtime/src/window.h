@@ -21,4 +21,10 @@ void window_present_rgba(const uint8_t *rgba, uint32_t w, uint32_t h, uint64_t f
  * window. Screenshots (of the rectangle) need an RGBA8 or BGRA8 format. */
 void window_present_image(VkImage image, VkFormat format, VkRect2D rect, uint64_t frame);
 
+/* The controller as the window sees it now, from the keyboard and any gamepad: Switch
+ * button bits (HidNpadButton: A 0, B 1, X 2, Y 3, L-stick 4, R-stick 5, L 6, R 7, ZL 8,
+ * ZR 9, Plus 10, Minus 11, D-pad left 12 up 13 right 14 down 15) and stick positions (left
+ * x, y, right x, y; -32767..32767, up positive). Zero without a window. Any thread. */
+void window_input(uint64_t *buttons, int32_t sticks[4]);
+
 #endif

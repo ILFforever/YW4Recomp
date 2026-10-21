@@ -443,6 +443,68 @@ void window_present_image(VkImage image, VkFormat format, VkRect2D rect, uint64_
     host_unlock(&present_lock);
 }
 
+/* ---- input: the keyboard and the first gamepad, as a Switch controller (window_input) */
+
+static SDL_Gamepad *gamepad;
+static uint64_t input_buttons;
+static int32_t input_sticks[4];
+static HostLock input_lock = HOST_LOCK_INIT;
+
+void window_input(uint64_t *buttons, int32_t sticks[4]) {
+    host_lock(&input_lock);
+    *buttons = input_buttons;
+    memcpy(sticks, input_sticks, sizeof input_sticks);
+    host_unlock(&input_lock);
+}
+
+/* Keyboard: Space/Enter A, Backspace/Escape B, X X, Y Y, arrows D-pad, WASD left stick,
+ * IJKL right stick, Q/E L/R, 1/3 ZL/ZR, P Plus, M Minus, left/right Shift stick clicks.
+ * Gamepad: by position, as on a Switch controller (east A, south B, north X, west Y). */
+static void update_input(void) {
+    const bool *k = SDL_GetKeyboardState(NULL);
+    static const struct {
+        SDL_Scancode key;
+        int bit;
+    } keys[] = {{SDL_SCANCODE_SPACE, 0}, {SDL_SCANCODE_RETURN, 0}, {SDL_SCANCODE_BACKSPACE, 1}, {SDL_SCANCODE_ESCAPE, 1},
+                {SDL_SCANCODE_X, 2}, {SDL_SCANCODE_Y, 3}, {SDL_SCANCODE_LSHIFT, 4}, {SDL_SCANCODE_RSHIFT, 5},
+                {SDL_SCANCODE_Q, 6}, {SDL_SCANCODE_E, 7}, {SDL_SCANCODE_1, 8}, {SDL_SCANCODE_3, 9},
+                {SDL_SCANCODE_P, 10}, {SDL_SCANCODE_M, 11}, {SDL_SCANCODE_LEFT, 12}, {SDL_SCANCODE_UP, 13},
+                {SDL_SCANCODE_RIGHT, 14}, {SDL_SCANCODE_DOWN, 15}};
+    uint64_t b = 0;
+    for (size_t i = 0; i < sizeof keys / sizeof *keys; i++)
+        if (k[keys[i].key]) b |= 1ull << keys[i].bit;
+    int32_t s[4] = {(k[SDL_SCANCODE_D] - k[SDL_SCANCODE_A]) * 32767, (k[SDL_SCANCODE_W] - k[SDL_SCANCODE_S]) * 32767,
+                    (k[SDL_SCANCODE_L] - k[SDL_SCANCODE_J]) * 32767, (k[SDL_SCANCODE_I] - k[SDL_SCANCODE_K]) * 32767};
+    if (gamepad) {
+        static const struct {
+            SDL_GamepadButton button;
+            int bit;
+        } pad[] = {{SDL_GAMEPAD_BUTTON_EAST, 0}, {SDL_GAMEPAD_BUTTON_SOUTH, 1}, {SDL_GAMEPAD_BUTTON_NORTH, 2},
+                   {SDL_GAMEPAD_BUTTON_WEST, 3}, {SDL_GAMEPAD_BUTTON_LEFT_STICK, 4},
+                   {SDL_GAMEPAD_BUTTON_RIGHT_STICK, 5}, {SDL_GAMEPAD_BUTTON_LEFT_SHOULDER, 6},
+                   {SDL_GAMEPAD_BUTTON_RIGHT_SHOULDER, 7}, {SDL_GAMEPAD_BUTTON_START, 10}, {SDL_GAMEPAD_BUTTON_BACK, 11},
+                   {SDL_GAMEPAD_BUTTON_DPAD_LEFT, 12}, {SDL_GAMEPAD_BUTTON_DPAD_UP, 13},
+                   {SDL_GAMEPAD_BUTTON_DPAD_RIGHT, 14}, {SDL_GAMEPAD_BUTTON_DPAD_DOWN, 15}};
+        for (size_t i = 0; i < sizeof pad / sizeof *pad; i++)
+            if (SDL_GetGamepadButton(gamepad, pad[i].button)) b |= 1ull << pad[i].bit;
+        if (SDL_GetGamepadAxis(gamepad, SDL_GAMEPAD_AXIS_LEFT_TRIGGER) > 16000) b |= 1ull << 8;
+        if (SDL_GetGamepadAxis(gamepad, SDL_GAMEPAD_AXIS_RIGHT_TRIGGER) > 16000) b |= 1ull << 9;
+        static const SDL_GamepadAxis axes[4] = {SDL_GAMEPAD_AXIS_LEFTX, SDL_GAMEPAD_AXIS_LEFTY, SDL_GAMEPAD_AXIS_RIGHTX,
+                                                SDL_GAMEPAD_AXIS_RIGHTY};
+        for (int i = 0; i < 4; i++) {
+            int32_t v = SDL_GetGamepadAxis(gamepad, axes[i]);
+            if (i & 1) v = -v;  /* SDL: down positive; Switch: up positive */
+            if (v > 32767) v = 32767;
+            if (v < -32767) v = -32767;
+            if (v > 4000 || v < -4000) s[i] = v;  /* dead zone: the keyboard wins near the centre */
+        }
+    }
+    host_lock(&input_lock);
+    input_buttons = b;
+    memcpy(input_sticks, s, sizeof s);
+    host_unlock(&input_lock);
+}
+
 /* ---- the window's thread */
 
 typedef struct {
@@ -461,7 +523,7 @@ void window_run(void (*guest)(void *), void *arg) {
     if (dir && *dir) snprintf(screenshot_dir, sizeof screenshot_dir, "%s", dir);
     const char *headless = getenv("YW4_HEADLESS");
     if (!(headless && *headless && *headless != '0')) {
-        if (!SDL_Init(SDL_INIT_VIDEO)) {
+        if (!SDL_Init(SDL_INIT_VIDEO | SDL_INIT_GAMEPAD)) {
             fprintf(stderr, "yw4: window: SDL_Init: %s; running headless\n", SDL_GetError());
         } else if (!(window = SDL_CreateWindow("Yo-kai Watch 4++ (recompiled)", 1280, 720,
                                                SDL_WINDOW_VULKAN | SDL_WINDOW_RESIZABLE))) {
@@ -485,8 +547,21 @@ void window_run(void (*guest)(void *), void *arg) {
     }
     for (;;) {
         SDL_Event e;
-        if (!SDL_WaitEventTimeout(&e, 100)) continue;
+        int got = SDL_WaitEventTimeout(&e, 8);
+        update_input();
+        if (!got) continue;
         switch (e.type) {
+        case SDL_EVENT_GAMEPAD_ADDED:
+            if (!gamepad && (gamepad = SDL_OpenGamepad(e.gdevice.which)))
+                fprintf(stderr, "yw4: window: gamepad %s\n", SDL_GetGamepadName(gamepad));
+            break;
+        case SDL_EVENT_GAMEPAD_REMOVED:
+            if (gamepad && SDL_GetGamepadID(gamepad) == e.gdevice.which) {
+                SDL_CloseGamepad(gamepad);
+                gamepad = NULL;
+                fprintf(stderr, "yw4: window: gamepad removed\n");
+            }
+            break;
         case SDL_EVENT_QUIT:
             fprintf(stderr, "yw4: window closed\n");
             exit(0);

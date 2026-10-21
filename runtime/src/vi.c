@@ -70,7 +70,8 @@ static void vsync_thread(void *arg) {
         if (next > now) yw4_host_sleep_ns(next - now);
         else if (now - next > 3 * VSYNC_PERIOD_NS) next = now;  /* fell far behind: don't burst to catch up */
         __atomic_store_n(&vsync_time, host_now_ns(), __ATOMIC_RELEASE);
-        __atomic_add_fetch(&vsync_count, 1, __ATOMIC_RELEASE);
+        uint64_t tick = __atomic_add_fetch(&vsync_count, 1, __ATOMIC_RELEASE);
+        yw4_hid_update(tick);
         KEvent *e = __atomic_load_n(&vsync, __ATOMIC_ACQUIRE);
         if (e) yw4_event_signal_from_host(e);
     }
