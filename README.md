@@ -93,6 +93,7 @@ Environment variables read by the runtime; the most useful ones:
 | `YW4_SCREENSHOT_DIR=path` | Where screenshots go (default `<work_dir>/screenshots/`) |
 | `YW4_INPUT=2400:1:10` | Scripted presses, `tick:buttons(hex):length`, comma separated; `1` is A. A at tick 2400 gets past the autosave notice |
 | `YW4_PERF=0` | Turn off the performance log (on by default: `work/perf/perf_<time>.csv` per frame and a `.txt` summary: frame interval, game work, GPU busy/span from timestamp queries, CPU, memory; `YW4_PERF_DIR` moves it) |
+| `YW4_LOG=0` | Turn off the log file (on by default: everything printed on stderr is also saved in `work/logs/yw4_<time>.log`; `YW4_LOG_DIR` moves it) |
 | `YW4_HEADLESS=1` | No window, no Vulkan |
 | `YW4_VULKAN_VALIDATION=1` | Turn on the Vulkan validation layer |
 
