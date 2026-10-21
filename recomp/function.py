@@ -413,6 +413,11 @@ def emit_function(code: Code, fn: Function, entries: set[int], subgroup=None,
     # Probes (runtime/src/dispatch.c): log calls to chosen functions without rebuilding.
     # Before the entry label, so a loop back to the entry doesn't count as a call.
     out.append(f"    if (__builtin_expect(yw4_probe_any, 0)) yw4_probe(ctx, {addr(fn.entry)});")
+    # Blocks are emitted in address order, and a function may own code below its entry
+    # (a block it only jumps back to, e.g. main+0xa7d8b4 in main+0xa7d8bc): start at the entry.
+    if order and order[0] != fn.entry:
+        labels.add(fn.entry)
+        out.append(f"    goto {label(fn.entry)};")
     for off, stmt in lines:
         if off is not None and off in labels:
             out.append(f"{label(off)}:")

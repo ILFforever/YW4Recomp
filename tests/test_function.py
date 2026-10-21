@@ -53,6 +53,16 @@ class DiscoverTest(unittest.TestCase):
         self.assertIn("TAILCALL(f_c);", src)
         self.assertIn("goto L_8;", src)
 
+    def test_code_below_the_entry_is_not_run_first(self):
+        # 0: ret (only reached by the jump at 4) ; 4: entry: cbz x0, 0 ; 8: ret
+        c = code(0xD65F03C0, 0xB4FFFFE0, 0xD65F03C0)
+        fn = function.discover(c, 4, {4})
+        self.assertEqual(fn.body, {0, 4, 8})
+        body = function.emit_function(c, fn, {4}).split("\n")
+        first = next(l.strip() for l in body[1:] if "yw4_probe" not in l)
+        self.assertEqual(first, "goto L_4;")
+        self.assertIn("L_4:", body)
+
 
 if __name__ == "__main__":
     unittest.main()
