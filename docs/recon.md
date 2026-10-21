@@ -214,7 +214,7 @@ For us: these are **references for reading formats, not code to copy**. The GPL 
 ## Open questions
 
 1. ~~Which NVN functions are actually called, and by whom.~~ Answered statically (section 5): 177 used, 108 wrappers, 96 producers. Still open: following the producers up to the frame loop (Phase 4b, best done in the Ghidra GUI or with runtime tracing).
-2. ~~Shader binary format.~~ Answered: `HBH1` wrapper with Maxwell code **and** NV_gpu_program5 assembly (section 6). Still open: the exact `HBH1` header layout (bindings), and what `.fxbin` describes.
+2. ~~Shader binary format.~~ Answered: `HBH1` wrapper with Maxwell code **and** NV_gpu_program5 assembly (section 6). `HBH1` layout: answered in decision 0020 and `tools/yw4/shaders.py`. Still open: what `.fxbin` describes.
 3. ~~**G4 formats.**~~ Existing tools listed in section 6 (references only, see licenses). Still open: whether they read YW4's versions of the formats.
 4. ~~**`sdk` strategy.**~~ Decided in `docs/decisions/0005`: implement the 578 `sdk` imports natively, recompile only `main`.
 5. **Translation mod packaging:** loose-file replacements vs. rebuilt CPKs.
