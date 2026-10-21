@@ -11,6 +11,7 @@
 #include "romfs.h"
 
 #include <dirent.h>
+#include <inttypes.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -25,6 +26,7 @@ typedef struct {
     uint64_t size, data_off;  /* data_off: relative to DATA_START */
     uint32_t entry;           /* offset in the file table */
     Dir *parent;
+    int read_before;          /* YW4_TRACE_ROMFS: its first read was logged */
 } File;
 struct Dir {
     char *name;
@@ -261,6 +263,12 @@ int romfs_read(uint64_t offset, void *out_, uint64_t size) {
             const File *f = lo ? files[lo - 1] : NULL;
             uint64_t next = lo < nfiles ? DATA_START + files[lo]->data_off : tables_off;
             if (f && rel < f->data_off + f->size) {
+                static int trace = -1;  /* YW4_TRACE_ROMFS=1: name each file at its first read */
+                if (trace < 0) trace = getenv("YW4_TRACE_ROMFS") && *getenv("YW4_TRACE_ROMFS") != '0';
+                if (trace && !((File *)f)->read_before) {
+                    ((File *)f)->read_before = 1;
+                    fprintf(stderr, "yw4: romfs: read %s (%" PRIu64 " bytes)\n", f->path, f->size);
+                }
                 uint64_t left = f->data_off + f->size - rel;
                 n = left < size ? left : size;
                 if (read_file_part(f, rel - f->data_off, out, n)) return -1;

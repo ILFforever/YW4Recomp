@@ -544,7 +544,7 @@ static int needs_transfers(const GpuState *s, const Program *g) {
         for (int i = 0; sh && i < sh->nb; i++) {
             if (sh->b[i].kind != 't' || sh->b[i].slot >= TEXTURES) continue;
             NvnTexEntry *e = tex_entry(s, s->tex[nvn_stage[st]][sh->b[i].slot]);
-            if (e && (!e->tex->gpu || e->tex->cpu_written)) return 1;
+            if (e && gpu_needs_transfer(e->tex)) return 1;
         }
     }
     return 0;
@@ -603,9 +603,16 @@ static void bind_sets(VkCommandBuffer cb, const GpuState *s, const Program *g) {
 }
 
 void gpu_draw(VkCommandBuffer cb, GpuState *s, const CmdRec *r) {
-    if (!s->program) return;
-    Program *g = program_of(s->program);
-    if (!g) return;
+    Program *g = s->program ? program_of(s->program) : NULL;
+    if (!g) {
+        static int logged;
+        if (logged++ < 8)
+            fprintf(stderr, "yw4: gpu: draw skipped: %s (stage mask %#x, stage keys %016" PRIx64 " %016" PRIx64 ")\n",
+                    s->program ? "program without a vertex stage" : "no program bound",
+                    s->program ? s->program->stage_mask : 0, s->program ? s->program->stages[0].key : 0,
+                    s->program ? s->program->stages[5].key : 0);
+        return;
+    }
     if (s->color[2] != 8) {
         static int logged;
         if (!logged++) fprintf(stderr, "yw4: gpu: alpha test %u ignored for now\n", s->color[2]);
@@ -616,7 +623,7 @@ void gpu_draw(VkCommandBuffer cb, GpuState *s, const CmdRec *r) {
         for (int i = 0; g->sh[st] && i < g->sh[st]->nb; i++) {
             const Binding *b = &g->sh[st]->b[i];
             NvnTexEntry *e = b->kind == 't' && b->slot < TEXTURES ? tex_entry(s, s->tex[nvn_stage[st]][b->slot]) : NULL;
-            if (e && (!e->tex->gpu || e->tex->cpu_written)) image_of(cb, e->tex);
+            if (e && gpu_needs_transfer(e->tex)) image_of(cb, e->tex);
         }
     if (!s->rendering)
         for (int i = 0; i < s->ncolor; i++)
@@ -679,9 +686,13 @@ void gpu_draw(VkCommandBuffer cb, GpuState *s, const CmdRec *r) {
     vkCmdBindPipeline(cb, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline(g, &k));
     bind_sets(cb, s, g);
 
-    static long trace = -1;  /* YW4_GPU_TRACE=<n>: describe the first n draws */
-    if (trace < 0) trace = getenv("YW4_GPU_TRACE") ? atol(getenv("YW4_GPU_TRACE")) : 0;
-    if (trace > 0) {
+    /* YW4_GPU_TRACE=<n>: describe n draws, from frame YW4_GPU_TRACE_AT (default 0) on */
+    static long trace = -1, trace_at;
+    if (trace < 0) {
+        trace = getenv("YW4_GPU_TRACE") ? atol(getenv("YW4_GPU_TRACE")) : 0;
+        trace_at = getenv("YW4_GPU_TRACE_AT") ? atol(getenv("YW4_GPU_TRACE_AT")) : 0;
+    }
+    if (trace > 0 && gpu_frames() >= (uint64_t)trace_at) {
         trace--;
         fprintf(stderr, "yw4: gpu draw: vs %016" PRIx64 " fs %016" PRIx64 " prim %u count %u target %ux%u (%d colour, %s depth)"
                 " viewport %s%d,%d %dx%d scissor %s%d,%d %dx%d blend %#x\n",

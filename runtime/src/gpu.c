@@ -402,10 +402,31 @@ static void upload(VkCommandBuffer cb, NvnTexture *t, GpuImage *g) {
     full_barrier(cb);
 }
 
+static uint64_t present_count;  /* frames presented */
+uint64_t gpu_frames(void) { return present_count; }
+
+/* YW4_GPU_REUPLOAD=1 (diagnostic): upload every CPU-visible texture again once per frame,
+ * to find textures whose data the game writes without telling NVN. Slow. */
+static int reupload(void) {
+    static int on = -1;
+    if (on < 0) on = getenv("YW4_GPU_REUPLOAD") && atoi(getenv("YW4_GPU_REUPLOAD"));
+    return on;
+}
+
+static int reupload_due(const NvnTexture *t) {
+    const GpuImage *g = t->gpu;
+    return reupload() && g && t->addr && !(t->pool_flags & POOL_CPU_NO_ACCESS) && g->uploaded_frame != present_count;
+}
+
+int gpu_needs_transfer(const NvnTexture *t) { return !t->gpu || t->cpu_written || reupload_due(t); }
+
 GpuImage *image_of(VkCommandBuffer cb, NvnTexture *t) {
     GpuImage *g = t->gpu;
     if (g) {
-        if (t->cpu_written) {
+        if (reupload_due(t)) {
+            g->uploaded_frame = present_count;
+            upload(cb, t, g);
+        } else if (t->cpu_written) {
             t->cpu_written = 0;
             upload(cb, t, g);
         }
@@ -765,7 +786,10 @@ void gpu_execute(uint64_t handle) {
         case CMD_DISPATCH: {
             gpu_end_rendering(cb, &s);
             static int logged;
-            if (!logged++) fprintf(stderr, "yw4: gpu: compute dispatches skipped for now\n");
+            if (logged++ < 4)
+                fprintf(stderr, "yw4: gpu: compute dispatch %ux%ux%u skipped for now (shader %016" PRIx64 ")\n",
+                        (unsigned)r->x[0], (unsigned)r->x[1], (unsigned)r->x[2],
+                        s.program ? s.program->stages[5].key : 0);
             break;
         }
         case CMD_BARRIER:
@@ -790,6 +814,7 @@ void gpu_execute(uint64_t handle) {
 
 void gpu_present(NvnTexture *t, uint64_t frame, const int crop[4]) {
     host_lock(&gpu_lock);
+    present_count++;
     GpuImage *g = t->gpu;
     if (!g) {  /* never drawn to: make it (black) */
         VkCommandBuffer cb = begin();

@@ -14,6 +14,7 @@ _Noreturn void gpu_stop(const char *fmt, ...);  /* something the draw path can't
 /* ---- gpu.c */
 
 void full_barrier(VkCommandBuffer cb);
+uint64_t gpu_frames(void);  /* frames presented so far */
 
 /* The imported pool buffer holding [addr, addr + size); 0 if no pool does. */
 int gpu_buffer_at(uint64_t addr, uint64_t size, VkBuffer *buf, VkDeviceSize *off);
@@ -29,10 +30,13 @@ typedef struct {
     VkImageAspectFlags aspect;
     uint32_t width, height, depth, layers, levels;
     GpuView *views;  /* cached image views */
+    uint64_t uploaded_frame;  /* YW4_GPU_REUPLOAD: the frame it was last uploaded in */
 } GpuImage;
 
 /* t's image: made on first use, uploaded from the game's memory unless the GPU owns it. */
 GpuImage *image_of(VkCommandBuffer cb, NvnTexture *t);
+/* Would image_of record a copy for t (make it, or upload it)? Not allowed while rendering. */
+int gpu_needs_transfer(const NvnTexture *t);
 VkFormat gpu_format(uint32_t nvn_format);
 int gpu_format_alpha_one(uint32_t nvn_format);  /* RGBX-style: alpha reads as 1 */
 
