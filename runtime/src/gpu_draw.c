@@ -355,6 +355,33 @@ static VkBuffer quad_indices(void) {
     return b;
 }
 
+/* Debugging a draw's shading: YW4_GPU_DEBUG_FS=<fragment key>=<name>[,...] draws programs
+ * with that fragment shader using YW4_SHADER_DIR/../debug/<name>.frag.spv instead (for
+ * example "magenta": where the geometry lands whatever the shading does; or one that shows
+ * an input). Applies to pipelines made after start-up. */
+static VkShaderModule debug_fragment(const Shader *fs) {
+    static const char *spec = (const char *)1;
+    if (spec == (const char *)1) spec = getenv("YW4_GPU_DEBUG_FS");
+    char key[17];
+    snprintf(key, sizeof key, "%016" PRIx64, fs->key);
+    const char *at = spec ? strstr(spec, key) : NULL;
+    if (!at || at[16] != '=') return fs->module;
+    char name[64];
+    size_t len = strcspn(at + 17, ",");
+    snprintf(name, sizeof name, "%.*s", (int)(len < 63 ? len : 63), at + 17);
+    char path[1024];
+    size_t n;
+    snprintf(path, sizeof path, "%s/../debug/%s.frag.spv", shader_dir(), name);
+    uint32_t *spv = read_file(path, &n);
+    if (!spv) gpu_stop("YW4_GPU_DEBUG_FS needs %s", path);
+    VkShaderModuleCreateInfo mci = {.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO, .codeSize = n, .pCode = spv};
+    VkShaderModule m;
+    CHECK(vkCreateShaderModule(vk.device, &mci, NULL, &m));
+    free(spv);
+    fprintf(stderr, "yw4: gpu: fragment shader %s replaced by debug/%s\n", key, name);
+    return m;
+}
+
 static VkPipeline pipeline(Program *g, const PipeKey *k) {
     for (Pipe *p = g->pipes; p; p = p->next)
         if (!memcmp(&p->key, k, sizeof *k)) return p->pipeline;
@@ -363,7 +390,9 @@ static VkPipeline pipeline(Program *g, const PipeKey *k) {
     for (int i = 0; i < NSETS; i++)
         if (g->sh[i])
             st[nst++] = (VkPipelineShaderStageCreateInfo){.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
-                                                          .stage = stage_bits[i], .module = g->sh[i]->module,
+                                                          .stage = stage_bits[i],
+                                                          .module = i == ST_FRAG ? debug_fragment(g->sh[i])
+                                                                                 : g->sh[i]->module,
                                                           .pName = "main"};
     VkPipelineVertexInputStateCreateInfo vi = {
         .sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO, .vertexBindingDescriptionCount = k->nbind,
@@ -470,7 +499,7 @@ static void begin_rendering(VkCommandBuffer cb, GpuState *s, VkFormat color[8], 
         ca[i].imageView = gpu_render_view(cb, s->rt.color[i], &s->rt.views[i], s->rt.has_view[i], &tw, &th);
         ca[i].imageLayout = VK_IMAGE_LAYOUT_GENERAL;
         ca[i].loadOp = VK_ATTACHMENT_LOAD_OP_LOAD, ca[i].storeOp = VK_ATTACHMENT_STORE_OP_STORE;
-        GpuImage *g = s->rt.color[i]->gpu;
+        GpuImage *g = image_find(s->rt.color[i]);
         const NvnTextureView *v = &s->rt.views[i];
         color[i] = s->rt.has_view[i] && v->setmask & 4 ? gpu_format(v->format) : g->format;
         if (tw < aw) aw = tw;
@@ -483,7 +512,7 @@ static void begin_rendering(VkCommandBuffer cb, GpuState *s, VkFormat color[8], 
         da.imageView = gpu_render_view(cb, s->rt.depth, &s->rt.depth_view, s->rt.has_depth_view, &tw, &th);
         da.imageLayout = VK_IMAGE_LAYOUT_GENERAL;
         da.loadOp = VK_ATTACHMENT_LOAD_OP_LOAD, da.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
-        *depth = ((GpuImage *)s->rt.depth->gpu)->format;
+        *depth = image_find(s->rt.depth)->format;
         if (tw < aw) aw = tw;
         if (th < ah) ah = th;
     }
@@ -706,8 +735,12 @@ void gpu_draw(VkCommandBuffer cb, GpuState *s, const CmdRec *r) {
                 const Binding *b = &g->sh[st]->b[i];
                 if (b->kind != 't') continue;
                 NvnTexEntry *e = tex_entry(s, s->tex[nvn_stage[st]][b->slot]);
-                if (e) fprintf(stderr, "yw4: gpu draw:   %s texture %u: %ux%u format %#x\n", stage_names[st], b->slot,
-                               e->tex->width, e->tex->height, e->tex->format);
+                uint64_t h = s->tex[nvn_stage[st]][b->slot];
+                fprintf(stderr, "yw4: gpu draw:   %s texture %u: handle %#" PRIx64 " (id %u, sampler %u) -> ", stage_names[st],
+                        b->slot, h, (unsigned)(h & 0xFFFFF), (unsigned)(h >> 20 & 0xFFF));
+                if (e) fprintf(stderr, "%ux%u format %#x at %#" PRIx64 "\n", e->tex->width, e->tex->height, e->tex->format,
+                               e->tex->addr);
+                else fprintf(stderr, "none\n");
             }
     }
 

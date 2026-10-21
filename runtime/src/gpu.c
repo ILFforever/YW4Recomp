@@ -243,9 +243,8 @@ static void scan_writes(void) {
     }
 }
 
-/* Has the CPU written t's storage since it was last uploaded? */
-static int cpu_changed(const NvnTexture *t) {
-    GpuImage *g = t->gpu;
+/* Has the CPU written t's storage since its image g was last uploaded? */
+static int cpu_changed(const NvnTexture *t, GpuImage *g) {
     if (!g || !t->addr || t->pool_flags & POOL_CPU_NO_ACCESS || g->checked_gen == write_gen) return 0;
     NvnPool *p = pool_of(t->addr);
     if (!p) return 0;
@@ -468,6 +467,13 @@ static void upload(VkCommandBuffer cb, NvnTexture *t, GpuImage *g) {
             fclose(fp);
             fprintf(stderr, "yw4: gpu: dumped %s\n", path);
         }
+        /* ... and the swizzled bytes as they are in the game's memory, with the layout used */
+        snprintf(path, sizeof path, "work/dump/tex_%" PRIx64 "_%03d_fmt%x_bh%u.tegra", t->addr, n - 1, t->format,
+                 L->block_height_log2);
+        if ((fp = fopen(path, "wb"))) {
+            fwrite((const void *)(uintptr_t)t->addr, 1, (size_t)tegra_total_size(L), fp);
+            fclose(fp);
+        }
     }
     full_barrier(cb);
     vkCmdCopyBufferToImage(cb, buf, g->image, VK_IMAGE_LAYOUT_GENERAL, ncopies, copies);
@@ -484,18 +490,73 @@ static int reupload(void) {
     return on;
 }
 
-static int reupload_due(const NvnTexture *t) {
-    const GpuImage *g = t->gpu;
+static int reupload_due(const NvnTexture *t, GpuImage *g) {
     if (reupload()) return g && t->addr && !(t->pool_flags & POOL_CPU_NO_ACCESS) && g->uploaded_frame != present_count;
-    return cpu_changed(t);
+    return cpu_changed(t, g);
 }
 
-int gpu_needs_transfer(const NvnTexture *t) { return !t->gpu || t->cpu_written || reupload_due(t); }
+/* ---- images by description (ImageKey): texture objects come and go, the memory stays */
+
+enum { IMAGE_BUCKETS = 4096 };
+static GpuImage *images[IMAGE_BUCKETS];
+
+static ImageKey key_of(const NvnTexture *t) {
+    ImageKey k;
+    memset(&k, 0, sizeof k);
+    k.addr = t->addr, k.format = t->format, k.target = t->target;
+    k.width = t->layout.width, k.height = t->layout.height, k.depth = t->layout.depth;
+    k.layers = t->layout.layers, k.levels = t->layout.levels;
+    k.block_height_log2 = t->layout.block_height_log2, k.block_depth_log2 = t->layout.block_depth_log2;
+    k.linear = (t->flags & FLAG_LINEAR) != 0;
+    return k;
+}
+
+static uint32_t key_hash(const ImageKey *k) {
+    uint64_t h = 0xCBF29CE484222325ull;
+    const uint8_t *p = (const uint8_t *)k;
+    for (size_t i = 0; i < sizeof *k; i++) h = (h ^ p[i]) * 0x100000001B3ull;
+    return (uint32_t)(h ^ h >> 32) % IMAGE_BUCKETS;
+}
+
+GpuImage *image_find(const NvnTexture *t) {
+    ImageKey k = key_of(t);
+    for (GpuImage *g = images[key_hash(&k)]; g; g = g->next)
+        if (!memcmp(&g->key, &k, sizeof k)) return g;
+    return NULL;
+}
+
+int gpu_needs_transfer(const NvnTexture *t) {
+    GpuImage *g = image_find(t);
+    return !g || t->cpu_written || reupload_due(t, g);
+}
+
+static void image_destroy(GpuImage *g);  /* below, after GpuView */
+
+/* Frees images no texture has used for a while (resolution changes leave old render
+ * targets behind) once the GPU is done with them. gpu_lock held. */
+static void evict_images(void) {
+    enum { UNUSED_FRAMES = 300 };
+    uint64_t done = completed();
+    int freed = 0;
+    for (int b = 0; b < IMAGE_BUCKETS; b++)
+        for (GpuImage **pp = &images[b]; *pp;) {
+            GpuImage *g = *pp;
+            if (g->last_frame + UNUSED_FRAMES < present_count && g->last_seq <= done) {
+                *pp = g->next;
+                image_destroy(g);
+                freed++;
+            } else {
+                pp = &g->next;
+            }
+        }
+    if (freed && nvn_stats_enabled()) fprintf(stderr, "yw4: gpu: freed %d unused images\n", freed);
+}
 
 GpuImage *image_of(VkCommandBuffer cb, NvnTexture *t) {
-    GpuImage *g = t->gpu;
+    GpuImage *g = image_find(t);
     if (g) {
-        if (reupload_due(t) || t->cpu_written) {
+        g->last_frame = present_count, g->last_seq = cur ? cur->seq : g->last_seq;
+        if (reupload_due(t, g) || t->cpu_written) {
             t->cpu_written = 0;
             upload(cb, t, g);
         }
@@ -506,6 +567,11 @@ GpuImage *image_of(VkCommandBuffer cb, NvnTexture *t) {
         gpu_stop("texture format %#x target %u samples %u", t->format, t->target, t->samples);
     if (t->levels > 16) gpu_stop("texture with %u levels", t->levels);
     g = calloc(1, sizeof *g);
+    g->key = key_of(t);
+    g->last_frame = present_count, g->last_seq = cur ? cur->seq : 0;
+    uint32_t bucket = key_hash(&g->key);
+    g->next = images[bucket];
+    images[bucket] = g;
     g->format = fmt;
     g->aspect = aspect_of(fmt);
     g->width = t->layout.width, g->height = t->layout.height, g->depth = t->layout.depth ? t->layout.depth : 1;
@@ -543,7 +609,12 @@ GpuImage *image_of(VkCommandBuffer cb, NvnTexture *t) {
                               .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED, .image = g->image, .subresourceRange = all};
     vkCmdPipelineBarrier(cb, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, 0, 0, NULL, 0, NULL, 1,
                          &b);
-    t->gpu = g;
+    if (nvn_stats_enabled())
+        fprintf(stderr, "yw4: gpu: image %ux%u format %#x flags %#x stride %" PRIu64 " block height log2 %u pool flags %#x at %#" PRIx64
+                        " (frame %" PRIu64 ")%s\n",
+                g->width, g->height, t->format, t->flags, t->stride, t->layout.block_height_log2, t->pool_flags, t->addr,
+                present_count,
+                t->cpu_written ? ", WriteTexels before first use" : "");
     t->cpu_written = 0;
     if (t->addr && !(t->pool_flags & POOL_CPU_NO_ACCESS)) {
         upload(cb, t, g);
@@ -569,6 +640,17 @@ struct GpuView {
     VkImageAspectFlags aspect;
     VkImageView view;
 };
+
+static void image_destroy(GpuImage *g) {
+    for (GpuView *v = g->views, *n; v; v = n) {
+        n = v->next;
+        vkDestroyImageView(vk.device, v->view, NULL);
+        free(v);
+    }
+    vkDestroyImage(vk.device, g->image, NULL);
+    vkFreeMemory(vk.device, g->mem, NULL);
+    free(g);
+}
 
 static VkImageView view_of(GpuImage *g, VkImageViewType type, VkFormat fmt, uint32_t level0, uint32_t nlevels,
                            uint32_t layer0, uint32_t nlayers, VkComponentMapping sw, VkImageAspectFlags aspect) {
@@ -641,7 +723,7 @@ VkImageView gpu_sample_view(VkCommandBuffer cb, NvnTexture *t, const NvnTextureV
 VkImageView gpu_dummy_view(VkCommandBuffer cb, VkImageViewType type) {
     static NvnTexture dummies[8];
     NvnTexture *t = &dummies[type & 7];
-    if (!t->gpu) {
+    if (!t->layout.width) {
         int cube = type == VK_IMAGE_VIEW_TYPE_CUBE || type == VK_IMAGE_VIEW_TYPE_CUBE_ARRAY;
         t->target = type == VK_IMAGE_VIEW_TYPE_3D ? TARGET_3D : cube ? TARGET_CUBE : TARGET_2D_ARRAY;
         t->format = 0x25;  /* RGBA8 */
@@ -653,19 +735,11 @@ VkImageView gpu_dummy_view(VkCommandBuffer cb, VkImageViewType type) {
     return gpu_sample_view(cb, t, NULL, 0, type);
 }
 
+/* The image stays: copies of the texture (texture pool entries, recorded render targets)
+ * may still use it, as the memory stays on the Switch. Unused images are freed later
+ * (evict_images). */
 void gpu_texture_finalize(NvnTexture *t) {
-    GpuImage *g = t ? t->gpu : NULL;
-    if (!g) return;
-    gpu_wait(gpu_submitted(), UINT64_MAX);
-    for (GpuView *v = g->views, *n; v; v = n) {
-        n = v->next;
-        vkDestroyImageView(vk.device, v->view, NULL);
-        free(v);
-    }
-    vkDestroyImage(vk.device, g->image, NULL);
-    vkFreeMemory(vk.device, g->mem, NULL);
-    free(g);
-    t->gpu = NULL;
+    if (t) t->gpu = NULL;
 }
 
 /* ================================================================== samplers */
@@ -783,11 +857,19 @@ void gpu_execute(uint64_t handle) {
         case CMD_BIND_IMAGES:
             if (r->x[0] < STAGES && r->x[1] < TEXTURES) s.img[r->x[0]][r->x[1]] = r->x[2];
             break;
-        case CMD_SET_TEXTURE_POOL: s.tex_pool = (const NvnDescPool *)(uintptr_t)r->x[0]; break;
-        case CMD_SET_SAMPLER_POOL: s.sampler_pool = (const NvnDescPool *)(uintptr_t)r->x[0]; break;
+        case CMD_SET_TEXTURE_POOL:
+        case CMD_SET_SAMPLER_POOL: {
+            const NvnDescPool **p = r->op == CMD_SET_TEXTURE_POOL ? &s.tex_pool : &s.sampler_pool;
+            if (*p != (const NvnDescPool *)(uintptr_t)r->x[0] && nvn_trace_texpool(UINT32_MAX) > 0)
+                fprintf(stderr, "yw4: texpool: frame %" PRIu64 ": %s pool %p -> %p\n", gpu_frames(),
+                        r->op == CMD_SET_TEXTURE_POOL ? "texture" : "sampler", (const void *)*p, (const void *)(uintptr_t)r->x[0]);
+            *p = (const NvnDescPool *)(uintptr_t)r->x[0];
+            break;
+        }
         case CMD_SET_RENDER_TARGETS:
             gpu_end_rendering(cb, &s);
             memcpy(&s.rt, r->extra, sizeof s.rt);
+            render_targets_fix(&s.rt);  /* point at our own copies of the textures */
             s.ncolor = (int)r->x[0];
             break;
         case CMD_SET_VIEWPORTS:  /* (x, y, w, h) */
@@ -854,11 +936,17 @@ void gpu_execute(uint64_t handle) {
         }
         case CMD_DISPATCH: {
             gpu_end_rendering(cb, &s);
-            static int logged;
-            if (logged++ < 4)
-                fprintf(stderr, "yw4: gpu: compute dispatch %ux%ux%u skipped for now (shader %016" PRIx64 ")\n",
-                        (unsigned)r->x[0], (unsigned)r->x[1], (unsigned)r->x[2],
-                        s.program ? s.program->stages[5].key : 0);
+            /* each different compute shader, once */
+            static uint64_t seen[64];
+            static int nseen;
+            uint64_t key = s.program ? s.program->stages[5].key : 0;
+            int known = 0;
+            for (int i = 0; i < nseen; i++) known |= seen[i] == key;
+            if (!known && nseen < 64) {
+                seen[nseen++] = key;
+                fprintf(stderr, "yw4: gpu: compute dispatch %ux%ux%u skipped for now (shader %016" PRIx64 ", frame %" PRIu64 ")\n",
+                        (unsigned)r->x[0], (unsigned)r->x[1], (unsigned)r->x[2], key, present_count);
+            }
             break;
         }
         case CMD_BARRIER:
@@ -866,6 +954,11 @@ void gpu_execute(uint64_t handle) {
             full_barrier(cb);
             break;
         case CMD_REPORT_COUNTER: {  /* (counter, address): NVNcounterData {u64 value, u64 GPU ticks at 614.4 MHz} */
+            static uint32_t logged;
+            if (r->x[0] < 32 && !(logged & 1u << r->x[0])) {
+                logged |= 1u << r->x[0];
+                fprintf(stderr, "yw4: gpu: ReportCounter type %u (first use)\n", (unsigned)r->x[0]);
+            }
             uint64_t *out = (uint64_t *)(uintptr_t)r->x[1];
             out[0] = 0;
             out[1] = (uint64_t)((unsigned __int128)(uint64_t)host_now_ns() * 384 / 625);
@@ -885,12 +978,14 @@ void gpu_present(NvnTexture *t, uint64_t frame, const int crop[4]) {
     host_lock(&gpu_lock);
     present_count++;
     scan_writes();
-    GpuImage *g = t->gpu;
+    if (present_count % 300 == 0) evict_images();
+    GpuImage *g = image_find(t);
     if (!g) {  /* never drawn to: make it (black) */
         VkCommandBuffer cb = begin();
         g = image_of(cb, t);
         submit(cb);
     }
+    g->last_frame = present_count;
     host_unlock(&gpu_lock);
     VkRect2D r = {{0, 0}, {g->width, g->height}};
     if (crop[2] > 0 && crop[3] > 0 && crop[0] >= 0 && crop[1] >= 0 && (uint32_t)(crop[0] + crop[2]) <= g->width &&

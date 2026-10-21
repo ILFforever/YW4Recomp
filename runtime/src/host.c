@@ -103,6 +103,13 @@ void *host_reserve_watched(uint64_t want, size_t size) {
     return VirtualAlloc((void *)(uintptr_t)want, size, MEM_RESERVE | MEM_WRITE_WATCH, PAGE_NOACCESS);
 }
 
+int host_readable(uint64_t addr, uint64_t size) {
+    MEMORY_BASIC_INFORMATION mbi;
+    if (!VirtualQuery((void *)(uintptr_t)addr, &mbi, sizeof mbi) || mbi.State != MEM_COMMIT) return 0;
+    if (!(mbi.Protect & (PAGE_READONLY | PAGE_READWRITE | PAGE_EXECUTE_READ | PAGE_EXECUTE_READWRITE))) return 0;
+    return addr + size <= (uint64_t)(uintptr_t)mbi.BaseAddress + mbi.RegionSize;
+}
+
 long host_written_pages(uint64_t addr, uint64_t size, void (*fn)(uint64_t page, void *arg), void *arg) {
     enum { BATCH = 4096 };
     static void *pages[BATCH];  /* callers hold the draw path's lock */
@@ -119,6 +126,7 @@ long host_written_pages(uint64_t addr, uint64_t size, void (*fn)(uint64_t page, 
 
 #else
 #include <sys/mman.h>
+#include <unistd.h>
 #include <sched.h>
 #include <signal.h>
 
@@ -223,5 +231,11 @@ void *host_reserve_watched(uint64_t want, size_t size) {
 long host_written_pages(uint64_t addr, uint64_t size, void (*fn)(uint64_t page, void *arg), void *arg) {
     (void)addr, (void)size, (void)fn, (void)arg;
     return -1;
+}
+
+int host_readable(uint64_t addr, uint64_t size) {  /* msync on unmapped pages fails with ENOMEM */
+    long page = sysconf(_SC_PAGESIZE);
+    uint64_t a = addr & ~(uint64_t)(page - 1);
+    return msync((void *)(uintptr_t)a, (size_t)(addr + size - a), MS_ASYNC) == 0;
 }
 #endif

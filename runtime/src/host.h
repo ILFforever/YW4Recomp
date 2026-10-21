@@ -52,5 +52,7 @@ void *host_reserve_watched(uint64_t want, size_t size);
  * each, then their tracking starts over. Returns the number of pages, or -1 where the host
  * can't track writes (then anything may have changed). */
 long host_written_pages(uint64_t addr, uint64_t size, void (*fn)(uint64_t page, void *arg), void *arg);
+/* Can [addr, addr + size) be read now (committed, readable)? For diagnostics. */
+int host_readable(uint64_t addr, uint64_t size);
 
 #endif

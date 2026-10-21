@@ -23,7 +23,21 @@ int gpu_buffer_at(uint64_t addr, uint64_t size, VkBuffer *buf, VkDeviceSize *off
 VkDescriptorSet gpu_alloc_set(VkDescriptorSetLayout layout);
 
 typedef struct GpuView GpuView;
+
+/* What identifies a texture's image: where its texels are and how they are laid out. Two
+ * NVN texture objects (or copies of one) with the same key share one image, as they share
+ * the memory on the Switch. */
 typedef struct {
+    uint64_t addr;
+    uint32_t format, target, width, height, depth, layers, levels, block_height_log2, block_depth_log2, linear;
+} ImageKey;
+
+typedef struct GpuImage GpuImage;
+struct GpuImage {
+    GpuImage *next;           /* hash chain (gpu.c) */
+    ImageKey key;
+    uint64_t last_frame;      /* frame it was last used in, and the submission: for freeing */
+    uint64_t last_seq;
     VkImage image;
     VkDeviceMemory mem;
     VkFormat format;
@@ -33,10 +47,12 @@ typedef struct {
     uint64_t uploaded_frame;  /* YW4_GPU_REUPLOAD: the frame it was last uploaded in */
     uint32_t upload_gen;      /* write generation (gpu.c) when it was last uploaded */
     uint32_t checked_gen;     /* ... when its pages were last found unchanged */
-} GpuImage;
+};
 
 /* t's image: made on first use, uploaded from the game's memory unless the GPU owns it. */
 GpuImage *image_of(VkCommandBuffer cb, NvnTexture *t);
+/* t's image if it exists (no upload, no creation). */
+GpuImage *image_find(const NvnTexture *t);
 /* Would image_of record a copy for t (make it, or upload it)? Not allowed while rendering. */
 int gpu_needs_transfer(const NvnTexture *t);
 VkFormat gpu_format(uint32_t nvn_format);

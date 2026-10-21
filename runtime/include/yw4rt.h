@@ -42,6 +42,13 @@ const char *yw4_describe(uint64_t addr, char buf[48]);
 /* Function at a guest address, or NULL. */
 GuestFn yw4_lookup(uint64_t addr);
 
+/* Probes (dispatch.c): every recompiled function starts with
+ * `if (yw4_probe_any) yw4_probe(ctx, entry)`; YW4_PROBE lists the functions to log. */
+extern int yw4_probe_any;
+void yw4_probe(CPUState *ctx, uint64_t addr);
+void yw4_probe_init(void);  /* after the modules are loaded */
+void yw4_watch_init(void);  /* YW4_WATCH data watch, uses the probes */
+
 /* Optional extra lookup tried first (the loader uses it for import stub addresses). */
 extern GuestFn (*yw4_lookup_hook)(uint64_t addr);
 

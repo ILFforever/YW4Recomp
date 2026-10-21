@@ -214,6 +214,19 @@ static void backtrace(const CPUState *ctx) {
     }
 }
 
+int yw4_call_stack(const CPUState *ctx, uint64_t *out, int n) {
+    uint64_t fp = ctx->x[29];
+    int k = 0;
+    if (k < n) out[k++] = ctx->x[30];  /* the caller of a native function: its return address */
+    for (; k < n && fp >= YW4_GUEST_LO && fp < YW4_GUEST_HI && !(fp & 7); k++) {
+        uint64_t ret = *(const uint64_t *)GPTR(fp + 8);
+        if (!ret) break;
+        out[k] = ret;
+        fp = *(const uint64_t *)GPTR(fp);
+    }
+    return k;
+}
+
 /* ---- host crashes (a bad guest pointer, or a runtime bug): say where the guest was */
 
 static void report_crash(const char *what, uint64_t pc, uint64_t addr) {
@@ -285,6 +298,41 @@ static _Noreturn void all_blocked(void) {
         backtrace(t->ctx);
     }
     exit(3);
+}
+
+/* YW4_DUMP_THREADS_AT=<seconds>[,<seconds>...]: at those times after start, print every
+ * guest thread, what it waits for and its call stack (from its registers at its last
+ * system call: exact for waiting threads, approximate for running ones). */
+static void dump_threads(void) {
+    fprintf(stderr, "yw4: kernel: threads at %.1f s:\n", (double)host_now_ns() / 1e9);
+    for (KThread *t = threads; t; t = t->next) {
+        if (!t->started || t->exited) continue;
+        fprintf(stderr, "   thread %" PRIu64 " (priority %d): %s", t->id, t->priority, wait_names[t->wait]);
+        if (t->wait != WAIT_NONE && t->wait != WAIT_SYNC) fprintf(stderr, " at %#" PRIx64, t->addr);
+        fprintf(stderr, "\n");
+        backtrace(t->ctx);
+    }
+}
+
+static void dump_threads_thread(void *arg) {
+    const char *s = arg;
+    int64_t start = host_now_ns();
+    while (*s) {
+        char *e;
+        double at = strtod(s, &e);
+        if (e == s) break;
+        int64_t due = start + (int64_t)(at * 1e9) - host_now_ns();
+        if (due > 0) host_sleep_ns(due);
+        host_lock(&klock);
+        dump_threads();
+        host_unlock(&klock);
+        s = *e == ',' ? e + 1 : e;
+    }
+}
+
+void yw4_dump_threads_start(void) {
+    const char *s = getenv("YW4_DUMP_THREADS_AT");
+    if (s && *s) host_thread_start(dump_threads_thread, (void *)s, 1 << 16);
 }
 
 /* Blocks the current thread in the wait it has set up, for at most timeout_ns (< 0: no
@@ -479,6 +527,7 @@ uint32_t yw4_kernel_init(CPUState *ctx, uint64_t stack, uint64_t stack_size) {
     }
     region_add(YW4_TLR_BASE, MAX_THREADS * TLR_STRIDE, MEM_THREAD_LOCAL, PERM_RW);
     yw4_reserve_free(YW4_GUEST_LO, YW4_GUEST_HI);
+    yw4_dump_threads_start();
 
     KThread *t = &main_thread;
     t->obj.type = KOBJ_THREAD;

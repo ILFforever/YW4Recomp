@@ -57,6 +57,8 @@ int main(int argc, char **argv) {
         return 1;
     }
     if (yw4_load_modules(argv[1]) || romfs_open(argv[2]) || savefs_init(argv[3])) return 1;
+    yw4_probe_init();
+    yw4_watch_init();
 
     window_run(start_guest, NULL);
     return 0;

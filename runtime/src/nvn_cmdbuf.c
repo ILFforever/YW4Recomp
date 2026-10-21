@@ -11,12 +11,14 @@
  *
  * Adapted from LAS Recomp (runtime/nvn/cmdbuf.c; MIT, see third_party/lasrecomp).
  */
+#include <inttypes.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
 #include "gpu.h"
 #include "host.h"
+#include "kernel.h"
 #include "nvn.h"
 #include "pixels.h"
 
@@ -95,6 +97,30 @@ static CmdRec *record_copy(CPUState *c, uint32_t op, int arg, uint32_t len) {
 /* ---- state */
 NVN(nvnCommandBufferBindProgram) {  /* (cmd, program, stage bits) */
     record(c, CMD_BIND_PROGRAM, 0)->x[0] = (uint64_t)(uintptr_t)HOST(NvnProgram, A(1));
+    cb_of(A(0))->program = HOST(NvnProgram, A(1));
+}
+
+/* YW4_TRACE_DRAW_CALLERS=1: each different guest call stack that records a draw, once,
+ * with the bound program's shaders: where the engine's renderers draw from. */
+static void trace_draw_caller(const CPUState *c) {
+    static int on = -1;
+    if (on < 0) on = getenv("YW4_TRACE_DRAW_CALLERS") && *getenv("YW4_TRACE_DRAW_CALLERS") != '0';
+    if (!on) return;
+    enum { DEPTH = 10, SEEN = 4096 };
+    static uint64_t seen[SEEN];
+    static int nseen;
+    uint64_t st[DEPTH];
+    int n = yw4_call_stack(c, st, DEPTH);
+    uint64_t h = 0xCBF29CE484222325ull;
+    for (int i = 0; i < n; i++) h = (h ^ st[i]) * 0x100000001B3ull;
+    for (int i = 0; i < nseen; i++)
+        if (seen[i] == h) return;
+    if (nseen < SEEN) seen[nseen++] = h;
+    const NvnProgram *p = cb_of(A(0))->program;
+    char where[48];
+    fprintf(stderr, "yw4: draw caller: vs %016llx fs %016llx\n", p ? (unsigned long long)p->stages[0].key : 0ull,
+            p ? (unsigned long long)p->stages[1].key : 0ull);
+    for (int i = 0; i < n; i++) fprintf(stderr, "       %s\n", yw4_describe(st[i] - 4, where));
 }
 NVN(nvnCommandBufferBindBlendState) { record_copy(c, CMD_BIND_BLEND, 1, 8); }
 NVN(nvnCommandBufferBindChannelMaskState) { record_copy(c, CMD_BIND_CHANNEL_MASK, 1, 4); }
@@ -108,11 +134,39 @@ NVN(nvnCommandBufferBindVertexStreamState) { record_copy(c, CMD_BIND_VERTEX_STRE
 PLAIN(nvnCommandBufferBindVertexBuffer, CMD_BIND_VERTEX_BUFFERS)      /* (cmd, index, address, size) */
 PLAIN(nvnCommandBufferBindUniformBuffer, CMD_BIND_UNIFORM_BUFFERS)    /* (cmd, stage, index, address, size) */
 PLAIN(nvnCommandBufferBindStorageBuffer, CMD_BIND_STORAGE_BUFFERS)    /* (cmd, stage, index, address, size) */
-PLAIN(nvnCommandBufferBindTexture, CMD_BIND_TEXTURES)                 /* (cmd, stage, index, handle) */
+NVN(nvnCommandBufferBindTexture) {  /* (cmd, stage, index, handle) */
+    record(c, CMD_BIND_TEXTURES, 0);
+    if (nvn_trace_texpool((uint32_t)(A(3) & 0xFFFFF)) > 0) {  /* once per (stage, index, texture id, fragment shader) */
+        enum { SEEN = 1024 };
+        static uint64_t seen[SEEN];
+        static int nseen;
+        const NvnProgram *p = cb_of(A(0))->program;
+        uint64_t k = (A(1) << 40 | A(2) << 20 | (A(3) & 0xFFFFF)) ^ (p ? p->stages[1].key : 0);
+        int i = 0;
+        while (i < nseen && seen[i] != k) i++;
+        if (i == nseen && nseen < SEEN) {
+            seen[nseen++] = k;
+            fprintf(stderr, "yw4: texpool: BindTexture(stage %u, %u, %#" PRIx64 ") in cmdbuf %#" PRIx64 ", program fs %016llx\n",
+                    (unsigned)A(1), (unsigned)A(2), A(3), A(0), p ? (unsigned long long)p->stages[1].key : 0ull);
+        }
+    }
+}
 PLAIN(nvnCommandBufferBindImage, CMD_BIND_IMAGES)                     /* (cmd, stage, index, handle) */
 PLAIN(nvnCommandBufferBindTransformFeedbackBuffer, CMD_BIND_TRANSFORM_FEEDBACK)  /* (cmd, index, address, size) */
-NVN(nvnCommandBufferSetTexturePool) { record(c, CMD_SET_TEXTURE_POOL, 0)->x[0] = (uint64_t)(uintptr_t)HOST(NvnDescPool, A(1)); }
-NVN(nvnCommandBufferSetSamplerPool) { record(c, CMD_SET_SAMPLER_POOL, 0)->x[0] = (uint64_t)(uintptr_t)HOST(NvnDescPool, A(1)); }
+static void trace_set_pool(const CPUState *c, const char *kind) {
+    static long n;
+    if (nvn_trace_texpool(UINT32_MAX) > 0 && n++ < 100)
+        fprintf(stderr, "yw4: texpool: record Set%sPool(%p, guest %#" PRIx64 ") in cmdbuf %#" PRIx64 "\n", kind,
+                (void *)HOST(NvnDescPool, A(1)), A(1), A(0));
+}
+NVN(nvnCommandBufferSetTexturePool) {
+    record(c, CMD_SET_TEXTURE_POOL, 0)->x[0] = (uint64_t)(uintptr_t)HOST(NvnDescPool, A(1));
+    trace_set_pool(c, "Texture");
+}
+NVN(nvnCommandBufferSetSamplerPool) {
+    record(c, CMD_SET_SAMPLER_POOL, 0)->x[0] = (uint64_t)(uintptr_t)HOST(NvnDescPool, A(1));
+    trace_set_pool(c, "Sampler");
+}
 
 /* SetRenderTargets(cmd, count, const NVNtexture *const *colours, const NVNtextureView *const *views,
  * const NVNtexture *depth, const NVNtextureView *depth view): host textures and copies of the views */
@@ -122,10 +176,18 @@ NVN(nvnCommandBufferSetRenderTargets) {
     RenderTargets rt = {0};
     const uint64_t *colors = AP(2), *views = AP(3);
     for (int i = 0; i < n; i++) {
-        rt.color[i] = colors && colors[i] ? HOST(NvnTexture, colors[i]) : NULL;
+        if (colors && colors[i]) {  /* copies: the texture objects may be gone when the list runs */
+            rt.color_snap[i] = *HOST(NvnTexture, colors[i]);
+            rt.color_snap[i].gpu = NULL;
+            rt.color[i] = &rt.color_snap[i];
+        }
         if (views && views[i]) rt.has_view[i] = 1, memcpy(&rt.views[i], (const void *)(uintptr_t)views[i], sizeof rt.views[i]);
     }
-    rt.depth = A(4) ? HOST(NvnTexture, A(4)) : NULL;
+    if (A(4)) {
+        rt.depth_snap = *HOST(NvnTexture, A(4));
+        rt.depth_snap.gpu = NULL;
+        rt.depth = &rt.depth_snap;
+    }
     if (A(5)) rt.has_depth_view = 1, memcpy(&rt.depth_view, AP(5), sizeof rt.depth_view);
     memcpy(record(c, CMD_SET_RENDER_TARGETS, sizeof rt)->extra, &rt, sizeof rt);
 }
@@ -150,12 +212,12 @@ PLAIN(nvnCommandBufferSetShaderScratchMemory, CMD_SET_SCRATCH_MEMORY)       /* (
 NVN(nvnCommandBufferClearColor) { record_copy(c, CMD_CLEAR_COLOR, 2, 16); }  /* (cmd, index, const float[4], mask) */
 PLAIN(nvnCommandBufferClearDepthStencil, CMD_CLEAR_DEPTH_STENCIL)  /* (cmd, depth, depth mask, stencil, stencil mask) */
 /* DrawArrays(cmd, primitive, first, count) is DrawArraysInstanced with one instance */
-NVN(nvnCommandBufferDrawArrays) { CmdRec *r = record(c, CMD_DRAW_ARRAYS, 0); r->x[3] = 0, r->x[4] = 1; }
-PLAIN(nvnCommandBufferDrawArraysInstanced, CMD_DRAW_ARRAYS)  /* (cmd, primitive, first, count, base instance, instances) */
+NVN(nvnCommandBufferDrawArrays) { trace_draw_caller(c); CmdRec *r = record(c, CMD_DRAW_ARRAYS, 0); r->x[3] = 0, r->x[4] = 1; }
+NVN(nvnCommandBufferDrawArraysInstanced) { trace_draw_caller(c); record(c, CMD_DRAW_ARRAYS, 0); }  /* (cmd, primitive, first, count, base instance, instances) */
 /* DrawElements(cmd, primitive, index type, count, index address) is DrawElementsInstanced
  * (..., base vertex, base instance, instances) with 0, 0, 1 */
-NVN(nvnCommandBufferDrawElements) { CmdRec *r = record(c, CMD_DRAW_ELEMENTS, 0); r->x[4] = 0, r->x[5] = 0, r->x[6] = 1; }
-PLAIN(nvnCommandBufferDrawElementsInstanced, CMD_DRAW_ELEMENTS)
+NVN(nvnCommandBufferDrawElements) { trace_draw_caller(c); CmdRec *r = record(c, CMD_DRAW_ELEMENTS, 0); r->x[4] = 0, r->x[5] = 0, r->x[6] = 1; }
+NVN(nvnCommandBufferDrawElementsInstanced) { trace_draw_caller(c); record(c, CMD_DRAW_ELEMENTS, 0); }
 PLAIN(nvnCommandBufferDrawArraysIndirect, CMD_DRAW_ARRAYS_INDIRECT)        /* (cmd, primitive, indirect address) */
 PLAIN(nvnCommandBufferDrawElementsIndirect, CMD_DRAW_ELEMENTS_INDIRECT)    /* (cmd, primitive, type, index address, indirect address) */
 PLAIN(nvnCommandBufferDrawTransformFeedback, CMD_DRAW_TRANSFORM_FEEDBACK)  /* (cmd, primitive, feedback address) */
@@ -219,8 +281,10 @@ void nvn_execute(uint64_t handle) {
             nvn_stats_program((const void *)(uintptr_t)r->x[0]);
             break;
         case CMD_SET_RENDER_TARGETS: {
-            const RenderTargets *rt = (const RenderTargets *)r->extra;
-            for (int i = 0; i < 8; i++) render_targets[i] = i < (int)r->x[0] ? rt->color[i] : NULL;
+            static RenderTargets rt;  /* the record's copies; its pointers must be re-pointed */
+            memcpy(&rt, r->extra, sizeof rt);
+            render_targets_fix(&rt);
+            for (int i = 0; i < 8; i++) render_targets[i] = i < (int)r->x[0] ? rt.color[i] : NULL;
             break;
         }
         case CMD_CLEAR_COLOR: {  /* (index, colour, mask) */

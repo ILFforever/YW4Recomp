@@ -18,6 +18,7 @@
 #include "nvn.h"
 #include "pixels.h"
 #include "window.h"
+#include "yw4rt.h"
 
 static void *alloc(size_t n) {
     void *p = calloc(1, n);
@@ -50,8 +51,56 @@ NVN(nvnDeviceSetDepthMode) {
 }
 NVN(nvnDeviceRegisterFastClearDepth) { RET(1); }  /* (device, depth): a hint for compression */
 NVN(nvnDeviceFinalizeCommandHandle) { (void)c; }
+/* YW4_TRACE_TEXPOOL=<id>: texture and sampler pools (diagnostic). Every pool, registration
+ * counts per pool, and in detail what touches texture ids id-10..id+10 (1: around 3003). */
+int nvn_trace_texpool(uint32_t id) {
+    static int on = -1;
+    static uint32_t center;
+    if (on < 0) {
+        const char *e = getenv("YW4_TRACE_TEXPOOL");
+        on = e && *e && *e != '0';
+        center = on ? (uint32_t)strtoul(e, NULL, 0) : 0;
+        if (center <= 1) center = 3003;
+    }
+    if (!on) return 0;
+    return id == UINT32_MAX || (id + 10 >= center && id <= center + 10) ? 1 : -1;
+}
+/* "caller <- caller's caller" of a guest call, for the trace */
+static const char *trace_callers(const CPUState *c, char buf[320], uint64_t *hash) {
+    uint64_t st[6];
+    int n = yw4_call_stack(c, st, 6);
+    char w[48];
+    buf[0] = 0;
+    uint64_t h = 0xCBF29CE484222325ull;
+    for (int i = 0; i < n; i++) {
+        size_t l = strlen(buf);
+        snprintf(buf + l, 320 - l, "%s%s", i ? " <- " : "", yw4_describe(st[i] - 4, w));
+        h = (h ^ st[i]) * 0x100000001B3ull;
+    }
+    if (hash) *hash = h;
+    return buf;
+}
+
 /* Handles a shader uses to name descriptors: texture ID in the low 20 bits, sampler ID above. */
-NVN(nvnDeviceGetTextureHandle) { RET((A(1) & 0xFFFFF) | (A(2) & 0xFFF) << 20); }
+NVN(nvnDeviceGetTextureHandle) {
+    if (nvn_trace_texpool((uint32_t)A(1)) > 0) {  /* once per texture id and call stack */
+        enum { SEEN = 1024 };
+        static uint64_t seen[SEEN];
+        static int nseen;
+        char b[320];
+        uint64_t h;
+        trace_callers(c, b, &h);
+        h ^= A(1) * 0x9E3779B97F4A7C15ull;
+        int i = 0;
+        while (i < nseen && seen[i] != h) i++;
+        if (i == nseen && nseen < SEEN) {
+            seen[nseen++] = h;
+            fprintf(stderr, "yw4: texpool: GetTextureHandle(tex %u, sampler %u) = %#" PRIx64 " from %s\n", (unsigned)A(1),
+                    (unsigned)A(2), (uint64_t)((A(1) & 0xFFFFF) | (A(2) & 0xFFF) << 20), b);
+        }
+    }
+    RET((A(1) & 0xFFFFF) | (A(2) & 0xFFF) << 20);
+}
 NVN(nvnDeviceGetImageHandle) { RET(A(1) & 0xFFFFF); }
 /* (device, const NVNcounterData*): the timestamp at +8 is in GPU ticks, 614.4 MHz. */
 NVN(nvnDeviceGetTimestampInNanoseconds) { RET((uint64_t)((unsigned __int128)G(uint64_t, A(1), 8) * 625 / 384)); }
@@ -304,6 +353,10 @@ NVN(nvnTextureInitialize) {
     RET(1);
 }
 NVN(nvnTextureFinalize) {
+    static long finalized_registered;
+    if (HOST(NvnTexture, A(0))->registered && finalized_registered++ < 5)
+        fprintf(stderr, "yw4: NVN: texture %ux%u finalized while registered in a texture pool\n",
+                HOST(NvnTexture, A(0))->width, HOST(NvnTexture, A(0))->height);
     gpu_texture_finalize(HOST(NvnTexture, A(0)));
     free(HOST(NvnTexture, A(0)));
     SET_HOST(A(0), 0);
@@ -399,6 +452,9 @@ static void desc_pool_init(CPUState *c, size_t entry) {  /* (pool, memory pool, 
     d->addr = HOST(NvnPool, A(1))->storage + A(2);
     d->count = (int)A(3);
     d->entries = alloc((size_t)d->count * entry);
+    if (nvn_trace_texpool(UINT32_MAX) > 0)
+        fprintf(stderr, "yw4: texpool: %s pool %p (guest %#" PRIx64 ") at %#" PRIx64 ", %d entries\n",
+                entry == sizeof(NvnTexEntry) ? "texture" : "sampler", (void *)d, A(0), d->addr, d->count);
     SET_HOST(A(0), d);
     G(uint64_t, A(0), 8) = A(1);
     G(uint64_t, A(0), 16) = A(2);
@@ -407,6 +463,7 @@ static void desc_pool_init(CPUState *c, size_t entry) {  /* (pool, memory pool, 
 }
 static void desc_pool_finalize(CPUState *c) {
     NvnDescPool *d = HOST(NvnDescPool, A(0));
+    if (nvn_trace_texpool(UINT32_MAX) > 0) fprintf(stderr, "yw4: texpool: pool %p finalized\n", (void *)d);
     if (d) free(d->entries), free(d);
     SET_HOST(A(0), 0);
 }
@@ -421,9 +478,32 @@ NVN(nvnTexturePoolInitialize) { desc_pool_init(c, sizeof(NvnTexEntry)); }
 NVN(nvnTexturePoolFinalize) { desc_pool_finalize(c); }
 static void register_texture(CPUState *c) {  /* (pool, id, texture, view or NULL) */
     NvnTexEntry *e = desc_entry(c, sizeof *e);
-    e->tex = HOST(NvnTexture, A(2));
+    NvnTexture *t = HOST(NvnTexture, A(2));
+    t->registered++;
+    e->snap = *t;  /* a copy, as the hardware's descriptor is */
+    e->snap.gpu = NULL;
+    e->tex = &e->snap;
     e->has_view = A(3) != 0;
     if (e->has_view) memcpy(&e->view, AP(3), sizeof e->view);
+    int tr = nvn_trace_texpool((uint32_t)A(1));
+    if (tr) {
+        enum { POOLS = 16 };
+        static const void *pools[POOLS];
+        static long regs[POOLS], detail;
+        const void *d = HOST(NvnDescPool, A(0));
+        int i = 0;
+        while (i < POOLS && pools[i] && pools[i] != d) i++;
+        if (i < POOLS) {
+            pools[i] = d;
+            if (!(++regs[i] & (regs[i] - 1)))  /* powers of two */
+                fprintf(stderr, "yw4: texpool: pool %p: %ld registrations\n", d, regs[i]);
+        }
+        char b[320];
+        if (tr > 0 && detail++ < 400)
+            fprintf(stderr, "yw4: texpool: pool %p id %u <- %ux%u format %#x at %#" PRIx64 " target %u levels %u%s from %s\n",
+                    d, (unsigned)A(1), t->width, t->height, t->format, t->addr, t->target, t->levels,
+                    e->has_view ? " (view)" : "", trace_callers(c, b, NULL));
+    }
 }
 NVN(nvnTexturePoolRegisterTexture) { register_texture(c); }
 NVN(nvnTexturePoolRegisterImage) { register_texture(c); }

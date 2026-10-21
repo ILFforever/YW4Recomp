@@ -68,6 +68,7 @@ typedef struct {
     uint32_t pool_flags;  /* of the memory pool it lives in */
     void *gpu;            /* the draw path's image (gpu.c) */
     int cpu_written;      /* WriteTexels changed its storage: upload before the GPU uses it */
+    int registered;       /* times registered in a texture pool (diagnostic) */
 } NvnTexture;
 
 typedef struct {
@@ -84,22 +85,37 @@ typedef struct {
     uint8_t swizzle[4];
 } NvnTextureView;
 
+/* A texture pool entry. Like the hardware's descriptor, it keeps a copy of the texture as it
+ * was registered (snap; tex points at it, NULL if the slot is empty): the game finalizes
+ * and reuses texture objects that are still registered, so a pointer to the live object
+ * would end up naming a different texture. */
 typedef struct {
     NvnTexture *tex;
+    NvnTexture snap;
     NvnTextureView view;
     int has_view;
 } NvnTexEntry;
 
-/* The data of a SetRenderTargets record (x[0] = colour count): host textures and copies
- * of the views */
+/* The data of a SetRenderTargets record (x[0] = colour count): copies of the textures as
+ * they were when recorded (the objects may be finalized before the list runs) and of the
+ * views. color[i] / depth point at the copies, or are NULL; whoever copies this struct
+ * must point them at its own copies (gpu.c). */
 typedef struct {
     NvnTexture *color[8];
+    NvnTexture color_snap[8];
     NvnTextureView views[8];
     uint8_t has_view[8];
     NvnTexture *depth;
+    NvnTexture depth_snap;
     NvnTextureView depth_view;
     uint8_t has_depth_view;
 } RenderTargets;
+
+/* Points rt's texture pointers at rt's own copies (after copying the struct). */
+static inline void render_targets_fix(RenderTargets *rt) {
+    for (int i = 0; i < 8; i++) rt->color[i] = rt->color[i] ? &rt->color_snap[i] : NULL;
+    rt->depth = rt->depth ? &rt->depth_snap : NULL;
+}
 
 typedef struct {
     uint64_t addr;
@@ -137,6 +153,7 @@ typedef struct {
     uint64_t callback, callback_data;
     int recording;
     uint64_t guest;            /* the guest NVNcommandBuffer* */
+    const NvnProgram *program; /* bound last (YW4_TRACE_DRAW_CALLERS) */
 } NvnCmdBuf;
 
 /* One recorded call: header, the call's x1..x7 and s0..s3, then copied data. A command
@@ -164,6 +181,10 @@ enum {
     CMD_BARRIER, CMD_REPORT_COUNTER, CMD_RESET_COUNTER,
     CMD_COUNT
 };
+
+/* YW4_TRACE_TEXPOOL (nvn_objects.c): 0 off, 1 trace id in detail (UINT32_MAX: any), -1 only
+ * summaries for it. */
+int nvn_trace_texpool(uint32_t id);
 
 /* Walks a submitted command list (headless: counts what it would run). */
 void nvn_execute(uint64_t handle);

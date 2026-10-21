@@ -276,9 +276,14 @@ int romfs_read(uint64_t offset, void *out_, uint64_t size) {
             const File *f = lo ? files[lo - 1] : NULL;
             uint64_t next = lo < nfiles ? DATA_START + files[lo]->data_off : tables_off;
             if (f && rel < f->data_off + f->size) {
-                static int trace = -1;  /* YW4_TRACE_ROMFS=1: name each file at its first read */
-                if (trace < 0) trace = getenv("YW4_TRACE_ROMFS") && *getenv("YW4_TRACE_ROMFS") != '0';
-                if (trace && !((File *)f)->read_before) {
+                /* YW4_TRACE_ROMFS=1: name each file at its first read; =2: every read, with
+                 * its offset in the file (to find entries inside CPK archives) */
+                static int trace = -1;
+                if (trace < 0) trace = getenv("YW4_TRACE_ROMFS") ? atoi(getenv("YW4_TRACE_ROMFS")) : 0;
+                if (trace == 2) {
+                    fprintf(stderr, "yw4: romfs: read %s +%#" PRIx64 " %#" PRIx64 "\n", f->path, rel - f->data_off,
+                            size);
+                } else if (trace && !((File *)f)->read_before) {
                     ((File *)f)->read_before = 1;
                     fprintf(stderr, "yw4: romfs: read %s (%" PRIu64 " bytes)\n", f->path, f->size);
                 }

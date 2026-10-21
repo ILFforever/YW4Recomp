@@ -71,6 +71,8 @@ void yw4_kernel_unlock(void);
 /* Stops the program after printing the current guest thread and its backtrace: for "not
  * implemented yet" stops reached from guest code (any guest thread, lock held or not). */
 _Noreturn void yw4_stop(void);
+/* Up to n return addresses of ctx's guest call stack (frame-pointer chain); how many. */
+int yw4_call_stack(const CPUState *ctx, uint64_t *out, int n);
 
 /* Sets up the memory map (modules, main stack, thread-local regions) and the main thread,
  * which runs on the calling host thread with `ctx` (its TPIDRRO_EL0 is set here); returns

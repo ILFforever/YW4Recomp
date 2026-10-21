@@ -410,6 +410,9 @@ def emit_function(code: Code, fn: Function, entries: set[int], subgroup=None,
     out = [f"void {name(fn.entry)}(CPUState *ctx) {{"]
     if njb:  # host jump buffers live as long as this frame does
         out.append(f"    jmp_buf yw4_jb[{njb}];")
+    # Probes (runtime/src/dispatch.c): log calls to chosen functions without rebuilding.
+    # Before the entry label, so a loop back to the entry doesn't count as a call.
+    out.append(f"    if (__builtin_expect(yw4_probe_any, 0)) yw4_probe(ctx, {addr(fn.entry)});")
     for off, stmt in lines:
         if off is not None and off in labels:
             out.append(f"{label(off)}:")
