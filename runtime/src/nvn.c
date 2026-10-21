@@ -7,10 +7,10 @@
  * unimplemented SVC. (Real NVN returns NULL for names it doesn't know; the game only asks
  * for names it uses, so a stub address for every name is the stricter choice.)
  *
- * NVN objects (device, queue, command buffer...) are structs the game allocates with sizes
- * fixed by the API; we keep our state inside them, as the real driver does.
+ * The functions themselves are in nvn_objects.c and nvn_cmdbuf.c (decision 0017).
  */
 #include <inttypes.h>
+#include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -18,16 +18,40 @@
 #include "hle.h"
 #include "host.h"
 #include "kernel.h"
+#include "nvn.h"
 #include "yw4load.h"
 
 static void DeviceGetProcAddress(CPUState *ctx);
 
-static const struct {
-    const char *name;
-    GuestFn fn;
-} implemented[] = {
+static const NvnImpl entry_impls[] = {
     {"nvnDeviceGetProcAddress", DeviceGetProcAddress},
+    {NULL, NULL},
 };
+static const NvnImpl *const impl_tables[] = {entry_impls, nvn_object_impls, nvn_cmdbuf_impls};
+
+static GuestFn find_impl(const char *name) {
+    for (size_t t = 0; t < sizeof impl_tables / sizeof *impl_tables; t++)
+        for (const NvnImpl *e = impl_tables[t]; e->name; e++)
+            if (!strcmp(e->name, name)) return e->fn;
+    return NULL;
+}
+
+_Noreturn void nvn_fatal(const CPUState *c, const char *fmt, ...) {
+    char where[48];
+    va_list ap;
+    va_start(ap, fmt);
+    fprintf(stderr, "yw4: NVN: ");
+    vfprintf(stderr, fmt, ap);
+    va_end(ap);
+    fprintf(stderr, " (called from %s)\n", yw4_describe(c->x[30] - 4, where));
+    yw4_stop();
+}
+
+void nvn_guest_call(CPUState *c, uint64_t fn) {
+    uint64_t lr = c->x[30];
+    yw4_resolve(fn)(c);
+    c->x[30] = lr;
+}
 
 /* ---- names to guest addresses */
 
@@ -60,9 +84,7 @@ static uint64_t proc_address(const char *name) {
         char *copy = malloc(strlen(name) + 1);
         if (!copy) exit(3);
         strcpy(copy, name);
-        GuestFn fn = NULL;
-        for (size_t i = 0; i < sizeof implemented / sizeof *implemented && !fn; i++)
-            if (!strcmp(implemented[i].name, name)) fn = implemented[i].fn;
+        GuestFn fn = find_impl(name);
         addr = fn ? yw4_host_function_data(fn, copy) : yw4_host_function_data(missing, copy);
         procs[nprocs].name = copy;
         procs[nprocs++].addr = addr;

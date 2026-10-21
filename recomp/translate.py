@@ -104,6 +104,21 @@ def load_overrides(modules: list[Module]) -> dict[str, dict[int, str]]:
     return out
 
 
+def guest_symbols(modules: list[Module]) -> list[tuple[str, int, int]]:
+    """(symbol, module index, offset) for each [[guest_symbol]] in overrides.toml."""
+    out = []
+    for g in tomllib.loads(OVERRIDES.read_text()).get("guest_symbol", []):
+        i = next((i for i, m in enumerate(modules) if m.name == g["module"]), None)
+        if i is None:
+            raise RuntimeError(f"overrides.toml: no module {g['module']!r}")
+        m = modules[i]
+        funcs = {name: v for name, typ, shndx, v in raw_dynsym(m.image, m.info) if shndx and typ == STT_FUNC}
+        if g["symbol"] not in funcs:
+            raise RuntimeError(f"overrides.toml: {m.name} defines no function {g['symbol']}")
+        out.append((g["symbol"], i, funcs[g["symbol"]]))
+    return out
+
+
 def entry_points(cfg: config.Config, m: Module) -> set[int]:
     code = m.code
     entries = set(recon.eh_frame_function_starts(code.data))
@@ -145,7 +160,8 @@ def resolve_relocations(modules: list[Module]) -> tuple[list[list], list[list], 
     return relative, symbolic, unresolved
 
 
-def image_info(modules: list[Module], relative: list[list], symbolic: list[list], npdm: bytes) -> str:
+def image_info(modules: list[Module], relative: list[list], symbolic: list[list], npdm: bytes,
+               gsyms: list[tuple[str, int, int]]) -> str:
     """Loader tables (decisions 0010, 0014): per module its size, hash, relocations, DT_INIT."""
     out = ['#include "yw4load.h"\n']
     rows = []
@@ -168,6 +184,9 @@ def image_info(modules: list[Module], relative: list[list], symbolic: list[list]
                f"const uint64_t yw4_entry_init_start = {start:#x};  /* nn::init::Start, in the sdk */\n"
                f"const uint64_t yw4_main_stack_size = {stack:#x};  /* main thread, from the NPDM */\n"
                f"const uint32_t yw4_main_priority = {npdm[0xE]};\n")
+    rows = ",\n".join(f'    {{"{name}", {i}, {off:#x}}}' for name, i, off in gsyms)
+    out.append(f"const Yw4GuestSymbol yw4_guest_symbols[] = {{\n{rows or '    {0, 0, 0}'}\n}};\n"
+               f"const size_t yw4_nguest_symbols = {len(gsyms)};\n")
     return "\n".join(out)
 
 
@@ -264,7 +283,7 @@ def main(argv: list[str] | None = None) -> int:
                      "\nconst Yw4CodeModule yw4_code[] = {\n" + ",\n".join(entries) + "\n};\n"
                      f"const size_t yw4_ncode = {len(modules)};\n")
     npdm = (cfg.exefs_dir / "main.npdm").read_bytes()
-    write_if_changed(out / "image_info.c", header + image_info(modules, relative, symbolic, npdm))
+    write_if_changed(out / "image_info.c", header + image_info(modules, relative, symbolic, npdm, guest_symbols(modules)))
     print(f"wrote {out} ({nfiles_total} source files + func_table.c, image_info.c)")
     return 0
 

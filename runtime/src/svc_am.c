@@ -4,6 +4,7 @@
  * "Applet_Manager_services", "PPC_services", "Log_services"; LAS Recomp's services/am.c
  * (MIT) as the cross-check. */
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 #include "ipc_simple.h"
@@ -22,10 +23,13 @@ static void am_init(void) {
     yw4_event_signal(message_event);
 }
 
-#define AM_NO_MESSAGE 0x680u  /* am ResultNoMessage (module 128, description 3) */
+#define AM_NO_DATA_IN_CHANNEL 0x480u  /* am (module 128), description 2 */
+#define AM_NO_MESSAGE 0x680u          /* am ResultNoMessage (module 128, description 3) */
+#define AM_OUT_OF_BOUNDS 0x3EE80u     /* am, description 503 */
 #define APPLET_RESOURCE_USER_ID 0x81ull  /* any non-zero id: hid and others key their state on it */
 
 static const SimpleCommand common_state_getter_simple[] = {
+    {5, SIMPLE_U8, 1, "GetOperationMode: console (docked), so the game renders for a TV"},
     {9, SIMPLE_U8, 1, "GetCurrentFocusState: in focus"},
 };
 
@@ -49,7 +53,9 @@ static void common_state_getter(Service *s, IpcRequest *req, IpcResponse *resp) 
 }
 
 static const SimpleCommand self_controller_simple[] = {
+    {11, SIMPLE_OK, 0, "SetOperationModeChangedNotification"},
     {13, SIMPLE_OK, 0, "SetFocusHandlingMode"},
+    {14, SIMPLE_OK, 0, "SetPerformanceModeChangedNotification"},
     {16, SIMPLE_OK, 0, "SetOutOfFocusSuspendingEnabled"},
     {91, SIMPLE_EVENT, 0, "GetAccumulatedSuspendedTickChangedEvent: never suspended"},
 };
@@ -67,11 +73,73 @@ static void window_controller(Service *s, IpcRequest *req, IpcResponse *resp) {
     if (!IPC_SIMPLE(window_controller_simple, req, resp)) ipc_unimplemented(s, req, resp);
 }
 
+/* ---- storages: blocks of bytes passed between applets (launch parameters) */
+
+typedef struct {
+    uint8_t *data;
+    uint64_t size;
+} Storage;
+
+static void storage_accessor(Service *s, IpcRequest *req, IpcResponse *resp) {
+    Storage *st = s->state;
+    switch (req->cmd) {
+    case 0:  /* GetSize -> i64 */
+        IPC_OUT(uint64_t, 0) = st->size;
+        ipc_out_size(resp, 8);
+        return;
+    case 11: {  /* Read(i64 offset, B buffer) */
+        uint64_t off = IPC_IN(uint64_t, 0);
+        IpcBuffer out = ipc_out_buffer(req, 0);
+        if (off > st->size || out.size > st->size - off) {
+            resp->result = AM_OUT_OF_BOUNDS;
+            return;
+        }
+        memcpy(GPTR(out.addr), st->data + off, out.size);
+        return;
+    }
+    }
+    ipc_unimplemented(s, req, resp);
+}
+
+static void storage(Service *s, IpcRequest *req, IpcResponse *resp) {
+    if (req->cmd == 0) {  /* Open -> IStorageAccessor */
+        ipc_return_object(resp, ipc_service_new("IStorageAccessor", storage_accessor, s->state));
+        return;
+    }
+    ipc_unimplemented(s, req, resp);
+}
+
+static Service *storage_new(const void *data, uint64_t size) {
+    Storage *st = calloc(1, sizeof *st);
+    if (!st || !(st->data = malloc(size))) exit(3);
+    memcpy(st->data, data, size);
+    st->size = size;
+    return ipc_service_new("IStorage", storage, st);
+}
+
 static const SimpleCommand application_functions_simple[] = {
+    /* LanguageCode: the language's tag as up to 8 chars in a u64; the game only has Japanese */
+    {21, SIMPLE_U64, 0x616A, "GetDesiredLanguage: \"ja\""},
     {22, SIMPLE_OK, 0, "SetTerminateResult"},
 };
 
 static void application_functions(Service *s, IpcRequest *req, IpcResponse *resp) {
+    if (req->cmd == 1) {  /* PopLaunchParameter(u32 kind) -> IStorage */
+        uint32_t kind = IPC_IN(uint32_t, 0);
+        if (kind != 2) {  /* 1 = user channel: nothing was passed */
+            resp->result = AM_NO_DATA_IN_CHANNEL;
+            return;
+        }
+        /* 2 = the user picked at launch (Switchbrew "PreselectedUser"): magic, "selected",
+         * the user id; 0x88 bytes */
+        uint8_t p[0x88] = {0};
+        uint32_t magic = 0xC79497CA;
+        memcpy(p, &magic, 4);
+        p[4] = 1;
+        yw4_account_user_id(p + 8);
+        ipc_return_object(resp, storage_new(p, sizeof p));
+        return;
+    }
     if (!IPC_SIMPLE(application_functions_simple, req, resp)) ipc_unimplemented(s, req, resp);
 }
 
@@ -108,11 +176,19 @@ void svc_appletOE(Service *s, IpcRequest *req, IpcResponse *resp) {
     ipc_unimplemented(s, req, resp);
 }
 
-/* ---- apm */
+/* ---- apm: performance modes (CPU/GPU clocks), which mean nothing on the host */
+
+static const SimpleCommand apm_session_simple[] = {
+    {0, SIMPLE_OK, 0, "SetPerformanceConfiguration(mode, configuration)"},
+};
+
+static void apm_session(Service *s, IpcRequest *req, IpcResponse *resp) {
+    if (!IPC_SIMPLE(apm_session_simple, req, resp)) ipc_unimplemented(s, req, resp);
+}
 
 void svc_apm(Service *s, IpcRequest *req, IpcResponse *resp) {
     if (req->cmd == 0) {  /* OpenSession */
-        ipc_return_object(resp, ipc_service_new("apm:ISession", ipc_unimplemented, NULL));
+        ipc_return_object(resp, ipc_service_new("apm:ISession", apm_session, NULL));
         return;
     }
     ipc_unimplemented(s, req, resp);

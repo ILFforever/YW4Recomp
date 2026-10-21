@@ -14,5 +14,6 @@ So far:
 - `src/ipc.h`, `src/ipc.c`, `src/ipc_simple.h`, `src/svc_*.c`: IPC message codec, sessions and domains, and the native system services (decision 0014). `YW4_TRACE_IPC=1` traces requests; `YW4_IPC_STUB=1` stubs unknown ones for surveying.
 - `src/romfs.h`, `src/romfs.c`: the game's RomFS as a virtual image of the owner's folder (decision 0014).
 - `src/kernel.h`, `src/kernel.c`: the Horizon kernel the recompiled sdk calls through `SVC`: memory map, heap, threads (one host thread each) and their synchronisation, events, shared and transfer memory, system counter, `FPCR` writes (decisions 0014, 0015). `YW4_TRACE_SVC=1` traces calls. Stops print a guest backtrace; `python -m tools.yw4.where -` adds symbol names to `sdk+0x...` addresses in piped output.
-- `src/nvn.c`: NVN, entered through the `nvnBootstrapLoader` override; unwritten NVN functions stop with their name (decision 0016).
+- `src/nvn.c`, `src/nvn.h`, `src/nvn_objects.c`, `src/nvn_cmdbuf.c`, `src/tegra.c`: NVN, entered through the `nvnBootstrapLoader` override (decision 0016); headless objects, command recording and the Tegra texture layout (decision 0017). Unwritten NVN functions stop with their name.
+- `src/vi.c`: `nn::vi` overrides and the 60 Hz vsync thread (decision 0017).
 - `src/host.h`, `src/host.c`: what the kernel needs from the host OS (threads, locks, condition variables, monotonic clock), for Windows and Linux (decision 0015).

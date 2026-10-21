@@ -33,6 +33,8 @@ const uint64_t yw4_entry_init_start = 0, yw4_main_stack_size = 0x1000;
 const uint32_t yw4_main_priority = 44;
 const Yw4CodeModule yw4_code[1];
 const size_t yw4_ncode = 0;
+const Yw4GuestSymbol yw4_guest_symbols[1];
+const size_t yw4_nguest_symbols = 0;
 uint32_t ipc_connect_named_port(const char *name, uint32_t *h) { (void)name, (void)h; return 1; }
 uint32_t ipc_send_request(uint32_t h, uint64_t m) { (void)h, (void)m; return 1; }
 int ipc_close_handle(uint32_t h) { (void)h; return 0; }

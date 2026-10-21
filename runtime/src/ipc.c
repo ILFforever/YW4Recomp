@@ -41,6 +41,7 @@ static const struct {
     {"time:a", svc_time},
     {"time:s", svc_time},
     {"fsp-srv", svc_fsp_srv},
+    {"acc:u0", svc_acc},
 };
 
 static int stub_mode(void) {

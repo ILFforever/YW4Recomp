@@ -60,6 +60,15 @@ struct Service {
 #define IPC_OUT(type, off) (*(type *)(resp->data + (off)))
 static inline void ipc_out_size(IpcResponse *resp, uint32_t n) { if (n > resp->data_size) resp->data_size = n; }
 
+/* Output buffer i of a command declared "auto select": the client sends it as a B buffer, or
+ * (small ones) as a C receive-list buffer with an empty B in the same place. Writing to the
+ * C address directly is what the kernel's copy-back would do. {0, 0} if there is none. */
+static inline IpcBuffer ipc_out_buffer(const IpcRequest *req, int i) {
+    if (i < req->nb && req->b[i].size) return req->b[i];
+    if (i < req->nc) return req->c[i];
+    return (IpcBuffer){0, 0};
+}
+
 Service *ipc_service_new(const char *name, ServiceHandler handler, void *state);
 void ipc_return_object(IpcResponse *resp, Service *s);
 /* A named service from the registry (ipc.c), or NULL / a stub (YW4_IPC_STUB=1). */
@@ -81,5 +90,9 @@ void svc_aoc_u(Service *s, IpcRequest *req, IpcResponse *resp);
 void svc_pctl(Service *s, IpcRequest *req, IpcResponse *resp);
 void svc_time(Service *s, IpcRequest *req, IpcResponse *resp);
 void svc_fsp_srv(Service *s, IpcRequest *req, IpcResponse *resp);
+void svc_acc(Service *s, IpcRequest *req, IpcResponse *resp);
+
+/* The one user account (svc_acc.c): its 16-byte id. */
+void yw4_account_user_id(uint8_t out[16]);
 
 #endif

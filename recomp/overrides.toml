@@ -25,3 +25,59 @@ module = "sdk"
 symbol = "_ZN2nv16FinalizeGraphicsEv"
 native = "yw4_nv_FinalizeGraphics"
 why = "the counterpart of nv::InitializeGraphics"
+
+# nn::vi, the display: on the Switch the NVN driver presents through vi's layers and the
+# Android-style "binder" buffer queue behind them. Our NVN presents itself, so the game's
+# display calls only need to hand back objects and the vsync event (decision 0017).
+[[override]]
+module = "sdk"
+symbol = "_ZN2nn2vi10InitializeEv"
+native = "yw4_vi_Initialize"
+why = "nn::vi::Initialize: connects to the display services, which our NVN doesn't use"
+
+[[override]]
+module = "sdk"
+symbol = "_ZN2nn2vi8FinalizeEv"
+native = "yw4_vi_Finalize"
+why = "counterpart of nn::vi::Initialize"
+
+[[override]]
+module = "sdk"
+symbol = "_ZN2nn2vi18OpenDefaultDisplayEPPNS0_7DisplayE"
+native = "yw4_vi_OpenDefaultDisplay"
+why = "a display object for the calls below"
+
+[[override]]
+module = "sdk"
+symbol = "_ZN2nn2vi12CloseDisplayEPNS0_7DisplayE"
+native = "yw4_vi_CloseDisplay"
+why = "counterpart of OpenDefaultDisplay"
+
+[[override]]
+module = "sdk"
+symbol = "_ZN2nn2vi11CreateLayerEPPNS0_5LayerEPNS0_7DisplayEii"
+native = "yw4_vi_CreateLayer"
+why = "a layer object: on the Switch, the compositor surface NVN's window presents to"
+
+[[override]]
+module = "sdk"
+symbol = "_ZN2nn2vi12DestroyLayerEPNS0_5LayerE"
+native = "yw4_vi_DestroyLayer"
+why = "counterpart of CreateLayer"
+
+[[override]]
+module = "sdk"
+symbol = "_ZN2nn2vi15GetNativeWindowEPPvPNS0_5LayerE"
+native = "yw4_vi_GetNativeWindow"
+why = "the handle the game passes to nvnWindowBuilderSetNativeWindow; our NVN doesn't look inside"
+
+[[override]]
+module = "sdk"
+symbol = "_ZN2nn2vi20GetDisplayVsyncEventEPNS_2os15SystemEventTypeEPNS0_7DisplayE"
+native = "yw4_vi_GetDisplayVsyncEvent"
+why = "the vsync event, signalled at 60 Hz by a host thread"
+
+# Guest functions native code calls, by name (yw4_guest_symbol() in the runtime).
+[[guest_symbol]]
+module = "sdk"
+symbol = "_ZN2nn2os33AttachReadableHandleToSystemEventEPNS0_15SystemEventTypeEjbNS0_14EventClearModeE"

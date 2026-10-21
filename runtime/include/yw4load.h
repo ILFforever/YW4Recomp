@@ -49,6 +49,17 @@ extern const uint64_t yw4_entry_init_start;  /* sdk offset of nn::init::Start */
 extern const uint64_t yw4_main_stack_size;    /* from the NPDM */
 extern const uint32_t yw4_main_priority;
 
+/* Guest functions native code calls by name (recomp/overrides.toml [[guest_symbol]]). */
+typedef struct {
+    const char *name;
+    uint32_t module;
+    uint64_t offset;
+} Yw4GuestSymbol;
+extern const Yw4GuestSymbol yw4_guest_symbols[];
+extern const size_t yw4_nguest_symbols;
+/* The guest address of one of them; stops if it isn't listed. */
+uint64_t yw4_guest_symbol(const char *name);
+
 /* Runtime: the guest address space (decision 0014), all inside the 39-bit space games may
  * assume. The kernel reports these regions through svcGetInfo. */
 #define YW4_GUEST_LO 0x7000000000ull

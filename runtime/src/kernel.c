@@ -214,6 +214,9 @@ static void backtrace(const CPUState *ctx) {
     }
 }
 
+void yw4_kernel_lock(void) { host_lock(&klock); }
+void yw4_kernel_unlock(void) { host_unlock(&klock); }
+
 _Noreturn void yw4_stop(void) {
     fprintf(stderr, "     on thread %" PRIu64 "\n", cur->id);
     backtrace(cur->ctx);
@@ -260,9 +263,10 @@ static KThread *first_waiter(WaitKind kind, uint64_t addr, int *count) {
 static const char *const wait_names[] = {"running", "WaitSynchronization", "ArbitrateLock (mutex)",
                                          "WaitProcessWideKeyAtomic (condition variable)", "WaitForAddress"};
 
-/* Every guest thread waits for something only another thread could do: nothing will ever
- * run again. Nothing outside guest threads signals anything yet, so this is a real deadlock
- * (or a missing kernel/service feature): stop and show where everyone is. */
+/* Every guest thread waits for something only another guest thread could do: nothing will
+ * ever run again. (Waits on host-signalled events, like vsync, don't count: a host thread
+ * ends them.) So this is a real deadlock, or a missing kernel/service feature: stop and show
+ * where everyone is. */
 static _Noreturn void all_blocked(void) {
     fprintf(stderr, "yw4: kernel: every guest thread waits forever:\n");
     for (KThread *t = threads; t; t = t->next) {
@@ -276,15 +280,16 @@ static _Noreturn void all_blocked(void) {
 }
 
 /* Blocks the current thread in the wait it has set up, for at most timeout_ns (< 0: no
- * limit). Returns the result its waker gave, or R_TIMEOUT. */
-static uint32_t wait_current(int64_t timeout_ns) {
+ * limit). Returns the result its waker gave, or R_TIMEOUT. host_can_wake: a host thread may
+ * end this wait (a host-signalled event), so it doesn't count as blocked forever. */
+static uint32_t wait_current_ex(int64_t timeout_ns, int host_can_wake) {
     KThread *t = cur;
     t->woken = 0;
     t->seq = next_seq++;
     int forever = timeout_ns < 0;
     int64_t deadline = forever ? 0 : host_now_ns() + timeout_ns;
-    t->forever = forever;
-    if (forever && --nrunnable == 0) all_blocked();
+    t->forever = forever && !host_can_wake;
+    if (t->forever && --nrunnable == 0) all_blocked();
     while (!t->woken) {
         int64_t left = forever ? -1 : deadline - host_now_ns();
         if (!forever && left <= 0) break;
@@ -296,6 +301,8 @@ static uint32_t wait_current(int64_t timeout_ns) {
     }
     return t->result;
 }
+
+static uint32_t wait_current(int64_t timeout_ns) { return wait_current_ex(timeout_ns, 0); }
 
 /* An object became signalled: wake everyone waiting on it. */
 static void wake_sync_waiters(const KObject *o) {
@@ -332,9 +339,12 @@ static uint32_t wait_synchronization(uint64_t handles_addr, int32_t n, int64_t t
             return R_OK;
         }
     if (timeout == 0) return R_TIMEOUT;
+    int host_can_wake = 0;
+    for (int32_t i = 0; i < n; i++)
+        if (t->objs[i]->type == KOBJ_EVENT && ((KEvent *)t->objs[i])->host_signalled) host_can_wake = 1;
     t->nobjs = n;
     t->wait = WAIT_SYNC;
-    uint32_t r = wait_current(timeout);
+    uint32_t r = wait_current_ex(timeout, host_can_wake);
     *index = r == R_OK ? t->index : -1;
     return r;
 }
@@ -485,6 +495,12 @@ KEvent *yw4_event_new(uint32_t *handle) {
     e->obj.type = KOBJ_EVENT;
     *handle = yw4_handle_new(&e->obj);
     return e;
+}
+
+void yw4_event_signal_from_host(KEvent *e) {
+    host_lock(&klock);
+    yw4_event_signal(e);
+    host_unlock(&klock);
 }
 
 void yw4_event_signal(KEvent *e) {

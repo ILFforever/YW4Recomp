@@ -29,9 +29,11 @@ void yw4_handle_close(uint32_t h);     /* forgets the handle; the object's owner
 typedef struct {
     KObject obj;
     int signaled;
+    int host_signalled;  /* a host thread signals it (vsync...): waiting on it is never a deadlock */
 } KEvent;
 KEvent *yw4_event_new(uint32_t *handle);  /* a new unsignalled event and a handle to it */
 void yw4_event_signal(KEvent *e);
+void yw4_event_signal_from_host(KEvent *e);  /* the same from a host thread: takes the kernel lock */
 void yw4_event_clear(KEvent *e);
 
 /* Shared memory a service gives the game: the game maps it at an address of its choice
@@ -53,6 +55,11 @@ typedef struct {
     uint32_t perm;  /* what the game itself may still do with it meanwhile */
 } KTransferMemory;
 KTransferMemory *yw4_transfer_memory_get(uint32_t handle);  /* NULL if not one */
+
+/* For native code that runs inside a guest call rather than an SVC (overrides) and needs
+ * kernel objects: the lock every SVC holds. */
+void yw4_kernel_lock(void);
+void yw4_kernel_unlock(void);
 
 /* Stops the program after printing the current guest thread and its backtrace: for "not
  * implemented yet" stops reached from guest code (any guest thread, lock held or not). */

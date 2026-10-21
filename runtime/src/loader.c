@@ -157,6 +157,14 @@ uint64_t yw4_host_function(GuestFn fn) { return yw4_host_function_data(fn, NULL)
 
 void *yw4_host_data(void) { return host_data; }
 
+uint64_t yw4_guest_symbol(const char *name) {
+    for (size_t i = 0; i < yw4_nguest_symbols; i++)
+        if (!strcmp(yw4_guest_symbols[i].name, name))
+            return *yw4_modules[yw4_guest_symbols[i].module].base + yw4_guest_symbols[i].offset;
+    fprintf(stderr, "yw4: guest symbol %s is not in recomp/overrides.toml [[guest_symbol]]\n", name);
+    exit(3);
+}
+
 /* ---- modules */
 
 static int load_one(const Yw4Module *m, const char *dir) {
