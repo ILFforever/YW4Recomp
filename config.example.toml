@@ -11,6 +11,9 @@ romfs_dir = ""
 # tools.yw4.extract` fills exefs_dir and romfs_dir from them (update applied).
 base_nsp = ""
 update_nsp = ""
+# Optional. Folder with your own add-on content (DLC) NSPs, e.g. the 4++ upgrade. The game
+# is told it owns the add-ons whose title IDs appear in the file names ([0100...]).
+dlc_dir = ""
 
 [output]
 # Where generated files go. Must stay gitignored and should NOT be inside a

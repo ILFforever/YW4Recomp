@@ -11,3 +11,7 @@ build_id = "C7DAB27F22ACD2EDFA334AEEC30E57867AA60E59"
 [sdk]
 image_sha256 = "0134ff06b7b4b6c5b515e7157b292c6b0ae6ed10db9766a13f27644e208182f5"
 build_id = "FCF93A41B08C5193A1410D262602DC621617C56F"
+
+# The application's title ID: add-on content (DLC) title IDs are this + 0x1000 + index.
+[title]
+application_id = "010086C00AF7C000"

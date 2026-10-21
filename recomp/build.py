@@ -16,6 +16,7 @@ import os
 import subprocess
 import sys
 import time
+import tomllib
 from pathlib import Path
 
 import shutil
@@ -135,6 +136,11 @@ def main(argv: list[str] | None = None) -> int:
         shots = cfg.work_dir / "screenshots"  # F12 / YW4_SCREENSHOTS (images of the game: never commit)
         shots.mkdir(exist_ok=True)
         env = {**os.environ, "YW4_SCREENSHOT_DIR": os.environ.get("YW4_SCREENSHOT_DIR", str(shots))}
+        app_id = int(tomllib.loads((check.REPO / "target.toml").read_text())["title"]["application_id"], 16)
+        aoc = cfg.dlc_indices(app_id)
+        if aoc:  # add-on content the owner has (svc_misc.c aoc:u)
+            env.setdefault("YW4_AOC", ",".join(map(str, aoc)))
+            print(f"add-on content: {env['YW4_AOC']}")
         return subprocess.run([str(exe), str(cfg.work_dir / "exefs"), str(cfg.romfs_dir), str(save)], env=env).returncode
     return 0
 

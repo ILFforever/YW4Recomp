@@ -6,6 +6,7 @@ ever hardcoded (CLAUDE.md rule 2).
 
 from __future__ import annotations
 
+import re
 import sys
 import tomllib
 from dataclasses import dataclass
@@ -35,6 +36,21 @@ class Config:
     emulator_exe: Path | None
     cc: str
     glslang: Path | None = None
+    dlc_dir: Path | None = None
+
+    def dlc_indices(self, application_id: int) -> list[int]:
+        """Add-on content indices owned, from the title IDs in dlc_dir's NSP names. An
+        add-on's title ID is the application's + 0x1000 + index."""
+        if not self.dlc_dir or not self.dlc_dir.is_dir():
+            return []
+        base = application_id + 0x1000
+        out = set()
+        for p in self.dlc_dir.glob("*.nsp"):
+            for m in re.finditer(r"\[(0100[0-9A-Fa-f]{12})\]", p.name):
+                i = int(m.group(1), 16) - base
+                if 0 < i < 0x1000:
+                    out.add(i)
+        return sorted(out)
 
 
 def _resolve(value: str) -> Path:
@@ -78,6 +94,7 @@ def load(path: Path = CONFIG_PATH, require_exefs: bool = True) -> Config:
         emulator_exe=_optional(tools.get("emulator_exe", "")),
         cc=tools.get("cc", ""),
         glslang=_optional(tools.get("glslang", "")),
+        dlc_dir=_optional(inp.get("dlc_dir", "")),
     )
 
     for name in ("exefs_dir", "romfs_dir"):
