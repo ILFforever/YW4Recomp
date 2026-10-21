@@ -48,13 +48,26 @@ extern const uint64_t yw4_entry_init_start;  /* sdk offset of nn::init::Start */
 extern const uint64_t yw4_main_stack_size;    /* from the NPDM */
 extern const uint32_t yw4_main_priority;
 
-/* Runtime */
-#define YW4_STACK_BASE 0x7000000000ull      /* guest stacks: inside the 39-bit space games may assume */
+/* Runtime: the guest address space (decision 0014), all inside the 39-bit space games may
+ * assume. The kernel reports these regions through svcGetInfo. */
+#define YW4_GUEST_LO 0x7000000000ull
+#define YW4_GUEST_HI 0x7800000000ull
+#define YW4_STACK_BASE 0x7000000000ull      /* guest stacks */
+#define YW4_STACK_SIZE 0x0040000000ull
 #define YW4_TLR_BASE 0x7040000000ull        /* thread-local regions (TPIDRRO_EL0) */
 #define YW4_HOST_FN_BASE 0x7080000000ull    /* guest addresses of host callbacks */
+#define YW4_HEAP_BASE 0x7200000000ull       /* svcSetHeapSize: reserved, committed as it grows */
+#define YW4_HEAP_SIZE 0x0180000000ull
+#define YW4_ALIAS_BASE 0x7400000000ull      /* svcMapMemory targets */
+#define YW4_ALIAS_SIZE 0x0100000000ull
 
 /* Zeroed read/write memory, at `want` if that range is free (0 = anywhere), else anywhere. */
 void *yw4_reserve(uint64_t want, size_t size);
+/* Address space only, at exactly `want` (NULL if taken); yw4_commit makes parts of it
+ * usable (zeroed), yw4_decommit gives memory back. */
+void *yw4_reserve_range(uint64_t want, size_t size);
+int yw4_commit(uint64_t addr, size_t size);
+void yw4_decommit(uint64_t addr, size_t size);
 
 /* Reads, verifies (size + SHA-256) and relocates every module from `exefs_dir`. Returns 0 on
  * success; prints why not. */

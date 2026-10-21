@@ -54,12 +54,13 @@ Tests (synthetic data only): `python -m unittest discover -s tests -t .`
 
 Where the recompiled game stops right now, and how it got there. Newest first. Each step links to the decision record that explains it.
 
-**Current stop:** the recompiled `sdk`'s start-up (`nn::init::Start`) at its first system call, `SVC 0x29` (`GetInfo`, random entropy).
+**Current stop:** the recompiled `sdk`'s start-up connects to the service manager (`SVC 0x1F ConnectToNamedPort("sm:")`): the first IPC.
 
-**Direction change (0014):** the `sdk` will be recompiled too, instead of re-implementing its 578 functions by hand; native code moves to the kernel/service level. Done: every instruction in `sdk` translates; both modules are translated, loaded and linked. Next: a minimal kernel (system calls, main thread, memory).
+**Direction change (0014):** the `sdk` will be recompiled too, instead of re-implementing its 578 functions by hand; native code moves to the kernel/service level. Done: every instruction in `sdk` translates; both modules are translated, loaded and linked. Next: IPC and the service manager, then the services the game opens.
 
 | Date | Step | Result |
 |---|---|---|
+| 2026-10-21 | Minimal kernel: address-space layout, `GetInfo`, heap (`SetHeapSize`, reserved and committed as it grows), `QueryMemory`, thread properties, single-thread mutex/condition-variable calls, sleep, system tick (0014) | The sdk's start-up runs through 50 system calls to its first IPC |
 | 2026-10-21 | Translate and load both modules: symbols resolved at translation time in load order, one dispatch over both, start-up through the sdk's own `nn::init::Start` (0014) | 73,844 functions; Nintendo's start-up code runs natively until its first system call |
 | 2026-10-21 | Instructions the `sdk` needs: AES/SHA/PMULL crypto, SIMD integer (`addv`, `smlal`, `sqadd`...), CRC32, fused multiply-add, `MRS`/`MSR`, cache ops, `SVC` (0014) | All of `sdk` translates; 13 forms Pi-checked (120,000 cases), 3 planted bugs caught |
 | 2026-10-21 | Decision: recompile `sdk` as well as `main`, measured first: 99.3% of its 33,616 functions already translate (0014) | Plan for the rest of Phase 3 |
@@ -75,7 +76,7 @@ Where the recompiled game stops right now, and how it got there. Newest first. E
 Still open from Phase 0: the baseline benchmark (`docs/baseline.md`), which needs the owner's emulator runs.
 
 Known gaps, in the order they will come up:
-- Recompiling `sdk` (0014): a minimal kernel (system calls, threads, thread-local region, memory), then system services.
+- Recompiling `sdk` (0014): IPC and system services; real threads (the kernel is single-threaded so far).
 - `qsort`, `printf`-family float output, `strtod`, `strerror`: same approach as the math functions (musl source, checked against the sdk), not done yet.
 - Threads (one guest thread so far), `setjmp`/`longjmp` for Lua, contents of the 20 data imports (RTTI, `stdio`).
 - C++ exceptions are not supported: nothing in `main` throws (0012).

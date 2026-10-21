@@ -47,6 +47,17 @@ def newest_header(cfg: config.Config) -> float:
     return max(h.stat().st_mtime for h in headers)
 
 
+# What generated code includes: funcs.h -> yw4rt.h -> yw4cpu.h -> yw4fp.h, and yw4load.h for
+# image_info.c only. Other runtime headers changing doesn't rebuild the ~150 generated files.
+GENERATED_HEADERS = ("yw4rt.h", "yw4cpu.h", "yw4fp.h")
+
+
+def generated_header(cfg: config.Config, src: Path) -> float:
+    names = GENERATED_HEADERS + (("yw4load.h",) if src.name == "image_info.c" else ())
+    headers = [RUNTIME / "include" / n for n in names] + list((cfg.work_dir / "recomp").glob("*.h"))
+    return max(h.stat().st_mtime for h in headers)
+
+
 def compile_one(cc: str, src: Path, obj: Path, includes: list[str]) -> str | None:
     flags = MUSL_CFLAGS if MUSL in src.parents else [*CFLAGS, *includes]
     proc = subprocess.run([cc, *flags, "-c", str(src), "-o", str(obj)], capture_output=True, text=True)
@@ -85,7 +96,7 @@ def main(argv: list[str] | None = None) -> int:
         musl = MUSL in src.parents
         obj = objdir / (("rt_" if rt else "musl_" if musl else "") + src.stem + ".o")
         objs.append(obj)
-        dep = musl_hdr if musl else rt_hdr if rt else hdr
+        dep = musl_hdr if musl else rt_hdr if rt else generated_header(cfg, src)
         if not obj.exists() or obj.stat().st_mtime < max(src.stat().st_mtime, dep):
             todo.append((src, obj))
 

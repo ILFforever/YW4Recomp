@@ -35,6 +35,38 @@ void *yw4_reserve(uint64_t want, size_t size) {
 #endif
 }
 
+/* Address space without memory behind it, at exactly `want` (NULL if taken). */
+void *yw4_reserve_range(uint64_t want, size_t size) {
+#ifdef _WIN32
+    return VirtualAlloc((void *)(uintptr_t)want, size, MEM_RESERVE, PAGE_NOACCESS);
+#else
+    void *p = mmap((void *)(uintptr_t)want, size, PROT_NONE, MAP_PRIVATE | MAP_ANONYMOUS | MAP_NORESERVE, -1, 0);
+    if (p != MAP_FAILED && p != (void *)(uintptr_t)want) {
+        munmap(p, size);
+        return NULL;
+    }
+    return p == MAP_FAILED ? NULL : p;
+#endif
+}
+
+/* Zeroed read/write memory inside a reserved range; 0 on success. */
+int yw4_commit(uint64_t addr, size_t size) {
+#ifdef _WIN32
+    return VirtualAlloc((void *)(uintptr_t)addr, size, MEM_COMMIT, PAGE_READWRITE) ? 0 : -1;
+#else
+    return mprotect((void *)(uintptr_t)addr, size, PROT_READ | PROT_WRITE);
+#endif
+}
+
+/* Give the memory back but keep the range reserved; the next commit reads as zeros. */
+void yw4_decommit(uint64_t addr, size_t size) {
+#ifdef _WIN32
+    VirtualFree((void *)(uintptr_t)addr, size, MEM_DECOMMIT);
+#else
+    mmap((void *)(uintptr_t)addr, size, PROT_NONE, MAP_PRIVATE | MAP_ANONYMOUS | MAP_NORESERVE | MAP_FIXED, -1, 0);
+#endif
+}
+
 static uint8_t *read_file(const char *path, size_t *len) {
     FILE *f = fopen(path, "rb");
     if (!f) return NULL;

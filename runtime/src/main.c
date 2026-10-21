@@ -12,10 +12,10 @@
 #include <stdio.h>
 #include <stdlib.h>
 
+#include "kernel.h"
 #include "yw4load.h"
 
 #define TLR_SIZE 0x200              /* Horizon's thread-local region per thread */
-#define MAIN_THREAD_HANDLE 0x101u   /* the kernel (kernel.c) will own handles; a fixed value until then */
 
 static void init_module(CPUState *ctx, size_t i) {
     const Yw4Module *m = &yw4_modules[i];
@@ -44,7 +44,7 @@ int main(int argc, char **argv) {
     ctx->tpidrro_el0 = (uint64_t)(uintptr_t)tlr;
     (void)TLR_SIZE;
 
-    ctx->x[0] = MAIN_THREAD_HANDLE;
+    ctx->x[0] = yw4_kernel_init((uint64_t)(uintptr_t)stack, yw4_main_stack_size, (uint64_t)(uintptr_t)tlr);
     ctx->x[1] = 0;  /* argument region: none */
     ctx->x[2] = yw4_host_function(init_sdk);
     ctx->x[3] = yw4_host_function(init_main);
