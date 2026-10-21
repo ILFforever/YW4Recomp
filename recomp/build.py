@@ -64,11 +64,14 @@ def main(argv: list[str] | None = None) -> int:
     objdir.mkdir(parents=True, exist_ok=True)
     includes = [f"-I{RUNTIME / 'include'}", f"-I{cfg.work_dir / 'recomp'}"]
     hdr = newest_header(cfg)
+    # runtime/src/*.h are private to the runtime: changing one doesn't rebuild generated code
+    rt_hdr = max([hdr, *(h.stat().st_mtime for h in (RUNTIME / "src").glob("*.h"))])
     todo, objs = [], []
     for src in sources(cfg):
-        obj = objdir / (("rt_" if src.parent.name == "src" else "") + src.stem + ".o")
+        rt = src.parent.name == "src"
+        obj = objdir / (("rt_" if rt else "") + src.stem + ".o")
         objs.append(obj)
-        if not obj.exists() or obj.stat().st_mtime < max(src.stat().st_mtime, hdr):
+        if not obj.exists() or obj.stat().st_mtime < max(src.stat().st_mtime, rt_hdr if rt else hdr):
             todo.append((src, obj))
 
     t0 = time.time()

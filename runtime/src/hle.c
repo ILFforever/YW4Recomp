@@ -9,10 +9,12 @@
  * YW4_TRACE=1 prints every import call.
  */
 #include <inttypes.h>
+#include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
+#include "hle.h"
 #include "yw4load.h"
 
 typedef struct {
@@ -20,11 +22,45 @@ typedef struct {
     GuestFn fn;
 } HleEntry;
 
-/* Native implementations, by mangled sdk name. Empty: the skeleton only finds out which
- * imports the game needs first. */
+/* Native implementations, by mangled sdk name (decision 0011). */
 static const HleEntry hle_table[] = {
+    /* nn::os memory (hle_os.c) */
+    {"_ZN2nn2os15QueryMemoryInfoEPNS0_10MemoryInfoE", hle_os_QueryMemoryInfo},
+    {"_ZN2nn2os17SetMemoryHeapSizeEm", hle_os_SetMemoryHeapSize},
+    {"_ZN2nn2os19AllocateMemoryBlockEPmm", hle_os_AllocateMemoryBlock},
+    /* nn::diag (hle_diag.c) */
+    {"_ZN2nn4diag6detail7LogImplERKNS0_11LogMetaDataEPKcz", hle_diag_LogImpl},
+    {"_ZN2nn4diag6detail18OnAssertionFailureENS0_13AssertionTypeEPKcS4_S4_i", hle_diag_OnAssertionFailure},
+    {"_ZN2nn4diag6detail9AbortImplEPKcS3_S3_i", hle_diag_AbortImpl},
+    {"nndetailDiagAbortFormatImpl", hle_diag_AbortFormatImpl},
+    /* nn::mem::StandardAllocator (hle_mem.c) */
+    {"_ZN2nn3mem17StandardAllocatorC1Ev", hle_mem_StandardAllocator_ctor},
+    {"_ZN2nn3mem17StandardAllocatorC2Ev", hle_mem_StandardAllocator_ctor},
+    {"_ZN2nn3mem17StandardAllocator10InitializeEPvm", hle_mem_StandardAllocator_Initialize},
+    {"_ZN2nn3mem17StandardAllocator10InitializeEPvmb", hle_mem_StandardAllocator_Initialize},
+    {"_ZN2nn3mem17StandardAllocator8FinalizeEv", hle_mem_StandardAllocator_Finalize},
+    {"_ZN2nn3mem17StandardAllocator8AllocateEm", hle_mem_StandardAllocator_Allocate},
+    {"_ZN2nn3mem17StandardAllocator8AllocateEmm", hle_mem_StandardAllocator_AllocateAligned},
+    {"_ZN2nn3mem17StandardAllocator4FreeEPv", hle_mem_StandardAllocator_Free},
+    {"_ZN2nn3mem17StandardAllocator10ReallocateEPvm", hle_mem_StandardAllocator_Reallocate},
+    {"_ZNK2nn3mem17StandardAllocator16GetTotalFreeSizeEv", hle_mem_StandardAllocator_GetTotalFreeSize},
+    {"_ZNK2nn3mem17StandardAllocator18GetAllocatableSizeEv", hle_mem_StandardAllocator_GetAllocatableSize},
     {NULL, NULL},
 };
+
+static uint64_t caller_of(const CPUState *ctx) {
+    return ctx->x[30] - 4 - yw4_image_base;  /* the BL that called the stub */
+}
+
+_Noreturn void yw4_hle_stop(CPUState *ctx, const char *fmt, ...) {
+    va_list ap;
+    va_start(ap, fmt);
+    fprintf(stderr, "yw4: ");
+    vfprintf(stderr, fmt, ap);
+    va_end(ap);
+    fprintf(stderr, "\n     called from main+%#" PRIx64 "\n", caller_of(ctx));
+    exit(3);
+}
 
 static GuestFn find_impl(const char *name) {
     for (const HleEntry *e = hle_table; e->name; e++)
@@ -39,7 +75,7 @@ void yw4_import_call(CPUState *ctx, uint32_t index) {
         trace = t && *t && *t != '0';
     }
     const char *name = yw4_imports[index].name;
-    uint64_t caller = ctx->x[30] - 4 - yw4_image_base;  /* the BL that called the stub */
+    uint64_t caller = caller_of(ctx);
     if (trace)
         fprintf(stderr, "yw4: import %s from %#" PRIx64 "\n", name, caller);
     GuestFn fn = find_impl(name);

@@ -49,5 +49,87 @@ class Sha256Test(unittest.TestCase):
                 self.assertEqual(got.stdout.strip(), hashlib.sha256(data).hexdigest(), f"length {n}")
 
 
+HEAP_DRIVER = r"""
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include "hle.h"
+#define REGION (64u << 20)
+#define SLOTS 4000
+static unsigned long long rng = 88172645463325252ull;
+static unsigned rnd(void) { rng ^= rng << 13; rng ^= rng >> 7; rng ^= rng << 17; return (unsigned)rng; }
+static struct { unsigned char *p; size_t n; unsigned char fill; } s[SLOTS];
+#define FAIL(...) do { printf(__VA_ARGS__); puts(""); return 1; } while (0)
+static int check_live(void) {  /* contents intact, no overlaps (sorted sweep) */
+    static int idx[SLOTS]; int k = 0;
+    for (int i = 0; i < SLOTS; i++) if (s[i].p) {
+        for (size_t j = 0; j < s[i].n; j++) if (s[i].p[j] != s[i].fill) return -1;
+        idx[k++] = i;
+    }
+    for (int a = 1; a < k; a++) for (int b = a; b > 0 && s[idx[b-1]].p > s[idx[b]].p; b--) { int t = idx[b]; idx[b] = idx[b-1]; idx[b-1] = t; }
+    for (int a = 1; a < k; a++) if (s[idx[a-1]].p + s[idx[a-1]].n > s[idx[a]].p) return -2;
+    return 0;
+}
+int main(void) {
+    unsigned char *region = malloc(REGION + 64);
+    Yw4Heap *h = yw4_heap_create(region + 3, REGION);  /* unaligned on purpose */
+    if (!h) FAIL("create failed");
+    size_t empty = yw4_heap_total_free(h);
+    if (yw4_heap_largest_free(h) != empty) FAIL("fresh heap: largest %zu != free %zu", yw4_heap_largest_free(h), empty);
+    for (int step = 0; step < 300000; step++) {
+        int i = rnd() % SLOTS;
+        unsigned op = rnd() % 8;
+        size_t n = (rnd() % 4 == 0) ? rnd() % 200000 : rnd() % 300;
+        if (!s[i].p && op < 6) {
+            size_t align = (op == 5) ? (size_t)1 << (rnd() % 13) : 16;
+            unsigned char *q = yw4_heap_alloc(h, n, align);
+            if (!q) continue;
+            if ((size_t)q % (align < 16 ? 16 : align)) FAIL("misaligned %p align %zu", (void *)q, align);
+            s[i].p = q; s[i].n = n; s[i].fill = (unsigned char)rnd();
+            memset(q, s[i].fill, n);
+        } else if (s[i].p && op < 4) {
+            if (yw4_heap_free(h, s[i].p)) FAIL("free of live block refused");
+            if (yw4_heap_free(h, s[i].p) == 0) FAIL("double free accepted");
+            s[i].p = NULL;
+        } else if (s[i].p) {
+            unsigned char *q = yw4_heap_realloc(h, s[i].p, n);
+            if (!q) continue;
+            for (size_t j = 0; j < (n < s[i].n ? n : s[i].n); j++) if (q[j] != s[i].fill) FAIL("realloc lost data");
+            s[i].p = q; s[i].n = n; memset(q, s[i].fill, n);
+        }
+        if (step % 20000 == 0) {
+            int r = check_live();
+            if (r) FAIL("step %d: %s", step, r == -1 ? "contents corrupted" : "blocks overlap");
+            if (yw4_heap_largest_free(h) > yw4_heap_total_free(h)) FAIL("largest > total free");
+        }
+    }
+    if (check_live()) FAIL("final check failed");
+    if (yw4_heap_free(h, region + 4096 + 16) == 0) FAIL("stray pointer accepted");
+    for (int i = 0; i < SLOTS; i++) if (s[i].p && yw4_heap_free(h, s[i].p)) FAIL("final free refused");
+    if (yw4_heap_total_free(h) != empty || yw4_heap_largest_free(h) != empty)
+        FAIL("not fully merged: free %zu largest %zu, expected %zu", yw4_heap_total_free(h), yw4_heap_largest_free(h), empty);
+    if (yw4_heap_alloc(h, empty, 16) == NULL) FAIL("whole heap not allocatable");
+    if (yw4_heap_alloc(h, 1, 16) != NULL) FAIL("allocation from a full heap");
+    puts("ok");
+    return 0;
+}
+"""
+
+
+class HeapTest(unittest.TestCase):
+    """The allocator behind nn::mem::StandardAllocator (runtime/src/heap.c, decision 0011)."""
+
+    def test_random_operations(self):
+        with tempfile.TemporaryDirectory() as t:
+            t = Path(t)
+            (t / "drv.c").write_text(HEAP_DRIVER)
+            exe = t / "heap.exe"
+            subprocess.run([check.host_cc(), "-std=c11", "-O1", "-Wall", f"-I{RUNTIME / 'include'}",
+                            f"-I{RUNTIME / 'src'}", "-o", str(exe), str(t / "drv.c"), str(RUNTIME / "src" / "heap.c")],
+                           check=True, capture_output=True)
+            got = subprocess.run([str(exe)], capture_output=True, text=True)
+            self.assertEqual(got.stdout.strip(), "ok")
+
+
 if __name__ == "__main__":
     unittest.main()
