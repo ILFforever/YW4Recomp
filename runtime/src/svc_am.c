@@ -148,6 +148,12 @@ static void application_functions(Service *s, IpcRequest *req, IpcResponse *resp
         ipc_out_size(resp, 8);
         return;
     }
+    if (req->cmd == 50) {  /* GetPseudoDeviceId -> Uuid: a fixed id stands in for this "console" */
+        static const uint8_t id[16] = {'y', 'w', '4', 'r', 'e', 'c', 'o', 'm', 'p', 'd', 'e', 'v', 'i', 'd', 0, 1};
+        memcpy(resp->data, id, 16);
+        ipc_out_size(resp, 16);
+        return;
+    }
     if (!IPC_SIMPLE(application_functions_simple, req, resp)) ipc_unimplemented(s, req, resp);
 }
 

@@ -81,3 +81,11 @@ why = "the vsync event, signalled at 60 Hz by a host thread"
 [[guest_symbol]]
 module = "sdk"
 symbol = "_ZN2nn2os33AttachReadableHandleToSystemEventEPNS0_15SystemEventTypeEjbNS0_14EventClearModeE"
+
+# nn::swkbd, the software keyboard: a library applet on the Switch, which we don't have.
+# The call answers at once with a name (YW4_PLAYER_NAME, default "Nate").
+[[override]]
+module = "sdk"
+symbol = "_ZN2nn5swkbd12ShowKeyboardEPNS0_6StringERKNS0_15ShowKeyboardArgE"
+native = "yw4_swkbd_ShowKeyboard"
+why = "nn::swkbd::ShowKeyboard launches the keyboard applet (CreateLibraryApplet), which has no host equivalent"

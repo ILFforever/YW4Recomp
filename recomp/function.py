@@ -240,7 +240,8 @@ def find_jump_table(code: Code, br_off: int, reg: int, lowest: int, window: int 
         e = code.word(o)
         if e & 0xFF00001E == 0x54000008:                     # cond 8 (HI) or 9 (LS)
             o -= 4
-            while o >= lo:                                   # the flag-setting compare before it
+            lo_cmp = max(br_off - 4 * 8 * window, lowest)    # the compiler can schedule much code in between
+            while o >= lo_cmp:                               # the flag-setting compare before it
                 e = code.word(o)
                 if e & 0x7F80001F == 0x7100001F and not bits(e, 22, 22):
                     bound = bits(e, 21, 10)                  # cmp xN/wN, #imm (subs xzr, ..)
@@ -251,17 +252,48 @@ def find_jump_table(code: Code, br_off: int, reg: int, lowest: int, window: int 
             break
         o -= 4
     table = trace_constant(code, ldr_off, rt, lowest)
-    if bound is None or table is None:
+    if bound is None:
         return None
+    if table is not None:
+        return table_targets(code, table, bound)
+    # The table's address was loaded by code the compiler placed after the branch (the
+    # register is set once, in a block laid out later). Take an `adrp xRt` (+ `add xRt, xRt,
+    # #imm`) anywhere nearby whose table has only code addresses near the branch in it.
+    for cand in nearby_tables(code, rt, lowest, br_off):
+        targets = table_targets(code, cand, bound, near=br_off)
+        if targets is not None:
+            return targets
+    return None
+
+
+def table_targets(code: Code, table: int, bound: int, near: int | None = None) -> list[int] | None:
+    """The bound+1 case targets of the int32 offset table at `table`, or None if any isn't code
+    (or, with `near`, isn't within 64 KiB of it)."""
     targets = []
     for k in range(bound + 1):
         if table + 4 * k + 4 > len(code.data):
             return None
         t = table + struct.unpack_from("<i", code.data, table + 4 * k)[0]
-        if not code.is_code(t):
+        if not code.is_code(t) or (near is not None and abs(t - near) > 0x10000):
             return None
         targets.append(t)
     return targets
+
+
+def nearby_tables(code: Code, reg: int, lowest: int, br_off: int, reach: int = 0x8000) -> list[int]:
+    """Addresses `adrp xreg` (+ `add xreg, xreg, #imm` right after) builds within `reach` of the branch."""
+    found = []
+    for o in range(max(lowest, br_off - reach), min(code.text_end, br_off + reach), 4):
+        e = code.word(o)
+        if e & 0x9F000000 != 0x90000000 or bits(e, 4, 0) != reg:
+            continue
+        imm = sign_extend(bits(e, 23, 5) << 2 | bits(e, 30, 29), 21)
+        addr = (o & ~0xFFF) + (imm << 12)
+        n = code.word(o + 4) if o + 4 < code.text_end else 0
+        if n & 0xFFC00000 == 0x91000000 and bits(n, 9, 5) == reg and bits(n, 4, 0) == reg:
+            addr += bits(n, 21, 10)
+        found.append(addr)
+    return found
 
 
 # --------------------------------------------------------------------------- discovery

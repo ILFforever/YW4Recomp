@@ -101,12 +101,13 @@ Tracing and probes (`YW4_TRACE_*`, `YW4_PROBE*`, `YW4_WATCH*`, `YW4_GPU_TRACE*`)
 
 Where the recompiled game stops right now, and how it got there. Newest first. Each step links to the decision record that explains it.
 
-**Current state:** no stop. The game draws on Vulkan (0021) with its own shaders translated (0020): the copyright warning, the LEVEL-5 logo, the autosave notice (waits for A), the opening movie, and the title menu with its logo, all animated. Keyboard and gamepad reach the game; the owner's add-on content is listed. Known gaps: the "4++" logo variant (add-on ownership), the translation mod (LayeredFS, Phase 5), compute dispatches, alpha test, streaks in movies.
+**Current state:** no stop through the name entry and into the opening scene (a 3D room, dialogue boxes; it waits for A). The game draws on Vulkan (0021) with its own shaders translated (0020): the copyright warning, the LEVEL-5 logo, the autosave notice (waits for A), the opening movie, and the title menu with its logo, all animated. Keyboard and gamepad reach the game; the owner's add-on content is listed. Known gaps: the "4++" logo variant (add-on ownership), the translation mod (LayeredFS, Phase 5), compute dispatches, alpha test, streaks in movies.
 
 **Direction change (0014):** the `sdk` will be recompiled too, instead of re-implementing its 578 functions by hand; native code moves to the kernel/service level. Done: every instruction in `sdk` translates; both modules are translated, loaded and linked; real guest threads. NVN runs headless (0017: owner chose headless first, then SDL3 + Vulkan); next: input, then the services the frame loop needs.
 
 | Date | Step | Result |
 |---|---|---|
+| 2026-10-22 | New game (0022): the keyboard applet answered natively; switch tables the recompiler missed (scheduling gaps, table base loaded after the branch); `time:u` clock snapshots; 32-bit integer vertex inputs | Name entry, the first 3D character, and the **opening scene with dialogue** render |
 | 2026-10-21 | Recompiler fix: a function whose code includes a block placed below its entry now starts with a jump to the entry (5 functions; one is the engine's resource lookup by name hash, main+0xa7d8bc) | **Menus render**: every menu mesh had been skipped because its texture links were never found; the warning card, autosave notice and title menu now draw |
 | 2026-10-21 | Draw path step 2 (0021): pipelines, descriptors, texture uploads, quads, window crop; the translated shaders run | **First real frames**: the LEVEL-5 logo and the autosave notice; waits there for a button (input next) |
 | 2026-10-21 | Draw path step 1 (0021): the game's memory pools imported into Vulkan in place, an image per texture, clears and present on the GPU, NVN syncs on a timeline semaphore; shader keys checked at run time | 30 frames/s on the GPU path; all 33 shaders the game loads are translated; still black (draws next) |
