@@ -52,6 +52,24 @@ static Slot ring[RING];
 static int ring_next;
 static Slot *cur;  /* the slot being recorded */
 
+/* GPU timing (YW4 performance log): each submission writes a timestamp at its start and end
+ * into its slot's pair of queries; the results are read once the submission has completed
+ * and added up per frame. */
+static VkQueryPool qpool;
+static double ts_period_ns;  /* nanoseconds per timestamp tick; 0 = no timestamps */
+typedef struct {
+    int slot;
+    uint64_t seq, frame;
+} PendingTime;
+static PendingTime pending[64];
+static int npending;
+typedef struct {
+    uint64_t frame, busy, first, last;  /* ticks */
+    int used;
+} FrameTime;
+static FrameTime frame_times[32];
+static uint64_t present_count;  /* frames presented */
+
 void gpu_fatal(const char *what, VkResult r) {
     fprintf(stderr, "yw4: gpu: %s failed (VkResult %d)\n", what, (int)r);
     exit(3);
@@ -85,6 +103,12 @@ void gpu_init(void) {
                                      .semaphoreType = VK_SEMAPHORE_TYPE_TIMELINE};
     VkSemaphoreCreateInfo sci = {.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO, .pNext = &tci};
     CHECK(vkCreateSemaphore(vk.device, &sci, NULL, &timeline));
+    if (vk.props.limits.timestampComputeAndGraphics && vk.props.limits.timestampPeriod > 0) {
+        VkQueryPoolCreateInfo qi = {.sType = VK_STRUCTURE_TYPE_QUERY_POOL_CREATE_INFO,
+                                    .queryType = VK_QUERY_TYPE_TIMESTAMP, .queryCount = 2 * RING};
+        if (vkCreateQueryPool(vk.device, &qi, NULL, &qpool) == VK_SUCCESS)
+            ts_period_ns = vk.props.limits.timestampPeriod;
+    }
     ready = 1;
     fprintf(stderr, "yw4: gpu: draw path on (decision 0021)\n");
 }
@@ -109,12 +133,48 @@ int gpu_wait(uint64_t seq, uint64_t timeout_ns) {
     return 1;
 }
 
+/* Adds the timestamps of every completed submission to its frame. gpu_lock held. */
+static void collect_times(void) {
+    if (!ts_period_ns) return;
+    uint64_t done = completed();
+    for (int i = 0; i < npending;) {
+        PendingTime p = pending[i];
+        if (p.seq > done) {
+            i++;
+            continue;
+        }
+        uint64_t t[2];
+        if (vkGetQueryPoolResults(vk.device, qpool, (uint32_t)p.slot * 2, 2, sizeof t, t, sizeof t[0],
+                                  VK_QUERY_RESULT_64_BIT) == VK_SUCCESS && t[1] >= t[0]) {
+            FrameTime *f = &frame_times[p.frame % 32];
+            if (!f->used || f->frame != p.frame) *f = (FrameTime){.frame = p.frame, .first = t[0], .used = 1};
+            f->busy += t[1] - t[0];
+            if (t[0] < f->first) f->first = t[0];
+            if (t[1] > f->last) f->last = t[1];
+        }
+        pending[i] = pending[--npending];
+    }
+}
+
+int gpu_frame_time(uint64_t frame, double *busy_ms, double *span_ms) {
+    if (!ready || !ts_period_ns) return 0;
+    host_lock(&gpu_lock);
+    collect_times();
+    FrameTime f = frame_times[frame % 32];
+    host_unlock(&gpu_lock);
+    if (!f.used || f.frame != frame) return 0;
+    *busy_ms = (double)f.busy * ts_period_ns / 1e6;
+    *span_ms = (double)(f.last - f.first) * ts_period_ns / 1e6;
+    return 1;
+}
+
 /* The next slot of the ring, its command buffer begun; waits if the GPU still runs it, then
  * frees what its last submission used. gpu_lock held. */
 static VkCommandBuffer begin(void) {
     Slot *s = &ring[ring_next];
     ring_next = (ring_next + 1) % RING;
     gpu_wait(s->seq, UINT64_MAX);
+    collect_times();  /* before the slot's queries are reset below */
     for (int i = 0; i < s->ndesc; i++) CHECK(vkResetDescriptorPool(vk.device, s->desc[i], 0));
     for (int i = 0; i < s->nstaging; i++) {
         vkDestroyBuffer(vk.device, s->staging[i].buf, NULL);
@@ -125,12 +185,18 @@ static VkCommandBuffer begin(void) {
     VkCommandBufferBeginInfo bi = {.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,
                                    .flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT};
     CHECK(vkBeginCommandBuffer(s->cb, &bi));
+    if (ts_period_ns) {
+        uint32_t q = (uint32_t)(s - ring) * 2;
+        vkCmdResetQueryPool(s->cb, qpool, q, 2);
+        vkCmdWriteTimestamp(s->cb, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, qpool, q);
+    }
     s->seq = submitted + 1;
     cur = s;
     return s->cb;
 }
 
 static void submit(VkCommandBuffer cb) {
+    if (ts_period_ns && cur) vkCmdWriteTimestamp(cb, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, qpool, (uint32_t)(cur - ring) * 2 + 1);
     CHECK(vkEndCommandBuffer(cb));
     uint64_t seq = submitted + 1;
     VkTimelineSemaphoreSubmitInfo ts = {.sType = VK_STRUCTURE_TYPE_TIMELINE_SEMAPHORE_SUBMIT_INFO,
@@ -146,6 +212,7 @@ static void submit(VkCommandBuffer cb) {
     }
     if (r != VK_SUCCESS) gpu_fatal("vkQueueSubmit", r);
     __atomic_store_n(&submitted, seq, __ATOMIC_RELEASE);
+    if (ts_period_ns && cur && npending < 64) pending[npending++] = (PendingTime){(int)(cur - ring), seq, present_count + 1};
     cur = NULL;
 }
 
@@ -216,7 +283,6 @@ typedef struct {
  * A texture is uploaded again when one of its pages is newer than its last upload. This
  * catches what the game writes without WriteTexels, like the movie decoder's frames. */
 static uint32_t write_gen = 1;
-static uint64_t present_count;  /* frames presented */
 
 static void mark_written(uint64_t page, void *arg) {
     const NvnPool *p = arg;

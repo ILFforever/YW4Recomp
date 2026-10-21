@@ -26,6 +26,12 @@ uint64_t gpu_submitted(void);
 /* 0: done before the call, 1: done within the timeout, 2: still running. */
 int gpu_wait(uint64_t seq, uint64_t timeout_ns);
 
+/* GPU time of the submissions made while frame `frame` was being built (the presents are
+ * counted from 1): the sum of their durations and the span from the first start to the last
+ * end, from timestamp queries. Results arrive a few frames late, so ask about a frame some
+ * frames back. 0 if there are none (yet) or timestamps aren't available. */
+int gpu_frame_time(uint64_t frame, double *busy_ms, double *span_ms);
+
 /* Shows texture t (the window's) once everything submitted before has run: its crop
  * rectangle (x, y, w, h; all zero: the whole texture), scaled to the window. The game
  * renders at a lower resolution and crops to it (dynamic resolution). */

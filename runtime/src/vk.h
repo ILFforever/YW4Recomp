@@ -39,7 +39,8 @@
     X(vkCmdSetDepthWriteEnable) X(vkCmdSetDepthCompareOp) X(vkCmdSetStencilTestEnable) X(vkCmdSetStencilOp)  \
     X(vkCmdSetStencilCompareMask) X(vkCmdSetStencilWriteMask) X(vkCmdSetStencilReference)                    \
     X(vkCmdSetDepthBias) X(vkCmdSetDepthBiasEnable) X(vkCmdSetBlendConstants) X(vkCmdPushConstants)          \
-    X(vkCmdSetRasterizerDiscardEnable) X(vkCmdSetDepthBoundsTestEnable) X(vkCmdSetPrimitiveRestartEnable)
+    X(vkCmdSetRasterizerDiscardEnable) X(vkCmdSetDepthBoundsTestEnable) X(vkCmdSetPrimitiveRestartEnable)  \
+    X(vkCreateQueryPool) X(vkCmdResetQueryPool) X(vkCmdWriteTimestamp) X(vkGetQueryPoolResults)
 
 #define VK_DECLARE_EXTERN(f) extern PFN_##f f;
 VK_GLOBAL_FNS(VK_DECLARE_EXTERN)
