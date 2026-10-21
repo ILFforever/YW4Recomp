@@ -238,13 +238,16 @@ def find_jump_table(code: Code, br_off: int, reg: int, lowest: int, window: int 
     o -= 4
     while o >= lo:                                           # b.hi / b.ls guarding the table
         e = code.word(o)
-        if e & 0xFF00001E == 0x54000008:                     # cond 8 (HI) or 9 (LS)
+        if e & 0xFF00001E == 0x54000008 or e & 0xFF00001F == 0x54000000:  # HI/LS, or EQ (below)
+            eq = e & 0xFF00001F == 0x54000000                # `cmp w, #N; b.eq`: the index was masked to 0..N, so N entries
             o -= 4
             lo_cmp = max(br_off - 4 * 8 * window, lowest)    # the compiler can schedule much code in between
             while o >= lo_cmp:                               # the flag-setting compare before it
                 e = code.word(o)
                 if e & 0x7F80001F == 0x7100001F and not bits(e, 22, 22):
-                    bound = bits(e, 21, 10)                  # cmp xN/wN, #imm (subs xzr, ..)
+                    bound = bits(e, 21, 10) - eq             # cmp xN/wN, #imm (subs xzr, ..)
+                    if bound < 0:
+                        bound = None
                     break
                 if e & 0x1F000000 in (0x11000000, 0x0B000000) and bits(e, 29, 29):
                     return None                              # some other flag setter
