@@ -461,6 +461,7 @@ static uint32_t start_thread(uint32_t handle) {
 uint32_t yw4_kernel_init(CPUState *ctx, uint64_t stack, uint64_t stack_size) {
     host_lock_init(&klock);
     host_install_crash_handler(report_crash);
+    host_timer_init();
     for (size_t i = 0; i < yw4_nmodules; i++) {  /* as Horizon maps an NSO: three regions */
         const Yw4Module *m = &yw4_modules[i];
         uint64_t b = *m->base;

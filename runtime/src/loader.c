@@ -12,7 +12,6 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <time.h>
 
 #ifdef _WIN32
 #include <windows.h>
@@ -90,15 +89,7 @@ void yw4_decommit(uint64_t addr, size_t size) {
 #endif
 }
 
-void yw4_host_sleep_ns(int64_t ns) {
-    if (ns <= 0) return;
-#ifdef _WIN32
-    Sleep((DWORD)((ns + 999999) / 1000000));  /* millisecond resolution; precise waits come with threads */
-#else
-    struct timespec ts = {(time_t)(ns / 1000000000), (long)(ns % 1000000000)};
-    nanosleep(&ts, NULL);
-#endif
-}
+void yw4_host_sleep_ns(int64_t ns) { host_sleep_ns(ns); }
 
 static uint8_t *read_file(const char *path, size_t *len) {
     FILE *f = fopen(path, "rb");

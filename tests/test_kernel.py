@@ -8,6 +8,7 @@ follow nn::os / libnx. The exclusive-increment loop is the recompiler's own outp
 from __future__ import annotations
 
 import subprocess
+import sys
 import tempfile
 import unittest
 from pathlib import Path
@@ -306,7 +307,8 @@ class KernelThreadTest(unittest.TestCase):
         rt = RUNTIME / "src"
         files = [rt / f for f in ("kernel.c", "host.c", "loader.c", "dispatch.c", "setjmp.c", "sha256.c")]
         subprocess.run([check.host_cc(), "-std=c11", "-O1", "-Wall", "-Werror", f"-I{RUNTIME / 'include'}", f"-I{rt}",
-                        "-o", str(cls.exe), str(t / "drv.c"), *map(str, files), "-pthread"], check=True)
+                        "-o", str(cls.exe), str(t / "drv.c"), *map(str, files), "-pthread",
+                        *(["-lwinmm"] if sys.platform == "win32" else [])], check=True)
 
     @classmethod
     def tearDownClass(cls):

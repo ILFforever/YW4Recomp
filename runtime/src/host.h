@@ -36,6 +36,12 @@ void host_yield(void);
  * violation, segmentation fault...). report should not return. */
 void host_install_crash_handler(void (*report)(const char *what, uint64_t pc, uint64_t addr));
 
+/* Sleeps the calling thread for ns (no-op for ns <= 0), to well under a millisecond. */
+void host_sleep_ns(int64_t ns);
+
+/* Once at start-up: makes timed waits precise (Windows: 1 ms system timer instead of 15.6). */
+void host_timer_init(void);
+
 /* Nanoseconds from an arbitrary start, never going backwards. */
 int64_t host_now_ns(void);
 

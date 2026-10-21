@@ -48,6 +48,18 @@ void yw4_vi_GetNativeWindow(CPUState *c) {
 /* ---- vsync */
 
 static KEvent *vsync;
+static uint64_t vsync_count;   /* vsyncs so far */
+static int64_t vsync_time;     /* host time of the last one */
+
+uint64_t yw4_vsync_count(void) { return __atomic_load_n(&vsync_count, __ATOMIC_ACQUIRE); }
+
+/* Waits until vsync number n has happened (the display's next flip, for NVN's present). */
+void yw4_wait_vsync(uint64_t n) {
+    while (yw4_vsync_count() < n) {
+        int64_t due = __atomic_load_n(&vsync_time, __ATOMIC_ACQUIRE) + VSYNC_PERIOD_NS - host_now_ns();
+        yw4_host_sleep_ns(due > 100000 ? due : 100000);
+    }
+}
 
 static void vsync_thread(void *arg) {
     (void)arg;
@@ -57,7 +69,20 @@ static void vsync_thread(void *arg) {
         int64_t now = host_now_ns();
         if (next > now) yw4_host_sleep_ns(next - now);
         else if (now - next > 3 * VSYNC_PERIOD_NS) next = now;  /* fell far behind: don't burst to catch up */
-        yw4_event_signal_from_host(vsync);
+        __atomic_store_n(&vsync_time, host_now_ns(), __ATOMIC_RELEASE);
+        __atomic_add_fetch(&vsync_count, 1, __ATOMIC_RELEASE);
+        KEvent *e = __atomic_load_n(&vsync, __ATOMIC_ACQUIRE);
+        if (e) yw4_event_signal_from_host(e);
+    }
+}
+
+/* The vsync thread runs from the first of: the game asking for the vsync event, NVN presenting. */
+void yw4_vsync_start(void) {
+    static int started;
+    if (__atomic_exchange_n(&started, 1, __ATOMIC_ACQ_REL)) return;
+    if (host_thread_start(vsync_thread, NULL, 1 << 16)) {
+        fprintf(stderr, "yw4: vi: cannot start the vsync thread\n");
+        exit(3);
     }
 }
 
@@ -68,17 +93,16 @@ static void vsync_thread(void *arg) {
 void yw4_vi_GetDisplayVsyncEvent(CPUState *c) {
     uint32_t handle;
     yw4_kernel_lock();
-    if (!vsync) {
-        vsync = yw4_event_new(&handle);
-        vsync->host_signalled = 1;
-        if (host_thread_start(vsync_thread, NULL, 1 << 16)) {
-            fprintf(stderr, "yw4: vi: cannot start the vsync thread\n");
-            exit(3);
-        }
+    KEvent *e = __atomic_load_n(&vsync, __ATOMIC_ACQUIRE);
+    if (!e) {
+        e = yw4_event_new(&handle);
+        e->host_signalled = 1;
+        __atomic_store_n(&vsync, e, __ATOMIC_RELEASE);  /* the vsync thread signals it from now on */
     } else {
-        handle = yw4_handle_new(&vsync->obj);
+        handle = yw4_handle_new(&e->obj);
     }
     yw4_kernel_unlock();
+    yw4_vsync_start();
     uint64_t lr = c->x[30];
     c->x[1] = handle, c->x[2] = 0, c->x[3] = 1;  /* x0 is already the event */
     yw4_resolve(yw4_guest_symbol("_ZN2nn2os33AttachReadableHandleToSystemEventEPNS0_15SystemEventTypeEjbNS0_14EventClearModeE"))(c);

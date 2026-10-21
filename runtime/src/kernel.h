@@ -56,6 +56,11 @@ typedef struct {
 } KTransferMemory;
 KTransferMemory *yw4_transfer_memory_get(uint32_t handle);  /* NULL if not one */
 
+/* The display's vsync (vi.c): a 60 Hz host thread, started on first use. */
+void yw4_vsync_start(void);
+uint64_t yw4_vsync_count(void);
+void yw4_wait_vsync(uint64_t n);  /* until vsync number n has happened */
+
 /* For native code that runs inside a guest call rather than an SVC (overrides) and needs
  * kernel objects: the lock every SVC holds. */
 void yw4_kernel_lock(void);

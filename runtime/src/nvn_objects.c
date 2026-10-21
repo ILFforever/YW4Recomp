@@ -13,6 +13,7 @@
 #include <string.h>
 
 #include "host.h"
+#include "kernel.h"
 #include "nvn.h"
 
 static void *alloc(size_t n) {
@@ -75,11 +76,29 @@ NVN(nvnQueueSubmitCommands) {  /* (queue, count, const NVNcommandHandle*) */
     const uint64_t *handles = AP(2);
     for (int i = 0; i < n; i++) nvn_execute(handles[i]);
 }
+/* The display flips at vsync and shows each frame for `interval` vsyncs; NVN only hands
+ * out a window texture again once the display is done with it. Headless, presenting waits
+ * for that flip directly, which paces the game as the Switch does (60 / interval). */
+static uint64_t next_flip;
+
 NVN(nvnQueuePresentTexture) {  /* (queue, window, texture index) */
+    NvnWindow *w = HOST(NvnWindow, A(1));
+    yw4_vsync_start();
+    uint64_t now = yw4_vsync_count();
+    if (next_flip < now + 1) next_flip = now + 1;
+    yw4_wait_vsync(next_flip);
+    next_flip += (uint64_t)(w->interval > 0 ? w->interval : 1);
+    static int64_t last_log;  /* host time of the last logged frame, for the rate since then */
+    static uint64_t last_frames;
     frames++;
     uint64_t draws = nvn_take_draw_count();
-    if (frames <= 3 || frames % 300 == 0)
-        fprintf(stderr, "yw4: NVN frame %" PRIu64 " presented (texture %d, %" PRIu64 " draws)\n", frames, (int)A(2), draws);
+    if (frames <= 3 || frames % 300 == 0) {
+        int64_t now = host_now_ns();
+        double fps = last_log ? (double)(frames - last_frames) * 1e9 / (double)(now - last_log) : 0;
+        fprintf(stderr, "yw4: NVN frame %" PRIu64 " presented (texture %d, %" PRIu64 " draws, %.1f frames/s)\n", frames,
+                (int)A(2), draws, fps);
+        last_log = now, last_frames = frames;
+    }
 }
 
 /* Headless, GPU work is done the moment it is submitted: every sync is signalled. */
@@ -401,7 +420,10 @@ NVN(nvnWindowInitialize) {
 }
 NVN(nvnWindowFinalize) { free(HOST(NvnWindow, A(0))); SET_HOST(A(0), 0); }
 NVN(nvnWindowSetCrop) { NvnWindow *w = HOST(NvnWindow, A(0)); for (int i = 0; i < 4; i++) w->crop[i] = (int)A(1 + i); }
-NVN(nvnWindowSetPresentInterval) { HOST(NvnWindow, A(0))->interval = (int)A(1); }
+NVN(nvnWindowSetPresentInterval) {
+    HOST(NvnWindow, A(0))->interval = (int)A(1);
+    fprintf(stderr, "yw4: NVN present interval %d (%d frames/s at most)\n", (int)A(1), A(1) ? 60 / (int)A(1) : 60);
+}
 NVN(nvnWindowAcquireTexture) {  /* (window, sync signalled when it's free, int *index) */
     NvnWindow *w = HOST(NvnWindow, A(0));
     *(int32_t *)AP(2) = w->next;

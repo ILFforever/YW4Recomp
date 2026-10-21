@@ -8,6 +8,7 @@
 #ifdef _WIN32
 #include <process.h>
 #include <windows.h>
+#include <timeapi.h>
 
 void host_lock_init(HostLock *l) { InitializeSRWLock((PSRWLOCK)l); }
 void host_lock(HostLock *l) { AcquireSRWLockExclusive((PSRWLOCK)l); }
@@ -68,6 +69,26 @@ static LONG WINAPI crash_filter(EXCEPTION_POINTERS *e) {
 void host_install_crash_handler(void (*report)(const char *, uint64_t, uint64_t)) {
     crash_report = report;
     SetUnhandledExceptionFilter(crash_filter);
+}
+
+/* Windows' default timer ticks every 15.6 ms: Sleep and timed condition-variable waits
+ * round up to it, so a 16.7 ms vsync sleep really lasted ~31 ms. timeBeginPeriod(1) makes
+ * it 1 ms for the whole process (and its waits). */
+void host_timer_init(void) { timeBeginPeriod(1); }
+
+/* A high-resolution waitable timer per thread (Windows 10 1803+: sub-millisecond), else Sleep. */
+void host_sleep_ns(int64_t ns) {
+    static _Thread_local HANDLE timer;
+    static _Thread_local int tried;
+    if (ns <= 0) return;
+    if (!tried) {
+        tried = 1;
+        timer = CreateWaitableTimerExW(NULL, NULL, CREATE_WAITABLE_TIMER_HIGH_RESOLUTION, TIMER_ALL_ACCESS);
+    }
+    LARGE_INTEGER due;
+    due.QuadPart = -(ns + 99) / 100;  /* relative, in 100 ns units */
+    if (timer && SetWaitableTimer(timer, &due, 0, NULL, NULL, FALSE)) WaitForSingleObject(timer, INFINITE);
+    else Sleep((DWORD)((ns + 999999) / 1000000));
 }
 
 int64_t host_now_ns(void) {
@@ -153,6 +174,14 @@ void host_install_crash_handler(void (*report)(const char *, uint64_t, uint64_t)
     sigaction(SIGSEGV, &sa, NULL);
     sigaction(SIGBUS, &sa, NULL);
     sigaction(SIGILL, &sa, NULL);
+}
+
+void host_timer_init(void) {}
+
+void host_sleep_ns(int64_t ns) {
+    if (ns <= 0) return;
+    struct timespec ts = {(time_t)(ns / 1000000000), (long)(ns % 1000000000)};
+    while (nanosleep(&ts, &ts)) {}  /* interrupted: sleep the rest */
 }
 
 int64_t host_now_ns(void) {
