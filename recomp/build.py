@@ -109,7 +109,7 @@ def main(argv: list[str] | None = None) -> int:
         print(f"{len(errors)} file(s) failed", file=sys.stderr)
         return 1
     exe = cfg.work_dir / "build" / "yw4.exe"
-    link = subprocess.run([cc, "-o", str(exe), *map(str, objs)], capture_output=True, text=True)
+    link = subprocess.run([cc, "-o", str(exe), *map(str, objs), "-pthread"], capture_output=True, text=True)
     if link.returncode != 0:
         print(f"link failed:\n{link.stderr[-3000:]}", file=sys.stderr)
         return 1

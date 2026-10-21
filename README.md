@@ -4,7 +4,7 @@ A fan static-recompilation project to run Yo-kai Watch 4++ (Nintendo Switch, fin
 
 This repo contains only tools, runtime code, and patches. It contains no game data. Provide your own dump of the final 4++ update.
 
-Status: Phase 3 (native `sdk` functions). See [Progress](#progress) below.
+Status: Phase 3 (kernel and system services). See [Progress](#progress) below.
 
 ## Setup
 
@@ -54,12 +54,13 @@ Tests (synthetic data only): `python -m unittest discover -s tests -t .`
 
 Where the recompiled game stops right now, and how it got there. Newest first. Each step links to the decision record that explains it.
 
-**Current stop:** inside `main`'s static constructors, the game creates its first thread (`SVC 0x8 CreateThread`). Before that: clock, filesystem with the RomFS (4,518 files, served from the owner's folder), and the thread's stack mapping all work.
+**Current stop:** the game opens `nvdrv`, the GPU driver service: the start of graphics. Before that: 8 guest threads running in parallel as host threads (file loading and others), clock, filesystem with the RomFS (4,518 files, served from the owner's folder).
 
-**Direction change (0014):** the `sdk` will be recompiled too, instead of re-implementing its 578 functions by hand; native code moves to the kernel/service level. Done: every instruction in `sdk` translates; both modules are translated, loaded and linked. Next: real guest threads (host thread per guest thread, blocking synchronisation).
+**Direction change (0014):** the `sdk` will be recompiled too, instead of re-implementing its 578 functions by hand; native code moves to the kernel/service level. Done: every instruction in `sdk` translates; both modules are translated, loaded and linked; real guest threads. Next: `nvdrv` and the services behind NVN.
 
 | Date | Step | Result |
 |---|---|---|
+| 2026-10-21 | Guest threads as host threads: one kernel lock, blocking mutexes, condition variables, events, thread exit/join, address arbiter, cancel, a deadlock detector; transfer memory (0015) | 8 threads start and run in parallel; through to the first graphics service, `nvdrv` |
 | 2026-10-21 | Clock service with shared memory; filesystem service with a virtual RomFS image of the owner's folder (tables built at start-up, file data read on demand, no copy); `MapMemory` (0014) | Through the constructors' clock and file set-up to the first `CreateThread` |
 | 2026-10-21 | IPC: message codec (HIPC/CMIF, domains, control messages), service manager, first services (`appletOE`, `apm`, `lm`, `aoc:u`, `pctl`), kernel events, `svcBreak` with a guest backtrace, Horizon's three-region module layout in `QueryMemory` (0014) | Through the sdk's start-up and the game's `nninitStartup` into `main`'s constructors |
 | 2026-10-21 | Minimal kernel: address-space layout, `GetInfo`, heap (`SetHeapSize`, reserved and committed as it grows), `QueryMemory`, thread properties, single-thread mutex/condition-variable calls, sleep, system tick (0014) | The sdk's start-up runs through 50 system calls to its first IPC |

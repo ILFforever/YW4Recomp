@@ -16,8 +16,6 @@
 #include "romfs.h"
 #include "yw4load.h"
 
-#define TLR_SIZE 0x200              /* Horizon's thread-local region per thread */
-
 static void init_module(CPUState *ctx, size_t i) {
     const Yw4Module *m = &yw4_modules[i];
     fprintf(stderr, "yw4: running %s DT_INIT (%s+%#" PRIx64 ")\n", m->name, m->name, m->dt_init);
@@ -36,16 +34,12 @@ int main(int argc, char **argv) {
 
     CPUState *ctx = calloc(1, sizeof *ctx);
     uint8_t *stack = yw4_reserve(YW4_STACK_BASE, yw4_main_stack_size);
-    uint8_t *tlr = yw4_reserve(YW4_TLR_BASE, 0x1000);
-    if (!ctx || !stack || !tlr) {
+    if (!ctx || !stack) {
         fprintf(stderr, "yw4: out of memory\n");
         return 1;
     }
     ctx->sp = ((uint64_t)(uintptr_t)(stack + yw4_main_stack_size)) & ~15ull;
-    ctx->tpidrro_el0 = (uint64_t)(uintptr_t)tlr;
-    (void)TLR_SIZE;
-
-    ctx->x[0] = yw4_kernel_init((uint64_t)(uintptr_t)stack, yw4_main_stack_size, (uint64_t)(uintptr_t)tlr);
+    ctx->x[0] = yw4_kernel_init(ctx, (uint64_t)(uintptr_t)stack, yw4_main_stack_size);
     ctx->x[1] = 0;  /* argument region: none */
     ctx->x[2] = yw4_host_function(init_sdk);
     ctx->x[3] = yw4_host_function(init_main);

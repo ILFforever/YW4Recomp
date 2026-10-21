@@ -37,4 +37,4 @@ A hardware exclusive store fails if *any* write hit the location since the `ldxr
 - Single instructions (golden tests): `ldxr`/`ldaxr` (value loaded) and `ldar`/`stlr`, with naturally aligned addresses: ARMv8.0 faults on unaligned exclusive/acquire/release accesses.
 - A lone `stxr` is not golden-tested, because its result after the harness's own code is IMPLEMENTATION DEFINED.
 - Whole loops (`tests/functest/atomics.S`): atomic add, compare-and-swap with `clrex` on the failure path, `stxr` without a reservation, byte and 64-bit exclusives, and acquire/release. All match the Pi. Planted bugs ("store ignores the reservation", "clrex does nothing") are caught.
-- **Not tested yet:** atomicity *between threads*. Single-threaded tests can't show it. Add a multi-threaded stress test when the runtime has threads.
+- Between threads (2026-10-21, decision 0015): `tests/test_kernel.py` runs 8 host threads × 100,000 increments through the recompiler's own `ldaxr`/`stlxr` output; all 800,000 land. With `stlxr` planted as a plain store, 167,482 did.

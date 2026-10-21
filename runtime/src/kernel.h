@@ -14,7 +14,7 @@ enum {
 enum { PERM_NONE = 0, PERM_R = 1, PERM_W = 2, PERM_X = 4, PERM_RW = 3, PERM_RX = 5 };
 
 /* Kernel objects behind handles. Each kind embeds KObject first. */
-typedef enum { KOBJ_THREAD = 1, KOBJ_SESSION, KOBJ_EVENT, KOBJ_SHARED_MEMORY } KType;
+typedef enum { KOBJ_THREAD = 1, KOBJ_SESSION, KOBJ_EVENT, KOBJ_SHARED_MEMORY, KOBJ_TRANSFER_MEMORY } KType;
 typedef struct {
     KType type;
 } KObject;
@@ -23,7 +23,9 @@ uint32_t yw4_handle_new(KObject *o);
 KObject *yw4_handle_get(uint32_t h);   /* NULL if not a valid handle */
 void yw4_handle_close(uint32_t h);     /* forgets the handle; the object's owner frees it */
 
-/* Events: signalled by the kernel or a service, waited on by the game (WaitSynchronization). */
+/* Events: signalled by the kernel or a service, waited on by the game (WaitSynchronization).
+ * Like everything here, call only while the kernel lock is held: from inside an SVC or a
+ * service command (decision 0015). */
 typedef struct {
     KObject obj;
     int signaled;
@@ -43,8 +45,18 @@ struct KSharedMemory {
 };
 KSharedMemory *yw4_shared_memory_new(uint64_t size, void (*on_map)(KSharedMemory *), uint32_t *handle);
 
-/* Sets up the memory map (modules, main stack, its thread-local region) and the main
- * thread; returns the main thread's handle. Call after yw4_load_modules. */
-uint32_t yw4_kernel_init(uint64_t stack, uint64_t stack_size, uint64_t tlr);
+/* Transfer memory: a block of the game's own memory it lends to a service
+ * (svcCreateTransferMemory, then passed in an IPC message). The service uses it in place. */
+typedef struct {
+    KObject obj;
+    uint64_t addr, size;
+    uint32_t perm;  /* what the game itself may still do with it meanwhile */
+} KTransferMemory;
+KTransferMemory *yw4_transfer_memory_get(uint32_t handle);  /* NULL if not one */
+
+/* Sets up the memory map (modules, main stack, thread-local regions) and the main thread,
+ * which runs on the calling host thread with `ctx` (its TPIDRRO_EL0 is set here); returns
+ * the main thread's handle. Call after yw4_load_modules. */
+uint32_t yw4_kernel_init(CPUState *ctx, uint64_t stack, uint64_t stack_size);
 
 #endif
