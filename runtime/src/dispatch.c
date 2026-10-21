@@ -190,9 +190,20 @@ void yw4_probe(CPUState *ctx, uint64_t addr) {
         for (const char *m = mem; m && *m;) {
             char *e;
             const char *start = m;
-            if (*m != 'x') break;
-            unsigned reg = (unsigned)strtoul(m + 1, &e, 10);
-            uint64_t p = reg < 31 ? ctx->x[reg] : 0, v = 0;
+            uint64_t p = 0, v = 0;
+            if (*m == '@') {  /* @main+0x56b82c8:1: a module-relative address */
+                char mod[16] = "";
+                size_t n = strcspn(m + 1, "+");
+                if (n < sizeof mod) memcpy(mod, m + 1, n);
+                for (size_t i = 0; i < yw4_ncode; i++)
+                    if (!strcmp(yw4_code[i].name, mod)) p = *yw4_code[i].base;
+                e = (char *)m + 1 + n;
+            } else if (*m == 'x') {
+                unsigned reg = (unsigned)strtoul(m + 1, &e, 10);
+                p = reg < 31 ? ctx->x[reg] : 0;
+            } else {
+                break;
+            }
             int ok = 1;
             for (;;) {
                 if (*e == '+') p += strtoull(e + 1, &e, 16);

@@ -1,6 +1,7 @@
 /* Host threads, locks, condition variables and a monotonic clock (host.h). */
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 #include <time.h>
 
 #include "host.h"
@@ -109,7 +110,7 @@ void *host_reserve_watched(uint64_t want, size_t size) {
  * during that one step are missed. */
 static uint64_t ww_addr, ww_size, ww_page;
 static void (*ww_report)(uint64_t pc, uint64_t addr);
-static _Thread_local int ww_stepping;
+static _Thread_local int ww_stepping, ww_hit;
 
 static LONG CALLBACK ww_handler(EXCEPTION_POINTERS *e) {
     EXCEPTION_RECORD *r = e->ExceptionRecord;
@@ -117,7 +118,8 @@ static LONG CALLBACK ww_handler(EXCEPTION_POINTERS *e) {
     if (r->ExceptionCode == EXCEPTION_ACCESS_VIOLATION && r->NumberParameters >= 2 && r->ExceptionInformation[0] == 1) {
         uint64_t a = (uint64_t)r->ExceptionInformation[1];
         if (a < ww_page || a >= ww_page + 4096) return EXCEPTION_CONTINUE_SEARCH;
-        if (a < ww_addr + ww_size && a + 16 > ww_addr) ww_report((uint64_t)(uintptr_t)r->ExceptionAddress, a);
+        ww_hit = a < ww_addr + ww_size && a + 16 > ww_addr;
+        if (ww_hit) ww_report((uint64_t)(uintptr_t)r->ExceptionAddress, a);
         VirtualProtect((void *)(uintptr_t)ww_page, 4096, PAGE_READWRITE, &old);
         e->ContextRecord->EFlags |= 0x100;  /* trap after this one instruction */
         ww_stepping = 1;
@@ -125,6 +127,11 @@ static LONG CALLBACK ww_handler(EXCEPTION_POINTERS *e) {
     }
     if (r->ExceptionCode == EXCEPTION_SINGLE_STEP && ww_stepping) {
         ww_stepping = 0;
+        if (ww_hit) {  /* the watched bytes after the write */
+            uint64_t v = 0;
+            memcpy(&v, (const void *)(uintptr_t)ww_addr, ww_size < 8 ? ww_size : 8);
+            fprintf(stderr, "       -> watched value now %#llx\n", (unsigned long long)v);
+        }
         VirtualProtect((void *)(uintptr_t)ww_page, 4096, PAGE_READONLY, &old);
         return EXCEPTION_CONTINUE_EXECUTION;
     }
