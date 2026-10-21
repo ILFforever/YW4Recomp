@@ -54,5 +54,8 @@ void *host_reserve_watched(uint64_t want, size_t size);
 long host_written_pages(uint64_t addr, uint64_t size, void (*fn)(uint64_t page, void *arg), void *arg);
 /* Can [addr, addr + size) be read now (committed, readable)? For diagnostics. */
 int host_readable(uint64_t addr, uint64_t size);
+/* Diagnostics: report(host pc, address) on the writing thread for each write to
+ * [addr, addr + size) (one watch per process; Windows only). 0 if armed. */
+int host_write_watch(uint64_t addr, uint64_t size, void (*report)(uint64_t pc, uint64_t addr));
 
 #endif

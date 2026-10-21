@@ -103,6 +103,41 @@ void *host_reserve_watched(uint64_t want, size_t size) {
     return VirtualAlloc((void *)(uintptr_t)want, size, MEM_RESERVE | MEM_WRITE_WATCH, PAGE_NOACCESS);
 }
 
+/* Write watchpoint: the watched page is made read-only; a write to it faults on the writing
+ * thread, which reports it (if it touches [addr, addr + size)), then the page is opened for
+ * one single-stepped instruction and protected again. Writes to the page by other threads
+ * during that one step are missed. */
+static uint64_t ww_addr, ww_size, ww_page;
+static void (*ww_report)(uint64_t pc, uint64_t addr);
+static _Thread_local int ww_stepping;
+
+static LONG CALLBACK ww_handler(EXCEPTION_POINTERS *e) {
+    EXCEPTION_RECORD *r = e->ExceptionRecord;
+    DWORD old;
+    if (r->ExceptionCode == EXCEPTION_ACCESS_VIOLATION && r->NumberParameters >= 2 && r->ExceptionInformation[0] == 1) {
+        uint64_t a = (uint64_t)r->ExceptionInformation[1];
+        if (a < ww_page || a >= ww_page + 4096) return EXCEPTION_CONTINUE_SEARCH;
+        if (a < ww_addr + ww_size && a + 16 > ww_addr) ww_report((uint64_t)(uintptr_t)r->ExceptionAddress, a);
+        VirtualProtect((void *)(uintptr_t)ww_page, 4096, PAGE_READWRITE, &old);
+        e->ContextRecord->EFlags |= 0x100;  /* trap after this one instruction */
+        ww_stepping = 1;
+        return EXCEPTION_CONTINUE_EXECUTION;
+    }
+    if (r->ExceptionCode == EXCEPTION_SINGLE_STEP && ww_stepping) {
+        ww_stepping = 0;
+        VirtualProtect((void *)(uintptr_t)ww_page, 4096, PAGE_READONLY, &old);
+        return EXCEPTION_CONTINUE_EXECUTION;
+    }
+    return EXCEPTION_CONTINUE_SEARCH;
+}
+
+int host_write_watch(uint64_t addr, uint64_t size, void (*report)(uint64_t pc, uint64_t addr)) {
+    DWORD old;
+    ww_addr = addr, ww_size = size, ww_page = addr & ~(uint64_t)4095, ww_report = report;
+    if (!AddVectoredExceptionHandler(1, ww_handler)) return -1;
+    return VirtualProtect((void *)(uintptr_t)ww_page, 4096, PAGE_READONLY, &old) ? 0 : -1;
+}
+
 int host_readable(uint64_t addr, uint64_t size) {
     MEMORY_BASIC_INFORMATION mbi;
     if (!VirtualQuery((void *)(uintptr_t)addr, &mbi, sizeof mbi) || mbi.State != MEM_COMMIT) return 0;
@@ -231,6 +266,11 @@ void *host_reserve_watched(uint64_t want, size_t size) {
 long host_written_pages(uint64_t addr, uint64_t size, void (*fn)(uint64_t page, void *arg), void *arg) {
     (void)addr, (void)size, (void)fn, (void)arg;
     return -1;
+}
+
+int host_write_watch(uint64_t addr, uint64_t size, void (*report)(uint64_t pc, uint64_t addr)) {
+    (void)addr, (void)size, (void)report;
+    return -1;  /* to do: mprotect + SIGSEGV + single step */
 }
 
 int host_readable(uint64_t addr, uint64_t size) {  /* msync on unmapped pages fails with ENOMEM */

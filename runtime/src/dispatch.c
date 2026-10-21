@@ -127,7 +127,19 @@ static void watch_check(const CPUState *ctx, uint64_t addr) {
     for (int j = 1; j < k; j++) fprintf(stderr, "       %s\n", yw4_describe(st[j] - 4, a));
 }
 
+/* YW4_WATCHW=<hex address>:<size>: a real write watchpoint (host page protection,
+ * Windows): every write reports the writing guest thread's call stack. Armed once the
+ * address is mapped (checked at function entries). */
+static uint64_t watchw_addr, watchw_size;
+
 void yw4_watch_init(void) {
+    const char *w = getenv("YW4_WATCHW");
+    if (w && *w) {
+        char *e;
+        watchw_addr = strtoull(w, &e, 16);
+        watchw_size = *e == ':' ? strtoull(e + 1, NULL, 10) : 8;
+        yw4_probe_any = 1;
+    }
     const char *s = getenv("YW4_WATCH");
     if (!s || !*s) return;
     char *e;
@@ -139,6 +151,13 @@ void yw4_watch_init(void) {
 }
 
 void yw4_probe(CPUState *ctx, uint64_t addr) {
+    if (watchw_size) {
+        static unsigned tries;
+        if (tries++ % 4096 == 0 && host_readable(watchw_addr, watchw_size)) {
+            yw4_write_watch_arm(watchw_addr, watchw_size);
+            watchw_size = 0;
+        }
+    }
     /* the watched memory is only readable once the game has mapped it */
     if (watch_size) {
         static int readable;

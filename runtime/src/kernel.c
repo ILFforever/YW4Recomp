@@ -214,6 +214,23 @@ static void backtrace(const CPUState *ctx) {
     }
 }
 
+/* YW4_WATCHW: a write to the watched bytes, on the writing thread (host.c watchpoint) */
+static void write_watch_report(uint64_t pc, uint64_t addr) {
+    char where[48];
+    fprintf(stderr, "yw4: write to %#" PRIx64 " by guest thread %" PRIu64 " (host pc %#" PRIx64 ")\n", addr,
+            cur ? cur->id : 0, pc);
+    if (!cur) return;
+    uint64_t st[12];
+    int k = yw4_call_stack(cur->ctx, st, 12);
+    for (int i = 0; i < k; i++) fprintf(stderr, "       %s\n", yw4_describe(st[i] - 4, where));
+}
+
+int yw4_write_watch_arm(uint64_t addr, uint64_t size) {
+    int r = host_write_watch(addr, size, write_watch_report);
+    fprintf(stderr, "yw4: write watch on %#" PRIx64 " (%" PRIu64 " bytes) %s\n", addr, size, r ? "failed" : "armed");
+    return r;
+}
+
 int yw4_call_stack(const CPUState *ctx, uint64_t *out, int n) {
     uint64_t fp = ctx->x[29];
     int k = 0;
