@@ -156,7 +156,8 @@ def build_program(encodings: list[int], exe: Path, flags: list[str]) -> None:
     src = exe.with_suffix(".c")
     src.write_text(PROGRAM % "\n".join(cases))
     proc = subprocess.run([host_cc(), "-std=c11", *flags, "-ffp-contract=off", "-Wall", "-Werror", f"-I{INCLUDE}", f"-I{PI_DIR}",
-                           "-o", str(exe), str(src)], capture_output=True, text=True)
+                           "-o", str(exe), str(src), str(REPO / "runtime" / "src" / "crypto.c")],
+                          capture_output=True, text=True)
     if proc.returncode != 0:
         raise RuntimeError(f"compile failed:\n{proc.stderr[-3000:]}")
 

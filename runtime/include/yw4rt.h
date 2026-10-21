@@ -39,6 +39,13 @@ GuestFn yw4_resolve(uint64_t target);
 _Noreturn void yw4_unimplemented(CPUState *ctx, uint64_t pc, uint32_t enc);
 _Noreturn void yw4_guest_trap(CPUState *ctx, uint64_t pc, uint32_t enc);
 
+/* System instructions (decision 0014, runtime/src/kernel.c): SVC #imm, the system counter
+ * (CNTPCT_EL0, 19.2 MHz as on the Switch), and writes to FPCR (only the default mode is
+ * supported, decision 0008). */
+void yw4_svc(CPUState *ctx, uint32_t imm);
+uint64_t yw4_cntpct(void);
+void yw4_msr_fpcr(CPUState *ctx, uint64_t value);
+
 /* Tail call to another guest function. Clang guarantees no host stack growth with musttail,
  * which matters for loops that go through tail calls; other compilers usually optimise the
  * plain call+return to a jump at -O2 but don't promise it. */

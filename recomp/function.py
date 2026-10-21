@@ -115,7 +115,33 @@ def emit_system(enc: int) -> str | None:
         return ";"
     if enc & 0xFFFFF0FF == 0xD503305F:                       # CLREX: drop the exclusive reservation
         return "ctx->excl_size = 0;"
+    if enc & 0xFFE0001F == 0xD4000001:                       # SVC #imm: the kernel (decision 0014)
+        return f"yw4_svc(ctx, {(enc >> 5) & 0xFFFF:#x});"
+    sysreg, t = (enc >> 5) & 0xFFFF, enc & 31
+    if enc & 0xFFF00000 == 0xD5300000 and sysreg in MRS_REGS:  # MRS Xt, <reg>
+        return f"ctx->x[{t}] = {MRS_REGS[sysreg]};" if t != 31 else ";"
+    if enc & 0xFFF00000 == 0xD5100000 and sysreg in MSR_REGS:  # MSR <reg>, Xt
+        return MSR_REGS[sysreg].format(x="0" if t == 31 else f"ctx->x[{t}]")
+    if enc & 0xFFFFFFE0 in CACHE_OPS:                        # DC CVAU/CVAC/CIVAC, IC IVAU: no cache to maintain
+        return ";"
     return None
+
+
+# System registers the sdk reads and writes (op0:op1:CRn:CRm:op2 = encoding bits 20:5)
+MRS_REGS = {
+    0xDE83: "ctx->tpidrro_el0",          # TPIDRRO_EL0: the thread-local region, set by the kernel
+    0xDE82: "ctx->tpidr_el0",            # TPIDR_EL0
+    0xDF01: "yw4_cntpct()",              # CNTPCT_EL0: the 19.2 MHz system counter
+    0xD801: "0x8444C004ull",             # CTR_EL0 of the Cortex-A57: 64-byte cache lines
+    0xDA20: "(uint64_t)ctx->fpcr",       # FPCR
+    0xDA21: "(uint64_t)ctx->fpsr",       # FPSR (not modelled: always what was last written)
+}
+MSR_REGS = {
+    0xDE82: "ctx->tpidr_el0 = {x};",
+    0xDA20: "yw4_msr_fpcr(ctx, {x});",   # decision 0008: only the default mode is supported
+    0xDA21: "ctx->fpsr = (uint32_t){x};",
+}
+CACHE_OPS = {0xD50B7B20, 0xD50B7A20, 0xD50B7E20, 0xD50B7520}  # DC CVAU, DC CVAC, DC CIVAC, IC IVAU (Rt cleared)
 
 
 # --------------------------------------------------------------------------- jump tables

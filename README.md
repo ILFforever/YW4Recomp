@@ -56,10 +56,11 @@ Where the recompiled game stops right now, and how it got there. Newest first. E
 
 **Current stop:** inside the static constructors (DT_INIT), at `nn::account::AsyncContext::AsyncContext()`. Native `sdk` functions: 99 of 578.
 
-**Direction change (0014):** the `sdk` will be recompiled too, instead of re-implementing its 578 functions by hand; native code moves to the kernel/service level. Next: the instructions `sdk` needs that `main` didn't (crypto, SIMD integer, CRC32, system registers, `SVC`).
+**Direction change (0014):** the `sdk` will be recompiled too, instead of re-implementing its 578 functions by hand; native code moves to the kernel/service level. Done: every instruction in `sdk` now translates. Next: translate and load both modules, then a minimal kernel.
 
 | Date | Step | Result |
 |---|---|---|
+| 2026-10-21 | Instructions the `sdk` needs: AES/SHA/PMULL crypto, SIMD integer (`addv`, `smlal`, `sqadd`...), CRC32, fused multiply-add, `MRS`/`MSR`, cache ops, `SVC` (0014) | All of `sdk` translates; 13 forms Pi-checked (120,000 cases), 3 planted bugs caught |
 | 2026-10-21 | Decision: recompile `sdk` as well as `main`, measured first: 99.3% of its 33,616 functions already translate (0014) | Plan for the rest of Phase 3 |
 | 2026-10-21 | Math library: musl 1.1.19's C (`third_party/musl`), checked against the sdk's own functions run on the Pi; sdk version-locked in `target.toml` (0013) | All 40 math functions match the Switch bit for bit on 800,000 inputs |
 | 2026-10-21 | C library basics: memory, strings, ctype, integer parsing; `__cxa_guard_*`; `__nnmusl_init_dso` (0012) | The 830 constructors start running |
@@ -73,7 +74,7 @@ Where the recompiled game stops right now, and how it got there. Newest first. E
 Still open from Phase 0: the baseline benchmark (`docs/baseline.md`), which needs the owner's emulator runs.
 
 Known gaps, in the order they will come up:
-- Recompiling `sdk` (0014): missing instruction groups, two-module translation and loading, a minimal kernel (threads, thread-local region, memory), then system services.
+- Recompiling `sdk` (0014): two-module translation and loading, a minimal kernel (threads, thread-local region, memory), then system services.
 - `qsort`, `printf`-family float output, `strtod`, `strerror`: same approach as the math functions (musl source, checked against the sdk), not done yet.
 - Threads (one guest thread so far), `setjmp`/`longjmp` for Lua, contents of the 20 data imports (RTTI, `stdio`).
 - C++ exceptions are not supported: nothing in `main` throws (0012).

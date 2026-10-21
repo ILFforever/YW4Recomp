@@ -31,6 +31,10 @@ typedef struct {
     uint64_t excl_addr;
     uint64_t excl_val;
     uint32_t excl_size;
+    /* Thread pointers (decision 0014): TPIDRRO_EL0 is set by the kernel (the thread-local
+     * region), TPIDR_EL0 by the thread itself. */
+    uint64_t tpidrro_el0;
+    uint64_t tpidr_el0;
 } CPUState;
 
 #define NZCV_N 0x80000000u
@@ -125,6 +129,25 @@ static inline uint64_t umulh64(uint64_t a, uint64_t b) {
 static inline uint64_t smulh64(uint64_t a, uint64_t b) {
     return (uint64_t)(((__int128)(int64_t)a * (int64_t)b) >> 64);
 }
+
+/* CRC32B/H/W/X and CRC32C*: the bit-reflected CRC update without inversion, over the low
+ * `bytes` bytes of `data` (Arm ARM: BitReverse(acc) and the polynomial division, done
+ * here in the equivalent reflected form). */
+static inline uint32_t crc32_update(uint32_t acc, uint64_t data, int bytes, uint32_t poly_reflected) {
+    for (int i = 0; i < 8 * bytes; i++) {
+        acc ^= (uint32_t)(data >> i) & 1;
+        acc = (acc >> 1) ^ (poly_reflected & (0u - (acc & 1)));
+    }
+    return acc;
+}
+
+/* Crypto extension (runtime/src/crypto.c): AES and SHA-1/SHA-256 steps on whole registers,
+ * as in the Arm ARM pseudocode. d is read and written; n/m are inputs. */
+typedef enum { YW4_AESE, YW4_AESD, YW4_AESMC, YW4_AESIMC } Yw4AesOp;
+void yw4_aes(Yw4AesOp op, v128 *d, const v128 *n);
+typedef enum { YW4_SHA1C, YW4_SHA1P, YW4_SHA1M, YW4_SHA1SU0, YW4_SHA256H, YW4_SHA256H2, YW4_SHA256SU1,
+               YW4_SHA1H, YW4_SHA1SU1, YW4_SHA256SU0 } Yw4ShaOp;
+void yw4_sha(Yw4ShaOp op, v128 *d, const v128 *n, const v128 *m);
 
 /* Guest memory. Guest addresses are host addresses (decision 0005), so these are plain
  * host accesses. memcpy keeps them legal for unaligned addresses and under strict aliasing;

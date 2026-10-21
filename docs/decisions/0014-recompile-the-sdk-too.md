@@ -35,3 +35,11 @@ They become unnecessary once the recompiled sdk runs: heap (0011), diag, string 
 5. **Services** as the game opens them.
 
 Each step lands as its own commit, with the README progress log updated.
+
+## Progress
+
+- **Step 1 done (2026-10-21).** New and extended forms, all checked against the Pi: CRC32/CRC32C (`dp2`); `sqadd`, `sqsub`, `smax`, `mla`, `mul` (three same); `cnt`, `neg`, `rev16`, `rev32`, `shll`, `fcvtl`, `fcvtn`, `frintm` (two-register misc); `smlal`, `uaddw`, `pmull` incl. 64-bit (three different); `shrn`, `sqshrn`, fixed-point `fcvtzs` (shift by immediate); `fmla`, `mul`, `smlal` by element; new forms `simd_across` (`addv`, `smaxv`, `uaddlv`), `simd_scalar_addp`, `simd_scalar_shift_imm`, `crypto_aes`, `crypto_sha3`, `crypto_sha2`, `fp_dp3` (`fmadd` family). 13 forms, 120,000 cases, all match. Planted bugs caught: double-rounded single-precision FMA, AES row shift reversed, wrong CRC32C polynomial.
+  - Fused multiply-add (`f32_muladd`/`f64_muladd` in `yw4fp.h`), which decision 0008 skipped because main had none: the Arm ARM's `FPMulAdd` NaN order, single precision via the existing round-to-odd add.
+  - AES/SHA in `runtime/src/crypto.c`, written from the pseudocode; the AES S-box is computed, not typed.
+  - System instructions (`function.py`): `MRS` of `TPIDRRO_EL0`, `TPIDR_EL0`, `CNTPCT_EL0` (19.2 MHz), `CTR_EL0` (the A57's value), `FPCR`, `FPSR`; `MSR` of `TPIDR_EL0`, `FPCR` (non-zero stops, 0008), `FPSR`; `DC CVAU/CVAC/CIVAC` and `IC IVAU` are no-ops; `SVC` calls `yw4_svc` (`runtime/src/kernel.c`, which stops on every call for now).
+  - Result: every instruction the sdk's 33,616 functions reach translates, except one word that is not an instruction (data between functions; it traps if executed). main: still 0 traps, same run as before.

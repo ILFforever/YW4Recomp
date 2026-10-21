@@ -258,6 +258,50 @@ static inline uint64_t f64_rsqrts(uint64_t a, uint64_t b) {
     return bits_f64(yw4_fma(f64_of(a), f64_of(b), 3.0) * 0.5);
 }
 
+/* FMADD/FMLA: FPMulAdd(addend, op1, op2) = addend + op1*op2 with one rounding. Callers
+ * negate operands first for FMSUB/FNMADD/FNMSUB/FMLS, as the pseudocode does (a NaN's sign
+ * flips too). NaNs: signalling before quiet, in the order addend, op1, op2; a quiet-NaN
+ * addend with inf*0 gives the default NaN. Single precision: the product is exact in
+ * double, then one round-to-odd add (see yw4_add_odd), then rounding to float. */
+static inline int f32_nans3(uint32_t a, uint32_t b, uint32_t c, uint32_t *r) {
+    if (f32_issnan(a)) { *r = a | 0x00400000u; return 1; }
+    if (f32_issnan(b)) { *r = b | 0x00400000u; return 1; }
+    if (f32_issnan(c)) { *r = c | 0x00400000u; return 1; }
+    if (f32_isnan(a)) { *r = a; return 1; }
+    if (f32_isnan(b)) { *r = b; return 1; }
+    if (f32_isnan(c)) { *r = c; return 1; }
+    return 0;
+}
+static inline int f64_nans3(uint64_t a, uint64_t b, uint64_t c, uint64_t *r) {
+    if (f64_issnan(a)) { *r = a | 0x0008000000000000ull; return 1; }
+    if (f64_issnan(b)) { *r = b | 0x0008000000000000ull; return 1; }
+    if (f64_issnan(c)) { *r = c | 0x0008000000000000ull; return 1; }
+    if (f64_isnan(a)) { *r = a; return 1; }
+    if (f64_isnan(b)) { *r = b; return 1; }
+    if (f64_isnan(c)) { *r = c; return 1; }
+    return 0;
+}
+static inline uint32_t f32_muladd(uint32_t a, uint32_t n, uint32_t m) {
+    uint32_t r;
+    int inf_n = (n & 0x7FFFFFFFu) == 0x7F800000u, inf_m = (m & 0x7FFFFFFFu) == 0x7F800000u;
+    int zero_n = !(n & 0x7FFFFFFFu), zero_m = !(m & 0x7FFFFFFFu);
+    int done = f32_nans3(a, n, m, &r);
+    if (f32_isnan(a) && !f32_issnan(a) && ((inf_n && zero_m) || (zero_n && inf_m))) return F32_DEFAULT_NAN;
+    if (done) return r;
+    r = bits_f32((float)yw4_add_odd((double)f32_of(a), (double)f32_of(n) * (double)f32_of(m)));
+    return f32_isnan(r) ? F32_DEFAULT_NAN : r;
+}
+static inline uint64_t f64_muladd(uint64_t a, uint64_t n, uint64_t m) {
+    const uint64_t mag = 0x7FFFFFFFFFFFFFFFull, inf = 0x7FF0000000000000ull;
+    uint64_t r;
+    int inf_n = (n & mag) == inf, inf_m = (m & mag) == inf, zero_n = !(n & mag), zero_m = !(m & mag);
+    int done = f64_nans3(a, n, m, &r);
+    if (f64_isnan(a) && !f64_issnan(a) && ((inf_n && zero_m) || (zero_n && inf_m))) return F64_DEFAULT_NAN;
+    if (done) return r;
+    r = bits_f64(yw4_fma(f64_of(n), f64_of(m), f64_of(a)));
+    return f64_isnan(r) ? F64_DEFAULT_NAN : r;
+}
+
 /* FRECPE / FRSQRTE: 8-bit estimates from the Arm ARM tables (RecipEstimate,
  * RecipSqrtEstimate), on a 52-bit fraction like the pseudocode. */
 #define YW4_M52 0x000FFFFFFFFFFFFFull

@@ -286,16 +286,29 @@ def _extr(e: int) -> str:
     return wr_reg(d, sf, f"({rd_reg(m, sf)} >> {lsb}) | ({utype(sf)})({rd_reg(n, sf)} << {w - lsb})")
 
 
-DP2 = {0b000010: "udiv", 0b000011: "sdiv", 0b001000: "lsl", 0b001001: "lsr", 0b001010: "asr", 0b001011: "ror"}
+DP2 = {0b000010: "udiv", 0b000011: "sdiv", 0b001000: "lsl", 0b001001: "lsr", 0b001010: "asr", 0b001011: "ror",
+       **{0b010000 | sz: "crc32" for sz in range(4)}, **{0b010100 | sz: "crc32c" for sz in range(4)}}
+
+
+def _dp2_valid(e: int) -> bool:
+    op = bits(e, 15, 10)
+    if op not in DP2:
+        return False
+    if DP2[op].startswith("crc32"):
+        return bits(e, 31, 31) == (op & 3 == 3)  # 64-bit data only with sf = 1 (CRC32X/CRC32CX)
+    return True
 
 
 # Data-processing (2 source): sf 0 0 11010110 Rm opcode Rn Rd
-@form("dp2", 0x7FE00000, 0x1AC00000, valid=lambda e: bits(e, 15, 10) in DP2)
+@form("dp2", 0x7FE00000, 0x1AC00000, valid=_dp2_valid)
 def _dp2(e: int) -> str:
     sf, m, op, n, d = bits(e, 31, 31), bits(e, 20, 16), bits(e, 15, 10), bits(e, 9, 5), bits(e, 4, 0)
     w = 64 if sf else 32
     a, b = rd_reg(n, sf), rd_reg(m, sf)
     kind = DP2[op]
+    if kind.startswith("crc32"):  # acc = Wn, data = low 1/2/4/8 bytes of Rm
+        poly = "0x82F63B78u" if kind == "crc32c" else "0xEDB88320u"
+        return wr_reg(d, 0, f"crc32_update({rd_reg(n, 0)}, {rd_reg(m, sf)}, {1 << (op & 3)}, {poly})")
     if kind in ("udiv", "sdiv"):
         return wr_reg(d, sf, f"{kind}{w}({a}, {b})")
     amount = f"(unsigned)({b} & {w - 1})"
@@ -861,7 +874,8 @@ FP3 = {
 }
 # Integer ops in "three same": (U, opcode) -> kind
 INT3 = {(0, 0x10): "+", (1, 0x10): "-", (0, 0x11): "tst", (1, 0x11): "==", (0, 0x06): "s>", (1, 0x06): "u>",
-        (0, 0x07): "s>=", (1, 0x07): "u>=", (0, 0x17): "addp", (0, 0x08): "sshl", (1, 0x08): "ushl"}
+        (0, 0x07): "s>=", (1, 0x07): "u>=", (0, 0x17): "addp", (0, 0x08): "sshl", (1, 0x08): "ushl",
+        (0, 0x01): "sqadd", (0, 0x05): "sqsub", (0, 0x0C): "smax", (0, 0x12): "mla", (0, 0x13): "mul"}
 LOGIC3 = {(0, 0): "&", (0, 1): "&~", (0, 2): "|", (0, 3): "|~", (1, 0): "^", (1, 1): "bsl", (1, 2): "bit", (1, 3): "bif"}
 
 
@@ -871,6 +885,8 @@ def _three_same_valid(e: int) -> bool:
         return (u, size >> 1, op) in FP3 and (q or not size & 1)  # .1d is not a float arrangement
     if op == 0x03:
         return True
+    if INT3.get((u, op)) in ("smax", "mla", "mul") and size == 3:
+        return False
     return (u, op) in INT3 and _q_size_ok(e)
 
 
@@ -929,6 +945,18 @@ def _simd_three_same(e: int) -> str:
         right = f"({st})({x} >> (-sh_ < {w} ? -sh_ : {w - 1}))" if kind == "sshl" else f"(-sh_ < {w} ? {a} >> -sh_ : 0)"
         stmt = (f"int sh_ = (int8_t){b}; "
                 f"r_.{lane}[i] = ({ut})(sh_ >= 0 ? (sh_ < {w} ? ({ut})({a} << sh_) : 0) : {right});")
+    elif kind in ("sqadd", "sqsub"):  # saturating (FPSR.QC is not modelled, decision 0008)
+        lo, hi = -(1 << ((8 << size) - 1)), (1 << ((8 << size) - 1)) - 1
+        lo_c = f"(-(__int128){hi} - 1)"
+        stmt = (f"__int128 x_ = (__int128)({st}){a} {'+' if kind == 'sqadd' else '-'} (__int128)({st}){b}; "
+                f"r_.{lane}[i] = ({ut})({st})(x_ < {lo_c} ? {lo_c} : x_ > (__int128){hi} ? (__int128){hi} : x_);")
+    elif kind == "smax":
+        stmt = f"r_.{lane}[i] = ({st}){a} > ({st}){b} ? {a} : {b};"
+    elif kind == "mul":
+        stmt = f"r_.{lane}[i] = ({ut})((uint64_t){a} * {b});"
+    elif kind == "mla":
+        srcs["d_"] = d
+        stmt = f"r_.{lane}[i] = ({ut})(d_.{lane}[i] + (uint64_t){a} * {b});"
     elif kind == "addp":
         h = count // 2
         stmt = (f"v128 *s_ = i < {h} ? &n_ : &m_; int j = 2 * (i % {h}); "
@@ -945,9 +973,10 @@ FP2 = {(0, 0x0F): "abs", (1, 0x0F): "neg", (1, 0x1F): "sqrt", (0, 0x1D): "recpe"
        (0, 0x1B): "cvtzs", (1, 0x1B): "cvtzu", (0, 0x0C): ">", (0, 0x0D): "==", (0, 0x0E): "<",
        (1, 0x0C): ">=", (1, 0x0D): "<="}
 # size<1> = 0 float ops (sz = size<0>)
-FP2_LO = {(0, 0x1D): "scvtf", (1, 0x1D): "ucvtf"}
+FP2_LO = {(0, 0x1D): "scvtf", (1, 0x1D): "ucvtf", (0, 0x19): "frintm", (0, 0x16): "fcvtn", (0, 0x17): "fcvtl"}
 # Integer ops: (U, opcode) -> kind
-INT2 = {(0, 0x12): "xtn", (1, 0x05): "not", (0, 0x00): "rev64", (0, 0x09): "==0", (1, 0x08): ">=0",
+INT2 = {(0, 0x05): "cnt", (1, 0x0B): "neg", (0, 0x01): "rev16", (1, 0x00): "rev32", (1, 0x13): "shll",
+        (0, 0x12): "xtn", (1, 0x05): "not", (0, 0x00): "rev64", (0, 0x09): "==0", (1, 0x08): ">=0",
         (0, 0x08): ">0", (1, 0x09): "<=0", (0, 0x0A): "<0"}
 
 
@@ -956,8 +985,16 @@ def _two_misc_valid(e: int) -> bool:
     if size >> 1 and (u, op) in FP2:
         return q or not size & 1
     if not size >> 1 and (u, op) in FP2_LO:
+        if FP2_LO[(u, op)] in ("fcvtn", "fcvtl"):
+            return size == 1  # double <-> single only (size 0 is half precision)
         return q or not size & 1
     kind = INT2.get((u, op))
+    if kind in ("cnt", "rev16"):
+        return size == 0
+    if kind == "rev32":
+        return size < 2
+    if kind == "shll":
+        return size < 3
     if kind == "xtn":
         return size < 3
     if kind == "not":
@@ -977,6 +1014,10 @@ def _simd_two_misc(e: int) -> str:
         sz = size & 1
         p, lane, count = FP[sz][0], LANE[2 + sz], lanes(q, 2 + sz)
         kind = FP2[(u, op)] if size >> 1 else FP2_LO[(u, op)]
+        if kind == "fcvtl":  # FCVTL(2): widen the low (Q=0) or high (Q=1) two singles
+            return vec(d, srcs, per_lane(2, f"r_.d[i] = f32_to_f64(n_.s[{2 * q} + i]);"))
+        if kind == "fcvtn":  # FCVTN(2): narrow into the low half, or the high half keeping the low
+            return vec(d, srcs, per_lane(2, f"r_.s[{2 * q} + i] = f64_to_f32(n_.d[i]);"), keep_d=bool(q))
         a, ut = f"n_.{lane}[i]", UINT[2 + sz]
         w = 32 << sz
         if kind == "abs":
@@ -985,6 +1026,8 @@ def _simd_two_misc(e: int) -> str:
             v = f"{a} ^ {sign_bit(sz)}"
         elif kind in ("sqrt", "recpe", "rsqrte"):
             v = f"{p}_{kind}({a})"
+        elif kind == "frintm":
+            v = f"{p}_rint({a}, 'm')"
         elif kind in ("cvtzs", "cvtzu"):
             host = "(double)f32_of" if sz == 0 else "f64_of"
             v = f"({ut})yw4_to_{kind[-1]}{w}({host}({a}), 'z')"
@@ -1004,6 +1047,16 @@ def _simd_two_misc(e: int) -> str:
             if q else vec(d, srcs, per_lane(half, f"r_.{lane}[i] = ({ut})n_.{src}[i];"))
     if kind == "not":
         return vec(d, srcs, per_lane(2 if q else 1, "r_.d[i] = ~n_.d[i];"))
+    if kind == "cnt":
+        return vec(d, srcs, per_lane(count, "r_.b[i] = (uint8_t)__builtin_popcount(n_.b[i]);"))
+    if kind == "neg":
+        return vec(d, srcs, per_lane(count, f"r_.{lane}[i] = ({ut})(0 - ({ut})n_.{lane}[i]);"))
+    if kind in ("rev16", "rev32"):  # reverse the lanes inside each 16/32-bit container
+        per = (2 if kind == "rev16" else 4) >> size
+        return vec(d, srcs, per_lane(count, f"r_.{lane}[i] = n_.{lane}[(i / {per}) * {per} + {per - 1} - i % {per}];"))
+    if kind == "shll":  # SHLL(2): widen the low (Q=0) or high half and shift left by the element size
+        half, wl, wu = 8 >> size, LANE[size + 1], UINT[size + 1]
+        return vec(d, srcs, per_lane(half, f"r_.{wl}[i] = ({wu})(({wu})n_.{lane}[{half * q} + i] << {8 << size});"))
     if kind == "rev64":  # reverse the lanes inside each 64-bit doubleword
         per = 8 >> size
         return vec(d, srcs, per_lane(count, f"r_.{lane}[i] = n_.{lane}[(i / {per}) * {per} + {per - 1} - i % {per}];"))
@@ -1158,24 +1211,59 @@ def _elem_index(e: int) -> tuple[int, int] | None:
     return None
 
 
+BY_ELEM = {(0, 0b1001): "fmul", (0, 0b0001): "fmla", (0, 0b1000): "mul", (0, 0b0010): "smlal"}
+
+
+def _int_elem_index(e: int) -> tuple[int, int] | None:
+    """(Rm, index) for integer by-element forms: halfwords use H:L:M and a 4-bit Rm."""
+    size, l, mbit, h = bits(e, 23, 22), bits(e, 21, 21), bits(e, 20, 20), bits(e, 11, 11)
+    if size == 1:
+        return bits(e, 19, 16), h << 2 | l << 1 | mbit
+    if size == 2:
+        return mbit << 4 | bits(e, 19, 16), h << 1 | l
+    return None
+
+
+def _by_elem_index(e: int) -> tuple[int, int] | None:
+    kind = BY_ELEM.get((bits(e, 29, 29), bits(e, 15, 12)))
+    if kind in ("fmul", "fmla"):
+        return _elem_index(e)
+    return _int_elem_index(e) if kind else None
+
+
 def _by_elem_valid(e: int) -> bool:
-    if bits(e, 29, 29) or bits(e, 15, 12) != 0b1001:
-        return False  # only FMUL (by element); FMLA/FMLS/FMULX/integer forms are not used by main
-    if _elem_index(e) is None:
+    kind = BY_ELEM.get((bits(e, 29, 29), bits(e, 15, 12)))
+    if kind is None or _by_elem_index(e) is None:
         return False
-    return bool(bits(e, 30, 30)) or bits(e, 23, 22) == 2
+    if kind in ("fmul", "fmla"):
+        return bool(bits(e, 30, 30)) or bits(e, 23, 22) == 2
+    return True
 
 
 # Advanced SIMD vector x indexed element: 0 Q U 01111 size L M Rm opcode H 0 Rn Rd
 @form("simd_by_elem", 0x9F000400, 0x0F000000, valid=_by_elem_valid,
-      vregs=lambda e: (bits(e, 4, 0), bits(e, 9, 5), (_elem_index(e) or (0, 0))[0]))
+      vregs=lambda e: (bits(e, 4, 0), bits(e, 9, 5), (_by_elem_index(e) or (0, 0))[0]))
 def _simd_by_elem(e: int) -> str:
     q, size, n, d = bits(e, 30, 30), bits(e, 23, 22), bits(e, 9, 5), bits(e, 4, 0)
-    m, idx = _elem_index(e)
-    sz = size & 1
-    p, lane = FP[sz][0], LANE[2 + sz]
-    return vec(d, {"n_": n, "m_": m},
-               f"{FP[sz][1]} k_ = m_.{lane}[{idx}]; " + per_lane(lanes(q, 2 + sz), f"r_.{lane}[i] = {p}_mul(n_.{lane}[i], k_);"))
+    kind = BY_ELEM[(bits(e, 29, 29), bits(e, 15, 12))]
+    m, idx = _by_elem_index(e)
+    if kind in ("fmul", "fmla"):
+        sz = size & 1
+        p, lane = FP[sz][0], LANE[2 + sz]
+        srcs = {"n_": n, "m_": m}
+        if kind == "fmul":
+            stmt = f"r_.{lane}[i] = {p}_mul(n_.{lane}[i], k_);"
+        else:  # fused, one rounding per lane
+            srcs["d_"] = d
+            stmt = f"r_.{lane}[i] = {p}_muladd(d_.{lane}[i], n_.{lane}[i], k_);"
+        return vec(d, srcs, f"{FP[sz][1]} k_ = m_.{lane}[{idx}]; " + per_lane(lanes(q, 2 + sz), stmt))
+    lane, ut, st = LANE[size], UINT[size], SINT[size]
+    if kind == "mul":
+        return vec(d, {"n_": n, "m_": m},
+                   f"{ut} k_ = m_.{lane}[{idx}]; " + per_lane(lanes(q, size), f"r_.{lane}[i] = ({ut})((uint64_t)n_.{lane}[i] * k_);"))
+    half, wl, wu, wt = 8 >> size, LANE[size + 1], UINT[size + 1], SINT[size + 1]  # SMLAL(2)
+    stmt = f"r_.{wl}[i] = ({wu})(d_.{wl}[i] + ({wu})(({wt})({st})n_.{lane}[{half * q} + i] * ({wt})k_));"
+    return vec(d, {"n_": n, "m_": m, "d_": d}, f"{st} k_ = ({st})m_.{lane}[{idx}]; " + per_lane(half, stmt))
 
 
 # Advanced SIMD scalar x indexed element: 01 U 11111 size L M Rm opcode H 0 Rn Rd   (FMUL only)
@@ -1271,7 +1359,8 @@ def _shift_imm(e: int) -> tuple[int, int, int] | None:
 
 # (U, opcode) -> kind. Narrowing/long forms use immh for the *narrow* element size.
 SHIFT_IMM = {(0, 0x00): "sshr", (1, 0x00): "ushr", (0, 0x04): "srshr", (1, 0x04): "urshr",
-             (0, 0x0A): "shl", (0, 0x14): "sshll", (1, 0x14): "ushll", (0, 0x13): "sqrshrn"}
+             (0, 0x0A): "shl", (0, 0x14): "sshll", (1, 0x14): "ushll", (0, 0x13): "sqrshrn",
+             (0, 0x10): "shrn", (0, 0x12): "sqshrn", (0, 0x1F): "fcvtzs"}
 
 
 def _shift_imm_valid(e: int) -> bool:
@@ -1282,8 +1371,10 @@ def _shift_imm_valid(e: int) -> bool:
     kind = SHIFT_IMM.get((bits(e, 29, 29), op))
     if kind is None:
         return False
-    if kind in ("sshll", "ushll", "sqrshrn"):
+    if kind in ("sshll", "ushll", "sqrshrn", "shrn", "sqshrn"):
         return size < 3
+    if kind == "fcvtzs":
+        return size == 2 or (size == 3 and bool(bits(e, 30, 30)))
     return bool(bits(e, 30, 30)) or size < 3
 
 
@@ -1314,28 +1405,59 @@ def _simd_shift_imm(e: int) -> str:
         ext = f"({SINT[size + 1]})({st})" if kind == "sshll" else ""
         src = f"({UINT[size + 1]}){ext}n_.{lane}[{half * q} + i]"
         return vec(d, {"n_": n}, per_lane(half, f"r_.{LANE[size + 1]}[i] = ({UINT[size + 1]})({src} << {sh});"))
-    # SQRSHRN(2): signed, rounding, saturating shift right and narrow (QC is not modelled)
+    if kind == "fcvtzs":  # to signed fixed point: scale by 2^fbits (exact), then convert toward zero
+        fbits = 2 * esize - raw
+        host = "(double)f32_of" if size == 2 else "f64_of"
+        return vec(d, {"n_": n}, per_lane(count, f"r_.{lane}[i] = ({ut})yw4_to_s{esize}({host}(n_.{lane}[i]) * {float(2 ** fbits)!r}, 'z');"))
     sh = 2 * esize - raw
     half = 8 >> size
+    if kind == "shrn":  # SHRN(2): truncating shift right and narrow
+        return vec(d, {"n_": n}, per_lane(half, f"r_.{lane}[{half * q} + i] = ({ut})(n_.{LANE[size + 1]}[i] >> {sh});"),
+                   keep_d=bool(q))
+    # SQRSHRN(2) / SQSHRN(2): signed, (rounding,) saturating shift right and narrow (QC is not modelled)
     lo, hi = -(1 << (esize - 1)), (1 << (esize - 1)) - 1
-    body = per_lane(half, f"__int128 x_ = ((__int128)({SINT[size + 1]})n_.{LANE[size + 1]}[i] + ((__int128)1 << {sh - 1})) >> {sh}; "
+    rnd = f" + ((__int128)1 << {sh - 1})" if kind == "sqrshrn" else ""
+    body = per_lane(half, f"__int128 x_ = ((__int128)({SINT[size + 1]})n_.{LANE[size + 1]}[i]{rnd}) >> {sh}; "
                           f"r_.{lane}[{half * q} + i] = ({ut})({st})(x_ < {lo} ? {lo} : x_ > {hi} ? {hi} : x_);")
     return vec(d, {"n_": n}, body, keep_d=bool(q))
 
 
-# Advanced SIMD three different, SMULL(2)/SMLSL(2) only: 0 Q U 01110 size 1 Rm opcode 00 Rn Rd
-@form("simd_three_diff", 0x9F200C00, 0x0E200000,
-      valid=lambda e: not bits(e, 29, 29) and bits(e, 15, 12) in (0b1100, 0b1010) and bits(e, 23, 22) < 3,
-      vregs=_rd_rn_rm)
+THREE_DIFF = {(0, 0b1100): "smull", (0, 0b1010): "smlsl", (0, 0b1000): "smlal", (1, 0b0001): "uaddw",
+              (0, 0b1110): "pmull"}
+
+
+def _three_diff_valid(e: int) -> bool:
+    kind, size = THREE_DIFF.get((bits(e, 29, 29), bits(e, 15, 12))), bits(e, 23, 22)
+    if kind == "pmull":
+        return size in (0, 3)  # 8-bit polynomials, or 64-bit (Crypto extension)
+    return kind is not None and size < 3
+
+
+# Advanced SIMD three different: 0 Q U 01110 size 1 Rm opcode 00 Rn Rd
+@form("simd_three_diff", 0x9F200C00, 0x0E200000, valid=_three_diff_valid, vregs=_rd_rn_rm)
 def _simd_three_diff(e: int) -> str:
     q, size, m, op, n, d = bits(e, 30, 30), bits(e, 23, 22), bits(e, 20, 16), bits(e, 15, 12), bits(e, 9, 5), bits(e, 4, 0)
+    kind = THREE_DIFF[(bits(e, 29, 29), op)]
+    if kind == "pmull":  # carry-less multiply of the low (Q=0) or high half
+        if size == 3:
+            body = (f"uint64_t a_ = n_.d[{q}], b_ = m_.d[{q}]; unsigned __int128 p_ = 0; "
+                    "for (int k = 0; k < 64; k++) if (b_ >> k & 1) p_ ^= (unsigned __int128)a_ << k; "
+                    "r_.d[0] = (uint64_t)p_; r_.d[1] = (uint64_t)(p_ >> 64);")
+            return vec(d, {"n_": n, "m_": m}, body)
+        stmt = (f"uint16_t a_ = n_.b[{8 * q} + i], p_ = 0; uint8_t b_ = m_.b[{8 * q} + i]; "
+                "for (int k = 0; k < 8; k++) if (b_ >> k & 1) p_ ^= (uint16_t)(a_ << k); r_.h[i] = p_;")
+        return vec(d, {"n_": n, "m_": m}, per_lane(8, stmt))
     half = 8 >> size
     lane, wl, st, wt = LANE[size], LANE[size + 1], SINT[size], SINT[size + 1]
+    if kind == "uaddw":  # wide n + zero-extended half of m
+        stmt = f"r_.{wl}[i] = ({UINT[size + 1]})(n_.{wl}[i] + ({UINT[size + 1]})m_.{lane}[{half * q} + i]);"
+        return vec(d, {"n_": n, "m_": m}, per_lane(half, stmt))
     prod = f"({wt})({st})n_.{lane}[{half * q} + i] * ({wt})({st})m_.{lane}[{half * q} + i]"
     if op == 0b1100:  # SMULL
         stmt = f"r_.{wl}[i] = ({UINT[size + 1]})({prod});"
         return vec(d, {"n_": n, "m_": m}, per_lane(half, stmt))
-    stmt = f"r_.{wl}[i] = ({UINT[size + 1]})(d_.{wl}[i] - ({UINT[size + 1]})({prod}));"  # SMLSL
+    sign = "+" if kind == "smlal" else "-"
+    stmt = f"r_.{wl}[i] = ({UINT[size + 1]})(d_.{wl}[i] {sign} ({UINT[size + 1]})({prod}));"  # SMLAL/SMLSL
     return vec(d, {"n_": n, "m_": m, "d_": d}, per_lane(half, stmt))
 
 
@@ -1361,6 +1483,105 @@ def _fp_fixed(e: int) -> str:
     it = ("uint" if op == 3 else "int") + f"{w}_t"
     host = "float" if ftype == 0 else "double"
     return vwrite(d, ftype, f"bits_{FP[ftype][0]}(({host})(({host})({it}){rd_reg(n, sf)} / {float(2 ** fbits)!r}))")
+
+
+# Advanced SIMD across lanes: 0 Q U 01110 size 11000 opcode 10 Rn Rd   (ADDV, SMAXV, UADDLV)
+ACROSS = {(0, 0x1B): "addv", (0, 0x0A): "smaxv", (1, 0x03): "uaddlv"}
+
+
+def _across_valid(e: int) -> bool:
+    q, u, size, op = bits(e, 30, 30), bits(e, 29, 29), bits(e, 23, 22), bits(e, 16, 12)
+    return (u, op) in ACROSS and size < 3 and not (size == 2 and not q)
+
+
+@form("simd_across", 0x9F3E0C00, 0x0E300800, valid=_across_valid, vregs=lambda e: (bits(e, 4, 0), bits(e, 9, 5)))
+def _simd_across(e: int) -> str:
+    q, u, size, op, n, d = bits(e, 30, 30), bits(e, 29, 29), bits(e, 23, 22), bits(e, 16, 12), bits(e, 9, 5), bits(e, 4, 0)
+    kind = ACROSS[(u, op)]
+    lane, ut, st, count = LANE[size], UINT[size], SINT[size], lanes(q, size)
+    if kind == "addv":
+        body = f"{ut} acc_ = 0; " + per_lane(count, f"acc_ = ({ut})(acc_ + n_.{lane}[i]);") + f" r_.{lane}[0] = acc_;"
+    elif kind == "smaxv":
+        body = (f"{st} acc_ = ({st})n_.{lane}[0]; " + per_lane(count, f"if (({st})n_.{lane}[i] > acc_) acc_ = ({st})n_.{lane}[i];")
+                + f" r_.{lane}[0] = ({ut})acc_;")
+    else:  # UADDLV: sum into a lane twice as wide
+        wu = UINT[size + 1]
+        body = f"{wu} acc_ = 0; " + per_lane(count, f"acc_ = ({wu})(acc_ + n_.{lane}[i]);") + f" r_.{LANE[size + 1]}[0] = acc_;"
+    return vec(d, {"n_": n}, body)
+
+
+# Advanced SIMD scalar pairwise, ADDP (D only): 01 0 11110 11 11000 11011 10 Rn Rd
+@form("simd_scalar_addp", 0xFFFFFC00, 0x5EF1B800, vregs=lambda e: (bits(e, 4, 0), bits(e, 9, 5)))
+def _simd_scalar_addp(e: int) -> str:
+    return vec(bits(e, 4, 0), {"n_": bits(e, 9, 5)}, "r_.d[0] = n_.d[0] + n_.d[1];")
+
+
+def _scalar_shift_valid(e: int) -> bool:
+    sh = _shift_imm(e)
+    return sh is not None and not bits(e, 29, 29) and sh[1] in (0x12, 0x13) and sh[0] < 3
+
+
+# Advanced SIMD scalar shift by immediate, SQSHRN/SQRSHRN only: 01 U 111110 immh immb opcode 1 Rn Rd
+@form("simd_scalar_shift_imm", 0xDF800400, 0x5F000400, valid=_scalar_shift_valid,
+      vregs=lambda e: (bits(e, 4, 0), bits(e, 9, 5)))
+def _simd_scalar_shift_imm(e: int) -> str:
+    n, d = bits(e, 9, 5), bits(e, 4, 0)
+    size, op, raw = _shift_imm(e)
+    esize = 8 << size
+    sh = 2 * esize - raw
+    lo, hi = -(1 << (esize - 1)), (1 << (esize - 1)) - 1
+    rnd = f" + ((__int128)1 << {sh - 1})" if op == 0x13 else ""
+    body = (f"__int128 x_ = ((__int128)({SINT[size + 1]})n_.{LANE[size + 1]}[0]{rnd}) >> {sh}; "
+            f"r_.{LANE[size]}[0] = ({UINT[size]})({SINT[size]})(x_ < {lo} ? {lo} : x_ > {hi} ? {hi} : x_);")
+    return vec(d, {"n_": n}, body)
+
+
+# Crypto AES: 01001110 00 10100 opcode 10 Rn Rd   (runtime/src/crypto.c)
+AES = {4: "YW4_AESE", 5: "YW4_AESD", 6: "YW4_AESMC", 7: "YW4_AESIMC"}
+
+
+@form("crypto_aes", 0xFFFE0C00, 0x4E280800, valid=lambda e: bits(e, 16, 12) in AES,
+      vregs=lambda e: (bits(e, 4, 0), bits(e, 9, 5)))
+def _crypto_aes(e: int) -> str:
+    return f"{{ v128 n_ = ctx->v[{bits(e, 9, 5)}]; yw4_aes({AES[bits(e, 16, 12)]}, &ctx->v[{bits(e, 4, 0)}], &n_); }}"
+
+
+# Crypto three-register SHA: 01011110 000 Rm 0 opcode 00 Rn Rd
+SHA3 = {0: "YW4_SHA1C", 1: "YW4_SHA1P", 2: "YW4_SHA1M", 3: "YW4_SHA1SU0", 4: "YW4_SHA256H", 5: "YW4_SHA256H2",
+        6: "YW4_SHA256SU1"}
+
+
+@form("crypto_sha3", 0xFFE08C00, 0x5E000000, valid=lambda e: bits(e, 14, 12) in SHA3, vregs=_rd_rn_rm)
+def _crypto_sha3(e: int) -> str:
+    m, n, d = bits(e, 20, 16), bits(e, 9, 5), bits(e, 4, 0)
+    return f"{{ v128 n_ = ctx->v[{n}], m_ = ctx->v[{m}]; yw4_sha({SHA3[bits(e, 14, 12)]}, &ctx->v[{d}], &n_, &m_); }}"
+
+
+# Crypto two-register SHA: 01011110 00 10100 opcode 10 Rn Rd
+SHA2 = {0: "YW4_SHA1H", 1: "YW4_SHA1SU1", 2: "YW4_SHA256SU0"}
+
+
+@form("crypto_sha2", 0xFFFE0C00, 0x5E280800, valid=lambda e: bits(e, 16, 12) in SHA2,
+      vregs=lambda e: (bits(e, 4, 0), bits(e, 9, 5)))
+def _crypto_sha2(e: int) -> str:
+    n, d = bits(e, 9, 5), bits(e, 4, 0)
+    return f"{{ v128 n_ = ctx->v[{n}]; yw4_sha({SHA2[bits(e, 16, 12)]}, &ctx->v[{d}], &n_, &n_); }}"
+
+
+# Floating-point data-processing (3 source): 0 0 0 11111 ftype o1 Rm o0 Ra Rn Rd
+#   FMADD a + n*m, FMSUB a - n*m, FNMADD -a - n*m, FNMSUB -a + n*m (fused, operands negated first)
+@form("fp_dp3", 0xFF000000, 0x1F000000, valid=_ftype_ok,
+      vregs=lambda e: (bits(e, 4, 0), bits(e, 9, 5), bits(e, 20, 16), bits(e, 14, 10)))
+def _fp_dp3(e: int) -> str:
+    ftype, o1, m, o0, a, n, d = (bits(e, 23, 22), bits(e, 21, 21), bits(e, 20, 16), bits(e, 15, 15),
+                                 bits(e, 14, 10), bits(e, 9, 5), bits(e, 4, 0))
+    sb = sign_bit(ftype)
+    addend, op1 = vread(a, ftype), vread(n, ftype)
+    if o1:
+        addend = f"({addend} ^ {sb})"
+    if o0 != o1:
+        op1 = f"({op1} ^ {sb})"
+    return vwrite(d, ftype, f"{FP[ftype][0]}_muladd({addend}, {op1}, {vread(m, ftype)})")
 
 
 # --------------------------------------------------------------------------- SIMD structure loads/stores
