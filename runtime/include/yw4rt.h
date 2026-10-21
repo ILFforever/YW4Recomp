@@ -12,18 +12,31 @@
 
 typedef void (*GuestFn)(CPUState *ctx);
 
-/* Host address of main's image. Guest addresses are host addresses (decision 0005), so
- * PC-relative values and return addresses are image offsets plus this. Must be 4 KiB
- * aligned, because ADRP results are computed at translation time from page offsets. */
+/* Host addresses of the recompiled modules: main and the sdk (decision 0014). Guest
+ * addresses are host addresses (decision 0005), so PC-relative values and return addresses
+ * are module offsets plus these. Must be 4 KiB aligned, because ADRP results are computed
+ * at translation time from page offsets. */
 extern uint64_t yw4_image_base;
+extern uint64_t yw4_sdk_base;
 
-/* The recompiler's table of every translated function, sorted by offset (generated). */
+/* The recompiler's tables of every translated function, one per module, sorted by offset
+ * (generated func_table.c). */
 typedef struct {
     uint64_t offset;
     GuestFn fn;
 } FuncEntry;
-extern const FuncEntry yw4_funcs[];
-extern const size_t yw4_nfuncs;
+typedef struct {
+    const char *name;
+    const uint64_t *base;   /* where the module was loaded */
+    uint64_t size;          /* image + .bss */
+    const FuncEntry *funcs;
+    size_t nfuncs;
+} Yw4CodeModule;
+extern const Yw4CodeModule yw4_code[];
+extern const size_t yw4_ncode;
+
+/* "main+0x1234", "sdk+0x56" or the raw address, for messages. Returns buf. */
+const char *yw4_describe(uint64_t addr, char buf[48]);
 
 /* Function at a guest address, or NULL. */
 GuestFn yw4_lookup(uint64_t addr);

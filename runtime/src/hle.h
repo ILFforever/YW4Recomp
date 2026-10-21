@@ -22,6 +22,9 @@
  * game reported a fatal error. Prints the message and the guest address of the call. */
 _Noreturn void yw4_hle_stop(CPUState *ctx, const char *fmt, ...);
 
+/* Native implementation by mangled name, or NULL (hle.c). */
+GuestFn yw4_hle_find(const char *name);
+
 /* Variadic arguments of a guest call (AAPCS64: integer arguments in x[next_gr..7] then the
  * stack, floating-point ones in v[next_vr..7] then the stack, 8 bytes per stack slot). */
 typedef struct {

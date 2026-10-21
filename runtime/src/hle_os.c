@@ -29,7 +29,7 @@ void hle_os_QueryMemoryInfo(CPUState *ctx) {
         int32_t thread_count;
     } *info = GPTR(ctx->x[0]);
     info->total_available = TOTAL_AVAILABLE;
-    info->program_size = yw4_image_mem_size;
+    info->program_size = yw4_modules[YW4_MAIN].mem_size;
     info->stack_size = MAIN_STACK_SIZE;
     info->heap_size = heap_size;
     info->heap_allocated = heap_used;

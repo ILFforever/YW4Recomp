@@ -1,11 +1,12 @@
-/* Load main into host memory and relocate it (decision 0010).
+/* Load the recompiled modules and relocate them (decisions 0010, 0014).
  *
- * Does what the Switch's rtld does for main, minus the parts the native runtime replaces:
- *   1. reserve one block for the image and its .bss, at main's Switch address if possible
+ * Does what the Switch's rtld does, minus symbol lookup (already done at translation time):
+ *   1. reserve one block per module for its image and .bss, at its preferred address if
+ *      possible (main at its Switch address 0x7100000000, the sdk right after it)
  *   2. copy the flat image, after checking its size and SHA-256 against the build
  *   3. RELATIVE relocations: base + addend
- *   4. imports: function imports get a unique address in a stub region that yw4_resolve
- *      maps to imp_<i>; data imports get a zeroed block each; weak undefined symbols are 0
+ *   4. symbolic relocations: the target module's base + value (or 0 for weak symbols
+ *      nobody defines)
  */
 #include <inttypes.h>
 #include <stdio.h>
@@ -21,9 +22,7 @@
 #include "yw4load.h"
 
 uint64_t yw4_image_base;
-uint64_t yw4_import_base;
-
-#define DATA_IMPORT_SIZE 4096  /* zeroed backing for each data import until HLE fills it */
+uint64_t yw4_sdk_base;
 
 void *yw4_reserve(uint64_t want, size_t size) {
 #ifdef _WIN32
@@ -52,13 +51,37 @@ static uint8_t *read_file(const char *path, size_t *len) {
     return buf;
 }
 
-static GuestFn import_lookup(uint64_t a) {
-    uint64_t off = a - yw4_import_base;
-    if (off >= yw4_nimports * YW4_IMPORT_STRIDE || off % YW4_IMPORT_STRIDE) return NULL;
-    return yw4_import_fns[off / YW4_IMPORT_STRIDE];
+/* ---- host callbacks: a guest address per host function, found through the lookup hook */
+
+#define MAX_HOST_FNS 256
+static GuestFn host_fns[MAX_HOST_FNS];
+static size_t nhost_fns;
+static uint64_t host_fn_base;
+
+static GuestFn host_lookup(uint64_t a) {
+    uint64_t off = a - host_fn_base;
+    if (!host_fn_base || off >= nhost_fns * 16 || off % 16) return NULL;
+    return host_fns[off / 16];
 }
 
-int yw4_load_image(const char *path) {
+uint64_t yw4_host_function(GuestFn fn) {
+    if (!host_fn_base) {
+        host_fn_base = (uint64_t)(uintptr_t)yw4_reserve(YW4_HOST_FN_BASE, MAX_HOST_FNS * 16);
+        yw4_lookup_hook = host_lookup;
+    }
+    if (!host_fn_base || nhost_fns == MAX_HOST_FNS) {
+        fprintf(stderr, "yw4: no room for host callbacks\n");
+        exit(1);
+    }
+    host_fns[nhost_fns] = fn;
+    return host_fn_base + 16 * nhost_fns++;
+}
+
+/* ---- modules */
+
+static int load_one(const Yw4Module *m, const char *dir) {
+    char path[1024];
+    snprintf(path, sizeof path, "%s/%s", dir, m->file);
     size_t len;
     uint8_t *file = read_file(path, &len);
     if (!file) {
@@ -67,55 +90,44 @@ int yw4_load_image(const char *path) {
     }
     char hash[65];
     yw4_sha256_hex(file, len, hash);
-    if (len != yw4_image_file_size || strcmp(hash, yw4_image_sha256) != 0) {
+    if (len != m->file_size || strcmp(hash, m->sha256) != 0) {
         fprintf(stderr, "yw4: %s is not the build this was recompiled from\n"
                         "  expected %s (%" PRIu64 " bytes)\n  got      %s (%zu bytes)\n",
-                path, yw4_image_sha256, yw4_image_file_size, hash, len);
+                path, m->sha256, m->file_size, hash, len);
         free(file);
         return 1;
     }
-
-    uint8_t *base = yw4_reserve(YW4_PREFERRED_BASE, (size_t)yw4_image_mem_size);
-    if (!base) {
-        fprintf(stderr, "yw4: cannot reserve %" PRIu64 " bytes for main\n", yw4_image_mem_size);
+    uint8_t *base = yw4_reserve(m->preferred_base, (size_t)m->mem_size);
+    if (!base || ((uintptr_t)base & 0xFFF)) {
+        fprintf(stderr, "yw4: cannot reserve %#" PRIx64 " bytes (4 KiB aligned) for %s\n", m->mem_size, m->name);
         return 1;
     }
     memcpy(base, file, len);  /* the rest (.bss) is already zero */
     free(file);
-    yw4_image_base = (uint64_t)(uintptr_t)base;
-    if (yw4_image_base & 0xFFF) {
-        fprintf(stderr, "yw4: image base %p is not 4 KiB aligned\n", (void *)base);
-        return 1;
-    }
+    *m->base = (uint64_t)(uintptr_t)base;
+    return 0;
+}
 
-    /* Imports: one stub region for functions, one zeroed block per data import. */
-    uint8_t *stubs = yw4_reserve(0, yw4_nimports * YW4_IMPORT_STRIDE);
-    uint64_t *addr = calloc(yw4_nimports, sizeof *addr);
-    if (!stubs || !addr) {
-        fprintf(stderr, "yw4: out of memory for imports\n");
-        return 1;
-    }
-    yw4_import_base = (uint64_t)(uintptr_t)stubs;
-    yw4_lookup_hook = import_lookup;
-    size_t ndata = 0;
-    for (size_t i = 0; i < yw4_nimports; i++) {
-        switch (yw4_imports[i].kind) {
-        case YW4_IMPORT_FUNC: addr[i] = yw4_import_base + i * YW4_IMPORT_STRIDE; break;
-        case YW4_IMPORT_DATA: addr[i] = (uint64_t)(uintptr_t)calloc(1, DATA_IMPORT_SIZE); ndata++; break;
-        default: addr[i] = 0; break;
+int yw4_load_modules(const char *exefs_dir) {
+    for (size_t i = 0; i < yw4_nmodules; i++)
+        if (load_one(&yw4_modules[i], exefs_dir)) return 1;
+    size_t nrel = 0;
+    for (size_t i = 0; i < yw4_nmodules; i++) {
+        const Yw4Module *m = &yw4_modules[i];
+        uint64_t base = *m->base;
+        for (size_t k = 0; k < m->nrelative; k++)
+            st64(base + m->relative[k].offset, base + (uint64_t)m->relative[k].addend);
+        for (size_t k = 0; k < m->nsymrelocs; k++) {
+            const Yw4SymReloc *r = &m->symrelocs[k];
+            st64(base + r->offset, r->module == YW4_NO_MODULE ? 0 : *yw4_modules[r->module].base + r->value);
         }
+        nrel += m->nrelative + m->nsymrelocs;
     }
-
-    for (size_t i = 0; i < yw4_nrelative; i++)
-        st64(yw4_image_base + yw4_relative[i].offset, yw4_image_base + (uint64_t)yw4_relative[i].addend);
-    for (size_t i = 0; i < yw4_nsymrelocs; i++) {
-        const Yw4SymReloc *r = &yw4_symrelocs[i];
-        st64(yw4_image_base + r->offset, addr[r->import] ? addr[r->import] + (uint64_t)r->addend : 0);
+    for (size_t i = 0; i < yw4_nmodules; i++) {
+        const Yw4Module *m = &yw4_modules[i];
+        fprintf(stderr, "yw4: %-4s loaded at %#014" PRIx64 "%s\n", m->name, *m->base,
+                *m->base == m->preferred_base ? "" : "  (NOT its preferred address)");
     }
-    free(addr);
-
-    fprintf(stderr, "yw4: main loaded at %p (%s), %zu relocations, %zu imports (%zu data)\n",
-            (void *)base, yw4_image_base == YW4_PREFERRED_BASE ? "its Switch address" : "NOT its Switch address",
-            yw4_nrelative + yw4_nsymrelocs, yw4_nimports, ndata);
+    fprintf(stderr, "yw4: %zu relocations applied\n", nrel);
     return 0;
 }

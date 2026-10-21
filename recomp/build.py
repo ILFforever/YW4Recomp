@@ -1,7 +1,7 @@
 """Build the recompiled game: work/recomp/*.c + runtime/src/*.c + musl's math -> work/build/yw4.exe.
 
     python -m recomp.build           compile what changed, link
-    python -m recomp.build --run     ... then run it on work/exefs/main.bin
+    python -m recomp.build --run     ... then run it on work/exefs/ (main.bin, sdk.bin)
 
 Uses [tools] cc (Clang recommended, decision 0007) with -O1 for now. Objects go to
 work/build/obj/; a source is recompiled when it, or any header, is newer than its object.
@@ -59,7 +59,7 @@ def compile_one(cc: str, src: Path, obj: Path, includes: list[str]) -> str | Non
 
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--run", action="store_true", help="run the result on work/exefs/main.bin")
+    ap.add_argument("--run", action="store_true", help="run the result on work/exefs/")
     ap.add_argument("--jobs", type=int, default=os.cpu_count() or 4)
     args = ap.parse_args(argv)
     try:
@@ -104,7 +104,7 @@ def main(argv: list[str] | None = None) -> int:
         return 1
     print(f"built {exe} in {time.time() - t0:.0f} s")
     if args.run:
-        return subprocess.run([str(exe), str(cfg.work_dir / "exefs" / "main.bin")]).returncode
+        return subprocess.run([str(exe), str(cfg.work_dir / "exefs")]).returncode
     return 0
 
 

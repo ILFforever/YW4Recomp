@@ -52,13 +52,15 @@ DRIVER = r"""
 
 %(functions)s
 
-const FuncEntry yw4_funcs[] = {
+static const FuncEntry funcs[] = {
 %(table)s
 };
-const size_t yw4_nfuncs = %(nfuncs)d;
-uint64_t yw4_image_base;
+uint64_t yw4_image_base, yw4_sdk_base;
 
 static uint8_t image[1 << 22] __attribute__((aligned(4096)));
+
+const Yw4CodeModule yw4_code[] = {{"test", &yw4_image_base, sizeof image, funcs, %(nfuncs)d}};
+const size_t yw4_ncode = 1;
 static uint8_t stack[1 << 20] __attribute__((aligned(16)));
 
 int main(int argc, char **argv) {

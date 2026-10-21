@@ -30,9 +30,14 @@ from .lift import bits, sign_extend
 
 @dataclass
 class Code:
-    """A flat guest image: `data` at offset 0, instructions in [0, text_end)."""
+    """A flat guest image: `data` at offset 0, instructions in [0, text_end).
+
+    base: the C variable holding the module's load address (decision 0014: main is
+    yw4_image_base, the sdk yw4_sdk_base); prefix: what its function names start with."""
     data: bytes
     text_end: int
+    base: str = "yw4_image_base"
+    prefix: str = "f_"
 
     def word(self, off: int) -> int:
         return struct.unpack_from("<I", self.data, off)[0]
@@ -83,19 +88,19 @@ def decode_flow(enc: int, pc: int) -> Flow | None:
 
 # --------------------------------------------------------------------------- PC-relative and system
 
-def image_addr(off: int) -> str:
-    return f"(yw4_image_base + {off:#x}ull)"
+def image_addr(off: int, base: str = "yw4_image_base") -> str:
+    return f"({base} + {off:#x}ull)"
 
 
-def emit_pc_relative(enc: int, pc: int) -> str | None:
+def emit_pc_relative(enc: int, pc: int, base: str = "yw4_image_base") -> str | None:
     """ADR, ADRP and integer LDR (literal): the PC is known at translation time."""
     if enc & 0x1F000000 == 0x10000000:                       # ADR, ADRP
         imm = sign_extend(bits(enc, 23, 5) << 2 | bits(enc, 30, 29), 21)
         value = (pc & ~0xFFF) + (imm << 12) if enc >> 31 else pc + imm
-        return lift.wr_reg(bits(enc, 4, 0), 1, image_addr(value)) or ";"
+        return lift.wr_reg(bits(enc, 4, 0), 1, image_addr(value, base)) or ";"
     if enc & 0x3F000000 == 0x18000000:                       # LDR (literal), integer
         opc, t = bits(enc, 31, 30), bits(enc, 4, 0)
-        addr = image_addr(pc + sign_extend(bits(enc, 23, 5), 19) * 4)
+        addr = image_addr(pc + sign_extend(bits(enc, 23, 5), 19) * 4, base)
         if opc == 0:
             return lift.wr_reg(t, 1, f"ld32({addr})") or ";"
         if opc == 1:
@@ -312,8 +317,8 @@ def discover(code: Code, entry: int, entries: set[int]) -> Function:
 
 # --------------------------------------------------------------------------- emission
 
-def fname(off: int) -> str:
-    return f"f_{off:x}"
+def fname(off: int, prefix: str = "f_") -> str:
+    return f"{prefix}{off:x}"
 
 
 def label(off: int) -> str:
@@ -332,22 +337,28 @@ def emit_function(code: Code, fn: Function, entries: set[int], subgroup=None,
     labels: set[int] = set()
     lines: list[str] = []
 
+    def addr(off: int) -> str:
+        return image_addr(off, code.base)
+
+    def name(off: int) -> str:
+        return fname(off, code.prefix)
+
     def jump(t: int) -> str:
         """goto inside the function, tail call into another one."""
         if t in body and (t == fn.entry or t not in entries):
             labels.add(t)
             return f"goto {label(t)};"
         if t in entries:
-            return f"TAILCALL({fname(t)});"
-        return f"yw4_unimplemented(ctx, {image_addr(t)}, 0); /* branch to {t:#x}: not discovered */"
+            return f"TAILCALL({name(t)});"
+        return f"yw4_unimplemented(ctx, {addr(t)}, 0); /* branch to {t:#x}: not discovered */"
 
     for i, off in enumerate(order):
         enc = code.word(off)
         f = decode_flow(enc, off)
-        pc = image_addr(off)
+        pc = addr(off)
         falls_through = True
         if f is None:
-            stmt = emit_pc_relative(enc, off) or emit_system(enc)
+            stmt = emit_pc_relative(enc, off, code.base) or emit_system(enc)
             if stmt is None:
                 try:
                     stmt = lift.lift(enc)
@@ -365,15 +376,15 @@ def emit_function(code: Code, fn: Function, entries: set[int], subgroup=None,
             if f.target not in entries:
                 stmt = f"yw4_unimplemented(ctx, {pc}, {enc:#010x}u); /* call to non-entry {f.target:#x} */"
             else:
-                stmt = f"ctx->x[30] = {image_addr(off + 4)}; {fname(f.target)}(ctx);"
+                stmt = f"ctx->x[30] = {addr(off + 4)}; {name(f.target)}(ctx);"
         elif f.kind == "blr":
-            stmt = (f"{{ uint64_t t = {lift.rd_reg(f.reg, 1)}; ctx->x[30] = {image_addr(off + 4)}; "
+            stmt = (f"{{ uint64_t t = {lift.rd_reg(f.reg, 1)}; ctx->x[30] = {addr(off + 4)}; "
                     f"yw4_resolve(t)(ctx); }}")
         elif f.kind == "br":
             target = lift.rd_reg(f.reg, 1)
             if off in fn.jump_tables:
                 cases = " ".join(f"case {t:#x}: {jump(t)}" for t in sorted(set(fn.jump_tables[off])))
-                stmt = (f"switch ({target} - yw4_image_base) {{ {cases} "
+                stmt = (f"switch ({target} - {code.base}) {{ {cases} "
                         f"default: TAILCALL_INDIRECT({target}); }}")
             else:
                 stmt = f"TAILCALL_INDIRECT({target});"
@@ -388,7 +399,7 @@ def emit_function(code: Code, fn: Function, entries: set[int], subgroup=None,
             if i + 1 >= len(order) or order[i + 1] != nxt:
                 lines.append((None, jump(nxt)))
 
-    out = [f"void {fname(fn.entry)}(CPUState *ctx) {{"]
+    out = [f"void {name(fn.entry)}(CPUState *ctx) {{"]
     for off, stmt in lines:
         if off is not None and off in labels:
             out.append(f"{label(off)}:")

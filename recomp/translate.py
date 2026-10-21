@@ -1,15 +1,22 @@
-"""Translate all of main to C (decision 0007).
+"""Translate main and the sdk to C (decisions 0007, 0014).
 
     python -m recomp.translate              write work/recomp/
     python -m recomp.translate --report     statistics only, write nothing
 
-Entry points: .eh_frame_hdr starts, address-taken targets, Ghidra's function
-entries and every BL target. Output (derived from the game's code, so it stays
-in work/ and is never committed):
+Both modules are version-locked (main by target.toml [main], the sdk by [sdk]).
+Entry points per module: .eh_frame_hdr starts, address-taken targets, defined
+function symbols, every BL target, and for main also Ghidra's function entries.
+Output (derived from the game's code, so it stays in work/ and is never committed):
 
-    work/recomp/funcs.h          prototypes of every f_<offset>
-    work/recomp/main_NNN.c       the functions, CHUNK per file (for a parallel build)
-    work/recomp/func_table.c     yw4_funcs[], the sorted table yw4_resolve searches
+    work/recomp/funcs.h          prototypes: f_<offset> (main), s_<offset> (sdk)
+    work/recomp/main_NNN.c       main's functions, CHUNK per file (for a parallel build)
+    work/recomp/sdk_NNN.c        the sdk's functions
+    work/recomp/func_table.c     yw4_code[]: each module's sorted function table (yw4_resolve)
+    work/recomp/image_info.c     yw4_modules[]: what the loader needs (sizes, hashes, relocations)
+
+Symbols are resolved here, not at run time: both modules are known, so every symbolic
+relocation becomes "module + offset" in load order (main first, then the sdk, as the
+Switch's dynamic loader searches), or 0 for weak symbols nobody defines.
 """
 
 from __future__ import annotations
@@ -20,35 +27,49 @@ import hashlib
 import json
 import struct
 import sys
+from dataclasses import dataclass
 
-from tools.yw4 import config, recon, reloc, symbols
+from tools.yw4 import config, recon, reloc, sdkref
 
 from . import coverage, function
 
 CHUNK = 500
 
-
-def load_code(cfg: config.Config) -> tuple[function.Code, dict]:
-    image, mods = recon.load_main(cfg)  # refuses a build that doesn't match target.toml
-    return function.Code(image, mods["main"]["segments"]["text"]["size"]), mods
-
-
-def entry_points(cfg: config.Config, code: function.Code) -> set[int]:
-    entries = set(recon.eh_frame_function_starts(code.data))
-    entries |= recon.address_taken_functions(code.data, code.text_end)
-    ghidra = json.loads((cfg.work_dir / "ghidra" / "main.functions.json").read_text())["functions"]
-    entries |= {f["entry"] for f in ghidra}
-    for off in range(0, code.text_end, 4):  # BL targets
-        f = function.decode_flow(code.word(off), off)
-        if f and f.kind == "bl" and code.is_code(f.target):
-            entries.add(f.target)
-    return {e for e in entries if code.is_code(e)}
-
-
 R_RELATIVE, SYMBOL_RELOCS = reloc.R_AARCH64_RELATIVE, (reloc.R_AARCH64_ABS64, reloc.R_AARCH64_GLOB_DAT,
                                                    reloc.R_AARCH64_JUMP_SLOT)
-STT_OBJECT, STT_FUNC = 1, 2
+STT_FUNC = 2
 DT_INIT = 0xC
+NO_MODULE = 0xFFFFFFFF
+INIT_START = "_ZN2nn4init5StartEmmPFvvES2_"  # nn::init::Start(u64, u64, void (*)(), void (*)())
+
+
+@dataclass
+class Module:
+    name: str            # also the file in work/exefs/ (<name>.bin) and the C file prefix
+    prefix: str          # function names
+    base: str            # C variable holding the load address
+    preferred: int       # where the runtime tries to put it (inside the 39-bit space)
+    image: bytes
+    info: dict
+    code: function.Code
+
+    @property
+    def mem_size(self) -> int:
+        return (max(len(self.image), reloc.read_mod0(self.image).bss_end) + 0xFFF) & ~0xFFF
+
+
+def load_modules(cfg: config.Config) -> list[Module]:
+    """main, then the sdk: load order, which is also symbol search order. The sdk goes right
+    after main, 2 MiB aligned; main stays at its Switch address (decision 0010)."""
+    main_image, mods = recon.load_main(cfg)  # each refuses a build that doesn't match target.toml
+    sdk_image, sdk_info = sdkref.load_sdk(cfg)
+    out = []
+    for name, prefix, base, image, info in (("main", "f_", "yw4_image_base", main_image, mods["main"]),
+                                            ("sdk", "s_", "yw4_sdk_base", sdk_image, sdk_info)):
+        code = function.Code(image, info["segments"]["text"]["size"], base, prefix)
+        preferred = 0x7100000000 if not out else (out[-1].preferred + out[-1].mem_size + 0x1FFFFF) & ~0x1FFFFF
+        out.append(Module(name, prefix, base, preferred, image, info, code))
+    return out
 
 
 def raw_dynsym(image: bytes, info: dict) -> list[tuple[str, int, int, int]]:
@@ -63,51 +84,70 @@ def raw_dynsym(image: bytes, info: dict) -> list[tuple[str, int, int, int]]:
     return out
 
 
-def image_info(cfg: config.Config, code: function.Code, mods: dict) -> str:
-    """Loader tables (decision 0010): image size, relocations, imports, entry points."""
-    image, info = code.data, mods["main"]
-    syms = raw_dynsym(image, info)
-    sdk = (cfg.work_dir / "exefs" / "sdk.bin").read_bytes()
-    sdk_exports = {s.name for s in symbols.read_dynsym(sdk, mods["sdk"]) if s.defined}
-    relocs = reloc.read_relocs(image)
-    unknown = {r.type for r in relocs} - {R_RELATIVE, *SYMBOL_RELOCS}
-    if unknown:
-        raise RuntimeError(f"unsupported relocation types {unknown}")
-    used = sorted({r.sym for r in relocs if r.type in SYMBOL_RELOCS})
-    index = {sym: i for i, sym in enumerate(used)}
-    imports = []
-    for sym in used:
-        name, typ, shndx, _ = syms[sym]
-        if shndx != 0:
-            raise RuntimeError(f"symbol relocation against a defined symbol {name}: not handled yet")
-        if name not in sdk_exports:
-            kind = "YW4_IMPORT_NULL"  # weak and undefined everywhere: resolves to 0
-        else:
-            kind = "YW4_IMPORT_DATA" if typ == STT_OBJECT else "YW4_IMPORT_FUNC"
-        imports.append((name, kind))
-    defined = {name: value for name, _, shndx, value in syms if shndx != 0}
-    mod0 = reloc.read_mod0(image)
-    mem_size = (max(len(image), mod0.bss_end) + 0xFFF) & ~0xFFF
-    init = reloc.read_dynamic(image, mod0)[DT_INIT]
+def entry_points(cfg: config.Config, m: Module) -> set[int]:
+    code = m.code
+    entries = set(recon.eh_frame_function_starts(code.data))
+    entries |= recon.address_taken_functions(code.data, code.text_end)
+    entries |= {v for _, typ, shndx, v in raw_dynsym(m.image, m.info) if shndx and typ == STT_FUNC}
+    if m.name == "main":
+        ghidra = json.loads((cfg.work_dir / "ghidra" / "main.functions.json").read_text())["functions"]
+        entries |= {f["entry"] for f in ghidra}
+    for off in range(0, code.text_end, 4):  # BL targets
+        f = function.decode_flow(code.word(off), off)
+        if f and f.kind == "bl" and code.is_code(f.target):
+            entries.add(f.target)
+    return {e for e in entries if code.is_code(e)}
 
-    rel = ",\n".join(f"    {{{r.offset:#x}, {r.addend:#x}}}" for r in relocs if r.type == R_RELATIVE)
-    srel = ",\n".join(f"    {{{r.offset:#x}, {index[r.sym]}, {r.type}, {r.addend:#x}}}"
-                       for r in relocs if r.type in SYMBOL_RELOCS)
-    imp = ",\n".join(f'    {{"{n}", {k}}}' for n, k in imports)
-    stubs = "\n".join(f"static void imp_{i}(CPUState *ctx) {{ yw4_import_call(ctx, {i}); }}" for i in range(len(imports)))
-    fns = ", ".join(f"imp_{i}" for i in range(len(imports)))
-    return (f'#include "yw4load.h"\n\n'
-            f'const char yw4_image_sha256[65] = "{hashlib.sha256(image).hexdigest()}";\n'
-            f"const uint64_t yw4_image_file_size = {len(image)}, yw4_image_mem_size = {mem_size:#x};\n"
-            f"const uint64_t yw4_entry_startup = {defined['nninitStartup']:#x}, yw4_entry_init = {init:#x}, "
-            f"yw4_entry_main = {defined['nnMain']:#x};\n\n"
-            f"const Yw4Relative yw4_relative[] = {{\n{rel}\n}};\n"
-            f"const size_t yw4_nrelative = {sum(r.type == R_RELATIVE for r in relocs)};\n\n"
-            f"const Yw4SymReloc yw4_symrelocs[] = {{\n{srel}\n}};\n"
-            f"const size_t yw4_nsymrelocs = {sum(r.type in SYMBOL_RELOCS for r in relocs)};\n\n"
-            f"const Yw4Import yw4_imports[] = {{\n{imp}\n}};\n"
-            f"const size_t yw4_nimports = {len(imports)};\n\n"
-            f"{stubs}\n\nconst GuestFn yw4_import_fns[] = {{{fns}}};\n")
+
+def resolve_relocations(modules: list[Module]) -> tuple[list[list], list[list], collections.Counter]:
+    """Per module: RELATIVE (offset, addend) and symbolic (offset, module index, value)."""
+    syms = [raw_dynsym(m.image, m.info) for m in modules]
+    defined = [{name: value for name, _, shndx, value in s if shndx} for s in syms]
+    unresolved: collections.Counter = collections.Counter()
+    relative, symbolic = [], []
+    for i, m in enumerate(modules):
+        rel, sym = [], []
+        for r in reloc.read_relocs(m.image):
+            if r.type == R_RELATIVE:
+                rel.append((r.offset, r.addend))
+            elif r.type in SYMBOL_RELOCS:
+                name = syms[i][r.sym][0]
+                where = next((j for j, d in enumerate(defined) if name in d), None)
+                if where is None:  # weak and defined nowhere (linker markers): 0
+                    unresolved[name] += 1
+                    sym.append((r.offset, NO_MODULE, 0))
+                else:
+                    sym.append((r.offset, where, (defined[where][name] + r.addend) & (2**64 - 1)))
+            else:
+                raise RuntimeError(f"{m.name}: unsupported relocation type {r.type}")
+        relative.append(rel)
+        symbolic.append(sym)
+    return relative, symbolic, unresolved
+
+
+def image_info(modules: list[Module], relative: list[list], symbolic: list[list], npdm: bytes) -> str:
+    """Loader tables (decisions 0010, 0014): per module its size, hash, relocations, DT_INIT."""
+    out = ['#include "yw4load.h"\n']
+    rows = []
+    for i, m in enumerate(modules):
+        rel = ",\n".join(f"    {{{o:#x}, {a:#x}}}" for o, a in relative[i]) or "    {0, 0}"
+        sym = ",\n".join(f"    {{{o:#x}, {mod:#x}, {v:#x}}}" for o, mod, v in symbolic[i]) or "    {0, 0, 0}"
+        out.append(f"static const Yw4Relative relative_{m.name}[] = {{\n{rel}\n}};\n"
+                   f"static const Yw4SymReloc symrelocs_{m.name}[] = {{\n{sym}\n}};\n")
+        init = reloc.read_dynamic(m.image, reloc.read_mod0(m.image)).get(DT_INIT, 0)
+        rows.append(f'    {{"{m.name}", "{m.name}.bin", "{hashlib.sha256(m.image).hexdigest()}", {len(m.image)}, '
+                    f"{m.mem_size:#x}, {m.preferred:#x}, &{m.base},\n"
+                    f"     relative_{m.name}, {len(relative[i])}, symrelocs_{m.name}, {len(symbolic[i])}, {init:#x}}}")
+    start = {name: v for name, _, shndx, v in raw_dynsym(modules[1].image, modules[1].info) if shndx}[INIT_START]
+    if npdm[:4] != b"META":
+        raise RuntimeError("main.npdm: no META header")
+    stack = struct.unpack_from("<I", npdm, 0x1C)[0]
+    out.append("const Yw4Module yw4_modules[] = {\n" + ",\n".join(rows) + "\n};\n"
+               f"const size_t yw4_nmodules = {len(modules)};\n"
+               f"const uint64_t yw4_entry_init_start = {start:#x};  /* nn::init::Start, in the sdk */\n"
+               f"const uint64_t yw4_main_stack_size = {stack:#x};  /* main thread, from the NPDM */\n"
+               f"const uint32_t yw4_main_priority = {npdm[0xE]};\n")
+    return "\n".join(out)
 
 
 def write_if_changed(path, text: str) -> None:
@@ -116,18 +156,9 @@ def write_if_changed(path, text: str) -> None:
         path.write_text(text)
 
 
-def main(argv: list[str] | None = None) -> int:
-    ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--report", action="store_true", help="print statistics, write nothing")
-    args = ap.parse_args(argv)
-    try:
-        cfg = config.load()
-        code, mods = load_code(cfg)
-    except config.ConfigError as e:
-        print(f"config error: {e}", file=sys.stderr)
-        return 1
-
-    entries = entry_points(cfg, code)
+def translate(cfg: config.Config, m: Module) -> tuple[list[function.Function], list[str]]:
+    code = m.code
+    entries = entry_points(cfg, m)
     funcs = [function.discover(code, e, entries) for e in sorted(entries)]
     stats = function.EmitStats()
     sources = [function.emit_function(code, fn, entries, coverage.subgroup, stats) for fn in funcs]
@@ -142,37 +173,65 @@ def main(argv: list[str] | None = None) -> int:
     unique = len(set().union(*(fn.body for fn in funcs)))
     problems = [p for fn in funcs for p in fn.problems]
     unimpl = sum(stats.unimplemented.values())
+    print(f"== {m.name} (preferred base {m.preferred:#x}, {m.mem_size:#x} bytes)")
     print(f"functions:               {len(funcs):,}")
     print(f"instructions translated: {translated:,} ({unique:,} unique, "
           f"{translated - unique:,} duplicated into more than one function)")
-    print(f"untranslated (traps):    {unimpl:,} ({100 * unimpl / translated:.1f}%)")
+    print(f"untranslated (traps):    {unimpl:,} ({100 * unimpl / translated:.2f}%)")
     for g, n in sorted(stats.unimplemented.items(), key=lambda kv: -kv[1]):
         print(f"    {n:10,}  {g}")
     print(f"BR: {dict(brs)}")
     print(f"flow problems: {len(problems)}")
     for p in problems[:10]:
         print(f"    {p}")
+    return funcs, sources
+
+
+def main(argv: list[str] | None = None) -> int:
+    ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap.add_argument("--report", action="store_true", help="print statistics, write nothing")
+    args = ap.parse_args(argv)
+    try:
+        cfg = config.load()
+        modules = load_modules(cfg)
+    except config.ConfigError as e:
+        print(f"config error: {e}", file=sys.stderr)
+        return 1
+
+    results = [translate(cfg, m) for m in modules]
+    relative, symbolic, unresolved = resolve_relocations(modules)
+    print(f"== relocations: " + ", ".join(f"{m.name} {len(relative[i]):,} relative + {len(symbolic[i]):,} symbolic"
+                                          for i, m in enumerate(modules)))
+    print(f"   weak symbols defined nowhere (-> 0): {dict(unresolved)}")
     if args.report:
         return 0
 
     out = cfg.work_dir / "recomp"
     out.mkdir(parents=True, exist_ok=True)
-    nfiles = (len(sources) + CHUNK - 1) // CHUNK
-    for old in out.glob("main_*.c"):
-        if int(old.stem[5:]) >= nfiles:
-            old.unlink()
-    header = "/* Generated by recomp.translate from the owner's copy of main. Do not commit. */\n"
-    protos = "\n".join(f"void {function.fname(fn.entry)}(CPUState *ctx);" for fn in funcs)
-    write_if_changed(out / "funcs.h", f"{header}#pragma once\n#include \"yw4rt.h\"\n{protos}\n")
-    for i in range(0, len(sources), CHUNK):
-        write_if_changed(out / f"main_{i // CHUNK:03}.c",
-                         f"{header}#include \"funcs.h\"\n\n" + "\n\n".join(sources[i:i + CHUNK]) + "\n")
-    table = ",\n".join(f"    {{{fn.entry:#x}, {function.fname(fn.entry)}}}" for fn in funcs)
+    header = "/* Generated by recomp.translate from the owner's copy of the game. Do not commit. */\n"
+    protos, tables, entries = [], [], []
+    nfiles_total = 0
+    for m, (funcs, sources) in zip(modules, results):
+        nfiles = (len(sources) + CHUNK - 1) // CHUNK
+        nfiles_total += nfiles
+        for old in out.glob(f"{m.name}_*.c"):
+            if old.stem[len(m.name) + 1:].isdigit() and int(old.stem[len(m.name) + 1:]) >= nfiles:
+                old.unlink()
+        for i in range(0, len(sources), CHUNK):
+            write_if_changed(out / f"{m.name}_{i // CHUNK:03}.c",
+                             f"{header}#include \"funcs.h\"\n\n" + "\n\n".join(sources[i:i + CHUNK]) + "\n")
+        protos += [f"void {function.fname(fn.entry, m.prefix)}(CPUState *ctx);" for fn in funcs]
+        rows = ",\n".join(f"    {{{fn.entry:#x}, {function.fname(fn.entry, m.prefix)}}}" for fn in funcs)
+        tables.append(f"static const FuncEntry funcs_{m.name}[] = {{\n{rows}\n}};\n")
+        entries.append(f'    {{"{m.name}", &{m.base}, {m.mem_size:#x}, funcs_{m.name}, {len(funcs)}}}')
+    write_if_changed(out / "funcs.h", f"{header}#pragma once\n#include \"yw4rt.h\"\n" + "\n".join(protos) + "\n")
     write_if_changed(out / "func_table.c",
-                     f"{header}#include \"funcs.h\"\n\nconst FuncEntry yw4_funcs[] = {{\n{table}\n}};\n"
-                     f"const size_t yw4_nfuncs = {len(funcs)};\n")
-    write_if_changed(out / "image_info.c", header + image_info(cfg, code, mods))
-    print(f"wrote {out} ({nfiles} source files + func_table.c, image_info.c)")
+                     f"{header}#include \"funcs.h\"\n\n" + "\n".join(tables) +
+                     "\nconst Yw4CodeModule yw4_code[] = {\n" + ",\n".join(entries) + "\n};\n"
+                     f"const size_t yw4_ncode = {len(modules)};\n")
+    npdm = (cfg.exefs_dir / "main.npdm").read_bytes()
+    write_if_changed(out / "image_info.c", header + image_info(modules, relative, symbolic, npdm))
+    print(f"wrote {out} ({nfiles_total} source files + func_table.c, image_info.c)")
     return 0
 
 

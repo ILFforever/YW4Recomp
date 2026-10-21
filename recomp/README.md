@@ -6,7 +6,7 @@ The AArch64 → C recompiler (Python, see `docs/decisions/0006`). Its output is 
 |---|---|
 | `lift.py` | Single-instruction translation: one `Form` per encoding layout, emitting C that works on a `CPUState` (`runtime/include/yw4cpu.h`) |
 | `function.py` | Whole-function translation: finds function bodies by following control flow, branches, calls, jump tables, PC-relative values (`docs/decisions/0007`) |
-| `translate.py` | Translates all of `main` into `work/recomp/` (version-locked) |
+| `translate.py` | Translates `main` and the `sdk` into `work/recomp/` (both version-locked), resolving symbols between them (decision 0014) |
 | `build.py` | Compiles `work/recomp/` + `runtime/src/` into `work/build/yw4.exe` (incremental, parallel); `--run` starts it on `main.bin` |
 | `functest.py` | Whole-function tests: code from `tests/functest/` compiled and run on the Pi vs. its translation on the host |
 | `golden.py` | Makes test cases per form and runs them on the ARM64 reference machine (`pi/`) to get golden results |
@@ -26,6 +26,6 @@ After changing control flow or function translation:
 
 ```
 python -m recomp.functest          # must print "all functions match"
-python -m recomp.translate         # all of main -> work/recomp/ (prints what is untranslated)
-python -m recomp.build --run       # build yw4.exe and run it (stops at the first unimplemented import)
+python -m recomp.translate         # main + sdk -> work/recomp/ (prints what is untranslated)
+python -m recomp.build --run       # build yw4.exe and run it (stops at the first unimplemented SVC)
 ```

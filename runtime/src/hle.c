@@ -1,12 +1,9 @@
-/* Calls from main into sdk imports (decision 0010).
+/* Native implementations of sdk functions, by mangled name (decisions 0010-0013).
  *
- * Every import is a stub address; calling it lands in yw4_import_call with the import's
- * index. Imports with a native implementation in hle_table run it (arguments in x0-x7 and
- * v0-v7, result in x0/v0, as in the AArch64 calling convention); every other import stops
- * the program with its name and the guest address it was called from, so the next thing
- * to implement is always obvious.
- *
- * YW4_TRACE=1 prints every import call.
+ * Since decision 0014 the sdk is recompiled and runs itself, so main no longer calls these
+ * through import stubs. They take arguments in x0-x7 / v0-v7 and return in x0/v0, as in the
+ * AArch64 calling convention, so any of them can become an override of the recompiled
+ * function later (yw4_hle_find).
  */
 #include <inttypes.h>
 #include <stdarg.h>
@@ -132,43 +129,23 @@ static const HleEntry hle_table[] = {
     {NULL, NULL},
 };
 
-static uint64_t caller_of(const CPUState *ctx) {
-    return ctx->x[30] - 4 - yw4_image_base;  /* the BL that called the stub */
-}
-
 _Noreturn void yw4_hle_stop(CPUState *ctx, const char *fmt, ...) {
     va_list ap;
     va_start(ap, fmt);
     fprintf(stderr, "yw4: ");
     vfprintf(stderr, fmt, ap);
     va_end(ap);
-    fprintf(stderr, "\n     called from main+%#" PRIx64 "\n", caller_of(ctx));
+    char where[48];
+    fprintf(stderr, "\n     called from %s\n", yw4_describe(ctx->x[30] - 4, where));
     exit(3);
 }
 
-static GuestFn find_impl(const char *name) {
+/* The native implementation of an sdk function, by mangled name, or NULL. Since decision
+ * 0014 the sdk itself is recompiled, so nothing reaches these through import stubs any
+ * more. They stay until the recompiled sdk passes the same checks (sdkref --check); this
+ * lookup is also where symbol overrides (NVN) will come from. */
+GuestFn yw4_hle_find(const char *name) {
     for (const HleEntry *e = hle_table; e->name; e++)
         if (strcmp(e->name, name) == 0) return e->fn;
     return NULL;
-}
-
-void yw4_import_call(CPUState *ctx, uint32_t index) {
-    static int trace = -1;
-    if (trace < 0) {
-        const char *t = getenv("YW4_TRACE");
-        trace = t && *t && *t != '0';
-    }
-    const char *name = yw4_imports[index].name;
-    uint64_t caller = caller_of(ctx);
-    if (trace)
-        fprintf(stderr, "yw4: import %s from %#" PRIx64 "\n", name, caller);
-    GuestFn fn = find_impl(name);
-    if (fn) {
-        fn(ctx);
-        return;
-    }
-    fprintf(stderr, "yw4: unimplemented import #%u %s\n"
-                    "     called from main+%#" PRIx64 " with x0=%#" PRIx64 " x1=%#" PRIx64 " x2=%#" PRIx64 "\n",
-            index, name, caller, ctx->x[0], ctx->x[1], ctx->x[2]);
-    exit(3);
 }
