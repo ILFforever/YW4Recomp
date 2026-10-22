@@ -104,5 +104,17 @@ and turns them into Vulkan at submit. The expensive part is `f_a45890` plus the 
    Open: a few submeshes (about one per cascade layer, objects not identified yet) are drawn by the game with an
    extra per-submesh offset on top of the object's world matrix (a node transform, location unknown): their
    matrix doesn't match ours, so they stay with the game until node transforms are applied.
-4. Instanced, then skinned, then cut-out casters. Depth comparison after each.
+4. **Instanced casters: done** (vertex program `a74842` + `6ead6a`). The model renderer gets an instanced model's
+   copies from the model's callback `main+0x5f9420` (model `+0xe0`): it culls the copies against the view (the
+   object's box, which is one copy's, through each copy's transform; then an occlusion test) and writes the kept
+   ones into a new buffer every frame, bound as vertex cbuf 11. We read all copies instead: `model+0x214` sets
+   (0 = 1) of `[model+0xd0]` (0x38 bytes: first copy `+0x30`, count `+0x32`), transforms at `[model+0x168]`
+   (3×4, 48 bytes), a byte per copy at `[model+0x170]` (with `model+0x218` set, the callback adds byte × 100 to
+   a copy's first value when it is below 100; we do the same). Each copy is its own draw with
+   projection × view × copy × world, culled by the side planes only (looser than the game's). Learned like the
+   static ones; the check also needs every copy the game drew to be one of ours. Street, `YW4_SHADOWS=check`:
+   0 of ~75,000 instanced draws with a copy we don't have, 0 drawn copies that our culling drops; the
+   screenshot against the game's shadows differs only by run-to-run noise (animation timing). Not handled
+   (the game keeps them): split copies (`model+0x216`), more than 8 sets.
+   Next: skinned, then cut-out casters. Depth comparison after each.
 5. Switch the default to `native` once every street, house and battle layer matches; measure CPU.
