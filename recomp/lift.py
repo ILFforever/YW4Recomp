@@ -923,6 +923,8 @@ def _simd_three_same(e: int) -> str:
         kind, fn = FP3[(u, size >> 1, op)]
         a, b = f"n_.{lane}[i]", f"m_.{lane}[i]"
         ones = "~(uint32_t)0" if sz == 0 else "~(uint64_t)0"
+        if kind == "lane" and fn in ("add", "sub", "mul", "div"):  # all lanes at once (yw4cpu.h)
+            return vec(d, srcs, f"r_ = vf32_{fn}(n_, m_, {count});" if sz == 0 else f"r_ = vf64_{fn}(n_, m_);")
         if kind == "lane":
             stmt = f"r_.{lane}[i] = {p}_{fn}({a}, {b});"
         elif kind == "abd":
@@ -1251,6 +1253,8 @@ def _simd_by_elem(e: int) -> str:
         sz = size & 1
         p, lane = FP[sz][0], LANE[2 + sz]
         srcs = {"n_": n, "m_": m}
+        if kind == "fmul" and sz == 0:  # all lanes at once (runtime/include/yw4cpu.h)
+            return vec(d, srcs, f"r_ = vf32_mul_elem(n_, m_.s[{idx}], {lanes(q, 2)});")
         if kind == "fmul":
             stmt = f"r_.{lane}[i] = {p}_mul(n_.{lane}[i], k_);"
         else:  # fused, one rounding per lane

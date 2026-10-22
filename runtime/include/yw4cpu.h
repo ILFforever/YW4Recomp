@@ -163,4 +163,61 @@ static inline void st64(uint64_t a, uint64_t v) { memcpy((void *)(uintptr_t)a, &
 
 #include "yw4fp.h"
 
+/* Vector FADD/FSUB/FMUL/FDIV on `count` lanes (the rest of the register zero), as the
+ * per-lane f32_/f64_ helpers give it: all lanes at once with SSE, and only if a lane's
+ * result is a NaN, every lane again through the helper (which applies ARM's NaN rules).
+ * by_elem: m's lane `idx` for every lane (FMUL by element). */
+#if defined(__x86_64__)
+#define YW4_VFP_BINOP(name, ps, pd)                                                          \
+    static inline v128 vf32_##name(v128 n, v128 m, int count) {                              \
+        v128 r;                                                                              \
+        __m128 z = ps(_mm_loadu_ps(n.f), _mm_loadu_ps(m.f));                                 \
+        _mm_storeu_ps(r.f, z);                                                               \
+        if (count == 2) r.d[1] = 0;                                                          \
+        if (__builtin_expect(_mm_movemask_ps(_mm_cmpunord_ps(z, z)) & ((1 << count) - 1), 0)) \
+            for (int i = 0; i < count; i++) r.s[i] = f32_##name(n.s[i], m.s[i]);             \
+        return r;                                                                            \
+    }                                                                                        \
+    static inline v128 vf32_##name##_elem(v128 n, uint32_t k, int count) {                   \
+        v128 m;                                                                              \
+        m.s[0] = m.s[1] = m.s[2] = m.s[3] = k;                                               \
+        return vf32_##name(n, m, count);                                                     \
+    }                                                                                        \
+    static inline v128 vf64_##name(v128 n, v128 m) {                                         \
+        v128 r;                                                                              \
+        __m128d z = pd(_mm_loadu_pd(n.df), _mm_loadu_pd(m.df));                              \
+        _mm_storeu_pd(r.df, z);                                                              \
+        if (__builtin_expect(_mm_movemask_pd(_mm_cmpunord_pd(z, z)), 0))                     \
+            for (int i = 0; i < 2; i++) r.d[i] = f64_##name(n.d[i], m.d[i]);                 \
+        return r;                                                                            \
+    }
+YW4_VFP_BINOP(add, _mm_add_ps, _mm_add_pd)
+YW4_VFP_BINOP(sub, _mm_sub_ps, _mm_sub_pd)
+YW4_VFP_BINOP(mul, _mm_mul_ps, _mm_mul_pd)
+YW4_VFP_BINOP(div, _mm_div_ps, _mm_div_pd)
+#undef YW4_VFP_BINOP
+#else
+#define YW4_VFP_BINOP(name)                                                                  \
+    static inline v128 vf32_##name(v128 n, v128 m, int count) {                              \
+        v128 r = {{0}};                                                                      \
+        for (int i = 0; i < count; i++) r.s[i] = f32_##name(n.s[i], m.s[i]);                 \
+        return r;                                                                            \
+    }                                                                                        \
+    static inline v128 vf32_##name##_elem(v128 n, uint32_t k, int count) {                   \
+        v128 r = {{0}};                                                                      \
+        for (int i = 0; i < count; i++) r.s[i] = f32_##name(n.s[i], k);                      \
+        return r;                                                                            \
+    }                                                                                        \
+    static inline v128 vf64_##name(v128 n, v128 m) {                                         \
+        v128 r;                                                                              \
+        for (int i = 0; i < 2; i++) r.d[i] = f64_##name(n.d[i], m.d[i]);                     \
+        return r;                                                                            \
+    }
+YW4_VFP_BINOP(add)
+YW4_VFP_BINOP(sub)
+YW4_VFP_BINOP(mul)
+YW4_VFP_BINOP(div)
+#undef YW4_VFP_BINOP
+#endif
+
 #endif
