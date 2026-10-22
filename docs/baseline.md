@@ -40,8 +40,26 @@ GPU use and GPU memory are for the whole GPU, so other programs (desktop, browse
 
 ## To do
 
-- A busier scene (town, battle) once the recompiled build gets that far.
 - The recompiled build measured the same way (its own log is in `work/perf/`, see README).
+
+## Recompiled build vs Eden, busy street (~1,480 draws), 2026-10-22
+
+Same spot (the street by the school gate where the owner's save loads), standing still, both
+running at the same time, per-process Windows counters over ~50 s. Ours after the CPU work of
+2026-10-22 (FP fast paths, -O2, restrict, SSE vector maths, native memcpy, call caches).
+
+| Measure | Eden | Recompiled build |
+|---|---|---|
+| CPU | 210% of one core | 111% |
+| GPU, 3D engine (this process only) | 29.7% average (peak 33%) | 33.0% average (peak 35%) |
+| Memory, private bytes (committed; not Task Manager's column) | 15.7 GB | 3.9 GB |
+| Frames over 34.5 ms | (no per-frame log) | 0.2%, p99 33.9 ms |
+
+Notes:
+- Our GPU time per frame from timestamps is 18-19 ms here; Eden's GPU share is a little lower,
+  so the renderer is now the side with more to gain (Phase 4b/4c).
+- Committed private memory is not what Task Manager shows (see the memory note below); it is
+  given here only because both processes were measured the same way.
 
 ## Recompiled build vs Eden, opening scene (Whisper dialogue), 2026-10-22
 
