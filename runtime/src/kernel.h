@@ -6,6 +6,13 @@
 
 #include "yw4rt.h"
 
+#include <stdio.h>
+
+/* Performance log: what a guest thread was seen doing, and each thread's CPU use. */
+enum { YW4_ROLE_PRESENT = 1, YW4_ROLE_SUBMIT = 2 };
+void yw4_thread_role(int role);
+void yw4_thread_cpu_report(FILE *f, int64_t interval_ns);
+
 /* Horizon memory types and permissions, as svcQueryMemory reports them. */
 enum {
     MEM_UNMAPPED = 0x00, MEM_CODE_STATIC = 0x03, MEM_CODE_MUTABLE = 0x04, MEM_HEAP = 0x05,

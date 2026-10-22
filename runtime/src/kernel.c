@@ -154,6 +154,9 @@ struct KThread {
     KObject *objs[MAX_WAIT_OBJECTS];
     int32_t nobjs;
     KThread *next;       /* all threads */
+    void *host;          /* the host thread, for its CPU time (performance log) */
+    int64_t cpu_last;    /* its CPU time at the last report */
+    int roles;           /* YW4_ROLE_* seen on it */
 };
 
 /* Thread-local regions: one 4 KiB page per thread slot (Horizon packs 0x200-byte regions
@@ -471,6 +474,7 @@ static void thread_main(void *p) {
     KThread *t = p;
     jmp_buf jump;
     cur = t;
+    t->host = host_thread_self();
     exit_jump = &jump;
     if (setjmp(jump) == 0) {
         yw4_resolve(t->entry)(t->ctx);
@@ -523,6 +527,26 @@ static uint32_t start_thread(uint32_t handle) {
     return R_OK;
 }
 
+void yw4_thread_role(int role) {
+    if (cur) cur->roles |= role;
+}
+
+/* One line per guest thread that used CPU since the last call: its share of one core over
+   `interval_ns`, entry point, priority, core and roles. For the performance summary. */
+void yw4_thread_cpu_report(FILE *f, int64_t interval_ns) {
+    host_lock(&klock);
+    for (KThread *t = threads; t; t = t->next) {
+        if (!t->host || t->exited) continue;
+        int64_t now = host_thread_cpu_ns(t->host), used = now - t->cpu_last;
+        t->cpu_last = now;
+        if (interval_ns <= 0 || used * 100 < interval_ns) continue;  /* under 1% */
+        fprintf(f, "    thread %" PRIu64 ": %3.0f%% of a core  entry %#" PRIx64 " prio %d core %d%s%s\n", t->id,
+                100.0 * (double)used / (double)interval_ns, t->entry, t->priority, t->core,
+                t->roles & YW4_ROLE_PRESENT ? "  [presents]" : "", t->roles & YW4_ROLE_SUBMIT ? "  [submits GPU work]" : "");
+    }
+    host_unlock(&klock);
+}
+
 uint32_t yw4_kernel_init(CPUState *ctx, uint64_t stack, uint64_t stack_size) {
     host_lock_init(&klock);
     host_install_crash_handler(report_crash);
@@ -562,6 +586,7 @@ uint32_t yw4_kernel_init(CPUState *ctx, uint64_t stack, uint64_t stack_size) {
     threads = t;
     nrunnable = 1;
     cur = t;
+    t->host = host_thread_self();
     return yw4_handle_new(&t->obj);
 }
 

@@ -134,7 +134,10 @@ static uint64_t frames;
 NVN(nvnQueueSubmitCommands) {  /* (queue, count, const NVNcommandHandle*) */
     int n = (int)A(1);
     const uint64_t *handles = AP(2);
+    int64_t t = host_now_ns();
+    yw4_thread_role(YW4_ROLE_SUBMIT);
     for (int i = 0; i < n; i++) nvn_execute(handles[i]);
+    yw4_perf_add(PERF_SUBMIT, host_now_ns() - t);
 }
 /* The display flips at vsync and shows each frame for `interval` vsyncs; NVN only hands
  * out a window texture again once the display is done with it. Headless, presenting waits
@@ -172,6 +175,9 @@ static void show(NvnTexture *t, uint64_t frame, const int crop[4]) {
 NVN(nvnQueuePresentTexture) {  /* (queue, window, texture index) */
     NvnWindow *w = HOST(NvnWindow, A(1));
     int index = (int)A(2);
+    yw4_perf_presenter = 1;
+    yw4_thread_role(YW4_ROLE_PRESENT);
+    yw4_profile_start_here();
     int64_t perf_enter = host_now_ns();
     if (index >= 0 && index < w->num) show(HOST(NvnTexture, w->textures[index]), frames + 1, w->crop);
     int64_t perf_shown = host_now_ns();
@@ -204,7 +210,12 @@ NVN(nvnQueueWaitSync) { RET(1); }  /* (queue, sync) */
 NVN(nvnSyncInitialize) { G(uint64_t, A(0), 0) = 0; RET(1); }
 NVN(nvnSyncFinalize) { (void)c; }
 /* (sync, timeout ns) -> ALREADY_SIGNALED 0, CONDITION_SATISFIED 1, TIMEOUT_EXPIRED 2 */
-NVN(nvnSyncWait) { RET(gpu_wait(G(uint64_t, A(0), 0), A(1))); }
+NVN(nvnSyncWait) {
+    int64_t t = host_now_ns();
+    int r = gpu_wait(G(uint64_t, A(0), 0), A(1));
+    yw4_perf_add(PERF_SYNC, host_now_ns() - t);
+    RET(r);
+}
 
 /* ================================================================== memory pools
  * Builder: device@0 flags@8 storage@0x10 size@0x18. GPU addresses are guest addresses. */

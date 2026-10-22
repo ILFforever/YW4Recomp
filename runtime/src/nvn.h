@@ -192,6 +192,11 @@ void nvn_execute(uint64_t handle);
 uint64_t nvn_take_draw_count(void);
 /* perf.c: one row of the performance log per presented frame (times from host_now_ns). */
 void yw4_perf_frame(uint64_t frame, int64_t enter, int64_t shown, int64_t exit_, uint64_t draws);
+/* Adds host time to this frame's row: PERF_SUBMIT (nvnQueueSubmitCommands) or PERF_SYNC (waits on the GPU). */
+enum { PERF_SUBMIT, PERF_SYNC };
+void yw4_perf_add(int what, int64_t ns);
+void yw4_profile_start_here(void);  /* profile.c: YW4_PROFILE=1 samples the calling thread */
+extern _Thread_local int yw4_perf_presenter;  /* set on the thread that presents */
 
 /* nvn_shader.c: shader keys (decision 0020) and YW4_NVN_STATS usage statistics */
 uint64_t nvn_shader_key(uint64_t control);

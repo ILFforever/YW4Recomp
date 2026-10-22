@@ -8,7 +8,8 @@ Environment variables and keys read by the runtime. The game runs fine with none
 |---|---|
 | `YW4_SCREENSHOTS=600,2500` | Save a screenshot at these frame numbers (also F12 at any time) |
 | `YW4_SCREENSHOT_DIR=path` | Where screenshots go (default `<work_dir>/screenshots/`) |
-| `YW4_PERF=0` | Turn off the performance log (on by default: `work/perf/perf_<time>.csv` per frame and a `.txt` summary: frame interval, game work, GPU busy/span from timestamp queries, CPU, memory; `YW4_PERF_DIR` moves it) |
+| `YW4_PERF=0` | Turn off the performance log (on by default: `work/perf/perf_<time>.csv` per frame and a `.txt` summary: frame interval, game work, GPU busy/span from timestamp queries, time in command-list translation and GPU waits, CPU, memory; every 600 frames stderr also lists each busy guest thread's share of a core; `YW4_PERF_DIR` moves it) |
+| `YW4_PROFILE=1` | Sample where the presenting (main) thread is every millisecond (Windows); `work/perf/profile_<time>.txt`, named with `python -m tools.yw4.profile` |
 | `YW4_LOG=0` | Turn off the log file (on by default: everything printed on stderr is also saved in `work/logs/yw4_<time>.log`; `YW4_LOG_DIR` moves it) |
 | `YW4_HEADLESS=1` | No window, no Vulkan (nothing is drawn) |
 | `YW4_VULKAN_VALIDATION=1` | Turn on the Vulkan validation layer |

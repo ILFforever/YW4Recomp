@@ -47,6 +47,9 @@ int64_t host_now_ns(void);
 
 /* This process's CPU time so far (user + kernel, all threads) and its memory in use (working set), for the performance log. */
 void host_process_usage(int64_t *cpu_ns, uint64_t *rss_bytes);
+/* A handle to the calling thread, and the CPU time (user + kernel) a thread has used so far. */
+void *host_thread_self(void);
+int64_t host_thread_cpu_ns(void *thread);
 
 /* Address space at exactly `want` with no memory behind it yet, in which the host tracks
  * which pages get written (Windows: MEM_WRITE_WATCH). NULL if the range is taken. */

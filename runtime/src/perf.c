@@ -16,7 +16,11 @@
  * is for the recompiled renderer, not what a Switch needs.
  *
  * Columns: frame, t_s, interval_ms, work_ms, present_ms, wait_ms, draws, cpu_pct (process CPU
- * time over the interval, 100 = one core), rss_mb, gpu_busy_ms, gpu_span_ms (empty: none). */
+ * time over the interval, 100 = one core), rss_mb, gpu_busy_ms, gpu_span_ms (empty: none),
+ * submit_ms / submit_other_ms (time in nvnQueueSubmitCommands, i.e. the host's translation of
+ * the command lists, on the presenting thread / on other threads), sync_ms (nvnSyncWait on
+ * the presenting thread). submit_ms and sync_ms are part of work_ms; the rest of work_ms is
+ * the game's own code. */
 #include <inttypes.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -31,6 +35,8 @@
 #endif
 
 #include "host.h"
+#include "kernel.h"
+#include "nvn.h"
 
 int gpu_frame_time(uint64_t frame, double *busy_ms, double *span_ms);  /* gpu.c */
 
@@ -38,8 +44,17 @@ int gpu_frame_time(uint64_t frame, double *busy_ms, double *span_ms);  /* gpu.c 
 
 typedef struct {
     uint64_t frame, draws;
-    double t, interval, work, present, wait, cpu, rss;
+    double t, interval, work, present, wait, cpu, rss, submit, submit_other, sync;
 } Row;
+
+_Thread_local int yw4_perf_presenter;
+static int64_t acc_submit, acc_submit_other, acc_sync;  /* ns since the last present */
+
+void yw4_perf_add(int what, int64_t ns) {
+    int64_t *a = what == PERF_SYNC ? (yw4_perf_presenter ? &acc_sync : NULL)
+                                   : yw4_perf_presenter ? &acc_submit : &acc_submit_other;
+    if (a) __atomic_add_fetch(a, ns, __ATOMIC_RELAXED);
+}
 
 static FILE *csv;
 static char summary_path[600];
@@ -104,6 +119,10 @@ static void print_summary(FILE *f, size_t from, const char *what) {
     } else {
         fprintf(f, "  GPU time: not available\n");
     }
+    double sub = 0, sync = 0, other = 0;
+    for (size_t i = from; i < n; i++) sub += rows[i].submit, sync += rows[i].sync, other += rows[i].submit_other;
+    fprintf(f, "  of the game work: submit (host translation) avg %.1f, GPU waits avg %.1f, game code avg %.1f; submit on other threads avg %.1f\n",
+            sub / frames, sync / frames, (wsum - sub - sync) / frames, other / frames);
     fprintf(f, "  process CPU: %.0f%% of one core on average, memory peak %.0f MB\n", cpu_pct_sum / (double)n,
             (double)peak_rss / 1048576.0);
 }
@@ -119,11 +138,12 @@ static void write_rows(size_t upto) {
         fprintf(csv, "%" PRIu64 ",%.3f,%.2f,%.2f,%.2f,%.2f,%" PRIu64 ",%.0f,%.0f,", r->frame, r->t, r->interval, r->work,
                 r->present, r->wait, r->draws, r->cpu, r->rss);
         if (has) {
-            fprintf(csv, "%.2f,%.2f\n", busy, span);
+            fprintf(csv, "%.2f,%.2f,", busy, span);
             gpu_busy[ngpu] = busy, gpu_span[ngpu] = span, ngpu++;
         } else {
-            fprintf(csv, ",\n");
+            fprintf(csv, ",,");
         }
+        fprintf(csv, "%.2f,%.2f,%.2f\n", r->submit, r->submit_other, r->sync);
     }
 }
 
@@ -173,7 +193,7 @@ static void start(void) {
     snprintf(summary_path, sizeof summary_path, "%s/perf_%s.txt", path, when);
     csv = fopen(csv_path, "w");
     if (!csv) return;
-    fprintf(csv, "frame,t_s,interval_ms,work_ms,present_ms,wait_ms,draws,cpu_pct,rss_mb,gpu_busy_ms,gpu_span_ms\n");
+    fprintf(csv, "frame,t_s,interval_ms,work_ms,present_ms,wait_ms,draws,cpu_pct,rss_mb,gpu_busy_ms,gpu_span_ms,submit_ms,submit_other_ms,sync_ms\n");
     fprintf(stderr, "yw4: performance log %s\n", csv_path);
     uint64_t rss;
     t0 = host_now_ns();
@@ -205,7 +225,10 @@ void yw4_perf_frame(uint64_t frame, int64_t enter, int64_t shown, int64_t exit_,
     rows[nrows++] = (Row){.frame = frame, .draws = draws, .t = (double)(exit_ - t0) / 1e9,
                           .interval = (double)(exit_ - last_exit) / 1e6, .work = (double)(enter - last_exit) / 1e6,
                           .present = (double)(shown - enter) / 1e6, .wait = (double)(exit_ - shown) / 1e6,
-                          .cpu = cpu_pct, .rss = (double)rss / 1048576.0};
+                          .cpu = cpu_pct, .rss = (double)rss / 1048576.0,
+                          .submit = (double)__atomic_exchange_n(&acc_submit, 0, __ATOMIC_RELAXED) / 1e6,
+                          .submit_other = (double)__atomic_exchange_n(&acc_submit_other, 0, __ATOMIC_RELAXED) / 1e6,
+                          .sync = (double)__atomic_exchange_n(&acc_sync, 0, __ATOMIC_RELAXED) / 1e6};
     last_cpu = cpu, last_exit = exit_;
     if (rss > peak_rss) peak_rss = rss;
     cpu_pct_sum += cpu_pct;
@@ -213,6 +236,10 @@ void yw4_perf_frame(uint64_t frame, int64_t enter, int64_t shown, int64_t exit_,
     if (nrows % 60 == 0) fflush(csv);
     if (frame - last_summary_frame >= 600) {
         print_summary(stderr, nrows > 600 ? nrows - 600 : 0, "yw4: perf, last 600 frames");
+        static int64_t last_threads;  /* host time of the last per-thread report */
+        if (last_threads) fprintf(stderr, "  threads, last 600 frames:\n");
+        yw4_thread_cpu_report(stderr, last_threads ? exit_ - last_threads : 0);  /* 0: only takes the start values */
+        last_threads = exit_;
         write_summary();  /* so a killed or crashed run leaves its numbers */
         last_summary_frame = frame;
     }

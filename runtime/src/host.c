@@ -101,6 +101,20 @@ int64_t host_now_ns(void) {
     return (int64_t)((unsigned __int128)now.QuadPart * 1000000000u / (uint64_t)freq.QuadPart);
 }
 
+void *host_thread_self(void) {
+    HANDLE h = NULL;
+    DuplicateHandle(GetCurrentProcess(), GetCurrentThread(), GetCurrentProcess(), &h, THREAD_QUERY_LIMITED_INFORMATION,
+                    FALSE, 0);
+    return h;
+}
+
+int64_t host_thread_cpu_ns(void *thread) {
+    FILETIME created, exited, kernel, user;
+    if (!thread || !GetThreadTimes((HANDLE)thread, &created, &exited, &kernel, &user)) return 0;
+    return (int64_t)((((uint64_t)kernel.dwHighDateTime << 32 | kernel.dwLowDateTime) +
+                      ((uint64_t)user.dwHighDateTime << 32 | user.dwLowDateTime)) * 100);
+}
+
 void host_process_usage(int64_t *cpu_ns, uint64_t *rss_bytes) {
     FILETIME created, exited, kernel, user;
     PROCESS_MEMORY_COUNTERS pmc = {sizeof pmc};
@@ -266,6 +280,18 @@ void host_sleep_ns(int64_t ns) {
 int64_t host_now_ns(void) {
     struct timespec ts;
     clock_gettime(CLOCK_MONOTONIC, &ts);
+    return (int64_t)ts.tv_sec * 1000000000 + ts.tv_nsec;
+}
+
+void *host_thread_self(void) {
+    clockid_t *c = malloc(sizeof *c);
+    if (c && pthread_getcpuclockid(pthread_self(), c)) free(c), c = NULL;
+    return c;
+}
+
+int64_t host_thread_cpu_ns(void *thread) {
+    struct timespec ts;
+    if (!thread || clock_gettime(*(clockid_t *)thread, &ts)) return 0;
     return (int64_t)ts.tv_sec * 1000000000 + ts.tv_nsec;
 }
 
