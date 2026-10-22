@@ -87,6 +87,25 @@ Draws one **layer**: `f_a45890(device, draw list, layer item)`. Every layer gets
 objects whose byte `+0x1d1` is 0 (likely "casts no shadow"). This list is the engine-level data a replaced pass
 would read instead of NVN commands.
 
+Read so far from the start of its loop (offsets; meanings partly guessed):
+
+| Where | Field |
+|---|---|
+| node `+0x00` | draw object (if the object's `+0x108` is set, that object is used instead) |
+| node `+0x10` | per-instance data; per-submesh records of 0xb8 bytes from `+0xb0` |
+| node `+0x20` | layer mask byte (skip if it has the layer's bit) |
+| node `+0x30` | next node |
+| object `+0x101`, `+0x103` | signed bytes: priority / sort range |
+| object `+0x120` | material set (its `[+0x18]+0x23` byte changes kind-0/kind-1 handling) |
+| object `+0x128`, `+0x140` | model resource (`+0x140`: submesh count at `+0x200`) |
+| object `+0x1b0`, `+0x1c8`, `+0x1cb`, `+0x1d1` | skip in shadow layers if `+0x1b0` ≠ 0; visible; layer bit; casts shadow |
+| `[draw list + 0x18]` | submesh table, records of 0x50 bytes (bytes `+0x34`, `+0x3f`, `+0x43` tested) |
+
+Why decode it rather than keep `f_a45890`: in the street the render threads' busy time is about 3% `f_a45890`,
+4% the engine's NVN wrapper layer (`f_965xxx`-`f_97xxxx`), 4.5% other game code and 7.5% our NVN → Vulkan
+translation (`YW4_PROFILE=submit`, percent of all samples; the threads wait the other 84%). A pass drawn from the
+list directly drops the wrapper layer and the translation, roughly 60% of that busy time.
+
 ## Main-view stages (thread C)
 
 Registered by `f_5d8010` in this order, each queueing jobs (mostly `f_a45890` layers plus pass functions in
