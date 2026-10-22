@@ -15,6 +15,13 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#ifdef _WIN32
+#include <direct.h>
+#define MKDIR(p) _mkdir(p)
+#else
+#include <sys/stat.h>
+#define MKDIR(p) mkdir(p, 0777)
+#endif
 
 #include <SDL3/SDL.h>
 #include <SDL3/SDL_vulkan.h>
@@ -62,7 +69,7 @@ static uint32_t frame_w, frame_h;
 void gpu_request_trace(int draws);  /* gpu_draw.c */
 void gpu_request_dump(void);        /* gpu.c */
 static int screenshot_requested;  /* F12 */
-static char screenshot_dir[512] = "screenshots";
+static char screenshot_dir[512] = "work/screenshots";
 
 static int vk_fail(const char *what, VkResult r) {
     fprintf(stderr, "yw4: window: %s failed (VkResult %d)\n", what, (int)r);
@@ -321,6 +328,15 @@ static void barrier(VkImage image, VkImageLayout from, VkImageLayout to, VkAcces
 
 static void save_screenshot(const uint8_t *rgba, uint32_t w, uint32_t h, uint64_t n) {
     char path[600];
+    snprintf(path, sizeof path, "%s", screenshot_dir);  /* make the folder (and its parents) if missing */
+    for (char *p = path + 1; *p; p++)
+        if (*p == '/' || *p == '\\') {
+            char c = *p;
+            *p = 0;
+            MKDIR(path);
+            *p = c;
+        }
+    MKDIR(path);
     snprintf(path, sizeof path, "%s/frame_%06" PRIu64 ".bmp", screenshot_dir, n);
     SDL_Surface *s = SDL_CreateSurfaceFrom((int)w, (int)h, SDL_PIXELFORMAT_ABGR8888, (void *)rgba, (int)w * 4);
     if (s && SDL_SaveBMP(s, path)) fprintf(stderr, "yw4: screenshot %s\n", path);

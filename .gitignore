@@ -104,3 +104,6 @@ venv/
 CMakeUserPresets.json
 .DS_Store
 Thumbs.db
+
+# Screenshots saved by older runs launched outside work/ (images of the game)
+/screenshots/
