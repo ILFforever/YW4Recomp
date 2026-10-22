@@ -422,7 +422,7 @@ def emit_function(code: Code, fn: Function, entries: set[int], subgroup=None,
                 stmt = f"ctx->x[30] = {addr(off + 4)}; {name(f.target)}(ctx);"
         elif f.kind == "blr":
             stmt = (f"{{ uint64_t t = {lift.rd_reg(f.reg, 1)}; ctx->x[30] = {addr(off + 4)}; "
-                    f"yw4_resolve(t)(ctx); }}")
+                    f"YW4_TARGET(t, c_) c_->fn(ctx); }}")
         elif f.kind == "br":
             target = lift.rd_reg(f.reg, 1)
             if off in fn.jump_tables:

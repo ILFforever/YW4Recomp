@@ -56,6 +56,22 @@ extern GuestFn (*yw4_lookup_hook)(uint64_t addr);
  * Traps if no translated function starts there. */
 GuestFn yw4_resolve(uint64_t target);
 
+/* The same as a record that never changes or moves, one per target: each indirect call site
+ * keeps a pointer to the last one it used (a single pointer, so threads can't see it torn)
+ * and only asks again when the target differs. */
+typedef struct {
+    uint64_t addr;
+    GuestFn fn;
+} Yw4Target;
+const Yw4Target *yw4_resolve_target(uint64_t target);
+#define YW4_TARGET(t, c_)                                                          \
+    static const Yw4Target *cs_;                                                   \
+    const Yw4Target *c_ = __atomic_load_n(&cs_, __ATOMIC_RELAXED);                 \
+    if (__builtin_expect(!c_ || c_->addr != (t), 0)) {                             \
+        c_ = yw4_resolve_target(t);                                                \
+        __atomic_store_n(&cs_, c_, __ATOMIC_RELAXED);                              \
+    }
+
 /* setjmp in recompiled code (decision 0018, runtime/src/setjmp.c): the translator puts a
  * host setjmp(jb) (the C library's, not __builtin_setjmp: see 0018) at each call to the
  * guest's setjmp and registers it here, so the guest longjmp's branch to `ret` can come
@@ -81,10 +97,10 @@ void yw4_msr_fpcr(CPUState *ctx, uint64_t value);
 #if defined(__clang__)
 /* Wrapped in a block: right after a label, a bare attribute would attach to a declaration. */
 #define TAILCALL(f) do { __attribute__((musttail)) return f(ctx); } while (0)
-#define TAILCALL_INDIRECT(t) do { GuestFn fn_ = yw4_resolve(t); __attribute__((musttail)) return fn_(ctx); } while (0)
+#define TAILCALL_INDIRECT(t) do { uint64_t t_ = (t); YW4_TARGET(t_, c_) __attribute__((musttail)) return c_->fn(ctx); } while (0)
 #else
 #define TAILCALL(f) do { f(ctx); return; } while (0)
-#define TAILCALL_INDIRECT(t) do { yw4_resolve(t)(ctx); return; } while (0)
+#define TAILCALL_INDIRECT(t) do { uint64_t t_ = (t); YW4_TARGET(t_, c_) c_->fn(ctx); return; } while (0)
 #endif
 
 #endif

@@ -243,6 +243,41 @@ GuestFn yw4_lookup(uint64_t addr) {
     return lo < m->nfuncs && m->funcs[lo].offset == off ? m->funcs[lo].fn : NULL;
 }
 
+/* One Yw4Target per target address, made on first use and never freed, in an open-addressed
+ * table that only grows (the game has a few thousand indirect-call targets). */
+static HostLock targets_lock = HOST_LOCK_INIT;
+static Yw4Target **targets;
+static size_t targets_cap, targets_n;
+
+const Yw4Target *yw4_resolve_target(uint64_t target) {
+    GuestFn fn = yw4_resolve(target);  /* traps, or longjmps to a setjmp point, if there's none */
+    host_lock(&targets_lock);
+    if (targets_n * 2 >= targets_cap) {  /* grow: rehash into twice the room */
+        size_t cap = targets_cap ? targets_cap * 2 : 8192;
+        Yw4Target **t = calloc(cap, sizeof *t);
+        if (!t) exit(3);
+        for (size_t i = 0; i < targets_cap; i++)
+            if (targets[i]) {
+                size_t j = (targets[i]->addr >> 2) & (cap - 1);
+                while (t[j]) j = (j + 1) & (cap - 1);
+                t[j] = targets[i];
+            }
+        free(targets);
+        targets = t, targets_cap = cap;
+    }
+    size_t j = (target >> 2) & (targets_cap - 1);
+    while (targets[j] && targets[j]->addr != target) j = (j + 1) & (targets_cap - 1);
+    if (!targets[j]) {
+        Yw4Target *t = malloc(sizeof *t);
+        if (!t) exit(3);
+        t->addr = target, t->fn = fn;
+        targets[j] = t, targets_n++;
+    }
+    const Yw4Target *r = targets[j];
+    host_unlock(&targets_lock);
+    return r;
+}
+
 /* Indirect calls (virtual calls, function pointers) go through here a lot: a small
  * per-thread cache saves the binary search for the targets seen most recently. */
 #define RESOLVE_CACHE 4096

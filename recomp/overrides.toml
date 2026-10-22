@@ -97,3 +97,29 @@ module = "sdk"
 symbol = "_ZN2nn2ec24ShowShopAddOnContentListERKNS_7account10UserHandleE"
 native = "yw4_ec_ShowShopAddOnContentList"
 why = "nn::ec::ShowShopAddOnContentList opens the eShop applet; there is no shop to show"
+
+# The C library's memory and string basics: the recompiled versions run the ARM code word
+# by word; the host's are vectorised and give the same results (decision 0011's natives).
+[[override]]
+module = "sdk"
+symbol = "memcpy"
+native = "hle_libc_memcpy"
+why = "hot in every frame (profile 2026-10-22); the host memcpy is many times faster"
+
+[[override]]
+module = "sdk"
+symbol = "memmove"
+native = "hle_libc_memmove"
+why = "memcpy's overlapping sibling, same reason"
+
+[[override]]
+module = "sdk"
+symbol = "memset"
+native = "hle_libc_memset"
+why = "same reason as memcpy"
+
+[[override]]
+module = "sdk"
+symbol = "strlen"
+native = "hle_libc_strlen"
+why = "same reason as memcpy"

@@ -136,6 +136,7 @@ NVN(nvnQueueSubmitCommands) {  /* (queue, count, const NVNcommandHandle*) */
     const uint64_t *handles = AP(2);
     int64_t t = host_now_ns();
     yw4_thread_role(YW4_ROLE_SUBMIT);
+    yw4_profile_thread(YW4_ROLE_SUBMIT, frames);
     for (int i = 0; i < n; i++) nvn_execute(handles[i]);
     yw4_perf_add(PERF_SUBMIT, host_now_ns() - t);
 }
@@ -177,7 +178,7 @@ NVN(nvnQueuePresentTexture) {  /* (queue, window, texture index) */
     int index = (int)A(2);
     yw4_perf_presenter = 1;
     yw4_thread_role(YW4_ROLE_PRESENT);
-    yw4_profile_start_here();
+    yw4_profile_thread(YW4_ROLE_PRESENT, frames);
     int64_t perf_enter = host_now_ns();
     if (index >= 0 && index < w->num) show(HOST(NvnTexture, w->textures[index]), frames + 1, w->crop);
     int64_t perf_shown = host_now_ns();
