@@ -13,8 +13,7 @@ Environment variables and keys read by the runtime. The game runs fine with none
 | `YW4_HEADLESS=1` | No window, no Vulkan (nothing is drawn) |
 | `YW4_VULKAN_VALIDATION=1` | Turn on the Vulkan validation layer |
 
-Saved screenshots are currently paler than the live window (see [known issues](known-issues.md)); judge colours from
-the window, or decode the BMP's sRGB once.
+Saved screenshots get the same sRGB decode as the window, so their colours match what is on screen.
 
 ## Capture keys
 

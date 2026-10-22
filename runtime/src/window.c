@@ -11,6 +11,7 @@
  * queue and swapchain, which present_lock gives).
  */
 #include <inttypes.h>
+#include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -440,6 +441,17 @@ void window_present_image(VkImage image, VkFormat format, VkRect2D rect, uint64_
                 uint8_t t = px[i];
                 px[i] = px[i + 2], px[i + 2] = t;
             }
+        /* The blit into the UNORM swapchain decodes an sRGB image to linear; save what the window shows. */
+        if (format == VK_FORMAT_B8G8R8A8_SRGB || format == VK_FORMAT_R8G8B8A8_SRGB) {
+            uint8_t lut[256];
+            for (int i = 0; i < 256; i++) {
+                double c = i / 255.0;
+                c = c <= 0.04045 ? c / 12.92 : pow((c + 0.055) / 1.055, 2.4);
+                lut[i] = (uint8_t)(c * 255.0 + 0.5);
+            }
+            for (size_t i = 0; i < (size_t)w * h * 4; i += 4)
+                px[i] = lut[px[i]], px[i + 1] = lut[px[i + 1]], px[i + 2] = lut[px[i + 2]];
+        }
         save_screenshot(px, w, h, n);
     }
     host_unlock(&present_lock);

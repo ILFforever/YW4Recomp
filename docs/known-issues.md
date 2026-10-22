@@ -5,8 +5,6 @@ What is known to be missing or wrong, roughly in the order it is likely to matte
 
 ## Graphics
 
-- **Saved screenshots are paler than the window.** F12 / `YW4_SCREENSHOTS` BMPs are sRGB-encoded one time too many;
-  the live window is correct.
 - **Shadow strength not yet checked against Eden** after the ambient-light fix; indoor shadows may still be a little
   stronger.
 - **Occlusion queries always report 0 samples.** The game issues them in pairs from the house onward; answering
