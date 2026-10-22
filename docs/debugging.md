@@ -58,3 +58,4 @@ Two of them map the engine's frame ([frame.md](frame.md)):
 |---|---|
 | `YW4_TRACE_RENDER_JOBS=<frame>` | Every job the render threads run while frames `<frame>` to `<frame>+2` are presented: function, its two arguments, the thread. Slows the game a little (a check at every function entry) |
 | `YW4_TRACE_DRAW_CALLERS=1` | Each different call stack that records a draw, once per render-target size, with the shaders |
+| `YW4_TRACE_DRAWLIST=<frame>` | From that frame, the model renderer's draws (`YW4_TRACE_DRAWLIST_MAX`, default 24): what was bound, the submesh record, and where in the draw object, geometry and submesh records the bound addresses and uniform-buffer contents are found (pointer search two levels deep). Slow while it prints |

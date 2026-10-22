@@ -101,6 +101,37 @@ Read so far from the start of its loop (offsets; meanings partly guessed):
 | object `+0x1b0`, `+0x1c8`, `+0x1cb`, `+0x1d1` | skip in shadow layers if `+0x1b0` ≠ 0; visible; layer bit; casts shadow |
 | `[draw list + 0x18]` | submesh table, records of 0x50 bytes (bytes `+0x34`, `+0x3f`, `+0x43` tested) |
 
+### How a draw item reaches the GPU
+
+`f_a45890` works in two phases: it walks the nodes and fills an array of 0x48-byte draw items on its stack, then
+sorts and draws them. Each mesh draw is `f_a75e90(device, geometry, primitive)` (call sites `a4bf90`, `a4c2cc`;
+the object being drawn is in `f_a45890`'s stack slot `sp+0x390`, the geometry is `*(object+0x128)`); `f_a75e90`
+sets the vertex range and draw call, then the engine's generic "flush state and draw" (`f_977e30` / `f_974630`)
+issues the NVN calls. Measured with `YW4_TRACE_DRAWLIST` (150 draws in the street: 38 shadow, 112 main view):
+
+| Data | Where | Found in |
+|---|---|---|
+| world matrix (4×4) | **object `+0x00`** (a copy at `+0x40`); it is the start of vertex constant buffer 2 | 143 of 150 draws |
+| vertex data base | `[geometry+0x20] + 0x00` | all |
+| index area base | `[geometry+0x20] + 0x68` | all |
+| bones (vertex constant buffer 4) | `object+0x110 → +0x138` | skinned draws (59 of 112) |
+| vertex constant buffer 6 (material values?) | `object+0x280 → +0x328 → +0x140` | all shadow, 62 of 112 |
+
+The **primitive record** (one per submesh, 0x50 bytes):
+
+| Offset | Meaning |
+|---|---|
+| `+0x00` | vertex offset from the vertex data base |
+| `+0x04` | index offset from the index area base |
+| `+0x08` | vertex count (× stride = the bound vertex buffer size) |
+| `+0x0c` | index count (0: not indexed) |
+| `+0x10`, `+0x20` | two float4 (w = 1, 0): probably bounding box min and max |
+| `+0x38` | small number (submesh or material slot?) |
+| `+0x3d` | primitive type (through a table) |
+| `+0x3e` | vertex stride in bytes (0x24, 0x28 seen) |
+| `+0x3f` | flags; bit 1 picks the index type |
+| `+0x43` | byte the renderer uses as an index (bone palette or LOD?) |
+
 Why decode it rather than keep `f_a45890`: in the street the render threads' busy time is about 3% `f_a45890`,
 4% the engine's NVN wrapper layer (`f_965xxx`-`f_97xxxx`), 4.5% other game code and 7.5% our NVN → Vulkan
 translation (`YW4_PROFILE=submit`, percent of all samples; the threads wait the other 84%). A pass drawn from the

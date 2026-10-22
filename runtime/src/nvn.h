@@ -155,7 +155,12 @@ typedef struct {
     uint64_t guest;            /* the guest NVNcommandBuffer* */
     const NvnProgram *program; /* bound last (YW4_TRACE_DRAW_CALLERS) */
     uint32_t target_w, target_h, target_colors, target_depth;  /* set last (YW4_TRACE_DRAW_CALLERS) */
+    uint64_t trace_vb0, trace_ub[2][16];  /* bound last, vertex and fragment stage (YW4_TRACE_DRAWLIST) */
 } NvnCmdBuf;
+
+/* YW4_TRACE_DRAWLIST (trace_drawlist.c): on, and a recorded draw (index address or 0) */
+int trace_drawlist_on(void);
+void trace_drawlist_draw(const NvnCmdBuf *cb, uint64_t index_addr);
 
 /* One recorded call: header, the call's x1..x7 and s0..s3, then copied data. A command
  * handle is the guest address of a list's first record. */

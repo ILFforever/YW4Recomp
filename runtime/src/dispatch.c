@@ -140,7 +140,7 @@ void yw4_watch_init(void) {
         watchw_size = *e == ':' ? strtoull(e + 1, NULL, 10) : 8;
         yw4_probe_any = 1;
     }
-    if (getenv("YW4_TRACE_RENDER_JOBS")) yw4_probe_any = 1;
+    if (getenv("YW4_TRACE_RENDER_JOBS") || getenv("YW4_TRACE_DRAWLIST")) yw4_probe_any = 1;
     const char *s = getenv("YW4_WATCH");
     if (!s || !*s) return;
     char *e;
@@ -182,7 +182,11 @@ static void trace_render_job(const CPUState *ctx, uint64_t addr) {
             kind);
 }
 
+/* Called at every guest function entry while probes are on (YW4_TRACE_DRAWLIST sets it). */
+void (*yw4_entry_hook)(CPUState *ctx, uint64_t addr);
+
 void yw4_probe(CPUState *ctx, uint64_t addr) {
+    if (yw4_entry_hook) yw4_entry_hook(ctx, addr);
     if (jobs_from == -2) {
         const char *j = getenv("YW4_TRACE_RENDER_JOBS");
         jobs_from = j && *j ? atoi(j) : -1;

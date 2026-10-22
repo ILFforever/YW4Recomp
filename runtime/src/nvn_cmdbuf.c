@@ -134,8 +134,14 @@ NVN(nvnCommandBufferBindPolygonState) { record_copy(c, CMD_BIND_POLYGON, 1, 4); 
 /* (cmd, count, const state*) */
 NVN(nvnCommandBufferBindVertexAttribState) { record_copy(c, CMD_BIND_VERTEX_ATTRIB, 2, (uint32_t)A(1) * 4); }
 NVN(nvnCommandBufferBindVertexStreamState) { record_copy(c, CMD_BIND_VERTEX_STREAM, 2, (uint32_t)A(1) * 8); }
-PLAIN(nvnCommandBufferBindVertexBuffer, CMD_BIND_VERTEX_BUFFERS)      /* (cmd, index, address, size) */
-PLAIN(nvnCommandBufferBindUniformBuffer, CMD_BIND_UNIFORM_BUFFERS)    /* (cmd, stage, index, address, size) */
+NVN(nvnCommandBufferBindVertexBuffer) {  /* (cmd, index, address, size) */
+    record(c, CMD_BIND_VERTEX_BUFFERS, 0);
+    if (A(1) == 0) cb_of(A(0))->trace_vb0 = A(2);
+}
+NVN(nvnCommandBufferBindUniformBuffer) {  /* (cmd, stage, index, address, size) */
+    record(c, CMD_BIND_UNIFORM_BUFFERS, 0);
+    if (A(1) < 2 && A(2) < 16) cb_of(A(0))->trace_ub[A(1)][A(2)] = A(3);
+}
 PLAIN(nvnCommandBufferBindStorageBuffer, CMD_BIND_STORAGE_BUFFERS)    /* (cmd, stage, index, address, size) */
 NVN(nvnCommandBufferBindTexture) {  /* (cmd, stage, index, handle) */
     record(c, CMD_BIND_TEXTURES, 0);
@@ -221,12 +227,16 @@ PLAIN(nvnCommandBufferSetShaderScratchMemory, CMD_SET_SCRATCH_MEMORY)       /* (
 NVN(nvnCommandBufferClearColor) { record_copy(c, CMD_CLEAR_COLOR, 2, 16); }  /* (cmd, index, const float[4], mask) */
 PLAIN(nvnCommandBufferClearDepthStencil, CMD_CLEAR_DEPTH_STENCIL)  /* (cmd, depth, depth mask, stencil, stencil mask) */
 /* DrawArrays(cmd, primitive, first, count) is DrawArraysInstanced with one instance */
-NVN(nvnCommandBufferDrawArrays) { trace_draw_caller(c); CmdRec *r = record(c, CMD_DRAW_ARRAYS, 0); r->x[3] = 0, r->x[4] = 1; }
-NVN(nvnCommandBufferDrawArraysInstanced) { trace_draw_caller(c); record(c, CMD_DRAW_ARRAYS, 0); }  /* (cmd, primitive, first, count, base instance, instances) */
+static void trace_draw(CPUState *c, uint64_t index_addr) {
+    trace_draw_caller(c);
+    if (trace_drawlist_on()) trace_drawlist_draw(cb_of(A(0)), index_addr);
+}
+NVN(nvnCommandBufferDrawArrays) { trace_draw(c, 0); CmdRec *r = record(c, CMD_DRAW_ARRAYS, 0); r->x[3] = 0, r->x[4] = 1; }
+NVN(nvnCommandBufferDrawArraysInstanced) { trace_draw(c, 0); record(c, CMD_DRAW_ARRAYS, 0); }  /* (cmd, primitive, first, count, base instance, instances) */
 /* DrawElements(cmd, primitive, index type, count, index address) is DrawElementsInstanced
  * (..., base vertex, base instance, instances) with 0, 0, 1 */
-NVN(nvnCommandBufferDrawElements) { trace_draw_caller(c); CmdRec *r = record(c, CMD_DRAW_ELEMENTS, 0); r->x[4] = 0, r->x[5] = 0, r->x[6] = 1; }
-NVN(nvnCommandBufferDrawElementsInstanced) { trace_draw_caller(c); record(c, CMD_DRAW_ELEMENTS, 0); }
+NVN(nvnCommandBufferDrawElements) { trace_draw(c, A(4)); CmdRec *r = record(c, CMD_DRAW_ELEMENTS, 0); r->x[4] = 0, r->x[5] = 0, r->x[6] = 1; }
+NVN(nvnCommandBufferDrawElementsInstanced) { trace_draw(c, A(4)); record(c, CMD_DRAW_ELEMENTS, 0); }
 PLAIN(nvnCommandBufferDrawArraysIndirect, CMD_DRAW_ARRAYS_INDIRECT)        /* (cmd, primitive, indirect address) */
 PLAIN(nvnCommandBufferDrawElementsIndirect, CMD_DRAW_ELEMENTS_INDIRECT)    /* (cmd, primitive, type, index address, indirect address) */
 PLAIN(nvnCommandBufferDrawTransformFeedback, CMD_DRAW_TRANSFORM_FEEDBACK)  /* (cmd, primitive, feedback address) */
