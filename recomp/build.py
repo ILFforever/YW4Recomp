@@ -3,7 +3,7 @@
     python -m recomp.build           compile what changed, link
     python -m recomp.build --run     ... then run it on work/exefs/ (main.bin, sdk.bin)
 
-Uses [tools] cc (Clang recommended, decision 0007) with -O1 for now. Objects go to
+Uses [tools] cc (Clang recommended, decision 0007) with -O2. Objects go to
 work/build/obj/; a source is recompiled when it, or any header, is newer than its object.
 The executable is built from the game's code, so it stays in work/ (never commit or share).
 """
@@ -26,7 +26,7 @@ from tools.yw4 import config, deps
 from . import check
 
 RUNTIME = check.REPO / "runtime"
-CFLAGS = ["-std=c11", "-O1", "-ffp-contract=off", "-Wall", "-Wno-unused-label"]
+CFLAGS = ["-std=c11", "-O2", "-ffp-contract=off", "-Wall", "-Wno-unused-label"]
 
 # musl 1.1.19's math (third_party/musl, decision 0013). These are the flags its results were
 # verified with against the sdk (tools/yw4/sdkref.py --check uses this same list): no FMA

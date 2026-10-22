@@ -243,8 +243,19 @@ GuestFn yw4_lookup(uint64_t addr) {
     return lo < m->nfuncs && m->funcs[lo].offset == off ? m->funcs[lo].fn : NULL;
 }
 
+/* Indirect calls (virtual calls, function pointers) go through here a lot: a small
+ * per-thread cache saves the binary search for the targets seen most recently. */
+#define RESOLVE_CACHE 4096
+static _Thread_local struct {
+    uint64_t target;
+    GuestFn fn;
+} resolve_cache[RESOLVE_CACHE];
+
 GuestFn yw4_resolve(uint64_t target) {
+    unsigned slot = (unsigned)((target >> 2) ^ (target >> 14)) & (RESOLVE_CACHE - 1);
+    if (resolve_cache[slot].target == target && !yw4_lookup_hook) return resolve_cache[slot].fn;
     GuestFn fn = yw4_lookup(target);
+    if (fn && !yw4_lookup_hook) resolve_cache[slot].target = target, resolve_cache[slot].fn = fn;
     if (!fn) {
         yw4_setjmp_resume(target);  /* a longjmp back to a setjmp's return address? */
         char where[48];
