@@ -451,7 +451,13 @@ void window_present_image(VkImage image, VkFormat format, VkRect2D rect, uint64_
     host_lock(&present_lock);
     if (!(swapchain_stale && create_swapchain()) && !frame_resources(w, h) &&
         !present_image(image, VK_IMAGE_LAYOUT_GENERAL, rect, shot) && shot) {
-        uint8_t *px = staging_ptr;
+        /* One bulk copy out of the staging memory: it is uncached, and per-byte reads of it took ~1.7 s. */
+        uint8_t *px = malloc((size_t)w * h * 4);
+        if (!px) {
+            host_unlock(&present_lock);
+            return;
+        }
+        memcpy(px, staging_ptr, (size_t)w * h * 4);
         if (bgra)
             for (size_t i = 0; i < (size_t)w * h * 4; i += 4) {
                 uint8_t t = px[i];
@@ -469,6 +475,7 @@ void window_present_image(VkImage image, VkFormat format, VkRect2D rect, uint64_
                 px[i] = lut[px[i]], px[i + 1] = lut[px[i + 1]], px[i + 2] = lut[px[i + 2]];
         }
         save_screenshot(px, w, h, n);
+        free(px);
     }
     host_unlock(&present_lock);
 }
