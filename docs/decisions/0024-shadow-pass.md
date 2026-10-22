@@ -116,5 +116,13 @@ and turns them into Vulkan at submit. The expensive part is `f_a45890` plus the 
    0 of ~75,000 instanced draws with a copy we don't have, 0 drawn copies that our culling drops; the
    screenshot against the game's shadows differs only by run-to-run noise (animation timing). Not handled
    (the game keeps them): split copies (`model+0x216`), more than 8 sets.
-   Next: skinned, then cut-out casters. Depth comparison after each.
+   **Instanced cut-out casters: done** (`744205` + `dceb89`, the biggest remaining share): the same copies and
+   matrices, plus the texture coordinates (attribute 1, from the same vertex buffer), the texture (fragment slot 0,
+   by its handle) and the material's alpha threshold (vertex cbuf 3 byte 12), all learned from the game's draw;
+   our `shadow_cutout.vert/.frag` drop texels below the threshold as `dceb89` does. Textures are made and uploaded
+   before our pass begins rendering. Street: screenshots against the game's shadows differ less than two runs of
+   the game differ from each other. The game now draws about 30% of the shadow submeshes (was 85%); CPU unchanged
+   so far (the game's model renderer still runs for these layers).
+   Not ours yet: skinned casters (all cut-out; their bone palettes are built per submesh each frame, source not
+   found, see frame.md) and the wind-swayed plants (`fa9033`, `61ebac`: textures read in the vertex stage).
 5. Switch the default to `native` once every street, house and battle layer matches; measure CPU.

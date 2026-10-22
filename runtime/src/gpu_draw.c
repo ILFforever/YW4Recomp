@@ -583,6 +583,23 @@ static const NvnSamplerDesc *sampler_entry(const GpuState *s, uint64_t handle) {
     return (const NvnSamplerDesc *)s->sampler_pool->entries + id;
 }
 
+int gpu_handle_texture(VkCommandBuffer cb, const GpuState *s, uint64_t handle, int upload, VkDescriptorImageInfo *ii) {
+    NvnTexEntry *e = tex_entry(s, handle);
+    if (!e) return 0;
+    if (upload) {
+        if (gpu_needs_transfer(e->tex)) image_of(cb, e->tex);
+        return 1;
+    }
+    /* as bind_stage_set binds a 2D texture */
+    const NvnSamplerDesc *sd = sampler_entry(s, handle);
+    NvnSamplerDesc d = sd ? *sd : (NvnSamplerDesc){.min_filter = 1, .mag_filter = 1, .lod_max = 1000};
+    d.compare_mode = 0;
+    ii->imageView = gpu_sample_view(cb, e->tex, &e->view, e->has_view, VK_IMAGE_VIEW_TYPE_2D);
+    ii->sampler = gpu_sampler(&d);
+    ii->imageLayout = VK_IMAGE_LAYOUT_GENERAL;
+    return 1;
+}
+
 static VkBuffer dummy_buffer(void) {  /* 64 KiB of zeros for unbound constant buffers */
     static VkBuffer b;
     if (!b) {

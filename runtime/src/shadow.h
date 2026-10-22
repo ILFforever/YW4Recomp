@@ -11,6 +11,9 @@ typedef struct {
     uint32_t stride, index_type;         /* NVN index type: 1 = 16-bit, 2 = 32-bit */
     uint8_t cull, front, pad[2];         /* NVN polygon state bytes 0 and 1, as the game drew it */
     float mvp[16];                       /* projection x view x world, row-major */
+    float threshold;                     /* cut-out casters (texture != 0): the material's alpha threshold, */
+    uint64_t texture;                    /* texture handle, and the texture coordinates' NVN format and */
+    uint32_t uv_format, uv_offset;       /* offset in the vertex */
 } ShadowDraw;
 
 typedef struct {

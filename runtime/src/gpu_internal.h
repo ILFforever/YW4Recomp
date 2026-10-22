@@ -107,6 +107,10 @@ void gpu_end_rendering(VkCommandBuffer cb, GpuState *s);
 /* For native passes (decision 0024): render into s's targets (their images made first,
  * rendering begun unless it is); the attachment formats and size; 0 if no target is set. */
 int gpu_begin_targets(VkCommandBuffer cb, GpuState *s, VkFormat color[8], VkFormat *depth, uint32_t *w, uint32_t *h);
+/* For native passes: the 2D texture a handle names in s's pools, sampled as a game draw's
+ * binding would be. upload: make or upload its image now (outside rendering only), else fill
+ * ii. 0: no such texture. */
+int gpu_handle_texture(VkCommandBuffer cb, const GpuState *s, uint64_t handle, int upload, VkDescriptorImageInfo *ii);
 /* Cull mode and front face from NVN polygon state bytes 0 and 1 (with the window origin's flip). */
 void gpu_cull(VkCommandBuffer cb, uint8_t cull_mode, uint8_t front_face);
 /* The pipelines' dynamic state from s (viewport, scissor, cull, depth, stencil, bias). */

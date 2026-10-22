@@ -195,6 +195,17 @@ enum { MAX_HIDDEN = 2048, PASS_DRAWS = 4096, RING = 64 };
 #define STATIC_VS 0xb320bd9159e2fd0aull
 #define INSTANCED_VS 0xa748428f2d024ad7ull
 #define DEPTH_FS 0x6ead6a69737c52c2ull
+/* Instanced cut-out casters: the instanced program, plus texture coordinates (attribute 1) and
+ * the material's alpha threshold (vs cbuf 3 byte 12) for a fragment stage that drops texels
+ * below it (texture: fs slot 0). */
+#define CUTOUT_INSTANCED_VS 0x744205aaee24163eull
+#define CUTOUT_FS 0xdceb89e5f80d79e1ull
+
+static int is_instanced(uint64_t vs) { return vs == INSTANCED_VS || vs == CUTOUT_INSTANCED_VS; }
+/* programs our pass mirrors */
+static int mirrored(uint64_t vs, uint64_t fs) {
+    return ((vs == STATIC_VS || vs == INSTANCED_VS) && fs == DEPTH_FS) || (vs == CUTOUT_INSTANCED_VS && fs == CUTOUT_FS);
+}
 
 /* An instanced model's copies. The model renderer gets them from the model's callback
  * main+0x5f9420 (model+0xe0), which culls them against the view (box per copy, then an
@@ -269,7 +280,12 @@ int shadow_checking;  /* nvn_cmdbuf.c calls shadow_check_draw while this is set 
  * once all its submeshes are known to be drawn with STATIC_VS or INSTANCED_VS and DEPTH_FS. The model and
  * material are kept to notice an object's memory being reused for another one. */
 enum { LEARN_SLOTS = 1 << 16 };
-static struct { uint64_t obj, sub, model, mat, vs, fs; int ok; uint8_t cull, front; } learned[LEARN_SLOTS];
+typedef struct {
+    uint64_t texture;  /* 0: not a cut-out */
+    float threshold;
+    uint32_t uv_format, uv_offset;
+} Cutout;
+static struct { uint64_t obj, sub, model, mat, vs, fs; int ok; uint8_t cull, front; Cutout cut; } learned[LEARN_SLOTS];
 
 static uint32_t learn_slot(uint64_t obj, uint64_t sub) {
     uint32_t h = (uint32_t)((obj * 0x9E3779B97F4A7C15ull ^ sub * 0xC2B2AE3D27D4EB4Full) >> 48);
@@ -284,17 +300,18 @@ static uint32_t learned_ours(uint64_t obj, uint64_t sub) {
     uint32_t h = learn_slot(obj, sub);
     if (h == UINT32_MAX || learned[h].obj != obj) return UINT32_MAX;
     if (learned[h].model != U64(obj + 0x140) || learned[h].mat != U64(obj + 0x120)) return UINT32_MAX;  /* reused */
-    int vs_ok = learned[h].vs == STATIC_VS || learned[h].vs == INSTANCED_VS;
-    return vs_ok && learned[h].fs == DEPTH_FS && learned[h].ok ? h : UINT32_MAX;
+    return mirrored(learned[h].vs, learned[h].fs) && learned[h].ok ? h : UINT32_MAX;
 }
 
 /* ok: our draw of it would equal the game's (same buffers, same matrix: compare_draw) */
-static void learn(uint64_t obj, uint64_t sub, uint64_t vs, uint64_t fs, int ok, const uint8_t polygon[4]) {
+static void learn(uint64_t obj, uint64_t sub, uint64_t vs, uint64_t fs, int ok, const uint8_t polygon[4],
+                  const Cutout *cut) {
     uint32_t h = learn_slot(obj, sub);
     if (h == UINT32_MAX) return;
     learned[h].obj = obj, learned[h].sub = sub, learned[h].model = U64(obj + 0x140), learned[h].mat = U64(obj + 0x120);
     learned[h].vs = vs, learned[h].fs = fs, learned[h].ok = ok;
     learned[h].cull = polygon[0], learned[h].front = polygon[1];
+    learned[h].cut = *cut;
 }
 
 /* The shadow map layer each cascade's draws went into, learned from the game's draws. */
@@ -361,14 +378,35 @@ static void report(void) {
 static int compare_draw(const NvnCmdBuf *cb, uint64_t obj, uint64_t sub, uint64_t index_addr,
                         const ShadowDrawCall *call, int instanced);
 
+/* A cut-out draw's texture, threshold and texture coordinates, as the game bound them; 0 if
+ * its vertex layout isn't the one our pass reads: position (0x22) at 0 and texture
+ * coordinates in attribute 1, both from one vertex buffer and stride. */
+static int cutout_of(const NvnCmdBuf *cb, Cutout *cut) {
+    uint32_t a0 = cb->trace_attribs[0], a1 = cb->trace_attribs[1];
+    if (cb->trace_nattribs < 2 || (a0 & 0xFF) != 0x22 || a0 >> 8 & 0x1F || a0 >> 13) return 0;
+    for (uint32_t i = 2; i < cb->trace_nattribs; i++)
+        if (cb->trace_attribs[i] & 0xFF) return 0;
+    uint32_t stream = a1 >> 8 & 0x1F;
+    if (!(a1 & 0xFF) || stream >= 4 || cb->trace_vb[stream] != cb->trace_vb[0] ||
+        (uint32_t)cb->trace_streams[stream] != (uint32_t)cb->trace_streams[0])
+        return 0;
+    if (!cb->trace_tex[1][0] || !cb->trace_ub[0][3]) return 0;
+    cut->texture = cb->trace_tex[1][0];
+    memcpy(&cut->threshold, (const void *)(uintptr_t)(cb->trace_ub[0][3] + 12), 4);
+    cut->uv_format = a1 & 0xFF;
+    cut->uv_offset = a1 >> 13;
+    return 1;
+}
+
 void shadow_check_draw(const NvnCmdBuf *cb, uint64_t index_addr, const ShadowDrawCall *call) {
     if (!lay || !lay->active || !lay->pending) return;
     lay->pending = 0;
     uint64_t obj = lay->drawn[lay->ndrawn - 1][0], sub = lay->drawn[lay->ndrawn - 1][1];
     uint64_t vs = cb->program ? cb->program->stages[0].key : 0, fs = cb->program ? cb->program->stages[1].key : 0;
-    int ok = (vs == STATIC_VS || vs == INSTANCED_VS) && fs == DEPTH_FS &&
-             compare_draw(cb, obj, sub, index_addr, call, vs == INSTANCED_VS);
-    learn(obj, sub, vs, fs, ok, cb->polygon);
+    Cutout cut = {0};
+    int ok = mirrored(vs, fs) && (fs != CUTOUT_FS || cutout_of(cb, &cut)) &&
+             compare_draw(cb, obj, sub, index_addr, call, is_instanced(vs));
+    learn(obj, sub, vs, fs, ok, cb->polygon, &cut);
     if (lay->cascade >= 0) {
         cascade_target[lay->cascade].addr = cb->depth_addr;
         cascade_target[lay->cascade].layer = cb->depth_layer;
@@ -405,6 +443,7 @@ static int describe(const Caster *c, const Mat4 *vp, ShadowDraw *d) {
     d->index_count = *(const uint32_t *)(uintptr_t)(c->submesh + 0xc);
     d->stride = U8(c->submesh + 0x3e);
     d->index_type = index_type(c->submesh);
+    d->texture = 0, d->threshold = 0, d->uv_format = d->uv_offset = 0;
     memcpy(d->mvp, mvp.m, sizeof d->mvp);
     return d->stride && (d->index_count || d->vertex_count);
 }
@@ -417,6 +456,9 @@ static int ours(const Caster *c, const Mat4 *vp, ShadowDraw *d, int room) {
     ShadowDraw one;
     if (h == UINT32_MAX || !describe(c, vp, &one)) return -1;
     one.cull = learned[h].cull, one.front = learned[h].front;
+    one.texture = learned[h].cut.texture, one.threshold = learned[h].cut.threshold;
+    one.uv_format = learned[h].cut.uv_format, one.uv_offset = learned[h].cut.uv_offset;
+    if (one.texture && one.uv_offset + 4 > one.stride) return -1;
     if (learned[h].vs == STATIC_VS) {
         if (room < 1) return -1;
         d[0] = one;
