@@ -81,7 +81,19 @@ needs re-implementing for a better-shadows mod later.
 |---|---|---|
 | `b320bd…` | 16 | cbuf 2 bytes 128-191 (projection × view × world, per object, made on the CPU) × vertex |
 | `a74842…`, `744205…` | 12 | cbuf 1 bytes 128-191 (projection × view of the cascade) × instance transform (cbuf 11, 3×4 per instance, `instance × 48` bytes; from `object+0x140 → +0x80`) × world (cbuf 2 bytes 0-63) × vertex: **instanced** props |
-| `71faac…`, `4cbb8e…` | 10 | skinned: up to 4 bones per vertex from cbuf 4 (3×4 each; `object+0x110 → +0x138`) |
+| `71faac…`, `4cbb8e…` | 10 | skinned: up to 8 bones per vertex from cbuf 4 (3×4 each), then cbuf 2 bytes 128-191 like `b320bd` |
+
+**Share of the shadow draws by program pair** (street, `YW4_SHADOWS=check`, about 300,000 draws): `b320bd`+`6ead6a`
+(static) 38%; `744205`+`dceb89` (instanced cut-out) 20%; `a74842`+`6ead6a` (instanced) 13%; `fa9033`+`dceb89` 8%;
+skinned `71faac`+`b7cd6e` 6%, `4cbb8e`+`dceb89` 6%, `9904c2`+`b7cd6e` 5%; `e758a5`/`f8951f`+`d5f536` 3%;
+`61ebac`+`dceb89` 1%. Every skinned draw seen is also a cut-out.
+
+**Skinned draws, as bound** (`71faac`): the three vertex streams are one buffer, the submesh's vertices (stride 60):
+position `0x22` at 0, weights `0x2f` at 28 (eight 16-bit weights in four 32-bit words; the shader scales the sum by
+1/65535; bones 5-8 only if weight 5 is not 0), bone indices `0x2c` at 44 (eight bytes, ×48 into cbuf 4). cbuf 2
+byte 128 equals our projection × view × world. cbuf 4 is a **new buffer per submesh every frame** (a bone palette
+built on the CPU); its matrices are not copies of `[object+0x110]+0x138` (that array holds other matrices; 0 of 24
+palette entries found there). Where the palette is built is still open.
 
 | Fragment shader | Does |
 |---|---|

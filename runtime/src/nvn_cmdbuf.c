@@ -142,10 +142,15 @@ NVN(nvnCommandBufferBindVertexAttribState) {
     cb->trace_nattribs = A(1) < 16 ? (uint32_t)A(1) : 16;
     if (A(2)) memcpy(cb->trace_attribs, AP(2), cb->trace_nattribs * 4);
 }
-NVN(nvnCommandBufferBindVertexStreamState) { record_copy(c, CMD_BIND_VERTEX_STREAM, 2, (uint32_t)A(1) * 8); }
+NVN(nvnCommandBufferBindVertexStreamState) {  /* (cmd, count, states: stride, divisor) */
+    record_copy(c, CMD_BIND_VERTEX_STREAM, 2, (uint32_t)A(1) * 8);
+    NvnCmdBuf *cb = cb_of(A(0));
+    if (A(2)) memcpy(cb->trace_streams, AP(2), (A(1) < 4 ? (uint32_t)A(1) : 4) * 8);
+}
 NVN(nvnCommandBufferBindVertexBuffer) {  /* (cmd, index, address, size) */
     record(c, CMD_BIND_VERTEX_BUFFERS, 0);
     if (A(1) == 0) cb_of(A(0))->trace_vb0 = A(2);
+    if (A(1) < 4) cb_of(A(0))->trace_vb[A(1)] = A(2);
 }
 NVN(nvnCommandBufferBindUniformBuffer) {  /* (cmd, stage, index, address, size) */
     record(c, CMD_BIND_UNIFORM_BUFFERS, 0);
