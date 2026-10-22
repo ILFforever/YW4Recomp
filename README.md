@@ -97,8 +97,8 @@ Runtime options, capture keys, input replay and the frame-inspection tools are i
 
 - **[N64Recomp](https://github.com/N64Recomp/N64Recomp)** - the model this project follows: ship the tools, let
   every player recompile their own copy.
-- **[LAS Recomp](https://github.com/peiikai/LASRecomp)** - a sister project (Link's Awakening on Switch); its README
-  layout inspired this one's.
+- **[LAS Recomp](https://github.com/peiikai/LASRecomp)** by peiikai - a static recompilation of *Link's Awakening*
+  for Switch; its approach to the Switch SDK and its README layout inspired this project's.
 - **[musl](https://musl.libc.org/)** - the math library (`third_party/musl`, MIT).
 - **[SDL3](https://www.libsdl.org/)** and the **[Vulkan](https://www.vulkan.org/)** headers.
 - **Eden** (a Switch emulator) - used only as a visual and performance reference; none of its code is used.
