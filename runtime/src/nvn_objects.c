@@ -130,7 +130,7 @@ NVN(nvnQueueInitialize) { RET(1); }
 NVN(nvnQueueFinalize) { (void)c; }
 
 static uint64_t frames;
-uint64_t nvn_frames_presented(void) { return __atomic_load_n(&frames, __ATOMIC_RELAXED); }
+extern uint64_t yw4_frames_presented;  /* dispatch.c (YW4_TRACE_RENDER_JOBS) */
 
 NVN(nvnQueueSubmitCommands) {  /* (queue, count, const NVNcommandHandle*) */
     int n = (int)A(1);
@@ -191,6 +191,7 @@ NVN(nvnQueuePresentTexture) {  /* (queue, window, texture index) */
     static int64_t last_log;  /* host time of the last logged frame, for the rate since then */
     static uint64_t last_frames;
     frames++;
+    __atomic_store_n(&yw4_frames_presented, frames, __ATOMIC_RELAXED);
     uint64_t draws = nvn_take_draw_count();
     yw4_perf_frame(frames, perf_enter, perf_shown, host_now_ns(), draws);
     nvn_stats_frame(frames);

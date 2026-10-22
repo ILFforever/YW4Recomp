@@ -158,7 +158,7 @@ void yw4_watch_init(void) {
  * <frame>+2 are current: the function, a, b and the byte at b+8 (the layer kind, when b is
  * a layer item). Lines starting "list" mark each start of the list walk. */
 static int jobs_from = -2;
-uint64_t nvn_frames_presented(void);  /* nvn_objects.c */
+uint64_t yw4_frames_presented;  /* set by the present (nvn_objects.c) */
 
 static void trace_render_job(const CPUState *ctx, uint64_t addr) {
     static uint64_t base;
@@ -167,7 +167,7 @@ static void trace_render_job(const CPUState *ctx, uint64_t addr) {
             if (!strcmp(yw4_code[i].name, "main")) base = *yw4_code[i].base;
     uint64_t ret = ctx->x[30] - base;
     if (ret != 0x979840 && ret != 0x979854 && ret != 0x971afc) return;
-    uint64_t frame = nvn_frames_presented();
+    uint64_t frame = __atomic_load_n(&yw4_frames_presented, __ATOMIC_RELAXED);
     if (frame < (uint64_t)jobs_from || frame >= (uint64_t)jobs_from + 3) return;
     if (ret == 0x979840) {  /* main+0x9737f0, called before each walk of the list */
         fprintf(stderr, "yw4: render jobs: t%04x list (presented frame %" PRIu64 ")\n",
