@@ -154,6 +154,7 @@ typedef struct {
     int recording;
     uint64_t guest;            /* the guest NVNcommandBuffer* */
     const NvnProgram *program; /* bound last (YW4_TRACE_DRAW_CALLERS) */
+    uint32_t target_w, target_h, target_colors, target_depth;  /* set last (YW4_TRACE_DRAW_CALLERS) */
 } NvnCmdBuf;
 
 /* One recorded call: header, the call's x1..x7 and s0..s3, then copied data. A command

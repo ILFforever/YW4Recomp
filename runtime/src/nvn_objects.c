@@ -130,6 +130,7 @@ NVN(nvnQueueInitialize) { RET(1); }
 NVN(nvnQueueFinalize) { (void)c; }
 
 static uint64_t frames;
+uint64_t nvn_frames_presented(void) { return __atomic_load_n(&frames, __ATOMIC_RELAXED); }
 
 NVN(nvnQueueSubmitCommands) {  /* (queue, count, const NVNcommandHandle*) */
     int n = (int)A(1);

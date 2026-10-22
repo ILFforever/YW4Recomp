@@ -111,15 +111,18 @@ static void trace_draw_caller(const CPUState *c) {
     static int nseen;
     uint64_t st[DEPTH];
     int n = yw4_call_stack(c, st, DEPTH);
+    const NvnCmdBuf *cb = cb_of(A(0));
     uint64_t h = 0xCBF29CE484222325ull;
     for (int i = 0; i < n; i++) h = (h ^ st[i]) * 0x100000001B3ull;
+    h = (h ^ ((uint64_t)cb->target_w << 32 | cb->target_h)) * 0x100000001B3ull;
     for (int i = 0; i < nseen; i++)
         if (seen[i] == h) return;
     if (nseen < SEEN) seen[nseen++] = h;
-    const NvnProgram *p = cb_of(A(0))->program;
+    const NvnProgram *p = cb->program;
     char where[48];
-    fprintf(stderr, "yw4: draw caller: vs %016llx fs %016llx\n", p ? (unsigned long long)p->stages[0].key : 0ull,
-            p ? (unsigned long long)p->stages[1].key : 0ull);
+    fprintf(stderr, "yw4: draw caller: vs %016llx fs %016llx target %ux%u (%u colour, %s depth)\n",
+            p ? (unsigned long long)p->stages[0].key : 0ull, p ? (unsigned long long)p->stages[1].key : 0ull,
+            cb->target_w, cb->target_h, cb->target_colors, cb->target_depth ? "with" : "no");
     for (int i = 0; i < n; i++) fprintf(stderr, "       %s\n", yw4_describe(st[i] - 4, where));
 }
 NVN(nvnCommandBufferBindBlendState) { record_copy(c, CMD_BIND_BLEND, 1, 8); }
@@ -190,6 +193,12 @@ NVN(nvnCommandBufferSetRenderTargets) {
     }
     if (A(5)) rt.has_depth_view = 1, memcpy(&rt.depth_view, AP(5), sizeof rt.depth_view);
     memcpy(record(c, CMD_SET_RENDER_TARGETS, sizeof rt)->extra, &rt, sizeof rt);
+    NvnCmdBuf *cb = cb_of(A(0));
+    const NvnTexture *first = rt.color[0] ? rt.color[0] : rt.depth;
+    cb->target_w = first ? first->width : 0, cb->target_h = first ? first->height : 0;
+    cb->target_colors = 0;
+    for (int i = 0; i < n; i++) cb->target_colors += rt.color[i] != NULL;
+    cb->target_depth = rt.depth != NULL;
 }
 PLAIN(nvnCommandBufferSetViewport, CMD_SET_VIEWPORTS)        /* (cmd, x, y, w, h) */
 PLAIN(nvnCommandBufferSetScissor, CMD_SET_SCISSORS)          /* (cmd, x, y, w, h) */

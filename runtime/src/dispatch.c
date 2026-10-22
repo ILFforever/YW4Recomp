@@ -140,6 +140,7 @@ void yw4_watch_init(void) {
         watchw_size = *e == ':' ? strtoull(e + 1, NULL, 10) : 8;
         yw4_probe_any = 1;
     }
+    if (getenv("YW4_TRACE_RENDER_JOBS")) yw4_probe_any = 1;
     const char *s = getenv("YW4_WATCH");
     if (!s || !*s) return;
     char *e;
@@ -150,7 +151,43 @@ void yw4_watch_init(void) {
     fprintf(stderr, "yw4: watch %#" PRIx64 " (%u bytes)\n", watch_addr, watch_size);
 }
 
+/* YW4_TRACE_RENDER_JOBS=<frame>: the render thread's job list (decision 0023). Each frame
+ * the render thread (main+0x979790) calls fn(device, a, b) for every node of the list at
+ * [device+0x3210] (node: +8 fn, +0x10 a, +0x18 b, +0x30 next); main+0x971ad0 is a job that
+ * runs a sub-list the same way. Prints every job run while presented frames <frame> to
+ * <frame>+2 are current: the function, a, b and the byte at b+8 (the layer kind, when b is
+ * a layer item). Lines starting "list" mark each start of the list walk. */
+static int jobs_from = -2;
+uint64_t nvn_frames_presented(void);  /* nvn_objects.c */
+
+static void trace_render_job(const CPUState *ctx, uint64_t addr) {
+    static uint64_t base;
+    if (!base)
+        for (size_t i = 0; i < yw4_ncode; i++)
+            if (!strcmp(yw4_code[i].name, "main")) base = *yw4_code[i].base;
+    uint64_t ret = ctx->x[30] - base;
+    if (ret != 0x979840 && ret != 0x979854 && ret != 0x971afc) return;
+    uint64_t frame = nvn_frames_presented();
+    if (frame < (uint64_t)jobs_from || frame >= (uint64_t)jobs_from + 3) return;
+    if (ret == 0x979840) {  /* main+0x9737f0, called before each walk of the list */
+        fprintf(stderr, "yw4: render jobs: t%04x list (presented frame %" PRIu64 ")\n",
+                (unsigned)((uintptr_t)ctx >> 4 & 0xFFFF), frame);
+        return;
+    }
+    char a[48];
+    uint64_t b = ctx->x[2];
+    unsigned kind = b >= 0x7000000000ull && b < 0x7800000000ull ? *(const uint8_t *)(uintptr_t)(b + 8) : 0xFFu;
+    fprintf(stderr, "yw4: render job t%04x %s%-14s a=%#" PRIx64 " b=%#" PRIx64 " [b+8]=%u\n",
+            (unsigned)((uintptr_t)ctx >> 4 & 0xFFFF), ret == 0x971afc ? "    " : "", yw4_describe(addr, a), ctx->x[1], b,
+            kind);
+}
+
 void yw4_probe(CPUState *ctx, uint64_t addr) {
+    if (jobs_from == -2) {
+        const char *j = getenv("YW4_TRACE_RENDER_JOBS");
+        jobs_from = j && *j ? atoi(j) : -1;
+    }
+    if (jobs_from >= 0) trace_render_job(ctx, addr);
     if (watchw_size) {
         static unsigned tries;
         if (tries++ % 4096 == 0 && host_readable(watchw_addr, watchw_size)) {

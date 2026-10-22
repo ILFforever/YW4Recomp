@@ -51,3 +51,10 @@ statement per instruction, with the source as a comment).
 `YW4_TRACE_*`, `YW4_PROBE*`, `YW4_WATCH*` (guest write watch with a call stack; one per process) and
 `YW4_GPU_TRACE*` are described where they are read in `runtime/src/`. To name a guest address in a log, pipe it
 through `python -m tools.yw4.where -`.
+
+Two of them map the engine's frame ([frame.md](frame.md)):
+
+| Variable | What it does |
+|---|---|
+| `YW4_TRACE_RENDER_JOBS=<frame>` | Every job the render threads run while frames `<frame>` to `<frame>+2` are presented: function, its two arguments, the thread. Slows the game a little (a check at every function entry) |
+| `YW4_TRACE_DRAW_CALLERS=1` | Each different call stack that records a draw, once per render-target size, with the shaders |
