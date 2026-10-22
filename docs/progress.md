@@ -5,10 +5,12 @@ How the recompiled game got where it is. Newest first. Numbers in brackets are t
 
 **Current state (2026-10-22):** playable from boot through a new game: logos, title menu, name entry, opening
 cutscenes with dialogue, free movement in the Amano house and town, Yo-kai Pad menus, the diary and autosave.
-Locked 30 frames/s on Vulkan; interior lighting matches Eden. Open gaps are in [known-issues.md](known-issues.md).
+Locked 30 frames/s on Vulkan; interior lighting matches Eden; sound works. Open gaps are in [known-issues.md](known-issues.md).
 
 | Date | Step | Result |
 |---|---|---|
+| 2026-10-22 | AudioOut PCM to the host's sound card (SDL3 audio stream, 5.1 kept), paced by the stream so the clocks can't drift | **Sound and music play** |
+| 2026-10-22 | Performance tools: game work split, per-thread CPU, sampling profiler (`YW4_PROFILE=1`); screenshots fixed (colours, folder, 1.7 s freeze) | The main thread is the CPU bottleneck; graphics translation runs on other threads |
 | 2026-10-22 | Cube texture views count layers in cubes: the game's ambient/reflection cube map (view "layers 0+1") was replaced by a black dummy | **Interiors lit like on Eden**: warm diffuse light, metal sink and kettle reflect again, softer shadows |
 | 2026-10-22 | Diagnostics: capture keys (F10/F11/F12), input recording and replay, mid-frame render-target capture, HDR and depth image dumps ([debugging.md](debugging.md)) | Lighting bugs can be traced pass by pass without a person at the keyboard |
 | 2026-10-22 | Draws without render targets skipped instead of stopping; eShop add-on list answered; exit hang in the performance log fixed | The tip windows no longer stop the game |

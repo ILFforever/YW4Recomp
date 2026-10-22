@@ -11,6 +11,8 @@ Environment variables and keys read by the runtime. The game runs fine with none
 | `YW4_PERF=0` | Turn off the performance log (on by default: `work/perf/perf_<time>.csv` per frame and a `.txt` summary: frame interval, game work, GPU busy/span from timestamp queries, time in command-list translation and GPU waits, CPU, memory; every 600 frames stderr also lists each busy guest thread's share of a core; `YW4_PERF_DIR` moves it) |
 | `YW4_PROFILE=1` | Sample where the presenting (main) thread is every millisecond (Windows); `work/perf/profile_<time>.txt`, named with `python -m tools.yw4.profile` |
 | `YW4_LOG=0` | Turn off the log file (on by default: everything printed on stderr is also saved in `work/logs/yw4_<time>.log`; `YW4_LOG_DIR` moves it) |
+| `YW4_AUDIO=0` | No sound (the game's audio still runs, timed at 48 kHz) |
+| `YW4_AUDIO_DUMP=<file>` | Also save the sound as played: raw PCM16, 48 kHz, the game's channel count (6 = 5.1) |
 | `YW4_HEADLESS=1` | No window, no Vulkan (nothing is drawn) |
 | `YW4_VULKAN_VALIDATION=1` | Turn on the Vulkan validation layer |
 
