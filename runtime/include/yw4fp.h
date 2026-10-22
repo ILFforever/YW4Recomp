@@ -63,20 +63,19 @@ static inline int f64_nans2(uint64_t a, uint64_t b, uint64_t *r) {
     return 0;
 }
 
-/* Two-operand arithmetic: NaN operands first, then the host operation; a NaN produced by
- * an invalid operation (inf - inf, 0 * inf, 0 / 0, ...) becomes the default NaN. */
+/* Two-operand arithmetic: the host operation first. A NaN operand always gives a NaN
+ * result, so a non-NaN result is final and the NaN rules only run when the result is a NaN:
+ * NaN operands as ARM picks them, else (inf - inf, 0 * inf, 0 / 0, ...) the default NaN. */
 #define YW4_FP_BINOP(name, op)                                                       \
     static inline uint32_t f32_##name(uint32_t a, uint32_t b) {                      \
-        uint32_t r;                                                                  \
-        if (f32_nans2(a, b, &r)) return r;                                           \
-        r = bits_f32(f32_of(a) op f32_of(b));                                        \
-        return f32_isnan(r) ? F32_DEFAULT_NAN : r;                                   \
+        uint32_t r = bits_f32(f32_of(a) op f32_of(b));                               \
+        if (__builtin_expect(!f32_isnan(r), 1)) return r;                            \
+        return f32_nans2(a, b, &r) ? r : F32_DEFAULT_NAN;                            \
     }                                                                                \
     static inline uint64_t f64_##name(uint64_t a, uint64_t b) {                      \
-        uint64_t r;                                                                  \
-        if (f64_nans2(a, b, &r)) return r;                                           \
-        r = bits_f64(f64_of(a) op f64_of(b));                                        \
-        return f64_isnan(r) ? F64_DEFAULT_NAN : r;                                   \
+        uint64_t r = bits_f64(f64_of(a) op f64_of(b));                               \
+        if (__builtin_expect(!f64_isnan(r), 1)) return r;                            \
+        return f64_nans2(a, b, &r) ? r : F64_DEFAULT_NAN;                            \
     }
 YW4_FP_BINOP(add, +)
 YW4_FP_BINOP(sub, -)
