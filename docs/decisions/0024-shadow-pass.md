@@ -101,7 +101,8 @@ and turns them into Vulkan at submit. The expensive part is `f_a45890` plus the 
    submeshes per cascade layer drawn by us, the game the other ~70; 0 wrong vertex or index addresses over
    51,000 compared draws. Depth images against the game's: differences at the level of run-to-run noise
    (moving characters, cars), checked per run against a second run of the game's own shadows.
-   Open: a few submeshes are parts posed by a node transform (e.g. a sliding gate): their matrix doesn't match
-   ours, so they stay with the game until node transforms are applied.
+   Open: a few submeshes (about one per cascade layer, objects not identified yet) are drawn by the game with an
+   extra per-submesh offset on top of the object's world matrix (a node transform, location unknown): their
+   matrix doesn't match ours, so they stay with the game until node transforms are applied.
 4. Instanced, then skinned, then cut-out casters. Depth comparison after each.
 5. Switch the default to `native` once every street, house and battle layer matches; measure CPU.
