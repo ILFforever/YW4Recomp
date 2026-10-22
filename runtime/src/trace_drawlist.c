@@ -24,7 +24,7 @@ extern uint64_t yw4_frames_presented;
 
 static int from = -2, printed, max_printed = 24;
 static uint64_t main_base;
-static _Thread_local struct { uint64_t node, obj, geom, prim; int armed; } cur;
+static _Thread_local struct { uint64_t node, obj, geom, prim, dev; int armed; } cur;
 
 static long calls, arms;  /* entries of the submesh draw in the traced frames: all, from the model renderer */
 
@@ -61,7 +61,7 @@ static void entry(CPUState *ctx, uint64_t addr) {
      * object being drawn is in its stack slot sp+0x390 (sp is still the caller's at entry) */
     cur.node = 0;
     cur.obj = *(const uint64_t *)(uintptr_t)(ctx->sp + 0x390);
-    cur.geom = ctx->x[1], cur.prim = ctx->x[2], cur.armed = 1;
+    cur.geom = ctx->x[1], cur.prim = ctx->x[2], cur.dev = ctx->x[0], cur.armed = 1;
 }
 
 int trace_drawlist_on(void) {
@@ -145,8 +145,8 @@ void trace_drawlist_draw(const NvnCmdBuf *cb, uint64_t index_addr) {
         " geometry %#" PRIx64 " primitive %#" PRIx64 "\n",
         pr ? (unsigned long long)pr->stages[0].key : 0ull, pr ? (unsigned long long)pr->stages[1].key : 0ull,
         cb->target_w, cb->target_h, cur.node, cur.obj, cur.geom, cur.prim);
-    Want w[2 + 2 * 16];
-    char names[2 * 16][24];
+    Want w[2 + 2 * 16 + 2];
+    char names[2 * 16 + 3][24];
     int nw = 0;
     w[nw++] = (Want){"vertex buffer 0", cb->trace_vb0, {0}, 0, 1, 0};
     if (index_addr) w[nw++] = (Want){"index buffer", index_addr, {0}, 0, 1, 0};
@@ -170,10 +170,25 @@ void trace_drawlist_draw(const NvnCmdBuf *cb, uint64_t index_addr) {
             }
             w[nw++] = x;
             out(&o, "yw4: drawlist:   %s at %#" PRIx64 "\n", x.what, a);
+            if (s == 0 && i == 1 && readable(a + 128, 64)) {  /* the view's matrix, as numbers */
+                const float *m = (const float *)(uintptr_t)(a + 128);
+                out(&o, "yw4: drawlist:   vs cbuf 1 @128:");
+                for (int k = 0; k < 16; k++) out(&o, " %.4g", m[k]);
+                out(&o, "\n");
+            }
+            if (s == 0 && (i == 1 || i == 2) && readable(a + 128, 16)) {  /* the shaders' matrices at byte 128 */
+                snprintf(names[32 + i], sizeof names[0], "vs cbuf %d @128", i);
+                Want y = {names[32 + i], 0, {0}, 0, 0, 0};
+                memcpy(y.bytes, (const void *)(uintptr_t)(a + 128), 16);
+                y.has_bytes = distinctive(y.bytes);
+                w[nw++] = y;
+            }
         }
     char path[96] = "";
     search(&o, "object", cur.obj, 2, path, 0, w, nw);
     search(&o, "geometry", cur.geom, 2, path, 0, w, nw);
     search(&o, "primitive", cur.prim, 1, path, 0, w, nw);
+    search(&o, "renderer", main_base + 0x56ab1b0, 0, path, 0, w, nw);  /* the static renderer object */
+    search(&o, "device", cur.dev, 0, path, 0, w, nw);
     fwrite(o.buf, 1, o.len, stderr);
 }

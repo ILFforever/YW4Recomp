@@ -74,10 +74,30 @@ needs re-implementing for a better-shadows mod later.
 ### What the GPU gets
 
 - One depth texture, **3 layers** (one per cascade), 1024×1024, format `0x34`.
-- Depth-only vertex shader (`b320bd…`): position = the 4×4 matrix at bytes 128-191 of constant buffer 2 (per
-  object, world × light view × projection, built on the CPU) × vertex. Skinned casters (`71faac…`, `4cbb8e…`,
-  `61ebac…`) also read bone matrices from constant buffer 4.
 - Culling per draw: none or back faces (polygon state `0,…` / `2,…`); depth test and write on.
+- Five programs in the street (`YW4_TRACE_DRAWLIST`, 38 shadow draws):
+
+| Vertex shader | Draws | Position |
+|---|---|---|
+| `b320bd…` | 16 | cbuf 2 bytes 128-191 (projection × view × world, per object, made on the CPU) × vertex |
+| `a74842…`, `744205…` | 12 | cbuf 1 bytes 128-191 (projection × view of the cascade) × instance transform (cbuf 11, 3×4 per instance, `instance × 48` bytes; from `object+0x140 → +0x80`) × world (cbuf 2 bytes 0-63) × vertex: **instanced** props |
+| `71faac…`, `4cbb8e…` | 10 | skinned: up to 4 bones per vertex from cbuf 4 (3×4 each; `object+0x110 → +0x138`) |
+
+| Fragment shader | Does |
+|---|---|
+| `6ead6a…` | nothing: depth only |
+| `dceb89…` | alpha cut-out: samples the material's texture (bindless handle in cbuf 14 slot 0), discards |
+| `b7cd6e…` | alpha cut-out with a threshold from cbuf 3 byte 16, texture handle at cbuf 14 byte 144 |
+
+Checked by value: cbuf 1 bytes 128-191 in a shadow draw equal the renderer's projection × view of that cascade
+(`+0x80 + i·0x40`, same row-major layout; the shader takes `dot(row, position)` per output component). Per-object
+cbuf 2 starts with the object's world matrix (`object+0`, 38 of 38).
+
+**What a replaced shadow pass needs per frame:** the three cascade matrices (renderer object); the shadow layer's
+objects (draw list, layer kind 1, `object+0x1d1` set); per object its world matrix, geometry and submesh records
+(vertex/index data, counts, stride), bones if skinned, instance transforms if instanced, and the cut-out texture
+if alpha-tested. Still open: the vertex attribute layout per shader, where the material's texture handle comes
+from, and how the engine culls objects per cascade (the occlusion boxes).
 
 ## The model renderer `f_a45890`
 
