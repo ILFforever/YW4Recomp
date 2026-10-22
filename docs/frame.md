@@ -93,6 +93,23 @@ Checked by value: cbuf 1 bytes 128-191 in a shadow draw equal the renderer's pro
 (`+0x80 + i·0x40`, same row-major layout; the shader takes `dot(row, position)` per output component). Per-object
 cbuf 2 starts with the object's world matrix (`object+0`, 38 of 38).
 
+Vertex attribute layouts seen in the shadow draws (format / stream / byte offset, from `BindVertexAttribState`):
+
+| Attributes | Draws | Likely |
+|---|---|---|
+| 0: `0x22` / 0 / 0 | 22 | position only |
+| 0: `0x22` / 0 / 0, 1: `0x12` / 1 / 32 | 7 | position + texture coordinates (cut-out) |
+| 0: `0x22` / 0 / 0, 1: `0x2f` / 1 / 28, 2: `0x2c` / 2 / 44 | 11 | position + bone weights and indices (skinned) |
+
+**How textures are bound** (read from `f_974cd0`, the engine's "apply pending state" function, which also holds its
+`BindTexture` and `GetTextureHandle` calls): the state block passed to it as its second argument has texture slots
+at `+0x780 + slot·16` (texture object pointer, "set" byte at `+8`). A texture object keeps its NVN texture id at
+`+8` and a small cache of finished handles per sampler from `+0xf8` (16-byte entries: handle, sampler id). The
+slot's name hash is looked up in the bound program's binding table (`program+0xb8`, count at `+0xc0`: pairs of
+name hash and binding index), the handle is made with `GetTextureHandle(texture id, sampler id)` and bound. Not
+found yet: where the material keeps its texture objects (searching the draw object and the material set
+`object+0x120` up to three pointers deep for the ids found nothing; next try is a write watch on a texture slot).
+
 **What a replaced shadow pass needs per frame:** the three cascade matrices (renderer object); the shadow layer's
 objects (draw list, layer kind 1, `object+0x1d1` set); per object its world matrix, geometry and submesh records
 (vertex/index data, counts, stride), bones if skinned, instance transforms if instanced, and the cut-out texture

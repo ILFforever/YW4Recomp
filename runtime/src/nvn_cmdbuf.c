@@ -132,7 +132,12 @@ NVN(nvnCommandBufferBindDepthStencilState) { record_copy(c, CMD_BIND_DEPTH_STENC
 NVN(nvnCommandBufferBindMultisampleState) { record_copy(c, CMD_BIND_MULTISAMPLE, 1, 0x18); }
 NVN(nvnCommandBufferBindPolygonState) { record_copy(c, CMD_BIND_POLYGON, 1, 4); }
 /* (cmd, count, const state*) */
-NVN(nvnCommandBufferBindVertexAttribState) { record_copy(c, CMD_BIND_VERTEX_ATTRIB, 2, (uint32_t)A(1) * 4); }
+NVN(nvnCommandBufferBindVertexAttribState) {
+    record_copy(c, CMD_BIND_VERTEX_ATTRIB, 2, (uint32_t)A(1) * 4);
+    NvnCmdBuf *cb = cb_of(A(0));
+    cb->trace_nattribs = A(1) < 16 ? (uint32_t)A(1) : 16;
+    if (A(2)) memcpy(cb->trace_attribs, AP(2), cb->trace_nattribs * 4);
+}
 NVN(nvnCommandBufferBindVertexStreamState) { record_copy(c, CMD_BIND_VERTEX_STREAM, 2, (uint32_t)A(1) * 8); }
 NVN(nvnCommandBufferBindVertexBuffer) {  /* (cmd, index, address, size) */
     record(c, CMD_BIND_VERTEX_BUFFERS, 0);
@@ -145,6 +150,7 @@ NVN(nvnCommandBufferBindUniformBuffer) {  /* (cmd, stage, index, address, size) 
 PLAIN(nvnCommandBufferBindStorageBuffer, CMD_BIND_STORAGE_BUFFERS)    /* (cmd, stage, index, address, size) */
 NVN(nvnCommandBufferBindTexture) {  /* (cmd, stage, index, handle) */
     record(c, CMD_BIND_TEXTURES, 0);
+    if (A(1) < 2 && A(2) < 4) cb_of(A(0))->trace_tex[A(1)][A(2)] = A(3);
     if (nvn_trace_texpool((uint32_t)(A(3) & 0xFFFFF)) > 0) {  /* once per (stage, index, texture id, fragment shader) */
         enum { SEEN = 1024 };
         static uint64_t seen[SEEN];

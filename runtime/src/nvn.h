@@ -156,6 +156,8 @@ typedef struct {
     const NvnProgram *program; /* bound last (YW4_TRACE_DRAW_CALLERS) */
     uint32_t target_w, target_h, target_colors, target_depth;  /* set last (YW4_TRACE_DRAW_CALLERS) */
     uint64_t trace_vb0, trace_ub[2][16];  /* bound last, vertex and fragment stage (YW4_TRACE_DRAWLIST) */
+    uint64_t trace_tex[2][4];             /* texture handles 0-3 bound last, vertex and fragment stage */
+    uint32_t trace_attribs[16], trace_nattribs;  /* vertex attribute state bound last */
 } NvnCmdBuf;
 
 /* YW4_TRACE_DRAWLIST (trace_drawlist.c): on, and a recorded draw (index address or 0) */
