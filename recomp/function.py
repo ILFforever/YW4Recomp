@@ -366,10 +366,13 @@ class EmitStats:
 
 
 def emit_function(code: Code, fn: Function, entries: set[int], subgroup=None,
-                  stats: EmitStats | None = None, setjmps: frozenset[int] = frozenset()) -> str:
+                  stats: EmitStats | None = None, setjmps: frozenset[int] = frozenset(),
+                  hook: str | None = None) -> str:
     """setjmps: entries that are setjmp (or a stub that jumps to it). A call to one is a
     host setjmp in this function's frame, registered so that the guest longjmp's jump back
-    to the return address can return here (decision 0018)."""
+    to the return address can return here (decision 0018).
+    hook: a native `int hook(CPUState *)` that runs first; nonzero means it did the
+    function's work and set its results, so the body is skipped (decision 0024)."""
     order = sorted(fn.body)
     body = fn.body
     labels: set[int] = set()
@@ -451,6 +454,9 @@ def emit_function(code: Code, fn: Function, entries: set[int], subgroup=None,
     # Probes (runtime/src/dispatch.c): log calls to chosen functions without rebuilding.
     # Before the entry label, so a loop back to the entry doesn't count as a call.
     out.append(f"    if (__builtin_expect(yw4_probe_any, 0)) yw4_probe(ctx, {addr(fn.entry)});")
+    if hook:
+        out.insert(0, f"int {hook}(CPUState *ctx);  /* hook (recomp/overrides.toml) */")
+        out.append(f"    if ({hook}(ctx)) return;")
     # Blocks are emitted in address order, and a function may own code below its entry
     # (a block it only jumps back to, e.g. main+0xa7d8b4 in main+0xa7d8bc): start at the entry.
     if order and order[0] != fn.entry:

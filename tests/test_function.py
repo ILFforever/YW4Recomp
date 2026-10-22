@@ -63,6 +63,15 @@ class DiscoverTest(unittest.TestCase):
         self.assertEqual(first, "goto L_4;")
         self.assertIn("L_4:", body)
 
+    def test_hook_runs_before_the_body(self):
+        # 0: ret
+        c = code(0xD65F03C0)
+        fn = function.discover(c, 0, {0})
+        lines = [l.strip() for l in function.emit_function(c, fn, {0}, hook="my_hook").split("\n")]
+        self.assertEqual(lines[0], "int my_hook(CPUState *ctx);  /* hook (recomp/overrides.toml) */")
+        body = [l for l in lines[2:] if "yw4_probe" not in l]
+        self.assertEqual(body[0], "if (my_hook(ctx)) return;")
+
 
 if __name__ == "__main__":
     unittest.main()

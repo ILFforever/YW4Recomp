@@ -1013,6 +1013,9 @@ void gpu_execute(uint64_t handle) {
             gpu_end_rendering(cb, &s);
             full_barrier(cb);
             break;
+        case CMD_NATIVE:  /* a pass of our own renderer (decision 0024) */
+            ((NvnNativePass)(uintptr_t)r->x[0])(cb, &s, r->extra, (uint32_t)r->x[1]);
+            break;
         case CMD_REPORT_COUNTER: {  /* (counter, address): NVNcounterData {u64 value, u64 GPU ticks at 614.4 MHz} */
             static uint32_t logged;
             if (r->x[0] < 32 && !(logged & 1u << r->x[0])) {

@@ -81,8 +81,9 @@ and turns them into Vulkan at submit. The expensive part is `f_a45890` plus the 
 
 ## Steps
 
-1. Recompiler hooks (`[[hook]]` in `recomp/overrides.toml`, by `main` offset) and a `CMD_NATIVE` command; a hook on
-   `f_a45890` that only counts kind-1 layers and declines. Game unchanged, tests pass.
+1. **Done:** recompiler hooks (`[[hook]]` in `recomp/overrides.toml`, by `main` offset) and a `CMD_NATIVE` command; a
+   hook on `f_a45890` (`runtime/src/shadow.c`) that only counts kind-1 layers and declines. Measured: 3 shadow
+   layers per frame (one per cascade), each walking the whole draw list (~185 nodes); game unchanged, tests pass.
 2. Gather: walk the layer like `f_a45890`, log the casters and their submeshes, compare the count with the game's
    draws in the same layer.
 3. Static casters: shader, pipeline, uniform ring, draw. Decline layers with other kinds. Depth comparison.

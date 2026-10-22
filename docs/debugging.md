@@ -15,6 +15,7 @@ Environment variables and keys read by the runtime. The game runs fine with none
 | `YW4_AUDIO_DUMP=<file>` | Also save the sound as played: raw PCM16, 48 kHz, the game's channel count (6 = 5.1) |
 | `YW4_HEADLESS=1` | No window, no Vulkan (nothing is drawn) |
 | `YW4_VULKAN_VALIDATION=1` | Turn on the Vulkan validation layer |
+| `YW4_SHADOWS=native` | Our own shadow-caster pass ([decision 0024](decisions/0024-shadow-pass.md)); work in progress, the default is the game's |
 
 Saved screenshots get the same sRGB decode as the window, so their colours match what is on screen.
 

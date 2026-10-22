@@ -123,3 +123,11 @@ module = "sdk"
 symbol = "strlen"
 native = "hle_libc_strlen"
 why = "same reason as memcpy"
+
+# Hooks: native code that runs before a recompiled function and may do its work instead
+# (decision 0024). Game functions have no symbols, so a hook names its function by offset.
+[[hook]]
+module = "main"
+offset = "0xa45890"
+native = "yw4_hook_model_renderer"
+why = "the model renderer; shadow layers (kind 1) can be drawn by our own pass (runtime/src/shadow.c)"

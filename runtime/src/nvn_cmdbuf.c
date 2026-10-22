@@ -243,6 +243,12 @@ NVN(nvnCommandBufferDrawArraysInstanced) { trace_draw(c, 0); record(c, CMD_DRAW_
  * (..., base vertex, base instance, instances) with 0, 0, 1 */
 NVN(nvnCommandBufferDrawElements) { trace_draw(c, A(4)); CmdRec *r = record(c, CMD_DRAW_ELEMENTS, 0); r->x[4] = 0, r->x[5] = 0, r->x[6] = 1; }
 NVN(nvnCommandBufferDrawElementsInstanced) { trace_draw(c, A(4)); record(c, CMD_DRAW_ELEMENTS, 0); }
+void nvn_record_native(const CPUState *c, uint64_t cmd, NvnNativePass fn, const void *data, uint32_t size) {
+    CmdRec *r = rec(c, cb_of(cmd), CMD_NATIVE, size);
+    r->x[0] = (uint64_t)(uintptr_t)fn;
+    r->x[1] = size;
+    if (size) memcpy(r->extra, data, size);
+}
 PLAIN(nvnCommandBufferDrawArraysIndirect, CMD_DRAW_ARRAYS_INDIRECT)        /* (cmd, primitive, indirect address) */
 PLAIN(nvnCommandBufferDrawElementsIndirect, CMD_DRAW_ELEMENTS_INDIRECT)    /* (cmd, primitive, type, index address, indirect address) */
 PLAIN(nvnCommandBufferDrawTransformFeedback, CMD_DRAW_TRANSFORM_FEEDBACK)  /* (cmd, primitive, feedback address) */

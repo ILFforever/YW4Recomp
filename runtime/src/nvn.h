@@ -187,8 +187,16 @@ enum {
     CMD_DRAW_TRANSFORM_FEEDBACK, CMD_DISPATCH,
     CMD_BEGIN_TRANSFORM_FEEDBACK, CMD_END_TRANSFORM_FEEDBACK,
     CMD_BARRIER, CMD_REPORT_COUNTER, CMD_RESET_COUNTER,
+    CMD_NATIVE,  /* a pass of our own renderer (decision 0024): x[0] = NvnNativePass, data in extra */
     CMD_COUNT
 };
+
+/* A native pass, run by the executor where its CMD_NATIVE record sits in the command stream:
+ * `vk_cb` is the VkCommandBuffer being recorded, `gpu_state` the executor's GpuState (the
+ * targets the game bound, gpu_internal.h), `data` the record's copied data. */
+typedef void (*NvnNativePass)(void *vk_cb, void *gpu_state, const void *data, uint32_t size);
+/* Records a native pass into the NVN command buffer `cmd` (guest address); copies `size` bytes. */
+void nvn_record_native(const CPUState *c, uint64_t cmd, NvnNativePass fn, const void *data, uint32_t size);
 
 /* YW4_TRACE_TEXPOOL (nvn_objects.c): 0 off, 1 trace id in detail (UINT32_MAX: any), -1 only
  * summaries for it. */
