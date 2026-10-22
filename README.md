@@ -1,14 +1,14 @@
 # YW4 Recomp
 
-> [!IMPORTANT]
-> **This project was made almost exclusively with AI.** Nearly all of the code, tooling, reverse engineering and
-> documentation in this repository was written by an AI (Anthropic's Claude, through Claude Code), directed, tested
-> and reviewed by a human. As a fan of this game, I made this for myself. Sharing it is a courtesy. If you don't agree
-> with the use of AI or don't trust code written by AI, that is your right; you may simply ignore this project.
-> As with anything on the internet, you run the code at your own discretion.
-
 **YW4 Recomp** is a fan static recompilation of *Yo-kai Watch 4++* (Nintendo Switch, update 2.2.0) into a native
 application, in the style of [N64Recomp](https://github.com/N64Recomp/N64Recomp).
+
+> [!IMPORTANT]
+> **Built with AI.** Claude (Anthropic's model, used through Claude Code) wrote most of this repository: the
+> recompiler, the runtime, the reverse engineering notes and these docs. A human decides what to work on, plays and
+> tests every build, compares it against the real game and reviews the changes. It is a personal fan project that
+> happens to be public. If AI-written code is not something you want to use or read, feel free to pass on it; if you
+> do run it, that is your call.
 
 > [!NOTE]
 > Platforms:
@@ -18,10 +18,10 @@ application, in the style of [N64Recomp](https://github.com/N64Recomp/N64Recomp)
 ![The Amano house kitchen, recompiled and running natively on Windows](docs/screenshots/07-kitchen.jpg)
 
 > [!NOTE]
-> **No game files are included.** YW4 Recomp needs your own copy of the extracted game files of *Yo-kai Watch 4++*
-> at update **2.2.0** (the final 4++ update). The tools check the build and refuse any other. Instructions on how to
-> obtain these files will **NOT** be provided. This repository contains only tools, runtime code and patches; the
-> recompiled code is generated on your machine from your own files and never committed.
+> **Bring your own game.** The repository holds tools, runtime code and patches, nothing from the game itself. To use
+> it you need the ExeFS and RomFS of your own *Yo-kai Watch 4++* at update **2.2.0**, the last 4++ release; the tools
+> check the exact build by hash and stop on anything else. Getting those files is up to you and is not covered here.
+> The recompiled C code is produced on your machine from your copy and stays there.
 
 ## Status
 
@@ -34,8 +34,8 @@ a locked 30 frames/s. Expect missing effects and crashes in places nobody has re
 
 ## How it works
 
-- **This is not emulation.** Every ARM64 function in the game's `main` and `sdk` modules (73,844 functions) is
-  translated to C ahead of time ([recomp/](recomp/README.md)), compiled with Clang and linked into one native program.
+- **Translated ahead of time, not interpreted.** Every ARM64 function in the game's `main` and `sdk` modules (73,844
+  functions) becomes C before the game runs ([recomp/](recomp/README.md)); Clang compiles it into one native program.
 - A native runtime ([runtime/](runtime/)) stands in for the Switch: the kernel (threads, memory, synchronisation),
   system services (filesystem with your RomFS read in place, input, audio, time, saves, applets) and the NVN graphics
   API on top of Vulkan.
