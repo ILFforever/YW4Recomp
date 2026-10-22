@@ -28,7 +28,7 @@ Saved screenshots get the same sRGB decode as the window, so their colours match
 | Variable | What it does |
 |---|---|
 | `YW4_RECORD=0` | Every input change and capture key is recorded in `work/inputs/rec_<time>.txt` (on by default); this turns it off |
-| `YW4_REPLAY=<file>` | Feed a recording back at the same ticks, so a route can be run without a person. Long routes can drift (about one run in three ends somewhere else, e.g. stuck on the save-load screen); check the screenshot |
+| `YW4_REPLAY=<file>` | Feed a recording back at the same ticks, so a route can be run without a person. When the replay ends, the keyboard and gamepad work again, so a short recording can just load the save. Long routes can drift (about one run in three ends somewhere else, e.g. stuck on the save-load screen); check the screenshot |
 | `YW4_INPUT=2400:1:10` | Scripted presses, `tick:buttons(hex):length`, comma separated; `1` is A |
 
 ## Looking inside a frame

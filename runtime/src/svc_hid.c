@@ -177,6 +177,13 @@ static void replay_load(void) {
 static int replay_state(uint64_t tick, uint64_t *buttons, int32_t sticks[4]) {
     if (!replay_loaded) replay_load();
     if (!n_states && !n_keys) return 0;
+    /* After the last line the player takes over (e.g. a replay that only loads the save). */
+    if (next_key == n_keys && (!n_states || tick > replay_states[n_states - 1].tick)) {
+        static int handed_over;
+        if (!handed_over) handed_over = 1, fprintf(stderr, "yw4: replay: finished at tick %llu, input is live\n",
+                                                   (unsigned long long)tick);
+        return 0;
+    }
     static size_t cur;
     while (cur + 1 < n_states && replay_states[cur + 1].tick <= tick) cur++;
     if (n_states && replay_states[cur].tick <= tick) {
