@@ -77,10 +77,10 @@ static uint64_t scripted(uint64_t tick) {
 
 /* ---- Input recording and replay (YW4_RECORD=0 turns recording off; YW4_REPLAY=<file> plays one)
  *
- * Every change of the physical input (buttons, sticks) and every capture key (F10/F11/F12) is
+ * Every change of the physical input (buttons, sticks) and every capture key (F9/F10/F11/F12) is
  * written, with the vsync tick (60 per second since start), to work/inputs/rec_<time>.txt:
  *     s <tick> <buttons hex> <lx> <ly> <rx> <ry>
- *     k <tick> <F10|F11|F12>
+ *     k <tick> <F9|F10|F11|F12>
  * A replay feeds the same states back at the same ticks (instead of the keyboard and gamepad)
  * and presses the same capture keys, so a route a person played can be run again by a script.
  * The game's loading times vary a little from run to run, so long routes can drift. */
@@ -95,6 +95,7 @@ static uint64_t scripted(uint64_t tick) {
 
 void gpu_request_trace(int draws);
 void gpu_request_dump(void);
+void shadow_toggle(void);
 
 static FILE *rec_file;
 static uint64_t rec_tick;  /* the tick of the latest update, for key notes from the window thread */
@@ -199,6 +200,7 @@ static int replay_state(uint64_t tick, uint64_t *buttons, int32_t sticks[4]) {
         if (!strcmp(k, "F11")) gpu_request_trace(450);
         else if (!strcmp(k, "F10")) gpu_request_dump();
         else if (!strcmp(k, "F12")) window_request_screenshot();
+        else if (!strcmp(k, "F9")) shadow_toggle();
     }
     return 1;
 }

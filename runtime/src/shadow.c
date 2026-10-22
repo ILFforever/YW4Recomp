@@ -248,6 +248,7 @@ static struct { uint64_t addr; uint32_t layer; int known; } cascade_target[3];
 /* Statistics since the last report */
 static long layers_seen, missing_total, extra_total, ours_total, drawn_total;
 static long nodes_hidden, draws_native;
+static long draws_since_toggle;  /* submeshes drawn by our pass since the last F9 */
 static long compared, wrong_vb, wrong_ib, wrong_mvp;  /* check mode: the game's static draws vs ours */
 
 static int same(const Caster *c, const uint64_t d[2]) { return c->object == d[0] && c->submesh == d[1]; }
@@ -437,6 +438,7 @@ static void take_over(Layer *k) {
     k->pass = p;
     __atomic_add_fetch(&nodes_hidden, k->nhidden, __ATOMIC_RELAXED);
     __atomic_add_fetch(&draws_native, p->n, __ATOMIC_RELAXED);
+    __atomic_add_fetch(&draws_since_toggle, p->n, __ATOMIC_RELAXED);
 }
 
 /* The layer has been drawn by the game: give the nodes back, queue our pass after it. */
@@ -456,18 +458,35 @@ static void end_layer(Layer *k, const CPUState *ctx) {
     k->pass = NULL;
 }
 
+/* ---- the mode: YW4_SHADOWS at start, F9 (window.c, or a replay's "k <tick> F9") switches
+ * between the game's shadows and ours while the game runs */
+
+static void init_mode(void) {
+    const char *s = getenv("YW4_SHADOWS");
+    int m = s && !strcmp(s, "native") ? MODE_NATIVE : s && !strcmp(s, "check") ? MODE_CHECK : MODE_GAME;
+    int unset = -1;
+    if (!__atomic_compare_exchange_n(&mode, &unset, m, 0, __ATOMIC_ACQ_REL, __ATOMIC_ACQUIRE)) return;
+    __atomic_store_n(&shadow_checking, m != MODE_GAME, __ATOMIC_RELEASE);
+    if (m != MODE_GAME) fprintf(stderr, "yw4: shadows: %s\n", m == MODE_CHECK ? "checking the gather"
+                                                                : "our pass draws the static casters");
+}
+
+void shadow_toggle(void) {
+    init_mode();
+    int m = __atomic_load_n(&mode, __ATOMIC_ACQUIRE) == MODE_GAME ? MODE_NATIVE : MODE_GAME;
+    /* a layer already begun keeps what it hid and queued: its cascade-end hook finishes it */
+    __atomic_store_n(&shadow_checking, m != MODE_GAME, __ATOMIC_RELEASE);
+    __atomic_store_n(&mode, m, __ATOMIC_RELEASE);
+    fprintf(stderr, "yw4: shadows: %s (F9; %ld submeshes drawn by our pass since the last switch)\n",
+            m == MODE_NATIVE ? "ours for the static casters" : "the game's",
+            __atomic_exchange_n(&draws_since_toggle, 0, __ATOMIC_RELAXED));
+}
+
 /* ---- hooks */
 
 int yw4_hook_model_renderer(CPUState *ctx) {
-    if (mode == MODE_GAME) return 0;
-    if (mode < 0) {
-        const char *s = getenv("YW4_SHADOWS");
-        mode = s && !strcmp(s, "native") ? MODE_NATIVE : s && !strcmp(s, "check") ? MODE_CHECK : MODE_GAME;
-        shadow_checking = mode != MODE_GAME;
-        if (mode != MODE_GAME) fprintf(stderr, "yw4: shadows: %s\n", mode == MODE_CHECK ? "checking the gather"
-                                                                         : "our pass draws the static casters");
-        if (mode == MODE_GAME) return 0;
-    }
+    if (__atomic_load_n(&mode, __ATOMIC_ACQUIRE) < 0) init_mode();
+    if (__atomic_load_n(&mode, __ATOMIC_ACQUIRE) == MODE_GAME) return 0;
     if (lay && lay->active) end_layer(lay, NULL);  /* not ended by its job (shouldn't happen): no pass */
     uint64_t list = ctx->x[1], item = ctx->x[2];
     if (!item || U8(item + 8) != LAYER_SHADOW) return 0;

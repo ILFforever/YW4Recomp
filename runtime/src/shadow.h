@@ -22,6 +22,8 @@ typedef struct {
 
 /* CMD_NATIVE callback: `data` holds a ShadowPass pointer. */
 void gpu_shadow_pass(void *vk_cb, void *gpu_state, const void *data, uint32_t size);
+/* F9: switch between the game's shadow casters and ours (shadow.c) */
+void shadow_toggle(void);
 /* Passes skipped because another target was bound, and draws skipped (memory outside the pools). */
 void gpu_shadow_counts(long *passes_skipped, long *draws_skipped);
 

@@ -15,7 +15,7 @@ Environment variables and keys read by the runtime. The game runs fine with none
 | `YW4_AUDIO_DUMP=<file>` | Also save the sound as played: raw PCM16, 48 kHz, the game's channel count (6 = 5.1) |
 | `YW4_HEADLESS=1` | No window, no Vulkan (nothing is drawn) |
 | `YW4_VULKAN_VALIDATION=1` | Turn on the Vulkan validation layer |
-| `YW4_SHADOWS=native` | Our own shadow-caster pass ([decision 0024](decisions/0024-shadow-pass.md)); work in progress, the default is the game's |
+| `YW4_SHADOWS=native` | Start with our own shadow-caster pass on ([decision 0024](decisions/0024-shadow-pass.md)); work in progress, the default is the game's. F9 switches while playing |
 
 Saved screenshots get the same sRGB decode as the window, so their colours match what is on screen.
 
@@ -26,6 +26,7 @@ Saved screenshots get the same sRGB decode as the window, so their colours match
 | F12 | Screenshot of the next frame |
 | F11 | Describe the draws of the next frame in the log: targets, shaders, textures, the vertex stage's matrices (`YW4_GPU_TRACE=<n>` with `YW4_GPU_TRACE_AT=<frame>` does the same from a start frame) |
 | F10 | Dump multi-layer depth images (shadow maps) to `work/dump/*.pgm` |
+| F9 | Switch the shadow casters between the game's and our pass ([decision 0024](decisions/0024-shadow-pass.md)); the log says which, and how many submeshes our pass drew since the last switch. Recorded and replayed like F10-F12 |
 
 ## Recording and replaying input
 
