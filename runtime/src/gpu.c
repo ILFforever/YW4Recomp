@@ -763,7 +763,12 @@ VkImageView gpu_sample_view(VkCommandBuffer cb, NvnTexture *t, const NvnTextureV
     if (layer0 + nlayers > g->layers) nlayers = g->layers - layer0;
     if (type == VK_IMAGE_VIEW_TYPE_2D || type == VK_IMAGE_VIEW_TYPE_3D) nlayers = 1;
     if (type == VK_IMAGE_VIEW_TYPE_CUBE) {
-        if (nlayers < 6) return gpu_dummy_view(cb, type);
+        /* A view of a cube texture counts its layers in cubes: the game's ambient cube map has a
+         * view of layers 0+1, which is the whole cube (6 faces), not one face. */
+        if (t->target == TARGET_CUBE || t->target == TARGET_CUBE_ARRAY) {
+            if (nlayers < 6) layer0 *= 6;
+        }
+        if (layer0 + 6 > g->layers) return gpu_dummy_view(cb, type);
         nlayers = 6;
     }
     VkFormat fmt = has_view && v->setmask & 4 ? gpu_format(v->format) : g->format;
@@ -1134,6 +1139,18 @@ static void dump_images(uint64_t frame) {
                         fputc((int)(u * 255.0 + 0.5), f);
                     }
                     fclose(f);
+                }
+                if (depth) {  /* depth as raw floats, for tools */
+                    snprintf(path, sizeof path, "work/dump/image_%" PRIx64 "_%u.depthf", addr, l);
+                    f = fopen(path, "wb");
+                    if (f) {
+                        fwrite(&g->width, 4, 1, f), fwrite(&g->height, 4, 1, f);
+                        for (size_t i = 0; i < n; i++) {
+                            float x = (float)v[i];
+                            fwrite(&x, 4, 1, f);
+                        }
+                        fclose(f);
+                    }
                 }
                 if (!depth) {  /* colour as raw RGBA floats, for tools */
                     snprintf(path, sizeof path, "work/dump/image_%" PRIx64 "_%u.rgbaf", addr, l);

@@ -114,6 +114,7 @@ Where the recompiled game stops right now, and how it got there. Newest first. E
 
 | Date | Step | Result |
 |---|---|---|
+| 2026-10-22 | Cube texture views count layers in cubes: the game's ambient/reflection cube map (view "layers 0+1") was replaced by a black dummy | **Interiors lit like on Eden**: warm diffuse light, metal sink and kettle reflect again, softer shadows (it was not the shadow cascades) |
 | 2026-10-22 | New game (0022): the keyboard applet answered natively; switch tables the recompiler missed (scheduling gaps, table base loaded after the branch); `time:u` clock snapshots; 32-bit integer vertex inputs | Name entry, the first 3D character, and the **opening scene with dialogue** render |
 | 2026-10-21 | Recompiler fix: a function whose code includes a block placed below its entry now starts with a jump to the entry (5 functions; one is the engine's resource lookup by name hash, main+0xa7d8bc) | **Menus render**: every menu mesh had been skipped because its texture links were never found; the warning card, autosave notice and title menu now draw |
 | 2026-10-21 | Draw path step 2 (0021): pipelines, descriptors, texture uploads, quads, window crop; the translated shaders run | **First real frames**: the LEVEL-5 logo and the autosave notice; waits there for a button (input next) |
