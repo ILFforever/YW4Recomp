@@ -43,6 +43,42 @@ the task that queues it (main thread).
 
 `f_7ed570` has six copies of this block; three ran in the street. The other three are not identified yet.
 
+### Cascade data
+
+Computed on the main thread every frame by `yw::CMainComponent` slot 11 (`f_5d4270`, the update; slot 12 queues
+the render jobs) → `f_7e5570` → `f_a4e830(camera, out, near[], far[], third[], 3)`. `f_a4e830` inverts the camera
+matrix, then calls `f_a4d100` once per cascade; `f_7e5570` copies the results into the **renderer object**
+(`a` = `0x71056ab1b0` = `main+0x56ab1b0`, a static object, same address every run):
+
+| Renderer offset | Per cascade i | Contents |
+|---|---|---|
+| `+0x200 + i·0x40` | 4×4 floats, row-major | light view: same rotation for all cascades, own translation |
+| `+0x140 + i·0x40` | 4×4 floats | projection, **perspective along light-space y** (last row `0 1 0 0`, so w = y): a perspective-warped shadow map (LiSPSM family), not the usual orthographic cascades |
+| `+0x080 + i·0x40` | 4×4 floats | projection × view, multiplied in `f_7e5570` |
+| `+0x2c0 + i·0x10` | 4 floats | per-cascade values (not decoded) |
+
+The per-cascade settings (`main+0x56b07a0` = `[renderer+0x568] + 0x1cf0`, three arrays of three floats):
+
+| Cascade | near | far | third (light depth range?) |
+|---|---|---|---|
+| 0 | 0.1 | 20 | 60 |
+| 1 | 20 | 50 | 110 |
+| 2 | 50 | 150 | 200 |
+
+`f_7ee510` (the per-cascade job) copies the view matrix (a) and projection (b) into the render state
+(`device+0x2c0`, `+0x280`) and takes the viewport from render target #0x14 (the shadow map).
+
+**For the replacement:** read the finished matrices from the renderer object; the warped-projection math only
+needs re-implementing for a better-shadows mod later.
+
+### What the GPU gets
+
+- One depth texture, **3 layers** (one per cascade), 1024×1024, format `0x34`.
+- Depth-only vertex shader (`b320bd…`): position = the 4×4 matrix at bytes 128-191 of constant buffer 2 (per
+  object, world × light view × projection, built on the CPU) × vertex. Skinned casters (`71faac…`, `4cbb8e…`,
+  `61ebac…`) also read bone matrices from constant buffer 4.
+- Culling per draw: none or back faces (polygon state `0,…` / `2,…`); depth test and write on.
+
 ## The model renderer `f_a45890`
 
 Draws one **layer**: `f_a45890(device, draw list, layer item)`. Every layer gets the same draw list (nodes from
@@ -78,5 +114,6 @@ UI is drawn by other layer drawers (`f_9f6170`, `f_a88c70`, `f_9cfe60`, `f_9dfb4
 
 - Which job draws into which target in the main view (G-buffer, lighting, transparent, post): match the jobs to the
   GPU passes of an F11 log.
-- What `f_7ee4e0` / `f_7ee510` read: the cascade matrices and splits, the first data the shadow replacement needs.
+- The draw list and draw objects `f_a45890` walks: per object the world matrix, mesh buffers, bones, material,
+  and the "casts a shadow" flag. This is the main data every replaced mesh pass needs (next step).
 - The three unused shadow blocks in `f_7ed570`.
