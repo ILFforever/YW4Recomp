@@ -84,8 +84,11 @@ and turns them into Vulkan at submit. The expensive part is `f_a45890` plus the 
 1. **Done:** recompiler hooks (`[[hook]]` in `recomp/overrides.toml`, by `main` offset) and a `CMD_NATIVE` command; a
    hook on `f_a45890` (`runtime/src/shadow.c`) that only counts kind-1 layers and declines. Measured: 3 shadow
    layers per frame (one per cascade), each walking the whole draw list (~185 nodes); game unchanged, tests pass.
-2. Gather: walk the layer like `f_a45890`, log the casters and their submeshes, compare the count with the game's
-   draws in the same layer.
+2. **Done:** gather (`shadow.c`), from Ghidra's decompile of `f_a45890`: node, object, geometry and submesh filters,
+   plus our own culling of each object's box against the cascade (side planes only: casters in front of the
+   cascade still cast into it). `YW4_SHADOWS=check` compares with the game's draws: 0 missed. Instanced objects are
+   not culled yet (identity world matrix, each copy placed by its own transform), so we select about 2.5× the
+   game's submeshes: same image, more GPU work, to fix with per-copy culling.
 3. Static casters: shader, pipeline, uniform ring, draw. Decline layers with other kinds. Depth comparison.
 4. Instanced, then skinned, then cut-out casters. Depth comparison after each.
 5. Switch the default to `native` once every street, house and battle layer matches; measure CPU.

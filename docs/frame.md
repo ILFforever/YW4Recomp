@@ -121,7 +121,7 @@ from, and how the engine culls objects per cascade (the occlusion boxes).
 Draws one **layer**: `f_a45890(device, draw list, layer item)`. Every layer gets the same draw list (nodes from
 `[list + 0x20]`, linked at `+0x30`); the layer item picks which nodes it draws: kind byte at `+8` (0 = normal view,
 1 = shadow, 2 = seen with the ambient cube), a key range at `+0xa`/`+0xc`, a mask at `+0x10`. For kind 1 it skips
-objects whose byte `+0x1d1` is 0 (likely "casts no shadow"). This list is the engine-level data a replaced pass
+objects whose byte `+0x1d1` is 0 ("casts no shadow"). `runtime/src/shadow.c` (`gather`) re-implements this selection; `YW4_SHADOWS=check` compares it with what the game draws (0 missed over 3,600 shadow layers). This list is the engine-level data a replaced pass
 would read instead of NVN commands.
 
 Read so far from the start of its loop (offsets; meanings partly guessed):
@@ -135,7 +135,9 @@ Read so far from the start of its loop (offsets; meanings partly guessed):
 | object `+0x101`, `+0x103` | signed bytes: priority / sort range |
 | object `+0x120` | material set (its `[+0x18]+0x23` byte changes kind-0/kind-1 handling) |
 | object `+0x128`, `+0x140` | model resource (`+0x140`: submesh count at `+0x200`) |
-| object `+0x1b0`, `+0x1c8`, `+0x1cb`, `+0x1d1` | skip in shadow layers if `+0x1b0` ≠ 0; visible; layer bit; casts shadow |
+| object `+0x1b0`, `+0x1c8`, `+0x1cb`, `+0x1d1` | skip in shadow layers if `+0x1b0` ≠ 0; **number of geometries** (per geometry: `*(+0x128)[g]`, model `+0x140 + g·0x240`); layer bit; casts shadow |
+| object `+0x80`, `+0x90` | bounding box min and max (local space) |
+| model `+0x80` | instance transforms (instanced objects; their world matrix is the identity) |
 | `[draw list + 0x18]` | submesh table, records of 0x50 bytes (bytes `+0x34`, `+0x3f`, `+0x43` tested) |
 
 ### How a draw item reaches the GPU

@@ -131,3 +131,9 @@ module = "main"
 offset = "0xa45890"
 native = "yw4_hook_model_renderer"
 why = "the model renderer; shadow layers (kind 1) can be drawn by our own pass (runtime/src/shadow.c)"
+
+[[hook]]
+module = "main"
+offset = "0xa75e90"
+native = "yw4_hook_submesh_draw"
+why = "the model renderer's submesh draw; YW4_SHADOWS=check notes what the game draws (runtime/src/shadow.c)"
