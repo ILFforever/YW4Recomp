@@ -89,6 +89,19 @@ and turns them into Vulkan at submit. The expensive part is `f_a45890` plus the 
    cascade still cast into it). `YW4_SHADOWS=check` compares with the game's draws: 0 missed. Instanced objects are
    not culled yet (identity world matrix, each copy placed by its own transform), so we select about 2.5× the
    game's submeshes: same image, more GPU work, to fix with per-copy culling.
-3. Static casters: shader, pipeline, uniform ring, draw. Decline layers with other kinds. Depth comparison.
+3. **Working, being validated:** static casters drawn by our pass (`runtime/src/gpu_shadow.c`, shader
+   `runtime/shaders/shadow_static.vert`, compiled by `recomp/build.py`). Built **hybrid** rather than as
+   planned in 1-3 above: the engine binds and clears each cascade layer lazily inside `f_a45890` (2 clears per
+   layer), so instead of skipping it, the hook hides the nodes we draw (their kind-1 bit at node `+0x20`), the
+   game draws the rest and binds/clears the layer, and our pass is queued after it from a hook on the cascade's
+   end job `f_7ed350`; the executor checks the bound target is the cascade's layer. Which submeshes are ours is
+   **learned from the game's own draws**: drawn with the static programs (`b320bd` + `6ead6a`), our vertex and
+   index addresses equal to the game's, our matrix equal to the one in cbuf 2 (verified per draw), and its
+   culling recorded. Nodes go back to the game one frame in 32 to re-check. In the street: about 15 static
+   submeshes per cascade layer drawn by us, the game the other ~70; 0 wrong vertex or index addresses over
+   51,000 compared draws. Depth images against the game's: differences at the level of run-to-run noise
+   (moving characters, cars), checked per run against a second run of the game's own shadows.
+   Open: a few submeshes are parts posed by a node transform (e.g. a sliding gate): their matrix doesn't match
+   ours, so they stay with the game until node transforms are applied.
 4. Instanced, then skinned, then cut-out casters. Depth comparison after each.
 5. Switch the default to `native` once every street, house and battle layer matches; measure CPU.

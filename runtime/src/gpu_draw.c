@@ -560,6 +560,15 @@ static int begin_rendering(VkCommandBuffer cb, GpuState *s, VkFormat color[8], V
     return 1;
 }
 
+int gpu_begin_targets(VkCommandBuffer cb, GpuState *s, VkFormat color[8], VkFormat *depth, uint32_t *w, uint32_t *h) {
+    if (!s->rendering) {  /* images first: made or uploaded outside rendering */
+        for (int i = 0; i < s->ncolor; i++)
+            if (s->rt.color[i]) image_of(cb, s->rt.color[i]);
+        if (s->rt.depth) image_of(cb, s->rt.depth);
+    }
+    return begin_rendering(cb, s, color, depth, w, h);
+}
+
 /* The texture and sampler a handle names in the current pools. */
 static NvnTexEntry *tex_entry(const GpuState *s, uint64_t handle) {
     uint32_t id = (uint32_t)(handle & 0xFFFFF);
@@ -847,6 +856,60 @@ void gpu_capture_flush(void) {
     ncaps = 0;
 }
 
+void gpu_cull(VkCommandBuffer cb, uint8_t cull_mode, uint8_t front_face) {
+    static const VkCullModeFlags cull[4] = {VK_CULL_MODE_NONE, VK_CULL_MODE_FRONT_BIT, VK_CULL_MODE_BACK_BIT,
+                                            VK_CULL_MODE_FRONT_AND_BACK};
+    vkCmdSetCullMode(cb, cull[cull_mode & 3]);
+    int ccw = front_face == 1;
+    if (nvn_window_origin != 1) ccw = !ccw;
+    vkCmdSetFrontFace(cb, ccw ? VK_FRONT_FACE_COUNTER_CLOCKWISE : VK_FRONT_FACE_CLOCKWISE);
+}
+
+/* The dynamic state of the pipelines (gpu_draw's and the native passes'), from s: viewport
+ * (flipped for the upper-left origin), scissor, cull, front face, depth, stencil, bias. */
+void gpu_dynamic_state(VkCommandBuffer cb, const GpuState *s, VkFormat depth, uint32_t w, uint32_t h) {
+    int flip = nvn_window_origin == 1;
+    float vx = 0, vy = 0, vw = (float)w, vh = (float)h;
+    if (s->have_viewport) vx = (float)s->viewport[0], vy = (float)s->viewport[1], vw = (float)s->viewport[2],
+                          vh = (float)s->viewport[3];
+    VkViewport vp = {vx, flip ? vy + vh : vy, vw, flip ? -vh : vh, s->depth_range[0], s->depth_range[1]};
+    vkCmdSetViewport(cb, 0, 1, &vp);
+    VkRect2D sc = {{0, 0}, {w, h}};
+    if (s->have_scissor) {
+        int32_t x = s->scissor[0] < 0 ? 0 : s->scissor[0], y = s->scissor[1] < 0 ? 0 : s->scissor[1];
+        sc = (VkRect2D){{x, y}, {(uint32_t)(s->scissor[2] > 0 ? s->scissor[2] : 0), (uint32_t)(s->scissor[3] > 0 ? s->scissor[3] : 0)}};
+    }
+    vkCmdSetScissor(cb, 0, 1, &sc);
+    static const VkCullModeFlags cull[4] = {VK_CULL_MODE_NONE, VK_CULL_MODE_FRONT_BIT, VK_CULL_MODE_BACK_BIT,
+                                            VK_CULL_MODE_FRONT_AND_BACK};
+    (void)cull;
+    gpu_cull(cb, s->polygon[0], s->polygon[1]);
+    const uint8_t *ds = s->depth_stencil;
+    int has_depth = depth != VK_FORMAT_UNDEFINED && depth != VK_FORMAT_S8_UINT;
+    int has_stencil = depth == VK_FORMAT_S8_UINT || depth == VK_FORMAT_D24_UNORM_S8_UINT ||
+                      depth == VK_FORMAT_D32_SFLOAT_S8_UINT;
+    vkCmdSetDepthTestEnable(cb, has_depth && ds[0]);
+    vkCmdSetDepthWriteEnable(cb, has_depth && ds[1]);
+    vkCmdSetDepthCompareOp(cb, compare_fn(ds[2]));
+    vkCmdSetDepthBoundsTestEnable(cb, VK_FALSE);
+    vkCmdSetStencilTestEnable(cb, has_stencil && ds[3]);
+    uint32_t ops = ds[5] | ds[6] << 8 | ds[7] << 16;
+    for (int face = 0; face < 2; face++) {
+        uint32_t o = ops >> (12 * face);
+        VkStencilFaceFlags f = face ? VK_STENCIL_FACE_BACK_BIT : VK_STENCIL_FACE_FRONT_BIT;
+        vkCmdSetStencilOp(cb, f, stencil_op(o & 0xF), stencil_op(o >> 8 & 0xF), stencil_op(o >> 4 & 0xF),
+                          compare_fn(face ? ds[4] >> 4 : ds[4] & 0xF));
+        vkCmdSetStencilReference(cb, f, s->stencil_ref[face]);
+        vkCmdSetStencilWriteMask(cb, f, s->stencil_mask[face]);
+        vkCmdSetStencilCompareMask(cb, f, s->stencil_value_mask[face]);
+    }
+    vkCmdSetDepthBiasEnable(cb, (s->polygon[3] & 4) != 0);
+    vkCmdSetDepthBias(cb, s->polygon_offset[1], s->polygon_offset[2], s->polygon_offset[0]);
+    vkCmdSetBlendConstants(cb, s->blend_color);
+    vkCmdSetRasterizerDiscardEnable(cb, s->rasterizer_discard != 0);
+    vkCmdSetPrimitiveRestartEnable(cb, VK_FALSE);
+}
+
 void gpu_draw(VkCommandBuffer cb, GpuState *s, const CmdRec *r) {
     Program *g = s->program ? program_of(s->program) : NULL;
     if (!g) {
@@ -1009,49 +1072,7 @@ void gpu_draw(VkCommandBuffer cb, GpuState *s, const CmdRec *r) {
         }
     }
 
-    /* Dynamic state */
-    int flip = nvn_window_origin == 1;
-    float vx = 0, vy = 0, vw = (float)w, vh = (float)h;
-    if (s->have_viewport) vx = (float)s->viewport[0], vy = (float)s->viewport[1], vw = (float)s->viewport[2],
-                          vh = (float)s->viewport[3];
-    VkViewport vp = {vx, flip ? vy + vh : vy, vw, flip ? -vh : vh, s->depth_range[0], s->depth_range[1]};
-    vkCmdSetViewport(cb, 0, 1, &vp);
-    VkRect2D sc = {{0, 0}, {w, h}};
-    if (s->have_scissor) {
-        int32_t x = s->scissor[0] < 0 ? 0 : s->scissor[0], y = s->scissor[1] < 0 ? 0 : s->scissor[1];
-        sc = (VkRect2D){{x, y}, {(uint32_t)(s->scissor[2] > 0 ? s->scissor[2] : 0), (uint32_t)(s->scissor[3] > 0 ? s->scissor[3] : 0)}};
-    }
-    vkCmdSetScissor(cb, 0, 1, &sc);
-    static const VkCullModeFlags cull[4] = {VK_CULL_MODE_NONE, VK_CULL_MODE_FRONT_BIT, VK_CULL_MODE_BACK_BIT,
-                                            VK_CULL_MODE_FRONT_AND_BACK};
-    vkCmdSetCullMode(cb, cull[s->polygon[0] & 3]);
-    int ccw = s->polygon[1] == 1;
-    if (!flip) ccw = !ccw;
-    vkCmdSetFrontFace(cb, ccw ? VK_FRONT_FACE_COUNTER_CLOCKWISE : VK_FRONT_FACE_CLOCKWISE);
-    const uint8_t *ds = s->depth_stencil;
-    int has_depth = k.depth != VK_FORMAT_UNDEFINED && k.depth != VK_FORMAT_S8_UINT;
-    int has_stencil = k.depth == VK_FORMAT_S8_UINT || k.depth == VK_FORMAT_D24_UNORM_S8_UINT ||
-                      k.depth == VK_FORMAT_D32_SFLOAT_S8_UINT;
-    vkCmdSetDepthTestEnable(cb, has_depth && ds[0]);
-    vkCmdSetDepthWriteEnable(cb, has_depth && ds[1]);
-    vkCmdSetDepthCompareOp(cb, compare_fn(ds[2]));
-    vkCmdSetDepthBoundsTestEnable(cb, VK_FALSE);
-    vkCmdSetStencilTestEnable(cb, has_stencil && ds[3]);
-    uint32_t ops = ds[5] | ds[6] << 8 | ds[7] << 16;
-    for (int face = 0; face < 2; face++) {
-        uint32_t o = ops >> (12 * face);
-        VkStencilFaceFlags f = face ? VK_STENCIL_FACE_BACK_BIT : VK_STENCIL_FACE_FRONT_BIT;
-        vkCmdSetStencilOp(cb, f, stencil_op(o & 0xF), stencil_op(o >> 8 & 0xF), stencil_op(o >> 4 & 0xF),
-                          compare_fn(face ? ds[4] >> 4 : ds[4] & 0xF));
-        vkCmdSetStencilReference(cb, f, s->stencil_ref[face]);
-        vkCmdSetStencilWriteMask(cb, f, s->stencil_mask[face]);
-        vkCmdSetStencilCompareMask(cb, f, s->stencil_value_mask[face]);
-    }
-    vkCmdSetDepthBiasEnable(cb, (s->polygon[3] & 4) != 0);
-    vkCmdSetDepthBias(cb, s->polygon_offset[1], s->polygon_offset[2], s->polygon_offset[0]);
-    vkCmdSetBlendConstants(cb, s->blend_color);
-    vkCmdSetRasterizerDiscardEnable(cb, s->rasterizer_discard != 0);
-    vkCmdSetPrimitiveRestartEnable(cb, VK_FALSE);
+    gpu_dynamic_state(cb, s, k.depth, w, h);
     uint32_t pos_fix = nvn_depth_mode == 0 ? (g->sh[ST_GEOM] ? 2u : 1u) : 0u;
     vkCmdPushConstants(cb, g->layout, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_GEOMETRY_BIT, 0, 4, &pos_fix);
 

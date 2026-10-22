@@ -34,6 +34,7 @@
     X(vkCreateDescriptorSetLayout) X(vkCreatePipelineLayout) X(vkCreateGraphicsPipelines)                     \
     X(vkCreateDescriptorPool) X(vkResetDescriptorPool) X(vkAllocateDescriptorSets) X(vkUpdateDescriptorSets) \
     X(vkCmdBindPipeline) X(vkCmdBindDescriptorSets) X(vkCmdBindVertexBuffers) X(vkCmdBindIndexBuffer)        \
+    X(vkCmdBindVertexBuffers2)                                                                                \
     X(vkCmdDraw) X(vkCmdDrawIndexed) X(vkCmdBeginRendering) X(vkCmdEndRendering) X(vkCmdSetViewport)         \
     X(vkCmdSetScissor) X(vkCmdSetCullMode) X(vkCmdSetFrontFace) X(vkCmdSetDepthTestEnable)                  \
     X(vkCmdSetDepthWriteEnable) X(vkCmdSetDepthCompareOp) X(vkCmdSetStencilTestEnable) X(vkCmdSetStencilOp)  \

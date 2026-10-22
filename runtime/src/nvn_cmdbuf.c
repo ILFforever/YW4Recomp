@@ -98,6 +98,7 @@ static CmdRec *record_copy(CPUState *c, uint32_t op, int arg, uint32_t len) {
 NVN(nvnCommandBufferBindProgram) {  /* (cmd, program, stage bits) */
     record(c, CMD_BIND_PROGRAM, 0)->x[0] = (uint64_t)(uintptr_t)HOST(NvnProgram, A(1));
     cb_of(A(0))->program = HOST(NvnProgram, A(1));
+    cb_of(A(0))->program_guest = A(1);
 }
 
 /* YW4_TRACE_DRAW_CALLERS=1: each different guest call stack that records a draw, once,
@@ -130,7 +131,10 @@ NVN(nvnCommandBufferBindChannelMaskState) { record_copy(c, CMD_BIND_CHANNEL_MASK
 NVN(nvnCommandBufferBindColorState) { record_copy(c, CMD_BIND_COLOR, 1, 4); }
 NVN(nvnCommandBufferBindDepthStencilState) { record_copy(c, CMD_BIND_DEPTH_STENCIL, 1, 8); }
 NVN(nvnCommandBufferBindMultisampleState) { record_copy(c, CMD_BIND_MULTISAMPLE, 1, 0x18); }
-NVN(nvnCommandBufferBindPolygonState) { record_copy(c, CMD_BIND_POLYGON, 1, 4); }
+NVN(nvnCommandBufferBindPolygonState) {
+    record_copy(c, CMD_BIND_POLYGON, 1, 4);
+    if (A(1)) memcpy(cb_of(A(0))->polygon, AP(1), 4);
+}
 /* (cmd, count, const state*) */
 NVN(nvnCommandBufferBindVertexAttribState) {
     record_copy(c, CMD_BIND_VERTEX_ATTRIB, 2, (uint32_t)A(1) * 4);
@@ -206,6 +210,9 @@ NVN(nvnCommandBufferSetRenderTargets) {
     if (A(5)) rt.has_depth_view = 1, memcpy(&rt.depth_view, AP(5), sizeof rt.depth_view);
     memcpy(record(c, CMD_SET_RENDER_TARGETS, sizeof rt)->extra, &rt, sizeof rt);
     NvnCmdBuf *cb = cb_of(A(0));
+    cb->depth_addr = rt.depth ? rt.depth->addr : 0;
+    cb->depth_guest = A(4);
+    cb->depth_layer = rt.has_depth_view && rt.depth_view.setmask & 2 ? rt.depth_view.min_layer : 0;
     const NvnTexture *first = rt.color[0] ? rt.color[0] : rt.depth;
     cb->target_w = first ? first->width : 0, cb->target_h = first ? first->height : 0;
     cb->target_colors = 0;
@@ -231,11 +238,15 @@ PLAIN(nvnCommandBufferSetShaderScratchMemory, CMD_SET_SCRATCH_MEMORY)       /* (
 
 /* ---- work */
 NVN(nvnCommandBufferClearColor) { record_copy(c, CMD_CLEAR_COLOR, 2, 16); }  /* (cmd, index, const float[4], mask) */
-PLAIN(nvnCommandBufferClearDepthStencil, CMD_CLEAR_DEPTH_STENCIL)  /* (cmd, depth, depth mask, stencil, stencil mask) */
+NVN(nvnCommandBufferClearDepthStencil) {  /* (cmd, depth, depth mask, stencil, stencil mask) */
+    record(c, CMD_CLEAR_DEPTH_STENCIL, 0);
+    if (shadow_checking) shadow_check_clear();
+}
 /* DrawArrays(cmd, primitive, first, count) is DrawArraysInstanced with one instance */
 static void trace_draw(CPUState *c, uint64_t index_addr) {
     trace_draw_caller(c);
     if (trace_drawlist_on()) trace_drawlist_draw(cb_of(A(0)), index_addr);
+    if (shadow_checking) shadow_check_draw(cb_of(A(0)), index_addr);
 }
 NVN(nvnCommandBufferDrawArrays) { trace_draw(c, 0); CmdRec *r = record(c, CMD_DRAW_ARRAYS, 0); r->x[3] = 0, r->x[4] = 1; }
 NVN(nvnCommandBufferDrawArraysInstanced) { trace_draw(c, 0); record(c, CMD_DRAW_ARRAYS, 0); }  /* (cmd, primitive, first, count, base instance, instances) */

@@ -71,6 +71,31 @@ def compile_one(cc: str, src: Path, obj: Path, includes: list[str]) -> str | Non
     return None
 
 
+def native_shaders(cfg: config.Config) -> bool:
+    """Our own renderer's shaders (runtime/shaders/*.vert, *.frag; decision 0024) to SPIR-V in
+    work/build/shaders/, where the runtime reads them. Without glslang only a warning: the
+    native passes then stay off."""
+    from . import shader
+    out = cfg.work_dir / "build" / "shaders"
+    out.mkdir(parents=True, exist_ok=True)
+    exe = shader.glslang(cfg)
+    srcs = sorted([*(RUNTIME / "shaders").glob("*.vert"), *(RUNTIME / "shaders").glob("*.frag")])
+    for src in srcs:
+        spv = out / (src.name + ".spv")
+        if spv.exists() and spv.stat().st_mtime >= src.stat().st_mtime:
+            continue
+        if not exe:
+            print(f"warning: no glslang ([tools] glslang): {src.name} not compiled", file=sys.stderr)
+            continue
+        r = subprocess.run([exe, "-V", "--target-env", "vulkan1.3", "-o", str(spv), str(src)],
+                           capture_output=True, text=True)
+        if r.returncode != 0:
+            print(f"{src.name}:\n{r.stdout}{r.stderr}", file=sys.stderr)
+            return False
+        print(f"compiled {src.name}")
+    return True
+
+
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--run", action="store_true", help="run the result on work/exefs/")
@@ -130,6 +155,8 @@ def main(argv: list[str] | None = None) -> int:
         print(f"link failed:\n{link.stderr[-3000:]}", file=sys.stderr)
         return 1
     print(f"built {exe} in {time.time() - t0:.0f} s")
+    if not native_shaders(cfg):
+        return 1
     if args.run:
         save = cfg.work_dir / "save"  # the game's save data (the owner's: never commit)
         save.mkdir(exist_ok=True)

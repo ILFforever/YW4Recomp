@@ -151,10 +151,11 @@ void trace_drawlist_draw(const NvnCmdBuf *cb, uint64_t index_addr) {
         " geometry %#" PRIx64 " primitive %#" PRIx64 "\n",
         pr ? (unsigned long long)pr->stages[0].key : 0ull, pr ? (unsigned long long)pr->stages[1].key : 0ull,
         cb->target_w, cb->target_h, cur.node, cur.obj, cur.geom, cur.prim);
-    Want w[2 + 2 * 16 + 2];
+    Want w[3 + 2 * 16 + 2];
     char names[2 * 16 + 3][24];
     int nw = 0;
     w[nw++] = (Want){"vertex buffer 0", cb->trace_vb0, {0}, 0, 1, 0, 0};
+    w[nw++] = (Want){"program", cb->program_guest, {0}, 0, 0, 0, 0};
     if (index_addr) w[nw++] = (Want){"index buffer", index_addr, {0}, 0, 1, 0, 0};
     out(&o, "yw4: drawlist:   vertex buffer 0 at %#" PRIx64 ", index buffer at %#" PRIx64 "\n", cb->trace_vb0,
         index_addr);
