@@ -25,6 +25,10 @@ What is known to be missing or wrong, roughly in the order it is likely to matte
 
 ## Tools
 
+- `tests/test_kernel.py::test_threads` fails now and then with "cannot reserve the heap and thread-local
+  regions" (seen once on 2026-10-22, then 4 passes in a row): the test program reserves fixed addresses, which
+  something else in the process can occasionally occupy first. Rerun before suspecting a change.
+
 - `YW4_REPLAY` routes can drift: about one run in three ends somewhere else (for example stuck on the save-load
   screen). Check the screenshot before trusting a run.
 - The baseline benchmark against Eden ([baseline.md](baseline.md)) still lacks the opening-scene frame-time spread.
