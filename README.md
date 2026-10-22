@@ -1,7 +1,21 @@
-# YW4 Recomp
+<h1 align="center">YW4 Recomp</h1>
 
-**YW4 Recomp** is a fan static recompilation of *Yo-kai Watch 4++* (Nintendo Switch, update 2.2.0) into a native
-application, in the style of [N64Recomp](https://github.com/N64Recomp/N64Recomp).
+<p align="center">
+  A fan static recompilation of <b>Yo-kai Watch 4++</b> (Nintendo Switch, update 2.2.0) into a native application, in the style of <a href="https://github.com/N64Recomp/N64Recomp">N64Recomp</a>.
+</p>
+
+<p align="center">
+  <img alt="Phase 3: kernel and services" src="https://img.shields.io/badge/phase-3%20·%20kernel%20%26%20services-6f42c1">
+  <img alt="Platforms" src="https://img.shields.io/badge/platforms-Windows%20%7C%20Linux-informational">
+  <img alt="Graphics" src="https://img.shields.io/badge/graphics-Vulkan-ac162c">
+  <img alt="Playable: house and town" src="https://img.shields.io/badge/playable-house%20%26%20town-success">
+</p>
+
+<p align="center">
+  <img src="docs/screenshots/05-title-screen.jpg" alt="The title screen, running recompiled on Windows" width="820">
+  <br>
+  <sub>The title screen, recompiled and running natively on Windows (Vulkan, 30 frames/s).</sub>
+</p>
 
 > [!IMPORTANT]
 > **Built with AI.** Claude (Anthropic's model, used through Claude Code) wrote most of this repository: the
@@ -14,8 +28,6 @@ application, in the style of [N64Recomp](https://github.com/N64Recomp/N64Recomp)
 > Platforms:
 > - Windows - x86-64, Vulkan graphics backend (this is what is built and tested)
 > - Linux - x86-64, Vulkan: planned; the runtime is written to be portable but has not been tested yet
-
-![The Amano house kitchen, recompiled and running natively on Windows](docs/screenshots/07-kitchen.jpg)
 
 > [!NOTE]
 > **Bring your own game.** The repository holds tools, runtime code and patches, nothing from the game itself. To use
@@ -51,8 +63,8 @@ All captured from the recompiled build on Windows.
 
 | | |
 |---|---|
-| ![Title screen](docs/screenshots/05-title-screen.jpg) | ![Opening scene](docs/screenshots/06-opening-scene.jpg) |
-| Title screen | Opening scene |
+| ![Amano house kitchen](docs/screenshots/07-kitchen.jpg) | ![Opening scene](docs/screenshots/06-opening-scene.jpg) |
+| The Amano house kitchen | Opening scene |
 | ![LEVEL-5 logo](docs/screenshots/02-level5-logo.jpg) | ![Opening movie](docs/screenshots/04-opening-movie.jpg) |
 | LEVEL-5 logo | Opening movie |
 
