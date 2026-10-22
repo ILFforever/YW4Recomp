@@ -442,7 +442,10 @@ def emit_function(code: Code, fn: Function, entries: set[int], subgroup=None,
             if i + 1 >= len(order) or order[i + 1] != nxt:
                 lines.append((None, jump(nxt)))
 
-    out = [f"void {name(fn.entry)}(CPUState *ctx) {{"]
+    # restrict: guest memory never overlaps the CPUState, so the compiler may keep registers
+    # in host registers across guest loads and stores. Not with setjmp: after a longjmp back,
+    # cached values would be stale.
+    out = [f"void {name(fn.entry)}(CPUState *{'' if njb else 'restrict '}ctx) {{"]
     if njb:  # host jump buffers live as long as this frame does
         out.append(f"    jmp_buf yw4_jb[{njb}];")
     # Probes (runtime/src/dispatch.c): log calls to chosen functions without rebuilding.
