@@ -300,7 +300,8 @@ static void report(void) {
  * is the game's draw of that submesh: learn its program and the cascade's target. */
 static int compare_draw(const NvnCmdBuf *cb, uint64_t obj, uint64_t sub, uint64_t index_addr);
 
-void shadow_check_draw(const NvnCmdBuf *cb, uint64_t index_addr) {
+void shadow_check_draw(const NvnCmdBuf *cb, uint64_t index_addr, const ShadowDrawCall *call) {
+    (void)call;  /* instancing: used once instanced casters are learned (next step) */
     if (!lay || !lay->active || !lay->pending) return;
     lay->pending = 0;
     uint64_t obj = lay->drawn[lay->ndrawn - 1][0], sub = lay->drawn[lay->ndrawn - 1][1];
@@ -313,7 +314,6 @@ void shadow_check_draw(const NvnCmdBuf *cb, uint64_t index_addr) {
     }
 }
 
-void shadow_check_clear(void) {}
 
 /* ---- native passes: a ring of pass buffers, reused after RING passes (about 20 frames:
  * long after the GPU has run them) */

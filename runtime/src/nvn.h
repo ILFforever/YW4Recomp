@@ -168,9 +168,10 @@ typedef struct {
 /* YW4_TRACE_DRAWLIST (trace_drawlist.c): on, and a recorded draw (index address or 0) */
 int trace_drawlist_on(void);
 void trace_drawlist_draw(const NvnCmdBuf *cb, uint64_t index_addr);
-/* YW4_SHADOWS=check (shadow.c): a draw was recorded with this program bound */
-void shadow_check_draw(const NvnCmdBuf *cb, uint64_t index_addr);
-void shadow_check_clear(void);
+/* Our shadow pass (shadow.c), while learning from the game's draws: a draw was recorded with
+ * this state bound, these index address and instancing */
+typedef struct { int32_t base_vertex; uint32_t base_instance, instances; } ShadowDrawCall;
+void shadow_check_draw(const NvnCmdBuf *cb, uint64_t index_addr, const ShadowDrawCall *call);
 extern int shadow_checking;
 
 /* One recorded call: header, the call's x1..x7 and s0..s3, then copied data. A command

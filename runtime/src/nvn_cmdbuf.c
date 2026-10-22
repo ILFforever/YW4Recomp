@@ -240,20 +240,26 @@ PLAIN(nvnCommandBufferSetShaderScratchMemory, CMD_SET_SCRATCH_MEMORY)       /* (
 NVN(nvnCommandBufferClearColor) { record_copy(c, CMD_CLEAR_COLOR, 2, 16); }  /* (cmd, index, const float[4], mask) */
 NVN(nvnCommandBufferClearDepthStencil) {  /* (cmd, depth, depth mask, stencil, stencil mask) */
     record(c, CMD_CLEAR_DEPTH_STENCIL, 0);
-    if (shadow_checking) shadow_check_clear();
 }
 /* DrawArrays(cmd, primitive, first, count) is DrawArraysInstanced with one instance */
-static void trace_draw(CPUState *c, uint64_t index_addr) {
+static void trace_draw(CPUState *c, uint64_t index_addr, const ShadowDrawCall *call) {
     trace_draw_caller(c);
     if (trace_drawlist_on()) trace_drawlist_draw(cb_of(A(0)), index_addr);
-    if (shadow_checking) shadow_check_draw(cb_of(A(0)), index_addr);
+    if (shadow_checking) shadow_check_draw(cb_of(A(0)), index_addr, call);
 }
-NVN(nvnCommandBufferDrawArrays) { trace_draw(c, 0); CmdRec *r = record(c, CMD_DRAW_ARRAYS, 0); r->x[3] = 0, r->x[4] = 1; }
-NVN(nvnCommandBufferDrawArraysInstanced) { trace_draw(c, 0); record(c, CMD_DRAW_ARRAYS, 0); }  /* (cmd, primitive, first, count, base instance, instances) */
+static const ShadowDrawCall one = {0, 0, 1};
+NVN(nvnCommandBufferDrawArrays) { trace_draw(c, 0, &one); CmdRec *r = record(c, CMD_DRAW_ARRAYS, 0); r->x[3] = 0, r->x[4] = 1; }
+NVN(nvnCommandBufferDrawArraysInstanced) {  /* (cmd, primitive, first, count, base instance, instances) */
+    trace_draw(c, 0, &(ShadowDrawCall){0, (uint32_t)A(4), (uint32_t)A(5)});
+    record(c, CMD_DRAW_ARRAYS, 0);
+}
 /* DrawElements(cmd, primitive, index type, count, index address) is DrawElementsInstanced
  * (..., base vertex, base instance, instances) with 0, 0, 1 */
-NVN(nvnCommandBufferDrawElements) { trace_draw(c, A(4)); CmdRec *r = record(c, CMD_DRAW_ELEMENTS, 0); r->x[4] = 0, r->x[5] = 0, r->x[6] = 1; }
-NVN(nvnCommandBufferDrawElementsInstanced) { trace_draw(c, A(4)); record(c, CMD_DRAW_ELEMENTS, 0); }
+NVN(nvnCommandBufferDrawElements) { trace_draw(c, A(4), &one); CmdRec *r = record(c, CMD_DRAW_ELEMENTS, 0); r->x[4] = 0, r->x[5] = 0, r->x[6] = 1; }
+NVN(nvnCommandBufferDrawElementsInstanced) {
+    trace_draw(c, A(4), &(ShadowDrawCall){(int32_t)A(5), (uint32_t)A(6), (uint32_t)A(7)});
+    record(c, CMD_DRAW_ELEMENTS, 0);
+}
 void nvn_record_native(const CPUState *c, uint64_t cmd, NvnNativePass fn, const void *data, uint32_t size) {
     CmdRec *r = rec(c, cb_of(cmd), CMD_NATIVE, size);
     r->x[0] = (uint64_t)(uintptr_t)fn;
