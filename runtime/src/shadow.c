@@ -282,6 +282,9 @@ typedef struct {
     int pending;           /* a submesh draw was entered; the next recorded draw is its */
     /* native mode */
     int game_drew;         /* the game has drawn in this layer: its first draw binds and clears the layer */
+    const float *pending_copies;  /* check: the copies pending when the game's draw began */
+    uint32_t pending_count;
+    int pending_copies_ok;
     ShadowPass *pass;
 } Layer;
 
@@ -335,7 +338,7 @@ static long layers_seen, missing_total, extra_total, ours_total, drawn_total;
 static long draws_replaced, draws_native;
 static long draws_since_toggle;  /* submeshes drawn by our pass since the last F9 */
 static long compared, wrong_vb, wrong_ib, wrong_mvp;  /* the game's static and instanced draws vs ours */
-static long compared_inst, wrong_inst;  /* of those, instanced; instance buffer or count different */
+static long compared_inst, wrong_inst, pending_checked, pending_wrong;  /* of those, instanced; instance buffer or count different */
 static long copies_culled;  /* copies the game drew that our culling drops */
 
 static int same(const Caster *c, const uint64_t d[2]) { return c->object == d[0] && c->submesh == d[1]; }
@@ -370,6 +373,9 @@ static void report(void) {
         long e = __atomic_exchange_n(&extra_total, 0, __ATOMIC_RELAXED);
         fprintf(stderr, "yw4: shadows: frame %" PRIu64 ": %ld shadow layers; gathered %ld submeshes, the game drew %ld; "
                 "missed %ld, extra (culled by the game) %ld\n", f, l, o, d, m, e);
+        fprintf(stderr, "yw4: shadows:   instanced draws: the copies pending at the draw differ from the game's in %ld of %ld\n",
+                __atomic_exchange_n(&pending_wrong, 0, __ATOMIC_RELAXED),
+                __atomic_exchange_n(&pending_checked, 0, __ATOMIC_RELAXED));
         fprintf(stderr, "yw4: shadows:   static and instanced draws compared with ours %ld: wrong vertices %ld, indices %ld, "
                 "matrix %ld; instanced %ld: wrong copies %ld, drawn copies we cull %ld\n",
                 __atomic_exchange_n(&compared, 0, __ATOMIC_RELAXED), __atomic_exchange_n(&wrong_vb, 0, __ATOMIC_RELAXED),
@@ -477,6 +483,12 @@ void shadow_check_draw(const NvnCmdBuf *cb, uint64_t index_addr, const ShadowDra
     lay->pending = 0;
     uint64_t obj = lay->drawn[lay->ndrawn - 1][0], sub = lay->drawn[lay->ndrawn - 1][1];
     uint64_t vs = cb->program ? cb->program->stages[0].key : 0, fs = cb->program ? cb->program->stages[1].key : 0;
+    if (is_instanced(vs) && lay->pending_copies_ok) {  /* the copies ours() takes, as the game then drew */
+        __atomic_add_fetch(&pending_checked, 1, __ATOMIC_RELAXED);
+        if (lay->pending_count != call->instances || !cb->trace_ub[0][11] ||
+            memcmp(lay->pending_copies, (const void *)(uintptr_t)cb->trace_ub[0][11], 48ull * lay->pending_count))
+            __atomic_add_fetch(&pending_wrong, 1, __ATOMIC_RELAXED);
+    }
     Cutout cut = {0};
     int ok = mirrored(vs, fs) && (fs != CUTOUT_FS || cutout_of(cb, &cut)) &&
              (vs != SKINNED_VS || skinned_ok(cb, obj, sub, fs)) &&
@@ -524,13 +536,44 @@ static int describe(const Caster *c, const Mat4 *vp, ShadowDraw *d) {
     return d->stride && (d->index_count || d->vertex_count);
 }
 
+/* The copies the game's instance callback kept for the draw it is about to make: the model
+ * renderer has put the callback's buffer object in vertex constant slot 11 (the engine state at
+ * device+13000, 0x18 bytes per slot; CPU data at [B+0x40] + [B+0x58]) and the count at
+ * device+0x45cc before it calls the submesh draw. 0 if there is none. */
+static int pending_copies(uint64_t device, const float **data, uint32_t *count) {
+    uint64_t b = U64(device + 13000 + 0x18ull * 11);
+    if (!b || !U64(b + 0x40)) return 0;
+    *data = (const float *)(uintptr_t)(U64(b + 0x40) + *(const uint32_t *)(uintptr_t)(b + 0x58));
+    *count = *(const uint32_t *)(uintptr_t)(device + 0x45cc);
+    return *count != 0;
+}
+
 /* Is the submesh ours (the game drew it with programs we mirror), and how do we draw it?
  * Appends its draws to d (at most `room`: an instanced one is a draw per copy) and returns
  * how many; -1: the game must draw it. */
-static int ours(const Caster *c, const Mat4 *vp, ShadowDraw *d, int room) {
+static int env_on(const char *name) {
+    const char *s = getenv(name);
+    return s && atoi(s);
+}
+
+/* The game's draws left to it, for narrowing down a fault by elimination:
+ * YW4_SHADOWS_NO_SKINNED=1 (characters), YW4_SHADOWS_NO_CUTOUT=1 (cut-out casters).
+ * Instanced casters (repeated props) stay the game's unless YW4_SHADOWS_INSTANCED=1: ours
+ * flash bands of shadow for a frame or a few while the camera moves, and every value our
+ * draws take was measured equal to the game's draw (decision 0024) */
+static int leave_to_game(uint64_t vs, uint64_t fs) {
+    static int no_skinned = -1, no_cutout = -1, instanced = -1;
+    if (no_skinned < 0) no_skinned = env_on("YW4_SHADOWS_NO_SKINNED");
+    if (no_cutout < 0) no_cutout = env_on("YW4_SHADOWS_NO_CUTOUT");
+    if (instanced < 0) instanced = env_on("YW4_SHADOWS_INSTANCED");
+    return (no_skinned && vs == SKINNED_VS) || (no_cutout && fs == CUTOUT_FS) || (!instanced && is_instanced(vs));
+}
+
+static int copies_known(const Copies *cp, const float *game, uint32_t n);
+static int ours(const Caster *c, const Mat4 *vp, uint64_t device, ShadowDraw *d, int room) {
     uint32_t h = learned_ours(c->object, c->submesh);
     ShadowDraw one;
-    if (h == UINT32_MAX || !describe(c, vp, &one)) return -1;
+    if (h == UINT32_MAX || leave_to_game(learned[h].vs, learned[h].fs) || !describe(c, vp, &one)) return -1;
     one.cull = learned[h].cull, one.front = learned[h].front;
     one.texture = learned[h].cut.texture, one.threshold = learned[h].cut.threshold;
     one.uv_format = learned[h].cut.uv_format, one.uv_offset = learned[h].cut.uv_offset;
@@ -546,20 +589,25 @@ static int ours(const Caster *c, const Mat4 *vp, ShadowDraw *d, int room) {
         d[0] = one;
         return 1;
     }
+    /* exactly the copies the game would draw: its callback culled them (side planes, near and
+     * far, occlusion); copies crossing the cascade projection's eye plane would come out as
+     * long streaks. Each must be one of the model's own, or the game draws it. */
+    const float *copies;
+    uint32_t count;
     Copies cp;
-    if (instances(c->model, &cp) != 1 || cp.count > (uint32_t)room) return -1;
-    /* each copy culled by the object's box, which is one copy's (no copy is placed inside
-     * it; check mode logs that) */
+    if (!pending_copies(device, &copies, &count) || count > (uint32_t)room || instances(c->model, &cp) != 1 ||
+        count > cp.count || !copies_known(&cp, copies, count))
+        return -1;
     Mat4 world = load(c->own);
-    int n = 0;
-    for (uint32_t i = 0; i < cp.count; i++) {
-        Mat4 e = instance_matrix(&cp, i), ew = mul(&e, &world), mvp = mul(vp, &ew);
-        if (outside(c->object, &mvp)) continue;
-        d[n] = one;
-        memcpy(d[n].mvp, mvp.m, sizeof d[n].mvp);
-        n++;
+    for (uint32_t i = 0; i < count; i++) {
+        Mat4 e = {{0}};
+        memcpy(e.m, copies + 12 * i, 48);
+        e.m[15] = 1;
+        Mat4 ew = mul(&e, &world), mvp = mul(vp, &ew);
+        d[i] = one;
+        memcpy(d[i].mvp, mvp.m, sizeof d[i].mvp);
     }
-    return n;
+    return (int)count;
 }
 
 /* Is each of the n copies the game drew (48 bytes each at `game`) one of ours? */
@@ -735,7 +783,9 @@ static void init_mode(void) {
     if (!__atomic_compare_exchange_n(&mode, &unset, m, 0, __ATOMIC_ACQ_REL, __ATOMIC_ACQUIRE)) return;
     __atomic_store_n(&shadow_checking, m != MODE_GAME, __ATOMIC_RELEASE);
     if (m != MODE_GAME) fprintf(stderr, "yw4: shadows: %s\n", m == MODE_CHECK ? "checking the gather"
-                                                                : "our pass draws the static and instanced casters");
+                                                                : env_on("YW4_SHADOWS_INSTANCED")
+                                                                      ? "our pass draws the casters, repeated props too"
+                                                                      : "our pass draws the casters but repeated props");
 }
 
 void shadow_toggle(void) {
@@ -745,7 +795,7 @@ void shadow_toggle(void) {
     __atomic_store_n(&shadow_checking, m != MODE_GAME, __ATOMIC_RELEASE);
     __atomic_store_n(&mode, m, __ATOMIC_RELEASE);
     fprintf(stderr, "yw4: shadows: %s (F9; %ld submeshes drawn by our pass since the last switch)\n",
-            m == MODE_NATIVE ? "ours for the static and instanced casters" : "the game's",
+            m == MODE_NATIVE ? "ours" : "the game's",
             __atomic_exchange_n(&draws_since_toggle, 0, __ATOMIC_RELAXED));
 }
 
@@ -791,13 +841,18 @@ int yw4_hook_submesh_draw(CPUState *ctx) {
     uint64_t frame = __atomic_load_n(&yw4_frames_presented, __ATOMIC_RELAXED);
     if (mode == MODE_NATIVE && p && k->game_drew && ((frame + (obj >> 4)) & 31) != 0) {
         const Caster *c = caster_of(obj, sub);
-        int n = c ? ours(c, &k->vp, &p->d[p->n], PASS_DRAWS - (int)p->n) : -1;
+        int n = c ? ours(c, &k->vp, k->device, &p->d[p->n], PASS_DRAWS - (int)p->n) : -1;
         if (n >= 0) {
             p->n += (uint32_t)n;
             __atomic_add_fetch(&draws_replaced, 1, __ATOMIC_RELAXED);
-            return 1;  /* the game's draw is skipped */
+            /* YW4_SHADOWS_BOTH=1: the game draws too (ours on top), to tell our draws' errors
+             * from the effects of skipping the game's draw */
+            static int both = -1;
+            if (both < 0) both = env_on("YW4_SHADOWS_BOTH");
+            if (!both) return 1;  /* the game's draw is skipped */
         }
     }
+    k->pending_copies_ok = pending_copies(k->device, &k->pending_copies, &k->pending_count);
     k->drawn[k->ndrawn][0] = obj;
     k->drawn[k->ndrawn][1] = sub;
     k->ndrawn++;

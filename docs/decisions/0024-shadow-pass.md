@@ -138,4 +138,20 @@ and turns them into Vulkan at submit. The expensive part is `f_a45890` plus the 
    game one frame in 32 to be checked again. Owner's field save, every frame for 160 frames: the streaks are gone
    and the character shadows match the game's; 72% of the game's shadow draws are replaced.
    The full takeover (our own selection, no `f_a45890` at all) needs the game's selection rules first.
+
+   **Changed 2026-10-23: instanced casters (repeated props) back to the game, for now.** With them ours, the owner
+   saw bands of shadow for a frame or a few while the camera moved (never standing still, never with the game's
+   shadows). Found by elimination, each a playtest with env switches: everything but instanced clean; instanced
+   flash. Ours now take exactly the copies the game's callback kept (vertex cbuf 11 and the count at
+   `device+0x45cc`, read at the submesh-draw hook) instead of our own culling of all copies. Measured and not
+   the cause: those copies and the count against the game's draw (0 different of 40,000+, live play); each copy's
+   final matrix, ours against cbuf 1 byte 128 × cbuf 11 copy × cbuf 2 byte 0 at the game's draw (0 of 40,000+,
+   live, with the game also drawing); cull and front face (0 different); submesh draws with no GPU draw (0 of
+   450,000); two layers sharing a pass buffer (one layer open at a time); copy count (2–4 copies flash, only the
+   first copy drawn still flashes); a depth bias on our instanced draws only (still flashes, so not float rounding).
+   With the game also drawing (`YW4_SHADOWS_BOTH=1`) it still flashes, so the bands come from our draws, while
+   every value they take matches. Next: capture a flashing frame (RenderDoc) and find the draw that makes the band.
+   `YW4_SHADOWS_INSTANCED=1` turns ours back on for that; `YW4_SHADOWS_NO_SKINNED` / `_NO_CUTOUT` leave those
+   kinds to the game for further elimination. Also seen: frame rate with our shadows is noticeably lower than
+   with the game's (not measured yet).
 5. Switch the default to `native` once every street, house and battle layer matches; measure CPU.
