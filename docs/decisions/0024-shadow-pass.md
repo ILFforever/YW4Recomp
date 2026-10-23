@@ -123,6 +123,19 @@ and turns them into Vulkan at submit. The expensive part is `f_a45890` plus the 
    before our pass begins rendering. Street: screenshots against the game's shadows differ less than two runs of
    the game differ from each other. The game now draws about 30% of the shadow submeshes (was 85%); CPU unchanged
    so far (the game's model renderer still runs for these layers).
-   Not ours yet: skinned casters (all cut-out; their bone palettes are built per submesh each frame, source not
-   found, see frame.md) and the wind-swayed plants (`fa9033`, `61ebac`: textures read in the vertex stage).
+   Then static cut-out (`4cbb8e`) and skinned casters (`71faac`; palettes in frame.md; with the fade program only
+   while the fade is 1). Not ours yet: instanced casters with per-copy fade (`9904c2` + `b7cd6e`) and the
+   wind-swayed plants (`fa9033`, `61ebac`: textures read in the vertex stage).
+
+   **Changed 2026-10-23: replace the game's draws instead of choosing our own casters.** Hiding nodes and
+   drawing what our gather selected went wrong in the owner's playtest: flickering streaks of shadow. Check mode
+   showed why: about 40 submeshes per layer that we would draw and the game does not (it chooses per cascade and
+   per frame by rules not decoded yet; an object 150 m away was in our list for the 20 m cascade). Learning a
+   submesh once and then drawing it every frame anywhere can't match that. Now the game keeps its whole selection
+   (walk, culling, sort) and the submesh-draw hook (`f_a75e90`) skips the game's draw of a submesh we can draw and
+   adds ours to the pass: its state flush, NVN calls and their translation are what we save. The first draw of
+   each layer stays with the game (its flush binds and clears the cascade's layer); each object goes back to the
+   game one frame in 32 to be checked again. Owner's field save, every frame for 160 frames: the streaks are gone
+   and the character shadows match the game's; 72% of the game's shadow draws are replaced.
+   The full takeover (our own selection, no `f_a45890` at all) needs the game's selection rules first.
 5. Switch the default to `native` once every street, house and battle layer matches; measure CPU.

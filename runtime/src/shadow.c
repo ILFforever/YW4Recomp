@@ -5,13 +5,14 @@
  * before it, before its submesh draw main+0xa75e90 and before the job that ends the cascade,
  * main+0x7ed350.
  *
- * YW4_SHADOWS=native, hybrid for now: we gather the layer's casters like the model renderer
- * does; the nodes whose every submesh we can draw are hidden from the game's layer (the
- * node's own "not in this kind of layer" bit) and drawn by our pass, which is queued right
- * after the game's draws of the layer (in the cascade-end hook), into the layer the game
- * bound and cleared. What we can draw is learned from the game's own draws: a submesh is ours
- * once the game has drawn it with the static or instanced program. So our share grows as kinds of casters
- * are added, and the game always draws the rest.
+ * YW4_SHADOWS=native: the game still chooses what goes into a cascade (its walk of the draw
+ * list, its culling, its sort), but when it is about to draw a submesh our pass can draw (the
+ * submesh-draw hook), we skip the game's draw, with its state flush, NVN calls and their
+ * translation, and add ours to a pass that is queued right after the game's draws of the
+ * layer (in the cascade-end hook), into the layer the game bound and cleared. What we can
+ * draw is learned from the game's own draws of that submesh; each object goes back to the
+ * game one frame in 32 to check it again. So our shadows are always the game's selection, and
+ * the game draws whatever we can't.
  *
  * YW4_SHADOWS=check: gather only, and compare with the submeshes the game drew. Missing ones
  * are bugs in the gather; extra ones are casters the game culled and we don't (instanced).
@@ -114,14 +115,17 @@ static int outside(uint64_t obj, const Mat4 *mvp) {
     memcpy(lo, (const void *)(uintptr_t)(obj + 0x80), 12);
     memcpy(hi, (const void *)(uintptr_t)(obj + 0x90), 12);
     if (lo[0] > hi[0] || lo[1] > hi[1] || lo[2] > hi[2]) return 0;
-    /* planes every corner is outside of: x<-w x>w y<-w y>w. Not near and far: casters between
-     * the light and the cascade still throw shadows into it */
-    unsigned all = 0xF;
+    /* planes every corner is outside of: x<-w x>w y<-w y>w, behind the projection's eye (w<=0:
+     * the cascades' projections are perspective-like, and there the side tests flip), beyond
+     * the far plane (z>w). Not the near plane: casters between the light and the cascade still
+     * throw shadows into it */
+    unsigned all = 0x3F;
     for (int c = 0; c < 8; c++) {
         float v[4] = {c & 1 ? hi[0] : lo[0], c & 2 ? hi[1] : lo[1], c & 4 ? hi[2] : lo[2], 1}, p[4];
         for (int i = 0; i < 4; i++)
             p[i] = mvp->m[i * 4] * v[0] + mvp->m[i * 4 + 1] * v[1] + mvp->m[i * 4 + 2] * v[2] + mvp->m[i * 4 + 3];
-        unsigned out = (p[0] < -p[3]) | (p[0] > p[3]) << 1 | (p[1] < -p[3]) << 2 | (p[1] > p[3]) << 3;
+        unsigned out = (p[0] < -p[3]) | (p[0] > p[3]) << 1 | (p[1] < -p[3]) << 2 | (p[1] > p[3]) << 3 |
+                       (p[3] <= 0) << 4 | (p[2] > p[3]) << 5;
         all &= out;
         if (!all) return 0;
     }
@@ -187,7 +191,7 @@ static void gather(uint64_t list, uint64_t item, const Mat4 *vp, Gathered *out) 
 
 /* ---- the layer being drawn on this thread (the shadow layers all run on one render thread) */
 
-enum { MAX_HIDDEN = 2048, PASS_DRAWS = 4096, RING = 64 };
+enum { PASS_DRAWS = 4096, RING = 64 };
 
 /* The game's programs for static casters: projection x view x world, and a fragment stage
  * that does nothing (the same vertex program also comes with cut-out fragment programs).
@@ -207,9 +211,6 @@ enum { MAX_HIDDEN = 2048, PASS_DRAWS = 4096, RING = 64 };
  * pattern while the object fades out (fs cbuf 3 byte 28 below 1); while it is 1 nothing is
  * dropped and our depth-only draw is the same. */
 #define SKINNED_VS 0x71faac9f597b428dull
-/* Learned for a submesh the game leaves out of the layer although it draws other submeshes of
- * the same object there (culling is per object, so this is the game's choice): ours too. */
-#define SKIPPED 1
 #define FADE_FS 0xb7cd6ed8cd28a184ull
 
 static int is_instanced(uint64_t vs) { return vs == INSTANCED_VS || vs == CUTOUT_INSTANCED_VS; }
@@ -280,8 +281,7 @@ typedef struct {
     int ndrawn;
     int pending;           /* a submesh draw was entered; the next recorded draw is its */
     /* native mode */
-    uint64_t hidden[MAX_HIDDEN];  /* nodes hidden from the game's layer (their kind-1 bit set by us) */
-    int nhidden;
+    int game_drew;         /* the game has drawn in this layer: its first draw binds and clears the layer */
     ShadowPass *pass;
 } Layer;
 
@@ -313,7 +313,7 @@ static uint32_t learned_ours(uint64_t obj, uint64_t sub) {
     uint32_t h = learn_slot(obj, sub);
     if (h == UINT32_MAX || learned[h].obj != obj) return UINT32_MAX;
     if (learned[h].model != U64(obj + 0x140) || learned[h].mat != U64(obj + 0x120)) return UINT32_MAX;  /* reused */
-    return (learned[h].vs == SKIPPED || mirrored(learned[h].vs, learned[h].fs)) && learned[h].ok ? h : UINT32_MAX;
+    return mirrored(learned[h].vs, learned[h].fs) && learned[h].ok ? h : UINT32_MAX;
 }
 
 /* ok: our draw of it would equal the game's (same buffers, same matrix: compare_draw) */
@@ -332,7 +332,7 @@ static struct { uint64_t addr; uint32_t layer; int known; } cascade_target[3];
 
 /* Statistics since the last report */
 static long layers_seen, missing_total, extra_total, ours_total, drawn_total;
-static long nodes_hidden, draws_native;
+static long draws_replaced, draws_native;
 static long draws_since_toggle;  /* submeshes drawn by our pass since the last F9 */
 static long compared, wrong_vb, wrong_ib, wrong_mvp;  /* the game's static and instanced draws vs ours */
 static long compared_inst, wrong_inst;  /* of those, instanced; instance buffer or count different */
@@ -379,9 +379,9 @@ static void report(void) {
     } else {
         long ps, ds;
         gpu_shadow_counts(&ps, &ds);
-        fprintf(stderr, "yw4: shadows: frame %" PRIu64 ": %ld shadow layers; %ld nodes and %ld submeshes drawn by us, "
-                "%ld submeshes by the game; skipped: %ld passes (other target bound), %ld draws (memory)\n", f, l,
-                __atomic_exchange_n(&nodes_hidden, 0, __ATOMIC_RELAXED),
+        fprintf(stderr, "yw4: shadows: frame %" PRIu64 ": %ld shadow layers; %ld of the game's submesh draws replaced by "
+                "%ld of ours, %ld left to the game; skipped: %ld passes (other target bound), %ld draws (memory)\n", f, l,
+                __atomic_exchange_n(&draws_replaced, 0, __ATOMIC_RELAXED),
                 __atomic_exchange_n(&draws_native, 0, __ATOMIC_RELAXED), d, ps, ds);
     }
 }
@@ -530,7 +530,6 @@ static int describe(const Caster *c, const Mat4 *vp, ShadowDraw *d) {
 static int ours(const Caster *c, const Mat4 *vp, ShadowDraw *d, int room) {
     uint32_t h = learned_ours(c->object, c->submesh);
     ShadowDraw one;
-    if (h != UINT32_MAX && learned[h].vs == SKIPPED) return 0;
     if (h == UINT32_MAX || !describe(c, vp, &one)) return -1;
     one.cull = learned[h].cull, one.front = learned[h].front;
     one.texture = learned[h].cut.texture, one.threshold = learned[h].cut.threshold;
@@ -697,70 +696,30 @@ static int compare_draw(const NvnCmdBuf *cb, uint64_t obj, uint64_t sub, uint64_
     return !bad_vb && !bad_ib && !bad_mvp;
 }
 
-/* Take over the nodes whose every gathered submesh we can draw: hide them from the game's
- * layer (their node's kind-1 bit) and add their draws to the pass. Each node goes back to the
- * game one frame in 32 (spread over the nodes), so what we learned from its draws is checked
- * again: a part of a model that starts moving (its node transform, which we don't apply yet)
- * then fails the check and stays with the game. */
-static void take_over(Layer *k) {
-    k->nhidden = 0;
+/* Native mode: the pass our replaced draws go into, for the cascade's layer. */
+static void begin_pass(Layer *k) {
     k->pass = NULL;
+    k->game_drew = 0;
     if (k->cascade < 0 || !cascade_target[k->cascade].known) return;  /* the game hasn't shown us the target yet */
     ShadowPass *p = new_pass();
     if (!p) return;
     p->depth_addr = cascade_target[k->cascade].addr;
     p->depth_layer = cascade_target[k->cascade].layer;
-    uint64_t frame = __atomic_load_n(&yw4_frames_presented, __ATOMIC_RELAXED);
-    for (int i = 0; i < k->ours.n;) {
-        uint64_t node = k->ours.c[i].node;
-        int j = i, all = ((frame + (node >> 4)) & 31) != 0;
-        uint32_t start = p->n;
-        for (; j < k->ours.n && k->ours.c[j].node == node; j++) {
-            int n = all ? ours(&k->ours.c[j], &k->vp, &p->d[p->n], PASS_DRAWS - (int)p->n) : -1;
-            if (n < 0) all = 0;
-            else p->n += (uint32_t)n;
-        }
-        if (!all || k->nhidden == MAX_HIDDEN || (U8(node + 0x20) & 2)) {
-            p->n = start;  /* the game draws this node */
-        } else {
-            *(uint8_t *)(uintptr_t)(node + 0x20) |= 2;
-            k->hidden[k->nhidden++] = node;
-        }
-        i = j;
-    }
     k->pass = p;
-    __atomic_add_fetch(&nodes_hidden, k->nhidden, __ATOMIC_RELAXED);
-    __atomic_add_fetch(&draws_native, p->n, __ATOMIC_RELAXED);
-    __atomic_add_fetch(&draws_since_toggle, p->n, __ATOMIC_RELAXED);
 }
 
-/* After the game's draws of a layer: a gathered submesh the game didn't draw, of an object it
- * drew other submeshes of, is one the game leaves out (learned as SKIPPED). */
-static void learn_skipped(Layer *k) {
-    static const uint8_t no_polygon[4];
-    static const Cutout no_cut;
-    for (int i = 0; i < k->ours.n; i++) {
-        const Caster *c = &k->ours.c[i];
-        int object_drawn = 0, drawn = 0;
-        for (int j = 0; j < k->ndrawn && !drawn; j++)
-            if (k->drawn[j][0] == c->object) object_drawn = 1, drawn = k->drawn[j][1] == c->submesh;
-        if (object_drawn && !drawn) learn(c->object, c->submesh, SKIPPED, 0, 1, no_polygon, &no_cut);
-    }
-}
-
-/* The layer has been drawn by the game: give the nodes back, queue our pass after it. */
+/* The layer has been drawn by the game: queue our pass after it. */
 static void end_layer(Layer *k, const CPUState *ctx) {
     if (!k->active) return;
     k->active = 0;
-    learn_skipped(k);
     __atomic_add_fetch(&layers_seen, 1, __ATOMIC_RELAXED);
     __atomic_add_fetch(&ours_total, k->ours.n, __ATOMIC_RELAXED);
     __atomic_add_fetch(&drawn_total, k->ndrawn, __ATOMIC_RELAXED);
     if (mode == MODE_CHECK) compare(k);
-    for (int i = 0; i < k->nhidden; i++) *(uint8_t *)(uintptr_t)(k->hidden[i] + 0x20) &= (uint8_t)~2;
-    k->nhidden = 0;
     if (k->pass && k->pass->n && ctx) {
         ShadowPass *p = k->pass;
+        __atomic_add_fetch(&draws_native, p->n, __ATOMIC_RELAXED);
+        __atomic_add_fetch(&draws_since_toggle, p->n, __ATOMIC_RELAXED);
         nvn_record_native(ctx, U64(k->device + 0x10d0) + 0xd8, gpu_shadow_pass, &p, sizeof p);
     }
     k->pass = NULL;
@@ -809,13 +768,14 @@ int yw4_hook_model_renderer(CPUState *ctx) {
     gather(list, item, &k->vp, &k->ours);
     k->ndrawn = 0;
     k->pending = 0;
-    if (mode == MODE_NATIVE) take_over(k);
+    if (mode == MODE_NATIVE) begin_pass(k);
     k->active = 1;
     report();
     return 0;
 }
 
-/* main+0xa75e90 (device, geometry, submesh): the model renderer's submesh draw. Only noted. */
+/* main+0xa75e90 (device, geometry, submesh): the model renderer's submesh draw. Noted (the
+ * game's draw that follows is learned from); in native mode replaced by ours when we can. */
 int yw4_hook_submesh_draw(CPUState *ctx) {
     if (!lay || !lay->active || lay->ndrawn >= MAX_CASTERS) return 0;
     static uint64_t base;
@@ -825,10 +785,24 @@ int yw4_hook_submesh_draw(CPUState *ctx) {
     uint64_t ret = ctx->x[30] - base;
     if (ret != 0xa4bf94 && ret != 0xa4c2d0) return 0;  /* from the model renderer */
     /* the object being drawn is in the model renderer's stack slot sp+0x390 */
-    lay->drawn[lay->ndrawn][0] = U64(ctx->sp + 0x390);
-    lay->drawn[lay->ndrawn][1] = ctx->x[2];
-    lay->ndrawn++;
-    lay->pending = 1;
+    uint64_t obj = U64(ctx->sp + 0x390), sub = ctx->x[2];
+    Layer *k = lay;
+    ShadowPass *p = k->pass;
+    uint64_t frame = __atomic_load_n(&yw4_frames_presented, __ATOMIC_RELAXED);
+    if (mode == MODE_NATIVE && p && k->game_drew && ((frame + (obj >> 4)) & 31) != 0) {
+        const Caster *c = caster_of(obj, sub);
+        int n = c ? ours(c, &k->vp, &p->d[p->n], PASS_DRAWS - (int)p->n) : -1;
+        if (n >= 0) {
+            p->n += (uint32_t)n;
+            __atomic_add_fetch(&draws_replaced, 1, __ATOMIC_RELAXED);
+            return 1;  /* the game's draw is skipped */
+        }
+    }
+    k->drawn[k->ndrawn][0] = obj;
+    k->drawn[k->ndrawn][1] = sub;
+    k->ndrawn++;
+    k->pending = 1;
+    k->game_drew = 1;
     return 0;
 }
 
