@@ -345,8 +345,19 @@ static void save_screenshot(const uint8_t *rgba, uint32_t w, uint32_t h, uint64_
     if (s) SDL_DestroySurface(s);
 }
 
+/* F12: this many frames in a row (YW4_SCREENSHOT_BURST, default 1), to catch short glitches */
+static int screenshot_burst(void) {
+    const char *s = getenv("YW4_SCREENSHOT_BURST");
+    int n = s ? atoi(s) : 1;
+    return n > 0 ? n : 1;
+}
+
 static int screenshot_wanted(uint64_t n) {
-    if (__atomic_exchange_n(&screenshot_requested, 0, __ATOMIC_ACQ_REL)) return 1;
+    int left = __atomic_load_n(&screenshot_requested, __ATOMIC_ACQUIRE);
+    if (left > 0) {
+        __atomic_store_n(&screenshot_requested, left - 1, __ATOMIC_RELEASE);
+        return 1;
+    }
     const char *list = getenv("YW4_SCREENSHOTS");  /* frame numbers, comma separated */
     for (const char *p = list; p && *p;) {
         char *end;
@@ -556,7 +567,7 @@ static void guest_main(void *p) {
     exit(0);  /* the game's main returned */
 }
 
-void window_request_screenshot(void) { __atomic_store_n(&screenshot_requested, 1, __ATOMIC_RELEASE); }
+void window_request_screenshot(void) { __atomic_store_n(&screenshot_requested, screenshot_burst(), __ATOMIC_RELEASE); }
 
 void yw4_hid_note_key(const char *name);  /* svc_hid.c: key presses go into the input recording */
 
@@ -608,7 +619,7 @@ void window_run(void (*guest)(void *), void *arg) {
             fprintf(stderr, "yw4: window closed\n");
             exit(0);
         case SDL_EVENT_KEY_DOWN:
-            if (e.key.key == SDLK_F12) __atomic_store_n(&screenshot_requested, 1, __ATOMIC_RELEASE), yw4_hid_note_key("F12");
+            if (e.key.key == SDLK_F12) __atomic_store_n(&screenshot_requested, screenshot_burst(), __ATOMIC_RELEASE), yw4_hid_note_key("F12");
             if (e.key.key == SDLK_F11) gpu_request_trace(450), yw4_hid_note_key("F11");  /* the draws of the next frame, in the log */
             if (e.key.key == SDLK_F10) gpu_request_dump(), yw4_hid_note_key("F10");      /* shadow maps etc.: work/dump/ */
             if (e.key.key == SDLK_F9) shadow_toggle(), yw4_hid_note_key("F9");          /* our shadow pass on/off */

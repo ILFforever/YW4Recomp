@@ -181,8 +181,16 @@ static int replay_state(uint64_t tick, uint64_t *buttons, int32_t sticks[4]) {
     /* After the last line the player takes over (e.g. a replay that only loads the save). */
     if (next_key == n_keys && (!n_states || tick > replay_states[n_states - 1].tick)) {
         static int handed_over;
-        if (!handed_over) handed_over = 1, fprintf(stderr, "yw4: replay: finished at tick %llu, input is live\n",
-                                                   (unsigned long long)tick);
+        if (!handed_over) {
+            handed_over = 1;
+            fprintf(stderr, "yw4: replay: finished at tick %llu, input is live\n", (unsigned long long)tick);
+            /* YW4_REPLAY_EXIT=1: a test run ends with its replay instead of idling */
+            const char *e = getenv("YW4_REPLAY_EXIT");
+            if (e && atoi(e)) {
+                fprintf(stderr, "yw4: replay: done, exiting (YW4_REPLAY_EXIT)\n");
+                exit(0);
+            }
+        }
         return 0;
     }
     static size_t cur;
