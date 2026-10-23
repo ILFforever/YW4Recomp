@@ -17,6 +17,7 @@
  * are bugs in the gather; extra ones are casters the game culled and we don't (instanced).
  */
 #include <inttypes.h>
+#include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -201,12 +202,22 @@ enum { MAX_HIDDEN = 2048, PASS_DRAWS = 4096, RING = 64 };
 #define CUTOUT_STATIC_VS 0x4cbb8e9627462c17ull
 #define CUTOUT_INSTANCED_VS 0x744205aaee24163eull
 #define CUTOUT_FS 0xdceb89e5f80d79e1ull
+/* Skinned casters: up to 8 bones per vertex from a per-submesh palette (vs cbuf 4), then as
+ * the static program. Usually with the fade fragment program, which drops pixels by a screen
+ * pattern while the object fades out (fs cbuf 3 byte 28 below 1); while it is 1 nothing is
+ * dropped and our depth-only draw is the same. */
+#define SKINNED_VS 0x71faac9f597b428dull
+/* Learned for a submesh the game leaves out of the layer although it draws other submeshes of
+ * the same object there (culling is per object, so this is the game's choice): ours too. */
+#define SKIPPED 1
+#define FADE_FS 0xb7cd6ed8cd28a184ull
 
 static int is_instanced(uint64_t vs) { return vs == INSTANCED_VS || vs == CUTOUT_INSTANCED_VS; }
 /* programs our pass mirrors */
 static int mirrored(uint64_t vs, uint64_t fs) {
     return ((vs == STATIC_VS || vs == INSTANCED_VS) && fs == DEPTH_FS) ||
-           ((vs == CUTOUT_STATIC_VS || vs == CUTOUT_INSTANCED_VS) && fs == CUTOUT_FS);
+           ((vs == CUTOUT_STATIC_VS || vs == CUTOUT_INSTANCED_VS) && fs == CUTOUT_FS) ||
+           (vs == SKINNED_VS && (fs == DEPTH_FS || fs == FADE_FS));
 }
 
 /* An instanced model's copies. The model renderer gets them from the model's callback
@@ -302,7 +313,7 @@ static uint32_t learned_ours(uint64_t obj, uint64_t sub) {
     uint32_t h = learn_slot(obj, sub);
     if (h == UINT32_MAX || learned[h].obj != obj) return UINT32_MAX;
     if (learned[h].model != U64(obj + 0x140) || learned[h].mat != U64(obj + 0x120)) return UINT32_MAX;  /* reused */
-    return mirrored(learned[h].vs, learned[h].fs) && learned[h].ok ? h : UINT32_MAX;
+    return (learned[h].vs == SKIPPED || mirrored(learned[h].vs, learned[h].fs)) && learned[h].ok ? h : UINT32_MAX;
 }
 
 /* ok: our draw of it would equal the game's (same buffers, same matrix: compare_draw) */
@@ -380,6 +391,67 @@ static void report(void) {
 static int compare_draw(const NvnCmdBuf *cb, uint64_t obj, uint64_t sub, uint64_t index_addr,
                         const ShadowDrawCall *call, int instanced);
 
+/* A skinned submesh's bone palette (3x4 per bone), as the model renderer finds it: the
+ * submesh's 0x140-byte record at [model+0xc8] (the size at +0x98) holds at +0x78 the buffer
+ * object the engine uploads into vs cbuf 4 right before the draw; its data at [B+0x40] +
+ * [B+0x58]. 0 if missing. */
+static int palette_of(const Caster *c, uint64_t *data, uint32_t *size) {
+    uint64_t recs = U64(c->model + 0xc8), hdr = U64(c->geometry + 0x18);
+    if (!recs || !hdr) return 0;
+    uint64_t subs = hdr + 4ull * U16(hdr + 0xa) + 4ull * U16(hdr + 0x60);
+    if (c->submesh < subs || (c->submesh - subs) % 0x50 || (c->submesh - subs) / 0x50 >= U16(c->model + 0x200)) return 0;
+    uint64_t rec = recs + 0x140 * ((c->submesh - subs) / 0x50), b = U64(rec + 0x78);
+    if (!b || !U64(b + 0x40)) return 0;
+    *data = U64(b + 0x40) + *(const uint32_t *)(uintptr_t)(b + 0x58);
+    *size = *(const uint32_t *)(uintptr_t)(rec + 0x98);
+    return *size && *size % 48 == 0 && *size <= 3 * 256 * 16;
+}
+
+static const Caster *caster_of(uint64_t obj, uint64_t sub) {
+    for (int i = 0; i < lay->ours.n; i++)
+        if (lay->ours.c[i].object == obj && lay->ours.c[i].submesh == sub) return &lay->ours.c[i];
+    return NULL;
+}
+
+/* Is our palette the one the game drew with? The game's animation writes the next pose into the
+ * same buffer while the render thread draws, so the copy the game made a moment ago can be a
+ * little different from what we read now: close (mean difference per value under 0.01) is
+ * enough. Another submesh's or another model's palette is far from it. */
+static int palette_close(const float *ours, const float *game, uint32_t size) {
+    double sum = 0;
+    uint32_t n = size / 4;
+    for (uint32_t i = 0; i < n; i++) sum += fabs((double)ours[i] - game[i]);
+    return n && sum / n < 0.01;
+}
+
+/* A skinned draw our pass can repeat: the vertex layout our pipeline reads (position at 0,
+ * weights 0x2f at 28, bone indices 0x2c at 44, one vertex buffer and stride), our palette
+ * the game's cbuf 4 (palette_close), and with the fade program, the fade at 1. */
+static int skinned_ok(const NvnCmdBuf *cb, uint64_t obj, uint64_t sub, uint64_t fs) {
+    static const uint32_t want[3] = {0x22, 0x2f | 28u << 13, 0x2c | 44u << 13};
+    if (cb->trace_nattribs < 3) return 0;
+    for (uint32_t i = 0; i < cb->trace_nattribs; i++) {
+        uint32_t a = cb->trace_attribs[i], stream = a >> 8 & 0x1F;
+        if (i >= 3 ? (a & 0xFF) != 0 : (a & ~(0x1Fu << 8)) != want[i]) return 0;
+        if (i < 3 && (stream >= 4 || cb->trace_vb[stream] != cb->trace_vb[0] ||
+                      (uint32_t)cb->trace_streams[stream] != (uint32_t)cb->trace_streams[0]))
+            return 0;
+    }
+    const Caster *c = caster_of(obj, sub);
+    uint64_t data;
+    uint32_t size;
+    if (!c || !palette_of(c, &data, &size) || !cb->trace_ub[0][4] ||
+        !palette_close((const float *)(uintptr_t)data, (const float *)(uintptr_t)cb->trace_ub[0][4], size))
+        return 0;
+    if (fs == FADE_FS) {
+        float fade;
+        if (!cb->trace_ub[1][3]) return 0;
+        memcpy(&fade, (const void *)(uintptr_t)(cb->trace_ub[1][3] + 28), 4);
+        if (fade != 1.0f) return 0;
+    }
+    return 1;
+}
+
 /* A cut-out draw's texture, threshold and texture coordinates, as the game bound them; 0 if
  * its vertex layout isn't the one our pass reads: position (0x22) at 0 and texture
  * coordinates in attribute 1, both from one vertex buffer and stride. */
@@ -407,6 +479,7 @@ void shadow_check_draw(const NvnCmdBuf *cb, uint64_t index_addr, const ShadowDra
     uint64_t vs = cb->program ? cb->program->stages[0].key : 0, fs = cb->program ? cb->program->stages[1].key : 0;
     Cutout cut = {0};
     int ok = mirrored(vs, fs) && (fs != CUTOUT_FS || cutout_of(cb, &cut)) &&
+             (vs != SKINNED_VS || skinned_ok(cb, obj, sub, fs)) &&
              compare_draw(cb, obj, sub, index_addr, call, is_instanced(vs));
     learn(obj, sub, vs, fs, ok, cb->polygon, &cut);
     if (lay->cascade >= 0) {
@@ -446,6 +519,7 @@ static int describe(const Caster *c, const Mat4 *vp, ShadowDraw *d) {
     d->stride = U8(c->submesh + 0x3e);
     d->index_type = index_type(c->submesh);
     d->texture = 0, d->threshold = 0, d->uv_format = d->uv_offset = 0;
+    d->palette_offset = d->palette_size = 0;
     memcpy(d->mvp, mvp.m, sizeof d->mvp);
     return d->stride && (d->index_count || d->vertex_count);
 }
@@ -456,11 +530,18 @@ static int describe(const Caster *c, const Mat4 *vp, ShadowDraw *d) {
 static int ours(const Caster *c, const Mat4 *vp, ShadowDraw *d, int room) {
     uint32_t h = learned_ours(c->object, c->submesh);
     ShadowDraw one;
+    if (h != UINT32_MAX && learned[h].vs == SKIPPED) return 0;
     if (h == UINT32_MAX || !describe(c, vp, &one)) return -1;
     one.cull = learned[h].cull, one.front = learned[h].front;
     one.texture = learned[h].cut.texture, one.threshold = learned[h].cut.threshold;
     one.uv_format = learned[h].cut.uv_format, one.uv_offset = learned[h].cut.uv_offset;
     if (one.texture && one.uv_offset + 4 > one.stride) return -1;
+    if (learned[h].vs == SKINNED_VS) {  /* the palette as it is now, copied for our draw */
+        uint64_t data;
+        if (room < 1 || !palette_of(c, &data, &one.palette_size) ||
+            !gpu_shadow_palette((const void *)(uintptr_t)data, one.palette_size, &one.palette_offset))
+            return -1;
+    }
     if (!is_instanced(learned[h].vs)) {
         if (room < 1) return -1;
         d[0] = one;
@@ -653,10 +734,25 @@ static void take_over(Layer *k) {
     __atomic_add_fetch(&draws_since_toggle, p->n, __ATOMIC_RELAXED);
 }
 
+/* After the game's draws of a layer: a gathered submesh the game didn't draw, of an object it
+ * drew other submeshes of, is one the game leaves out (learned as SKIPPED). */
+static void learn_skipped(Layer *k) {
+    static const uint8_t no_polygon[4];
+    static const Cutout no_cut;
+    for (int i = 0; i < k->ours.n; i++) {
+        const Caster *c = &k->ours.c[i];
+        int object_drawn = 0, drawn = 0;
+        for (int j = 0; j < k->ndrawn && !drawn; j++)
+            if (k->drawn[j][0] == c->object) object_drawn = 1, drawn = k->drawn[j][1] == c->submesh;
+        if (object_drawn && !drawn) learn(c->object, c->submesh, SKIPPED, 0, 1, no_polygon, &no_cut);
+    }
+}
+
 /* The layer has been drawn by the game: give the nodes back, queue our pass after it. */
 static void end_layer(Layer *k, const CPUState *ctx) {
     if (!k->active) return;
     k->active = 0;
+    learn_skipped(k);
     __atomic_add_fetch(&layers_seen, 1, __ATOMIC_RELAXED);
     __atomic_add_fetch(&ours_total, k->ours.n, __ATOMIC_RELAXED);
     __atomic_add_fetch(&drawn_total, k->ndrawn, __ATOMIC_RELAXED);

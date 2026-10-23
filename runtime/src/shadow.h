@@ -14,6 +14,7 @@ typedef struct {
     float threshold;                     /* cut-out casters (texture != 0): the material's alpha threshold, */
     uint64_t texture;                    /* texture handle, and the texture coordinates' NVN format and */
     uint32_t uv_format, uv_offset;       /* offset in the vertex */
+    uint32_t palette_offset, palette_size;  /* skinned casters (size != 0): the bones in the palette ring */
 } ShadowDraw;
 
 typedef struct {
@@ -23,6 +24,9 @@ typedef struct {
     ShadowDraw d[];
 } ShadowPass;
 
+/* A skinned caster's bone palette (size bytes, 3x4 per bone) copied into the executor's ring,
+ * on the thread that gathers the pass; its offset there. 0 if it can't be. */
+int gpu_shadow_palette(const void *src, uint32_t size, uint32_t *offset);
 /* CMD_NATIVE callback: `data` holds a ShadowPass pointer. */
 void gpu_shadow_pass(void *vk_cb, void *gpu_state, const void *data, uint32_t size);
 /* F9: switch between the game's shadow casters and ours (shadow.c) */
