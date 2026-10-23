@@ -195,16 +195,18 @@ enum { MAX_HIDDEN = 2048, PASS_DRAWS = 4096, RING = 64 };
 #define STATIC_VS 0xb320bd9159e2fd0aull
 #define INSTANCED_VS 0xa748428f2d024ad7ull
 #define DEPTH_FS 0x6ead6a69737c52c2ull
-/* Instanced cut-out casters: the instanced program, plus texture coordinates (attribute 1) and
+/* Cut-out casters: the static or instanced program, plus texture coordinates (attribute 1) and
  * the material's alpha threshold (vs cbuf 3 byte 12) for a fragment stage that drops texels
  * below it (texture: fs slot 0). */
+#define CUTOUT_STATIC_VS 0x4cbb8e9627462c17ull
 #define CUTOUT_INSTANCED_VS 0x744205aaee24163eull
 #define CUTOUT_FS 0xdceb89e5f80d79e1ull
 
 static int is_instanced(uint64_t vs) { return vs == INSTANCED_VS || vs == CUTOUT_INSTANCED_VS; }
 /* programs our pass mirrors */
 static int mirrored(uint64_t vs, uint64_t fs) {
-    return ((vs == STATIC_VS || vs == INSTANCED_VS) && fs == DEPTH_FS) || (vs == CUTOUT_INSTANCED_VS && fs == CUTOUT_FS);
+    return ((vs == STATIC_VS || vs == INSTANCED_VS) && fs == DEPTH_FS) ||
+           ((vs == CUTOUT_STATIC_VS || vs == CUTOUT_INSTANCED_VS) && fs == CUTOUT_FS);
 }
 
 /* An instanced model's copies. The model renderer gets them from the model's callback
@@ -459,7 +461,7 @@ static int ours(const Caster *c, const Mat4 *vp, ShadowDraw *d, int room) {
     one.texture = learned[h].cut.texture, one.threshold = learned[h].cut.threshold;
     one.uv_format = learned[h].cut.uv_format, one.uv_offset = learned[h].cut.uv_offset;
     if (one.texture && one.uv_offset + 4 > one.stride) return -1;
-    if (learned[h].vs == STATIC_VS) {
+    if (!is_instanced(learned[h].vs)) {
         if (room < 1) return -1;
         d[0] = one;
         return 1;

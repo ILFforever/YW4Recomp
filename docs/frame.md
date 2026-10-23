@@ -81,25 +81,35 @@ needs re-implementing for a better-shadows mod later.
 |---|---|---|
 | `b320bd…` | 16 | cbuf 2 bytes 128-191 (projection × view × world, per object, made on the CPU) × vertex |
 | `a74842…`, `744205…` | 12 | cbuf 1 bytes 128-191 (projection × view of the cascade) × instance transform (cbuf 11, 3×4 per instance, `instance × 48` bytes; from `object+0x140 → +0x80`) × world (cbuf 2 bytes 0-63) × vertex: **instanced** props |
-| `71faac…`, `4cbb8e…` | 10 | skinned: up to 8 bones per vertex from cbuf 4 (3×4 each), then cbuf 2 bytes 128-191 like `b320bd` |
+| `71faac…` | | **skinned**: up to 8 bones per vertex from cbuf 4 (3×4 each), then cbuf 2 bytes 128-191 like `b320bd` |
+| `4cbb8e…` | | static (`b320bd`) plus texture coordinates (attribute 1) and the alpha threshold (cbuf 3 byte 12): **static cut-out** |
+| `9904c2…` | | instanced (`a74842`), with the fade fragment shader `b7cd6e` |
+| `fa9033…`, `61ebac…` | | wind-swayed plants: textures read in the vertex stage |
 
 **Share of the shadow draws by program pair** (street, `YW4_SHADOWS=check`, about 300,000 draws): `b320bd`+`6ead6a`
 (static) 38%; `744205`+`dceb89` (instanced cut-out) 20%; `a74842`+`6ead6a` (instanced) 13%; `fa9033`+`dceb89` 8%;
-skinned `71faac`+`b7cd6e` 6%, `4cbb8e`+`dceb89` 6%, `9904c2`+`b7cd6e` 5%; `e758a5`/`f8951f`+`d5f536` 3%;
-`61ebac`+`dceb89` 1%. Every skinned draw seen is also a cut-out.
+`71faac`+`b7cd6e` (skinned, fade) 6%; `4cbb8e`+`dceb89` (static cut-out) 6%; `9904c2`+`b7cd6e` (instanced, fade) 5%;
+`e758a5`/`f8951f`+`d5f536` 3%; `61ebac`+`dceb89` 1%.
 
 **Skinned draws, as bound** (`71faac`): the three vertex streams are one buffer, the submesh's vertices (stride 60):
 position `0x22` at 0, weights `0x2f` at 28 (eight 16-bit weights in four 32-bit words; the shader scales the sum by
 1/65535; bones 5-8 only if weight 5 is not 0), bone indices `0x2c` at 44 (eight bytes, ×48 into cbuf 4). cbuf 2
-byte 128 equals our projection × view × world. cbuf 4 is a **new buffer per submesh every frame** (a bone palette
-built on the CPU); its matrices are not copies of `[object+0x110]+0x138` (that array holds other matrices; 0 of 24
-palette entries found there). Where the palette is built is still open.
+byte 128 equals our projection × view × world.
+
+**Where the bone palette comes from:** cbuf 4 is a copy, made right before each skinned submesh's draw, of a palette
+the game built earlier (one 3×4 matrix per bone of that submesh, e.g. 41, 51 or 6 bones). The copy is the engine's
+generic constant-buffer upload `f_965eb0`: a state slot (`device + stage·0x150 + slot·0x18 + 13000`) holds a buffer
+object B, the CPU data is at `[B+0x40] + [B+0x58]`, the size in the slot (`+0x32d0`), and when the slot is dirty
+the data is copied into the frame's buffer (`f_977550`) and bound. The model renderer puts the submesh's palette
+object in the slot: for submesh `i` of a geometry, B = `[[object+0x140] + 0xc8] + 0x140·i + 0x78` (a record of
+0x140 bytes per submesh; the size at `+0x98`). Found by value: for each skinned draw, the bytes at that B's data
+equal cbuf 4 (check mode, every draw tried).
 
 | Fragment shader | Does |
 |---|---|
 | `6ead6a…` | nothing: depth only |
-| `dceb89…` | alpha cut-out: samples the material's texture (bindless handle in cbuf 14 slot 0), discards |
-| `b7cd6e…` | alpha cut-out with a threshold from cbuf 3 byte 16, texture handle at cbuf 14 byte 144 |
+| `dceb89…` | alpha cut-out: drops texels of the material's texture (fs slot 0) below the threshold the vertex stage passes |
+| `b7cd6e…` | **fade**: drops pixels by a 16×16 screen pattern (texture fs slot 18, `texelFetch` at the pixel position mod 16) where the object's fade (fs cbuf 3 byte 28 × attribute 3.w) is below the pattern's value; at full opacity nothing is dropped |
 
 Checked by value: cbuf 1 bytes 128-191 in a shadow draw equal the renderer's projection × view of that cascade
 (`+0x80 + i·0x40`, same row-major layout; the shader takes `dot(row, position)` per output component). Per-object
