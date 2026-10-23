@@ -154,4 +154,11 @@ and turns them into Vulkan at submit. The expensive part is `f_a45890` plus the 
    `YW4_SHADOWS_INSTANCED=1` turns ours back on for that; `YW4_SHADOWS_NO_SKINNED` / `_NO_CUTOUT` leave those
    kinds to the game for further elimination. Also seen: frame rate with our shadows is noticeably lower than
    with the game's (not measured yet).
+
+   **Fixed 2026-10-24: character shadows animated choppier than the characters.** Our skinned draws copied the
+   palette from the submesh's own buffer (`palette_of`), which the animation is writing the next pose into: exactly
+   the palette of the game's draw in only 45% of 70,000 check-mode draws. The snapshot the model renderer binds to
+   vs cbuf 4 before the submesh draw (read at the hook like the copies in slot 11) was exactly the game's in all
+   70,000; ours now copy that. Owner's playtest: smooth. (The frame-rate note above was this, not speed: on the
+   walk replay our pass costs about the same CPU and GPU as the game's shadows.)
 5. Switch the default to `native` once every street, house and battle layer matches; measure CPU.

@@ -537,15 +537,21 @@ static int describe(const Caster *c, const Mat4 *vp, ShadowDraw *d) {
 }
 
 /* The copies the game's instance callback kept for the draw it is about to make: the model
- * renderer has put the callback's buffer object in vertex constant slot 11 (the engine state at
- * device+13000, 0x18 bytes per slot; CPU data at [B+0x40] + [B+0x58]) and the count at
+ * renderer has put the callback's buffer object in vertex constant slot 11 and the count at
  * device+0x45cc before it calls the submesh draw. 0 if there is none. */
+static const void *bound_constants(uint64_t device, int slot);
 static int pending_copies(uint64_t device, const float **data, uint32_t *count) {
-    uint64_t b = U64(device + 13000 + 0x18ull * 11);
-    if (!b || !U64(b + 0x40)) return 0;
-    *data = (const float *)(uintptr_t)(U64(b + 0x40) + *(const uint32_t *)(uintptr_t)(b + 0x58));
+    if (!(*data = bound_constants(device, 11))) return 0;
     *count = *(const uint32_t *)(uintptr_t)(device + 0x45cc);
     return *count != 0;
+}
+
+/* The CPU data of the buffer object bound to vertex constant slot `slot` in the engine state
+ * (device+13000, 0x18 bytes per slot; data at [B+0x40] + [B+0x58]); NULL if none. */
+static const void *bound_constants(uint64_t device, int slot) {
+    uint64_t b = U64(device + 13000 + 0x18ull * slot);
+    if (!b || !U64(b + 0x40)) return NULL;
+    return (const void *)(uintptr_t)(U64(b + 0x40) + *(const uint32_t *)(uintptr_t)(b + 0x58));
 }
 
 /* Is the submesh ours (the game drew it with programs we mirror), and how do we draw it?
@@ -578,10 +584,15 @@ static int ours(const Caster *c, const Mat4 *vp, uint64_t device, ShadowDraw *d,
     one.texture = learned[h].cut.texture, one.threshold = learned[h].cut.threshold;
     one.uv_format = learned[h].cut.uv_format, one.uv_offset = learned[h].cut.uv_offset;
     if (one.texture && one.uv_offset + 4 > one.stride) return -1;
-    if (learned[h].vs == SKINNED_VS) {  /* the palette as it is now, copied for our draw */
+    if (learned[h].vs == SKINNED_VS) {
+        /* the palette the game's draw would use, copied for ours: the snapshot the model renderer
+         * bound to vs cbuf 4 (equal to the game's draw in every check; the submesh's own buffer
+         * that palette_of finds is being written with the next pose and matched about half the
+         * time, so the shadow's pose lagged and jumped) */
         uint64_t data;
-        if (room < 1 || !palette_of(c, &data, &one.palette_size) ||
-            !gpu_shadow_palette((const void *)(uintptr_t)data, one.palette_size, &one.palette_offset))
+        const void *pose = bound_constants(device, 4);
+        if (room < 1 || !pose || !palette_of(c, &data, &one.palette_size) ||
+            !gpu_shadow_palette(pose, one.palette_size, &one.palette_offset))
             return -1;
     }
     if (!is_instanced(learned[h].vs)) {
