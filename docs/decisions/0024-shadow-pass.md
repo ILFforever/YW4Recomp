@@ -150,7 +150,10 @@ and turns them into Vulkan at submit. The expensive part is `f_a45890` plus the 
    450,000); two layers sharing a pass buffer (one layer open at a time); copy count (2–4 copies flash, only the
    first copy drawn still flashes); a depth bias on our instanced draws only (still flashes, so not float rounding).
    With the game also drawing (`YW4_SHADOWS_BOTH=1`) it still flashes, so the bands come from our draws, while
-   every value they take matches. Next: capture a flashing frame (RenderDoc) and find the draw that makes the band.
+   every value they take matches. Also equal (2026-10-24, check mode, 96,000 instanced draws): index count, base
+   vertex (always 0), vertex stride, primitive (triangles) and index type. Nothing left to compare on the CPU
+   side: the fault is in how our draws run on the GPU. Next: capture a flashing frame (RenderDoc) and find the
+   draw that makes the band.
    `YW4_SHADOWS_INSTANCED=1` turns ours back on for that; `YW4_SHADOWS_NO_SKINNED` / `_NO_CUTOUT` leave those
    kinds to the game for further elimination. Also seen: frame rate with our shadows is noticeably lower than
    with the game's (not measured yet).
