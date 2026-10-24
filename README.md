@@ -68,6 +68,36 @@ All captured from the recompiled build on Windows.
 | ![LEVEL-5 logo](docs/screenshots/02-level5-logo.jpg) | ![Opening movie](docs/screenshots/04-opening-movie.jpg) |
 | LEVEL-5 logo | Opening movie |
 
+## Native shadow pass
+
+Optional (`YW4_SHADOWS=native`): our own renderer draws the shadow casters the game would draw, from the game's
+data, instead of replaying the game's draw calls one by one
+([decision 0024](docs/decisions/0024-shadow-pass.md)). It covers static, cut-out, skinned and instanced casters,
+including props fading in and out; the game still draws the rest (wind-swayed plants, a few others).
+
+Same save and frame, the game's shadows against ours. The only differences are animation timing between the two
+runs (Whisper's float, idle poses, leaves):
+
+| The game's shadows | Our shadow pass |
+|---|---|
+| ![The game's shadows](docs/screenshots/08-shadows-game.jpg) | ![Our shadow pass](docs/screenshots/09-shadows-ours.jpg) |
+
+<details><summary>Difference image (white: pixels that differ)</summary>
+
+![Difference](docs/screenshots/10-shadows-difference.jpg)
+
+</details>
+
+Cost per frame on a scripted walk through the town (average of 3 runs each, alternating, nothing else running;
+RTX 4070 Laptop):
+
+| Per frame | The game's shadows | Our shadow pass | Change |
+|---|---|---|---|
+| Game work, average | 10.9 ms | 10.3 ms | **−0.6 ms** |
+| Game work, 95th percentile | 18.0 ms | 16.8 ms | **−1.2 ms** |
+| GPU busy, average | 11.3 ms | 10.9 ms | −0.3 ms |
+| Process CPU | 72.7% of a core | 71.3% of a core | −1.4 points |
+
 ## Building from source
 
 Requirements: Python 3.11+, Git, Clang (or GCC), a GPU with Vulkan 1.3 and the Vulkan SDK; SDL3 is fetched
