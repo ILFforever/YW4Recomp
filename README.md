@@ -68,6 +68,14 @@ All captured from the recompiled build on Windows.
 | ![LEVEL-5 logo](docs/screenshots/02-level5-logo.jpg) | ![Opening movie](docs/screenshots/04-opening-movie.jpg) |
 | LEVEL-5 logo | Opening movie |
 
+In town with the performance HUD on (F3). The game is a native Windows program: the frame takes about 10 ms of
+work on the CPU and under one core of a 16-core laptop, against the 33 ms the game's 30 frames/s allow; the
+shadows here are our own pass ("CUSTOM").
+
+<p align="center">
+  <img src="docs/screenshots/11-hud-in-town.jpg" alt="In town with the performance HUD: frame time, work, GPU, CPU, memory and a frame-time graph" width="820">
+</p>
+
 ## Native shadow pass
 
 Optional (`YW4_SHADOWS=native`): our own renderer draws the shadow casters the game would draw, from the game's
