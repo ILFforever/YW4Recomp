@@ -969,15 +969,17 @@ void shadow_toggle(void) {
 
 int yw4_hook_model_renderer(CPUState *ctx) {
     if (__atomic_load_n(&mode, __ATOMIC_ACQUIRE) < 0) init_mode();
-    if (__atomic_load_n(&mode, __ATOMIC_ACQUIRE) == MODE_GAME) return 0;
     /* A cascade's job list can draw more than one shadow layer (cutscenes: two per cascade) before
      * the cascade-end job: the next layer of the same cascade ends the previous one, which queues its
-     * pass here, still inside the cascade's target. Anything else: not ended by its job, no pass. */
+     * pass here, still inside the cascade's target. Anything else: not ended by its job, no pass.
+     * Before the mode check: after F9 to the game's shadows the next layer's draws must not be
+     * taken for the open one's. */
     if (lay && lay->active) {
         uint64_t v = U64(ctx->x[0] + 0x2780);
         int c = v && U8(v) >= 1 && U8(v) <= 3 ? U8(v) - 1 : -1;
         end_layer(lay, lay->device == ctx->x[0] && c >= 0 && c == lay->cascade ? ctx : NULL);
     }
+    if (__atomic_load_n(&mode, __ATOMIC_ACQUIRE) == MODE_GAME) return 0;
     uint64_t list = ctx->x[1], item = ctx->x[2];
     if (!item || U8(item + 8) != LAYER_SHADOW) return 0;
     if (!lay && !(lay = calloc(1, sizeof *lay))) return 0;
