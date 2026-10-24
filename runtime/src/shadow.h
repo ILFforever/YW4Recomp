@@ -17,6 +17,11 @@ typedef struct {
     uint32_t palette_offset, palette_size;  /* skinned casters (size != 0): the bones in the palette ring */
     uint32_t first_copy, copies;         /* instanced casters (copies != 0): their copies in the copies ring */
     uint64_t dither;                     /* fading ones (!= 0): the 16x16 dither texture's handle */
+    /* wind-swayed casters (wind_tex[0] != 0; always cut-out, texture coordinates from attribute 2):
+     * the copies hold copy x world rows (mvp: projection x view), a header entry the constants */
+    uint64_t wind_tex[2];                /* vs textures 11 (noise) and 12 (wind map) */
+    uint32_t wind_format, wind_offset;   /* the vertex's wind weights: NVN format, offset (attribute 1) */
+    uint32_t wind_header;                /* the header's index in the copies ring */
 } ShadowDraw;
 
 /* One copy of an instanced caster in the copies ring (shadow_instanced.vert's Copy): projection x

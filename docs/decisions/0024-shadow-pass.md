@@ -193,4 +193,18 @@ and turns them into Vulkan at submit. The expensive part is `f_a45890` plus the 
    window instead of 73,000. The before/after detector with the game also drawing: 0 passes with 1,000+ changed
    texels, 2 of ~7,000 with 100–999. Screenshots from the same save, game's against ours: differences only from
    animation timing.
+   **Changed 2026-10-24: wind-swayed casters ours.** `fa9033` (instanced) and `61ebac` (not), both with the cut-out
+   fragment program: the largest share the game still drew. The vertex program moves each vertex in world space
+   (after copy x world) by a wind map (vs texture 12, placed by cbuf 6 row 47) giving a height band and bend, and
+   two lookups of a wind noise (vs texture 11) scrolled by cbuf 6 row 36 (direction, strength, time), scaled by the
+   material (cbuf 7 rows 0, 3) and the vertex's weights (attribute 1); texture coordinates are attribute 2.
+   `shadow_wind.vert` does the same operations in the game's order. The constants are read at the submesh-draw
+   hook from the bound slots, as the copies (slot 11) and palettes (slot 4): equal to the game's draw in all of
+   50,000 checked; the two textures had one id each throughout (handles: the latest learned). A draw is one
+   header entry (the four constant rows) plus its copies' copy x world rows in the copies ring. Before/after
+   check with the game also drawing: passes with wind draws changed no more texels than the others (0 with
+   1,000+, 5 with 100-999 of ~3,700); Vulkan validation clean. The game's remaining shadow draws per report
+   window: about 18,500-26,000 (from ~30,000). Walk replay, 3 runs each: game work 9.5 ms against the game's
+   shadows' 10.2 (p95 15.0 against 16.4), GPU and process CPU equal; one of the three pairs went the other way,
+   so the gain is within run-to-run noise. `YW4_SHADOWS_NO_WIND=1` leaves them to the game.
 5. Switch the default to `native` once every street, house and battle layer matches; measure CPU.

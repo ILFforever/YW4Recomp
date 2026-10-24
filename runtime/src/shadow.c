@@ -221,16 +221,26 @@ enum { PASS_DRAWS = 4096, RING = 64 };
 #define FADE_CUTOUT_INSTANCED_VS 0xf8951f14aed20733ull
 #define FADE_CUTOUT_FS 0xd5f536a14604f183ull
 
+/* Wind-swayed casters (plants): instanced or not, always with the cut-out fragment program; the
+ * vertices move with the wind in world space before projection x view (shadow_wind.vert has the
+ * math): vs cbuf 6 rows 36, 47 (wind direction, strength, time; wind map placement), cbuf 7 rows
+ * 0, 3 (the material's), vs textures 11 (noise) and 12 (wind map); attribute 1 the vertex's wind
+ * weights, attribute 2 its texture coordinates. */
+#define WIND_INSTANCED_VS 0xfa9033d5819c7ebbull
+#define WIND_VS 0x61ebacf08dbc2b7dull
+
 static int is_instanced(uint64_t vs) {
-    return vs == INSTANCED_VS || vs == CUTOUT_INSTANCED_VS || vs == FADE_INSTANCED_VS || vs == FADE_CUTOUT_INSTANCED_VS;
+    return vs == INSTANCED_VS || vs == CUTOUT_INSTANCED_VS || vs == FADE_INSTANCED_VS || vs == FADE_CUTOUT_INSTANCED_VS ||
+           vs == WIND_INSTANCED_VS;
 }
+static int is_wind(uint64_t vs) { return vs == WIND_INSTANCED_VS || vs == WIND_VS; }
 static int is_fading(uint64_t vs) { return vs == FADE_INSTANCED_VS || vs == FADE_CUTOUT_INSTANCED_VS; }
 /* programs our pass mirrors */
 static int mirrored(uint64_t vs, uint64_t fs) {
     return ((vs == STATIC_VS || vs == INSTANCED_VS) && fs == DEPTH_FS) ||
            ((vs == CUTOUT_STATIC_VS || vs == CUTOUT_INSTANCED_VS) && fs == CUTOUT_FS) ||
            (vs == SKINNED_VS && (fs == DEPTH_FS || fs == FADE_FS)) || (vs == FADE_INSTANCED_VS && fs == FADE_FS) ||
-           (vs == FADE_CUTOUT_INSTANCED_VS && fs == FADE_CUTOUT_FS);
+           (vs == FADE_CUTOUT_INSTANCED_VS && fs == FADE_CUTOUT_FS) || (is_wind(vs) && fs == CUTOUT_FS);
 }
 
 /* An instanced model's copies. The model renderer gets them from the model's callback
@@ -313,6 +323,7 @@ typedef struct {
     float threshold;
     uint32_t uv_format, uv_offset;
     uint64_t dither;   /* fading instanced casters: the dither texture (fs slot 18) */
+    uint32_t wind_format, wind_offset;  /* wind-swayed casters: attribute 1 */
 } Cutout;
 static struct { uint64_t obj, sub, model, mat, vs, fs; int ok; uint8_t cull, front; Cutout cut; } learned[LEARN_SLOTS];
 
@@ -491,6 +502,38 @@ static int cutout_of(const NvnCmdBuf *cb, Cutout *cut) {
     return 1;
 }
 
+static uint64_t wind_tex[2];  /* the wind draws' vs textures 11 and 12, learned from them */
+
+/* A wind-swayed draw our pass can repeat: position (0x22) at 0, wind weights in attribute 1 and
+ * texture coordinates in attribute 2, all from one vertex buffer and stride; the leaf texture
+ * and threshold as for cut-out casters; both wind textures bound (one texture each everywhere,
+ * it seems: the latest handles, and a word if another texture turns up). */
+static int wind_of(const NvnCmdBuf *cb, Cutout *cut) {
+    uint32_t a0 = cb->trace_attribs[0], a1 = cb->trace_attribs[1], a2 = cb->trace_attribs[2];
+    if (cb->trace_nattribs < 3 || (a0 & 0xFF) != 0x22 || a0 >> 8 & 0x1F || a0 >> 13) return 0;
+    for (uint32_t i = 3; i < cb->trace_nattribs; i++)
+        if (cb->trace_attribs[i] & 0xFF) return 0;
+    for (int i = 1; i < 3; i++) {
+        uint32_t a = cb->trace_attribs[i], stream = a >> 8 & 0x1F;
+        if (!(a & 0xFF) || stream >= 4 || cb->trace_vb[stream] != cb->trace_vb[0] ||
+            (uint32_t)cb->trace_streams[stream] != (uint32_t)cb->trace_streams[0])
+            return 0;
+    }
+    if (!cb->trace_tex[1][0] || !cb->trace_ub[0][3] || !cb->trace_tex[0][11] || !cb->trace_tex[0][12]) return 0;
+    cut->texture = cb->trace_tex[1][0];
+    memcpy(&cut->threshold, (const void *)(uintptr_t)(cb->trace_ub[0][3] + 12), 4);
+    cut->uv_format = a2 & 0xFF, cut->uv_offset = a2 >> 13;
+    cut->wind_format = a1 & 0xFF, cut->wind_offset = a1 >> 13;
+    for (int t = 0; t < 2; t++) {
+        uint64_t was = __atomic_exchange_n(&wind_tex[t], cb->trace_tex[0][11 + t], __ATOMIC_RELAXED);
+        static int shown;
+        if (was && (was & 0xFFFFF) != (cb->trace_tex[0][11 + t] & 0xFFFFF) && shown++ < 5)
+            fprintf(stderr, "yw4: shadows: another wind texture %d: %#" PRIx64 " (was %#" PRIx64 ")\n", 11 + t,
+                    cb->trace_tex[0][11 + t], was);
+    }
+    return 1;
+}
+
 static uint64_t fade_dither;  /* the fading draws' dither texture, learned from them */
 
 /* A fading instanced draw our pass can repeat: its dither texture bound (fs slot 18), the
@@ -524,9 +567,9 @@ void shadow_check_draw(const NvnCmdBuf *cb, uint64_t index_addr, const ShadowDra
             __atomic_add_fetch(&pending_wrong, 1, __ATOMIC_RELAXED);
     }
     Cutout cut = {0};
-    int ok = mirrored(vs, fs) && (fs != CUTOUT_FS || cutout_of(cb, &cut)) && (!is_fading(vs) || fading_of(cb, fs, &cut)) &&
-             (vs != SKINNED_VS || skinned_ok(cb, obj, sub, fs)) &&
-             compare_draw(cb, obj, sub, index_addr, call, is_instanced(vs));
+    int ok = mirrored(vs, fs) && (fs != CUTOUT_FS || (is_wind(vs) ? wind_of(cb, &cut) : cutout_of(cb, &cut))) &&
+             (!is_fading(vs) || fading_of(cb, fs, &cut)) && (vs != SKINNED_VS || skinned_ok(cb, obj, sub, fs)) &&
+             compare_draw(cb, obj, sub, index_addr, call, is_instanced(vs) ? 1 : vs == WIND_VS ? 2 : 0);
     learn(obj, sub, vs, fs, ok, cb->polygon, &cut);
     if (lay->cascade >= 0) {
         cascade_target[lay->cascade].addr = cb->depth_addr;
@@ -567,6 +610,7 @@ static int describe(const Caster *c, const Mat4 *vp, ShadowDraw *d) {
     d->texture = 0, d->threshold = 0, d->uv_format = d->uv_offset = 0;
     d->palette_offset = d->palette_size = 0;
     d->dither = 0, d->first_copy = d->copies = 0;
+    d->wind_tex[0] = d->wind_tex[1] = 0, d->wind_format = d->wind_offset = d->wind_header = 0;
     memcpy(d->mvp, mvp.m, sizeof d->mvp);
     return d->stride && (d->index_count || d->vertex_count);
 }
@@ -599,16 +643,61 @@ static int env_on(const char *name) {
 
 /* The game's draws left to it, for narrowing down a fault by elimination:
  * YW4_SHADOWS_NO_SKINNED=1 (characters), YW4_SHADOWS_NO_CUTOUT=1 (cut-out casters),
- * YW4_SHADOWS_NO_INSTANCED=1 (repeated props). */
+ * YW4_SHADOWS_NO_INSTANCED=1 (repeated props), YW4_SHADOWS_NO_WIND=1 (plants). */
 static int leave_to_game(uint64_t vs, uint64_t fs) {
-    static int no_skinned = -1, no_cutout = -1, no_instanced = -1;
+    static int no_skinned = -1, no_cutout = -1, no_instanced = -1, no_wind = -1;
     if (no_skinned < 0) no_skinned = env_on("YW4_SHADOWS_NO_SKINNED");
     if (no_cutout < 0) no_cutout = env_on("YW4_SHADOWS_NO_CUTOUT");
     if (no_instanced < 0) no_instanced = env_on("YW4_SHADOWS_NO_INSTANCED");
-    return (no_skinned && vs == SKINNED_VS) || (no_cutout && (fs == CUTOUT_FS || fs == FADE_CUTOUT_FS)) || (no_instanced && is_instanced(vs));
+    if (no_wind < 0) no_wind = env_on("YW4_SHADOWS_NO_WIND");
+    return (no_skinned && vs == SKINNED_VS) || (no_cutout && (fs == CUTOUT_FS || fs == FADE_CUTOUT_FS)) ||
+           (no_instanced && is_instanced(vs)) || (no_wind && is_wind(vs));
 }
 
 static int copies_known(const Copies *cp, const float *game, uint32_t n);
+
+/* A wind-swayed submesh (one learned as ours, `one` described): one draw, with a header in the
+ * copies ring holding the wind constants as bound now (vs cbuf 6 rows 36, 47, cbuf 7 rows 0, 3:
+ * equal to the game's draw in all of 50,000 checked), then per copy its copy x world rows (or the
+ * world's alone without copies), as shadow_wind.vert reads them; projection x view in mvp. */
+static int wind_draw(const Caster *c, const Mat4 *vp, uint64_t device, uint64_t vs, const ShadowDraw *one,
+                     ShadowDraw *d, int room) {
+    const float *c6 = bound_constants(device, 6), *c7 = bound_constants(device, 7);
+    uint64_t t11 = __atomic_load_n(&wind_tex[0], __ATOMIC_RELAXED), t12 = __atomic_load_n(&wind_tex[1], __ATOMIC_RELAXED);
+    if (room < 1 || !c6 || !c7 || !t11 || !t12 || !one->texture) return -1;
+    const float *copies = NULL;
+    uint32_t count = 1, first;
+    if (vs == WIND_INSTANCED_VS) {  /* the copies the game would draw, as for the other instanced casters */
+        Copies cp;
+        if (!pending_copies(device, &copies, &count) || instances(c->model, &cp) != 1 || count > cp.count ||
+            !copies_known(&cp, copies, 1) || !copies_known(&cp, copies + 12 * (count - 1), 1))
+            return -1;
+        for (uint32_t i = 0; i < count; i++)  /* no wind program decodes a nudged copy */
+            if (copies[12 * i] >= 100.0f || copies[12 * i] <= -100.0f) return -1;
+    }
+    ShadowCopy *out = gpu_shadow_copies(count + 1, &first);
+    if (!out) return -1;
+    memcpy(out[0].mvp, c6 + 4 * 36, 16), memcpy(out[0].mvp + 4, c6 + 4 * 47, 16);
+    memcpy(out[0].mvp + 8, c7, 16), memcpy(out[0].mvp + 12, c7 + 4 * 3, 16);
+    Mat4 world = load(c->own);
+    for (uint32_t i = 0; i < count; i++) {
+        Mat4 m = world;
+        if (copies) {
+            Mat4 e = {{0}};
+            memcpy(e.m, copies + 12 * i, 48);
+            e.m[15] = 1;
+            m = mul(&e, &world);
+        }
+        memcpy(out[1 + i].mvp, m.m, sizeof m.m);
+        out[1 + i].fade = 1;
+    }
+    d[0] = *one;
+    memcpy(d[0].mvp, vp->m, sizeof d[0].mvp);
+    d[0].first_copy = first + 1, d[0].copies = count, d[0].wind_header = first;
+    d[0].wind_tex[0] = t11, d[0].wind_tex[1] = t12;
+    return 1;
+}
+
 static int ours(const Caster *c, const Mat4 *vp, uint64_t device, ShadowDraw *d, int room) {
     uint32_t h = learned_ours(c->object, c->submesh);
     ShadowDraw one;
@@ -617,6 +706,11 @@ static int ours(const Caster *c, const Mat4 *vp, uint64_t device, ShadowDraw *d,
     one.texture = learned[h].cut.texture, one.threshold = learned[h].cut.threshold;
     one.uv_format = learned[h].cut.uv_format, one.uv_offset = learned[h].cut.uv_offset;
     if (one.texture && one.uv_offset + 4 > one.stride) return -1;
+    if (is_wind(learned[h].vs)) {
+        one.wind_format = learned[h].cut.wind_format, one.wind_offset = learned[h].cut.wind_offset;
+        if (one.wind_offset + 4 > one.stride) return -1;
+        return wind_draw(c, vp, device, learned[h].vs, &one, d, room);
+    }
     if (learned[h].vs == SKINNED_VS) {
         /* the palette the game's draw would use, copied for ours: the snapshot the model renderer
          * bound to vs cbuf 4 (equal to the game's draw in every check; the submesh's own buffer
@@ -724,8 +818,8 @@ static void log_instance_box(const Caster *c, const Copies *cp) {
 
 /* The game drew (obj, sub) with a program our pass mirrors; would our draw be the same? The
  * vertex and index addresses must be equal, and the matrices: static, ours = vs cbuf 2 byte
- * 128; instanced, the world = cbuf 2 byte 0, projection x view = cbuf 1 byte 128, the copies
- * = cbuf 11 and the draw's instance count, counted from vertex 0. */
+ * 128; instanced (1), the world = cbuf 2 byte 0, projection x view = cbuf 1 byte 128, the copies
+ * = cbuf 11 and the draw's instance count, counted from vertex 0; 2: as instanced, no copies. */
 static int compare_draw(const NvnCmdBuf *cb, uint64_t obj, uint64_t sub, uint64_t index_addr,
                         const ShadowDrawCall *call, int instanced) {
     const Caster *c = NULL;
@@ -750,28 +844,30 @@ static int compare_draw(const NvnCmdBuf *cb, uint64_t obj, uint64_t sub, uint64_
         } else {
             err = 1e30f;
         }
-        /* the game drew the copies its callback kept: each must be one of ours */
-        bad_inst = instances(c->model, &cp) != 1 || !game_copies || call->base_vertex != 0 ||
-                   call->instances > cp.count || !copies_known(&cp, (const float *)(uintptr_t)game_copies, call->instances);
-        __atomic_add_fetch(&compared_inst, 1, __ATOMIC_RELAXED);
-        __atomic_add_fetch(&wrong_inst, bad_inst, __ATOMIC_RELAXED);
-        static int shown_inst;
-        if (mode == MODE_CHECK && bad_inst && shown_inst++ < 5)
-            fprintf(stderr, "yw4: shadows: check: instanced object %#" PRIx64 ": %u copies of ours (found: %d) vs the "
-                    "game's %u at %#" PRIx64 " (base vertex %d; model sets %u +0x216 %u +0x218 %u)\n", obj,
-                    instances(c->model, &cp) == 1 ? cp.count : 0, instances(c->model, &cp), call->instances,
-                    game_copies, call->base_vertex, U8(c->model + 0x214), U8(c->model + 0x216), U8(c->model + 0x218));
-        if (!bad_inst) {
-            Mat4 world = load(c->own);
-            for (uint32_t j = 0; j < call->instances; j++) {
-                Mat4 e, ew, mvp;
-                memcpy(e.m, (const float *)(uintptr_t)game_copies + 12 * j, 48);
-                e.m[12] = e.m[13] = e.m[14] = 0, e.m[15] = 1;
-                ew = mul(&e, &world), mvp = mul(&lay->vp, &ew);
-                if (outside(c->object, &mvp)) __atomic_add_fetch(&copies_culled, 1, __ATOMIC_RELAXED);
+        if (instanced == 1) {  /* 2: world and projection x view only (WIND_VS) */
+            /* the game drew the copies its callback kept: each must be one of ours */
+            bad_inst = instances(c->model, &cp) != 1 || !game_copies || call->base_vertex != 0 ||
+                       call->instances > cp.count || !copies_known(&cp, (const float *)(uintptr_t)game_copies, call->instances);
+            __atomic_add_fetch(&compared_inst, 1, __ATOMIC_RELAXED);
+            __atomic_add_fetch(&wrong_inst, bad_inst, __ATOMIC_RELAXED);
+            static int shown_inst;
+            if (mode == MODE_CHECK && bad_inst && shown_inst++ < 5)
+                fprintf(stderr, "yw4: shadows: check: instanced object %#" PRIx64 ": %u copies of ours (found: %d) vs the "
+                        "game's %u at %#" PRIx64 " (base vertex %d; model sets %u +0x216 %u +0x218 %u)\n", obj,
+                        instances(c->model, &cp) == 1 ? cp.count : 0, instances(c->model, &cp), call->instances,
+                        game_copies, call->base_vertex, U8(c->model + 0x214), U8(c->model + 0x216), U8(c->model + 0x218));
+            if (!bad_inst) {
+                Mat4 world = load(c->own);
+                for (uint32_t j = 0; j < call->instances; j++) {
+                    Mat4 e, ew, mvp;
+                    memcpy(e.m, (const float *)(uintptr_t)game_copies + 12 * j, 48);
+                    e.m[12] = e.m[13] = e.m[14] = 0, e.m[15] = 1;
+                    ew = mul(&e, &world), mvp = mul(&lay->vp, &ew);
+                    if (outside(c->object, &mvp)) __atomic_add_fetch(&copies_culled, 1, __ATOMIC_RELAXED);
+                }
             }
+            if (mode == MODE_CHECK && !bad_inst) log_instance_box(c, &cp);
         }
-        if (mode == MODE_CHECK && !bad_inst) log_instance_box(c, &cp);
     }
     int bad_vb = d.vertices != cb->trace_vb0, bad_ib = d.index_count && d.indices != index_addr;
     int bad_mvp = err > 1e-4f * (scale > 1 ? scale : 1);

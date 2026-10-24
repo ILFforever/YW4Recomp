@@ -73,7 +73,8 @@ All captured from the recompiled build on Windows.
 Optional (`YW4_SHADOWS=native`): our own renderer draws the shadow casters the game would draw, from the game's
 data, instead of replaying the game's draw calls one by one
 ([decision 0024](docs/decisions/0024-shadow-pass.md)). It covers static, cut-out, skinned and instanced casters,
-including props fading in and out; the game still draws the rest (wind-swayed plants, a few others).
+including props fading in and out and wind-swayed plants; the game still draws the rest (a second kind of
+character, a few others).
 
 Same save and frame, the game's shadows against ours. The only differences are animation timing between the two
 runs (Whisper's float, idle poses, leaves):
