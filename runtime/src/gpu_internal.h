@@ -30,6 +30,7 @@ typedef struct GpuView GpuView;
 typedef struct {
     uint64_t addr;
     uint32_t format, target, width, height, depth, layers, levels, block_height_log2, block_depth_log2, linear;
+    uint32_t scale;  /* shadow maps: made this many times larger (YW4_SHADOW_RES / F8); else 1 */
 } ImageKey;
 
 typedef struct GpuImage GpuImage;
@@ -43,6 +44,7 @@ struct GpuImage {
     VkFormat format;
     VkImageAspectFlags aspect;
     uint32_t width, height, depth, layers, levels;
+    uint32_t scale;  /* width and height are this many times the texture's (key.scale) */
     GpuView *views;  /* cached image views */
     uint64_t uploaded_frame;  /* YW4_GPU_REUPLOAD: the frame it was last uploaded in */
     uint32_t upload_gen;      /* write generation (gpu.c) when it was last uploaded */

@@ -247,7 +247,7 @@ void yw4_perf_hud(HudContent *c) {
         }
         c->npoints = (int)p;
     }
-    LINE("SHADOWS: %s", shadow_mode_name());
+    LINE("SHADOWS: %s  %d", shadow_mode_name(), gpu_shadow_res());
 #undef LINE
 }
 

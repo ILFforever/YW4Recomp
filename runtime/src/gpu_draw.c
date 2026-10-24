@@ -54,6 +54,8 @@ typedef struct Shader {
     int nb;
     char inputs[32];  /* vertex inputs: 0 unused, 'f' float, 'u' integer */
     VkDescriptorSetLayout layout;
+    int pcf_float;  /* samples a shadow map: the float in cbuf 8 where its filter spread starts (2), else -1 */
+    uint32_t cb8_bytes;  /* ... and how much of cbuf 8 it reads */
 } Shader;
 
 static Shader *shaders;
@@ -130,6 +132,29 @@ static Shader *shader(uint64_t key, int stage) {
         }
     }
     free(text);
+    /* The shaders that sample a shadow map average 5 taps spread by a cbuf 8 value the game sets
+     * (half a texel of the 1024 map and up): cbuf 8 d[31].zw in most, d[8].zw in the rest. Found
+     * in the GLSL, so shadow quality can scale it with the map (bind_stage_set). */
+    s->pcf_float = -1;
+    for (int i = 0; i < s->nb; i++)
+        if (s->b[i].kind == 't' && s->b[i].shadow) {
+            snprintf(path, sizeof path, "%s/%016" PRIx64 ".%s", shader_dir(), key, stage_names[stage]);
+            char *glsl = read_file(path, &n);
+            if (glsl) {
+                s->pcf_float = strstr(glsl, "cb8.d[31].zw") ? 31 * 4 + 2 : strstr(glsl, "cb8.d[8].zw") ? 8 * 4 + 2 : -1;
+                /* the copy only needs what the shader reads: up to its highest constant index
+                 * (any computed index: all of it) */
+                s->cb8_bytes = 0;
+                for (const char *p = glsl; (p = strstr(p, "cb8.d[")) != NULL && s->cb8_bytes != 65536; p += 6) {
+                    char *end;
+                    unsigned long k = strtoul(p + 6, &end, 10);
+                    if (end == p + 6 || *end != ']') s->cb8_bytes = 65536;
+                    else if ((k + 1) * 16 > s->cb8_bytes) s->cb8_bytes = (uint32_t)(k + 1) * 16;
+                }
+                free(glsl);
+            }
+            break;
+        }
     VkDescriptorSetLayoutCreateInfo lci = {.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
                                            .bindingCount = (uint32_t)s->nb, .pBindings = lb};
     CHECK(vkCreateDescriptorSetLayout(vk.device, &lci, NULL, &s->layout));
@@ -638,6 +663,45 @@ static int needs_transfers(const GpuState *s, const Program *g) {
 
 /* Writes and binds the descriptor set of one shader stage (ns: its NVN stage number) at set `setno`.
  * 0 if the shader needs something not supported yet (storage images). */
+/* Shadow quality (gpu.c, F8): with shadow maps larger than the game's, a shader that samples one
+ * gets cbuf 8 from a copy whose filter spread (2 floats at pcf_float) is scaled by 1024 / size, so
+ * its 5 taps stay as many texels apart as the game's and edges get sharper with the map. Copies
+ * go into a host-visible ring, reused in turn (16 MiB: many frames of these draws). The game's
+ * memory is not touched. 0: not wanted (1024) or not possible; bind the game's buffer. */
+enum { PCF_RING = 16 << 20 };
+static VkBuffer pcf_buf;
+static VkDeviceMemory pcf_mem;
+static uint8_t *pcf_ptr;
+static VkDeviceSize pcf_at;
+
+static int pcf_scaled_copy(uint64_t addr, VkDeviceSize range, int pcf_float, VkBuffer *buf, VkDeviceSize *offset) {
+    int res = gpu_shadow_res();
+    if (res == 1024 || range > 65536 || (VkDeviceSize)(pcf_float + 2) * 4 > range) return 0;
+    if (!pcf_buf) {
+        VkBufferCreateInfo bci = {.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO, .size = PCF_RING,
+                                  .usage = VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT};
+        if (vkCreateBuffer(vk.device, &bci, NULL, &pcf_buf) != VK_SUCCESS) return 0;
+        VkMemoryRequirements mr;
+        vkGetBufferMemoryRequirements(vk.device, pcf_buf, &mr);
+        VkMemoryAllocateInfo mai = {.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO, .allocationSize = mr.size,
+                                    .memoryTypeIndex = vk_memory_type(mr.memoryTypeBits,
+                                                                      VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT |
+                                                                          VK_MEMORY_PROPERTY_HOST_COHERENT_BIT)};
+        if (vkAllocateMemory(vk.device, &mai, NULL, &pcf_mem) != VK_SUCCESS) return 0;
+        vkBindBufferMemory(vk.device, pcf_buf, pcf_mem, 0);
+        vkMapMemory(vk.device, pcf_mem, 0, VK_WHOLE_SIZE, 0, (void **)&pcf_ptr);
+    }
+    VkDeviceSize align = vk.props.limits.minUniformBufferOffsetAlignment;
+    VkDeviceSize at = (pcf_at + align - 1) / align * align;
+    if (at + range > PCF_RING) at = 0;
+    memcpy(pcf_ptr + at, (const void *)(uintptr_t)addr, (size_t)range);
+    float *spread = (float *)(pcf_ptr + at) + pcf_float;
+    spread[0] *= 1024.0f / (float)res, spread[1] *= 1024.0f / (float)res;
+    pcf_at = at + range;
+    *buf = pcf_buf, *offset = at;
+    return 1;
+}
+
 static int bind_stage_set(VkCommandBuffer cb, const GpuState *s, const Shader *sh, int ns, VkPipelineBindPoint bp,
                           VkPipelineLayout layout, uint32_t setno) {
     {
@@ -653,7 +717,12 @@ static int bind_stage_set(VkCommandBuffer cb, const GpuState *s, const Shader *s
                 GpuRange r = b->kind == 'c' ? (b->slot < UBOS ? s->ubo[ns][b->slot] : (GpuRange){0})
                                             : (b->slot < SSBOS ? s->ssbo[ns][b->slot] : (GpuRange){0});
                 VkDeviceSize range = b->kind == 'c' && r.size > 65536 ? 65536 : r.size;
-                if (!r.size || !gpu_buffer_at(r.addr, range, &bi[i].buffer, &bi[i].offset)) {
+                if (b->kind == 'c' && b->slot == 8 && sh->pcf_float >= 0 && r.size &&
+                    pcf_scaled_copy(r.addr, range < sh->cb8_bytes ? range : sh->cb8_bytes, sh->pcf_float,
+                                    &bi[i].buffer, &bi[i].offset)) {
+                    /* a copy with the shadow filter spread scaled to the shadow maps' size */
+                    if (range > sh->cb8_bytes) range = sh->cb8_bytes;
+                } else if (!r.size || !gpu_buffer_at(r.addr, range, &bi[i].buffer, &bi[i].offset)) {
                     bi[i].buffer = dummy_buffer(), bi[i].offset = 0, range = 65536;
                 } else {
                     VkDeviceSize align = b->kind == 'c' ? vk.props.limits.minUniformBufferOffsetAlignment
@@ -886,15 +955,26 @@ void gpu_cull(VkCommandBuffer cb, uint8_t cull_mode, uint8_t front_face) {
  * (flipped for the upper-left origin), scissor, cull, front face, depth, stencil, bias. */
 void gpu_dynamic_state(VkCommandBuffer cb, const GpuState *s, VkFormat depth, uint32_t w, uint32_t h) {
     int flip = nvn_window_origin == 1;
+    /* a target made larger than the game's texture (YW4_SHADOW_RES): the game's viewport and
+     * scissor scaled with it */
+    const GpuImage *tg = s->rt.depth ? image_find(s->rt.depth) : NULL;
+    int64_t k = tg && tg->scale > 1 ? tg->scale : 1;
     float vx = 0, vy = 0, vw = (float)w, vh = (float)h;
-    if (s->have_viewport) vx = (float)s->viewport[0], vy = (float)s->viewport[1], vw = (float)s->viewport[2],
-                          vh = (float)s->viewport[3];
+    if (s->have_viewport) vx = (float)(s->viewport[0] * k), vy = (float)(s->viewport[1] * k),
+                          vw = (float)(s->viewport[2] * k), vh = (float)(s->viewport[3] * k);
     VkViewport vp = {vx, flip ? vy + vh : vy, vw, flip ? -vh : vh, s->depth_range[0], s->depth_range[1]};
     vkCmdSetViewport(cb, 0, 1, &vp);
     VkRect2D sc = {{0, 0}, {w, h}};
     if (s->have_scissor) {
-        int32_t x = s->scissor[0] < 0 ? 0 : s->scissor[0], y = s->scissor[1] < 0 ? 0 : s->scissor[1];
-        sc = (VkRect2D){{x, y}, {(uint32_t)(s->scissor[2] > 0 ? s->scissor[2] : 0), (uint32_t)(s->scissor[3] > 0 ? s->scissor[3] : 0)}};
+        int64_t x = s->scissor[0] < 0 ? 0 : s->scissor[0] * k, y = s->scissor[1] < 0 ? 0 : s->scissor[1] * k;
+        int64_t sw = s->scissor[2] > 0 ? s->scissor[2] * k : 0, sh = s->scissor[3] > 0 ? s->scissor[3] * k : 0;
+        if (k > 1) {  /* the game's "whole target" scissor can be huge: keep it inside the target */
+            if (x > w) x = w;
+            if (y > h) y = h;
+            if (sw > w - x) sw = w - x;
+            if (sh > h - y) sh = h - y;
+        }
+        sc = (VkRect2D){{(int32_t)x, (int32_t)y}, {(uint32_t)sw, (uint32_t)sh}};
     }
     vkCmdSetScissor(cb, 0, 1, &sc);
     static const VkCullModeFlags cull[4] = {VK_CULL_MODE_NONE, VK_CULL_MODE_FRONT_BIT, VK_CULL_MODE_BACK_BIT,

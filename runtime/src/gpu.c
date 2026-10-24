@@ -566,6 +566,41 @@ static int reupload_due(const NvnTexture *t, GpuImage *g) {
 enum { IMAGE_BUCKETS = 4096 };
 static GpuImage *images[IMAGE_BUCKETS];
 
+/* Shadow quality: the shadow maps (depth, 1024 x 1024, 3 layers: one per cascade; rendered by
+ * the GPU only) made 2048 or 4096 instead. YW4_SHADOW_RES sets it at start, F8 cycles it while
+ * playing. The size is part of the image key, so after a switch the next frame's draws and
+ * samples use an image of the new size (the old one is freed with other unused images). Draws
+ * into it get their viewport and scissor scaled (gpu_dynamic_state); the shaders reading it
+ * sample in 0..1 coordinates, with their filter spread scaled to match (gpu_draw.c). */
+static int shadow_res = -1;
+
+int gpu_shadow_res(void) {
+    int r = __atomic_load_n(&shadow_res, __ATOMIC_ACQUIRE);
+    if (r < 0) {
+        const char *e = getenv("YW4_SHADOW_RES");
+        int v = e ? atoi(e) : 0;
+        r = v == 2048 || v == 4096 ? v : 1024;
+        __atomic_store_n(&shadow_res, r, __ATOMIC_RELEASE);
+    }
+    return r;
+}
+
+void gpu_shadow_res_cycle(void) {
+    int r = gpu_shadow_res();
+    r = r == 1024 ? 2048 : r == 2048 ? 4096 : 1024;
+    __atomic_store_n(&shadow_res, r, __ATOMIC_RELEASE);
+    fprintf(stderr, "yw4: gpu: shadow maps %dx%d (F8)\n", r, r);
+}
+
+static uint32_t shadow_map_scale(const NvnTexture *t) {
+    int res = gpu_shadow_res();
+    if (res == 1024 || t->layout.width != 1024 || t->layout.height != 1024 || t->layout.layers != 3 ||
+        t->layout.levels > 1 || !(t->pool_flags & POOL_CPU_NO_ACCESS) ||
+        !(aspect_of(gpu_format(t->format)) & VK_IMAGE_ASPECT_DEPTH_BIT))
+        return 1;
+    return (uint32_t)res / 1024;
+}
+
 static ImageKey key_of(const NvnTexture *t) {
     ImageKey k;
     memset(&k, 0, sizeof k);
@@ -574,6 +609,7 @@ static ImageKey key_of(const NvnTexture *t) {
     k.layers = t->layout.layers, k.levels = t->layout.levels;
     k.block_height_log2 = t->layout.block_height_log2, k.block_depth_log2 = t->layout.block_depth_log2;
     k.linear = (t->flags & FLAG_LINEAR) != 0;
+    k.scale = shadow_map_scale(t);
     return k;
 }
 
@@ -642,6 +678,11 @@ GpuImage *image_of(VkCommandBuffer cb, NvnTexture *t) {
     g->aspect = aspect_of(fmt);
     g->width = t->layout.width, g->height = t->layout.height, g->depth = t->layout.depth ? t->layout.depth : 1;
     g->layers = t->layout.layers ? t->layout.layers : 1, g->levels = t->layout.levels ? t->layout.levels : 1;
+    g->scale = g->key.scale ? g->key.scale : 1;
+    g->width *= g->scale, g->height *= g->scale;
+    if (g->scale > 1)
+        fprintf(stderr, "yw4: gpu: shadow map at %#" PRIx64 " made %ux%u (the game's is 1024x1024)\n", t->addr, g->width,
+                g->height);
     VkFormatProperties fp;
     vkGetPhysicalDeviceFormatProperties(vk.gpu, fmt, &fp);
     VkImageUsageFlags usage = VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT;

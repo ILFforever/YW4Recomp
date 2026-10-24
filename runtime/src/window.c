@@ -705,6 +705,7 @@ void window_run(void (*guest)(void *), void *arg) {
             if (e.key.key == SDLK_F10) gpu_request_dump(), yw4_hid_note_key("F10");      /* shadow maps etc.: work/dump/ */
             if (e.key.key == SDLK_F9) shadow_toggle(), yw4_hid_note_key("F9");          /* our shadow pass on/off */
             if (e.key.key == SDLK_F3) __atomic_store_n(&hud_on, hud_enabled() ? 0 : 1, __ATOMIC_RELEASE);  /* the HUD */
+            if (e.key.key == SDLK_F8) gpu_shadow_res_cycle();  /* shadow quality: 1024 / 2048 / 4096 */
             break;
         case SDL_EVENT_WINDOW_PIXEL_SIZE_CHANGED:
             host_lock(&present_lock);

@@ -16,6 +16,10 @@ int gpu_ready(void);
  * F10 dumps every multi-layer depth image (shadow maps) at the next present (gpu.c). */
 void gpu_request_trace(int draws);
 void gpu_request_dump(void);
+/* Shadow quality: the shadow maps' size (1024 is the game's; YW4_SHADOW_RES at start), and F8's
+ * cycle 1024 -> 2048 -> 4096 -> 1024. */
+int gpu_shadow_res(void);
+void gpu_shadow_res_cycle(void);
 
 void gpu_pool_init(NvnPool *p);  /* imports the pool's memory into Vulkan */
 void gpu_pool_finalize(NvnPool *p);

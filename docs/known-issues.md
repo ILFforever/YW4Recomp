@@ -5,6 +5,11 @@ What is known to be missing or wrong, roughly in the order it is likely to matte
 
 ## Graphics
 
+- **Shadow quality (F8) is one setting for every shadow.** At 2048/4096 hard objects (poles, characters, benches)
+  get clean edges, but tree canopies (many small leaf cut-outs) turn into a speckled field of dots, where the game's
+  1024 blur gives soft dappled shade. To do: contact-hardening shadows (PCSS): the receiving shaders find how far
+  the caster is from the surface and blur more the farther it is, so poles stay sharp at their base and canopies stay
+  soft. Needs a blocker search in the ~200 translated shaders that sample shadow maps.
 - **Shadow strength not yet checked against Eden** after the ambient-light fix; indoor shadows may still be a little
   stronger.
 - **Occlusion queries always report 0 samples.** The game issues them in pairs from the house onward; answering

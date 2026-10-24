@@ -21,6 +21,8 @@ void yw4_perf_hud(HudContent *c);
 
 /* shadow.c: whose shadow casters are drawn ("ORIGINAL": the game's, "CUSTOM": our pass, "CHECK"). */
 const char *shadow_mode_name(void);
+/* gpu.c: the shadow maps' size (1024 is the game's; F8). */
+int gpu_shadow_res(void);
 
 /* Draws c into rgba (w x h texels, 4 bytes each, rows of w); *used_w and *used_h: the part drawn. */
 void hud_render(uint8_t *rgba, int w, int h, const HudContent *c, int *used_w, int *used_h);
