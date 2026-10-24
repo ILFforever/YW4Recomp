@@ -163,9 +163,11 @@ and turns them into Vulkan at submit. The expensive part is `f_a45890` plus the 
    instanced ours about 100 passes per walk replay changed 1,000+ texels, 0 without. Per draw, each band was one
    instanced draw writing far outside its own box, with copy matrices whose first value was ±100 or more: copies
    the callback nudged (`model+0x218`, flag × 100: fading). In check mode the game never draws a nudged copy with
-   the instanced programs we mirror (0 of ~86,000 draws); it switches the submesh to other programs (e.g.
-   `26b707`), which our learning sees only one frame in 32. Ours now leave any draw with a nudged pending copy to
-   the game, every frame. Detector after the fix: 0 passes with 1,000+ changed texels (100–999: as few as with no
+   the instanced programs we mirror (0 of ~86,000 draws), while our learning, which sees the game's draw only one
+   frame in 32, kept the submesh as ours. The per-copy fade program `9904c2` is the one that decodes a nudged
+   value (scale `fract(|x|) × 100`, fade `floor(|x|) / 255`); which program, if any, the game uses for nudged
+   copies in the shadow layers is not pinned down yet (none showed in the walk replay's check). Ours now leave
+   any draw with a nudged pending copy to the game, every frame. Detector after the fix: 0 passes with 1,000+ changed texels (100–999: as few as with no
    instanced draws, edge and rounding noise). Owner's playtest: no flashes. Why the earlier checks missed it: they
    compared only draws the game made with the mirrored programs, which never carry nudged copies.
 
