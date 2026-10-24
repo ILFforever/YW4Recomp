@@ -177,4 +177,20 @@ and turns them into Vulkan at submit. The expensive part is `f_a45890` plus the 
    vs cbuf 4 before the submesh draw (read at the hook like the copies in slot 11) was exactly the game's in all
    70,000; ours now copy that. Owner's playtest: smooth. (The frame-rate note above was this, not speed: on the
    walk replay our pass costs about the same CPU and GPU as the game's shadows.)
+   **Changed 2026-10-24: instanced casters drawn instanced; fading copies ours.** Measured on a quiet machine (walk
+   replay, 3 runs each, alternating), our pass with one draw per copy cost more than the game's shadows: game
+   work +0.4 ms, GPU +1.1 ms a frame (about 207,000 of our draws where the game made 115,000; and every draw
+   compared each pending copy with all the model's, up to 64 × 64). Now an instanced submesh is one draw, as the
+   game's: each copy's projection × view × copy × world (the matrices verified before) and its fade go into a
+   copies ring (`gpu_shadow_copies`, a storage buffer; `shadow_instanced.vert` / `_cutout.vert` read
+   `copy[gl_InstanceIndex]`, the draw's first instance being its first copy), and only the first and last copy are
+   checked to be the model's own. The fading programs are ours too (`9904c2` + `b7cd6e`, cut-out `f8951f` +
+   `d5f536`: half of what the game still drew): a draw with any nudged copy decodes all of them as `9904c2` does,
+   in the same float operations, and drops fragments below the 16×16 dither (fs slot 18; one texture, its handle's
+   sampler part changes) in `shadow_fade.frag` / `_cutout.frag`; learned only while the material's own fade (fs cbuf
+   3 byte 28) is 1. Texture handles are now traced for slots 0–19. Same measurement after: game work −0.6 ms (avg
+   10.9 → 10.3, every pair), p95 −1.2 ms, GPU −0.3 ms; the game draws about 30,000 of its shadow draws per report
+   window instead of 73,000. The before/after detector with the game also drawing: 0 passes with 1,000+ changed
+   texels, 2 of ~7,000 with 100–999. Screenshots from the same save, game's against ours: differences only from
+   animation timing.
 5. Switch the default to `native` once every street, house and battle layer matches; measure CPU.

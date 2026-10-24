@@ -166,7 +166,7 @@ void trace_drawlist_draw(const NvnCmdBuf *cb, uint64_t index_addr) {
     }
     out(&o, "\n");
     for (int s = 0; s < 2; s++)  /* texture handles: id | sampler << 20 */
-        for (int i = 0; i < 4; i++)
+        for (int i = 0; i < TRACE_TEXTURES; i++)
             if (cb->trace_tex[s][i])
                 out(&o, "yw4: drawlist:   %s texture %d handle %#" PRIx64 "\n", s ? "fs" : "vs", i, cb->trace_tex[s][i]);
     if (guest_ptr(cur.prim) && readable(cur.prim, 0x50)) {  /* the primitive (submesh) record, as 32-bit words */

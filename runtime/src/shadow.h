@@ -15,7 +15,16 @@ typedef struct {
     uint64_t texture;                    /* texture handle, and the texture coordinates' NVN format and */
     uint32_t uv_format, uv_offset;       /* offset in the vertex */
     uint32_t palette_offset, palette_size;  /* skinned casters (size != 0): the bones in the palette ring */
+    uint32_t first_copy, copies;         /* instanced casters (copies != 0): their copies in the copies ring */
+    uint64_t dither;                     /* fading ones (!= 0): the 16x16 dither texture's handle */
 } ShadowDraw;
+
+/* One copy of an instanced caster in the copies ring (shadow_instanced.vert's Copy): projection x
+ * view x copy x world, row-major, and its fade (1 when not fading). */
+typedef struct {
+    float mvp[16];
+    float fade, pad[3];
+} ShadowCopy;
 
 typedef struct {
     uint64_t depth_addr;   /* the cascade's layer of the shadow map: the executor checks that the */
@@ -27,6 +36,9 @@ typedef struct {
 /* A skinned caster's bone palette (size bytes, 3x4 per bone) copied into the executor's ring,
  * on the thread that gathers the pass; its offset there. 0 if it can't be. */
 int gpu_shadow_palette(const void *src, uint32_t size, uint32_t *offset);
+/* Room for n copies in the executor's copies ring, on the thread that gathers the pass; the
+ * index of the first (the draw's first instance). NULL if n is too many. */
+ShadowCopy *gpu_shadow_copies(uint32_t n, uint32_t *first);
 /* CMD_NATIVE callback: `data` holds a ShadowPass pointer. */
 void gpu_shadow_pass(void *vk_cb, void *gpu_state, const void *data, uint32_t size);
 /* F9: switch between the game's shadow casters and ours (shadow.c) */

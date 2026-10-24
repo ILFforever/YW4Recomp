@@ -41,10 +41,83 @@ static VkShaderModule module(const char *name) {
     return m;
 }
 
-/* Kinds of caster, each its own shaders and pipeline layout */
-enum { KIND_STATIC, KIND_CUTOUT, KIND_SKINNED, KINDS };
-/* Push constants: the matrix (64 bytes), for cut-out casters also the threshold. */
-static const uint32_t push_size[KINDS] = {64, 68, 64};
+/* Kinds of caster, each its own shaders and pipeline layout. The instanced ones draw all of a
+ * submesh's copies at once, their matrices in the copies ring. */
+enum { KIND_STATIC, KIND_CUTOUT, KIND_SKINNED, KIND_INST, KIND_INST_CUTOUT, KIND_INST_FADE, KIND_INST_FADE_CUTOUT, KINDS };
+/* Push constants: the matrix (64 bytes), for cut-out casters also the threshold; instanced ones
+ * only the threshold (their matrices come per copy). */
+static const uint32_t push_size[KINDS] = {64, 68, 64, 4, 4, 4, 4};
+static int kind_instanced(int kind) { return kind >= KIND_INST; }
+
+/* Instanced casters' copies: a ring in host-visible memory, as the palettes'. The render thread
+ * that gathers a pass writes each draw's copies in (gpu_shadow_copies); the draw's first instance
+ * is the first one's index, read by shadow_instanced.vert through one storage-buffer descriptor.
+ * 16 MiB is 200,000 copies: hundreds of frames. */
+enum { COPIES_RING = 16 << 20 };
+static struct {
+    VkBuffer buf;
+    ShadowCopy *map;
+    uint32_t next, size;  /* in copies */
+    VkDescriptorSetLayout layout;
+    VkDescriptorSet set;
+} cps;
+static HostLock cps_lock = HOST_LOCK_INIT;
+
+static VkDescriptorSetLayout copies_set_layout(void) {
+    if (!cps.layout) {
+        VkDescriptorSetLayoutBinding b = {0, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1, VK_SHADER_STAGE_VERTEX_BIT, NULL};
+        VkDescriptorSetLayoutCreateInfo lci = {.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
+                                               .bindingCount = 1, .pBindings = &b};
+        CHECK(vkCreateDescriptorSetLayout(vk.device, &lci, NULL, &cps.layout));
+    }
+    return cps.layout;
+}
+
+/* The ring, its memory and its one descriptor set (cps_lock held). */
+static void copies_ring(void) {
+    VkBufferCreateInfo bci = {.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO, .size = COPIES_RING,
+                              .usage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT};
+    CHECK(vkCreateBuffer(vk.device, &bci, NULL, &cps.buf));
+    VkMemoryRequirements mr;
+    vkGetBufferMemoryRequirements(vk.device, cps.buf, &mr);
+    VkMemoryAllocateInfo mai = {
+        .sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO, .allocationSize = mr.size,
+        .memoryTypeIndex = vk_memory_type(mr.memoryTypeBits,
+                                          VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT)};
+    VkDeviceMemory mem;
+    CHECK(vkAllocateMemory(vk.device, &mai, NULL, &mem));
+    CHECK(vkBindBufferMemory(vk.device, cps.buf, mem, 0));
+    CHECK(vkMapMemory(vk.device, mem, 0, VK_WHOLE_SIZE, 0, (void **)&cps.map));
+    VkDescriptorPoolSize size = {VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1};
+    VkDescriptorPoolCreateInfo pci = {.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO, .maxSets = 1,
+                                      .poolSizeCount = 1, .pPoolSizes = &size};
+    VkDescriptorPool pool;
+    CHECK(vkCreateDescriptorPool(vk.device, &pci, NULL, &pool));
+    VkDescriptorSetLayout l = copies_set_layout();
+    VkDescriptorSetAllocateInfo ai = {.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO, .descriptorPool = pool,
+                                      .descriptorSetCount = 1, .pSetLayouts = &l};
+    CHECK(vkAllocateDescriptorSets(vk.device, &ai, &cps.set));
+    VkDescriptorBufferInfo bi = {cps.buf, 0, COPIES_RING};
+    VkWriteDescriptorSet w = {.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET, .dstSet = cps.set, .dstBinding = 0,
+                              .descriptorCount = 1, .descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+                              .pBufferInfo = &bi};
+    vkUpdateDescriptorSets(vk.device, 1, &w, 0, NULL);
+    cps.size = COPIES_RING / sizeof(ShadowCopy);
+}
+
+ShadowCopy *gpu_shadow_copies(uint32_t n, uint32_t *first) {
+    host_lock(&cps_lock);
+    if (!cps.buf) copies_ring();
+    if (!n || n > cps.size) {
+        host_unlock(&cps_lock);
+        return NULL;
+    }
+    uint32_t at = cps.next + n > cps.size ? 0 : cps.next;
+    cps.next = at + n;
+    host_unlock(&cps_lock);
+    *first = at;
+    return cps.map + at;
+}
 
 /* Skinned casters' bone palettes: a ring in host-visible memory. The render thread that gathers
  * a pass copies each palette in (gpu_shadow_palette), the pass's draws read it through one
@@ -115,25 +188,34 @@ int gpu_shadow_palette(const void *src, uint32_t size, uint32_t *offset) {
     return 1;
 }
 
-/* Cut-out casters: their texture at set 0 binding 0. */
-static VkDescriptorSetLayout cutout_set_layout(void) {
-    static VkDescriptorSetLayout l;
-    if (!l) {
-        VkDescriptorSetLayoutBinding b = {0, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 1, VK_SHADER_STAGE_FRAGMENT_BIT, NULL};
+/* Cut-out and fading casters: their textures at set 0, bindings 0 .. n-1 (cut-out: the texture;
+ * fading: the dither; fading cut-out: the texture, then the dither). n = 0: an empty set 0 for
+ * the instanced kinds without textures (their copies are set 1). */
+static VkDescriptorSetLayout textures_set_layout(uint32_t n) {
+    static VkDescriptorSetLayout l[3];
+    if (!l[n]) {
+        VkDescriptorSetLayoutBinding b[2] = {
+            {0, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 1, VK_SHADER_STAGE_FRAGMENT_BIT, NULL},
+            {1, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 1, VK_SHADER_STAGE_FRAGMENT_BIT, NULL}};
         VkDescriptorSetLayoutCreateInfo lci = {.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
-                                               .bindingCount = 1, .pBindings = &b};
-        CHECK(vkCreateDescriptorSetLayout(vk.device, &lci, NULL, &l));
+                                               .bindingCount = n, .pBindings = b};
+        CHECK(vkCreateDescriptorSetLayout(vk.device, &lci, NULL, &l[n]));
     }
-    return l;
+    return l[n];
+}
+static uint32_t kind_textures(int kind) {
+    return kind == KIND_INST_FADE_CUTOUT ? 2 : kind == KIND_CUTOUT || kind == KIND_INST_CUTOUT || kind == KIND_INST_FADE;
 }
 
 static VkPipelineLayout layout(int kind) {
     static VkPipelineLayout l[KINDS];
     if (!l[kind]) {
         VkPushConstantRange pc = {VK_SHADER_STAGE_VERTEX_BIT, 0, push_size[kind]};
-        VkDescriptorSetLayout set = kind == KIND_CUTOUT ? cutout_set_layout() : palette_set_layout();
+        VkDescriptorSetLayout set[2] = {kind == KIND_SKINNED ? palette_set_layout() : textures_set_layout(kind_textures(kind)),
+                                        copies_set_layout()};
+        uint32_t nsets = kind_instanced(kind) ? 2 : kind == KIND_STATIC ? 0 : 1;
         VkPipelineLayoutCreateInfo lci = {.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO,
-                                          .setLayoutCount = kind == KIND_STATIC ? 0 : 1, .pSetLayouts = &set,
+                                          .setLayoutCount = nsets, .pSetLayouts = set,
                                           .pushConstantRangeCount = 1, .pPushConstantRanges = &pc};
         CHECK(vkCreatePipelineLayout(vk.device, &lci, NULL, &l[kind]));
     }
@@ -144,32 +226,39 @@ static VkPipelineLayout layout(int kind) {
  * the stride set per draw), no fragment stage. Cut-out casters also read their texture
  * coordinates (`uv`, a Vulkan format) through a second binding of the same vertices and have a
  * fragment stage; skinned ones read weights (R32G32B32A32_UINT at 28) and bone indices
- * (R16G16B16A16_UINT at 44) from the same binding. */
+ * (R16G16B16A16_UINT at 44) from the same binding. Instanced ones take their matrices per copy;
+ * fading ones have the dither in their fragment stage. */
+static int kind_has_uv(int kind) { return kind == KIND_CUTOUT || kind == KIND_INST_CUTOUT || kind == KIND_INST_FADE_CUTOUT; }
 static VkPipeline pipeline(VkFormat depth, int kind, VkFormat uv) {
-    enum { MAX = 16 };
+    enum { MAX = 32 };
     static struct { VkFormat depth, uv; int kind; VkPipeline pipe; } pipes[MAX];
     static int n;
     for (int i = 0; i < n; i++)
         if (pipes[i].depth == depth && pipes[i].kind == kind && pipes[i].uv == uv) return pipes[i].pipe;
     if (n == MAX) gpu_stop("shadow pass: too many pipelines");
-    static VkShaderModule vs[KINDS], cut_fs;
-    static const char *const vs_name[KINDS] = {"shadow_static.vert", "shadow_cutout.vert", "shadow_skinned.vert"};
+    static VkShaderModule vs[KINDS], fs[KINDS];
+    static const char *const vs_name[KINDS] = {"shadow_static.vert",          "shadow_cutout.vert",
+                                               "shadow_skinned.vert",         "shadow_instanced.vert",
+                                               "shadow_instanced_cutout.vert", "shadow_instanced.vert",
+                                               "shadow_instanced_cutout.vert"};
+    static const char *const fs_name[KINDS] = {NULL, "shadow_cutout.frag", NULL, NULL, "shadow_cutout.frag",
+                                               "shadow_fade.frag", "shadow_fade_cutout.frag"};
     if (!vs[kind]) vs[kind] = module(vs_name[kind]);
-    if (kind == KIND_CUTOUT && !cut_fs) cut_fs = module("shadow_cutout.frag");
+    if (fs_name[kind] && !fs[kind]) fs[kind] = module(fs_name[kind]);
     VkPipelineShaderStageCreateInfo st[2] = {
         {.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO, .stage = VK_SHADER_STAGE_VERTEX_BIT,
          .module = vs[kind], .pName = "main"},
         {.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO, .stage = VK_SHADER_STAGE_FRAGMENT_BIT,
-         .module = cut_fs, .pName = "main"}};
+         .module = fs[kind], .pName = "main"}};
     VkVertexInputBindingDescription bind[2] = {{0, 12, VK_VERTEX_INPUT_RATE_VERTEX}, {1, 12, VK_VERTEX_INPUT_RATE_VERTEX}};
     VkVertexInputAttributeDescription attr[3] = {{0, 0, VK_FORMAT_R32G32B32_SFLOAT, 0}, {1, 1, uv, 0}};
     if (kind == KIND_SKINNED) {
         attr[1] = (VkVertexInputAttributeDescription){1, 0, VK_FORMAT_R32G32B32A32_UINT, 28};
         attr[2] = (VkVertexInputAttributeDescription){2, 0, VK_FORMAT_R16G16B16A16_UINT, 44};
     }
-    uint32_t nattr = kind == KIND_SKINNED ? 3 : kind == KIND_CUTOUT ? 2 : 1;
+    uint32_t nattr = kind == KIND_SKINNED ? 3 : kind_has_uv(kind) ? 2 : 1;
     VkPipelineVertexInputStateCreateInfo vi = {.sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO,
-                                               .vertexBindingDescriptionCount = kind == KIND_CUTOUT ? 2 : 1,
+                                               .vertexBindingDescriptionCount = kind_has_uv(kind) ? 2 : 1,
                                                .pVertexBindingDescriptions = bind,
                                                .vertexAttributeDescriptionCount = nattr,
                                                .pVertexAttributeDescriptions = attr};
@@ -200,7 +289,7 @@ static VkPipeline pipeline(VkFormat depth, int kind, VkFormat uv) {
                                         .depthAttachmentFormat = depth,
                                         .stencilAttachmentFormat = stencil ? depth : VK_FORMAT_UNDEFINED};
     VkGraphicsPipelineCreateInfo pci = {
-        .sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO, .pNext = &ri, .stageCount = kind == KIND_CUTOUT ? 2 : 1,
+        .sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO, .pNext = &ri, .stageCount = fs_name[kind] ? 2 : 1,
         .pStages = st, .pVertexInputState = &vi, .pInputAssemblyState = &ia, .pViewportState = &vp,
         .pRasterizationState = &rs, .pMultisampleState = &ms, .pDepthStencilState = &ds, .pColorBlendState = &cbs,
         .pDynamicState = &dy, .layout = layout(kind)};
@@ -221,12 +310,20 @@ void gpu_shadow_pass(void *vk_cb, void *gpu_state, const void *data, uint32_t si
         __atomic_add_fetch(&passes_skipped, 1, __ATOMIC_RELAXED);
         return;
     }
-    /* cut-out casters' textures: images made and uploaded before rendering, as for the game's draws */
-    for (uint32_t i = 0; i < p->n; i++)
+    /* cut-out casters' textures and the dither: images made and uploaded before rendering, as for
+     * the game's draws */
+    uint64_t dither_uploaded = 0;
+    for (uint32_t i = 0; i < p->n; i++) {
         if (p->d[i].texture) {
             if (s->rendering) gpu_end_rendering(cb, s);
             gpu_handle_texture(cb, s, p->d[i].texture, 1, NULL);
         }
+        if (p->d[i].dither && p->d[i].dither != dither_uploaded) {
+            if (s->rendering) gpu_end_rendering(cb, s);
+            gpu_handle_texture(cb, s, p->d[i].dither, 1, NULL);
+            dither_uploaded = p->d[i].dither;
+        }
+    }
     VkFormat color[8], depth;
     uint32_t w, h;
     if (!gpu_begin_targets(cb, s, color, &depth, &w, &h)) {
@@ -241,15 +338,20 @@ void gpu_shadow_pass(void *vk_cb, void *gpu_state, const void *data, uint32_t si
         VkBuffer vb[2], ib;
         VkDeviceSize voff[2], ioff, stride[2] = {d->stride, d->stride};
         uint32_t isize = d->index_type == 2 ? 4 : 2;
-        VkDescriptorImageInfo ii;
+        VkDescriptorImageInfo ii[2];  /* the cut-out texture, the dither */
         VkFormat uv = d->texture ? gpu_format(d->uv_format) : VK_FORMAT_UNDEFINED;
         if (!gpu_buffer_at(d->vertices, (uint64_t)d->vertex_count * d->stride, &vb[0], &voff[0]) ||
             (d->index_count && !gpu_buffer_at(d->indices, (uint64_t)d->index_count * isize, &ib, &ioff)) ||
-            (d->texture && (uv == VK_FORMAT_UNDEFINED || !gpu_handle_texture(cb, s, d->texture, 0, &ii)))) {
+            (d->texture && (uv == VK_FORMAT_UNDEFINED || !gpu_handle_texture(cb, s, d->texture, 0, &ii[0]))) ||
+            (d->dither && !gpu_handle_texture(cb, s, d->dither, 0, &ii[1]))) {
             skipped++;
             continue;
         }
-        int kind = d->palette_size ? KIND_SKINNED : d->texture ? KIND_CUTOUT : KIND_STATIC;
+        int kind = d->palette_size ? KIND_SKINNED
+                   : d->copies     ? (d->dither ? (d->texture ? KIND_INST_FADE_CUTOUT : KIND_INST_FADE)
+                                                : (d->texture ? KIND_INST_CUTOUT : KIND_INST))
+                   : d->texture    ? KIND_CUTOUT
+                                   : KIND_STATIC;
         if (kind == KIND_SKINNED && !pal.buf) {  /* can't happen: the gather made the ring */
             skipped++;
             continue;
@@ -263,25 +365,34 @@ void gpu_shadow_pass(void *vk_cb, void *gpu_state, const void *data, uint32_t si
         }
         if (d->cull != cull || d->front != front) gpu_cull(cb, d->cull, d->front), cull = d->cull, front = d->front;
         vb[1] = vb[0], voff[1] = voff[0] + d->uv_offset;
-        vkCmdBindVertexBuffers2(cb, 0, kind == KIND_CUTOUT ? 2 : 1, vb, voff, NULL, stride);
+        vkCmdBindVertexBuffers2(cb, 0, kind_has_uv(kind) ? 2 : 1, vb, voff, NULL, stride);
         if (kind == KIND_SKINNED)
             vkCmdBindDescriptorSets(cb, VK_PIPELINE_BIND_POINT_GRAPHICS, layout(KIND_SKINNED), 0, 1, &pal.set, 1,
                                     &d->palette_offset);
-        if (kind == KIND_CUTOUT) {
-            VkDescriptorSet set = gpu_alloc_set(cutout_set_layout());
-            VkWriteDescriptorSet wr = {.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET, .dstSet = set, .dstBinding = 0,
-                                       .descriptorCount = 1,
-                                       .descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, .pImageInfo = &ii};
-            vkUpdateDescriptorSets(vk.device, 1, &wr, 0, NULL);
-            vkCmdBindDescriptorSets(cb, VK_PIPELINE_BIND_POINT_GRAPHICS, layout(KIND_CUTOUT), 0, 1, &set, 0, NULL);
+        uint32_t ntex = kind_textures(kind);
+        if (ntex) {  /* the cut-out texture at binding 0 if any, then the dither */
+            const VkDescriptorImageInfo *first = d->texture ? &ii[0] : &ii[1];
+            VkDescriptorSet set = gpu_alloc_set(textures_set_layout(ntex));
+            VkWriteDescriptorSet wr[2] = {
+                {.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET, .dstSet = set, .dstBinding = 0, .descriptorCount = 1,
+                 .descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, .pImageInfo = first},
+                {.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET, .dstSet = set, .dstBinding = 1, .descriptorCount = 1,
+                 .descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, .pImageInfo = &ii[1]}};
+            vkUpdateDescriptorSets(vk.device, ntex, wr, 0, NULL);
+            vkCmdBindDescriptorSets(cb, VK_PIPELINE_BIND_POINT_GRAPHICS, layout(kind), 0, 1, &set, 0, NULL);
         }
-        /* the matrix, and for cut-out casters the threshold right after it */
-        vkCmdPushConstants(cb, layout(kind), VK_SHADER_STAGE_VERTEX_BIT, 0, push_size[kind], d->mvp);
+        if (kind_instanced(kind)) {  /* the copies; only the threshold in push constants */
+            vkCmdBindDescriptorSets(cb, VK_PIPELINE_BIND_POINT_GRAPHICS, layout(kind), 1, 1, &cps.set, 0, NULL);
+            vkCmdPushConstants(cb, layout(kind), VK_SHADER_STAGE_VERTEX_BIT, 0, push_size[kind], &d->threshold);
+        } else {  /* the matrix, and for cut-out casters the threshold right after it */
+            vkCmdPushConstants(cb, layout(kind), VK_SHADER_STAGE_VERTEX_BIT, 0, push_size[kind], d->mvp);
+        }
+        uint32_t instances = d->copies ? d->copies : 1, first = d->copies ? d->first_copy : 0;
         if (d->index_count) {
             vkCmdBindIndexBuffer(cb, ib, ioff, d->index_type == 2 ? VK_INDEX_TYPE_UINT32 : VK_INDEX_TYPE_UINT16);
-            vkCmdDrawIndexed(cb, d->index_count, 1, 0, 0, 0);
+            vkCmdDrawIndexed(cb, d->index_count, instances, 0, 0, first);
         } else {
-            vkCmdDraw(cb, d->vertex_count, 1, 0, 0);
+            vkCmdDraw(cb, d->vertex_count, instances, 0, first);
         }
     }
     if (skipped) __atomic_add_fetch(&draws_skipped, skipped, __ATOMIC_RELAXED);

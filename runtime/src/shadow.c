@@ -212,13 +212,25 @@ enum { PASS_DRAWS = 4096, RING = 64 };
  * dropped and our depth-only draw is the same. */
 #define SKINNED_VS 0x71faac9f597b428dull
 #define FADE_FS 0xb7cd6ed8cd28a184ull
+/* Fading instanced casters: the instanced programs for copies the callback nudged (flag x 100
+ * added to the first value). The vertex program decodes each copy: first value sign x 100 x
+ * fract(|v| / 100), fade floor(|v| / 100) / 255; the fragment program drops the fragment where
+ * fade x fs cbuf 3 byte 28 is below the 16x16 dither texture (fs slot 18) at the pixel mod 16.
+ * The cut-out one first drops texels as the cut-out programs do (dceb89's test in d5f536). */
+#define FADE_INSTANCED_VS 0x9904c21a86e1e9f8ull
+#define FADE_CUTOUT_INSTANCED_VS 0xf8951f14aed20733ull
+#define FADE_CUTOUT_FS 0xd5f536a14604f183ull
 
-static int is_instanced(uint64_t vs) { return vs == INSTANCED_VS || vs == CUTOUT_INSTANCED_VS; }
+static int is_instanced(uint64_t vs) {
+    return vs == INSTANCED_VS || vs == CUTOUT_INSTANCED_VS || vs == FADE_INSTANCED_VS || vs == FADE_CUTOUT_INSTANCED_VS;
+}
+static int is_fading(uint64_t vs) { return vs == FADE_INSTANCED_VS || vs == FADE_CUTOUT_INSTANCED_VS; }
 /* programs our pass mirrors */
 static int mirrored(uint64_t vs, uint64_t fs) {
     return ((vs == STATIC_VS || vs == INSTANCED_VS) && fs == DEPTH_FS) ||
            ((vs == CUTOUT_STATIC_VS || vs == CUTOUT_INSTANCED_VS) && fs == CUTOUT_FS) ||
-           (vs == SKINNED_VS && (fs == DEPTH_FS || fs == FADE_FS));
+           (vs == SKINNED_VS && (fs == DEPTH_FS || fs == FADE_FS)) || (vs == FADE_INSTANCED_VS && fs == FADE_FS) ||
+           (vs == FADE_CUTOUT_INSTANCED_VS && fs == FADE_CUTOUT_FS);
 }
 
 /* An instanced model's copies. The model renderer gets them from the model's callback
@@ -300,6 +312,7 @@ typedef struct {
     uint64_t texture;  /* 0: not a cut-out */
     float threshold;
     uint32_t uv_format, uv_offset;
+    uint64_t dither;   /* fading instanced casters: the dither texture (fs slot 18) */
 } Cutout;
 static struct { uint64_t obj, sub, model, mat, vs, fs; int ok; uint8_t cull, front; Cutout cut; } learned[LEARN_SLOTS];
 
@@ -478,6 +491,27 @@ static int cutout_of(const NvnCmdBuf *cb, Cutout *cut) {
     return 1;
 }
 
+static uint64_t fade_dither;  /* the fading draws' dither texture, learned from them */
+
+/* A fading instanced draw our pass can repeat: its dither texture bound (fs slot 18), the
+ * material's own fade (fs cbuf 3 byte 28) at 1, so that only the copies' fades remain, and for
+ * the cut-out one the cut-out layout and data. */
+static int fading_of(const NvnCmdBuf *cb, uint64_t fs, Cutout *cut) {
+    float fade;
+    if (!cb->trace_tex[1][18] || !cb->trace_ub[1][3]) return 0;
+    memcpy(&fade, (const void *)(uintptr_t)(cb->trace_ub[1][3] + 28), 4);
+    if (fade != 1.0f || (fs == FADE_CUTOUT_FS && !cutout_of(cb, cut))) return 0;
+    cut->dither = cb->trace_tex[1][18];
+    /* one dither texture for every fading draw, it seems (handle: texture id | sampler << 20; the
+     * sampler changes, and texelFetch doesn't use it): the latest handle; say so if another
+     * texture turns up */
+    uint64_t was = __atomic_exchange_n(&fade_dither, cut->dither, __ATOMIC_RELAXED);
+    static int shown;
+    if (was && (was & 0xFFFFF) != (cut->dither & 0xFFFFF) && shown++ < 5)
+        fprintf(stderr, "yw4: shadows: another dither texture %#" PRIx64 " (was %#" PRIx64 ")\n", cut->dither, was);
+    return 1;
+}
+
 void shadow_check_draw(const NvnCmdBuf *cb, uint64_t index_addr, const ShadowDrawCall *call) {
     if (!lay || !lay->active || !lay->pending) return;
     lay->pending = 0;
@@ -490,7 +524,7 @@ void shadow_check_draw(const NvnCmdBuf *cb, uint64_t index_addr, const ShadowDra
             __atomic_add_fetch(&pending_wrong, 1, __ATOMIC_RELAXED);
     }
     Cutout cut = {0};
-    int ok = mirrored(vs, fs) && (fs != CUTOUT_FS || cutout_of(cb, &cut)) &&
+    int ok = mirrored(vs, fs) && (fs != CUTOUT_FS || cutout_of(cb, &cut)) && (!is_fading(vs) || fading_of(cb, fs, &cut)) &&
              (vs != SKINNED_VS || skinned_ok(cb, obj, sub, fs)) &&
              compare_draw(cb, obj, sub, index_addr, call, is_instanced(vs));
     learn(obj, sub, vs, fs, ok, cb->polygon, &cut);
@@ -532,6 +566,7 @@ static int describe(const Caster *c, const Mat4 *vp, ShadowDraw *d) {
     d->index_type = index_type(c->submesh);
     d->texture = 0, d->threshold = 0, d->uv_format = d->uv_offset = 0;
     d->palette_offset = d->palette_size = 0;
+    d->dither = 0, d->first_copy = d->copies = 0;
     memcpy(d->mvp, mvp.m, sizeof d->mvp);
     return d->stride && (d->index_count || d->vertex_count);
 }
@@ -555,7 +590,7 @@ static const void *bound_constants(uint64_t device, int slot) {
 }
 
 /* Is the submesh ours (the game drew it with programs we mirror), and how do we draw it?
- * Appends its draws to d (at most `room`: an instanced one is a draw per copy) and returns
+ * Appends its draw to d (at most `room`; an instanced one with its copies in the copies ring) and returns
  * how many; -1: the game must draw it. */
 static int env_on(const char *name) {
     const char *s = getenv(name);
@@ -570,7 +605,7 @@ static int leave_to_game(uint64_t vs, uint64_t fs) {
     if (no_skinned < 0) no_skinned = env_on("YW4_SHADOWS_NO_SKINNED");
     if (no_cutout < 0) no_cutout = env_on("YW4_SHADOWS_NO_CUTOUT");
     if (no_instanced < 0) no_instanced = env_on("YW4_SHADOWS_NO_INSTANCED");
-    return (no_skinned && vs == SKINNED_VS) || (no_cutout && fs == CUTOUT_FS) || (no_instanced && is_instanced(vs));
+    return (no_skinned && vs == SKINNED_VS) || (no_cutout && (fs == CUTOUT_FS || fs == FADE_CUTOUT_FS)) || (no_instanced && is_instanced(vs));
 }
 
 static int copies_known(const Copies *cp, const float *game, uint32_t n);
@@ -600,29 +635,45 @@ static int ours(const Caster *c, const Mat4 *vp, uint64_t device, ShadowDraw *d,
     }
     /* exactly the copies the game would draw: its callback culled them (side planes, near and
      * far, occlusion); copies crossing the cascade projection's eye plane would come out as
-     * long streaks. Each must be one of the model's own, or the game draws it. */
+     * long streaks. They must be the model's own, or the game draws it: checked for the first and
+     * the last (every copy was, in 100,000+ checked draws; all of them cost up to 64 x 64
+     * compares a draw). One draw for all of them, as the game's. */
     const float *copies;
-    uint32_t count;
+    uint32_t count, first;
     Copies cp;
-    if (!pending_copies(device, &copies, &count) || count > (uint32_t)room || instances(c->model, &cp) != 1 ||
-        count > cp.count || !copies_known(&cp, copies, count))
+    if (room < 1 || !pending_copies(device, &copies, &count) || instances(c->model, &cp) != 1 || count > cp.count ||
+        !copies_known(&cp, copies, 1) || !copies_known(&cp, copies + 12 * (count - 1), 1))
         return -1;
-    /* a copy the callback nudged (flag x 100 added to its first value: fading) is drawn by the
-     * game with another program that decodes it, never with the instanced ones we mirror; drawn
-     * raw it stretches across the layer. Learning sees the program change only one frame in 32,
-     * so every draw is checked. */
-    for (uint32_t i = 0; i < count; i++)
-        if (copies[12 * i] >= 100.0f || copies[12 * i] <= -100.0f) return -1;
+    /* a copy the callback nudged (flag x 100 added to its first value: fading) makes the game
+     * draw with the fading program, never with the plain instanced ones (drawn raw it stretches
+     * across the layer). Learning sees the program change only one frame in 32, so every draw
+     * decides as the game does: any nudged copy, and all copies are decoded as the fading vertex
+     * program does, in the same float operations, and drawn with the dither. */
+    int fading = 0;
+    for (uint32_t i = 0; i < count; i++) fading |= copies[12 * i] >= 100.0f || copies[12 * i] <= -100.0f;
+    uint64_t dither = __atomic_load_n(&fade_dither, __ATOMIC_RELAXED);
+    if (fading && !dither) return -1;  /* no fading draw learned yet */
+    ShadowCopy *out = gpu_shadow_copies(count, &first);
+    if (!out) return -1;
     Mat4 world = load(c->own);
     for (uint32_t i = 0; i < count; i++) {
         Mat4 e = {{0}};
         memcpy(e.m, copies + 12 * i, 48);
         e.m[15] = 1;
+        float fade = 1;
+        if (fading) {
+            float v = e.m[0] * 0.00999999978f, a = fabsf(v);
+            float sign = (float)((e.m[0] < 0.0f ? -1 : 0) - (e.m[0] > 0.0f ? -1 : 0));
+            e.m[0] = (a - floorf(a)) * sign * 100.0f;
+            fade = floorf(a) * 0.00392156886f;
+        }
         Mat4 ew = mul(&e, &world), mvp = mul(vp, &ew);
-        d[i] = one;
-        memcpy(d[i].mvp, mvp.m, sizeof d[i].mvp);
+        memcpy(out[i].mvp, mvp.m, sizeof out[i].mvp);
+        out[i].fade = fade;
     }
-    return (int)count;
+    d[0] = one;
+    d[0].first_copy = first, d[0].copies = count, d[0].dither = fading ? dither : 0;
+    return 1;
 }
 
 /* Is each of the n copies the game drew (48 bytes each at `game`) one of ours? */

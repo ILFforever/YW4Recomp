@@ -147,6 +147,8 @@ typedef struct {
 
 /* ---- command recording: records live in the game's command memory (nvn_cmdbuf.c) */
 
+enum { TRACE_TEXTURES = 20 };  /* texture slots recorded per stage (the shadow fade programs read slot 18) */
+
 typedef struct {
     uint64_t mem, size, used;  /* current command memory chunk (guest address) */
     uint64_t start;            /* first record of the list being recorded */
@@ -158,7 +160,7 @@ typedef struct {
     uint32_t target_w, target_h, target_colors, target_depth;  /* set last (YW4_TRACE_DRAW_CALLERS) */
     uint64_t trace_vb0, trace_ub[2][16];  /* bound last, vertex and fragment stage (YW4_TRACE_DRAWLIST) */
     uint64_t trace_vb[4], trace_streams[4];  /* vertex buffers 0-3 and stream states 0-3 bound last */
-    uint64_t trace_tex[2][4];             /* texture handles 0-3 bound last, vertex and fragment stage */
+    uint64_t trace_tex[2][TRACE_TEXTURES];  /* texture handles bound last, vertex and fragment stage */
     uint32_t trace_attribs[16], trace_nattribs;  /* vertex attribute state bound last */
     uint64_t depth_addr;    /* depth target set last: texels' address, first layer of its view */
     uint32_t depth_layer;
