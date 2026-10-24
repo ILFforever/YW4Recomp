@@ -28,6 +28,7 @@
 
 #include "host.h"
 #include "gpu.h"
+#include "hud.h"
 #include "vk.h"
 #include "window.h"
 
@@ -65,6 +66,14 @@ static VkDeviceMemory staging_mem, frame_mem;
 static void *staging_ptr;
 static VkImage frame;
 static uint32_t frame_w, frame_h;
+
+/* The performance HUD (hud.h): F3 or YW4_HUD=1; drawn by the presenting thread. */
+enum { HUD_W = 256, HUD_H = 128 };
+static int hud_on = -1;
+static VkImage hud_image;
+static VkBuffer hud_buffer;
+static VkDeviceMemory hud_image_mem, hud_buffer_mem;
+static void *hud_ptr;
 
 void gpu_request_trace(int draws);  /* gpu_draw.c */
 void gpu_request_dump(void);        /* gpu.c */
@@ -369,6 +378,77 @@ static int screenshot_wanted(uint64_t n) {
     return 0;
 }
 
+static int hud_enabled(void) {
+    int on = __atomic_load_n(&hud_on, __ATOMIC_ACQUIRE);
+    if (on < 0) {
+        const char *e = getenv("YW4_HUD");
+        int want = e && *e && *e != '0';
+        __atomic_compare_exchange_n(&hud_on, &on, want, 0, __ATOMIC_ACQ_REL, __ATOMIC_ACQUIRE);
+        on = __atomic_load_n(&hud_on, __ATOMIC_ACQUIRE);
+    }
+    return on > 0;
+}
+
+/* The HUD's staging buffer (mapped) and image, made on first use. 0 when ready. */
+static int hud_resources(void) {
+    if (hud_image) return 0;
+    VkBufferCreateInfo bci = {.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO, .size = (VkDeviceSize)HUD_W * HUD_H * 4,
+                              .usage = VK_BUFFER_USAGE_TRANSFER_SRC_BIT};
+    if (vkCreateBuffer(vk.device, &bci, NULL, &hud_buffer) != VK_SUCCESS) return -1;
+    VkMemoryRequirements mr;
+    vkGetBufferMemoryRequirements(vk.device, hud_buffer, &mr);
+    VkMemoryAllocateInfo mai = {.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO, .allocationSize = mr.size,
+                                .memoryTypeIndex = vk_memory_type(mr.memoryTypeBits, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT |
+                                                                                      VK_MEMORY_PROPERTY_HOST_COHERENT_BIT)};
+    if (vkAllocateMemory(vk.device, &mai, NULL, &hud_buffer_mem) != VK_SUCCESS) return -1;
+    vkBindBufferMemory(vk.device, hud_buffer, hud_buffer_mem, 0);
+    vkMapMemory(vk.device, hud_buffer_mem, 0, VK_WHOLE_SIZE, 0, &hud_ptr);
+    VkImageCreateInfo ici = {.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO, .imageType = VK_IMAGE_TYPE_2D,
+                             .format = VK_FORMAT_R8G8B8A8_UNORM, .extent = {HUD_W, HUD_H, 1}, .mipLevels = 1,
+                             .arrayLayers = 1, .samples = VK_SAMPLE_COUNT_1_BIT, .tiling = VK_IMAGE_TILING_OPTIMAL,
+                             .usage = VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT};
+    VkImage image;
+    if (vkCreateImage(vk.device, &ici, NULL, &image) != VK_SUCCESS) return -1;
+    vkGetImageMemoryRequirements(vk.device, image, &mr);
+    mai.allocationSize = mr.size;
+    mai.memoryTypeIndex = vk_memory_type(mr.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
+    if (vkAllocateMemory(vk.device, &mai, NULL, &hud_image_mem) != VK_SUCCESS) return -1;
+    vkBindImageMemory(vk.device, image, hud_image_mem, 0);
+    hud_image = image;
+    return 0;
+}
+
+/* Draws the HUD's lines into its buffer and records copying them onto dst (in TRANSFER_DST
+ * layout) at the frame's top-left corner (x0, y0), scaled up with the window. The previous
+ * present's fence has been waited for, so the buffer is free to write. */
+static void hud_draw(VkImage dst, int32_t x0, int32_t y0) {
+    if (!hud_enabled() || hud_resources()) return;
+    static HudContent content;
+    int w, h;
+    yw4_perf_hud(&content);
+    hud_render(hud_ptr, HUD_W, HUD_H, &content, &w, &h);
+    barrier(hud_image, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 0, VK_ACCESS_TRANSFER_WRITE_BIT);
+    VkBufferImageCopy copy = {.bufferRowLength = HUD_W, .imageSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1},
+                              .imageExtent = {(uint32_t)w, (uint32_t)h, 1}};
+    vkCmdCopyBufferToImage(cmd, hud_buffer, hud_image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &copy);
+    barrier(hud_image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+            VK_ACCESS_TRANSFER_WRITE_BIT, VK_ACCESS_TRANSFER_READ_BIT);
+    barrier(dst, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+            VK_ACCESS_TRANSFER_WRITE_BIT, VK_ACCESS_TRANSFER_WRITE_BIT);
+    int32_t s = swap_extent.height >= 2160 ? 2 : 1;  /* the 5x7 font at 1:1 up to 1440p */
+    int32_t x = x0 + 6 * s, y = y0 + 6 * s;
+    int32_t xe = x + w * s, ye = y + h * s;  /* clipped to the window */
+    if (xe > (int32_t)swap_extent.width) xe = (int32_t)swap_extent.width;
+    if (ye > (int32_t)swap_extent.height) ye = (int32_t)swap_extent.height;
+    if (xe <= x || ye <= y) return;
+    VkImageBlit blit = {.srcSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1},
+                        .srcOffsets = {{0, 0, 0}, {(xe - x) / s, (ye - y) / s, 1}},
+                        .dstSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1},
+                        .dstOffsets = {{x, y, 0}, {x + (xe - x) / s * s, y + (ye - y) / s * s, 1}}};
+    vkCmdBlitImage(cmd, hud_image, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, dst, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1,
+                   &blit, VK_FILTER_NEAREST);
+}
+
 /* Scales src (w x h colour texels) into the next swapchain image and presents it.
  * layout UNDEFINED: src is `frame`, filled from the staging buffer (the CPU path).
  * Otherwise src is the draw path's image in that layout (GENERAL, decision 0021); with
@@ -420,6 +500,7 @@ static int present_image(VkImage src, VkImageLayout layout, VkRect2D r0, int rea
                         .dstSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1},
                         .dstOffsets = {{x0, y0, 0}, {x0 + (int32_t)bw, y0 + (int32_t)bh, 1}}};
     vkCmdBlitImage(cmd, src, layout, dst, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &blit, VK_FILTER_LINEAR);
+    hud_draw(dst, x0, y0);
     barrier(dst, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR, VK_ACCESS_TRANSFER_WRITE_BIT, 0);
     vkEndCommandBuffer(cmd);
 
@@ -623,6 +704,7 @@ void window_run(void (*guest)(void *), void *arg) {
             if (e.key.key == SDLK_F11) gpu_request_trace(450), yw4_hid_note_key("F11");  /* the draws of the next frame, in the log */
             if (e.key.key == SDLK_F10) gpu_request_dump(), yw4_hid_note_key("F10");      /* shadow maps etc.: work/dump/ */
             if (e.key.key == SDLK_F9) shadow_toggle(), yw4_hid_note_key("F9");          /* our shadow pass on/off */
+            if (e.key.key == SDLK_F3) __atomic_store_n(&hud_on, hud_enabled() ? 0 : 1, __ATOMIC_RELEASE);  /* the HUD */
             break;
         case SDL_EVENT_WINDOW_PIXEL_SIZE_CHANGED:
             host_lock(&present_lock);

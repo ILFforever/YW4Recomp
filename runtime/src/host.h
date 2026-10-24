@@ -47,6 +47,8 @@ int64_t host_now_ns(void);
 
 /* This process's CPU time so far (user + kernel, all threads) and its memory in use (working set), for the performance log. */
 void host_process_usage(int64_t *cpu_ns, uint64_t *rss_bytes);
+/* The number of logical processors (at least 1). */
+int host_cpu_count(void);
 /* A handle to the calling thread, and the CPU time (user + kernel) a thread has used so far. */
 void *host_thread_self(void);
 int64_t host_thread_cpu_ns(void *thread);

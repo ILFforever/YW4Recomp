@@ -124,6 +124,11 @@ void host_process_usage(int64_t *cpu_ns, uint64_t *rss_bytes) {
     *rss_bytes = GetProcessMemoryInfo(GetCurrentProcess(), &pmc, sizeof pmc) ? pmc.WorkingSetSize : 0;
 }
 
+int host_cpu_count(void) {
+    DWORD n = GetActiveProcessorCount(ALL_PROCESSOR_GROUPS);
+    return n ? (int)n : 1;
+}
+
 void *host_reserve_watched(uint64_t want, size_t size) {
     return VirtualAlloc((void *)(uintptr_t)want, size, MEM_RESERVE | MEM_WRITE_WATCH, PAGE_NOACCESS);
 }
@@ -306,6 +311,11 @@ void host_process_usage(int64_t *cpu_ns, uint64_t *rss_bytes) {
         fclose(f);
     }
     *rss_bytes = (uint64_t)resident * 4096;
+}
+
+int host_cpu_count(void) {
+    long n = sysconf(_SC_NPROCESSORS_ONLN);
+    return n > 0 ? (int)n : 1;
 }
 
 /* No write tracking on Linux yet (to do: soft-dirty bits or mprotect): plain reservation,

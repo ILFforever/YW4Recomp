@@ -954,6 +954,11 @@ static void init_mode(void) {
                                                                 : "our pass draws the casters it mirrors");
 }
 
+const char *shadow_mode_name(void) {
+    int m = __atomic_load_n(&mode, __ATOMIC_ACQUIRE);
+    return m == MODE_NATIVE ? "CUSTOM" : m == MODE_CHECK ? "CHECK" : "ORIGINAL";
+}
+
 void shadow_toggle(void) {
     init_mode();
     int m = __atomic_load_n(&mode, __ATOMIC_ACQUIRE) == MODE_GAME ? MODE_NATIVE : MODE_GAME;

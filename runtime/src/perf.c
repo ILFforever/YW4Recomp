@@ -35,6 +35,7 @@
 #endif
 
 #include "host.h"
+#include "hud.h"
 #include "kernel.h"
 #include "nvn.h"
 
@@ -200,6 +201,54 @@ static void start(void) {
     host_process_usage(&last_cpu, &rss);
     atexit(finish);
     enabled = 1;
+}
+
+/* The HUD (hud.h): averages over the last 30 frames; lows, min and max over the last 600 (20 s);
+ * the graph is the last HUD_POINTS frames. */
+void yw4_perf_hud(HudContent *c) {
+    c->nlines = c->npoints = 0;
+    c->target_ms = 1000.0f / 30.0f;
+#define LINE(...) (c->nlines < HUD_LINES ? snprintf(c->lines[c->nlines++], HUD_COLS, __VA_ARGS__) : 0)
+    if (enabled <= 0 || !nrows) {
+        LINE(enabled == 0 ? "PERF OFF (YW4_PERF=0)" : "PERF: NO FRAMES YET");
+    } else {
+        size_t k = nrows < 30 ? nrows : 30, from = nrows - k;
+        double interval = 0, work = 0, cpu = 0, draws = 0;
+        for (size_t i = from; i < nrows; i++)
+            interval += rows[i].interval, work += rows[i].work, cpu += rows[i].cpu, draws += (double)rows[i].draws;
+        interval /= (double)k, work /= (double)k, cpu /= (double)k, draws /= (double)k;
+        /* 1% / 0.1% low: the frame rate of the 99th / 99.9th percentile frame time */
+        static double recent[600];
+        size_t m = nrows < 600 ? nrows : 600;
+        double lo = 1e9, hi = 0;
+        for (size_t i = 0; i < m; i++) {
+            recent[i] = rows[nrows - m + i].interval;
+            if (recent[i] < lo) lo = recent[i];
+            if (recent[i] > hi) hi = recent[i];
+        }
+        double p99 = percentile(recent, 0, m, 99), p999 = percentile(recent, 0, m, 99.9);
+        LINE("FPS %4.1f  1%% %4.1f  0.1%% %4.1f", interval > 0 ? 1000.0 / interval : 0.0, p99 > 0 ? 1000.0 / p99 : 0.0,
+             p999 > 0 ? 1000.0 / p999 : 0.0);
+        LINE("FRAME %4.1f  MIN %4.1f  MAX %5.1f MS", interval, lo, hi);
+        size_t g = ngpu < 30 ? ngpu : 30;  /* GPU times arrive PERF_DELAY frames late */
+        double busy = 0;
+        for (size_t i = ngpu - g; i < ngpu; i++) busy += gpu_busy[i];
+        if (g) LINE("WORK %4.1f  GPU %4.1f MS", work, busy / (double)g);
+        else LINE("WORK %4.1f  GPU - MS", work);
+        /* cpu is 100 per busy core: shown as the share of the whole CPU (as task managers do) and in cores */
+        static int ncpu;
+        if (!ncpu) ncpu = host_cpu_count();
+        LINE("CPU %.0f%% (%.1f OF %d CORES)", cpu / ncpu, cpu / 100.0, ncpu);
+        LINE("DRAWS %.0f  RAM %.0f MB", draws, rows[nrows - 1].rss);
+        size_t p = nrows < HUD_POINTS ? nrows : HUD_POINTS;
+        for (size_t i = 0; i < p; i++) {
+            c->frame_ms[i] = (float)rows[nrows - p + i].interval;
+            c->work_ms[i] = (float)rows[nrows - p + i].work;
+        }
+        c->npoints = (int)p;
+    }
+    LINE("SHADOWS: %s", shadow_mode_name());
+#undef LINE
 }
 
 /* Called by nvnQueuePresentTexture: enter = on entry, shown = after the host's part of the
