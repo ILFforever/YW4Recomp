@@ -154,9 +154,20 @@ and turns them into Vulkan at submit. The expensive part is `f_a45890` plus the 
    vertex (always 0), vertex stride, primitive (triangles) and index type. Nothing left to compare on the CPU
    side: the fault is in how our draws run on the GPU. Next: capture a flashing frame (RenderDoc) and find the
    draw that makes the band.
-   `YW4_SHADOWS_INSTANCED=1` turns ours back on for that; `YW4_SHADOWS_NO_SKINNED` / `_NO_CUTOUT` leave those
-   kinds to the game for further elimination. Also seen: frame rate with our shadows is noticeably lower than
-   with the game's (not measured yet).
+   `YW4_SHADOWS_NO_SKINNED` / `_NO_CUTOUT` / `_NO_INSTANCED` leave those kinds to the game for elimination.
+
+   **Fixed 2026-10-24: the bands were nudged copies; instanced casters are ours again.** RenderDoc can't run the
+   draw path (no `VK_EXT_external_memory_host` under it). Instead, a temporary detector (with
+   `YW4_SHADOWS_BOTH=1`, so our draws only repeat the game's): the layer copied on the GPU before and after our
+   pass, and after each draw in small passes, compared a few frames later. Our draws should change nothing; with
+   instanced ours about 100 passes per walk replay changed 1,000+ texels, 0 without. Per draw, each band was one
+   instanced draw writing far outside its own box, with copy matrices whose first value was ±100 or more: copies
+   the callback nudged (`model+0x218`, flag × 100: fading). In check mode the game never draws a nudged copy with
+   the instanced programs we mirror (0 of ~86,000 draws); it switches the submesh to other programs (e.g.
+   `26b707`), which our learning sees only one frame in 32. Ours now leave any draw with a nudged pending copy to
+   the game, every frame. Detector after the fix: 0 passes with 1,000+ changed texels (100–999: as few as with no
+   instanced draws, edge and rounding noise). Owner's playtest: no flashes. Why the earlier checks missed it: they
+   compared only draws the game made with the mirrored programs, which never carry nudged copies.
 
    **Fixed 2026-10-24: character shadows animated choppier than the characters.** Our skinned draws copied the
    palette from the submesh's own buffer (`palette_of`), which the animation is writing the next pose into: exactly

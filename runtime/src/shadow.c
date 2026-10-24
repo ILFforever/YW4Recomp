@@ -563,16 +563,14 @@ static int env_on(const char *name) {
 }
 
 /* The game's draws left to it, for narrowing down a fault by elimination:
- * YW4_SHADOWS_NO_SKINNED=1 (characters), YW4_SHADOWS_NO_CUTOUT=1 (cut-out casters).
- * Instanced casters (repeated props) stay the game's unless YW4_SHADOWS_INSTANCED=1: ours
- * flash bands of shadow for a frame or a few while the camera moves, and every value our
- * draws take was measured equal to the game's draw (decision 0024) */
+ * YW4_SHADOWS_NO_SKINNED=1 (characters), YW4_SHADOWS_NO_CUTOUT=1 (cut-out casters),
+ * YW4_SHADOWS_NO_INSTANCED=1 (repeated props). */
 static int leave_to_game(uint64_t vs, uint64_t fs) {
-    static int no_skinned = -1, no_cutout = -1, instanced = -1;
+    static int no_skinned = -1, no_cutout = -1, no_instanced = -1;
     if (no_skinned < 0) no_skinned = env_on("YW4_SHADOWS_NO_SKINNED");
     if (no_cutout < 0) no_cutout = env_on("YW4_SHADOWS_NO_CUTOUT");
-    if (instanced < 0) instanced = env_on("YW4_SHADOWS_INSTANCED");
-    return (no_skinned && vs == SKINNED_VS) || (no_cutout && fs == CUTOUT_FS) || (!instanced && is_instanced(vs));
+    if (no_instanced < 0) no_instanced = env_on("YW4_SHADOWS_NO_INSTANCED");
+    return (no_skinned && vs == SKINNED_VS) || (no_cutout && fs == CUTOUT_FS) || (no_instanced && is_instanced(vs));
 }
 
 static int copies_known(const Copies *cp, const float *game, uint32_t n);
@@ -609,6 +607,12 @@ static int ours(const Caster *c, const Mat4 *vp, uint64_t device, ShadowDraw *d,
     if (!pending_copies(device, &copies, &count) || count > (uint32_t)room || instances(c->model, &cp) != 1 ||
         count > cp.count || !copies_known(&cp, copies, count))
         return -1;
+    /* a copy the callback nudged (flag x 100 added to its first value: fading) is drawn by the
+     * game with another program that decodes it, never with the instanced ones we mirror; drawn
+     * raw it stretches across the layer. Learning sees the program change only one frame in 32,
+     * so every draw is checked. */
+    for (uint32_t i = 0; i < count; i++)
+        if (copies[12 * i] >= 100.0f || copies[12 * i] <= -100.0f) return -1;
     Mat4 world = load(c->own);
     for (uint32_t i = 0; i < count; i++) {
         Mat4 e = {{0}};
@@ -794,9 +798,7 @@ static void init_mode(void) {
     if (!__atomic_compare_exchange_n(&mode, &unset, m, 0, __ATOMIC_ACQ_REL, __ATOMIC_ACQUIRE)) return;
     __atomic_store_n(&shadow_checking, m != MODE_GAME, __ATOMIC_RELEASE);
     if (m != MODE_GAME) fprintf(stderr, "yw4: shadows: %s\n", m == MODE_CHECK ? "checking the gather"
-                                                                : env_on("YW4_SHADOWS_INSTANCED")
-                                                                      ? "our pass draws the casters, repeated props too"
-                                                                      : "our pass draws the casters but repeated props");
+                                                                : "our pass draws the casters it mirrors");
 }
 
 void shadow_toggle(void) {
