@@ -150,7 +150,9 @@ typedef struct {
 enum { TRACE_TEXTURES = 20 };  /* texture slots recorded per stage (the shadow fade programs read slot 18) */
 
 typedef struct {
-    uint64_t mem, size, used;  /* current command memory chunk (guest address) */
+    uint64_t mem, size, used;  /* current command memory chunk (guest address, or an overflow chunk) */
+    uint64_t base;             /* the command memory the game added last */
+    int overflows;             /* overflow chunks used since (nvn_cmdbuf.c) */
     uint64_t start;            /* first record of the list being recorded */
     uint64_t callback, callback_data;
     int recording;

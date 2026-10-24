@@ -2,7 +2,8 @@
  *
  * Commands are recorded as CmdRec records into the command memory the game gives the
  * command buffer (AddCommandMemory), so the game's own memory management works as designed;
- * a list that outgrows a chunk continues in the next through a JUMP record. A command handle
+ * a list that outgrows a chunk continues in the next through a JUMP record (in an overflow chunk
+ * of ours when the game has added none, see rec). A command handle
  * is the guest address of a list's first record. Each record keeps the call's arguments and
  * copies of what its pointers point at (state objects, colours), because the game may reuse
  * that memory before the list runs.
@@ -50,13 +51,52 @@ NVN(nvnCommandBufferAddCommandMemory) {  /* (cmd, memory pool, offset, size) */
     cb->mem = mem;
     cb->size = A(3);
     cb->used = 0;
+    cb->base = mem, cb->overflows = 0;
 }
 NVN(nvnCommandBufferAddControlMemory) { (void)c; }  /* (cmd, memory, size): the driver's; ours needs none */
 
-/* Room for one record of `extra` bytes after the header. No memory callback is set by this
- * game, so running out is a stop. */
+/* Our records are larger than the driver's commands, and this game gives each command buffer
+ * a fixed chunk (2 MiB) with no memory callback: a busy scene can outgrow it where the Switch
+ * would not. Such a list continues in overflow chunks of our own, kept per chunk of the game's
+ * they extend and reused when the game adds that chunk again (the game reuses it only when its
+ * commands are done, and so are the ones that continued from it). */
+enum { OVERFLOW_SIZE = 2 << 20, OVERFLOW_MAX = 16, OVERFLOW_BASES = 64 };
+static struct {
+    uint64_t base;
+    uint8_t *chunk[OVERFLOW_MAX];
+} overflow[OVERFLOW_BASES];
+static HostLock overflow_lock = HOST_LOCK_INIT;
+
+static uint8_t *overflow_chunk(uint64_t base, int i) {
+    if (i >= OVERFLOW_MAX) return NULL;
+    host_lock(&overflow_lock);
+    int k = 0;
+    while (k < OVERFLOW_BASES && overflow[k].base && overflow[k].base != base) k++;
+    uint8_t *p = NULL;
+    if (k < OVERFLOW_BASES) {
+        overflow[k].base = base;
+        if (!overflow[k].chunk[i]) overflow[k].chunk[i] = malloc(OVERFLOW_SIZE);
+        p = overflow[k].chunk[i];
+    }
+    host_unlock(&overflow_lock);
+    return p;
+}
+
+/* Room for one record of `extra` bytes after the header. */
 static CmdRec *rec(const CPUState *c, NvnCmdBuf *cb, uint32_t op, uint32_t extra) {
     uint32_t size = (uint32_t)((sizeof(CmdRec) + extra + 7) & ~7u);
+    if (cb->mem && cb->used + size + JUMP_RESERVE > cb->size) {
+        uint8_t *next = size + JUMP_RESERVE <= OVERFLOW_SIZE ? overflow_chunk(cb->base, cb->overflows) : NULL;
+        if (next) {
+            static int shown;
+            if (!shown++)
+                fprintf(stderr, "yw4: NVN: a command list outgrew the game's command memory (%llu bytes); it continues "
+                        "in overflow chunks of %d MiB (logged once)\n", (unsigned long long)cb->size, OVERFLOW_SIZE >> 20);
+            raw_rec(cb->mem + cb->used, CMD_JUMP, sizeof(CmdRec))->x[0] = (uint64_t)(uintptr_t)next;
+            cb->overflows++;
+            cb->mem = (uint64_t)(uintptr_t)next, cb->size = OVERFLOW_SIZE, cb->used = 0;
+        }
+    }
     if (!cb->mem || cb->used + size + JUMP_RESERVE > cb->size)
         nvn_fatal(c, "out of command memory (%u bytes needed, %llu of %llu used)", size,
                   (unsigned long long)cb->used, (unsigned long long)cb->size);
