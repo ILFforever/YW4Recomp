@@ -942,6 +942,7 @@ void gpu_execute(uint64_t handle) {
             memcpy(&s.rt, r->extra, sizeof s.rt);
             render_targets_fix(&s.rt);  /* point at our own copies of the textures */
             s.ncolor = (int)r->x[0];
+            s.targets_noted = 0;  /* noted at the first draw, with the state the game draws with */
             break;
         case CMD_SET_VIEWPORTS:  /* (x, y, w, h) */
             for (int i = 0; i < 4; i++) s.viewport[i] = (int32_t)r->x[i];
@@ -998,6 +999,7 @@ void gpu_execute(uint64_t handle) {
             break;
         }
         case CMD_DRAW_ARRAYS: case CMD_DRAW_ELEMENTS:
+            if (!s.targets_noted) gpu_shadow_note_targets(&s), s.targets_noted = 1;
             gpu_draw(cb, &s, r);
             break;
         case CMD_DRAW_ARRAYS_INDIRECT: case CMD_DRAW_ELEMENTS_INDIRECT: case CMD_DRAW_TRANSFORM_FEEDBACK: {

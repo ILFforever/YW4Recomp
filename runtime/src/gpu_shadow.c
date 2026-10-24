@@ -322,18 +322,62 @@ static VkPipeline pipeline(VkFormat depth, int kind, VkFormat uv, VkFormat wind)
     return pipes[n++].pipe;
 }
 
-void gpu_shadow_pass(void *vk_cb, void *gpu_state, const void *data, uint32_t size) {
-    VkCommandBuffer cb = vk_cb;
-    GpuState *s = gpu_state;
-    const ShadowPass *p;
-    if (size < sizeof p) return;
-    memcpy(&p, data, sizeof p);
-    if (!p || !p->n) return;
-    uint32_t layer = s->rt.has_depth_view && s->rt.depth_view.setmask & 2 ? s->rt.depth_view.min_layer : 0;
-    if (!s->rt.depth || s->rt.depth->addr != p->depth_addr || layer != p->depth_layer || s->ncolor) {
-        __atomic_add_fetch(&passes_skipped, 1, __ATOMIC_RELAXED);
-        return;
+static uint32_t depth_layer_of(const RenderTargets *rt) {
+    return rt->has_depth_view && rt->depth_view.setmask & 2 ? rt->depth_view.min_layer : 0;
+}
+
+/* A depth-only target (a shadow map layer) and the state the game's draws into it ended with:
+ * what a pass drawn after the game has moved on needs (the next target's viewport can differ). */
+typedef struct {
+    RenderTargets rt;
+    int32_t viewport[4], scissor[4];
+    int have_viewport, have_scissor;
+    float depth_range[2], polygon_offset[3];
+    uint8_t depth_stencil[8], polygon[4];
+} TargetState;
+
+static void target_state_get(TargetState *t, const GpuState *s) {
+    memcpy(&t->rt, &s->rt, sizeof t->rt);
+    render_targets_fix(&t->rt);
+    memcpy(t->viewport, s->viewport, sizeof t->viewport), memcpy(t->scissor, s->scissor, sizeof t->scissor);
+    t->have_viewport = s->have_viewport, t->have_scissor = s->have_scissor;
+    memcpy(t->depth_range, s->depth_range, sizeof t->depth_range);
+    memcpy(t->polygon_offset, s->polygon_offset, sizeof t->polygon_offset);
+    memcpy(t->depth_stencil, s->depth_stencil, sizeof t->depth_stencil), memcpy(t->polygon, s->polygon, sizeof t->polygon);
+}
+
+static void target_state_set(GpuState *s, const TargetState *t) {
+    memcpy(&s->rt, &t->rt, sizeof s->rt);
+    render_targets_fix(&s->rt);
+    memcpy(s->viewport, t->viewport, sizeof s->viewport), memcpy(s->scissor, t->scissor, sizeof s->scissor);
+    s->have_viewport = t->have_viewport, s->have_scissor = t->have_scissor;
+    memcpy(s->depth_range, t->depth_range, sizeof s->depth_range);
+    memcpy(s->polygon_offset, t->polygon_offset, sizeof s->polygon_offset);
+    memcpy(s->depth_stencil, t->depth_stencil, sizeof s->depth_stencil), memcpy(s->polygon, t->polygon, sizeof s->polygon);
+}
+
+/* The depth-only targets left last, by texels' address and layer. */
+enum { NOTED = 8 };
+static HostLock noted_lock = HOST_LOCK_INIT;
+static TargetState noted[NOTED];
+static int nnoted, noted_next;
+
+void gpu_shadow_note_targets(const GpuState *s) {
+    if (s->ncolor || !s->rt.depth) return;
+    uint64_t addr = s->rt.depth->addr;
+    uint32_t layer = depth_layer_of(&s->rt);
+    host_lock(&noted_lock);
+    int i = 0;
+    while (i < nnoted && (noted[i].rt.depth->addr != addr || depth_layer_of(&noted[i].rt) != layer)) i++;
+    if (i == nnoted) {
+        if (nnoted < NOTED) i = nnoted++;
+        else i = noted_next, noted_next = (noted_next + 1) % NOTED;
     }
+    target_state_get(&noted[i], s);
+    host_unlock(&noted_lock);
+}
+
+static void draw_pass(VkCommandBuffer cb, GpuState *s, const ShadowPass *p) {
     /* cut-out casters' textures, the dither and the wind textures: images made and uploaded before
      * rendering, as for the game's draws */
     uint64_t uploaded[3] = {0};  /* dither, wind noise, wind map: one each in a pass */
@@ -434,4 +478,45 @@ void gpu_shadow_pass(void *vk_cb, void *gpu_state, const void *data, uint32_t si
         }
     }
     if (skipped) __atomic_add_fetch(&draws_skipped, skipped, __ATOMIC_RELAXED);
+}
+
+void gpu_shadow_pass(void *vk_cb, void *gpu_state, const void *data, uint32_t size) {
+    VkCommandBuffer cb = vk_cb;
+    GpuState *s = gpu_state;
+    const ShadowPass *p;
+    if (size < sizeof p) return;
+    memcpy(&p, data, sizeof p);
+    if (!p || !p->n) return;
+    if (s->rt.depth && s->rt.depth->addr == p->depth_addr && depth_layer_of(&s->rt) == p->depth_layer && !s->ncolor) {
+        draw_pass(cb, s, p);
+        return;
+    }
+    /* The game has moved on to another target before the pass's turn (cutscenes: a cascade's second
+     * layer goes into a second shadow map, bound before that layer starts, with its own viewport).
+     * Draw into the pass's layer with the target and state the game's draws there ended with, then
+     * put the game's back. */
+    TargetState *game = malloc(sizeof *game), *ours = malloc(sizeof *ours);
+    int found = 0;
+    if (game && ours) {
+        host_lock(&noted_lock);
+        for (int i = 0; i < nnoted && !found; i++)
+            if (noted[i].rt.depth->addr == p->depth_addr && depth_layer_of(&noted[i].rt) == p->depth_layer)
+                *ours = noted[i], render_targets_fix(&ours->rt), found = 1;
+        host_unlock(&noted_lock);
+    }
+    if (!found) {
+        free(game), free(ours);
+        __atomic_add_fetch(&passes_skipped, 1, __ATOMIC_RELAXED);
+        return;
+    }
+    int ncolor = s->ncolor;
+    gpu_end_rendering(cb, s);
+    target_state_get(game, s);
+    target_state_set(s, ours);
+    s->ncolor = 0;
+    draw_pass(cb, s, p);
+    gpu_end_rendering(cb, s);
+    target_state_set(s, game);
+    s->ncolor = ncolor;
+    free(game), free(ours);
 }

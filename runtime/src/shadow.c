@@ -571,6 +571,12 @@ void shadow_check_draw(const NvnCmdBuf *cb, uint64_t index_addr, const ShadowDra
              (!is_fading(vs) || fading_of(cb, fs, &cut)) && (vs != SKINNED_VS || skinned_ok(cb, obj, sub, fs)) &&
              compare_draw(cb, obj, sub, index_addr, call, is_instanced(vs) ? 1 : vs == WIND_VS ? 2 : 0);
     learn(obj, sub, vs, fs, ok, cb->polygon, &cut);
+    /* the pass draws where the game's draws in this layer went: a cascade's layers can have
+     * different targets (cutscenes: two layers per cascade, two shadow maps) */
+    if (lay->pass) {
+        lay->pass->depth_addr = cb->depth_addr;
+        lay->pass->depth_layer = cb->depth_layer;
+    }
     if (lay->cascade >= 0) {
         cascade_target[lay->cascade].addr = cb->depth_addr;
         cascade_target[lay->cascade].layer = cb->depth_layer;
@@ -964,7 +970,14 @@ void shadow_toggle(void) {
 int yw4_hook_model_renderer(CPUState *ctx) {
     if (__atomic_load_n(&mode, __ATOMIC_ACQUIRE) < 0) init_mode();
     if (__atomic_load_n(&mode, __ATOMIC_ACQUIRE) == MODE_GAME) return 0;
-    if (lay && lay->active) end_layer(lay, NULL);  /* not ended by its job (shouldn't happen): no pass */
+    /* A cascade's job list can draw more than one shadow layer (cutscenes: two per cascade) before
+     * the cascade-end job: the next layer of the same cascade ends the previous one, which queues its
+     * pass here, still inside the cascade's target. Anything else: not ended by its job, no pass. */
+    if (lay && lay->active) {
+        uint64_t v = U64(ctx->x[0] + 0x2780);
+        int c = v && U8(v) >= 1 && U8(v) <= 3 ? U8(v) - 1 : -1;
+        end_layer(lay, lay->device == ctx->x[0] && c >= 0 && c == lay->cascade ? ctx : NULL);
+    }
     uint64_t list = ctx->x[1], item = ctx->x[2];
     if (!item || U8(item + 8) != LAYER_SHADOW) return 0;
     if (!lay && !(lay = calloc(1, sizeof *lay))) return 0;

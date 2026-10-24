@@ -79,6 +79,7 @@ typedef struct {
     RenderTargets rt;
     int ncolor;
     int rendering;  /* inside vkCmdBeginRendering for rt */
+    int targets_noted;  /* rt passed to gpu_shadow_note_targets since it was set */
     NvnProgram *program;
     uint8_t blend[8][8];
     uint8_t color[4];
@@ -115,6 +116,10 @@ int gpu_handle_texture(VkCommandBuffer cb, const GpuState *s, uint64_t handle, i
 void gpu_cull(VkCommandBuffer cb, uint8_t cull_mode, uint8_t front_face);
 /* The pipelines' dynamic state from s (viewport, scissor, cull, depth, stencil, bias). */
 void gpu_dynamic_state(VkCommandBuffer cb, const GpuState *s, VkFormat depth, uint32_t w, uint32_t h);
+/* gpu_shadow.c: the first draw into s's targets since they were set; depth-only ones are
+ * remembered with the state the game draws with, so a shadow pass can draw into its layer after
+ * the game has moved on to another target. */
+void gpu_shadow_note_targets(const GpuState *s);
 /* A draw record: CMD_DRAW_ARRAYS or CMD_DRAW_ELEMENTS. */
 void gpu_draw(VkCommandBuffer cb, GpuState *s, const CmdRec *r);
 /* A CMD_DISPATCH record: runs the bound program's compute shader, then a full barrier. */

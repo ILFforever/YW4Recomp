@@ -207,4 +207,14 @@ and turns them into Vulkan at submit. The expensive part is `f_a45890` plus the 
    window: about 18,500-26,000 (from ~30,000). Walk replay, 3 runs each: game work 9.5 ms against the game's
    shadows' 10.2 (p95 15.0 against 16.4), GPU and process CPU equal; one of the three pairs went the other way,
    so the gain is within run-to-run noise. `YW4_SHADOWS_NO_WIND=1` leaves them to the game.
+   **Fixed 2026-10-24: shadows flickered in cutscenes (forest scene), never with the game's shadows.** In
+   cutscenes a cascade's job list draws two shadow layers, into two shadow maps (the usual one and a second,
+   bound before the second layer starts), and only then the cascade-end job. Ours ended the first layer when the
+   second began and dropped its pass (the game's draws of it already skipped): about 70,000 of our draws lost per
+   report window, the game's version showing only on the 1-in-32 re-check frames. Now the next layer of the same
+   cascade queues the previous layer's pass; a pass draws where the game's draws in its layer went; and when the
+   game has moved on to another target, the executor draws the pass into its own layer with the target and state
+   (viewport, scissor, depth and polygon state) the game's first draw there used, then restores the game's.
+   Restoring only the target was not enough: a few shadows stayed missing. Check mode in the cutscene: all 81,000
+   draws per window equal to ours. Owner's playtests: no flicker, identical to the game's shadows.
 5. Switch the default to `native` once every street, house and battle layer matches; measure CPU.
