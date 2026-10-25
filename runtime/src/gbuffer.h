@@ -20,16 +20,19 @@ void gbuffer_toggle(void);
 /* Step 2b, YW4_GBUFFER=native: a G-buffer draw of ours, recorded in place of the game's
  * DrawElements. Our buffers and object constants; the rest (material constants, textures,
  * vertex formats, targets, pipeline state) is what the game bound before it. */
+enum { GBUFFER_OBJECT_FLOATS = 80 };  /* 20 rows: the programs read up to row 19 */
 typedef struct {
     uint64_t vertices, indices;
-    uint32_t vertex_bytes, index_type, index_count, primitive;  /* index_type, primitive: NVN's */
-    uint64_t game[7];  /* the game's DrawElements (x1..x7), drawn instead on the game's frames */
-    float object[64];  /* vertex constants 2: rows 0-2 world, 8-11 projection x view x world,
-                        * 12-15 last frame's world */
+    uint32_t vertex_bytes, vertex_count, index_type, index_count, primitive;  /* index_type, primitive: NVN's;
+                                                                  * no indices: index_count 0 */
+    uint64_t game[7];  /* the game's draw (x1..x7), drawn instead on the game's frames */
+    int game_indexed;  /* it was DrawElements, else DrawArrays */
+    float object[GBUFFER_OBJECT_FLOATS];  /* vertex constants 2: world, projection x view x world,
+                                           * last frame's world, in the program's rows (gbuffer.c) */
 } GBufferDraw;
-/* nvn_cmdbuf.c, DrawElements(cmd, primitive, type, count, address): 1 if our draw went in its
- * place (then the game's is not recorded). */
-int gbuffer_take_draw(CPUState *c, const NvnCmdBuf *cb);
+/* nvn_cmdbuf.c, DrawElements(cmd, primitive, type, count, address) (indexed) or DrawArrays(cmd,
+ * primitive, first, count): 1 if our draw went in its place (then the game's is not recorded). */
+int gbuffer_take_draw(CPUState *c, const NvnCmdBuf *cb, int indexed);
 /* CMD_NATIVE callback (gpu_draw.c): `data` holds a GBufferDraw. */
 void gpu_gbuffer_draw(void *vk_cb, void *gpu_state, const void *data, uint32_t size);
 
