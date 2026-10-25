@@ -40,8 +40,6 @@
 > **Bring your own game.** Nothing from the game is in this repository. You need files from your own copy of
 > *Yo-kai Watch 4++* with the last update, **2.2.0**. Getting those files is up to you and is not covered here.
 >
-> For the technically minded: the tools take the ExeFS and RomFS of that build, check it by hash and stop on any other
-> version; the recompiled C code is produced on your machine from your copy and stays there.
 
 ## Status
 
@@ -57,24 +55,24 @@ reached yet.
 
 | Status | Goal | Where it stands |
 |---|---|---|
-| In progress | **Native performance** | Runs as a native program, no emulation; a steady 30 frames/s everywhere is not there yet (some scenes still dip) |
-| In progress | **Our own renderer** | Replace the game's renderer pass by pass, so the improvements below become possible (see below) |
-| In progress | **Better shadows** | Bigger shadow maps and PCSS soft shadows done; contact shadows and steadier cascades next |
-| Planned | **Higher resolution** | Render the 3D scene above the game's 1600×900, sharper on 1080p, 1440p and 4K screens |
-| Planned | **Ultrawide and other aspect ratios** | A wider view of the scene, with the UI laid out correctly |
-| Planned | **Higher frame rates** | Above the game's 30 frames/s; also needs the game's timing patched |
-| Planned | **Better anti-aliasing** | And other effects the Switch had no budget for |
-| Planned | **Mod support** | Load replaced game files from a mod folder without touching your dump (first use: the English translation mod) |
-| Planned | **Input remapping** | Keyboard, mouse and controller bindings of your choice |
-| Planned | **Linux** | The runtime is written to be portable; not built or tested there yet |
+| 🔧 | **Native performance** | Runs as a native program, no emulation; a steady 30 frames/s everywhere is not there yet (some scenes still dip) |
+| 🔧 | **Our own renderer** | Replace the game's renderer pass by pass, so the improvements below become possible (see below) |
+| 🔧 | **Better shadows** | Bigger shadow maps and PCSS soft shadows done; contact shadows and steadier cascades next |
+| 🗓️ | **Higher resolution** | Render the 3D scene above the game's 1600×900, sharper on 1080p, 1440p and 4K screens |
+| 🗓️ | **Ultrawide and other aspect ratios** | A wider view of the scene, with the UI laid out correctly |
+| 🗓️ | **Higher frame rates** | Above the game's 30 frames/s; also needs the game's timing patched |
+| 🗓️ | **Better anti-aliasing** | And other effects the Switch had no budget for |
+| 🗓️ | **Mod support** | Load replaced game files from a mod folder without touching your dump (first use: the English translation mod) |
+| 🗓️ | **Input remapping** | Keyboard, mouse and controller bindings of your choice with corresponding hints on screen |
+| 🗓️ | **Linux** | The runtime is written to be portable; not built or tested there yet |
 
-### Our own renderer (for developers)
+🔧 = In progress, 🗓️ = Planned
+
+### Our own renderer
 
 Replaying the game's draw calls ties every frame to the Switch's choices: its resolution, its 16:9 layout, its
 shadow settings. A renderer of our own draws the same scene from the game's data, so those choices become ours to
-change ([decision 0023](docs/decisions/0023-custom-renderer-plan.md)). Each replaced pass first has to look exactly
-like the game's before anything is changed: every pixel of a frame drawn both ways is compared, and must be the same
-([how](tools/dev/README.md)).
+change ([decision 0023](docs/decisions/0023-custom-renderer-plan.md)). 
 
 | Status | Pass | Where it stands |
 |---|---|---|
@@ -85,39 +83,7 @@ like the game's before anything is changed: every pixel of a frame drawn both wa
 
 Still the game's everywhere: the choice of what to draw, textures and character bones.
 
-## How it works (for developers)
-
-- **Translated ahead of time, not interpreted.** Every ARM64 function in the game's `main` and `sdk` modules (73,844
-  functions) becomes C before the game runs ([recomp/](recomp/README.md)); Clang compiles it into one native program.
-- A native runtime ([runtime/](runtime/)) stands in for the Switch: the kernel (threads, memory, synchronisation),
-  system services (filesystem with your RomFS read in place, input, audio, time, saves, applets) and the NVN graphics
-  API on top of Vulkan.
-- The game's own shaders are translated from the NV_gpu_program5 assembly they ship with into GLSL and SPIR-V
-  ([decision 0020](docs/decisions/0020-shaders-from-the-assembly.md)).
-- No emulator code is linked ([decision 0005](docs/decisions/0005-phase1-runtime-strategy.md)). Each instruction form
-  of the recompiler is checked against a real ARM64 CPU (a Raspberry Pi 5).
-- Why things are built this way is written down in [docs/decisions/](docs/decisions/).
-
-## Screenshots
-
-All captured from the recompiled build on Windows.
-
-| | |
-|---|---|
-| ![Amano house kitchen](docs/screenshots/07-kitchen.jpg) | ![Opening scene](docs/screenshots/06-opening-scene.jpg) |
-| The Amano house kitchen | Opening scene |
-| ![LEVEL-5 logo](docs/screenshots/02-level5-logo.jpg) | ![Opening movie](docs/screenshots/04-opening-movie.jpg) |
-| LEVEL-5 logo | Opening movie |
-
-In town with the performance HUD on (F3). The game is a native Windows program: the frame takes about 10 ms of
-work on the CPU and under one core of a 16-core laptop, against the 33 ms the game's 30 frames/s allow; the
-shadows here are our own pass ("CUSTOM", switched on with F9).
-
-<p align="center">
-  <img src="docs/screenshots/11-hud-in-town.jpg" alt="In town with the performance HUD: frame time, work, GPU, CPU, memory and a frame-time graph" width="820">
-</p>
-
-## Graphics options
+## Current Graphical Improvements
 
 Improvements over the original game. Details, comparisons and measurements: [docs/graphics.md](docs/graphics.md).
 
@@ -149,6 +115,40 @@ the camera. The bamboo forest, PCSS off:
 
 The game starts with the recommended 4096 map and PCSS ×2. For the game's original shadows, press F8 until the map
 is 1024 and F7 until PCSS is off.
+
+## Screenshots
+
+All captured from the recompiled build on Windows.
+
+| | |
+|---|---|
+| ![Amano house kitchen](docs/screenshots/07-kitchen.jpg) | ![Opening scene](docs/screenshots/06-opening-scene.jpg) |
+| The Amano house kitchen | Opening scene |
+| ![LEVEL-5 logo](docs/screenshots/02-level5-logo.jpg) | ![Opening movie](docs/screenshots/04-opening-movie.jpg) |
+| LEVEL-5 logo | Opening movie |
+
+In town with the performance HUD on (F3). The game is a native Windows program: the frame takes about 10 ms of
+work on the CPU and under one core of a 16-core laptop, against the 33 ms the game's 30 frames/s allow; the
+shadows here are our own pass with no graphical improvements applied ("CUSTOM", switched on with F9).
+
+<p align="center">
+  <img src="docs/screenshots/11-hud-in-town.jpg" alt="In town with the performance HUD: frame time, work, GPU, CPU, memory and a frame-time graph" width="820">
+</p>
+
+
+
+## Behind the scenes
+
+- **Translated ahead of time, not interpreted.** Every ARM64 function in the game's `main` and `sdk` modules (73,844
+  functions) becomes C before the game runs ([recomp/](recomp/README.md)); Clang compiles it into one native program.
+- A native runtime ([runtime/](runtime/)) stands in for the Switch: the kernel (threads, memory, synchronisation),
+  system services (filesystem with your RomFS read in place, input, audio, time, saves, applets) and the NVN graphics
+  API on top of Vulkan.
+- The game's own shaders are translated from the NV_gpu_program5 assembly they ship with into GLSL and SPIR-V
+  ([decision 0020](docs/decisions/0020-shaders-from-the-assembly.md)).
+- No emulator code is linked ([decision 0005](docs/decisions/0005-phase1-runtime-strategy.md)). Each instruction form
+  of the recompiler is checked against a real ARM64 CPU (a Raspberry Pi 5).
+- Why things are built this way is written down in [docs/decisions/](docs/decisions/).
 
 ## Building from source
 
