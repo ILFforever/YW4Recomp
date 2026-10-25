@@ -127,4 +127,11 @@ this frame's world-view-projection in rows 8-11, **last frame's** in rows 12-15)
   by texel. Result: **0 texels differ** on every colour and depth target of the G-buffer (schoolyard and town) and
   of the material pass (6 frames), with all our draws and programs. The tool was checked both ways: 0 when both runs
   are the game's, hundreds of thousands when one matrix element is off by 0.01%.
+- **The material pass's main programs are ours** (`material_main.vert/.frag`, the game's `046b2a` + `5eb3b2`, most of
+  the lit pass): normal mapping, the box-corrected reflection, depth-aware upsampling of the half-res shadow and
+  indirect light, the sun's diffuse and GGX-like specular, ambient and reflections from the cube map, fresnel,
+  emissive, fog and sky scattering, and the soft-edge blend with what is behind. Same-frame A/B: 0 texels differ
+  (schoolyard and town, 4 frames each). The one texel that differed on the first try came from leaving out a
+  "times 0" lane: where two neighbours have the same depth the game's value is NaN, and NaN x 0 spreads to the
+  other lane; such lanes are kept.
 - Bones (constants 4 and 5), textures and the other bound state are still the game's.

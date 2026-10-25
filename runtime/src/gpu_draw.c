@@ -108,6 +108,7 @@ static const struct {
     {0x2c5e1e076da5b271ull, ST_FRAG, "gbuffer_plain.frag"},
     {0xb742aa7d4094cd28ull, ST_VERT, "gbuffer_skinned.vert"},
     {0x046b2a15a631058full, ST_VERT, "material_main.vert"},
+    {0x5eb3b2cacbdb9824ull, ST_FRAG, "material_main.frag"},
     {0xb0aa5d810b96a62eull, ST_FRAG, "gbuffer_skinned.frag"},
 };
 
