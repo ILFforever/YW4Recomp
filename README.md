@@ -57,6 +57,23 @@ a locked 30 frames/s. Expect missing effects and crashes in places nobody has re
   of the recompiler is checked against a real ARM64 CPU (a Raspberry Pi 5).
 - Why things are built this way is written down in [docs/decisions/](docs/decisions/).
 
+## Goal: our own renderer
+
+The project's main goal is a renderer of our own for the whole frame, built pass by pass on the game's data
+([decision 0023](docs/decisions/0023-custom-renderer-plan.md)). What it is for:
+
+- **Higher resolution**: render the 3D scene above the game's 1600×900 (sharper on 1080p, 1440p and 4K screens).
+- **Better shadows**: bigger maps and PCSS today; contact shadows and steadier cascades next.
+- **Ultrawide and other aspect ratios**: a wider view of the scene, with the UI laid out correctly.
+- **Smoother frame rates** above the game's 30 frames/s (this also needs the game's timing patched).
+- **Better anti-aliasing** and other effects the Switch had no budget for.
+
+Each replaced pass first has to look exactly like the game's (checked pixel by pixel) before anything is changed.
+Done so far: the shadow pass; the G-buffer and the lit material pass now draw with our own draw calls and our own
+shaders for most surfaces, and match the game's output bit for bit
+([decision 0026](docs/decisions/0026-gbuffer-pass.md)). Still the game's: the choice of what to draw, textures,
+character bones, and the post-processing and UI.
+
 ## Screenshots
 
 All captured from the recompiled build on Windows.
@@ -95,7 +112,7 @@ instanced casters, including props fading in and out and wind-swayed plants; the
 kind of character, a few others).
 
 The shadow pass is the first step, not the end point: the plan is to **replace the game's whole renderer with our
-own**, one pass at a time (see [the goal below](#goal-our-own-renderer)). Replaying the game's draw calls ties every
+own**, one pass at a time (see [the goal above](#goal-our-own-renderer)). Replaying the game's draw calls ties every
 frame to the Switch's choices: its resolution, its 16:9 layout, its shadow map size and filters. A renderer of our
 own draws the same scene from the game's data, so those choices become ours to change.
 
@@ -138,23 +155,6 @@ RTX 4070 Laptop):
 
 **Default: 4096 map with PCSS ×2**: sharp contact shadows and soft, clean canopy shade. For the game's original
 shadows, start with `YW4_SHADOW_RES=1024 YW4_PCSS=0` (or press F8 and F7).
-
-### Goal: our own renderer
-
-The project's main goal is a renderer of our own for the whole frame, built pass by pass on the game's data
-([decision 0023](docs/decisions/0023-custom-renderer-plan.md)). What it is for:
-
-- **Higher resolution**: render the 3D scene above the game's 1600×900 (sharper on 1080p, 1440p and 4K screens).
-- **Better shadows**: bigger maps and PCSS today; contact shadows and steadier cascades next.
-- **Ultrawide and other aspect ratios**: a wider view of the scene, with the UI laid out correctly.
-- **Smoother frame rates** above the game's 30 frames/s (this also needs the game's timing patched).
-- **Better anti-aliasing** and other effects the Switch had no budget for.
-
-Each replaced pass first has to look exactly like the game's (checked pixel by pixel) before anything is changed.
-Done so far: the shadow pass; the G-buffer and the lit material pass now draw with our own draw calls and our own
-shaders for most surfaces, and match the game's output bit for bit
-([decision 0026](docs/decisions/0026-gbuffer-pass.md)). Still the game's: the choice of what to draw, textures,
-character bones, and the post-processing and UI.
 
 **Shadow map size.** The bamboo forest with PCSS off at each size, and 2048 with PCSS ×1 added:
 
