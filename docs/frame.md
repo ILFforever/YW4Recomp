@@ -23,7 +23,7 @@ the task that queues it (main thread).
 | Thread | Work | Queued by |
 |---|---|---|
 | A | **Shadow maps**: 3 cascades, 1024×1024 depth | `yw::CMainEndComponent` vtable slot 13 (`f_5dbe30`) → `f_7ed570` |
-| B | Occlusion boxes for the camera (240×135), ambient cube map (128×128), some passes | `yw::CMainComponent` slot 12 (`f_5d77f0`) |
+| B | Occlusion boxes for the camera (240×135), ambient cube map (128×128), **the G-buffer** (layer kind 2), the screen-space shadow mask | `yw::CMainComponent` slot 12 (`f_5d77f0`) |
 | C | Main view: the named stages below, then UI, then present (`f_95b740`) | the stage tasks below |
 
 ## Shadow maps (thread A)
@@ -198,6 +198,40 @@ Why decode it rather than keep `f_a45890`: in the street the render threads' bus
 translation (`YW4_PROFILE=submit`, percent of all samples; the threads wait the other 84%). A pass drawn from the
 list directly drops the wrapper layer and the translation, roughly 60% of that busy time.
 
+## Main view: the passes (measured 2026-10-25)
+
+Schoolyard, daytime, one frame (~1,000 draws), from `YW4_GPU_TRACE` + `YW4_TRACE_DRAW_CALLERS` (grouped by
+`python -m tools.yw4.mainview`) and `YW4_TRACE_LAYERS`. The drawing function is the one right below the engine's NVN
+wrappers (`f_9749c4`, `f_974bec`) in the call stack.
+
+| # | Target | Draws | What | Drawn by |
+|---|---|---|---|---|
+| 1 | 240×135 depth | ~110 | occlusion boxes, before each cascade | `f_9ab8c0`, `f_9abfc0` |
+| 2 | shadow map, 3 layers | 27 / 84 / 137 | shadow cascades: model renderer, **layer kind 1** | `f_a45890` (our pass, 0024) |
+| 3 | 128×128 | 3 | ambient cube map | `f_7f88e0` |
+| 4 | 1600×900, 3 colour (formats 0x11, 0x25, 0x25) + depth 0x35 | ~200 | **G-buffer**: model renderer, **layer kind 2** (keys 0..25) | `f_a75e90` < `f_a45890` |
+| 5 | 800×450 / 533×300 | ~5 | half-res: depth copy (`f_80d270`, `f_8050d0`), **shadow mask** (`f_7f3e90`, the PCSS shader of 0025), `f_7f4c90` (2 targets) | |
+| 6 | 1600×900, 1 colour (0x3f) + the G-buffer's depth | ~210 | **lit material pass**: the same objects again with their materials, reading the half-res results: model renderer, **layer kind 0, keys 0..2** | `f_a75e90` < `f_a45890` |
+| 7 | 1600×900 and half-res | ~30 | full-screen lighting, fog and effects; a few more model layers (kind 0, other key ranges) and `f_a3dcb0` < `f_a3dbf0` < `f_a45890` (effects) | `f_807980`, `f_80c9e0`, `f_80b810`, `f_7fcd20`, `f_7f3900`, `f_8007d0` |
+| 8 | 400×225 → 200×112 → 120×67 | 6 | bloom chain, then composite | `f_802e40` |
+| 9 | 1600×900, 340×304, 516×460 | ~120 | UI and minimap | `f_9cfec0`, `f_9dfb40`, `f_a8c3f0` |
+| 10 | 1920×1080 | 1 | copy into the window texture | `f_95b740` |
+
+**The scene geometry is drawn twice** (a light pre-pass renderer): once into the G-buffer (kind 2), then, after
+the half-res shadow and light passes, again with full materials (kind 0, keys 0..2). Both go through the same model
+renderer and mesh-draw function as the shadow cascades, so what [the model renderer section](#the-model-renderer-f_a45890)
+says about draw items, objects, matrices, buffers and bones holds for them too.
+
+Layers of one frame (`YW4_TRACE_LAYERS`):
+
+| Kind | Keys | Submeshes | Pass |
+|---|---|---|---|
+| 1 | 0..25 | 29 / 88 / 133 | shadow cascades (thread A) |
+| 2 | 0..25 | 202 | G-buffer (thread B) |
+| 0 | 0..2 | 180 | lit material pass (thread C) |
+| 0 | 2..3, 3..10, 10..16, 16..20, 22..23, 30..38, 60..64 ... | 0-25 each | the named stages below (thread C) |
+| 0 | 0..65535 | 0-9 each, ~40 layers | small special layers (to identify) |
+
 ## Main-view stages (thread C)
 
 Registered by `f_5d8010` in this order, each queueing jobs (mostly `f_a45890` layers plus pass functions in
@@ -223,8 +257,11 @@ UI is drawn by other layer drawers (`f_9f6170`, `f_a88c70`, `f_9cfe60`, `f_9dfb4
 
 ## Open
 
-- Which job draws into which target in the main view (G-buffer, lighting, transparent, post): match the jobs to the
-  GPU passes of an F11 log.
+- ~~Which job draws into which target in the main view~~: measured, see "Main view: the passes". Still open: which
+  key ranges belong to which named stage, and what the ~40 kind-0 layers with keys 0..65535 are.
+- **Materials:** where an object's material keeps its textures and constants for the G-buffer and material passes
+  (`f_974cd0` binds textures from a state at `[device+0x10d0]+0x780`; who fills it is not found). The main blocker
+  for drawing these passes ourselves.
 - The draw list and draw objects `f_a45890` walks: per object the world matrix, mesh buffers, bones, material,
   and the "casts a shadow" flag. This is the main data every replaced mesh pass needs (next step).
 - The three unused shadow blocks in `f_7ed570`.

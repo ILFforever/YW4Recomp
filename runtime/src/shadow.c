@@ -970,9 +970,37 @@ void shadow_toggle(void) {
             __atomic_exchange_n(&draws_since_toggle, 0, __ATOMIC_RELAXED));
 }
 
+/* ---- YW4_TRACE_LAYERS=<frame>: every layer the model renderer draws while presented frames
+ * <frame> to <frame>+2 are current, one line each when the next layer starts on that thread: its
+ * kind (+8), key range (+0xa, +0xc), mask (+0x10) and how many submeshes it drew. Maps layer kinds
+ * to the GPU passes (the main view, docs/frame.md). */
+extern uint64_t yw4_frames_presented;  /* dispatch.c */
+static _Thread_local uint64_t trace_item;
+static _Thread_local long trace_draws;
+
+static int trace_layers_on(void) {
+    static int from = -2;
+    if (from == -2) {
+        const char *e = getenv("YW4_TRACE_LAYERS");
+        from = e && *e ? atoi(e) : -1;
+    }
+    uint64_t f = __atomic_load_n(&yw4_frames_presented, __ATOMIC_RELAXED);
+    return from >= 0 && f >= (uint64_t)from && f < (uint64_t)from + 3;
+}
+
+static void trace_layer_start(const CPUState *ctx) {
+    if (trace_item)
+        fprintf(stderr, "yw4: layer t%04x item %#" PRIx64 " kind %u keys %u..%u mask %#x: %ld submeshes\n",
+                (unsigned)((uintptr_t)ctx >> 4 & 0xFFFF), trace_item, U8(trace_item + 8), U16(trace_item + 0xa),
+                U16(trace_item + 0xc), U8(trace_item + 0x10), trace_draws);
+    trace_item = trace_layers_on() ? ctx->x[2] : 0;
+    trace_draws = 0;
+}
+
 /* ---- hooks */
 
 int yw4_hook_model_renderer(CPUState *ctx) {
+    trace_layer_start(ctx);
     if (__atomic_load_n(&mode, __ATOMIC_ACQUIRE) < 0) init_mode();
     /* A cascade's job list can draw more than one shadow layer (cutscenes: two per cascade) before
      * the cascade-end job: the next layer of the same cascade ends the previous one, which queues its
@@ -1007,6 +1035,7 @@ int yw4_hook_model_renderer(CPUState *ctx) {
 /* main+0xa75e90 (device, geometry, submesh): the model renderer's submesh draw. Noted (the
  * game's draw that follows is learned from); in native mode replaced by ours when we can. */
 int yw4_hook_submesh_draw(CPUState *ctx) {
+    trace_draws++;
     if (!lay || !lay->active || lay->ndrawn >= MAX_CASTERS) return 0;
     static uint64_t base;
     if (!base)

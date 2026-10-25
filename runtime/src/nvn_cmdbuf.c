@@ -147,19 +147,21 @@ static void trace_draw_caller(const CPUState *c) {
     static int on = -1;
     if (on < 0) on = getenv("YW4_TRACE_DRAW_CALLERS") && *getenv("YW4_TRACE_DRAW_CALLERS") != '0';
     if (!on) return;
-    enum { DEPTH = 10, SEEN = 4096 };
+    enum { DEPTH = 14, SEEN = 4096 };
     static uint64_t seen[SEEN];
     static int nseen;
     uint64_t st[DEPTH];
     int n = yw4_call_stack(c, st, DEPTH);
     const NvnCmdBuf *cb = cb_of(A(0));
+    const NvnProgram *p = cb->program;
+    /* one line per call stack, target and program: the mesh passes draw many programs from one stack */
     uint64_t h = 0xCBF29CE484222325ull;
     for (int i = 0; i < n; i++) h = (h ^ st[i]) * 0x100000001B3ull;
     h = (h ^ ((uint64_t)cb->target_w << 32 | cb->target_h)) * 0x100000001B3ull;
+    if (p) h = ((h ^ p->stages[0].key) * 0x100000001B3ull ^ p->stages[1].key) * 0x100000001B3ull;
     for (int i = 0; i < nseen; i++)
         if (seen[i] == h) return;
     if (nseen < SEEN) seen[nseen++] = h;
-    const NvnProgram *p = cb->program;
     char where[48];
     fprintf(stderr, "yw4: draw caller: vs %016llx fs %016llx target %ux%u (%u colour, %s depth)\n",
             p ? (unsigned long long)p->stages[0].key : 0ull, p ? (unsigned long long)p->stages[1].key : 0ull,
