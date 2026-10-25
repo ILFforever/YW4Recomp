@@ -169,7 +169,7 @@ character bones, and the post-processing and UI.
 | PCSS off | PCSS ×1 |
 |---|---|
 | ![PCSS off: hard, speckled leaf shadows](docs/screenshots/16-pcss-off.jpg) | ![PCSS x1](docs/screenshots/17-pcss-x1.jpg) |
-| **PCSS ×2 (default)** | **PCSS ×4** |
+| **PCSS ×2 (recommended)** | **PCSS ×4** |
 | ![PCSS x2](docs/screenshots/18-pcss-x2.jpg) | ![PCSS x4](docs/screenshots/19-pcss-x4.jpg) |
 
 ## Building from source
