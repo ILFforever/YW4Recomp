@@ -1127,7 +1127,7 @@ int yw4_hook_submesh_draw(CPUState *ctx) {
              * from the effects of skipping the game's draw */
             static int both = -1;
             if (both < 0) both = env_on("YW4_SHADOWS_BOTH");
-            if (!both) return 1;  /* the game's draw is skipped */
+            if (!both) return gbuffer_disarm(), 1;  /* the game's draw is skipped */
         }
     }
     k->pending_copies_ok = pending_copies(k->device, &k->pending_copies, &k->pending_count);

@@ -37,7 +37,7 @@ extern uint64_t yw4_frames_presented;  /* dispatch.c */
 #define U32(a) (*(const uint32_t *)(uintptr_t)(a))
 #define U64(a) (*(const uint64_t *)(uintptr_t)(a))
 
-enum { LAYER_MATERIAL = 0, LAYER_GBUFFER = 2 };
+enum { LAYER_MATERIAL = 0, LAYER_SHADOW = 1, LAYER_GBUFFER = 2 };
 
 /* The lit material pass (docs/frame.md "Main view: the passes"): the same objects again with full
  * materials, layers of kind 0 with sort keys 0..2 (render thread C). Our draws go there too, in the
@@ -54,6 +54,13 @@ static int stage_layer(uint64_t item) {
     static int on = -1;
     if (on < 0) on = !getenv("YW4_STAGES") || atoi(getenv("YW4_STAGES"));
     return on && U8(item + 8) == LAYER_MATERIAL && !material_layer(item);
+}
+/* The shadow cascades' layers (kind 1): the draws the shadow pass (shadow.c) leaves to the game
+ * are ours here, with the game's program and the cascade's camera (YW4_SHADOW_PROGRAMS=0: not). */
+static int shadow_layer(uint64_t item) {
+    static int on = -1;
+    if (on < 0) on = !getenv("YW4_SHADOW_PROGRAMS") || atoi(getenv("YW4_SHADOW_PROGRAMS"));
+    return on && U8(item + 8) == LAYER_SHADOW;
 }
 static _Thread_local const char *pass_name = "gbuffer";  /* this thread's pass, for the summaries */
 enum { MODE_GAME, MODE_CHECK, MODE_PROGRAMS, MODE_NATIVE };
@@ -276,7 +283,9 @@ void gbuffer_layer_start(const CPUState *ctx) {
     uint64_t cmd = U64(ctx->x[0] + 0x10d0) + 0xd8;  /* the command buffer this thread records into */
     if (ab_open.cmd == cmd) ab_close(ctx);
     const char *name = !item || mode == MODE_GAME ? NULL
-                       : U8(item + 8) == LAYER_GBUFFER ? "gbuffer" : material_layer(item) ? "material" : NULL;
+                       : U8(item + 8) == LAYER_GBUFFER ? "gbuffer" : material_layer(item) ? "material"
+                       : shadow_layer(item)          ? "shadow"
+                                                     : NULL;
     if (name && gpu_ab_wanted(name) && !ab_open.cmd) {
         char m[17] = "b";
         strcpy(m + 1, name);
@@ -284,16 +293,18 @@ void gbuffer_layer_start(const CPUState *ctx) {
         strcpy(ab_open.name, name);
         ab_open.cmd = cmd;
     }
-    cur.active = mode != MODE_GAME && item && (U8(item + 8) == LAYER_GBUFFER || material_layer(item) || stage_layer(item));
+    cur.active = mode != MODE_GAME && item &&
+                 (U8(item + 8) == LAYER_GBUFFER || material_layer(item) || stage_layer(item) || shadow_layer(item));
     if (!cur.active) return;
-    pass_name = U8(item + 8) == LAYER_GBUFFER ? "gbuffer" : material_layer(item) ? "material" : "stages";
+    pass_name = U8(item + 8) == LAYER_GBUFFER ? "gbuffer" : material_layer(item) ? "material"
+                : shadow_layer(item)          ? "shadow"  : "stages";
     cur.device = ctx->x[0], cur.list = ctx->x[1];
     /* the camera's projection and view in the render state (the shadow cascades' jobs put theirs
      * at the same offsets on their own thread) */
     Mat4 proj = mat4_load(cur.device + 0x280), view = mat4_load(cur.device + 0x2c0);
     cur.vp = mat4_mul(&proj, &view);
     uint64_t frame = __atomic_load_n(&yw4_frames_presented, __ATOMIC_RELAXED);
-    if (frame != this_vp_frame) prev_vp = this_vp, this_vp = cur.vp, this_vp_frame = frame;
+    if (frame != this_vp_frame && !shadow_layer(item)) prev_vp = this_vp, this_vp = cur.vp, this_vp_frame = frame;
     st.layers++;
 }
 
@@ -339,6 +350,8 @@ static int material_constants(uint64_t item, uint8_t out[0x80]) {
     memcpy(out, (const void *)(uintptr_t)src, 16 * n);
     return 1;
 }
+
+void gbuffer_disarm(void) { cur.armed = 0; }
 
 int gbuffer_hook_world(const CPUState *ctx, float out[12]) {
     uint64_t rw = U64(ctx->sp + 0x30);

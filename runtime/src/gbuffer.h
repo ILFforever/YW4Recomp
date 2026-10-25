@@ -11,6 +11,8 @@
 void gbuffer_layer_start(const CPUState *ctx);
 /* From the submesh-draw hook (shadow.c), before every submesh draw. */
 void gbuffer_submesh(const CPUState *ctx);
+/* The shadow pass drew the submesh noted last itself (the game's draw is skipped): forget it. */
+void gbuffer_disarm(void);
 /* The renderer's world for the submesh about to be drawn ([sp+0x30]+0x40 at the submesh-draw
  * hook, 3 rows of 4): 1 if found. The shadow pass's too. */
 int gbuffer_hook_world(const CPUState *ctx, float out[12]);

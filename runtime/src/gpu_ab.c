@@ -1,4 +1,4 @@
-/* Same-frame A/B of one of our passes (YW4_AB_AT=<GPU frame>[,...], YW4_AB_PASS=gbuffer|material):
+/* Same-frame A/B of one of our passes (YW4_AB_AT=<GPU frame>[,...], YW4_AB_PASS=gbuffer|material|shadow):
  * in those frames the commands of the pass's layer are run twice from the same starting images,
  * once with our draws and once with the game's, and their colour and depth targets are compared
  * texel by texel. Nothing moves between the two, unlike alternating frames (YW4_GBUFFER_ALTERNATE),
@@ -115,6 +115,14 @@ static void add_target(VkCommandBuffer cb, NvnTexture *tex, int depth) {
     for (int i = 0; i < ab.n; i++)
         if (ab.t[i].g == g) return;
     if (g->depth != 1) return;  /* 2D (array) targets only */
+    /* three copies of each target: the 4096 shadow maps (3 layers, 200 MB a copy) were too much
+     * (the game died comparing them); YW4_SHADOW_RES=1024 compares the game's size */
+    uint64_t bytes = (uint64_t)g->width * g->height * g->layers * (depth ? 4 : texel_bytes(g->format));
+    if (bytes > (64u << 20)) {
+        fprintf(stderr, "yw4: ab: a %ux%u target with %u layers is too big to compare (YW4_SHADOW_RES=1024 for the"
+                " shadow maps)\n", g->width, g->height, g->layers);
+        return;
+    }
     Target *t = &ab.t[ab.n++];
     memset(t, 0, sizeof *t);
     t->g = g, t->depth = depth;
