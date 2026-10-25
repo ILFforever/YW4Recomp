@@ -36,6 +36,12 @@ int gbuffer_take_draw(CPUState *c, const NvnCmdBuf *cb, int indexed);
 /* CMD_NATIVE callback (gpu_draw.c): copies the bound colour targets in the frames of
  * YW4_CAPTURE_LAYER_AT; `data` is a name. */
 void gpu_capture_layer(void *vk_cb, void *gpu_state, const void *data, uint32_t size);
+/* Same-frame A/B (gpu_ab.c, YW4_AB_AT): its marker's CMD_NATIVE function ('b' or 'e', then the
+ * pass's name), whether the pass is the one compared, and the second run (the game's draws). */
+void gpu_ab_native(void *vk_cb, void *gpu_state, const void *data, uint32_t size);
+int gpu_ab_wanted(const char *pass);
+void gbuffer_end_recording(const CPUState *ctx, uint64_t cmd);  /* nvn_cmdbuf.c: EndRecording(cmd) */
+extern int gpu_ab_game;
 /* CMD_NATIVE callback (gpu_draw.c): `data` holds a GBufferDraw. */
 void gpu_gbuffer_draw(void *vk_cb, void *gpu_state, const void *data, uint32_t size);
 

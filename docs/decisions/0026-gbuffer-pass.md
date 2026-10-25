@@ -119,4 +119,12 @@ this frame's world-view-projection in rows 8-11, **last frame's** in rows 12-15)
   The game still sets up every draw's state before ours; only skipping its submesh draw (the takeover) removes that,
   and the render threads wait most of the time anyway (frame.md: 84%), so the takeover is for what it enables, not
   for speed.
+- **Our programs for the G-buffer family**: the five fragment programs behind `bc358b` are one program with
+  switches (`gbuffer_frag.glsl`), and the characters' pair (`b742aa` + `b0aa5d`: up to 8 bones, last frame's bones
+  for motion, the dithered fade, the rim term) is written out too (`gbuffer_skinned.vert/.frag`).
+- **Same-frame A/B** (`runtime/src/gpu_ab.c`, `YW4_AB_AT`): alternating frames can't see faults on moving things,
+  so the pass's commands are run twice in one frame, ours and the game's, from the same images, and compared texel
+  by texel. Result: **0 texels differ** on every colour and depth target of the G-buffer (schoolyard and town) and
+  of the material pass (6 frames), with all our draws and programs. The tool was checked both ways: 0 when both runs
+  are the game's, hundreds of thousands when one matrix element is off by 0.01%.
 - Bones (constants 4 and 5), textures and the other bound state are still the game's.

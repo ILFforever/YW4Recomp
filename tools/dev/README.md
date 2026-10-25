@@ -43,6 +43,17 @@ Things that move still differ between frames, so compare with an image the chang
 the change is exact when its count is no larger. Drive such tests by frame number (an environment variable read
 by the runtime), not by replay ticks: dumps are slow and the replay runs on in real time.
 
+**Compare in the same frame when things move.** Alternating frames can't see a fault on a moving object (a
+running character differs between frames anyway). `YW4_AB_AT=<frames>` runs the pass twice in those frames,
+ours and the game's, from the same starting images, and compares every target texel by texel:
+
+    python -m tools.dev.run --save work/testsaves/save_school --seconds 90 YW4_GBUFFER=native \
+        YW4_AB_AT=1800,1850 YW4_AB_PASS=material
+
+Each `yw4: ab:` line must say 0 texels differ. Check the tool before trusting a 0: `YW4_GBUFFER=check` (both
+runs the game's) gives 0, and a deliberately wrong value (one matrix element x 1.0001) gives hundreds of
+thousands. 24-bit depth is compared without its undefined top 8 bits.
+
 **Time shader builds cold.** A shader change that is cheap at run time can still be slow to *compile*: the
 driver compiles pipelines when a scene first draws them, so the game freezes on loading (the PCSS helper in all
 ~200 shadow shaders: up to 25 s per shader, decision 0025). `pipebench` builds a shader's pipeline with a random

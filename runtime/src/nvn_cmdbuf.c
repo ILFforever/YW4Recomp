@@ -113,6 +113,7 @@ NVN(nvnCommandBufferBeginRecording) {
     cb->start = cb->mem + cb->used - sizeof(CmdRec);
 }
 NVN(nvnCommandBufferEndRecording) {
+    gbuffer_end_recording(c, A(0));  /* closes a same-frame A/B range (gpu_ab.c) */
     NvnCmdBuf *cb = cb_of(A(0));
     rec(c, cb, CMD_END, 0);
     cb->recording = 0;

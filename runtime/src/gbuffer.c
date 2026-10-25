@@ -165,6 +165,7 @@ int gbuffer_native(void) {
 /* YW4_GBUFFER_ALTERNATE=<frame>: for 16 frames from that GPU frame, odd frames ours and even
  * frames the game's, to compare the two in one run (a frame dumped as F was drawn as F-1). */
 int gbuffer_native_frame(uint64_t frame) {
+    if (gpu_ab_game) return 0;  /* the same-frame A/B's second run */
     static long long alt = -2;
     if (alt == -2) alt = getenv("YW4_GBUFFER_ALTERNATE") ? atoll(getenv("YW4_GBUFFER_ALTERNATE")) : -1;
     if (alt >= 0 && frame >= (uint64_t)alt && frame < (uint64_t)alt + 16) return (int)(frame & 1);
@@ -233,6 +234,25 @@ static _Thread_local struct { long n, exact, ib, item, mat_n, mat_ok[2]; } lay_s
 /* game: the game's bound vertex constants 2, for the parts we copy (PART_GAME) */
 static void object_constants(const Layout *l, const float *game, float out[GBUFFER_OBJECT_FLOATS]);
 
+/* Same-frame A/B (gpu_ab.c): the compared pass's layer, open in this command buffer until the next
+ * layer starts there or the game ends the buffer's recording (thread B's G-buffer layer is the
+ * last layer of its list). */
+static struct {
+    uint64_t cmd;
+    char name[16];
+} ab_open;
+
+static void ab_close(const CPUState *ctx) {
+    char m[17] = "e";
+    memcpy(m + 1, ab_open.name, 16);
+    nvn_record_native(ctx, ab_open.cmd, gpu_ab_native, m, 1 + (uint32_t)strlen(ab_open.name));
+    ab_open.cmd = 0;
+}
+
+void gbuffer_end_recording(const CPUState *ctx, uint64_t cmd) {
+    if (cmd && ab_open.cmd == cmd) ab_close(ctx);
+}
+
 void gbuffer_layer_start(const CPUState *ctx) {
     if (__atomic_load_n(&mode, __ATOMIC_ACQUIRE) < 0) init_mode();
     uint64_t item = ctx->x[2];
@@ -242,6 +262,18 @@ void gbuffer_layer_start(const CPUState *ctx) {
     if (after_material && getenv("YW4_CAPTURE_LAYER_AT"))
         nvn_record_native(ctx, U64(ctx->x[0] + 0x10d0) + 0xd8, gpu_capture_layer, "material", 8);
     after_material = item && material_layer(item) && mode != MODE_GAME;
+    /* same-frame A/B (gpu_ab.c): the compared pass's layer ends here, or starts */
+    uint64_t cmd = U64(ctx->x[0] + 0x10d0) + 0xd8;  /* the command buffer this thread records into */
+    if (ab_open.cmd == cmd) ab_close(ctx);
+    const char *name = !item || mode == MODE_GAME ? NULL
+                       : U8(item + 8) == LAYER_GBUFFER ? "gbuffer" : material_layer(item) ? "material" : NULL;
+    if (name && gpu_ab_wanted(name) && !ab_open.cmd) {
+        char m[17] = "b";
+        strcpy(m + 1, name);
+        nvn_record_native(ctx, cmd, gpu_ab_native, m, 1 + (uint32_t)strlen(name));
+        strcpy(ab_open.name, name);
+        ab_open.cmd = cmd;
+    }
     cur.active = mode != MODE_GAME && item && (U8(item + 8) == LAYER_GBUFFER || material_layer(item) || stage_layer(item));
     if (!cur.active) return;
     pass_name = U8(item + 8) == LAYER_GBUFFER ? "gbuffer" : material_layer(item) ? "material" : "stages";

@@ -23,6 +23,7 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "gbuffer.h"
 #include "gpu_internal.h"
 #include "host.h"
 #include "tegra.h"
@@ -926,6 +927,8 @@ void gpu_execute(uint64_t handle) {
     static int state_ready;
     if (!state_ready) gpu_state_init(&s), state_ready = 1;
     uint64_t at = handle;
+    static uint64_t exec;  /* which run of a list this is (gpu_ab.c) */
+    exec++;
     for (int n = 0;; n++) {
         const CmdRec *r = (const CmdRec *)(uintptr_t)at;
         if (r->op >= CMD_COUNT || r->size < sizeof(CmdRec) || r->size & 7 || n > 10000000) {
@@ -985,6 +988,7 @@ void gpu_execute(uint64_t handle) {
             render_targets_fix(&s.rt);  /* point at our own copies of the textures */
             s.ncolor = (int)r->x[0];
             s.targets_noted = 0;  /* noted at the first draw, with the state the game draws with */
+            gpu_ab_targets(cb, &s);
             break;
         case CMD_SET_VIEWPORTS:  /* (x, y, w, h) */
             for (int i = 0; i < 4; i++) s.viewport[i] = (int32_t)r->x[i];
@@ -1058,6 +1062,10 @@ void gpu_execute(uint64_t handle) {
             full_barrier(cb);
             break;
         case CMD_NATIVE:  /* a pass of our own renderer (decision 0024) */
+            if ((NvnNativePass)(uintptr_t)r->x[0] == gpu_ab_native) {  /* same-frame A/B: may run a range again */
+                if (gpu_ab_marker(cb, &s, r->extra, (uint32_t)r->x[1], exec, at + r->size, &at)) continue;
+                break;
+            }
             ((NvnNativePass)(uintptr_t)r->x[0])(cb, &s, r->extra, (uint32_t)r->x[1]);
             break;
         case CMD_REPORT_COUNTER: {  /* (counter, address): NVNcounterData {u64 value, u64 GPU ticks at 614.4 MHz} */
@@ -1245,6 +1253,10 @@ void gpu_present(NvnTexture *t, uint64_t frame, const int crop[4]) {
     if (gpu_capture_pending()) {
         gpu_wait(gpu_submitted(), UINT64_MAX);
         gpu_capture_flush();
+    }
+    if (gpu_ab_pending()) {
+        gpu_wait(gpu_submitted(), UINT64_MAX);
+        gpu_ab_flush();
     }
     dump_images(present_count);
     if (getenv("YW4_COMPUTE_TRACE")) {

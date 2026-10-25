@@ -11,6 +11,14 @@ _Noreturn void gpu_fatal(const char *what, VkResult r);
 #define CHECK(x) do { VkResult r_ = (x); if (r_ != VK_SUCCESS) gpu_fatal(#x, r_); } while (0)
 _Noreturn void gpu_stop(const char *fmt, ...);  /* something the draw path can't do yet */
 
+/* ---- gpu_ab.c: same-frame A/B of a pass (YW4_AB_AT) */
+typedef struct GpuState GpuState;
+int gpu_ab_marker(VkCommandBuffer cb, GpuState *s, const void *data, uint32_t size, uint64_t exec, uint64_t next,
+                  uint64_t *resume);
+void gpu_ab_targets(VkCommandBuffer cb, GpuState *s);
+int gpu_ab_pending(void);
+void gpu_ab_flush(void);
+
 /* ---- gpu.c */
 
 void full_barrier(VkCommandBuffer cb);
@@ -77,7 +85,7 @@ typedef struct {
 
 enum { STAGES = 6, UBOS = 16, SSBOS = 16, TEXTURES = 48 };
 
-typedef struct {
+typedef struct GpuState {
     RenderTargets rt;
     int ncolor;
     int rendering;  /* inside vkCmdBeginRendering for rt */
