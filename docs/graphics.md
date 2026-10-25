@@ -11,7 +11,7 @@ instanced casters, including props fading in and out and wind-swayed plants; the
 kind of character, a few others).
 
 The shadow pass is the first step, not the end point: the plan is to **replace the game's whole renderer with our
-own**, one pass at a time ([the goal](../README.md#goal-our-own-renderer)). Replaying the game's draw calls ties
+own**, one pass at a time ([the goals](../README.md#our-own-renderer)). Replaying the game's draw calls ties
 every frame to the Switch's choices: its resolution, its 16:9 layout, its shadow map size and filters. A renderer of
 our own draws the same scene from the game's data, so those choices become ours to change.
 

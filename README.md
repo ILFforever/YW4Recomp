@@ -44,25 +44,29 @@ a locked 30 frames/s. Expect missing effects and crashes in places nobody has re
 - How it got here, step by step: [docs/progress.md](docs/progress.md)
 - What is known to be missing or wrong: [docs/known-issues.md](docs/known-issues.md)
 
-## Goal: our own renderer
-
-The project's main goal is a renderer of our own for the whole frame, built pass by pass on the game's data
-([decision 0023](docs/decisions/0023-custom-renderer-plan.md)). Replaying the game's draw calls ties every frame to
-the Switch's choices: its resolution, its 16:9 layout, its shadow settings. A renderer of our own draws the same
-scene from the game's data, so those choices become ours to change. Each replaced pass first has to look exactly
-like the game's (checked pixel by pixel) before anything is changed.
-
-What it is for:
+## Goals
 
 | | Goal | Where it stands |
 |---|---|---|
+| ✅ | **Native performance** | The game runs as a native Windows program: about 10 ms of CPU work per frame against the 33 ms its 30 frames/s allow, under one core |
+| 🚧 | **Our own renderer** | Replace the game's renderer pass by pass, so the improvements below become possible (see below) |
 | 🚧 | **Better shadows** | Bigger shadow maps and PCSS soft shadows done; contact shadows and steadier cascades next |
 | ⬜ | **Higher resolution** | Render the 3D scene above the game's 1600×900, sharper on 1080p, 1440p and 4K screens |
 | ⬜ | **Ultrawide and other aspect ratios** | A wider view of the scene, with the UI laid out correctly |
-| ⬜ | **Smoother frame rates** | Above the game's 30 frames/s; also needs the game's timing patched |
+| ⬜ | **Higher frame rates** | Above the game's 30 frames/s; also needs the game's timing patched |
 | ⬜ | **Better anti-aliasing** | And other effects the Switch had no budget for |
+| ⬜ | **Mod support** | Load replaced game files from a mod folder without touching your dump (first use: the English translation mod) |
+| ⬜ | **Input remapping** | Keyboard, mouse and controller bindings of your choice |
+| ⬜ | **Linux** | The runtime is written to be portable; not built or tested there yet |
 
-The renderer itself, pass by pass:
+✅ done · 🚧 in progress · ⬜ planned
+
+### Our own renderer
+
+Replaying the game's draw calls ties every frame to the Switch's choices: its resolution, its 16:9 layout, its
+shadow settings. A renderer of our own draws the same scene from the game's data, so those choices become ours to
+change ([decision 0023](docs/decisions/0023-custom-renderer-plan.md)). Each replaced pass first has to look exactly
+like the game's (checked pixel by pixel) before anything is changed.
 
 | | Pass | Where it stands |
 |---|---|---|
@@ -72,8 +76,6 @@ The renderer itself, pass by pass:
 | ⬜ | Post-processing, UI | The game's |
 
 Still the game's everywhere: the choice of what to draw, textures and character bones.
-
-✅ done · 🚧 in progress · ⬜ planned
 
 ## How it works
 
