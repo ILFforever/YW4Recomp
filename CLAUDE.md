@@ -55,6 +55,13 @@ Goal: understand what we're dealing with before writing a recompiler.
   - Enhancements unlocked by owning the renderer: internal resolution scaling, widescreen/ultrawide with correct UI layout, stable 60fps+ (requires patching delta-time game logic), better shadows/AA.
 - **Phase 5: Quality-of-life.** LayeredFS mod loading (translation mod), input remapping, Linux packaging, benchmark comparison against `docs/baseline.md`.
 
+## Where to look before testing or changing the renderer
+- `docs/debugging.md`: every environment variable and key the runtime reads.
+- `tools/dev/README.md`: the test tools (repeatable runs from a save copy, A/B comparisons within one run, cold
+  shader-build timing) and the methods and pitfalls that worked.
+- `docs/frame.md`: how the engine builds a frame (passes, layer kinds, draw items, materials); the decision records
+  0024 (shadow pass), 0025 (PCSS), 0026 (G-buffer pass) for what is ours so far.
+
 ## How to work with Dean
 - He prefers practical, direct answers and will push back if something's off.
 - Explain the "why" for anything non-obvious. He wants to be able to explain every subsystem himself.

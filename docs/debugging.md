@@ -1,6 +1,7 @@
 # Run options and debugging
 
-Environment variables and keys read by the runtime. The game runs fine with none of them set.
+Environment variables and keys read by the runtime. The game runs fine with none of them set. Tools that run the
+game with them and compare results: [tools/dev](../tools/dev/README.md).
 
 ## Everyday options
 
