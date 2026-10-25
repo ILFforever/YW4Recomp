@@ -10,7 +10,7 @@ This is also a learning project. The owner (Dean, computer engineering student w
 2. All paths to user-supplied files come from a gitignored local config (`config.local.toml`). Never hardcode them.
 3. Version lock: we target exactly one build. Identify it by **SHA-256 of the decompressed main NSO**. Tools must refuse to run on a mismatched binary with a clear error. Store only hashes in the repo.
 4. Never write dumping, key-extraction, or console-modding instructions into the repo or docs. Docs simply say "provide your own dump of version X."
-5. Licensing: if we reuse code from an emulator (Eden, Citron, Suyu and other yuzu forks are GPL; Ryujinx/Ryubing is reportedly MIT, so verify), the project's license may change. Flag this **before** copying any emulator code and record the decision. Per decision 0005 we currently link no emulator code.
+5. Licensing: the project is **MIT** (decision 0027). GPL code (Eden, Citron, Suyu and other yuzu forks) cannot be copied in without relicensing; MIT-compatible code (Ryujinx/Ryubing is reportedly MIT, so verify) can, with its notice kept. Flag this **before** copying any emulator code and record the decision. Per decision 0005 we currently link no emulator code.
 6. Small, reviewable commits. Ask before large refactors or new dependencies.
 
 ## Target facts (fill in during Phase 0)

@@ -193,3 +193,8 @@ Runtime options, capture keys, input replay and the frame-inspection tools are i
 - **[SDL3](https://www.libsdl.org/)** and the **[Vulkan](https://www.vulkan.org/)** headers.
 - **Eden** (a Switch emulator) - used only as a visual and performance reference; none of its code is used.
 - **LEVEL-5** for Yo-kai Watch 4. This project is not affiliated with or endorsed by LEVEL-5 or Nintendo.
+
+## License
+
+[MIT](LICENSE), for the code and docs in this repository only: not the game, its files, or anything built from
+your copy of it. Third-party code keeps its own license (`third_party/musl`: MIT).
