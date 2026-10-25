@@ -8,6 +8,11 @@ What is known to be missing or wrong, roughly in the order it is likely to matte
 - **PCSS (F7) only reaches what the shadow mask covers.** It is in the game's screen-space shadow mask shader, which
   shadows everything drawn into the G-buffer. Objects the game draws forward (6 other shadow shaders seen so far) keep
   the game's filter. Its strengths are tuned by eye in the town and the bamboo forest only.
+- **To do: contact shadows.** Small gaps where things touch the ground (shoes, bench legs, props against walls)
+  are thinner than a shadow-map texel, so they get no shadow. A screen-space version in the game's shadow mask shader
+  was tried and removed (2026-10-25): that pass only has half-resolution depth, so it found no real contact gaps and
+  drew a ring of dots around character outlines, even under Whisper floating in the air. Redo it in our own 3D
+  renderer with full-resolution depth ([decision 0025](decisions/0025-pcss-soft-shadows.md)).
 - **Shadow strength not yet checked against Eden** after the ambient-light fix; indoor shadows may still be a little
   stronger.
 - **Occlusion queries always report 0 samples.** The game issues them in pairs from the house onward; answering

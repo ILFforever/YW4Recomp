@@ -68,3 +68,9 @@ G-buffer. The other 6 shadow forward-drawn objects.
 - Any slow pipeline build is now logged (`pipeline took N ms`), so a shader that stalls a scene shows up at once.
 - Cold starts still build every *other* pipeline when first used (~60-75 ms each), as before this change. Shipping a
   list of pipeline states and building them all at start-up would remove that too; not done yet.
+- **Screen-space contact shadows were tried in the same shader and removed** (to do, known-issues.md): a short ray
+  march toward the sun through the mask pass's depth buffer. That buffer is half resolution, so the real contact
+  gaps (thinner than one of its pixels) were never found, and the mixed depths at character outlines read as
+  blockers: a ring of dark dots around every character, including Whisper, who floats. A random start per pixel
+  added more dots (the game has no temporal blur to hide them). Worth redoing in our own renderer, with
+  full-resolution depth and an edge-aware filter.
