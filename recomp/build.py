@@ -80,9 +80,11 @@ def native_shaders(cfg: config.Config) -> bool:
     out.mkdir(parents=True, exist_ok=True)
     exe = shader.glslang(cfg)
     srcs = sorted([*(RUNTIME / "shaders").glob("*.vert"), *(RUNTIME / "shaders").glob("*.frag")])
+    # shared code the programs #include (*.glsl): a change rebuilds them all
+    newest_include = max((p.stat().st_mtime for p in (RUNTIME / "shaders").glob("*.glsl")), default=0)
     for src in srcs:
         spv = out / (src.name + ".spv")
-        if spv.exists() and spv.stat().st_mtime >= src.stat().st_mtime:
+        if spv.exists() and spv.stat().st_mtime >= max(src.stat().st_mtime, newest_include):
             continue
         if not exe:
             print(f"warning: no glslang ([tools] glslang): {src.name} not compiled", file=sys.stderr)

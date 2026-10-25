@@ -102,6 +102,10 @@ static const struct {
 } replacements[] = {
     {0xbc358b88a500029full, ST_VERT, "gbuffer_main.vert"},
     {0xa93492ef0b558e21ull, ST_FRAG, "gbuffer_main.frag"},
+    {0x01fd748a298cf8b6ull, ST_FRAG, "gbuffer_main_cutout.frag"},
+    {0x53ce6660dbaa7332ull, ST_FRAG, "gbuffer_gloss.frag"},
+    {0xca3b58d6b4fb04f7ull, ST_FRAG, "gbuffer_gloss_cutout.frag"},
+    {0x2c5e1e076da5b271ull, ST_FRAG, "gbuffer_plain.frag"},
 };
 
 static VkShaderModule replacement(uint64_t key, int stage) {
