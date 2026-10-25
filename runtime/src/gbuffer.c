@@ -10,6 +10,16 @@
  * draw the game then records: its vertex and index buffers and vertex constants 2 (the object's
  * world in rows 0-2, this frame's projection x view x world in rows 8-11, last frame's in rows
  * 12-15). A summary goes to the log every 300 frames.
+ *
+ * Step 2a, YW4_GBUFFER=programs: our readable programs (runtime/shaders/gbuffer_main.*) in the
+ * game's own draws (gpu_draw.c swaps them in).
+ *
+ * Step 2b, YW4_GBUFFER=native: also our own draw. When the game records the DrawElements of a
+ * G-buffer submesh drawn with the main programs, we record ours in its place (gbuffer_take_draw):
+ * the vertex and index buffers from the submesh, vertex constants 2 computed here from the
+ * renderer's world and the camera. Material constants, textures, vertex formats and the targets
+ * stay what the game bound before its draw. A draw whose buffers are not the ones the game was
+ * about to draw stays the game's.
  */
 #include <inttypes.h>
 #include <stdio.h>
@@ -27,16 +37,21 @@ extern uint64_t yw4_frames_presented;  /* dispatch.c */
 #define U64(a) (*(const uint64_t *)(uintptr_t)(a))
 
 enum { LAYER_GBUFFER = 2 };
-enum { MODE_GAME, MODE_CHECK, MODE_NATIVE };
+enum { MODE_GAME, MODE_CHECK, MODE_PROGRAMS, MODE_NATIVE };
 static int mode = -1;
 int gbuffer_checking;
 
-/* The G-buffer's main vertex program (half the draws in the schoolyard). */
+/* The G-buffer's main programs (half the draws in the schoolyard). */
 #define GBUFFER_VS 0xbc358b88a500029full
+#define GBUFFER_FS 0xa93492ef0b558e21ull
 
 static void init_mode(void) {
     const char *e = getenv("YW4_GBUFFER");
-    int m = e && !strcmp(e, "check") ? MODE_CHECK : e && !strcmp(e, "native") ? MODE_NATIVE : MODE_GAME;
+    int m = !e                        ? MODE_GAME
+            : !strcmp(e, "check")    ? MODE_CHECK
+            : !strcmp(e, "programs") ? MODE_PROGRAMS
+            : !strcmp(e, "native")   ? MODE_NATIVE
+                                     : MODE_GAME;
     gbuffer_checking = m == MODE_CHECK;
     __atomic_store_n(&mode, m, __ATOMIC_RELEASE);
 }
@@ -44,7 +59,7 @@ static void init_mode(void) {
 int gbuffer_native(void) {
     int m = __atomic_load_n(&mode, __ATOMIC_ACQUIRE);
     if (m < 0) init_mode(), m = __atomic_load_n(&mode, __ATOMIC_ACQUIRE);
-    return m == MODE_NATIVE;
+    return m == MODE_NATIVE || m == MODE_PROGRAMS;
 }
 
 /* YW4_GBUFFER_ALTERNATE=<frame>: for 16 frames from that GPU frame, odd frames ours and even
@@ -108,6 +123,8 @@ static struct {
     float wvp_worst;
     int shown, slot_shown;
     long slot_ok, slot_is_object, slot_is_model, hook_world_ok, hook_wvp_ok, ib_bad[2];
+    long exact[3];  /* rows 0-2, 8-11, 12-15 bit-identical to our draw's (object_constants) */
+    int ib_shown;
 } st;
 
 void gbuffer_layer_start(const CPUState *ctx) {
@@ -160,6 +177,8 @@ static void summary(void) {
             " read at the hook: %ld, projection x view x it: %ld; index buffer wrong: %ld (call site a4bf94), %ld (a4c2d0)\n",
             st.slot_ok, st.main_vs, st.slot_is_object, st.slot_is_model, st.hook_world_ok, st.hook_wvp_ok, st.ib_bad[0],
             st.ib_bad[1]);
+    fprintf(stderr, "yw4: gbuffer:   our constants 2 bit-identical: rows 0-2 %ld, rows 8-11 %ld, rows 12-15 %ld\n",
+            st.exact[0], st.exact[1], st.exact[2]);
     for (int i = 0; i < SOURCES; i++)
         if (sources[i].n)
             fprintf(stderr, "yw4: gbuffer:   world from call site main+%#" PRIx64 ": [sp+%#x]+%#x, %ld draws\n",
@@ -170,6 +189,25 @@ static void summary(void) {
     memset(&st, 0, sizeof st);
     memset(sources, 0, sizeof sources);
     unexplained[0] = unexplained[1] = 0;
+}
+
+static void object_constants(float out[64]);
+
+/* An index buffer that is not ours: what the game drew instead. */
+static void show_ib(uint64_t bufs, uint64_t vb0, uint64_t index_addr, uint32_t type, uint32_t count) {
+    if (st.ib_shown >= 6) return;
+    st.ib_shown++;
+    uint64_t ib = bufs ? U64(bufs + 0x68) : 0, ours = ib + U32(cur.submesh + 4);
+    fprintf(stderr, "yw4: gbuffer: index buffer differs (call site %#" PRIx64 "): game %#" PRIx64 " type %u count %u,"
+            " ours %#" PRIx64 " (game - ours %" PRId64 ") type %u count %u; vertices: game %#" PRIx64 " ours %#" PRIx64
+            "; object %#" PRIx64 " geometry %#" PRIx64 "\n", cur.ret, index_addr, type, count, ours,
+            (int64_t)(index_addr - ours), U8(cur.submesh + 0x3f) & 2 ? 2 : 1, U32(cur.submesh + 0xc),
+            vb0, bufs ? U64(bufs) + U32(cur.submesh) : 0, cur.object, cur.geometry);
+    fprintf(stderr, "yw4: gbuffer:   submesh:");
+    for (int i = 0; i < 0x50; i += 4) fprintf(stderr, " %08x", U32(cur.submesh + i));
+    fprintf(stderr, "\nyw4: gbuffer:   buffers:");
+    for (int i = 0; bufs && i < 0x90; i += 8) fprintf(stderr, " %" PRIx64, U64(bufs + i));
+    fprintf(stderr, "\n");
 }
 
 /* A mismatching draw: look for the world the game used in the model renderer's stack. */
@@ -190,7 +228,7 @@ static void find_world(const float *game_world) {
     unexplained[cur.ret == 0xa4c2d0]++;
 }
 
-void gbuffer_check_draw(const NvnCmdBuf *cb, uint64_t index_addr) {
+void gbuffer_check_draw(const NvnCmdBuf *cb, uint64_t index_addr, uint32_t type, uint32_t count) {
     if (!cur.armed) return;
     cur.armed = 0;
     st.draws++;
@@ -214,8 +252,16 @@ void gbuffer_check_draw(const NvnCmdBuf *cb, uint64_t index_addr) {
         w.m[15] = 1;
         Mat4 hw = mat4_mul(&cur.vp, &w);
         if (mat4_diff(c2 + 32, hw.m, 16) < 1e-3f) st.hook_wvp_ok++;
+        float ours[64];
+        object_constants(ours);
+        st.exact[0] += !memcmp(c2, ours, 48);
+        st.exact[1] += !memcmp(c2 + 32, ours + 32, 64);
+        st.exact[2] += !memcmp(c2 + 48, ours + 48, 64);
     }
-    if (!bufs || index_addr != U64(bufs + 0x68) + U32(cur.submesh + 4)) st.ib_bad[cur.ret == 0xa4c2d0]++;
+    if (!bufs || index_addr != U64(bufs + 0x68) + U32(cur.submesh + 4)) {
+        st.ib_bad[cur.ret == 0xa4c2d0]++;
+        show_ib(bufs, cb->trace_vb0, index_addr, type, count);
+    }
     /* the renderer's own world: [sp+0x30] + 0x40 (found for posed parts), for every draw */
     uint64_t rw = U64(cur.sp + 0x30);
     if (guest_ptr(rw) && readable(rw, 0x80) && mat4_diff(c2, (const float *)(uintptr_t)(rw + 0x40), 12) < 1e-5f) {
@@ -259,4 +305,87 @@ void gbuffer_check_draw(const NvnCmdBuf *cb, uint64_t index_addr) {
                 world.m[3]);
     }
     summary();
+}
+
+/* ---- step 2b: our draw in place of the game's */
+
+static struct {
+    long taken, left[6];  /* left to the game: program, no world, not a plain triangle list, vertex
+                           * buffer or layout, index buffer, count or type */
+} nat;
+
+static void native_summary(void) {
+    static uint64_t last;
+    uint64_t frame = __atomic_load_n(&yw4_frames_presented, __ATOMIC_RELAXED);
+    if (frame < last + 300) return;
+    last = frame;
+    fprintf(stderr, "yw4: gbuffer: native: %ld draws ours; the game's: %ld other programs, %ld no world, %ld not a "
+            "triangle list, %ld other vertex buffer or layout, %ld other index buffer, %ld other count or type\n",
+            nat.taken, nat.left[0], nat.left[1], nat.left[2], nat.left[3], nat.left[4], nat.left[5]);
+    memset(&nat, 0, sizeof nat);
+}
+
+/* Vertex constants 2 for the submesh noted last: the renderer's world (3x4) in rows 0-2,
+ * projection x view x world in rows 8-11, the world again as last frame's (rows 12-15: the game
+ * puts this frame's there, so only the camera's motion shows in the motion vectors). */
+static void object_constants(float out[64]) {
+    Mat4 w = {{0}};
+    memcpy(w.m, cur.world, sizeof cur.world);
+    w.m[15] = 1;
+    /* projection x (view x world), each summed in order without fused multiply-adds: the game's
+     * order, bit-identical on every draw checked (P x V first or fused sums are off by a last bit
+     * on 2-90% of draws) */
+    Mat4 proj = mat4_load(cur.device + 0x280), view = mat4_load(cur.device + 0x2c0);
+    Mat4 vw = mat4_mul(&view, &w), wvp = mat4_mul(&proj, &vw);
+    memset(out, 0, 64 * sizeof *out);
+    memcpy(out, w.m, 12 * sizeof *out);
+    memcpy(out + 32, wvp.m, sizeof wvp.m);
+    memcpy(out + 48, w.m, sizeof w.m);
+}
+
+int gbuffer_take_draw(CPUState *ctx, const NvnCmdBuf *cb) {
+    if (!cur.armed || __atomic_load_n(&mode, __ATOMIC_ACQUIRE) != MODE_NATIVE) return 0;
+    cur.armed = 0;
+    native_summary();
+    /* (cmd, primitive, type, count, address) */
+    uint32_t prim = (uint32_t)ctx->x[1], type = (uint32_t)ctx->x[2], count = (uint32_t)ctx->x[3];
+    uint64_t index_addr = ctx->x[4];
+    const NvnProgram *p = cb->program;
+    if (!p || p->stages[0].key != GBUFFER_VS || p->stages[1].key != GBUFFER_FS) return nat.left[0]++, 0;
+    if (!cur.have_world) return nat.left[1]++, 0;
+    if (U8(cur.submesh + 0x3d) != 1 || prim != 4) return nat.left[2]++, 0;  /* table index 1, NVN's triangles */
+    uint64_t bufs = U64(cur.geometry + 0x20);
+    uint32_t stride = U8(cur.submesh + 0x3e);
+    GBufferDraw d;
+    d.vertices = bufs ? U64(bufs) + U32(cur.submesh) : 0;
+    d.vertex_bytes = U32(cur.submesh + 8) * stride;
+    d.indices = bufs ? U64(bufs + 0x68) + U32(cur.submesh + 4) : 0;
+    d.index_type = U8(cur.submesh + 0x3f) & 2 ? 2 : 1;
+    d.index_count = U32(cur.submesh + 0xc);
+    d.primitive = 4;
+    /* the attributes' streams (one each: 0-4 for this program) all bound to the submesh's vertices
+     * with its stride, so our buffer can go in all of them */
+    int one_stream = cb->trace_nattribs > 0;
+    for (uint32_t i = 0; i < cb->trace_nattribs; i++) {
+        uint32_t a = cb->trace_attribs[i], s = a >> 8 & 0x1F;
+        if ((a & 0xFF) && (s >= 8 || cb->trace_vb[s] != cb->trace_vb0 || (uint32_t)cb->trace_streams[s] != stride))
+            one_stream = 0;
+    }
+    if (!d.vertices || !stride || cb->trace_vb0 != d.vertices || !one_stream) {
+        static int shown;
+        if (shown++ < 3) {
+            fprintf(stderr, "yw4: gbuffer: native: vertex layout not ours: buffer %#" PRIx64 " (ours %#" PRIx64 "), stride"
+                    " %u, stream 0 %#" PRIx64 ", attributes:", cb->trace_vb0, d.vertices, stride, cb->trace_streams[0]);
+            for (uint32_t i = 0; i < cb->trace_nattribs; i++) fprintf(stderr, " %#x", cb->trace_attribs[i]);
+            fprintf(stderr, "\n");
+        }
+        return nat.left[3]++, 0;
+    }
+    if (index_addr != d.indices) return nat.left[4]++, 0;
+    if (count != d.index_count || type != d.index_type) return nat.left[5]++, 0;
+    memcpy(d.game, &ctx->x[1], sizeof d.game);
+    object_constants(d.object);
+    nvn_record_native(ctx, ctx->x[0], gpu_gbuffer_draw, &d, sizeof d);
+    nat.taken++;
+    return 1;
 }

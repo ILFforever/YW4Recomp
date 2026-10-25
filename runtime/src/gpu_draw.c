@@ -869,6 +869,10 @@ static int pcss_settings(VkBuffer *buf, VkDeviceSize *offset) {
     return 1;
 }
 
+/* A draw of our G-buffer pass (gbuffer.h): its own vertex and index buffers and vertex constants 2
+ * in place of the bound ones. */
+static _Thread_local const GBufferDraw *own;
+
 static int bind_stage_set(VkCommandBuffer cb, const GpuState *s, const Shader *sh, int ns, VkPipelineBindPoint bp,
                           VkPipelineLayout layout, uint32_t setno) {
     {
@@ -884,7 +888,11 @@ static int bind_stage_set(VkCommandBuffer cb, const GpuState *s, const Shader *s
                 GpuRange r = b->kind == 'c' ? (b->slot < UBOS ? s->ubo[ns][b->slot] : (GpuRange){0})
                                             : (b->slot < SSBOS ? s->ssbo[ns][b->slot] : (GpuRange){0});
                 VkDeviceSize range = b->kind == 'c' && r.size > 65536 ? 65536 : r.size;
-                if (b->kind == 'c' && b->slot == 8 && sh->pcf_float >= 0 && r.size &&
+                if (own && ns == 0 && b->kind == 'c' && b->slot == 2) {  /* our object constants */
+                    uint8_t *p = ring_alloc(sizeof own->object, &bi[i].buffer, &bi[i].offset);
+                    if (p) memcpy(p, own->object, sizeof own->object), range = sizeof own->object;
+                    else bi[i].buffer = dummy_buffer(), bi[i].offset = 0, range = 65536;
+                } else if (b->kind == 'c' && b->slot == 8 && sh->pcf_float >= 0 && r.size &&
                     pcf_scaled_copy(r.addr, range < sh->cb8_bytes ? range : sh->cb8_bytes, sh->pcf_float,
                                     &bi[i].buffer, &bi[i].offset)) {
                     /* a copy with the shadow filter spread scaled to the shadow maps' size */
@@ -1182,7 +1190,7 @@ void gpu_dynamic_state(VkCommandBuffer cb, const GpuState *s, VkFormat depth, ui
     vkCmdSetPrimitiveRestartEnable(cb, VK_FALSE);
 }
 
-void gpu_draw(VkCommandBuffer cb, GpuState *s, const CmdRec *r) {
+static void draw(VkCommandBuffer cb, GpuState *s, const CmdRec *r) {
     Program *g = s->program ? program_of(s->program) : NULL;
     if (!g) {
         static int logged;
@@ -1224,7 +1232,7 @@ void gpu_draw(VkCommandBuffer cb, GpuState *s, const CmdRec *r) {
     }
     k.ncolor = (uint8_t)s->ncolor;
     /* our G-buffer programs in place of the game's (decision 0026; F6) */
-    k.ours = gbuffer_native_frame(gpu_frames()) &&
+    k.ours = (own || gbuffer_native_frame(gpu_frames())) &&
              ((g->sh[ST_VERT] && g->sh[ST_VERT]->ours) || (g->sh[ST_FRAG] && g->sh[ST_FRAG]->ours));
     memcpy(k.blend, s->blend, sizeof k.blend);
     for (int i = 0; i < 8; i++) k.blend[i][0] = 0;
@@ -1269,8 +1277,8 @@ void gpu_draw(VkCommandBuffer cb, GpuState *s, const CmdRec *r) {
             i, stride, divisor ? VK_VERTEX_INPUT_RATE_INSTANCE : VK_VERTEX_INPUT_RATE_VERTEX};
         VkBuffer buf;
         VkDeviceSize off;
-        if (!s->vbuf[i].size || !gpu_buffer_at(s->vbuf[i].addr, s->vbuf[i].size, &buf, &off))
-            buf = dummy_buffer(), off = 0;
+        GpuRange vr = own ? (GpuRange){own->vertices, own->vertex_bytes} : s->vbuf[i];  /* ours: every stream */
+        if (!vr.size || !gpu_buffer_at(vr.addr, vr.size, &buf, &off)) buf = dummy_buffer(), off = 0;
         vkCmdBindVertexBuffers(cb, i, 1, &buf, &off);
     }
 
@@ -1372,4 +1380,27 @@ void gpu_draw(VkCommandBuffer cb, GpuState *s, const CmdRec *r) {
                          (uint32_t)r->x[5]);
     }
     capture_after_draw(cb, s, g);
+}
+
+void gpu_draw(VkCommandBuffer cb, GpuState *s, const CmdRec *r) { draw(cb, s, r); }
+
+/* CMD_NATIVE: a G-buffer draw of ours (gbuffer.c). On the game's frames of YW4_GBUFFER_ALTERNATE,
+ * the game's DrawElements it replaced instead, with the game's programs and buffers. */
+void gpu_gbuffer_draw(void *vk_cb, void *gpu_state, const void *data, uint32_t size) {
+    const GBufferDraw *d = data;
+    if (size < sizeof *d) return;
+    CmdRec r;
+    memset(&r, 0, sizeof r);
+    r.op = CMD_DRAW_ELEMENTS, r.size = sizeof r;
+    if (!gbuffer_native_frame(gpu_frames())) {
+        memcpy(r.x, d->game, sizeof r.x);
+        r.x[4] = 0, r.x[5] = 0, r.x[6] = 1;  /* DrawElements: base vertex 0, base instance 0, one instance */
+        draw(vk_cb, gpu_state, &r);
+        return;
+    }
+    /* (primitive, index type, count, index address, base vertex, base instance, instances) */
+    r.x[0] = d->primitive, r.x[1] = d->index_type, r.x[2] = d->index_count, r.x[3] = d->indices, r.x[6] = 1;
+    own = d;
+    draw(vk_cb, gpu_state, &r);
+    own = NULL;
 }

@@ -79,4 +79,15 @@ this frame's world-view-projection in rows 8-11, **last frame's** in rows 12-15)
   (`YW4_GBUFFER_ALTERNATE`) and dumping the G-buffer targets, our output is bit-identical to the game's on every pixel
   that did not move between frames. This step went first so that any later difference comes from our data, not our
   shaders.
-- **Next (2b):** our own draw with our data (the scratch world, the decoded buffers), in place of the game's draw.
+- **Step 2b (our draws):** `YW4_GBUFFER=native` now records our own draw in place of the game's `DrawElements` for
+  every `bc358b` + `a93492` submesh (all 97 a frame in the schoolyard): vertex and index buffers from the submesh
+  record, vertex constants 2 computed by us (`=programs` keeps step 2a alone). Material constants, textures, vertex
+  formats and targets are still what the game bound. The constants are **bit-identical** to the game's on every draw
+  checked once they are computed in the game's order, projection × (view × world), each product summed in order with
+  no fused multiply-adds: (projection × view) × world, or fused sums, were off by one last bit on 2-60% of draws
+  (found by dumping the inputs of mismatching draws and trying the orders offline). The model renderer spreads one
+  vertex over five vertex streams bound to the same buffer, so our buffer goes into each. In one run with alternating
+  frames, ours against the game's differs no more than the game's against itself. A draw whose buffers, count or
+  index type are not the ones the game was about to draw stays the game's; the 0.12% index buffer mismatches of the
+  hour-long check did not occur in the test saves, so check mode now logs the first ones in detail (both addresses,
+  the submesh and buffer records) for when they do.
