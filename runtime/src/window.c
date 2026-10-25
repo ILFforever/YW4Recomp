@@ -27,6 +27,7 @@
 #include <SDL3/SDL_vulkan.h>
 
 #include "host.h"
+#include "gbuffer.h"
 #include "gpu.h"
 #include "hud.h"
 #include "vk.h"
@@ -724,6 +725,7 @@ void window_run(void (*guest)(void *), void *arg) {
             if (e.key.key == SDLK_F3) __atomic_store_n(&hud_on, hud_enabled() ? 0 : 1, __ATOMIC_RELEASE);  /* the HUD */
             if (e.key.key == SDLK_F8) gpu_shadow_res_cycle();  /* shadow quality: 1024 / 2048 / 4096 */
             if (e.key.key == SDLK_F7) gpu_pcss_cycle();  /* PCSS (soft contact shadows): off / x1 / x2 / x4 */
+            if (e.key.key == SDLK_F6) gbuffer_toggle(), yw4_hid_note_key("F6");  /* the G-buffer: the game's programs or ours */
             break;
         case SDL_EVENT_WINDOW_PIXEL_SIZE_CHANGED:
             host_lock(&present_lock);

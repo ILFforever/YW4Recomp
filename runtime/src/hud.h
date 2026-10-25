@@ -25,6 +25,8 @@ const char *shadow_mode_name(void);
 int gpu_shadow_res(void);
 /* gpu_draw.c: PCSS (soft contact shadows), 0 off, 1..3 = x1, x2, x4 (F7). */
 int gpu_pcss_level(void);
+/* gbuffer.c: our G-buffer programs on (F6). */
+int gbuffer_native(void);
 
 /* Draws c into rgba (w x h texels, 4 bytes each, rows of w); *used_w and *used_h: the part drawn. */
 void hud_render(uint8_t *rgba, int w, int h, const HudContent *c, int *used_w, int *used_h);

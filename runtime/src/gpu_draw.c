@@ -25,6 +25,7 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "gbuffer.h"
 #include "gpu_internal.h"
 #include "host.h"
 #include "kernel.h"
@@ -56,6 +57,7 @@ typedef struct Shader {
     int nb;
     char inputs[32];  /* vertex inputs: 0 unused, 'f' float, 'u' integer */
     VkDescriptorSetLayout layout;
+    VkShaderModule ours;  /* our readable program with the same interface, if we have one (0: none) */
     int pcf_float;  /* samples a shadow map: the float in cbuf 8 where its filter spread starts (2), else -1 */
     uint32_t cb8_bytes;  /* ... and how much of cbuf 8 it reads */
 } Shader;
@@ -89,6 +91,39 @@ static VkImageViewType view_type(const char *dim, int *shadow) {
     if (!strcmp(dim, "3D")) return VK_IMAGE_VIEW_TYPE_3D;
     if (!strcmp(dim, "CUBE")) return VK_IMAGE_VIEW_TYPE_CUBE;
     gpu_stop("texture target %s", dim);
+}
+
+/* Our replacements for game programs (decision 0026): readable GLSL in runtime/shaders with the
+ * translated program's interface, used in its place when the G-buffer pass is on (F6). */
+static const struct {
+    uint64_t key;
+    int stage;
+    const char *name;
+} replacements[] = {
+    {0xbc358b88a500029full, ST_VERT, "gbuffer_main.vert"},
+    {0xa93492ef0b558e21ull, ST_FRAG, "gbuffer_main.frag"},
+};
+
+static VkShaderModule replacement(uint64_t key, int stage) {
+    for (size_t i = 0; i < sizeof replacements / sizeof *replacements; i++) {
+        if (replacements[i].key != key || replacements[i].stage != stage) continue;
+        const char *dir = getenv("YW4_NATIVE_SHADER_DIR");
+        char path[1024];
+        size_t n;
+        snprintf(path, sizeof path, "%s/%s.spv", dir && *dir ? dir : "work/build/shaders", replacements[i].name);
+        uint32_t *spv = read_file(path, &n);
+        if (!spv) {
+            fprintf(stderr, "yw4: gpu: no %s (python -m recomp.build compiles runtime/shaders): the game's program stays\n",
+                    path);
+            return VK_NULL_HANDLE;
+        }
+        VkShaderModuleCreateInfo mci = {.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO, .codeSize = n, .pCode = spv};
+        VkShaderModule m;
+        CHECK(vkCreateShaderModule(vk.device, &mci, NULL, &m));
+        free(spv);
+        return m;
+    }
+    return VK_NULL_HANDLE;
 }
 
 /* A translated shader's module and descriptor set layout, from the files (not kept in the list). */
@@ -164,6 +199,7 @@ static Shader *load_shader(uint64_t key, int stage) {
     VkDescriptorSetLayoutCreateInfo lci = {.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
                                            .bindingCount = (uint32_t)s->nb, .pBindings = lb};
     CHECK(vkCreateDescriptorSetLayout(vk.device, &lci, NULL, &s->layout));
+    s->ours = replacement(key, stage);
     return s;
 }
 
@@ -193,6 +229,7 @@ typedef struct {
     uint8_t color_state[4];
     uint32_t channel_mask;
     uint8_t polygon_mode, topology, depth_clamp, ncolor;  /* ncolor: as in the rendering, empty slots too */
+    uint8_t ours;  /* our replacement programs in place of the translated ones (Shader.ours) */
     VkVertexInputAttributeDescription attr[16];
     uint32_t nattr;
     VkVertexInputBindingDescription bind[16];
@@ -458,8 +495,9 @@ static VkPipeline pipeline(Program *g, const PipeKey *k) {
         if (g->sh[i])
             st[nst++] = (VkPipelineShaderStageCreateInfo){.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
                                                           .stage = stage_bits[i],
-                                                          .module = i == ST_FRAG ? debug_fragment(g->sh[i])
-                                                                                 : g->sh[i]->module,
+                                                          .module = k->ours && g->sh[i]->ours ? g->sh[i]->ours
+                                                                    : i == ST_FRAG    ? debug_fragment(g->sh[i])
+                                                                                      : g->sh[i]->module,
                                                           .pName = "main"};
     VkPipelineVertexInputStateCreateInfo vi = {
         .sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO, .vertexBindingDescriptionCount = k->nbind,
@@ -1185,6 +1223,9 @@ void gpu_draw(VkCommandBuffer cb, GpuState *s, const CmdRec *r) {
         return;
     }
     k.ncolor = (uint8_t)s->ncolor;
+    /* our G-buffer programs in place of the game's (decision 0026; F6) */
+    k.ours = gbuffer_native_frame(gpu_frames()) &&
+             ((g->sh[ST_VERT] && g->sh[ST_VERT]->ours) || (g->sh[ST_FRAG] && g->sh[ST_FRAG]->ours));
     memcpy(k.blend, s->blend, sizeof k.blend);
     for (int i = 0; i < 8; i++) k.blend[i][0] = 0;
     memcpy(k.color_state, s->color, 4);

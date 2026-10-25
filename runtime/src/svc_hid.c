@@ -18,6 +18,7 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "gbuffer.h"
 #include "ipc_simple.h"
 #include "window.h"
 
@@ -209,6 +210,7 @@ static int replay_state(uint64_t tick, uint64_t *buttons, int32_t sticks[4]) {
         else if (!strcmp(k, "F10")) gpu_request_dump();
         else if (!strcmp(k, "F12")) window_request_screenshot();
         else if (!strcmp(k, "F9")) shadow_toggle();
+        else if (!strcmp(k, "F6")) gbuffer_toggle();
     }
     return 1;
 }

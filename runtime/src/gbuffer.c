@@ -41,6 +41,29 @@ static void init_mode(void) {
     __atomic_store_n(&mode, m, __ATOMIC_RELEASE);
 }
 
+int gbuffer_native(void) {
+    int m = __atomic_load_n(&mode, __ATOMIC_ACQUIRE);
+    if (m < 0) init_mode(), m = __atomic_load_n(&mode, __ATOMIC_ACQUIRE);
+    return m == MODE_NATIVE;
+}
+
+/* YW4_GBUFFER_ALTERNATE=<frame>: for 16 frames from that GPU frame, odd frames ours and even
+ * frames the game's, to compare the two in one run (a frame dumped as F was drawn as F-1). */
+int gbuffer_native_frame(uint64_t frame) {
+    static long long alt = -2;
+    if (alt == -2) alt = getenv("YW4_GBUFFER_ALTERNATE") ? atoll(getenv("YW4_GBUFFER_ALTERNATE")) : -1;
+    if (alt >= 0 && frame >= (uint64_t)alt && frame < (uint64_t)alt + 16) return (int)(frame & 1);
+    return gbuffer_native();
+}
+
+void gbuffer_toggle(void) {
+    int m = gbuffer_native() ? MODE_GAME : MODE_NATIVE;
+    gbuffer_checking = 0;
+    __atomic_store_n(&mode, m, __ATOMIC_RELEASE);
+    fprintf(stderr, "yw4: gbuffer: %s (F6, presented frame %" PRIu64 ")\n", m == MODE_NATIVE ? "ours" : "the game's",
+            __atomic_load_n(&yw4_frames_presented, __ATOMIC_RELAXED));
+}
+
 /* The layer being drawn on this thread, and the submesh about to be drawn. */
 static _Thread_local struct {
     int active;  /* a G-buffer layer */

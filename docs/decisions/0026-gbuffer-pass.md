@@ -67,3 +67,16 @@ this frame's world-view-projection in rows 8-11, **last frame's** in rows 12-15)
 - **Reuse the game's translated programs with our own draws.** Fastest to get pixels, but it ties our pass to the
   game's constant buffer layouts and gains nothing over drawing through the game; readable shaders of our own are what
   the later improvements need.
+
+## Progress
+
+- **Step 1 (check):** buffers, matrices and last frame's camera match the game on every main-program draw over an
+  hour of play (4.9 M draws), once the world matrix comes from the renderer's per-draw scratch record
+  (`[sp+0x30]+0x40` at the submesh-draw hook) instead of the object: the object's own matrix is wrong for posed parts
+  and for moving objects (the renderer draws a copy taken earlier). Index buffers: 99.88% (to identify).
+- **Step 2a (our programs):** `gbuffer_main.vert/.frag` replace `bc358b` / `a93492` in the game's own draws (same
+  interface, the game's state and buffers), switched by F6. Within one run, alternating frames
+  (`YW4_GBUFFER_ALTERNATE`) and dumping the G-buffer targets, our output is bit-identical to the game's on every pixel
+  that did not move between frames. This step went first so that any later difference comes from our data, not our
+  shaders.
+- **Next (2b):** our own draw with our data (the scratch world, the decoded buffers), in place of the game's draw.

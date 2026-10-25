@@ -17,6 +17,8 @@ Environment variables and keys read by the runtime. The game runs fine with none
 | `YW4_VULKAN_VALIDATION=1` | Turn on the Vulkan validation layer |
 | `YW4_SHADOWS=native` | Start with our own shadow-caster pass on ([decision 0024](decisions/0024-shadow-pass.md)); work in progress, the default is the game's. F9 switches while playing |
 | `YW4_GBUFFER=check` | Our G-buffer pass ([decision 0026](decisions/0026-gbuffer-pass.md)), step 1: compares what it would use with the game's G-buffer draws (buffers, matrices) and logs a summary every 300 frames; nothing is drawn |
+| `YW4_GBUFFER=native` | Our readable G-buffer programs (`runtime/shaders/gbuffer_*`) draw in place of the game's main G-buffer program; F6 switches while playing (the HUD's G-BUFFER line) |
+| `YW4_GBUFFER_ALTERNATE=<frame>` | For 16 GPU frames from that one, odd frames use our G-buffer programs and even frames the game's: compares the two in one run (with `YW4_DUMP_IMAGE`; a frame dumped as F was drawn as F-1) |
 | `YW4_HUD=1` | Start with the performance HUD shown (F3 toggles it) |
 | `YW4_SHADOW_RES=1024` (`2048`, `4096`) | Shadow map size at start (default 4096; 1024 is the game's; F8 cycles it): the shadow maps that size instead of the game's 1024, and the shadow filter's spread scaled down to match, so edges get sharper, mostly in the far cascades. Costs GPU time and memory. Works with either shadow pass |
 | `YW4_PCSS=0` (`1`, `2`, `3`) | PCSS (soft contact shadows) at start: off (x1, x2, x4); default x2; F7 cycles it. `YW4_SHADOW_RES=1024 YW4_PCSS=0` gives the game's original shadows. Only the game's screen-space shadow mask shader has it (`PCSS_SHADERS` in recomp/shader.py) |
@@ -35,6 +37,7 @@ Saved screenshots get the same sRGB decode as the window, so their colours match
 | F10 | Dump multi-layer depth images (shadow maps) to `work/dump/*.pgm` |
 | F9 | Switch the shadow casters between the game's and our pass ([decision 0024](decisions/0024-shadow-pass.md)); the log says which, and how many submeshes our pass drew since the last switch. Recorded and replayed like F10-F12 |
 | F8 | Shadow quality: cycles the shadow maps 1024 (the game's) → 2048 → 4096 (the default), with the filter spread scaled to match; the HUD's SHADOWS line shows the size. The frame of the switch can show wrong shadows once |
+| F6 | The G-buffer: the game's programs or ours ([decision 0026](decisions/0026-gbuffer-pass.md)); recorded and replayed like F9 |
 | F7 | PCSS (soft contact shadows): off → x1 → x2 (the default) → x4; the HUD's PCSS line shows it |
 | F3 | Show or hide the performance HUD in the window's top-left corner: frames per second, frame interval, the game's work per frame, GPU busy time, draws, process CPU, memory, whose shadow casters are drawn. Averages over the last 30 frames, from the perf log's numbers (`YW4_PERF=0` leaves it empty). F12 screenshots include it while it is shown |
 
@@ -50,7 +53,7 @@ Saved screenshots get the same sRGB decode as the window, so their colours match
 
 | Variable | What it does |
 |---|---|
-| `YW4_DUMP_IMAGE=<hex addr>[,<hex addr>...]` `YW4_DUMP_IMAGE_AT=<frame>` | Read back the images at those guest addresses at that frame (depth, RGBA8, RGBA16F, R11G11B10F): per-layer min/max/cleared share, `work/dump/image_*.pgm`, and raw floats in `image_*.rgbaf` (colour) or `image_*.depthf` (depth). This is the image's last use in the frame |
+| `YW4_DUMP_IMAGE=<hex addr>[,<hex addr>...]` `YW4_DUMP_IMAGE_AT=<frame>[,<frame>...]` | Read back the images at those guest addresses at that frame (several frames: the file names get `_f<frame>`) (depth, RGBA8, RGBA16F, R11G11B10F): per-layer min/max/cleared share, `work/dump/image_*.pgm`, and raw floats in `image_*.rgbaf` (colour) or `image_*.depthf` (depth). This is the image's last use in the frame |
 | `YW4_CAPTURE_FS=<fs key prefix>[,...]` with `YW4_DUMP_IMAGE_AT=<frame>` | Copy the colour targets right after each draw with that fragment shader in that frame, to `work/dump/cap_*.raw`; shows a pass's output before later passes reuse the target. `python -m tools.yw4.capview` makes a contact sheet |
 | `YW4_COMPUTE_TRACE=<n>` | Every n frames, the inputs and results of the last dispatch of each compute shader |
 

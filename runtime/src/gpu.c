@@ -1105,15 +1105,23 @@ static float dump_small(uint32_t v, int mbits) {
 
 static void dump_images(uint64_t frame) {
     int all = __atomic_exchange_n(&dump_request, 0, __ATOMIC_ACQ_REL);
-    static uint64_t want[16], at;
-    static int nwant = -1;
+    /* YW4_DUMP_IMAGE_AT may list several frames (comma separated): then the files get the frame
+     * in their name (image_<addr>_f<frame>_<layer>), to compare frames of one run */
+    static uint64_t want[16], at[8];
+    static int nwant = -1, nat;
     if (nwant < 0) {
         nwant = 0;
         const char *a = getenv("YW4_DUMP_IMAGE");
         for (char *end; a && *a && nwant < 16; a = *end ? end + 1 : end) want[nwant++] = strtoull(a, &end, 16);
-        at = getenv("YW4_DUMP_IMAGE_AT") ? strtoull(getenv("YW4_DUMP_IMAGE_AT"), NULL, 10) : 0;
+        a = getenv("YW4_DUMP_IMAGE_AT");
+        for (char *end; a && *a && nat < 8; a = *end ? end + 1 : end) at[nat++] = strtoull(a, &end, 10);
+        if (!nat) at[nat++] = 0;
     }
-    if (!all && (!nwant || frame != at)) return;
+    int listed = 0;
+    for (int i = 0; i < nat; i++) listed |= frame == at[i];
+    if (!all && (!nwant || !listed)) return;
+    char tag[24] = "";
+    if (nat > 1) snprintf(tag, sizeof tag, "_f%" PRIu64, frame);
     for (int b = 0; b < IMAGE_BUCKETS; b++)
         for (GpuImage *g = images[b]; g; g = g->next) {
             int wanted = 0;
@@ -1177,7 +1185,7 @@ static void dump_images(uint64_t frame) {
                 fprintf(stderr, "yw4: image %#" PRIx64 " frame %" PRIu64 " %ux%u format %d layer %u: min %g max %g, %.1f%% equal to the first texel (%g)\n",
                         addr, frame, g->width, g->height, (int)g->format, l, mn, mx, 100.0 * (double)same / (double)n, first);
                 char path[256];
-                snprintf(path, sizeof path, "work/dump/image_%" PRIx64 "_%u.pgm", addr, l);
+                snprintf(path, sizeof path, "work/dump/image_%" PRIx64 "%s_%u.pgm", addr, tag, l);
                 FILE *f = fopen(path, "wb");
                 if (f) {
                     fprintf(f, "P5\n%u %u\n255\n", g->width, g->height);
@@ -1188,7 +1196,7 @@ static void dump_images(uint64_t frame) {
                     fclose(f);
                 }
                 if (depth) {  /* depth as raw floats, for tools */
-                    snprintf(path, sizeof path, "work/dump/image_%" PRIx64 "_%u.depthf", addr, l);
+                    snprintf(path, sizeof path, "work/dump/image_%" PRIx64 "%s_%u.depthf", addr, tag, l);
                     f = fopen(path, "wb");
                     if (f) {
                         fwrite(&g->width, 4, 1, f), fwrite(&g->height, 4, 1, f);
@@ -1200,7 +1208,7 @@ static void dump_images(uint64_t frame) {
                     }
                 }
                 if (!depth) {  /* colour as raw RGBA floats, for tools */
-                    snprintf(path, sizeof path, "work/dump/image_%" PRIx64 "_%u.rgbaf", addr, l);
+                    snprintf(path, sizeof path, "work/dump/image_%" PRIx64 "%s_%u.rgbaf", addr, tag, l);
                     f = fopen(path, "wb");
                     if (f) {
                         fwrite(&g->width, 4, 1, f), fwrite(&g->height, 4, 1, f);
