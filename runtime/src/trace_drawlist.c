@@ -122,7 +122,7 @@ static void search(Out *o, const char *root, uint64_t at, int depth, int span, c
             uint64_t v = *(const uint64_t *)(p + off);
             if (w[i].value && !(off & 7) && v == w[i].value)
                 w[i].hits++, out(o, "yw4: drawlist:     %s = %s%s+%#x\n", w[i].what, root, path, off);
-            else if (w[i].inside && !(off & 7) && guest_ptr(v) && v < w[i].value && w[i].value - v < (16u << 20))
+            else if (w[i].inside && !(off & 7) && guest_ptr(v) && v < w[i].value && w[i].value - v < (w[i].inside == 2 ? 0x10000u : 16u << 20))
                 w[i].hits++, out(o, "yw4: drawlist:     %s = %s%s+%#x + %#" PRIx64 "\n", w[i].what, root, path, off,
                                  w[i].value - v);
             if (w[i].has_bytes && off + 16 <= span && !memcmp(p + off, w[i].bytes, 16))
@@ -142,6 +142,10 @@ static void search(Out *o, const char *root, uint64_t at, int depth, int span, c
 void trace_drawlist_draw(const NvnCmdBuf *cb, uint64_t index_addr) {
     if (!cur.armed) return;
     cur.armed = 0;
+    /* YW4_TRACE_DRAWLIST_COLOURS=<n>: only draws into n colour targets (3: the G-buffer) */
+    static int colours = -2;
+    if (colours == -2) colours = getenv("YW4_TRACE_DRAWLIST_COLOURS") ? atoi(getenv("YW4_TRACE_DRAWLIST_COLOURS")) : -1;
+    if (colours >= 0 && cb->target_colors != (uint32_t)colours) return;
     if (!in_frame() || __atomic_fetch_add(&printed, 1, __ATOMIC_RELAXED) >= max_printed) return;
     static _Thread_local char storage[1 << 16];  /* one draw's report, written out in one go */
     Out o = {storage, 0, sizeof storage};
@@ -151,9 +155,84 @@ void trace_drawlist_draw(const NvnCmdBuf *cb, uint64_t index_addr) {
         " geometry %#" PRIx64 " primitive %#" PRIx64 "\n",
         pr ? (unsigned long long)pr->stages[0].key : 0ull, pr ? (unsigned long long)pr->stages[1].key : 0ull,
         cb->target_w, cb->target_h, cur.node, cur.obj, cur.geom, cur.prim);
-    Want w[3 + 2 * 16 + 2];
-    char names[2 * 16 + 3][24];
+    Want w[3 + 2 * 16 + 2 + TRACE_TEXTURES + 20];
+    char names[2 * 16 + 3][24], tnames[TRACE_TEXTURES][24], snames[20][24];
     int nw = 0;
+    /* the engine's texture slots (f_974cd0 binds from [device+0x10d0]+0x780 + slot*16: the texture
+     * object, whose +8 is the NVN texture id): print them, and look for where the objects come from */
+    uint64_t state = guest_ptr(cur.dev) && readable(cur.dev + 0x10d0, 8) ? *(const uint64_t *)(uintptr_t)(cur.dev + 0x10d0) : 0;
+    if (guest_ptr(state) && readable(state + 0x780, 20 * 16)) {
+        out(&o, "yw4: drawlist:   engine texture slots at %#" PRIx64 " (object, id):", state + 0x780);
+        for (int i = 0; i < 20; i++) {
+            uint64_t t = *(const uint64_t *)(uintptr_t)(state + 0x780 + 16ull * i);
+            if (!guest_ptr(t) || !readable(t + 8, 4)) continue;
+            out(&o, " %d:%#" PRIx64 "/%#x", i, t, *(const uint32_t *)(uintptr_t)(t + 8));
+            snprintf(snames[i], sizeof snames[0], "texture slot %d object", i);
+            w[nw++] = (Want){snames[i], t, {0}, 0, 2, 0, 0};  /* also array bases up to 64 KiB below it */
+        }
+        out(&o, "\n");
+    }
+    /* the object's texture table (f_a45890's material binding): 16-byte entries {texture
+     * resource, index}; a resource keeps 0x50-byte records at [+0x30], counted from the
+     * header's (+0x18) byte +0x20 */
+    /* ... of the model record (object+0x140, 0x240 bytes per geometry) of the geometry drawn */
+    uint64_t mdl = 0;
+    if (guest_ptr(cur.obj) && readable(cur.obj + 0x120, 0x40)) {
+        uint64_t geos = *(const uint64_t *)(uintptr_t)(cur.obj + 0x128), models = *(const uint64_t *)(uintptr_t)(cur.obj + 0x140);
+        unsigned ngeo = *(const uint8_t *)(uintptr_t)(cur.obj + 0x1c8);
+        for (unsigned g = 0; g < ngeo && g < 16 && guest_ptr(geos) && readable(geos + 8ull * g, 8); g++)
+            if (*(const uint64_t *)(uintptr_t)(geos + 8ull * g) == cur.geom) mdl = models + 0x240ull * g;
+    }
+    out(&o, "yw4: drawlist:   model record %#" PRIx64 "\n", mdl);
+    if (guest_ptr(state) && readable(state + 0x790, 8)) {  /* texture slot 1's object, as 64-bit words */
+        uint64_t t1 = *(const uint64_t *)(uintptr_t)(state + 0x790);
+        if (guest_ptr(t1) && readable(t1, 0x50)) {
+            out(&o, "yw4: drawlist:   slot 1 object words:");
+            for (int i = 0; i < 10; i++) out(&o, " %" PRIx64, *(const uint64_t *)(uintptr_t)(t1 + 8ull * i));
+            out(&o, "\n");
+        }
+    }
+    /* object+0x3f0 -> +0x60: a table of 0x18-byte entries pointing at texture objects: which
+     * entries the bound slots are */
+    if (guest_ptr(cur.obj) && readable(cur.obj + 0x3f0, 8) && guest_ptr(state) && readable(state + 0x780, 20 * 16)) {
+        uint64_t a = *(const uint64_t *)(uintptr_t)(cur.obj + 0x3f0);
+        uint64_t t = guest_ptr(a) && readable(a + 0x60, 8) ? *(const uint64_t *)(uintptr_t)(a + 0x60) : 0;
+        out(&o, "yw4: drawlist:   object+0x3f0 = %#" PRIx64 ", its +0x60 table %#" PRIx64 ":", a, t);
+        for (int sl = 0; sl < 20 && guest_ptr(t); sl++) {
+            uint64_t want = *(const uint64_t *)(uintptr_t)(state + 0x780 + 16ull * sl);
+            if (!guest_ptr(want)) continue;
+            for (int k = 0; k < 512 && readable(t + 0x18ull * k, 0x18); k++)
+                if (*(const uint64_t *)(uintptr_t)(t + 0x18ull * k) == want) {
+                    out(&o, " slot %d = entry %d", sl, k);
+                    break;
+                }
+        }
+        out(&o, "\n");
+    }
+    for (int which = 0; which < 2; which++) {
+        uint64_t tt = guest_ptr(mdl) && readable(mdl + 0xf0, 16) ? *(const uint64_t *)(uintptr_t)(mdl + (which ? 0xf0 : 0xf8)) : 0;
+        if (!guest_ptr(tt) || !readable(tt, 8 * 16)) continue;
+        out(&o, "yw4: drawlist:   model+%#x texture table:", which ? 0xf0 : 0xf8);
+        for (int i = 0; i < 8; i++) {
+            uint64_t res = *(const uint64_t *)(uintptr_t)(tt + 16ull * i);
+            uint16_t idx = *(const uint16_t *)(uintptr_t)(tt + 16ull * i + 8);
+            if (!guest_ptr(res) || !readable(res + 0x18, 0x20)) continue;
+            uint64_t hdr = *(const uint64_t *)(uintptr_t)(res + 0x18), arr = *(const uint64_t *)(uintptr_t)(res + 0x30);
+            unsigned base = guest_ptr(hdr) && readable(hdr + 0x20, 4) ? *(const uint8_t *)(uintptr_t)(hdr + 0x20) : 0;
+            uint64_t recd = guest_ptr(arr) && idx >= base ? arr + 0x50ull * (idx - base) : 0;
+            uint64_t p20 = guest_ptr(recd) && readable(recd + 0x20, 8) ? *(const uint64_t *)(uintptr_t)(recd + 0x20) : 0;
+            out(&o, " [%d] res %#" PRIx64 " idx %u base %u -> record %#" PRIx64 " (+0x20 %#" PRIx64 ")", i, res, idx,
+                base, recd, p20);
+        }
+        out(&o, "\n");
+    }
+    /* the fragment textures' handles (id | sampler << 20): the engine's texture object keeps its
+     * handle at +0xf8, so a hit at "...+0xf8" is the path to the texture object */
+    for (int i = 0; i < TRACE_TEXTURES; i++)
+        if (cb->trace_tex[1][i] && (uint32_t)cb->trace_tex[1][i]) {
+            snprintf(tnames[i], sizeof tnames[0], "fs texture %d", i);
+            w[nw++] = (Want){tnames[i], 0, {0}, 0, 0, 0, (uint32_t)cb->trace_tex[1][i]};
+        }
     w[nw++] = (Want){"vertex buffer 0", cb->trace_vb0, {0}, 0, 1, 0, 0};
     w[nw++] = (Want){"program", cb->program_guest, {0}, 0, 0, 0, 0};
     if (index_addr) w[nw++] = (Want){"index buffer", index_addr, {0}, 0, 1, 0, 0};
@@ -207,6 +286,11 @@ void trace_drawlist_draw(const NvnCmdBuf *cb, uint64_t index_addr) {
     search(&o, "primitive", cur.prim, 1, SPAN, path, 0, w, nw);
     if (guest_ptr(cur.obj) && readable(cur.obj + 0x120, 8))  /* the material set, deeper but narrower */
         search(&o, "material", *(const uint64_t *)(uintptr_t)(cur.obj + 0x120), 3, 0x100, path, 0, w, nw);
+    if (guest_ptr(mdl) && readable(mdl + 0xf8, 8)) {  /* the model's first texture resource */
+        uint64_t tt = *(const uint64_t *)(uintptr_t)(mdl + 0xf8);
+        if (guest_ptr(tt) && readable(tt, 8)) search(&o, "texture resource", *(const uint64_t *)(uintptr_t)tt, 3, SPAN, path, 0, w, nw);
+        search(&o, "model", mdl, 2, 0x240, path, 0, w, nw);
+    }
     search(&o, "renderer", main_base + 0x56ab1b0, 0, SPAN, path, 0, w, nw);  /* the static renderer object */
     search(&o, "device", cur.dev, 0, SPAN, path, 0, w, nw);
     fwrite(o.buf, 1, o.len, stderr);

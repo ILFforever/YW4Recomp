@@ -255,13 +255,41 @@ Registered by `f_5d8010` in this order, each queueing jobs (mostly `f_a45890` la
 
 UI is drawn by other layer drawers (`f_9f6170`, `f_a88c70`, `f_9cfe60`, `f_9dfb40`).
 
+## Materials (measured 2026-10-25)
+
+Read from `f_a45890`'s second phase (Ghidra merges `f_a4bf90` into it) and checked on G-buffer draws with
+`YW4_TRACE_DRAWLIST` (`YW4_TRACE_DRAWLIST_COLOURS=3`: G-buffer draws only).
+
+The second phase walks the sorted **draw items** (0x48 bytes): `+0` geometry, `+8` the **model record** of that
+geometry (`object+0x140` + 0x240 × geometry index), `+0x10` the submesh records, `+0x18` the **material records**,
+`+0x28` texture references, `+0x30` material constants. A submesh's byte `+0x43` picks its material record (the
+same index the shadow selection uses for the sort key).
+
+| Material record (16 bytes) | |
+|---|---|
+| `+2` (u16), `+0xa` (u8) | constants: start (in 16-byte units, from the draw item's `+0x30` array) and count; uploaded per draw with `f_977550` into a fresh uniform buffer. The model record's `+0x78` holds per-object overrides (0x80 bytes each) when `+0x219` bit 0 is set |
+| `+4` (u16), `+0xb` (u8) | render state entries (2 bytes each, in the geometry header blob) |
+| `+6` (u16), `+0xc` (u8) | textures: start in the draw item's `+0x28` table (6 bytes each; byte 0 = entry of the model's texture table) and count |
+| `+8` (s8) | sort key |
+| `+0xe` (u16) | UV transforms, 0x20 bytes per texture, from the model record's `+0x98` (`+0x90` when `+0x219` bit 1) |
+
+**Textures:** the model record's texture table (`+0xf8`; `+0xf0` in one case) has 16-byte entries
+`{texture resource, index}`. The resource's header (`+0x18`) holds a 0x18-byte descriptor per index
+(`hdr + 4×u16(hdr+0xa) + 4×u16(hdr+0x3e) + index×0x18`). From those the engine makes **temporary texture views**
+each draw (0x50 bytes: `+0` the NVN texture, `+8` the texture id that the shader handle carries, then format and
+swizzle; ids rise through the frame and differ between runs) and puts them in the texture slots of a static state
+at `main+0x58569f8 + 0x780 + slot×16`, which `f_977e30` commits when the submesh is drawn (`f_a75e90`).
+
+So at our submesh-draw hook the engine has already resolved a draw's textures and constants: a first replaced
+G-buffer or material pass can take them from the bound state (as the shadow pass does for cut-out textures) and only
+a full takeover needs the descriptors decoded.
+
 ## Open
 
 - ~~Which job draws into which target in the main view~~: measured, see "Main view: the passes". Still open: which
   key ranges belong to which named stage, and what the ~40 kind-0 layers with keys 0..65535 are.
-- **Materials:** where an object's material keeps its textures and constants for the G-buffer and material passes
-  (`f_974cd0` binds textures from a state at `[device+0x10d0]+0x780`; who fills it is not found). The main blocker
-  for drawing these passes ourselves.
+- ~~Materials~~: see "Materials". Still open: the texture descriptor's fields (image address, format, size), the
+  render state entries, and which shader program a material selects.
 - The draw list and draw objects `f_a45890` walks: per object the world matrix, mesh buffers, bones, material,
   and the "casts a shadow" flag. This is the main data every replaced mesh pass needs (next step).
 - The three unused shadow blocks in `f_7ed570`.
