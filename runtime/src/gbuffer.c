@@ -50,7 +50,11 @@ int gbuffer_checking;
  * shows in the motion vectors. Programs without P x V x W multiply by the camera themselves (from
  * constants 1). Our draw writes these parts and nothing else. From the translated programs; check
  * mode compares them with the game's, bit for bit. */
-enum { PART_NONE, PART_W3, PART_W4, PART_VW, PART_WVP };  /* W 3 rows, W 4 rows, view x W, P x view x W */
+/* W 3 rows, W 4 rows, view x W, P x view x W, and the skinned programs' last frame's view x W:
+ * this frame's on most draws, but on some (0.5-30%, by area) one of a few fixed matrices that are
+ * the same in every area (left in the constant memory?); copied from the game's bound constants, as
+ * last frame's bones (constants 5) are. */
+enum { PART_NONE, PART_W3, PART_W4, PART_VW, PART_WVP, PART_GAME };
 typedef struct {
     uint64_t vs;
     struct { uint8_t what, row; } part[4];
@@ -59,12 +63,16 @@ static const Layout layouts[] = {
     {GBUFFER_VS, {{PART_W3, 0}, {PART_WVP, 8}, {PART_W4, 12}}},
     {0x07b7085fd39014daull, {{PART_W3, 0}, {PART_WVP, 8}, {PART_W4, 12}}},
     {0x44dd8154987b814bull, {{PART_W3, 0}, {PART_WVP, 8}, {PART_W4, 12}}},  /* skinned: bones in constants 4, last frame's in 5 */
-    {0xb742aa7d4094cd28ull, {{PART_VW, 4}, {PART_WVP, 8}, {PART_VW, 16}}},  /* skinned */
+    {0xb742aa7d4094cd28ull, {{PART_VW, 4}, {PART_WVP, 8}, {PART_GAME, 16}}},  /* skinned */
     {0x69ccf1e136bafdbbull, {{PART_W3, 0}, {PART_W4, 12}}},
     {0x9447ec08ee99eb00ull, {{PART_W3, 0}, {PART_W4, 12}}},
     {0x48ad99b0a01a2650ull, {{PART_W3, 0}, {PART_W4, 12}}},
     {0xb018461f506d0557ull, {{PART_W3, 0}, {PART_W4, 12}}},
     {0xe3bbbbb06699f239ull, {{PART_W3, 0}, {PART_W4, 12}}},
+    {0x2d6853131f6a178full, {{PART_VW, 4}, {PART_WVP, 8}, {PART_GAME, 16}}},  /* skinned */
+    {0x15c39ce2be80ffbdull, {{PART_VW, 4}, {PART_WVP, 8}, {PART_GAME, 16}}},
+    {0xdfe0364f78f6b929ull, {{PART_W3, 0}, {PART_W4, 12}}},
+    {0x045ee58bf4978aacull, {{PART_W3, 0}, {PART_W4, 12}}},
 };
 static int part_rows(int what) { return what == PART_W3 ? 3 : what ? 4 : 0; }
 /* Are the layout's parts the same, bit for bit, in a and b? */
@@ -170,7 +178,8 @@ static struct {
 /* per layout: draws, how many had all their parts of constants 2 bit-identical to ours, and our
  * index buffer */
 static struct { long n, exact, ib; } lay_st[LAYOUTS];
-static void object_constants(const Layout *l, float out[GBUFFER_OBJECT_FLOATS]);
+/* game: the game's bound vertex constants 2, for the parts we copy (PART_GAME) */
+static void object_constants(const Layout *l, const float *game, float out[GBUFFER_OBJECT_FLOATS]);
 
 void gbuffer_layer_start(const CPUState *ctx) {
     if (__atomic_load_n(&mode, __ATOMIC_ACQUIRE) < 0) init_mode();
@@ -240,11 +249,19 @@ static void summary(void) {
 }
 
 
+/* The submesh's indices, as the submesh draw main+0xa75e90 finds them: the geometry's index buffer
+ * object (+0x28; usually, not always, the second object in the vertex buffer's record, +0x68 of
+ * it), at the submesh's offset (+4). 0 if there is none. */
+static uint64_t indices_of(uint64_t geometry, uint64_t submesh) {
+    uint64_t ib = U64(geometry + 0x28);
+    return ib && U64(ib) ? U64(ib) + U32(submesh + 4) : 0;
+}
+
 /* An index buffer that is not ours: what the game drew instead. */
 static void show_ib(uint64_t bufs, uint64_t vb0, uint64_t index_addr, uint32_t type, uint32_t count) {
     if (st.ib_shown >= 6) return;
     st.ib_shown++;
-    uint64_t ib = bufs ? U64(bufs + 0x68) : 0, ours = ib + U32(cur.submesh + 4);
+    uint64_t ours = indices_of(cur.geometry, cur.submesh);
     fprintf(stderr, "yw4: gbuffer: index buffer differs (call site %#" PRIx64 "): game %#" PRIx64 " type %u count %u,"
             " ours %#" PRIx64 " (game - ours %" PRId64 ") type %u count %u; vertices: game %#" PRIx64 " ours %#" PRIx64
             "; object %#" PRIx64 " geometry %#" PRIx64 "\n", cur.ret, index_addr, type, count, ours,
@@ -285,11 +302,11 @@ void gbuffer_check_draw(const NvnCmdBuf *cb, uint64_t index_addr, uint32_t type,
         const Layout *lay = &layouts[l];
         const float *game = (const float *)(uintptr_t)cb->trace_ub[0][2];
         float ours[GBUFFER_OBJECT_FLOATS];
-        object_constants(lay, ours);
+        object_constants(lay, game, ours);
         lay_st[l].n++;
         lay_st[l].exact += same_parts(lay, game, ours);
         uint64_t bufs = U64(cur.geometry + 0x20);
-        int ib_ok = U32(cur.submesh + 0xc) ? bufs && index_addr == U64(bufs + 0x68) + U32(cur.submesh + 4)
+        int ib_ok = U32(cur.submesh + 0xc) ? index_addr && index_addr == indices_of(cur.geometry, cur.submesh)
                                            : !index_addr;  /* no indices: drawn as the vertices */
         lay_st[l].ib += ib_ok;
         if (!ib_ok) show_ib(bufs, cb->trace_vb0, index_addr, type, count);
@@ -309,7 +326,7 @@ void gbuffer_check_draw(const NvnCmdBuf *cb, uint64_t index_addr, uint32_t type,
     st.main_vs++;
     uint64_t bufs = U64(cur.geometry + 0x20);
     if (bufs && cb->trace_vb0 == U64(bufs) + U32(cur.submesh)) st.vb_ok++;
-    if (bufs && index_addr == U64(bufs + 0x68) + U32(cur.submesh + 4)) st.ib_ok++;
+    if (index_addr && index_addr == indices_of(cur.geometry, cur.submesh)) st.ib_ok++;
     const float *c2 = (const float *)(uintptr_t)cb->trace_ub[0][2];
     Mat4 world = mat4_load(cur.object), world40 = mat4_load(cur.object + 0x40);
     if (mat4_diff(c2, world.m, 12) < 1e-4f) st.world_ok++;
@@ -322,7 +339,7 @@ void gbuffer_check_draw(const NvnCmdBuf *cb, uint64_t index_addr, uint32_t type,
         Mat4 hw = mat4_mul(&cur.vp, &w);
         if (mat4_diff(c2 + 32, hw.m, 16) < 1e-3f) st.hook_wvp_ok++;
     }
-    if (!bufs || index_addr != U64(bufs + 0x68) + U32(cur.submesh + 4)) {
+    if (U32(cur.submesh + 0xc) && index_addr != indices_of(cur.geometry, cur.submesh)) {
         st.ib_bad[cur.ret == 0xa4c2d0]++;
         show_ib(bufs, cb->trace_vb0, index_addr, type, count);
     }
@@ -403,7 +420,7 @@ static void native_summary(void) {
 /* Vertex constants 2 for the submesh noted last, as layout l reads them: the renderer's world,
  * projection x view x world, the world again as last frame's (the game puts this frame's there, so
  * only the camera's motion shows in the motion vectors). */
-static void object_constants(const Layout *l, float out[GBUFFER_OBJECT_FLOATS]) {
+static void object_constants(const Layout *l, const float *game, float out[GBUFFER_OBJECT_FLOATS]) {
     Mat4 w = {{0}};
     memcpy(w.m, cur.world, sizeof cur.world);
     w.m[15] = 1;
@@ -414,8 +431,9 @@ static void object_constants(const Layout *l, float out[GBUFFER_OBJECT_FLOATS]) 
     Mat4 vw = mat4_mul(&view, &w), wvp = mat4_mul(&proj, &vw);
     memset(out, 0, GBUFFER_OBJECT_FLOATS * sizeof *out);
     for (int i = 0; i < 4; i++) {
-        const float *m = l->part[i].what == PART_VW ? vw.m : l->part[i].what == PART_WVP ? wvp.m : w.m;
-        memcpy(out + 4 * l->part[i].row, m, 16 * part_rows(l->part[i].what));
+        int what = l->part[i].what;
+        const float *m = what == PART_VW ? vw.m : what == PART_WVP ? wvp.m : what == PART_GAME ? game + 4 * l->part[i].row : w.m;
+        memcpy(out + 4 * l->part[i].row, m, 16 * part_rows(what));
     }
 }
 
@@ -440,7 +458,7 @@ int gbuffer_take_draw(CPUState *ctx, const NvnCmdBuf *cb, int indexed) {
     d.vertex_bytes = d.vertex_count * stride;
     /* a submesh without indices (+0xc 0) is drawn as its vertices in order */
     d.index_count = U32(cur.submesh + 0xc);
-    d.indices = bufs && d.index_count ? U64(bufs + 0x68) + U32(cur.submesh + 4) : 0;
+    d.indices = d.index_count ? indices_of(cur.geometry, cur.submesh) : 0;
     d.index_type = !d.index_count ? 0 : U8(cur.submesh + 0x3f) & 2 ? 2 : 1;
     d.primitive = 4;
     /* the attributes' streams (one each: 0-4 for this program) all bound to the submesh's vertices
@@ -467,7 +485,8 @@ int gbuffer_take_draw(CPUState *ctx, const NvnCmdBuf *cb, int indexed) {
         return nat.left[5]++, 0;
     memcpy(d.game, &ctx->x[1], sizeof d.game);
     d.game_indexed = indexed;
-    object_constants(&layouts[l], d.object);
+    if (!cb->trace_ub[0][2]) return nat.left[1]++, 0;
+    object_constants(&layouts[l], (const float *)(uintptr_t)cb->trace_ub[0][2], d.object);
     nvn_record_native(ctx, ctx->x[0], gpu_gbuffer_draw, &d, sizeof d);
     nat.taken++;
     return 1;

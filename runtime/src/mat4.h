@@ -11,8 +11,9 @@ static inline Mat4 mat4_mul(const Mat4 *a, const Mat4 *b) {
     Mat4 r;
     for (int i = 0; i < 4; i++)
         for (int j = 0; j < 4; j++) {
-            float s = 0;
-            for (int k = 0; k < 4; k++) s += a->m[i * 4 + k] * b->m[k * 4 + j];
+            /* from the first product, not from 0: 0 + -0 would make a -0 of the game's +0 */
+            float s = a->m[i * 4] * b->m[j];
+            for (int k = 1; k < 4; k++) s += a->m[i * 4 + k] * b->m[k * 4 + j];
             r.m[i * 4 + j] = s;
         }
     return r;

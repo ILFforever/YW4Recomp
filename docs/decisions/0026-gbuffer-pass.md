@@ -91,3 +91,21 @@ this frame's world-view-projection in rows 8-11, **last frame's** in rows 12-15)
   index type are not the ones the game was about to draw stays the game's; the 0.12% index buffer mismatches of the
   hour-long check did not occur in the test saves, so check mode now logs the first ones in detail (both addresses,
   the submesh and buffer records) for when they do.
+- **Step 3/4 (the other programs, skinned included):** 13 G-buffer vertex programs are ours now, 99.5-99.9% of
+  the G-buffer's draws in the schoolyard, the town and the late-game forest; 1e14f9 (an extra row) and a few rare ones
+  stay the game's. A table in `gbuffer.c` says where each program reads the object in vertex constants 2: world
+  (3 or 4 rows), view × world, projection × view × world, at which rows. The skinned programs keep view × world
+  where the others keep the world. Our draw changes only what the vertex program reads, so any fragment program
+  behind these goes with it. Check mode compares each program's parts with the game's: bit-identical on all of
+  400,000+ draws in the town. Found on the way:
+  - The **index buffer** is the geometry's own index buffer object (+0x28), as the submesh draw reads it. It is
+    usually, not always, the second object of the vertex buffer's record (+0x68 of it), which step 1 used. The
+    shadow pass used the same wrong source; fixed there too (its learning had kept those draws with the game).
+  - The step 1 **0.12% index buffer mismatches** were submeshes without indices: the game draws their vertices with
+    `DrawArrays`. Ours does the same.
+  - A sum that starts from 0 turns the game's −0 into +0; ours starts from the first product, as the game's.
+  - The skinned programs' **last frame's view × world** is this frame's on most draws, but on 0.5-30% (by area) one
+    of a few fixed matrices that are the same in every area, not the object's history. It is copied from the
+    game's bound constants, as last frame's bones are; everything else in constants 2 is computed by us.
+- Bones (constants 4 and 5), material constants and textures are still the game's bound state: their decoding is
+  the takeover's work (step 5).

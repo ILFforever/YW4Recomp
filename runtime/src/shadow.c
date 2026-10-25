@@ -609,7 +609,10 @@ static int describe(const Caster *c, const Mat4 *vp, ShadowDraw *d) {
     if (!bufs) return 0;
     Mat4 world = load(c->own), mvp = mul(vp, &world);
     d->vertices = U64(bufs) + *(const uint32_t *)(uintptr_t)c->submesh;
-    d->indices = U64(bufs + 0x68) + *(const uint32_t *)(uintptr_t)(c->submesh + 4);
+    /* the geometry's index buffer object (+0x28), as the submesh draw finds it: usually the second
+     * object of the vertex buffer's record (+0x68 of it), not always */
+    uint64_t ib = U64(c->geometry + 0x28);
+    d->indices = ib ? U64(ib) + *(const uint32_t *)(uintptr_t)(c->submesh + 4) : 0;
     d->vertex_count = *(const uint32_t *)(uintptr_t)(c->submesh + 8);
     d->index_count = *(const uint32_t *)(uintptr_t)(c->submesh + 0xc);
     d->stride = U8(c->submesh + 0x3e);
@@ -619,7 +622,7 @@ static int describe(const Caster *c, const Mat4 *vp, ShadowDraw *d) {
     d->dither = 0, d->first_copy = d->copies = 0;
     d->wind_tex[0] = d->wind_tex[1] = 0, d->wind_format = d->wind_offset = d->wind_header = 0;
     memcpy(d->mvp, mvp.m, sizeof d->mvp);
-    return d->stride && (d->index_count || d->vertex_count);
+    return d->stride && (d->index_count ? d->indices != 0 : d->vertex_count != 0);
 }
 
 /* The copies the game's instance callback kept for the draw it is about to make: the model
