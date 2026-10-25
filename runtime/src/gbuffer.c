@@ -41,9 +41,8 @@ enum { MODE_GAME, MODE_CHECK, MODE_PROGRAMS, MODE_NATIVE };
 static int mode = -1;
 int gbuffer_checking;
 
-/* The G-buffer's main programs (half the draws in the schoolyard). */
+/* The G-buffer's main vertex program (two thirds of the draws in the schoolyard). */
 #define GBUFFER_VS 0xbc358b88a500029full
-#define GBUFFER_FS 0xa93492ef0b558e21ull
 
 static void init_mode(void) {
     const char *e = getenv("YW4_GBUFFER");
@@ -312,7 +311,15 @@ void gbuffer_check_draw(const NvnCmdBuf *cb, uint64_t index_addr, uint32_t type,
 static struct {
     long taken, left[6];  /* left to the game: program, no world, not a plain triangle list, vertex
                            * buffer or layout, index buffer, count or type */
+    struct { uint64_t vs, fs; long n; } other[24];  /* the programs left to the game, by draws */
 } nat;
+
+static void note_other(const NvnProgram *p) {
+    uint64_t vs = p ? p->stages[0].key : 0, fs = p ? p->stages[1].key : 0;
+    int i = 0;
+    while (i < 24 && nat.other[i].n && !(nat.other[i].vs == vs && nat.other[i].fs == fs)) i++;
+    if (i < 24) nat.other[i].vs = vs, nat.other[i].fs = fs, nat.other[i].n++;
+}
 
 static void native_summary(void) {
     static uint64_t last;
@@ -322,6 +329,9 @@ static void native_summary(void) {
     fprintf(stderr, "yw4: gbuffer: native: %ld draws ours; the game's: %ld other programs, %ld no world, %ld not a "
             "triangle list, %ld other vertex buffer or layout, %ld other index buffer, %ld other count or type\n",
             nat.taken, nat.left[0], nat.left[1], nat.left[2], nat.left[3], nat.left[4], nat.left[5]);
+    for (int i = 0; i < 24 && nat.other[i].n; i++)
+        fprintf(stderr, "yw4: gbuffer:   the game's: vs %016" PRIx64 " fs %016" PRIx64 ": %ld draws\n", nat.other[i].vs,
+                nat.other[i].fs, nat.other[i].n);
     memset(&nat, 0, sizeof nat);
 }
 
@@ -351,7 +361,8 @@ int gbuffer_take_draw(CPUState *ctx, const NvnCmdBuf *cb) {
     uint32_t prim = (uint32_t)ctx->x[1], type = (uint32_t)ctx->x[2], count = (uint32_t)ctx->x[3];
     uint64_t index_addr = ctx->x[4];
     const NvnProgram *p = cb->program;
-    if (!p || p->stages[0].key != GBUFFER_VS || p->stages[1].key != GBUFFER_FS) return nat.left[0]++, 0;
+    /* any fragment program: our draw changes only what the vertex program reads */
+    if (!p || p->stages[0].key != GBUFFER_VS) return note_other(p), nat.left[0]++, 0;
     if (!cur.have_world) return nat.left[1]++, 0;
     if (U8(cur.submesh + 0x3d) != 1 || prim != 4) return nat.left[2]++, 0;  /* table index 1, NVN's triangles */
     uint64_t bufs = U64(cur.geometry + 0x20);
