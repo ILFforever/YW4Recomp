@@ -548,11 +548,17 @@ static const struct {
 static void prebuild_thread(void *arg) {
     (void)arg;
     for (size_t i = 0; i < sizeof prebuilt / sizeof *prebuilt; i++) {
-        char path[1024];
-        snprintf(path, sizeof path, "%s/%016" PRIx64 ".frag.spv", shader_dir(), prebuilt[i].frag);
-        FILE *f = fopen(path, "rb");
-        if (!f) continue;  /* not translated: nothing to warm */
-        fclose(f);
+        /* both stages translated (load_shader stops the game on a missing file), else nothing to warm */
+        int have = 1;
+        for (int st = 0; st < 2; st++) {
+            char path[1024];
+            snprintf(path, sizeof path, "%s/%016" PRIx64 ".%s.spv", shader_dir(), st ? prebuilt[i].frag : prebuilt[i].vert,
+                     st ? "frag" : "vert");
+            FILE *f = fopen(path, "rb");
+            if (f) fclose(f);
+            else have = 0;
+        }
+        if (!have) continue;
         int64_t t0 = host_now_ns();
         Program g = {0};
         g.sh[ST_VERT] = load_shader(prebuilt[i].vert, ST_VERT);
