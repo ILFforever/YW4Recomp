@@ -22,6 +22,7 @@ game with them and compare results: [tools/dev](../tools/dev/README.md).
 | `YW4_GBUFFER=programs` | Step 2a only: our readable programs in the game's own draws |
 | `YW4_GBUFFER_LAYOUTS=<hex mask>` | Native mode draws only the programs of these entries of the table in `runtime/src/gbuffer.c` (all by default), to narrow a fault down |
 | `YW4_MATERIAL=0` | Leave the lit material pass (layer kind 0, keys 0..2) to the game; by default it follows `YW4_GBUFFER` (our draws there too in `native` mode) |
+| `YW4_STAGES=0` | Leave the main view's other model layers (kind 0, other keys: the named stages) to the game; by default they follow `YW4_GBUFFER` too |
 | `YW4_CAPTURE_LAYER_AT=<GPU frame>[,...]` | With our G-buffer pass on: the colour target as the material pass left it, in those frames, to `work/dump/layer_material_f<frame>_t0.raw` (for comparisons within one run, with `YW4_GBUFFER_ALTERNATE`) |
 | `YW4_GBUFFER_ALTERNATE=<frame>` | For 16 GPU frames from that one, odd frames use our G-buffer pass (the mode's: `native` or `programs`) and even frames the game's: compares the two in one run (with `YW4_DUMP_IMAGE`; a frame dumped as F was drawn as F-1) |
 | `YW4_HUD=1` | Start with the performance HUD shown (F3 toggles it) |

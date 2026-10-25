@@ -47,6 +47,13 @@ static int material_layer(uint64_t item) {
     return on && U8(item + 8) == LAYER_MATERIAL && *(const uint16_t *)(uintptr_t)(item + 0xa) == 0 &&
            *(const uint16_t *)(uintptr_t)(item + 0xc) == 2;
 }
+/* The main view's other model renderer layers (kind 0, other keys: the named stages, characters,
+ * map, effects; docs/frame.md "Main-view stages"). Our draws there too (YW4_STAGES=0: not). */
+static int stage_layer(uint64_t item) {
+    static int on = -1;
+    if (on < 0) on = !getenv("YW4_STAGES") || atoi(getenv("YW4_STAGES"));
+    return on && U8(item + 8) == LAYER_MATERIAL && !material_layer(item);
+}
 static _Thread_local const char *pass_name = "gbuffer";  /* this thread's pass, for the summaries */
 enum { MODE_GAME, MODE_CHECK, MODE_PROGRAMS, MODE_NATIVE };
 static int mode = -1;
@@ -98,6 +105,20 @@ static const Layout layouts[] = {
     {0xa4ec7992db13fd68ull, {{PART_W3, 0}}},
     {0xadc29b1b44829818ull, {{PART_W3, 0}}},
     {0x9b9f9ed2cc08aa0eull, {{PART_W3, 0}}},
+    {0x358916c1961dd9b9ull, {{PART_W4, 0}, {PART_WVP, 8}}},  /* skinned */
+    {0x2bed6627a501b602ull, {{PART_WVP, 8}}},
+    {0x5bd1d944ba55c3a7ull, {{PART_WVP, 8}}},
+    {0x9dd0c8c2b5a55909ull, {{PART_W4, 0}, {PART_W4, 12}}},
+    {0x0216502064e7bbc3ull, {{PART_W3, 0}, {PART_WVP, 8}}},
+    {0x41a8fd685b64dffdull, {{PART_W3, 0}}},
+    {0xa56f491c7ffbe48eull, {{PART_W3, 0}}},
+    {0xb813fb690e38a1e5ull, {{PART_W3, 0}}},
+    {0x98c09b816c2787a2ull, {{PART_NONE, 0}}},  /* reads no object constants */
+    {0x6488f2ab4b0873d5ull, {{PART_W3, 0}, {PART_W4, 12}}},  /* G-buffer */
+    {0x99c29881d52eb8b7ull, {{PART_W3, 0}, {PART_W4, 12}}},  /* G-buffer */
+    /* the main view's stage layers' */
+    {0xea32f254e28caa24ull, {{PART_WVP, 8}}},
+    {0xf7b17fd7a6ebea03ull, {{PART_WVP, 8}}},
 };
 static int part_rows(int what) { return what == PART_W3 ? 3 : what ? 4 : 0; }
 /* Are the layout's parts the same, bit for bit, in a and b? */
@@ -215,9 +236,9 @@ void gbuffer_layer_start(const CPUState *ctx) {
     if (after_material && getenv("YW4_CAPTURE_LAYER_AT"))
         nvn_record_native(ctx, U64(ctx->x[0] + 0x10d0) + 0xd8, gpu_capture_layer, "material", 8);
     after_material = item && material_layer(item) && mode != MODE_GAME;
-    cur.active = mode != MODE_GAME && item && (U8(item + 8) == LAYER_GBUFFER || material_layer(item));
+    cur.active = mode != MODE_GAME && item && (U8(item + 8) == LAYER_GBUFFER || material_layer(item) || stage_layer(item));
     if (!cur.active) return;
-    pass_name = U8(item + 8) == LAYER_GBUFFER ? "gbuffer" : "material";
+    pass_name = U8(item + 8) == LAYER_GBUFFER ? "gbuffer" : material_layer(item) ? "material" : "stages";
     cur.device = ctx->x[0];
     /* the camera's projection and view in the render state (the shadow cascades' jobs put theirs
      * at the same offsets on their own thread) */
