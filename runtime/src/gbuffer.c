@@ -33,6 +33,7 @@
 extern uint64_t yw4_frames_presented;  /* dispatch.c */
 
 #define U8(a) (*(const uint8_t *)(uintptr_t)(a))
+#define U16(a) (*(const uint16_t *)(uintptr_t)(a))
 #define U32(a) (*(const uint32_t *)(uintptr_t)(a))
 #define U64(a) (*(const uint64_t *)(uintptr_t)(a))
 
@@ -188,6 +189,8 @@ static _Thread_local struct {
     uint64_t sp, ret;  /* the model renderer's stack and which of its two call sites */
     float world[12];   /* the renderer's world for this draw ([sp+0x30]+0x40), read at the hook */
     int have_world;
+    uint64_t list;     /* the layer's draw list */
+    uint64_t item;     /* the draw item (0x48 bytes) of this submesh, 0 if not found */
 } cur;
 
 /* host_readable is a system call: remember the answer per 64 KiB block */
@@ -226,7 +229,7 @@ static _Thread_local struct {
 } st;
 /* per layout: draws, how many had all their parts of constants 2 bit-identical to ours, and our
  * index buffer */
-static _Thread_local struct { long n, exact, ib; } lay_st[LAYOUTS];
+static _Thread_local struct { long n, exact, ib, item, mat_n, mat_ok[2]; } lay_st[LAYOUTS];
 /* game: the game's bound vertex constants 2, for the parts we copy (PART_GAME) */
 static void object_constants(const Layout *l, const float *game, float out[GBUFFER_OBJECT_FLOATS]);
 
@@ -242,7 +245,7 @@ void gbuffer_layer_start(const CPUState *ctx) {
     cur.active = mode != MODE_GAME && item && (U8(item + 8) == LAYER_GBUFFER || material_layer(item) || stage_layer(item));
     if (!cur.active) return;
     pass_name = U8(item + 8) == LAYER_GBUFFER ? "gbuffer" : material_layer(item) ? "material" : "stages";
-    cur.device = ctx->x[0];
+    cur.device = ctx->x[0], cur.list = ctx->x[1];
     /* the camera's projection and view in the render state (the shadow cascades' jobs put theirs
      * at the same offsets on their own thread) */
     Mat4 proj = mat4_load(cur.device + 0x280), view = mat4_load(cur.device + 0x2c0);
@@ -250,6 +253,49 @@ void gbuffer_layer_start(const CPUState *ctx) {
     uint64_t frame = __atomic_load_n(&yw4_frames_presented, __ATOMIC_RELAXED);
     if (frame != this_vp_frame) prev_vp = this_vp, this_vp = cur.vp, this_vp_frame = frame;
     st.layers++;
+}
+
+/* The model renderer's draw item (0x48 bytes, docs/frame.md "Materials") for the submesh noted:
+ * +0 geometry, +8 model record, +0x10 submesh records, +0x18 material records, +0x28 texture
+ * references, +0x30 material constants, +0x40 (u16) the submesh's index. Found in the renderer's
+ * stack, as a slot pointing at it or as the item itself; where it was is remembered per call site. */
+static int is_item(uint64_t p) {
+    return guest_ptr(p) && readable(p, 0x48) && U64(p) == cur.geometry &&
+           U64(p + 0x10) + 0x50ull * U16(p + 0x40) == cur.submesh;
+}
+static uint64_t find_item(uint64_t sp, int site) {
+    static int where[2] = {-1, -1};  /* stack offset, +1 bit: 1 the slot holds a pointer, 0 the item is there */
+    int w = __atomic_load_n(&where[site], __ATOMIC_RELAXED);
+    if (w >= 0) {
+        uint64_t p = w & 1 ? U64(sp + (w & ~1)) : sp + (uint64_t)w;
+        if (is_item(p)) return p;
+    }
+    for (int off = 0; off < 0x2000; off += 8) {
+        if (is_item(sp + off)) return __atomic_store_n(&where[site], off, __ATOMIC_RELAXED), sp + off;
+        uint64_t p = U64(sp + off);
+        if (is_item(p)) return __atomic_store_n(&where[site], off | 1, __ATOMIC_RELAXED), p;
+    }
+    static int logged;
+    if (logged++ < 3) fprintf(stderr, "yw4: gbuffer: no draw item found for submesh %#" PRIx64 "\n", cur.submesh);
+    return 0;
+}
+
+/* The material constants the renderer uploads for the item's submesh (0x80 bytes, zero after the
+ * material's own): the material record (+0x18, 16 bytes each, by the submesh's byte +0x43) gives
+ * the start (+2, in 16-byte units, in the item's +0x30) and count (+0xa); a model record with
+ * +0x219 bit 0 and per-object overrides at +0x78 takes 0x80 bytes per material from there instead.
+ * 0 if there are none (the game then binds the previous ones). */
+static int material_constants(uint64_t item, uint8_t out[0x80]) {
+    uint64_t model = U64(item + 8);
+    unsigned m = U8(cur.submesh + 0x43);
+    uint64_t rec = U64(item + 0x18) + 16ull * m;
+    unsigned n = U8(rec + 0xa);
+    if (!n || n > 8) return 0;
+    uint64_t src = U8(model + 0x219) & 1 && U64(model + 0x78) ? U64(model + 0x78) + 0x80ull * m
+                                                               : U64(item + 0x30) + 16ull * U16(rec + 2);
+    memset(out, 0, 0x80);
+    memcpy(out, (const void *)(uintptr_t)src, 16 * n);
+    return 1;
 }
 
 void gbuffer_submesh(const CPUState *ctx) {
@@ -266,6 +312,7 @@ void gbuffer_submesh(const CPUState *ctx) {
     uint64_t rw = U64(ctx->sp + 0x30);
     cur.have_world = guest_ptr(rw) && readable(rw + 0x40, 48);
     if (cur.have_world) memcpy(cur.world, (const void *)(uintptr_t)(rw + 0x40), sizeof cur.world);
+    cur.item = find_item(ctx->sp, ret == 0xa4c2d0);
     cur.armed = 1;
     st.submeshes++;
 }
@@ -289,7 +336,9 @@ static void summary(void) {
     for (int l = 0; l < LAYOUTS; l++)
         if (lay_st[l].n)
             fprintf(stderr, "yw4: %s:   vs %016" PRIx64 ": %ld draws, constants 2 bit-identical %ld, index buffer"
-                    " ours %ld\n", pass_name, layouts[l].vs, lay_st[l].n, lay_st[l].exact, lay_st[l].ib);
+                    " ours %ld; draw item found %ld, material constants %ld: ours bound in vs %ld, fs %ld\n",
+                    pass_name, layouts[l].vs, lay_st[l].n, lay_st[l].exact, lay_st[l].ib, lay_st[l].item,
+                    lay_st[l].mat_n, lay_st[l].mat_ok[0], lay_st[l].mat_ok[1]);
     memset(lay_st, 0, sizeof lay_st);
     for (int i = 0; i < SOURCES; i++)
         if (sources[i].n)
@@ -360,6 +409,16 @@ void gbuffer_check_draw(const NvnCmdBuf *cb, uint64_t index_addr, uint32_t type,
         object_constants(lay, game, ours);
         lay_st[l].n++;
         lay_st[l].exact += same_parts(lay, game, ours);
+        /* the material constants, against what the game bound at the draw list's slot (+0x7a) */
+        uint8_t mat[0x80];
+        unsigned slot = U16(cur.list + 0x7a);
+        if (cur.item && slot < 16 && material_constants(cur.item, mat)) {
+            lay_st[l].mat_n++;
+            for (int stage = 0; stage < 2; stage++)
+                lay_st[l].mat_ok[stage] += cb->trace_ub[stage][slot] &&
+                                           !memcmp((const void *)(uintptr_t)cb->trace_ub[stage][slot], mat, 0x80);
+        }
+        lay_st[l].item += cur.item != 0;
         uint64_t bufs = U64(cur.geometry + 0x20);
         int ib_ok = U32(cur.submesh + 0xc) ? index_addr && index_addr == indices_of(cur.geometry, cur.submesh)
                                            : !index_addr;  /* no indices: drawn as the vertices */
