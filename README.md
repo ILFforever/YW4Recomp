@@ -5,7 +5,7 @@
 </p>
 
 <p align="center">
-  <img alt="Phase 3: kernel and services" src="https://img.shields.io/badge/phase-3%20·%20kernel%20%26%20services-6f42c1">
+  <img alt="Phase 4: renderer" src="https://img.shields.io/badge/phase-4%20·%20renderer-6f42c1">
   <img alt="Platforms" src="https://img.shields.io/badge/platforms-Windows%20%7C%20Linux-informational">
   <img alt="Graphics" src="https://img.shields.io/badge/graphics-Vulkan-ac162c">
   <img alt="Playable: house and town" src="https://img.shields.io/badge/playable-house%20%26%20town-success">
@@ -44,6 +44,37 @@ a locked 30 frames/s. Expect missing effects and crashes in places nobody has re
 - How it got here, step by step: [docs/progress.md](docs/progress.md)
 - What is known to be missing or wrong: [docs/known-issues.md](docs/known-issues.md)
 
+## Goal: our own renderer
+
+The project's main goal is a renderer of our own for the whole frame, built pass by pass on the game's data
+([decision 0023](docs/decisions/0023-custom-renderer-plan.md)). Replaying the game's draw calls ties every frame to
+the Switch's choices: its resolution, its 16:9 layout, its shadow settings. A renderer of our own draws the same
+scene from the game's data, so those choices become ours to change. Each replaced pass first has to look exactly
+like the game's (checked pixel by pixel) before anything is changed.
+
+What it is for:
+
+| | Goal | Where it stands |
+|---|---|---|
+| 🚧 | **Better shadows** | Bigger shadow maps and PCSS soft shadows done; contact shadows and steadier cascades next |
+| ⬜ | **Higher resolution** | Render the 3D scene above the game's 1600×900, sharper on 1080p, 1440p and 4K screens |
+| ⬜ | **Ultrawide and other aspect ratios** | A wider view of the scene, with the UI laid out correctly |
+| ⬜ | **Smoother frame rates** | Above the game's 30 frames/s; also needs the game's timing patched |
+| ⬜ | **Better anti-aliasing** | And other effects the Switch had no budget for |
+
+The renderer itself, pass by pass:
+
+| | Pass | Where it stands |
+|---|---|---|
+| ✅ | Shadow maps | Our own pass ([decision 0024](docs/decisions/0024-shadow-pass.md)) |
+| ✅ | G-buffer | Our draws and shaders, identical to the game's ([decision 0026](docs/decisions/0026-gbuffer-pass.md)) |
+| 🚧 | Lit material pass | Our draws; our shaders for most surfaces, identical to the game's |
+| ⬜ | Post-processing, UI | The game's |
+
+Still the game's everywhere: the choice of what to draw, textures and character bones.
+
+✅ done · 🚧 in progress · ⬜ planned
+
 ## How it works
 
 - **Translated ahead of time, not interpreted.** Every ARM64 function in the game's `main` and `sdk` modules (73,844
@@ -56,23 +87,6 @@ a locked 30 frames/s. Expect missing effects and crashes in places nobody has re
 - No emulator code is linked ([decision 0005](docs/decisions/0005-phase1-runtime-strategy.md)). Each instruction form
   of the recompiler is checked against a real ARM64 CPU (a Raspberry Pi 5).
 - Why things are built this way is written down in [docs/decisions/](docs/decisions/).
-
-## Goal: our own renderer
-
-The project's main goal is a renderer of our own for the whole frame, built pass by pass on the game's data
-([decision 0023](docs/decisions/0023-custom-renderer-plan.md)). What it is for:
-
-- **Higher resolution**: render the 3D scene above the game's 1600×900 (sharper on 1080p, 1440p and 4K screens).
-- **Better shadows**: bigger maps and PCSS today; contact shadows and steadier cascades next.
-- **Ultrawide and other aspect ratios**: a wider view of the scene, with the UI laid out correctly.
-- **Smoother frame rates** above the game's 30 frames/s (this also needs the game's timing patched).
-- **Better anti-aliasing** and other effects the Switch had no budget for.
-
-Each replaced pass first has to look exactly like the game's (checked pixel by pixel) before anything is changed.
-Done so far: the shadow pass; the G-buffer and the lit material pass now draw with our own draw calls and our own
-shaders for most surfaces, and match the game's output bit for bit
-([decision 0026](docs/decisions/0026-gbuffer-pass.md)). Still the game's: the choice of what to draw, textures,
-character bones, and the post-processing and UI.
 
 ## Screenshots
 
@@ -93,84 +107,31 @@ shadows here are our own pass ("CUSTOM").
   <img src="docs/screenshots/11-hud-in-town.jpg" alt="In town with the performance HUD: frame time, work, GPU, CPU, memory and a frame-time graph" width="820">
 </p>
 
-## Improvements
+## Graphics options
 
-Improvements over the original game:
+Improvements over the original game. Details, comparisons and measurements: [docs/graphics.md](docs/graphics.md).
 
-| Improvement | Key | What it does |
+| Option | Key | What it does |
 |---|---|---|
 | Performance HUD | F3 | Frame time, CPU and GPU cost, memory and the settings below, in the window's corner |
-| Native shadow pass | F9 | Our own renderer draws the shadow casters from the game's data |
-| Shadow map size | F8 | 1024 (the game's), 2048 or 4096: sharper shadow edges. Default: 4096 |
-| PCSS (soft contact shadows) | F7 | Shadows sharp at the contact, softer with distance: off, ×1, ×2, ×4. Default: ×2 |
+| Native shadow pass | F9 | Our own renderer draws the shadow casters from the game's data; slightly faster than the game's |
+| Shadow map size | F8 | 1024 (the game's), 2048 or 4096: sharper shadow edges. Recommended: 4096 |
+| PCSS (soft shadows) | F7 | Off, ×1, ×2, ×4. Recommended: ×2 |
 
-### Native shadow pass (F9)
+**PCSS** (percentage-closer soft shadows) makes shadows behave more like real ones:
 
-Our own renderer draws the shadow casters the game would draw, from the game's data, instead of replaying the game's
-draw calls one by one ([decision 0024](docs/decisions/0024-shadow-pass.md)). It covers static, cut-out, skinned and
-instanced casters, including props fading in and out and wind-swayed plants; the game still draws the rest (a second
-kind of character, a few others).
+- **Close shadows stay sharp**: where a shadow touches its caster (feet, poles, the base of a wall).
+- **Farther shadows get softer**: the farther the caster is from the ground, the softer the edge, so tree canopies
+  become soft dappled shade instead of a field of hard dots.
+- **Less shimmering**: hard edges flicker as the camera moves; softer ones spread that out, so distant shadows
+  shimmer much less.
 
-The shadow pass is the first step, not the end point: the plan is to **replace the game's whole renderer with our
-own**, one pass at a time (see [the goal above](#goal-our-own-renderer)). Replaying the game's draw calls ties every
-frame to the Switch's choices: its resolution, its 16:9 layout, its shadow map size and filters. A renderer of our
-own draws the same scene from the game's data, so those choices become ours to change.
-
-Same save and frame, the game's shadows against ours. The only differences are animation timing between the two
-runs (Whisper's float, idle poses, leaves):
-
-| The game's shadows | Our shadow pass |
+| PCSS off | PCSS ×2 (recommended) |
 |---|---|
-| ![The game's shadows](docs/screenshots/08-shadows-game.jpg) | ![Our shadow pass](docs/screenshots/09-shadows-ours.jpg) |
+| ![PCSS off: hard, speckled leaf shadows](docs/screenshots/16-pcss-off.jpg) | ![PCSS x2](docs/screenshots/18-pcss-x2.jpg) |
 
-<details><summary>Difference image (white: pixels that differ)</summary>
-
-![Difference](docs/screenshots/10-shadows-difference.jpg)
-
-</details>
-
-Cost per frame on a scripted walk through the town (average of 3 runs each, alternating, nothing else running;
-RTX 4070 Laptop):
-
-| Per frame | The game's shadows | Our shadow pass | Change |
-|---|---|---|---|
-| Game work, average | 10.9 ms | 10.3 ms | **−0.6 ms** |
-| Game work, 95th percentile | 18.0 ms | 16.8 ms | **−1.2 ms** |
-| GPU busy, average | 11.3 ms | 10.9 ms | −0.3 ms |
-| Process CPU | 72.7% of a core | 71.3% of a core | −1.4 points |
-
-### Shadow quality: map size (F8) and PCSS (F7)
-
-- **Shadow map size (F8):** 1024 (the game's), 2048 or 4096. Bigger maps give sharper edges.
-- **PCSS, soft contact shadows (F7):** off, ×1, ×2, ×4. PCSS (percentage-closer soft shadows) makes shadows behave
-  more like real ones:
-  - **Close shadows stay sharp.** Where a shadow touches the thing casting it (feet, poles, the base of a wall), the
-    edge stays crisp.
-  - **Farther shadows get softer.** The farther the caster is from the surface the shadow falls on, the softer its
-    edge, so tree canopies become soft dappled shade instead of a field of hard dots.
-  - **Less shimmering.** Hard shadow edges flicker and crawl as the camera moves, because each edge snaps to the
-    shadow map's texels. Softer edges spread that over more pixels, so distant shadows shimmer much less.
-
-  It is added to the game's screen-space shadow mask shader only, so loading is as fast as before.
-
-**Default: 4096 map with PCSS ×2**: sharp contact shadows and soft, clean canopy shade. For the game's original
-shadows, start with `YW4_SHADOW_RES=1024 YW4_PCSS=0` (or press F8 and F7).
-
-**Shadow map size.** The bamboo forest with PCSS off at each size, and 2048 with PCSS ×1 added:
-
-| 1024 (the game's) | 2048 |
-|---|---|
-| ![1024 shadow map](docs/screenshots/12-shadow-map-1024.jpg) | ![2048 shadow map](docs/screenshots/13-shadow-map-2048.jpg) |
-| **4096** | **2048 + PCSS ×1** |
-| ![4096 shadow map](docs/screenshots/14-shadow-map-4096.jpg) | ![2048 shadow map with PCSS x1](docs/screenshots/15-shadow-map-2048-pcss-x1.jpg) |
-
-**PCSS.** Another spot in the bamboo forest, 4096 map, PCSS off and its three strengths:
-
-| PCSS off | PCSS ×1 |
-|---|---|
-| ![PCSS off: hard, speckled leaf shadows](docs/screenshots/16-pcss-off.jpg) | ![PCSS x1](docs/screenshots/17-pcss-x1.jpg) |
-| **PCSS ×2 (recommended)** | **PCSS ×4** |
-| ![PCSS x2](docs/screenshots/18-pcss-x2.jpg) | ![PCSS x4](docs/screenshots/19-pcss-x4.jpg) |
+The game starts with the recommended 4096 map and PCSS ×2. For the game's original shadows, start with
+`YW4_SHADOW_RES=1024 YW4_PCSS=0` (or press F8 and F7).
 
 ## Building from source
 
@@ -193,7 +154,7 @@ Runtime options, capture keys, input replay and the frame-inspection tools are i
 | `runtime/` | Native runtime: kernel, services, NVN on Vulkan |
 | `tools/` | Python input pipeline and analysis tools |
 | `tests/` | Tests on synthetic data (no game files) |
-| `docs/` | Setup, debugging, progress, known issues, decision records, recon report, Eden baseline |
+| `docs/` | Setup, debugging, graphics options, progress, known issues, decision records, recon report, Eden baseline |
 | `third_party/musl/` | musl 1.1.19's math functions (MIT) |
 | `work/`, `build/` | Generated output from your own game files (gitignored, never committed) |
 
