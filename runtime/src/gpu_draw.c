@@ -26,6 +26,7 @@
 #include <string.h>
 
 #include "gpu_internal.h"
+#include "host.h"
 #include "kernel.h"
 
 enum { ST_VERT, ST_FRAG, ST_GEOM, NSETS = 3, ST_COMP = 3 };  /* NSETS: the graphics stages; compute is separate */
@@ -39,7 +40,8 @@ static const int nvn_stage[NSETS] = {0, 1, 2};
 
 enum { MAX_BINDINGS = 64 };
 typedef struct {
-    char kind;  /* c constant buffer, t texture, i image, s storage buffer */
+    char kind;  /* c constant buffer, t texture, i image, s storage buffer, d a shadow map's raw depth
+                 * (texture slot, no compare), p the soft shadow settings (yw4_shadow in recomp/shader.py) */
     uint32_t slot;
     VkImageViewType view;  /* textures */
     int shadow;
@@ -89,9 +91,8 @@ static VkImageViewType view_type(const char *dim, int *shadow) {
     gpu_stop("texture target %s", dim);
 }
 
-static Shader *shader(uint64_t key, int stage) {
-    for (Shader *s = shaders; s; s = s->next)
-        if (s->key == key && s->stage == stage) return s;
+/* A translated shader's module and descriptor set layout, from the files (not kept in the list). */
+static Shader *load_shader(uint64_t key, int stage) {
     Shader *s = calloc(1, sizeof *s);
     s->key = key, s->stage = stage;
     char path[1024];
@@ -126,6 +127,11 @@ static Shader *shader(uint64_t key, int stage) {
             l->binding = 16 + slot, l->descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
             b->view = view_type(dim, &b->shadow);
             break;
+        case 'd':
+            l->binding = 96 + slot, l->descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+            b->view = view_type(dim, &b->shadow);
+            break;
+        case 'p': l->binding = 95, l->descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER; break;
         case 'i': l->binding = 16 + slot, l->descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE; break;
         case 's': l->binding = 64 + slot, l->descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER; break;
         default: gpu_stop("shader interface line '%s'", line);
@@ -158,6 +164,13 @@ static Shader *shader(uint64_t key, int stage) {
     VkDescriptorSetLayoutCreateInfo lci = {.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
                                            .bindingCount = (uint32_t)s->nb, .pBindings = lb};
     CHECK(vkCreateDescriptorSetLayout(vk.device, &lci, NULL, &s->layout));
+    return s;
+}
+
+static Shader *shader(uint64_t key, int stage) {
+    for (Shader *s = shaders; s; s = s->next)
+        if (s->key == key && s->stage == stage) return s;
+    Shader *s = load_shader(key, stage);
     s->next = shaders;
     shaders = s;
     return s;
@@ -509,10 +522,69 @@ static VkPipeline pipeline(Program *g, const PipeKey *k) {
         .layout = g->layout};
     Pipe *p = calloc(1, sizeof *p);
     p->key = *k;
+    int64_t t0 = host_now_ns();
     CHECK(vkCreateGraphicsPipelines(vk.device, VK_NULL_HANDLE, 1, &pci, NULL, &p->pipeline));
+    int64_t took = host_now_ns() - t0;
+    if (took > 100000000)  /* a slow build stalls the frame: say which shaders */
+        fprintf(stderr, "yw4: gpu: pipeline took %lld ms (vert %016" PRIx64 ", frag %016" PRIx64 ")\n",
+                (long long)(took / 1000000), g->sh[ST_VERT] ? g->sh[ST_VERT]->key : 0,
+                g->sh[ST_FRAG] ? g->sh[ST_FRAG]->key : 0);
     p->next = g->pipes;
     g->pipes = p;
     return p->pipeline;
+}
+
+/* Pipelines built at start-up, so their first draw doesn't wait for the driver's compiler: the
+ * soft-shadow mask (yw4_shadow in recomp/shader.py) builds in ~0.2-0.3 s, a visible stall the
+ * first time a scene loads on a cold driver cache. The key is the game's draw (the same in every
+ * traced frame: one B10G11R11 target, D32 depth, no blending, quads as a triangle list, three
+ * vertex inputs). A background thread builds it while the game boots: the driver's disk cache
+ * keeps the result, and the game's own build of it is then ~1 ms. The
+ * thread uses its own Shader copies (load_shader), so it never touches the shared list. */
+static const struct {
+    uint64_t vert, frag;
+} prebuilt[] = {{0x98c09b816c2787a2ull, 0x06d03ad703b4bee5ull}};
+
+static void prebuild_thread(void *arg) {
+    (void)arg;
+    for (size_t i = 0; i < sizeof prebuilt / sizeof *prebuilt; i++) {
+        char path[1024];
+        snprintf(path, sizeof path, "%s/%016" PRIx64 ".frag.spv", shader_dir(), prebuilt[i].frag);
+        FILE *f = fopen(path, "rb");
+        if (!f) continue;  /* not translated: nothing to warm */
+        fclose(f);
+        int64_t t0 = host_now_ns();
+        Program g = {0};
+        g.sh[ST_VERT] = load_shader(prebuilt[i].vert, ST_VERT);
+        g.sh[ST_FRAG] = load_shader(prebuilt[i].frag, ST_FRAG);
+        VkDescriptorSetLayout layouts[2] = {g.sh[ST_VERT]->layout, g.sh[ST_FRAG]->layout};
+        VkPushConstantRange pc = {VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_GEOMETRY_BIT, 0, 4};
+        VkPipelineLayoutCreateInfo pli = {.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO, .setLayoutCount = 2,
+                                          .pSetLayouts = layouts, .pushConstantRangeCount = 1, .pPushConstantRanges = &pc};
+        CHECK(vkCreatePipelineLayout(vk.device, &pli, NULL, &g.layout));
+        PipeKey k = {.depth = VK_FORMAT_D32_SFLOAT, .channel_mask = 0xFFFFFFFFu, .polygon_mode = 2,
+                     .topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST, .ncolor = 1, .nattr = 3, .nbind = 3};
+        k.color[0] = VK_FORMAT_B10G11R11_UFLOAT_PACK32;
+        k.color_state[1] = 3, k.color_state[2] = 8;
+        for (int b = 0; b < 8; b++) {
+            static const uint8_t none[8] = {0, 2, 1, 2, 1, 1, 1, 0};  /* ONE, ZERO, ONE, ZERO, ADD, ADD */
+            memcpy(k.blend[b], none, 8);
+        }
+        k.attr[0] = (VkVertexInputAttributeDescription){0, 0, VK_FORMAT_R32G32B32A32_SFLOAT, 0};
+        k.attr[1] = (VkVertexInputAttributeDescription){1, 1, VK_FORMAT_R32G32B32A32_SFLOAT, 24};
+        k.attr[2] = (VkVertexInputAttributeDescription){2, 2, VK_FORMAT_R32G32_SFLOAT, 16};
+        for (uint32_t b = 0; b < 3; b++) k.bind[b] = (VkVertexInputBindingDescription){b, 40, VK_VERTEX_INPUT_RATE_VERTEX};
+        pipeline(&g, &k);  /* kept, like every pipeline: a few small objects, once */
+        fprintf(stderr, "yw4: gpu: prebuilt pipeline (frag %016" PRIx64 ") in %lld ms\n", prebuilt[i].frag,
+                (long long)((host_now_ns() - t0) / 1000000));
+    }
+}
+
+void gpu_prebuild_start(void) {
+    const char *e = getenv("YW4_PREBUILD");
+    if (e && *e == '0') return;
+    if (host_thread_start(prebuild_thread, NULL, 1 << 20))
+        fprintf(stderr, "yw4: gpu: cannot start the pipeline prebuild thread\n");
 }
 
 /* ================================================================== state and rendering */
@@ -674,31 +746,82 @@ static VkDeviceMemory pcf_mem;
 static uint8_t *pcf_ptr;
 static VkDeviceSize pcf_at;
 
-static int pcf_scaled_copy(uint64_t addr, VkDeviceSize range, int pcf_float, VkBuffer *buf, VkDeviceSize *offset) {
-    int res = gpu_shadow_res();
-    if (res == 1024 || range > 65536 || (VkDeviceSize)(pcf_float + 2) * 4 > range) return 0;
+/* `size` bytes of the ring for one draw's uniform data; NULL if the ring can't be made. */
+static uint8_t *ring_alloc(VkDeviceSize size, VkBuffer *buf, VkDeviceSize *offset) {
     if (!pcf_buf) {
         VkBufferCreateInfo bci = {.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO, .size = PCF_RING,
                                   .usage = VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT};
-        if (vkCreateBuffer(vk.device, &bci, NULL, &pcf_buf) != VK_SUCCESS) return 0;
+        if (vkCreateBuffer(vk.device, &bci, NULL, &pcf_buf) != VK_SUCCESS) return NULL;
         VkMemoryRequirements mr;
         vkGetBufferMemoryRequirements(vk.device, pcf_buf, &mr);
         VkMemoryAllocateInfo mai = {.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO, .allocationSize = mr.size,
                                     .memoryTypeIndex = vk_memory_type(mr.memoryTypeBits,
                                                                       VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT |
                                                                           VK_MEMORY_PROPERTY_HOST_COHERENT_BIT)};
-        if (vkAllocateMemory(vk.device, &mai, NULL, &pcf_mem) != VK_SUCCESS) return 0;
+        if (vkAllocateMemory(vk.device, &mai, NULL, &pcf_mem) != VK_SUCCESS) return NULL;
         vkBindBufferMemory(vk.device, pcf_buf, pcf_mem, 0);
         vkMapMemory(vk.device, pcf_mem, 0, VK_WHOLE_SIZE, 0, (void **)&pcf_ptr);
     }
     VkDeviceSize align = vk.props.limits.minUniformBufferOffsetAlignment;
     VkDeviceSize at = (pcf_at + align - 1) / align * align;
-    if (at + range > PCF_RING) at = 0;
-    memcpy(pcf_ptr + at, (const void *)(uintptr_t)addr, (size_t)range);
-    float *spread = (float *)(pcf_ptr + at) + pcf_float;
-    spread[0] *= 1024.0f / (float)res, spread[1] *= 1024.0f / (float)res;
-    pcf_at = at + range;
+    if (at + size > PCF_RING) at = 0;
+    pcf_at = at + size;
     *buf = pcf_buf, *offset = at;
+    return pcf_ptr + at;
+}
+
+static int pcf_scaled_copy(uint64_t addr, VkDeviceSize range, int pcf_float, VkBuffer *buf, VkDeviceSize *offset) {
+    int res = gpu_shadow_res();
+    if (res == 1024 || range > 65536 || (VkDeviceSize)(pcf_float + 2) * 4 > range) return 0;
+    uint8_t *p = ring_alloc(range, buf, offset);
+    if (!p) return 0;
+    memcpy(p, (const void *)(uintptr_t)addr, (size_t)range);
+    float *spread = (float *)p + pcf_float;
+    spread[0] *= 1024.0f / (float)res, spread[1] *= 1024.0f / (float)res;
+    return 1;
+}
+
+/* Soft shadows (PCSS, yw4_shadow in recomp/shader.py): off, or on with a strength. x2 by default
+ * (the owner's pick, with 4096 maps); F7 cycles it, YW4_PCSS=0..3 sets it at start. The settings go to each draw from the ring:
+ *   mode  = on, (unused), largest radius, smallest radius
+ *   scale = radius per unit of depth gap for cascades 0..3 (YW4_PCSS_SCALE=a,b,c,d to try others)
+ *   tune  = smallest depth gap that counts as a caster (YW4_PCSS_EPS)
+ * Radii are in map coordinates (0..1), so they don't change with the map's size (F8); the smallest
+ * is half a texel of the current map, the game's own filter spread. */
+static int pcss_level = -1;
+static float pcss_scale[4] = {0.01f, 0.005f, 0.0025f, 0.0025f}, pcss_eps, pcss_max = 6.0f / 1024.0f;
+static int pcss_debug;  /* YW4_PCSS_DEBUG: 1 shows casters found / 16, 2 the radius / largest (white = 1) */
+
+int gpu_pcss_level(void) {
+    int l = __atomic_load_n(&pcss_level, __ATOMIC_ACQUIRE);
+    if (l < 0) {
+        const char *e = getenv("YW4_PCSS");
+        l = e ? atoi(e) : 2;
+        if (l < 0 || l > 3) l = 2;
+        if ((e = getenv("YW4_PCSS_SCALE")) != NULL)
+            sscanf(e, "%f,%f,%f,%f", &pcss_scale[0], &pcss_scale[1], &pcss_scale[2], &pcss_scale[3]);
+        if ((e = getenv("YW4_PCSS_EPS")) != NULL) pcss_eps = (float)atof(e);
+        if ((e = getenv("YW4_PCSS_MAX")) != NULL) pcss_max = (float)atof(e) / 1024.0f;
+        if ((e = getenv("YW4_PCSS_DEBUG")) != NULL) pcss_debug = atoi(e);
+        __atomic_store_n(&pcss_level, l, __ATOMIC_RELEASE);
+    }
+    return l;
+}
+
+void gpu_pcss_cycle(void) {
+    int l = (gpu_pcss_level() + 1) % 4;
+    __atomic_store_n(&pcss_level, l, __ATOMIC_RELEASE);
+    fprintf(stderr, "yw4: gpu: PCSS %s (F7)\n", l ? (l == 1 ? "x1" : l == 2 ? "x2" : "x4") : "off");
+}
+
+static int pcss_settings(VkBuffer *buf, VkDeviceSize *offset) {
+    float *f = (float *)ring_alloc(48, buf, offset);
+    if (!f) return 0;
+    int l = gpu_pcss_level();
+    float k = (float)(1 << (l ? l - 1 : 0));
+    f[0] = l ? 1.0f : 0.0f, f[1] = 0.0f, f[2] = pcss_max, f[3] = 0.5f / (float)gpu_shadow_res();
+    for (int i = 0; i < 4; i++) f[4 + i] = pcss_scale[i] * k;
+    f[8] = pcss_eps, f[9] = (float)pcss_debug, f[10] = f[11] = 0.0f;
     return 1;
 }
 
@@ -738,18 +861,26 @@ static int bind_stage_set(VkCommandBuffer cb, const GpuState *s, const Shader *s
                 w[i].dstBinding = b->kind == 'c' ? b->slot : 64 + b->slot;
                 w[i].descriptorType = b->kind == 'c' ? VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER : VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
                 w[i].pBufferInfo = &bi[i];
-            } else if (b->kind == 't') {
+            } else if (b->kind == 'p') {  /* the soft shadow settings */
+                if (!pcss_settings(&bi[i].buffer, &bi[i].offset))
+                    bi[i].buffer = dummy_buffer(), bi[i].offset = 0;
+                bi[i].range = 48;
+                w[i].dstBinding = 95;
+                w[i].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+                w[i].pBufferInfo = &bi[i];
+            } else if (b->kind == 't' || b->kind == 'd') {
                 uint64_t handle = b->slot < TEXTURES ? s->tex[ns][b->slot] : 0;
                 NvnTexEntry *e = tex_entry(s, handle);
                 const NvnSamplerDesc *sd = sampler_entry(s, handle);
                 NvnSamplerDesc d = sd ? *sd : (NvnSamplerDesc){.min_filter = 1, .mag_filter = 1, .lod_max = 1000};
                 if (b->shadow && !d.compare_mode) d.compare_mode = 1, d.compare_func = 4;  /* LEQUAL */
                 if (!b->shadow) d.compare_mode = 0;
+                if (b->kind == 'd') d.min_filter = d.mag_filter = 0;  /* raw depth: nearest texel */
                 ii[i].imageView = e ? gpu_sample_view(cb, e->tex, &e->view, e->has_view, b->view)
                                     : gpu_dummy_view(cb, b->view);
                 ii[i].sampler = gpu_sampler(&d);
                 ii[i].imageLayout = VK_IMAGE_LAYOUT_GENERAL;
-                w[i].dstBinding = 16 + b->slot;
+                w[i].dstBinding = (b->kind == 'd' ? 96 : 16) + b->slot;
                 w[i].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
                 w[i].pImageInfo = &ii[i];
             } else {

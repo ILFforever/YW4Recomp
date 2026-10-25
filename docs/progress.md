@@ -9,6 +9,7 @@ Locked 30 frames/s on Vulkan; interior lighting matches Eden; sound works. Open 
 
 | Date | Step | Result |
 |---|---|---|
+| 2026-10-25 | PCSS soft contact shadows in the game's shadow mask shader, built at start-up; F7, HUD line, F12 screenshots with the HUD; defaults 4096 maps + PCSS x2 (0025) | **Sharp contact shadows, soft canopy shade**, no extra load time |
 | 2026-10-22 | AudioOut PCM to the host's sound card (SDL3 audio stream, 5.1 kept), paced by the stream so the clocks can't drift | **Sound and music play** |
 | 2026-10-22 | Performance tools: game work split, per-thread CPU, sampling profiler (`YW4_PROFILE=1`); screenshots fixed (colours, folder, 1.7 s freeze) | The main thread is the CPU bottleneck; graphics translation runs on other threads |
 | 2026-10-22 | Cube texture views count layers in cubes: the game's ambient/reflection cube map (view "layers 0+1") was replaced by a black dummy | **Interiors lit like on Eden**: warm diffuse light, metal sink and kettle reflect again, softer shadows |

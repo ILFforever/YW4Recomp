@@ -50,6 +50,14 @@ from tools.yw4 import config
 
 SET = {"vert": 0, "frag": 1, "geom": 2, "comp": 0}
 TEX_BINDING, STORAGE_BINDING = 16, 64
+# Soft shadows (yw4_shadow below): the shadow map's raw depth at DEPTH_BINDING + slot, the
+# runtime's settings at PCSS_BINDING.
+DEPTH_BINDING, PCSS_BINDING = 96, 95
+# The shaders that get yw4_shadow: only the game's screen-space shadow mask (a full-screen pass
+# at half resolution that shadows everything in the G-buffer). The helper is copied into every
+# lookup by the driver, and in all ~200 shadow shaders that made pipeline builds take up to 25 s
+# each; the other shaders keep the game's own lookups. Keys are hashes of the game's shaders.
+PCSS_SHADERS = {"06d03ad703b4bee5"}
 SWZ = "xyzw"
 GLSL_TYPE = {"f": "vec4", "u": "uvec4", "s": "ivec4"}
 
@@ -84,6 +92,7 @@ class Program:
     gs: dict[str, str | int] = field(default_factory=dict)
     handles: dict[str, int] = field(default_factory=dict)             # "D0.x" -> texture slot
     textures: dict[int, str] = field(default_factory=dict)            # slot -> dim
+    depth_reads: set[int] = field(default_factory=set)                # shadow map slots read via yw4_shadow
     inputs: dict[int, str] = field(default_factory=dict)              # location -> "f" / "u"
     flat_inputs: set[int] = field(default_factory=set)
     outputs: set[int] = field(default_factory=set)
@@ -485,13 +494,22 @@ class Translator:
              "SHADOWARRAY2D": "xyzw"}.get(dim)
         if n is None:
             raise ShaderError(f"texture target {dim}")
+        soft = not lod_needed and p.key in PCSS_SHADERS
         if dim == "SHADOWARRAY2D":
             if op == "TXL":
                 raise ShaderError("TXL on SHADOWARRAY2D")
-            e = (f"vec4(textureGrad({t}, {cf}, vec2(0.0), vec2(0.0)))" if lod_needed
-                 else f"vec4(texture({t}, {cf}))")
+            if soft:
+                p.depth_reads.add(slot)
+                e = f"vec4(yw4_shadow({t}, {t}_depth, {cf}))"
+            else:
+                e = (f"vec4(textureGrad({t}, {cf}, vec2(0.0), vec2(0.0)))" if lod_needed
+                     else f"vec4(texture({t}, {cf}))")
         elif dim == "SHADOW2D":
-            e = f"vec4(textureLod({t}, {cf}.xyz, {lod}))" if lod_needed else f"vec4(texture({t}, {cf}.xyz))"
+            if soft:
+                p.depth_reads.add(slot)
+                e = f"vec4(yw4_shadow({t}, {t}_depth, {cf}.xyz))"
+            else:
+                e = f"vec4(textureLod({t}, {cf}.xyz, {lod}))" if lod_needed else f"vec4(texture({t}, {cf}.xyz))"
         else:
             e = f"textureLod({t}, {cf}.{n}, {lod})" if lod_needed else f"texture({t}, {cf}.{n})"
         self.store(args[0], e, "f", False, sat)
@@ -688,6 +706,7 @@ class Translator:
         return {"stage": p.stage, "set": SET[p.stage],
                 "cbuffers": sorted(p.used_cbuffers), "textures": {str(k): v for k, v in sorted(p.textures.items())},
                 "images": {str(k): v for k, v in sorted(p.images.items())},
+                "depth": {str(k): p.textures[k].removeprefix("SHADOW") for k in sorted(p.depth_reads)},
                 "storage": sorted(p.storage.values()),
                 "inputs": {str(k): p.inputs.get(k, "f") for k in sorted(p.input_locs)},
                 "outputs": sorted(p.outputs), "colors": sorted(p.colors),
@@ -740,6 +759,16 @@ class Translator:
         if "ld2" in p.uses:
             o += ["uvec4 yw4_ld2(uvec4 v, uint half_index) {",
                   "    return (half_index & 1u) != 0u ? v.zwzw : v.xyxy;", "}"]
+        if p.depth_reads:
+            depth_samp = {"SHADOW2D": "sampler2D", "SHADOWARRAY2D": "sampler2DArray"}
+            for slot in sorted(p.depth_reads):
+                o.append(f"layout(set = {s}, binding = {DEPTH_BINDING + slot}) uniform "
+                         f"{depth_samp[p.textures[slot]]} tex{slot}_depth;")
+            o.append(f"layout(set = {s}, binding = {PCSS_BINDING}, std140) uniform YW4PCSS "
+                     "{ vec4 mode; vec4 scale; vec4 tune; } yw4_pcss;")
+            o += PCSS_COMMON.splitlines()
+            for dim in sorted({p.textures[slot] for slot in p.depth_reads}):
+                o += pcss_helper(dim).splitlines()
         o.append("void main() {")
         decl = ", ".join(f"{r} = uvec4(0u)" for r in p.regs)
         if decl:
@@ -754,12 +783,96 @@ class Translator:
         return "\n".join(o) + "\n"
 
 
+# Soft shadows with contact hardening (PCSS), in the shaders listed in PCSS_SHADERS: their
+# shadow map lookups go through yw4_shadow. Off (yw4_pcss.mode.x == 0) it is the game's lookup. On, it reads the raw
+# depth around the point to find the casters in front of it (blocker search); their average
+# distance from the receiver sets the filter radius: sharp at the contact, soft far from it
+# (tree canopies). The game's shaders average 5 lookups a little apart with the same layer and
+# reference; the first one is filtered and the rest reuse its result (yw4_seen), so the cost is
+# one search + one filter per pixel and cascade. The compare taps use texture(), not
+# textureGrad(.., 0, 0): on NVIDIA the latter on an array shadow map made pipeline builds ~10x
+# slower (the map has one level, so both read the same texels). Casters are texels with a
+# smaller depth than the reference (the maps are cleared to 1.0). The game's compare (GREATER)
+# only says the result means "in shadow", not which way depth runs.
+#   mode:  x on, y unused, z largest radius and search radius (0..1 map coordinates), w smallest radius
+#   scale: radius per unit of depth gap, per cascade layer 0..3
+#   tune:  x depth gap below which a texel isn't counted as a caster, y debug view (1 casters
+#          found / 16, 2 radius / largest)
+PCSS_COMMON = """\
+const vec2 YW4_DISK[16] = vec2[16](
+    vec2(-0.94201624, -0.39906216), vec2(0.94558609, -0.76890725), vec2(-0.09418410, -0.92938870),
+    vec2(0.34495938, 0.29387760), vec2(-0.91588581, 0.45771432), vec2(-0.81544232, -0.87912464),
+    vec2(-0.38277543, 0.27676845), vec2(0.97484398, 0.75648379), vec2(0.44323325, -0.97511554),
+    vec2(0.53742981, -0.47373420), vec2(-0.26496911, -0.41893023), vec2(0.79197514, 0.19090188),
+    vec2(-0.24188840, 0.99706507), vec2(-0.81409955, 0.91437590), vec2(0.19984126, 0.78641367),
+    vec2(0.14383161, -0.14100790));
+vec2 yw4_seen_key[2];
+float yw4_seen_lit[2];
+int yw4_seen_n = 0;
+mat2 yw4_pcss_rotation() {
+    float a = 6.2831853 * fract(52.9829189 * fract(dot(gl_FragCoord.xy, vec2(0.06711056, 0.00583715))));
+    return mat2(cos(a), sin(a), -sin(a), cos(a));
+}
+float yw4_pcss_remember(vec2 key, float lit) {
+    if (yw4_seen_n < 2) {
+        yw4_seen_key[yw4_seen_n] = key;
+        yw4_seen_lit[yw4_seen_n] = lit;
+        yw4_seen_n++;
+    }
+    return lit;
+}"""
+
+
+def pcss_helper(dim: str) -> str:
+    """yw4_shadow for a SHADOWARRAY2D (c: x, y, layer, reference) or SHADOW2D (x, y, reference) map."""
+    if dim == "SHADOWARRAY2D":
+        sig = "sampler2DArrayShadow s, sampler2DArray d, vec4 c"
+        game, key, layer, ref = "texture(s, c)", "c.zw", "c.z", "c.w"
+        fetch = "textureLod(d, vec3({uv}, c.z), 0.0).r"
+        test = "texture(s, vec4({uv}, c.z, c.w))"
+    else:
+        sig = "sampler2DShadow s, sampler2D d, vec3 c"
+        game, key, layer, ref = "texture(s, c)", "vec2(-1.0, c.z)", "0.0", "c.z"
+        fetch = "textureLod(d, {uv}, 0.0).r"
+        test = "texture(s, vec3({uv}, c.z))"
+    tap = "c.xy + rot * YW4_DISK[i] * {r}"
+    return f"""\
+float yw4_shadow({sig}) {{
+    if (yw4_pcss.mode.x < 0.5) return {game};
+    if (yw4_pcss.tune.y == 3.0) return {test.format(uv="c.xy")};
+    if (yw4_pcss.tune.y == 4.0) return {fetch.format(uv="c.xy")};
+    if (yw4_pcss.tune.y == 5.0) return {ref} > {fetch.format(uv="c.xy")} ? 1.0 : 0.0;
+    if (yw4_pcss.tune.y == 6.0) return {ref};
+    for (int i = 0; i < yw4_seen_n; i++)
+        if (yw4_seen_key[i] == {key}) return yw4_seen_lit[i];
+    mat2 rot = yw4_pcss_rotation();
+    float gaps = 0.0, casters = 0.0;
+    for (int i = 0; i < 16; i++) {{
+        float z = {fetch.format(uv=tap.format(r="yw4_pcss.mode.z"))};
+        float gap = {ref} - z;
+        if (gap > yw4_pcss.tune.x) {{ gaps += gap; casters += 1.0; }}
+    }}
+    if (yw4_pcss.tune.y == 1.0) return casters * (1.0 / 16.0);
+    if (casters == 0.0) return yw4_pcss_remember({key}, {test.format(uv="c.xy")});
+    float r = clamp(gaps / casters * yw4_pcss.scale[min(int({layer} + 0.5), 3)], yw4_pcss.mode.w, yw4_pcss.mode.z);
+    if (yw4_pcss.tune.y == 2.0) return r / yw4_pcss.mode.z;
+    float lit = 0.0;
+    for (int i = 0; i < 16; i++)
+        lit += {test.format(uv=tap.format(r="r"))};
+    return yw4_pcss_remember({key}, lit * (1.0 / 16.0));
+}}"""
+
+
 def iface_text(iface: dict) -> str:
     """The interface for the runtime (gpu.c), one item per line:
     c <slot> (constant buffer), t <slot> <target> (texture), i <slot> (image),
-    s <n> (storage buffer), a <location> f|u (vertex input type)."""
+    s <n> (storage buffer), a <location> f|u (vertex input type),
+    d <slot> <target> (a shadow map's raw depth, for yw4_shadow), p 0 (yw4_shadow's settings)."""
     lines = [f"c {n}" for n in iface["cbuffers"]]
     lines += [f"t {k} {v}" for k, v in iface["textures"].items()]
+    lines += [f"d {k} {v}" for k, v in iface.get("depth", {}).items()]
+    if iface.get("depth"):
+        lines.append("p 0")
     lines += [f"i {k}" for k in iface["images"]]
     lines += [f"s {n}" for n in iface["storage"]]
     if iface["stage"] == "vert":

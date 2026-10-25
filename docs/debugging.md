@@ -17,7 +17,11 @@ Environment variables and keys read by the runtime. The game runs fine with none
 | `YW4_VULKAN_VALIDATION=1` | Turn on the Vulkan validation layer |
 | `YW4_SHADOWS=native` | Start with our own shadow-caster pass on ([decision 0024](decisions/0024-shadow-pass.md)); work in progress, the default is the game's. F9 switches while playing |
 | `YW4_HUD=1` | Start with the performance HUD shown (F3 toggles it) |
-| `YW4_SHADOW_RES=2048` (or `4096`) | Start with shadow quality at that setting (F8 cycles it): the shadow maps that size instead of the game's 1024, and the shadow filter's spread scaled down to match, so edges get sharper, mostly in the far cascades. Costs GPU time and memory. Works with either shadow pass |
+| `YW4_SHADOW_RES=1024` (`2048`, `4096`) | Shadow map size at start (default 4096; 1024 is the game's; F8 cycles it): the shadow maps that size instead of the game's 1024, and the shadow filter's spread scaled down to match, so edges get sharper, mostly in the far cascades. Costs GPU time and memory. Works with either shadow pass |
+| `YW4_PCSS=0` (`1`, `2`, `3`) | PCSS (soft contact shadows) at start: off (x1, x2, x4); default x2; F7 cycles it. `YW4_SHADOW_RES=1024 YW4_PCSS=0` gives the game's original shadows. Only the game's screen-space shadow mask shader has it (`PCSS_SHADERS` in recomp/shader.py) |
+| `YW4_PCSS_SCALE=a,b,c,d` / `YW4_PCSS_MAX=<texels>` / `YW4_PCSS_EPS=<depth>` | PCSS tuning: blur radius per unit of depth gap for cascades 0-3 (default 0.01,0.005,0.0025,0.0025), largest radius and search area (default 6 texels of a 1024 map), smallest depth gap that counts as a caster |
+| `YW4_PCSS_DEBUG=1`..`6` | PCSS debug views in place of the shadow: casters found, blur radius, the game's lookup, raw depth, a hand-made compare, the reference depth |
+| `YW4_PREBUILD=0` | Don't build the listed pipelines (the PCSS shadow mask) on a background thread at start-up |
 
 Saved screenshots get the same sRGB decode as the window, so their colours match what is on screen.
 
@@ -29,8 +33,9 @@ Saved screenshots get the same sRGB decode as the window, so their colours match
 | F11 | Describe the draws of the next frame in the log: targets, shaders, textures, the vertex stage's matrices (`YW4_GPU_TRACE=<n>` with `YW4_GPU_TRACE_AT=<frame>` does the same from a start frame) |
 | F10 | Dump multi-layer depth images (shadow maps) to `work/dump/*.pgm` |
 | F9 | Switch the shadow casters between the game's and our pass ([decision 0024](decisions/0024-shadow-pass.md)); the log says which, and how many submeshes our pass drew since the last switch. Recorded and replayed like F10-F12 |
-| F8 | Shadow quality: cycles the shadow maps 1024 (the game's) → 2048 → 4096, with the filter spread scaled to match; the HUD's SHADOWS line shows the size. The frame of the switch can show wrong shadows once |
-| F3 | Show or hide the performance HUD in the window's top-left corner: frames per second, frame interval, the game's work per frame, GPU busy time, draws, process CPU, memory, whose shadow casters are drawn. Averages over the last 30 frames, from the perf log's numbers (`YW4_PERF=0` leaves it empty). Not in F12 screenshots |
+| F8 | Shadow quality: cycles the shadow maps 1024 (the game's) → 2048 → 4096 (the default), with the filter spread scaled to match; the HUD's SHADOWS line shows the size. The frame of the switch can show wrong shadows once |
+| F7 | PCSS (soft contact shadows): off → x1 → x2 (the default) → x4; the HUD's PCSS line shows it |
+| F3 | Show or hide the performance HUD in the window's top-left corner: frames per second, frame interval, the game's work per frame, GPU busy time, draws, process CPU, memory, whose shadow casters are drawn. Averages over the last 30 frames, from the perf log's numbers (`YW4_PERF=0` leaves it empty). F12 screenshots include it while it is shown |
 
 ## Recording and replaying input
 

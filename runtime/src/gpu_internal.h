@@ -132,5 +132,7 @@ void gpu_compute_trace(uint64_t frame);
  * out by gpu_capture_flush once the GPU has finished them. */
 int gpu_capture_pending(void);
 void gpu_capture_flush(void);
+/* Builds the pipelines listed in gpu_draw.c on a background thread at start-up (YW4_PREBUILD=0: off). */
+void gpu_prebuild_start(void);
 
 #endif

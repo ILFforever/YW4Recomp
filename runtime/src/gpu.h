@@ -20,6 +20,9 @@ void gpu_request_dump(void);
  * cycle 1024 -> 2048 -> 4096 -> 1024. */
 int gpu_shadow_res(void);
 void gpu_shadow_res_cycle(void);
+/* Soft shadows (PCSS): 0 off (the game's filter), 1..3 on with stronger softening; F7 cycles. */
+int gpu_pcss_level(void);
+void gpu_pcss_cycle(void);
 
 void gpu_pool_init(NvnPool *p);  /* imports the pool's memory into Vulkan */
 void gpu_pool_finalize(NvnPool *p);

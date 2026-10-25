@@ -111,6 +111,7 @@ void gpu_init(void) {
     }
     ready = 1;
     fprintf(stderr, "yw4: gpu: draw path on (decision 0021)\n");
+    gpu_prebuild_start();
 }
 
 /* ================================================================== submissions */
@@ -567,8 +568,8 @@ enum { IMAGE_BUCKETS = 4096 };
 static GpuImage *images[IMAGE_BUCKETS];
 
 /* Shadow quality: the shadow maps (depth, 1024 x 1024, 3 layers: one per cascade; rendered by
- * the GPU only) made 2048 or 4096 instead. YW4_SHADOW_RES sets it at start, F8 cycles it while
- * playing. The size is part of the image key, so after a switch the next frame's draws and
+ * the GPU only) made 2048 or 4096 instead. 4096 by default (the owner's pick, with PCSS x2);
+ * YW4_SHADOW_RES=1024/2048/4096 sets it at start, F8 cycles it while playing. The size is part of the image key, so after a switch the next frame's draws and
  * samples use an image of the new size (the old one is freed with other unused images). Draws
  * into it get their viewport and scissor scaled (gpu_dynamic_state); the shaders reading it
  * sample in 0..1 coordinates, with their filter spread scaled to match (gpu_draw.c). */
@@ -578,8 +579,8 @@ int gpu_shadow_res(void) {
     int r = __atomic_load_n(&shadow_res, __ATOMIC_ACQUIRE);
     if (r < 0) {
         const char *e = getenv("YW4_SHADOW_RES");
-        int v = e ? atoi(e) : 0;
-        r = v == 2048 || v == 4096 ? v : 1024;
+        int v = e ? atoi(e) : 4096;
+        r = v == 1024 || v == 2048 ? v : 4096;
         __atomic_store_n(&shadow_res, r, __ATOMIC_RELEASE);
     }
     return r;

@@ -248,6 +248,8 @@ void yw4_perf_hud(HudContent *c) {
         c->npoints = (int)p;
     }
     LINE("SHADOWS: %s  %d", shadow_mode_name(), gpu_shadow_res());
+    static const char *const soft[4] = {"OFF", "X1", "X2", "X4"};
+    LINE("PCSS: %s (F7)", soft[gpu_pcss_level() & 3]);
 #undef LINE
 }
 

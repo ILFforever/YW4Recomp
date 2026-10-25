@@ -23,6 +23,8 @@ void yw4_perf_hud(HudContent *c);
 const char *shadow_mode_name(void);
 /* gpu.c: the shadow maps' size (1024 is the game's; F8). */
 int gpu_shadow_res(void);
+/* gpu_draw.c: PCSS (soft contact shadows), 0 off, 1..3 = x1, x2, x4 (F7). */
+int gpu_pcss_level(void);
 
 /* Draws c into rgba (w x h texels, 4 bytes each, rows of w); *used_w and *used_h: the part drawn. */
 void hud_render(uint8_t *rgba, int w, int h, const HudContent *c, int *used_w, int *used_h);

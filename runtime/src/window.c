@@ -421,12 +421,16 @@ static int hud_resources(void) {
 /* Draws the HUD's lines into its buffer and records copying them onto dst (in TRANSFER_DST
  * layout) at the frame's top-left corner (x0, y0), scaled up with the window. The previous
  * present's fence has been waited for, so the buffer is free to write. */
+static int hud_shown_w, hud_shown_h;  /* the part of hud_ptr drawn at the last present (0: none) */
+
 static void hud_draw(VkImage dst, int32_t x0, int32_t y0) {
+    hud_shown_w = hud_shown_h = 0;
     if (!hud_enabled() || hud_resources()) return;
     static HudContent content;
     int w, h;
     yw4_perf_hud(&content);
     hud_render(hud_ptr, HUD_W, HUD_H, &content, &w, &h);
+    hud_shown_w = w, hud_shown_h = h;
     barrier(hud_image, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 0, VK_ACCESS_TRANSFER_WRITE_BIT);
     VkBufferImageCopy copy = {.bufferRowLength = HUD_W, .imageSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1},
                               .imageExtent = {(uint32_t)w, (uint32_t)h, 1}};
@@ -447,6 +451,18 @@ static void hud_draw(VkImage dst, int32_t x0, int32_t y0) {
                         .dstOffsets = {{x, y, 0}, {x + (xe - x) / s * s, y + (ye - y) / s * s, 1}}};
     vkCmdBlitImage(cmd, hud_image, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, dst, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1,
                    &blit, VK_FILTER_NEAREST);
+}
+
+/* Screenshots show the HUD when it is on: its texels from the last present, pasted 1:1 at the
+ * frame's top-left corner like in the window (rgba: the w x h frame, colours as the window shows). */
+static void hud_onto(uint8_t *rgba, uint32_t w, uint32_t h) {
+    if (!hud_shown_w || !hud_ptr) return;
+    uint32_t x = 6, y = 6;
+    if (x >= w || y >= h) return;
+    uint32_t cw = (uint32_t)hud_shown_w < w - x ? (uint32_t)hud_shown_w : w - x;
+    uint32_t ch = (uint32_t)hud_shown_h < h - y ? (uint32_t)hud_shown_h : h - y;
+    for (uint32_t r = 0; r < ch; r++)
+        memcpy(rgba + ((size_t)(y + r) * w + x) * 4, (const uint8_t *)hud_ptr + (size_t)r * HUD_W * 4, (size_t)cw * 4);
 }
 
 /* Scales src (w x h colour texels) into the next swapchain image and presents it.
@@ -567,6 +583,7 @@ void window_present_image(VkImage image, VkFormat format, VkRect2D rect, uint64_
             for (size_t i = 0; i < (size_t)w * h * 4; i += 4)
                 px[i] = lut[px[i]], px[i + 1] = lut[px[i + 1]], px[i + 2] = lut[px[i + 2]];
         }
+        hud_onto(px, w, h);
         save_screenshot(px, w, h, n);
         free(px);
     }
@@ -706,6 +723,7 @@ void window_run(void (*guest)(void *), void *arg) {
             if (e.key.key == SDLK_F9) shadow_toggle(), yw4_hid_note_key("F9");          /* our shadow pass on/off */
             if (e.key.key == SDLK_F3) __atomic_store_n(&hud_on, hud_enabled() ? 0 : 1, __ATOMIC_RELEASE);  /* the HUD */
             if (e.key.key == SDLK_F8) gpu_shadow_res_cycle();  /* shadow quality: 1024 / 2048 / 4096 */
+            if (e.key.key == SDLK_F7) gpu_pcss_cycle();  /* PCSS (soft contact shadows): off / x1 / x2 / x4 */
             break;
         case SDL_EVENT_WINDOW_PIXEL_SIZE_CHANGED:
             host_lock(&present_lock);
