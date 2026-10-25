@@ -23,6 +23,7 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "gbuffer.h"
 #include "nvn.h"
 #include "shadow.h"
 #include "yw4rt.h"
@@ -1001,6 +1002,7 @@ static void trace_layer_start(const CPUState *ctx) {
 
 int yw4_hook_model_renderer(CPUState *ctx) {
     trace_layer_start(ctx);
+    gbuffer_layer_start(ctx);  /* the G-buffer pass (decision 0026) shares these hooks */
     if (__atomic_load_n(&mode, __ATOMIC_ACQUIRE) < 0) init_mode();
     /* A cascade's job list can draw more than one shadow layer (cutscenes: two per cascade) before
      * the cascade-end job: the next layer of the same cascade ends the previous one, which queues its
@@ -1036,6 +1038,7 @@ int yw4_hook_model_renderer(CPUState *ctx) {
  * game's draw that follows is learned from); in native mode replaced by ours when we can. */
 int yw4_hook_submesh_draw(CPUState *ctx) {
     trace_draws++;
+    gbuffer_submesh(ctx);
     if (!lay || !lay->active || lay->ndrawn >= MAX_CASTERS) return 0;
     static uint64_t base;
     if (!base)

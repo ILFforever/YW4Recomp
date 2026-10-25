@@ -16,6 +16,7 @@ Environment variables and keys read by the runtime. The game runs fine with none
 | `YW4_HEADLESS=1` | No window, no Vulkan (nothing is drawn) |
 | `YW4_VULKAN_VALIDATION=1` | Turn on the Vulkan validation layer |
 | `YW4_SHADOWS=native` | Start with our own shadow-caster pass on ([decision 0024](decisions/0024-shadow-pass.md)); work in progress, the default is the game's. F9 switches while playing |
+| `YW4_GBUFFER=check` | Our G-buffer pass ([decision 0026](decisions/0026-gbuffer-pass.md)), step 1: compares what it would use with the game's G-buffer draws (buffers, matrices) and logs a summary every 300 frames; nothing is drawn |
 | `YW4_HUD=1` | Start with the performance HUD shown (F3 toggles it) |
 | `YW4_SHADOW_RES=1024` (`2048`, `4096`) | Shadow map size at start (default 4096; 1024 is the game's; F8 cycles it): the shadow maps that size instead of the game's 1024, and the shadow filter's spread scaled down to match, so edges get sharper, mostly in the far cascades. Costs GPU time and memory. Works with either shadow pass |
 | `YW4_PCSS=0` (`1`, `2`, `3`) | PCSS (soft contact shadows) at start: off (x1, x2, x4); default x2; F7 cycles it. `YW4_SHADOW_RES=1024 YW4_PCSS=0` gives the game's original shadows. Only the game's screen-space shadow mask shader has it (`PCSS_SHADERS` in recomp/shader.py) |

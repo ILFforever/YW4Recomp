@@ -17,6 +17,7 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "gbuffer.h"
 #include "gpu.h"
 #include "host.h"
 #include "kernel.h"
@@ -293,6 +294,7 @@ static void trace_draw(CPUState *c, uint64_t index_addr, const ShadowDrawCall *c
     trace_draw_caller(c);
     if (trace_drawlist_on()) trace_drawlist_draw(cb_of(A(0)), index_addr);
     if (shadow_checking) shadow_check_draw(cb_of(A(0)), index_addr, call);
+    if (gbuffer_checking) gbuffer_check_draw(cb_of(A(0)), index_addr);
 }
 static const ShadowDrawCall one = {0, 0, 1};
 NVN(nvnCommandBufferDrawArrays) { trace_draw(c, 0, &one); CmdRec *r = record(c, CMD_DRAW_ARRAYS, 0); r->x[3] = 0, r->x[4] = 1; }
