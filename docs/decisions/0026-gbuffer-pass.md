@@ -107,5 +107,16 @@ this frame's world-view-projection in rows 8-11, **last frame's** in rows 12-15)
   - The skinned programs' **last frame's view × world** is this frame's on most draws, but on 0.5-30% (by area) one
     of a few fixed matrices that are the same in every area, not the object's history. It is copied from the
     game's bound constants, as last frame's bones are; everything else in constants 2 is computed by us.
-- Bones (constants 4 and 5), material constants and textures are still the game's bound state: their decoding is
-  the takeover's work (step 5).
+- **The lit material pass and the stage layers** (layer kind 0: keys 0..2, and the other key ranges) go through
+  the same renderer and submesh draw, so the same hooks take their draws (`YW4_MATERIAL=0`, `YW4_STAGES=0` leave
+  them to the game). Their programs joined the table; check mode bit-identical on ~1.2 million draws in three saves;
+  ~98-99% of those passes' draws are ours. The A/B for the material pass captures its target at its end
+  (`YW4_CAPTURE_LAYER_AT`): ours differs from the game's less than the game's frames differ among themselves.
+- **Material constants decoded**: the hook finds the renderer's draw item in its stack, and the material constants
+  rebuilt from it (frame.md "Materials") equal the block the game binds, on every draw checked. Not used for drawing
+  yet: the game still binds them.
+- **Measured** (town walk, 3 alternating pairs): no change, game work 11.07 ms both ways, GPU 12.07 vs 12.03 ms.
+  The game still sets up every draw's state before ours; only skipping its submesh draw (the takeover) removes that,
+  and the render threads wait most of the time anyway (frame.md: 84%), so the takeover is for what it enables, not
+  for speed.
+- Bones (constants 4 and 5), textures and the other bound state are still the game's.
