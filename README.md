@@ -1,12 +1,14 @@
 <h1 align="center">YW4 Recomp</h1>
 
 <p align="center">
-  A fan static recompilation of <b>Yo-kai Watch 4++</b> (Nintendo Switch, update 2.2.0) into a native application, in the style of <a href="https://github.com/N64Recomp/N64Recomp">N64Recomp</a>.
+  Play <b>Yo-kai Watch 4++</b> as a real PC program, from your own copy of the game: no Switch and no emulator.
+  <br>
+  <sub>A fan static recompilation of the Nintendo Switch game (update 2.2.0), in the style of <a href="https://github.com/N64Recomp/N64Recomp">N64Recomp</a>: the game's code is translated into a native Windows program.</sub>
 </p>
 
 <p align="center">
   <img alt="Phase 4: renderer" src="https://img.shields.io/badge/phase-4%20·%20renderer-6f42c1">
-  <img alt="Platforms" src="https://img.shields.io/badge/platforms-Windows%20%7C%20Linux-informational">
+  <img alt="Platform: Windows, Linux planned" src="https://img.shields.io/badge/platform-Windows%20(Linux%20planned)-informational">
   <img alt="Graphics" src="https://img.shields.io/badge/graphics-Vulkan-ac162c">
   <img alt="Playable: house and town" src="https://img.shields.io/badge/playable-house%20%26%20town-success">
 </p>
@@ -30,16 +32,23 @@
 > - Linux - x86-64, Vulkan: planned; the runtime is written to be portable but has not been tested yet
 
 > [!NOTE]
-> **Bring your own game.** The repository holds tools, runtime code and patches, nothing from the game itself. To use
-> it you need the ExeFS and RomFS of your own *Yo-kai Watch 4++* at update **2.2.0**, the last 4++ release; the tools
-> check the exact build by hash and stop on anything else. Getting those files is up to you and is not covered here.
-> The recompiled C code is produced on your machine from your copy and stays there.
+> **Can I play it?** Not as a download, and not yet as a whole game. There is no ready-to-play build: you build it
+> yourself from your own copy of the game, which takes developer tools and some technical comfort
+> ([Building from source](#building-from-source)). What runs today is listed under [Status](#status).
+
+> [!NOTE]
+> **Bring your own game.** Nothing from the game is in this repository. You need files from your own copy of
+> *Yo-kai Watch 4++* with the last update, **2.2.0**. Getting those files is up to you and is not covered here.
+>
+> For the technically minded: the tools take the ExeFS and RomFS of that build, check it by hash and stop on any other
+> version; the recompiled C code is produced on your machine from your copy and stays there.
 
 ## Status
 
 Early, but playable. The game runs from boot through a new game: logos, title menu, name entry, the opening
 cutscenes with dialogue, free movement in the Amano house and town, the Yo-kai Pad menus, the diary and autosave, at
-a locked 30 frames/s. Expect missing effects and crashes in places nobody has reached yet.
+the game's 30 frames/s (some scenes still dip below it). Expect missing effects and crashes in places nobody has
+reached yet.
 
 - How it got here, step by step: [docs/progress.md](docs/progress.md)
 - What is known to be missing or wrong: [docs/known-issues.md](docs/known-issues.md)
@@ -59,23 +68,24 @@ a locked 30 frames/s. Expect missing effects and crashes in places nobody has re
 | Planned | **Input remapping** | Keyboard, mouse and controller bindings of your choice |
 | Planned | **Linux** | The runtime is written to be portable; not built or tested there yet |
 
-### Our own renderer
+### Our own renderer (for developers)
 
 Replaying the game's draw calls ties every frame to the Switch's choices: its resolution, its 16:9 layout, its
 shadow settings. A renderer of our own draws the same scene from the game's data, so those choices become ours to
 change ([decision 0023](docs/decisions/0023-custom-renderer-plan.md)). Each replaced pass first has to look exactly
-like the game's (checked pixel by pixel) before anything is changed.
+like the game's before anything is changed: every pixel of a frame drawn both ways is compared, and must be the same
+([how](tools/dev/README.md)).
 
 | Status | Pass | Where it stands |
 |---|---|---|
-| Done | Shadow maps | Our own pass ([decision 0024](docs/decisions/0024-shadow-pass.md)) |
-| Done | G-buffer | Our draws, our shaders for the main surfaces and characters, identical to the game's ([decision 0026](docs/decisions/0026-gbuffer-pass.md)) |
-| In progress | Lit material pass | Our draws; our shaders for most surfaces, identical to the game's |
+| Done, off by default (F9) | Shadow maps | Our own pass ([decision 0024](docs/decisions/0024-shadow-pass.md)) |
+| Done, off by default (F6) | G-buffer | Our draws, our shaders for the main surfaces and characters, identical to the game's ([decision 0026](docs/decisions/0026-gbuffer-pass.md)) |
+| In progress, off by default (F6) | Lit material pass | Our draws; our shaders for most surfaces, identical to the game's |
 | Planned | Post-processing, UI | The game's |
 
 Still the game's everywhere: the choice of what to draw, textures and character bones.
 
-## How it works
+## How it works (for developers)
 
 - **Translated ahead of time, not interpreted.** Every ARM64 function in the game's `main` and `sdk` modules (73,844
   functions) becomes C before the game runs ([recomp/](recomp/README.md)); Clang compiles it into one native program.
@@ -101,7 +111,7 @@ All captured from the recompiled build on Windows.
 
 In town with the performance HUD on (F3). The game is a native Windows program: the frame takes about 10 ms of
 work on the CPU and under one core of a 16-core laptop, against the 33 ms the game's 30 frames/s allow; the
-shadows here are our own pass ("CUSTOM").
+shadows here are our own pass ("CUSTOM", switched on with F9).
 
 <p align="center">
   <img src="docs/screenshots/11-hud-in-town.jpg" alt="In town with the performance HUD: frame time, work, GPU, CPU, memory and a frame-time graph" width="820">
@@ -137,18 +147,26 @@ the camera. The bamboo forest, PCSS off:
 |---|---|
 | ![PCSS off: hard, speckled leaf shadows](docs/screenshots/16-pcss-off.jpg) | ![PCSS x2](docs/screenshots/18-pcss-x2.jpg) |
 
-The game starts with the recommended 4096 map and PCSS ×2. For the game's original shadows, start with
-`YW4_SHADOW_RES=1024 YW4_PCSS=0` (or press F8 and F7).
+The game starts with the recommended 4096 map and PCSS ×2. For the game's original shadows, press F8 until the map
+is 1024 and F7 until PCSS is off.
 
 ## Building from source
 
-Requirements: Python 3.11+, Git, Clang (or GCC), a GPU with Vulkan 1.3 and the Vulkan SDK; SDL3 is fetched
+Requirements: Python 3.11+, Git, a C compiler (Clang recommended:
+[llvm-mingw](https://github.com/mstorsjo/llvm-mingw) on Windows; GCC also works), a GPU with Vulkan 1.3, and
+`glslangValidator` (from the [Vulkan SDK](https://vulkan.lunarg.com/), or a standalone glslang). SDL3 is fetched
 automatically on Windows. Full steps in [docs/setup.md](docs/setup.md).
 
-1. Copy `config.example.toml` to `config.local.toml` and point it at your extracted ExeFS and RomFS.
-2. Verify and decompress the game code: `python -m tools.yw4.ingest`.
-3. Recompile and build: `python -m recomp.translate`, `python -m tools.yw4.shaders`, `python -m recomp.shader --check`,
+1. If you will commit: install the guard that keeps game data out of commits, `python -m tools.yw4.guard --install`.
+2. Copy `config.example.toml` to `config.local.toml`. Point `exefs_dir` and `romfs_dir` at your extracted ExeFS and
+   RomFS; set `[tools] cc` to your Clang (the default is gcc) and `[tools] glslang` if it isn't on your PATH.
+3. Check the config: `python tools/yw4/config.py` prints the resolved paths or says what is missing.
+4. Verify and decompress the game code: `python -m tools.yw4.ingest`.
+5. Recompile and build: `python -m recomp.translate`, `python -m tools.yw4.shaders`, `python -m recomp.shader --check`,
    then `python -m recomp.build --run`.
+
+Runtime options are environment variables, for example `YW4_SHADOW_RES=1024`: in PowerShell
+`$env:YW4_SHADOW_RES = "1024"`, in cmd `set YW4_SHADOW_RES=1024`, before starting the game.
 
 Runtime options, capture keys, input replay and the frame-inspection tools are in
 [docs/debugging.md](docs/debugging.md).
