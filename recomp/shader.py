@@ -98,6 +98,8 @@ class Program:
     outputs: set[int] = field(default_factory=set)
     colors: set[int] = field(default_factory=set)
     used_cbuffers: set[int] = field(default_factory=set)
+    cbuffer_rows: dict[int, set[int]] = field(default_factory=dict)   # slot -> 16-byte rows read by a constant address
+    cbuffer_computed: set[int] = field(default_factory=set)           # slots also read at a computed address
     uses: set[str] = field(default_factory=set)
     body: list[str] = field(default_factory=list)
     depth: int = 1
@@ -424,9 +426,11 @@ class Translator:
             n = int(addr)
             if n % size:
                 raise ShaderError(f"unaligned constant load {args[1]}")
+            p.cbuffer_rows.setdefault(slot, set()).add(n >> 4)
             e = {16: f"{cb}[{n >> 4}]", 8: f"{cb}[{n >> 4}].{'zwzw' if n & 8 else 'xyxy'}",
                  4: f"uvec4({cb}[{n >> 4}].{SWZ[(n >> 2) & 3]})"}[size]
         else:
+            p.cbuffer_computed.add(slot)
             a = self.address(addr)
             if size == 16:
                 e = f"{cb}[({a}) >> 4]"
@@ -704,7 +708,9 @@ class Translator:
     def interface(self) -> dict:
         p = self.p
         return {"stage": p.stage, "set": SET[p.stage],
-                "cbuffers": sorted(p.used_cbuffers), "textures": {str(k): v for k, v in sorted(p.textures.items())},
+                "cbuffers": sorted(p.used_cbuffers),
+                "cbuffer_rows": {str(k): sorted(v) for k, v in sorted(p.cbuffer_rows.items())},
+                "cbuffer_computed": sorted(p.cbuffer_computed), "textures": {str(k): v for k, v in sorted(p.textures.items())},
                 "images": {str(k): v for k, v in sorted(p.images.items())},
                 "depth": {str(k): p.textures[k].removeprefix("SHADOW") for k in sorted(p.depth_reads)},
                 "storage": sorted(p.storage.values()),
@@ -863,12 +869,20 @@ float yw4_shadow({sig}) {{
 }}"""
 
 
-def iface_text(iface: dict) -> str:
+def iface_text(iface: dict, names: dict[int, str] | None = None) -> str:
     """The interface for the runtime (gpu.c), one item per line:
-    c <slot> (constant buffer), t <slot> <target> (texture), i <slot> (image),
+    c <slot> [name] (constant buffer, with the engine's name for it from the shader's header),
+    r <slot> <hex mask> | * (its 16-byte rows 0-63 the program reads; *: also at computed addresses),
+    t <slot> <target> (texture), i <slot> (image),
     s <n> (storage buffer), a <location> f|u (vertex input type),
     d <slot> <target> (a shadow map's raw depth, for yw4_shadow), p 0 (yw4_shadow's settings)."""
-    lines = [f"c {n}" for n in iface["cbuffers"]]
+    names = names or {}
+    lines = [f"c {n} {names[n]}" if n in names else f"c {n}" for n in iface["cbuffers"]]
+    computed = set(iface.get("cbuffer_computed", []))
+    for n in iface["cbuffers"]:
+        rows = iface.get("cbuffer_rows", {}).get(str(n), [])
+        mask = sum(1 << r for r in rows if r < 64)
+        lines.append(f"r {n} *" if n in computed or any(r >= 64 for r in rows) else f"r {n} {mask:x}")
     lines += [f"t {k} {v}" for k, v in iface["textures"].items()]
     lines += [f"d {k} {v}" for k, v in iface.get("depth", {}).items()]
     if iface.get("depth"):
@@ -914,6 +928,9 @@ def main(argv: list[str] | None = None) -> int:
     if args.check and not exe:
         print("glslang not found: install the Vulkan SDK or set [tools] glslang", file=sys.stderr)
         return 1
+    # the engine's names for the constant buffers, from the shaders' headers (tools/yw4/shaders.py)
+    index_path = cfg.work_dir / "shaders" / "index.json"
+    index = json.loads(index_path.read_text()) if index_path.is_file() else {}
     errors: dict[str, list[str]] = {}
     bad_compile = []
     written = []
@@ -928,7 +945,8 @@ def main(argv: list[str] | None = None) -> int:
         g = out / f"{key}.{stage}"
         g.write_text(glsl)
         (out / f"{key}.json").write_text(json.dumps(iface))
-        (out / f"{key}.iface").write_text(iface_text(iface))
+        names = {r["slot"]: r["name"] for r in index.get(key, {}).get("resources", []) if r["kind"] == "cbuffer"}
+        (out / f"{key}.iface").write_text(iface_text(iface, names))
         written.append((key, stage, g))
 
     def compile_one(item):

@@ -135,3 +135,14 @@ this frame's world-view-projection in rows 8-11, **last frame's** in rows 12-15)
   "times 0" lane: where two neighbours have the same depth the game's value is NaN, and NaN x 0 spreads to the
   other lane; such lanes are kept.
 - Bones (constants 4 and 5), textures and the other bound state are still the game's.
+- **Every program, without a table (2026-10-26).** The per-program table grew with each new area (75 entries after
+  the owner's late-game walk turned up ~60 more programs). The shaders' own headers end it: each program names its
+  constant buffers, and slot 2 is the engine's local matrix block (`CBUSE_UB_LOCAL_MATRIX_IDX`) in 717 of the
+  game's 757 vertex programs, all with the same members: rows 0-3 `mtxLW` (world), 4-7 `mtxLV` (view × world), 8-11
+  `mtxLP` (projection × view × world), 12-15 `mtxLWOld`, 16-19 `mtxLVOld` (last frame's). That is the pattern the
+  table had found program by program. `recomp/shader.py` now writes the block's name and the rows each program
+  reads into its `.iface`; our draw takes any program whose slot 2 is that block and reads it at fixed rows. Rows
+  0-11 are ours, last frame's are copied from the game's bound block (the object's history; ours with the
+  takeover). Check mode compares exactly the rows each program reads. Instanced draws come through the same path
+  (the game's copies stay bound in constants 11). The shadow pass now takes the renderer's per-draw world too
+  (`[sp+0x30]+0x40`): the bamboo forest's stalks are posed parts, and its shadow coverage went from 18% to 89%.

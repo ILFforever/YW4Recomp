@@ -159,6 +159,7 @@ static Shader *load_shader(uint64_t key, int stage) {
             if (slot < 32) s->inputs[slot] = dim[0];
             continue;
         }
+        if (kind == 'r') continue;  /* rows read from a constant buffer: for gbuffer.c */
         if (s->nb == MAX_BINDINGS) gpu_stop("shader %016" PRIx64 " has too many bindings", key);
         Binding *b = &s->b[s->nb];
         b->kind = kind, b->slot = slot;

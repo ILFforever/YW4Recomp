@@ -20,7 +20,7 @@ game with them and compare results: [tools/dev](../tools/dev/README.md).
 | `YW4_GBUFFER=check` | Our G-buffer pass ([decision 0026](decisions/0026-gbuffer-pass.md)), step 1: compares what it would use with the game's G-buffer draws (buffers, matrices) and logs a summary every 300 frames; nothing is drawn |
 | `YW4_GBUFFER=native` | Our G-buffer pass, step 2b: our own draws (our vertex and index buffers and object constants; the game's material constants, textures and targets) with our readable programs (`runtime/shaders/gbuffer_*`) in place of the game's main G-buffer draws; logs a summary every 300 frames; F6 switches while playing (the HUD's G-BUFFER line) |
 | `YW4_GBUFFER=programs` | Step 2a only: our readable programs in the game's own draws |
-| `YW4_GBUFFER_LAYOUTS=<hex mask>` | Native mode draws only the programs of these entries of the table in `runtime/src/gbuffer.c` (all by default), to narrow a fault down |
+| `YW4_GBUFFER_SKIP=<keys>` | Native mode leaves these vertex programs (hex keys, comma separated) to the game, to narrow a fault down |
 | `YW4_MATERIAL=0` | Leave the lit material pass (layer kind 0, keys 0..2) to the game; by default it follows `YW4_GBUFFER` (our draws there too in `native` mode) |
 | `YW4_STAGES=0` | Leave the main view's other model layers (kind 0, other keys: the named stages) to the game; by default they follow `YW4_GBUFFER` too |
 | `YW4_CAPTURE_LAYER_AT=<GPU frame>[,...]` | With our G-buffer pass on: the colour target as the material pass left it, in those frames, to `work/dump/layer_material_f<frame>_t0.raw` (for comparisons within one run, with `YW4_GBUFFER_ALTERNATE`) |

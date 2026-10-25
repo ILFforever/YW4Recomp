@@ -63,127 +63,95 @@ int gbuffer_checking;
 /* The G-buffer's main vertex program (two thirds of the draws in the schoolyard). */
 #define GBUFFER_VS 0xbc358b88a500029full
 
-/* Where a G-buffer vertex program reads the object from vertex constants 2: up to four parts, each
- * at a row (4 floats a row). The renderer's world W is 3x4 (with 0 0 0 1 below as 4x4); the game
- * puts this frame's matrices where the programs read last frame's, so only the camera's motion
- * shows in the motion vectors. Programs without P x V x W multiply by the camera themselves (from
- * constants 1). Our draw writes these parts and nothing else. From the translated programs; check
- * mode compares them with the game's, bit for bit. */
-/* W 3 rows, W 4 rows, view x W, P x view x W, and the skinned programs' last frame's view x W:
- * this frame's on most draws, but on some (0.5-30%, by area) one of a few fixed matrices that are
- * the same in every area (left in the constant memory?); copied from the game's bound constants, as
- * last frame's bones (constants 5) are. */
-enum { PART_NONE, PART_W3, PART_W4, PART_VW, PART_WVP, PART_GAME };
-typedef struct {
-    uint64_t vs;
-    struct { uint8_t what, row; } part[4];
-} Layout;
-static const Layout layouts[] = {
-    {GBUFFER_VS, {{PART_W3, 0}, {PART_WVP, 8}, {PART_W4, 12}}},
-    {0x07b7085fd39014daull, {{PART_W3, 0}, {PART_WVP, 8}, {PART_W4, 12}}},
-    {0x44dd8154987b814bull, {{PART_W3, 0}, {PART_WVP, 8}, {PART_W4, 12}}},  /* skinned: bones in constants 4, last frame's in 5 */
-    {0xb742aa7d4094cd28ull, {{PART_VW, 4}, {PART_WVP, 8}, {PART_GAME, 16}}},  /* skinned */
-    {0x69ccf1e136bafdbbull, {{PART_W3, 0}, {PART_W4, 12}}},
-    {0x9447ec08ee99eb00ull, {{PART_W3, 0}, {PART_W4, 12}}},
-    {0x48ad99b0a01a2650ull, {{PART_W3, 0}, {PART_W4, 12}}},
-    {0xb018461f506d0557ull, {{PART_W3, 0}, {PART_W4, 12}}},
-    {0xe3bbbbb06699f239ull, {{PART_W3, 0}, {PART_W4, 12}}},
-    {0x2d6853131f6a178full, {{PART_VW, 4}, {PART_WVP, 8}, {PART_GAME, 16}}},  /* skinned */
-    {0x15c39ce2be80ffbdull, {{PART_VW, 4}, {PART_WVP, 8}, {PART_GAME, 16}}},
-    {0xdfe0364f78f6b929ull, {{PART_W3, 0}, {PART_W4, 12}}},
-    {0x045ee58bf4978aacull, {{PART_W3, 0}, {PART_W4, 12}}},
-    /* the lit material pass's */
-    {0x046b2a15a631058full, {{PART_W3, 0}, {PART_WVP, 8}}},
-    {0xdcc6c449f889ccfeull, {{PART_W3, 0}, {PART_WVP, 8}}},
-    {0x2a1b178ed00aa1f6ull, {{PART_W3, 0}, {PART_WVP, 8}}},
-    {0x8871f59f38c71272ull, {{PART_W3, 0}, {PART_WVP, 8}}},
-    {0x2e114dd75c870331ull, {{PART_W3, 0}, {PART_WVP, 8}}},  /* skinned */
-    {0x58da2816a6c92e87ull, {{PART_W3, 0}}},
-    {0x3e96b46f8899902dull, {{PART_W3, 0}}},
-    {0xce3616ad2c7ba2c3ull, {{PART_W3, 0}}},
-    {0x37b9e7176d0468f6ull, {{PART_W3, 0}}},
-    {0xce03c241bb3aaf4cull, {{PART_W3, 0}}},
-    {0xa4ec7992db13fd68ull, {{PART_W3, 0}}},
-    {0xadc29b1b44829818ull, {{PART_W3, 0}}},
-    {0x9b9f9ed2cc08aa0eull, {{PART_W3, 0}}},
-    {0x358916c1961dd9b9ull, {{PART_W4, 0}, {PART_WVP, 8}}},  /* skinned */
-    {0x2bed6627a501b602ull, {{PART_WVP, 8}}},
-    {0x5bd1d944ba55c3a7ull, {{PART_WVP, 8}}},
-    {0x9dd0c8c2b5a55909ull, {{PART_W4, 0}, {PART_W4, 12}}},
-    {0x0216502064e7bbc3ull, {{PART_W3, 0}, {PART_WVP, 8}}},
-    {0x41a8fd685b64dffdull, {{PART_W3, 0}}},
-    {0xa56f491c7ffbe48eull, {{PART_W3, 0}}},
-    {0xb813fb690e38a1e5ull, {{PART_W3, 0}}},
-    {0x98c09b816c2787a2ull, {{PART_NONE, 0}}},  /* reads no object constants */
-    {0x6488f2ab4b0873d5ull, {{PART_W3, 0}, {PART_W4, 12}}},  /* G-buffer */
-    {0x99c29881d52eb8b7ull, {{PART_W3, 0}, {PART_W4, 12}}},  /* G-buffer */
-    {0xdd7df0ff45403bfeull, {{PART_W3, 0}, {PART_VW, 4}, {PART_WVP, 8}}},  /* reads only row 6 of view x W */
-    {0x1e14f9290339d1d5ull, {{PART_W3, 0}, {PART_VW, 4}, {PART_W4, 12}}},  /* G-buffer; row 6 only */
-    {0x948d32df75118c5full, {{PART_W3, 0}, {PART_VW, 4}}},                 /* stages */
-    /* the main view's stage layers' */
-    {0xea32f254e28caa24ull, {{PART_WVP, 8}}},
-    {0xf7b17fd7a6ebea03ull, {{PART_WVP, 8}}},
-    /* the late-game bamboo forest's: instanced (copies in vertex constants 11, bound by the game) */
-    {0xec245cde1ecedbb9ull, {{PART_W3, 0}, {PART_W4, 12}}},  /* G-buffer */
-    {0x740898495e327060ull, {{PART_W3, 0}, {PART_W4, 12}}},  /* G-buffer */
-    {0x8e88846fb47ff870ull, {{PART_W3, 0}}},
-    {0x27ccdd743a729089ull, {{PART_W3, 0}}},
-    {0xb78a64c2f0d9b2e5ull, {{PART_W3, 0}}},
-    {0x0510e9442c031f5dull, {{PART_W3, 0}}},
-    /* and not instanced */
-    {0xc1bd30a23a61a309ull, {{PART_W3, 0}, {PART_WVP, 8}}},
-    {0x091924e34e241a2bull, {{PART_W3, 0}, {PART_WVP, 8}}},
-    {0x019409e34b708547ull, {{PART_W3, 0}, {PART_VW, 4}, {PART_WVP, 8}}},
-    {0xa829043068f86fa4ull, {{PART_W4, 0}, {PART_GAME, 4}}},  /* rows 4-6: vectors, not the camera's */
-    {0xb1370bd14a618520ull, {{PART_W4, 0}, {PART_W4, 12}}},
-    /* the owner's late-game walk: instanced */
-    {0x28a4b7fbc068096cull, {{PART_W3, 0}, {PART_W4, 12}}},  /* G-buffer */
-    {0x87d7852c4459fe6cull, {{PART_W3, 0}, {PART_W4, 12}}},  /* G-buffer */
-    {0x787aabf5c97b2845ull, {{PART_W3, 0}, {PART_W4, 12}}},  /* G-buffer */
-    {0xb646189b842cb8fcull, {{PART_W3, 0}}},
-    {0x4da03ae0981b950eull, {{PART_W3, 0}}},
-    {0xca5b9234f79b185bull, {{PART_W3, 0}}},
-    /* and not instanced */
-    {0xb2b60a755b17e672ull, {{PART_W3, 0}, {PART_W4, 12}}},  /* G-buffer */
-    {0x6ae546090f0cbd2dull, {{PART_VW, 4}, {PART_WVP, 8}, {PART_GAME, 16}}},  /* G-buffer, skinned */
-    {0x93b0158e30bfb40dull, {{PART_W3, 0}, {PART_GAME, 16}}},  /* G-buffer, skinned */
-    {0xcd1d6c554ed8c338ull, {{PART_W3, 0}, {PART_GAME, 16}}},  /* G-buffer, skinned */
-    {0x44b6b7c41ae9b46full, {{PART_W4, 0}, {PART_WVP, 8}}},
-    {0x87d989a31a32d11full, {{PART_W3, 0}, {PART_VW, 4}, {PART_WVP, 8}}},
-    {0x89a9c9e98c7a9bd5ull, {{PART_W3, 0}, {PART_VW, 4}, {PART_WVP, 8}}},
-    {0xe92af2d2f17d3c1bull, {{PART_W3, 0}, {PART_VW, 4}, {PART_WVP, 8}}},  /* row 6 only of view x W */
-    {0xb31f6350967c3751ull, {{PART_W3, 0}, {PART_VW, 4}}},
-    {0xf852410659ddecf2ull, {{PART_W3, 0}, {PART_WVP, 8}}},
-    {0x26dc7f86eff34f41ull, {{PART_W3, 0}}},
-    {0x8af60251ee659360ull, {{PART_W3, 0}}},
-    {0x5205f9ae60fe652full, {{PART_W3, 0}}},
-    {0x1e2809f82a457694ull, {{PART_W3, 0}}},
-    {0xc2a564c07aafeaa6ull, {{PART_WVP, 8}}},
-    {0x7297f0550d3775c0ull, {{PART_WVP, 8}}},
-    /* found by check mode's survey (rows the game's constants hold, with the rows the program reads) */
-    {0xb65cb9128690f752ull, {{PART_W3, 0}, {PART_VW, 4}, {PART_WVP, 8}}},
-    {0xeab579fd0ad7df1dull, {{PART_W3, 0}, {PART_WVP, 8}}},
-    {0xb0f1cf2d937ca7bdull, {{PART_WVP, 8}}},
-};
-static int part_rows(int what) { return what == PART_W3 ? 3 : what ? 4 : 0; }
-/* Are the layout's parts the same, bit for bit, in a and b? */
-static int same_parts(const Layout *l, const float *a, const float *b) {
-    for (int i = 0; i < 4; i++)
-        if (memcmp(a + 4 * l->part[i].row, b + 4 * l->part[i].row, 16 * part_rows(l->part[i].what))) return 0;
+/* The object's constants, vertex constants 2: every model program that reads them has the
+ * engine's local-matrix block there (CBUSE_UB_LOCAL_MATRIX_IDX in the shader's header; 717 of the
+ * game's 757 vertex programs, all with the same members): rows 0-3 mtxLW (world, 3x4 with 0 0 0 1
+ * below), 4-7 mtxLV (view x world), 8-11 mtxLP (projection x view x world), 12-15 mtxLWOld and
+ * 16-19 mtxLVOld (last frame's). recomp/shader.py writes in each program's .iface which block a
+ * slot holds and which rows the program reads. Rows 0-11 are ours; last frame's are the object's
+ * history, copied from the game's bound block (the game puts this frame's world there for most
+ * objects, so only the camera's motion shows in the motion vectors; the skinned programs' last
+ * view x world is sometimes one of a few fixed matrices). Check mode compares the rows each
+ * program reads, bit for bit. */
+enum { LOCAL_ROWS = 20, OUR_ROWS = 12 };
+
+static const char *shader_dir(void) {
+    const char *d = getenv("YW4_SHADER_DIR");
+    return d && *d ? d : "work/shaders/glsl";
+}
+
+/* The rows of constants 2 a vertex program reads, from its .iface; 0 if they are not the local
+ * matrix block, or not all at fixed rows of it. */
+static uint64_t read_local_rows(uint64_t vs) {
+    char path[1024], line[256];
+    snprintf(path, sizeof path, "%s/%016" PRIx64 ".iface", shader_dir(), vs);
+    FILE *f = fopen(path, "r");
+    if (!f) return 0;
+    int local = 0;
+    uint64_t rows = 0;
+    while (fgets(line, sizeof line, f)) {
+        char kind, word[128] = "";
+        unsigned slot;
+        if (sscanf(line, "%c %u %127s", &kind, &slot, word) < 2 || slot != 2) continue;
+        if (kind == 'c') local = !strcmp(word, "CBUSE_UB_LOCAL_MATRIX_IDX");
+        if (kind == 'r') rows = word[0] == '*' ? ~0ull : strtoull(word, NULL, 16);
+    }
+    fclose(f);
+    return local && !(rows >> LOCAL_ROWS) ? rows : 0;
+}
+
+/* The same, remembered per program (the render threads ask before every model draw). */
+static uint64_t local_rows(const NvnProgram *p) {
+    enum { SLOTS = 1 << 11 };
+    static struct { uint64_t vs, rows; } seen[SLOTS];  /* rows + 1 (0: not read yet) */
+    if (!p) return 0;
+    uint64_t vs = p->stages[0].key;
+    uint32_t h = (uint32_t)(vs * 0x9E3779B97F4A7C15ull >> 53);
+    for (uint32_t i = 0; i < SLOTS; i++, h = (h + 1) & (SLOTS - 1)) {
+        uint64_t k = __atomic_load_n(&seen[h].vs, __ATOMIC_ACQUIRE);
+        if (k == vs) {
+            uint64_t r = __atomic_load_n(&seen[h].rows, __ATOMIC_ACQUIRE);
+            if (r) return r - 1;
+            break;  /* another thread is reading it: read it too */
+        }
+        if (!k) {
+            uint64_t zero = 0;
+            if (!__atomic_compare_exchange_n(&seen[h].vs, &zero, vs, 0, __ATOMIC_ACQ_REL, __ATOMIC_ACQUIRE) &&
+                zero != vs)
+                continue;
+            uint64_t r = read_local_rows(vs);
+            __atomic_store_n(&seen[h].rows, r + 1, __ATOMIC_RELEASE);
+            return r;
+        }
+    }
+    return read_local_rows(vs);
+}
+
+/* Are the rows in the mask the same, bit for bit, in a and b? */
+static int same_rows(uint64_t rows, const float *a, const float *b) {
+    for (int r = 0; r < LOCAL_ROWS; r++)
+        if (rows >> r & 1 && memcmp(a + 4 * r, b + 4 * r, 16)) return 0;
     return 1;
 }
-enum { LAYOUTS = sizeof layouts / sizeof *layouts };
-static int layout_of(const NvnProgram *p) {
-    for (int i = 0; p && i < LAYOUTS; i++)
-        if (layouts[i].vs == p->stages[0].key) return i;
-    return -1;
-}
-/* YW4_GBUFFER_LAYOUTS=<hex mask of the table's entries>: which programs native mode draws (all by
- * default), to narrow a fault down */
-static int layout_on(int l) {
-    static long long mask = -2;
-    if (mask == -2) mask = getenv("YW4_GBUFFER_LAYOUTS") ? strtoll(getenv("YW4_GBUFFER_LAYOUTS"), NULL, 16) : -1;
-    return l < 64 ? (int)(mask >> l & 1) : mask == -1;  /* the mask names the first 64 */
+
+/* YW4_GBUFFER_SKIP=<vertex program keys, hex, comma separated>: native mode leaves these to the
+ * game, to narrow a fault down */
+static int skipped(const NvnProgram *p) {
+    enum { MAX = 32 };
+    static uint64_t keys[MAX];
+    static int n = -1;
+    if (n < 0) {
+        int k = 0;
+        for (const char *e = getenv("YW4_GBUFFER_SKIP"); e && *e && k < MAX;) {
+            char *end;
+            keys[k++] = strtoull(e, &end, 16);
+            e = *end == ',' ? end + 1 : "";
+        }
+        __atomic_store_n(&n, k, __ATOMIC_RELEASE);
+    }
+    for (int i = 0; i < __atomic_load_n(&n, __ATOMIC_ACQUIRE); i++)
+        if (keys[i] == p->stages[0].key) return 1;
+    return 0;
 }
 
 static void init_mode(void) {
@@ -269,12 +237,12 @@ static _Thread_local struct {
     long slot_ok, slot_is_object, slot_is_model, hook_world_ok, hook_wvp_ok, ib_bad[2];
     int ib_shown;
 } st;
-/* per layout: draws, how many had all their parts of constants 2 bit-identical to ours, and our
+/* per program: draws, how many had the rows of constants 2 it reads bit-identical to ours, and our
  * index buffer */
-static _Thread_local struct { long n, exact, ib, item, mat_n, mat_ok[2]; } lay_st[LAYOUTS];
-/* game: the game's bound vertex constants 2, for the parts we copy (PART_GAME) */
-static void object_constants(const Layout *l, const float *game, float out[GBUFFER_OBJECT_FLOATS]);
-static void survey_summary(void);
+enum { PROGRAM_STATS = 96 };
+static _Thread_local struct { uint64_t vs; long n, exact, ib, item, mat_n, mat_ok[2]; } prog_st[PROGRAM_STATS];
+/* game: the game's bound vertex constants 2, for last frame's rows */
+static void object_constants(const float *game, float out[GBUFFER_OBJECT_FLOATS]);
 
 /* Same-frame A/B (gpu_ab.c): the compared pass's layer, open in this command buffer until the next
  * layer starts there or the game ends the buffer's recording (thread B's G-buffer layer is the
@@ -412,14 +380,12 @@ static void summary(void) {
             " read at the hook: %ld, projection x view x it: %ld; index buffer wrong: %ld (call site a4bf94), %ld (a4c2d0)\n",
             st.slot_ok, st.main_vs, st.slot_is_object, st.slot_is_model, st.hook_world_ok, st.hook_wvp_ok, st.ib_bad[0],
             st.ib_bad[1]);
-    for (int l = 0; l < LAYOUTS; l++)
-        if (lay_st[l].n)
-            fprintf(stderr, "yw4: %s:   vs %016" PRIx64 ": %ld draws, constants 2 bit-identical %ld, index buffer"
-                    " ours %ld; draw item found %ld, material constants %ld: ours bound in vs %ld, fs %ld\n",
-                    pass_name, layouts[l].vs, lay_st[l].n, lay_st[l].exact, lay_st[l].ib, lay_st[l].item,
-                    lay_st[l].mat_n, lay_st[l].mat_ok[0], lay_st[l].mat_ok[1]);
-    memset(lay_st, 0, sizeof lay_st);
-    survey_summary();
+    for (int i = 0; i < PROGRAM_STATS && prog_st[i].n; i++)
+        fprintf(stderr, "yw4: %s:   vs %016" PRIx64 ": %ld draws, constants 2 bit-identical %ld, index buffer"
+                " ours %ld; draw item found %ld, material constants %ld: ours bound in vs %ld, fs %ld\n",
+                pass_name, prog_st[i].vs, prog_st[i].n, prog_st[i].exact, prog_st[i].ib, prog_st[i].item,
+                prog_st[i].mat_n, prog_st[i].mat_ok[0], prog_st[i].mat_ok[1]);
+    memset(prog_st, 0, sizeof prog_st);
     for (int i = 0; i < SOURCES; i++)
         if (sources[i].n)
             fprintf(stderr, "yw4: gbuffer:   world from call site main+%#" PRIx64 ": [sp+%#x]+%#x, %ld draws\n",
@@ -476,74 +442,43 @@ static void find_world(const float *game_world) {
     unexplained[cur.ret == 0xa4c2d0]++;
 }
 
-/* Programs not in the table: at which rows the game's constants 2 hold which part, bit for bit,
- * to write their table entries from (with the rows the translated program reads). */
-enum { SURVEY = 64 };
-static _Thread_local struct { uint64_t vs; long n, hit[5][PART_GAME]; } survey[SURVEY];
-
-static void survey_draw(uint64_t vs, const float *game) {
-    int i = 0;
-    while (i < SURVEY && survey[i].n && survey[i].vs != vs) i++;
-    if (i == SURVEY) return;
-    survey[i].vs = vs, survey[i].n++;
-    Layout one = {0};
-    float ours[GBUFFER_OBJECT_FLOATS];
-    for (int s = 0; s < 5; s++)
-        for (int what = PART_W3; what < PART_GAME; what++) {
-            one.part[0].what = (uint8_t)what, one.part[0].row = (uint8_t)(4 * s);
-            object_constants(&one, game, ours);
-            survey[i].hit[s][what] += same_parts(&one, game, ours);
-        }
-}
-
-static void survey_summary(void) {
-    static const char *const part_name[PART_GAME] = {"", "W3", "W4", "VW", "WVP"};
-    for (int i = 0; i < SURVEY && survey[i].n; i++) {
-        fprintf(stderr, "yw4: %s: not in the table: vs %016" PRIx64 ", %ld draws:", pass_name, survey[i].vs, survey[i].n);
-        for (int s = 0; s < 5; s++)
-            for (int what = PART_W3; what < PART_GAME; what++)
-                if (survey[i].hit[s][what])
-                    fprintf(stderr, " row %d %s %ld,", 4 * s, part_name[what], survey[i].hit[s][what]);
-        fprintf(stderr, "\n");
-    }
-    memset(survey, 0, sizeof survey);
-}
-
 void gbuffer_check_draw(const NvnCmdBuf *cb, uint64_t index_addr, uint32_t type, uint32_t count) {
     if (!cur.armed) return;
     cur.armed = 0;
     st.draws++;
     const NvnProgram *p = cb->program;
-    int l = layout_of(p);
-    if (l < 0 && p && cb->trace_ub[0][2] && cur.have_world)
-        survey_draw(p->stages[0].key, (const float *)(uintptr_t)cb->trace_ub[0][2]);
-    if (l >= 0 && cb->trace_ub[0][2] && cur.have_world) {  /* our constants against the game's, bit for bit */
-        const Layout *lay = &layouts[l];
+    uint64_t rows = local_rows(p);
+    if (rows && cb->trace_ub[0][2] && cur.have_world) {  /* our constants against the game's, bit for bit */
         const float *game = (const float *)(uintptr_t)cb->trace_ub[0][2];
         float ours[GBUFFER_OBJECT_FLOATS];
-        object_constants(lay, game, ours);
-        lay_st[l].n++;
-        lay_st[l].exact += same_parts(lay, game, ours);
+        object_constants(game, ours);
+        int l = 0;
+        while (l < PROGRAM_STATS && prog_st[l].n && prog_st[l].vs != p->stages[0].key) l++;
+        if (l == PROGRAM_STATS) l = PROGRAM_STATS - 1;  /* full: the last one counts the rest */
+        prog_st[l].vs = p->stages[0].key;
+        prog_st[l].n++;
+        prog_st[l].exact += same_rows(rows, game, ours);
         /* the material constants, against what the game bound at the draw list's slot (+0x7a) */
         uint8_t mat[0x80];
         unsigned slot = U16(cur.list + 0x7a);
         if (cur.item && slot < 16 && material_constants(cur.item, mat)) {
-            lay_st[l].mat_n++;
+            prog_st[l].mat_n++;
             for (int stage = 0; stage < 2; stage++)
-                lay_st[l].mat_ok[stage] += cb->trace_ub[stage][slot] &&
-                                           !memcmp((const void *)(uintptr_t)cb->trace_ub[stage][slot], mat, 0x80);
+                prog_st[l].mat_ok[stage] += cb->trace_ub[stage][slot] &&
+                                            !memcmp((const void *)(uintptr_t)cb->trace_ub[stage][slot], mat, 0x80);
         }
-        lay_st[l].item += cur.item != 0;
+        prog_st[l].item += cur.item != 0;
         uint64_t bufs = U64(cur.geometry + 0x20);
         int ib_ok = U32(cur.submesh + 0xc) ? index_addr && index_addr == indices_of(cur.geometry, cur.submesh)
                                            : !index_addr;  /* no indices: drawn as the vertices */
-        lay_st[l].ib += ib_ok;
+        prog_st[l].ib += ib_ok;
         if (!ib_ok) show_ib(bufs, cb->trace_vb0, index_addr, type, count);
-        static int shown[LAYOUTS];
-        if (!same_parts(lay, game, ours) && shown[l] < 2) {
-            shown[l]++;
-            fprintf(stderr, "yw4: gbuffer: vs %016" PRIx64 " constants 2 rows 0-19 (game, then ours):\n", lay->vs);
-            for (int r = 0; r < 20; r++)
+        static _Thread_local int shown;
+        if (!same_rows(rows, game, ours) && shown < 6) {
+            shown++;
+            fprintf(stderr, "yw4: gbuffer: vs %016" PRIx64 " constants 2 rows read %#" PRIx64 " (game, then ours):\n",
+                    p->stages[0].key, rows);
+            for (int r = 0; r < LOCAL_ROWS; r++)
                 fprintf(stderr, "yw4: gbuffer:   %2d: %g %g %g %g | %g %g %g %g\n", r, game[4 * r], game[4 * r + 1],
                         game[4 * r + 2], game[4 * r + 3], ours[4 * r], ours[4 * r + 1], ours[4 * r + 2], ours[4 * r + 3]);
         }
@@ -646,10 +581,9 @@ static void native_summary(void) {
     memset(&nat, 0, sizeof nat);
 }
 
-/* Vertex constants 2 for the submesh noted last, as layout l reads them: the renderer's world,
- * projection x view x world, the world again as last frame's (the game puts this frame's there, so
- * only the camera's motion shows in the motion vectors). */
-static void object_constants(const Layout *l, const float *game, float out[GBUFFER_OBJECT_FLOATS]) {
+/* Vertex constants 2 (the local matrix block) for the submesh noted last: the renderer's world,
+ * view x world, projection x view x world; last frame's two from the game's bound block. */
+static void object_constants(const float *game, float out[GBUFFER_OBJECT_FLOATS]) {
     Mat4 w = {{0}};
     memcpy(w.m, cur.world, sizeof cur.world);
     w.m[15] = 1;
@@ -658,12 +592,10 @@ static void object_constants(const Layout *l, const float *game, float out[GBUFF
      * bit on 2-60% of draws) */
     Mat4 proj = mat4_load(cur.device + 0x280), view = mat4_load(cur.device + 0x2c0);
     Mat4 vw = mat4_mul(&view, &w), wvp = mat4_mul(&proj, &vw);
-    memset(out, 0, GBUFFER_OBJECT_FLOATS * sizeof *out);
-    for (int i = 0; i < 4; i++) {
-        int what = l->part[i].what;
-        const float *m = what == PART_VW ? vw.m : what == PART_WVP ? wvp.m : what == PART_GAME ? game + 4 * l->part[i].row : w.m;
-        memcpy(out + 4 * l->part[i].row, m, 16 * part_rows(what));
-    }
+    memcpy(out, w.m, sizeof w.m);
+    memcpy(out + 16, vw.m, sizeof vw.m);
+    memcpy(out + 32, wvp.m, sizeof wvp.m);
+    memcpy(out + 4 * OUR_ROWS, game + 4 * OUR_ROWS, 16 * (LOCAL_ROWS - OUR_ROWS));
 }
 
 int gbuffer_take_draw(CPUState *ctx, const NvnCmdBuf *cb, int indexed, int instanced) {
@@ -679,8 +611,7 @@ int gbuffer_take_draw(CPUState *ctx, const NvnCmdBuf *cb, int indexed, int insta
     uint32_t instances = !instanced ? 1 : (uint32_t)ctx->x[indexed ? 7 : 5];
     const NvnProgram *p = cb->program;
     /* any fragment program: our draw changes only what the vertex program reads */
-    int l = layout_of(p);
-    if (l < 0 || !layout_on(l)) return note_other(p), nat.left[0]++, 0;
+    if (!local_rows(p) || skipped(p)) return note_other(p), nat.left[0]++, 0;
     if (!cur.have_world) return nat.left[1]++, 0;
     if (U8(cur.submesh + 0x3d) != 1 || prim != 4) return nat.left[2]++, 0;  /* table index 1, NVN's triangles */
     uint64_t bufs = U64(cur.geometry + 0x20);
@@ -722,7 +653,7 @@ int gbuffer_take_draw(CPUState *ctx, const NvnCmdBuf *cb, int indexed, int insta
     d.game_instanced = instanced;
     d.base_instance = base_instance, d.instances = instances;
     if (!cb->trace_ub[0][2]) return nat.left[1]++, 0;
-    object_constants(&layouts[l], (const float *)(uintptr_t)cb->trace_ub[0][2], d.object);
+    object_constants((const float *)(uintptr_t)cb->trace_ub[0][2], d.object);
     nvn_record_native(ctx, ctx->x[0], gpu_gbuffer_draw, &d, sizeof d);
     nat.taken++;
     return 1;
