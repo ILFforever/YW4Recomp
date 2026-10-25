@@ -11,6 +11,9 @@
 void gbuffer_layer_start(const CPUState *ctx);
 /* From the submesh-draw hook (shadow.c), before every submesh draw. */
 void gbuffer_submesh(const CPUState *ctx);
+/* The renderer's world for the submesh about to be drawn ([sp+0x30]+0x40 at the submesh-draw
+ * hook, 3 rows of 4): 1 if found. The shadow pass's too. */
+int gbuffer_hook_world(const CPUState *ctx, float out[12]);
 /* YW4_GBUFFER=native (our draws and programs) or =programs (our programs in the game's draws,
  * step 2a): gpu_draw.c asks per draw whether our programs replace the game's. F6 switches
  * between native and the game's. */
@@ -27,12 +30,16 @@ typedef struct {
                                                                   * no indices: index_count 0 */
     uint64_t game[7];  /* the game's draw (x1..x7), drawn instead on the game's frames */
     int game_indexed;  /* it was DrawElements, else DrawArrays */
+    int game_instanced;  /* ...Instanced: game[] has its base vertex (indexed), base instance, instances */
+    uint32_t base_instance, instances;  /* ours: the game's, so the instanced programs read the same
+                                         * copies (vertex constants 11, bound by the game) */
     float object[GBUFFER_OBJECT_FLOATS];  /* vertex constants 2: world, projection x view x world,
                                            * last frame's world, in the program's rows (gbuffer.c) */
 } GBufferDraw;
 /* nvn_cmdbuf.c, DrawElements(cmd, primitive, type, count, address) (indexed) or DrawArrays(cmd,
- * primitive, first, count): 1 if our draw went in its place (then the game's is not recorded). */
-int gbuffer_take_draw(CPUState *c, const NvnCmdBuf *cb, int indexed);
+ * primitive, first, count), or their Instanced forms (then base vertex if indexed, base instance,
+ * instances follow): 1 if our draw went in its place (then the game's is not recorded). */
+int gbuffer_take_draw(CPUState *c, const NvnCmdBuf *cb, int indexed, int instanced);
 /* CMD_NATIVE callback (gpu_draw.c): copies the bound colour targets in the frames of
  * YW4_CAPTURE_LAYER_AT; `data` is a name. */
 void gpu_capture_layer(void *vk_cb, void *gpu_state, const void *data, uint32_t size);

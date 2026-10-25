@@ -1434,17 +1434,23 @@ void gpu_gbuffer_draw(void *vk_cb, void *gpu_state, const void *data, uint32_t s
     if (!gbuffer_native_frame(gpu_frames())) {
         memcpy(r.x, d->game, sizeof r.x);
         r.op = d->game_indexed ? CMD_DRAW_ELEMENTS : CMD_DRAW_ARRAYS;
-        if (d->game_indexed) r.x[4] = 0, r.x[5] = 0, r.x[6] = 1;  /* base vertex 0, base instance 0, one instance */
-        else r.x[3] = 0, r.x[4] = 1;                              /* base instance 0, one instance */
+        if (d->game_instanced) {
+            /* the game's instanced call: its base vertex, base instance and instances as recorded */
+        } else if (d->game_indexed) {
+            r.x[4] = 0, r.x[5] = 0, r.x[6] = 1;  /* base vertex 0, base instance 0, one instance */
+        } else {
+            r.x[3] = 0, r.x[4] = 1;  /* base instance 0, one instance */
+        }
         draw(vk_cb, gpu_state, &r);
         return;
     }
     if (d->index_count) {  /* (primitive, index type, count, index address, base vertex, base instance, instances) */
         r.op = CMD_DRAW_ELEMENTS;
-        r.x[0] = d->primitive, r.x[1] = d->index_type, r.x[2] = d->index_count, r.x[3] = d->indices, r.x[6] = 1;
+        r.x[0] = d->primitive, r.x[1] = d->index_type, r.x[2] = d->index_count, r.x[3] = d->indices;
+        r.x[5] = d->base_instance, r.x[6] = d->instances;
     } else {  /* (primitive, first, count, base instance, instances) */
         r.op = CMD_DRAW_ARRAYS;
-        r.x[0] = d->primitive, r.x[2] = d->vertex_count, r.x[4] = 1;
+        r.x[0] = d->primitive, r.x[2] = d->vertex_count, r.x[3] = d->base_instance, r.x[4] = d->instances;
     }
     own = d;
     draw(vk_cb, gpu_state, &r);

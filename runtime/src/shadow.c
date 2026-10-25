@@ -309,6 +309,11 @@ typedef struct {
     uint32_t pending_count;
     int pending_copies_ok;
     ShadowPass *pass;
+    /* the renderer's world for the submesh being drawn ([sp+0x30]+0x40 at the submesh draw, as
+     * for the G-buffer): the object's own world is wrong for posed parts (the bamboo forest's
+     * stalks: one object, a world per part) */
+    Mat4 world;
+    int have_world;
 } Layer;
 
 static _Thread_local Layer *lay;
@@ -365,6 +370,25 @@ static long draws_since_toggle;  /* submeshes drawn by our pass since the last F
 static long compared, wrong_vb, wrong_ib, wrong_mvp;  /* the game's static and instanced draws vs ours */
 static long compared_inst, wrong_inst, pending_checked, pending_wrong;  /* of those, instanced; instance buffer or count different */
 static long copies_culled;  /* copies the game drew that our culling drops */
+/* the game's draws our pass can't repeat, by programs and why (reject: not mirrored, then which
+ * test of shadow_check_draw / compare_draw turned it down) */
+enum { R_PROGRAM, R_CASTER, R_DESCRIBE, R_COPIES, R_VB, R_IB, R_MATRIX, R_LAYOUT, R_FADE, R_SKINNED, R_PALETTE, R_N };
+static const char *const reject_name[R_N] = {"other programs", "not gathered", "not described", "copies",
+                                             "vertex buffer", "index buffer", "matrix", "vertex layout or texture",
+                                             "fade", "skinned vertex layout", "bone palette"};
+static _Thread_local int reject;
+enum { OTHERS = 24 };
+static struct { uint64_t vs, fs; long n[R_N]; } others[OTHERS];
+
+static void note_other(uint64_t vs, uint64_t fs, int why) {
+    int i = 0;
+    while (i < OTHERS && __atomic_load_n(&others[i].vs, __ATOMIC_RELAXED) &&
+           !(others[i].vs == vs && others[i].fs == fs))
+        i++;
+    if (i == OTHERS) return;
+    if (!others[i].vs) others[i].fs = fs, __atomic_store_n(&others[i].vs, vs | !vs, __ATOMIC_RELAXED);
+    __atomic_add_fetch(&others[i].n[why], 1, __ATOMIC_RELAXED);
+}
 
 static int same(const Caster *c, const uint64_t d[2]) { return c->object == d[0] && c->submesh == d[1]; }
 
@@ -415,6 +439,13 @@ static void report(void) {
                 __atomic_exchange_n(&draws_replaced, 0, __ATOMIC_RELAXED),
                 __atomic_exchange_n(&draws_native, 0, __ATOMIC_RELAXED), d, ps, ds);
     }
+    for (int i = 0; i < OTHERS && others[i].vs; i++) {
+        fprintf(stderr, "yw4: shadows:   the game's: vs %016" PRIx64 " fs %016" PRIx64 ":", others[i].vs, others[i].fs);
+        for (int r = 0; r < R_N; r++)
+            if (others[i].n[r]) fprintf(stderr, " %s %ld,", reject_name[r], others[i].n[r]);
+        fprintf(stderr, "\n");
+    }
+    memset(others, 0, sizeof others);
 }
 
 /* nvn_cmdbuf.c: a draw was recorded; if it is the submesh draw noted last on this thread, it
@@ -471,11 +502,13 @@ static int skinned_ok(const NvnCmdBuf *cb, uint64_t obj, uint64_t sub, uint64_t 
     const Caster *c = caster_of(obj, sub);
     uint64_t data;
     uint32_t size;
+    reject = R_PALETTE;
     if (!c || !palette_of(c, &data, &size) || !cb->trace_ub[0][4] ||
         !palette_close((const float *)(uintptr_t)data, (const float *)(uintptr_t)cb->trace_ub[0][4], size))
         return 0;
     if (fs == FADE_FS) {
         float fade;
+        reject = R_FADE;
         if (!cb->trace_ub[1][3]) return 0;
         memcpy(&fade, (const void *)(uintptr_t)(cb->trace_ub[1][3] + 28), 4);
         if (fade != 1.0f) return 0;
@@ -568,10 +601,14 @@ void shadow_check_draw(const NvnCmdBuf *cb, uint64_t index_addr, const ShadowDra
             __atomic_add_fetch(&pending_wrong, 1, __ATOMIC_RELAXED);
     }
     Cutout cut = {0};
-    int ok = mirrored(vs, fs) && (fs != CUTOUT_FS || (is_wind(vs) ? wind_of(cb, &cut) : cutout_of(cb, &cut))) &&
-             (!is_fading(vs) || fading_of(cb, fs, &cut)) && (vs != SKINNED_VS || skinned_ok(cb, obj, sub, fs)) &&
+    reject = R_PROGRAM;
+    int ok = mirrored(vs, fs) &&
+             (reject = R_LAYOUT, fs != CUTOUT_FS || (is_wind(vs) ? wind_of(cb, &cut) : cutout_of(cb, &cut))) &&
+             (reject = R_FADE, !is_fading(vs) || fading_of(cb, fs, &cut)) &&
+             (reject = R_SKINNED, vs != SKINNED_VS || skinned_ok(cb, obj, sub, fs)) &&
              compare_draw(cb, obj, sub, index_addr, call, is_instanced(vs) ? 1 : vs == WIND_VS ? 2 : 0);
     learn(obj, sub, vs, fs, ok, cb->polygon, &cut);
+    if (!ok) note_other(vs, fs, reject);
     /* the pass draws where the game's draws in this layer went: a cascade's layers can have
      * different targets (cutscenes: two layers per cascade, two shadow maps) */
     if (lay->pass) {
@@ -603,11 +640,14 @@ static uint32_t index_type(uint64_t sub) { return U8(sub + 0x3f) & 2 ? 2 : 1; }
 
 /* How our pass would draw this submesh (0: it can't): a triangle list, from the geometry's
  * buffers, with projection x view x the node's own object's world matrix. */
+/* The caster's world: the renderer's for the submesh being drawn, else its object's. */
+static Mat4 world_of(const Caster *c) { return lay && lay->have_world ? lay->world : load(c->own); }
+
 static int describe(const Caster *c, const Mat4 *vp, ShadowDraw *d) {
     if (U8(c->submesh + 0x3d) != 1) return 0;  /* primitive table index 1: triangle list */
     uint64_t bufs = U64(c->geometry + 0x20);
     if (!bufs) return 0;
-    Mat4 world = load(c->own), mvp = mul(vp, &world);
+    Mat4 world = world_of(c), mvp = mul(vp, &world);
     d->vertices = U64(bufs) + *(const uint32_t *)(uintptr_t)c->submesh;
     /* the geometry's index buffer object (+0x28), as the submesh draw finds it: usually the second
      * object of the vertex buffer's record (+0x68 of it), not always */
@@ -689,7 +729,7 @@ static int wind_draw(const Caster *c, const Mat4 *vp, uint64_t device, uint64_t 
     if (!out) return -1;
     memcpy(out[0].mvp, c6 + 4 * 36, 16), memcpy(out[0].mvp + 4, c6 + 4 * 47, 16);
     memcpy(out[0].mvp + 8, c7, 16), memcpy(out[0].mvp + 12, c7 + 4 * 3, 16);
-    Mat4 world = load(c->own);
+    Mat4 world = world_of(c);
     for (uint32_t i = 0; i < count; i++) {
         Mat4 m = world;
         if (copies) {
@@ -759,7 +799,7 @@ static int ours(const Caster *c, const Mat4 *vp, uint64_t device, ShadowDraw *d,
     if (fading && !dither) return -1;  /* no fading draw learned yet */
     ShadowCopy *out = gpu_shadow_copies(count, &first);
     if (!out) return -1;
-    Mat4 world = load(c->own);
+    Mat4 world = world_of(c);
     for (uint32_t i = 0; i < count; i++) {
         Mat4 e = {{0}};
         memcpy(e.m, copies + 12 * i, 48);
@@ -837,7 +877,8 @@ static int compare_draw(const NvnCmdBuf *cb, uint64_t obj, uint64_t sub, uint64_
         if (lay->ours.c[i].object == obj && lay->ours.c[i].submesh == sub) c = &lay->ours.c[i];
     ShadowDraw d;
     uint64_t ub = cb->trace_ub[0][2];
-    if (!c || !describe(c, &lay->vp, &d) || !ub) return 0;
+    if (!c) return reject = R_CASTER, 0;
+    if (!describe(c, &lay->vp, &d) || !ub) return reject = R_DESCRIBE, 0;
     const float *game = (const float *)(uintptr_t)(ub + 128);
     float err, scale;
     int bad_inst = 0;
@@ -847,7 +888,8 @@ static int compare_draw(const NvnCmdBuf *cb, uint64_t obj, uint64_t sub, uint64_
         uint64_t vp_ub = cb->trace_ub[0][1], game_copies = cb->trace_ub[0][11];
         Copies cp;
         float s2;
-        err = max_diff((const float *)(uintptr_t)c->own, (const float *)(uintptr_t)ub, 16, &scale);
+        Mat4 world = world_of(c);
+        err = max_diff(world.m, (const float *)(uintptr_t)ub, 16, &scale);
         if (vp_ub) {
             float e2 = max_diff(lay->vp.m, (const float *)(uintptr_t)(vp_ub + 128), 16, &s2);
             if (e2 / (s2 > 1 ? s2 : 1) > err / (scale > 1 ? scale : 1)) err = e2, scale = s2;
@@ -867,7 +909,7 @@ static int compare_draw(const NvnCmdBuf *cb, uint64_t obj, uint64_t sub, uint64_
                         instances(c->model, &cp) == 1 ? cp.count : 0, instances(c->model, &cp), call->instances,
                         game_copies, call->base_vertex, U8(c->model + 0x214), U8(c->model + 0x216), U8(c->model + 0x218));
             if (!bad_inst) {
-                Mat4 world = load(c->own);
+                Mat4 world = world_of(c);
                 for (uint32_t j = 0; j < call->instances; j++) {
                     Mat4 e, ew, mvp;
                     memcpy(e.m, (const float *)(uintptr_t)game_copies + 12 * j, 48);
@@ -885,6 +927,7 @@ static int compare_draw(const NvnCmdBuf *cb, uint64_t obj, uint64_t sub, uint64_
     __atomic_add_fetch(&wrong_vb, bad_vb, __ATOMIC_RELAXED);
     __atomic_add_fetch(&wrong_ib, bad_ib, __ATOMIC_RELAXED);
     __atomic_add_fetch(&wrong_mvp, bad_mvp, __ATOMIC_RELAXED);
+    reject = bad_inst ? R_COPIES : bad_vb ? R_VB : bad_ib ? R_IB : R_MATRIX;
     if (bad_inst) return 0;
     static int shown;
     if (mode == MODE_CHECK && !instanced && (bad_vb || bad_ib || bad_mvp) && shown++ < 5) {
@@ -1052,6 +1095,9 @@ int yw4_hook_submesh_draw(CPUState *ctx) {
     /* the object being drawn is in the model renderer's stack slot sp+0x390 */
     uint64_t obj = U64(ctx->sp + 0x390), sub = ctx->x[2];
     Layer *k = lay;
+    memset(&k->world, 0, sizeof k->world);
+    k->have_world = gbuffer_hook_world(ctx, k->world.m);
+    k->world.m[15] = 1;
     ShadowPass *p = k->pass;
     uint64_t frame = __atomic_load_n(&yw4_frames_presented, __ATOMIC_RELAXED);
     if (mode == MODE_NATIVE && p && k->game_drew && ((frame + (obj >> 4)) & 31) != 0) {

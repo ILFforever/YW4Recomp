@@ -123,6 +123,19 @@ static const Layout layouts[] = {
     /* the main view's stage layers' */
     {0xea32f254e28caa24ull, {{PART_WVP, 8}}},
     {0xf7b17fd7a6ebea03ull, {{PART_WVP, 8}}},
+    /* the late-game bamboo forest's: instanced (copies in vertex constants 11, bound by the game) */
+    {0xec245cde1ecedbb9ull, {{PART_W3, 0}, {PART_W4, 12}}},  /* G-buffer */
+    {0x740898495e327060ull, {{PART_W3, 0}, {PART_W4, 12}}},  /* G-buffer */
+    {0x8e88846fb47ff870ull, {{PART_W3, 0}}},
+    {0x27ccdd743a729089ull, {{PART_W3, 0}}},
+    {0xb78a64c2f0d9b2e5ull, {{PART_W3, 0}}},
+    {0x0510e9442c031f5dull, {{PART_W3, 0}}},
+    /* and not instanced */
+    {0xc1bd30a23a61a309ull, {{PART_W3, 0}, {PART_WVP, 8}}},
+    {0x091924e34e241a2bull, {{PART_W3, 0}, {PART_WVP, 8}}},
+    {0x019409e34b708547ull, {{PART_W3, 0}, {PART_VW, 4}, {PART_WVP, 8}}},
+    {0xa829043068f86fa4ull, {{PART_W4, 0}, {PART_GAME, 4}}},  /* rows 4-6: vectors, not the camera's */
+    {0xb1370bd14a618520ull, {{PART_W4, 0}, {PART_W4, 12}}},
 };
 static int part_rows(int what) { return what == PART_W3 ? 3 : what ? 4 : 0; }
 /* Are the layout's parts the same, bit for bit, in a and b? */
@@ -330,6 +343,13 @@ static int material_constants(uint64_t item, uint8_t out[0x80]) {
     return 1;
 }
 
+int gbuffer_hook_world(const CPUState *ctx, float out[12]) {
+    uint64_t rw = U64(ctx->sp + 0x30);
+    if (!guest_ptr(rw) || !readable(rw + 0x40, 48)) return 0;
+    memcpy(out, (const void *)(uintptr_t)(rw + 0x40), 48);
+    return 1;
+}
+
 void gbuffer_submesh(const CPUState *ctx) {
     if (!cur.active) return;
     static uint64_t base;
@@ -341,9 +361,7 @@ void gbuffer_submesh(const CPUState *ctx) {
     /* the object being drawn is in the model renderer's stack slot sp+0x390 */
     cur.object = U64(ctx->sp + 0x390), cur.geometry = ctx->x[1], cur.submesh = ctx->x[2];
     cur.sp = ctx->sp, cur.ret = ret;
-    uint64_t rw = U64(ctx->sp + 0x30);
-    cur.have_world = guest_ptr(rw) && readable(rw + 0x40, 48);
-    if (cur.have_world) memcpy(cur.world, (const void *)(uintptr_t)(rw + 0x40), sizeof cur.world);
+    cur.have_world = gbuffer_hook_world(ctx, cur.world);
     cur.item = find_item(ctx->sp, ret == 0xa4c2d0);
     cur.armed = 1;
     st.submeshes++;
@@ -583,13 +601,17 @@ static void object_constants(const Layout *l, const float *game, float out[GBUFF
     }
 }
 
-int gbuffer_take_draw(CPUState *ctx, const NvnCmdBuf *cb, int indexed) {
+int gbuffer_take_draw(CPUState *ctx, const NvnCmdBuf *cb, int indexed, int instanced) {
     if (!cur.armed || __atomic_load_n(&mode, __ATOMIC_ACQUIRE) != MODE_NATIVE) return 0;
     cur.armed = 0;
     native_summary();
-    /* DrawElements(cmd, primitive, type, count, address) or DrawArrays(cmd, primitive, first, count) */
+    /* DrawElements(cmd, primitive, type, count, address) or DrawArrays(cmd, primitive, first, count);
+     * instanced: then (base vertex,) base instance, instances */
     uint32_t prim = (uint32_t)ctx->x[1], type = indexed ? (uint32_t)ctx->x[2] : 0, count = (uint32_t)ctx->x[3];
     uint64_t index_addr = indexed ? ctx->x[4] : 0, first = indexed ? 0 : ctx->x[2];
+    int32_t base_vertex = instanced && indexed ? (int32_t)ctx->x[5] : 0;
+    uint32_t base_instance = !instanced ? 0 : (uint32_t)ctx->x[indexed ? 6 : 4];
+    uint32_t instances = !instanced ? 1 : (uint32_t)ctx->x[indexed ? 7 : 5];
     const NvnProgram *p = cb->program;
     /* any fragment program: our draw changes only what the vertex program reads */
     int l = layout_of(p);
@@ -629,8 +651,11 @@ int gbuffer_take_draw(CPUState *ctx, const NvnCmdBuf *cb, int indexed) {
     if (d.index_count ? count != d.index_count || type != d.index_type
                       : first || count != d.vertex_count)
         return nat.left[5]++, 0;
+    if (base_vertex) return nat.left[5]++, 0;
     memcpy(d.game, &ctx->x[1], sizeof d.game);
     d.game_indexed = indexed;
+    d.game_instanced = instanced;
+    d.base_instance = base_instance, d.instances = instances;
     if (!cb->trace_ub[0][2]) return nat.left[1]++, 0;
     object_constants(&layouts[l], (const float *)(uintptr_t)cb->trace_ub[0][2], d.object);
     nvn_record_native(ctx, ctx->x[0], gpu_gbuffer_draw, &d, sizeof d);
