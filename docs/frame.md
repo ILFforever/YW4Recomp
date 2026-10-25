@@ -174,7 +174,7 @@ issues the NVN calls. Measured with `YW4_TRACE_DRAWLIST` (150 draws in the stree
 |---|---|---|
 | world matrix (4×4) | **object `+0x00`** (a copy at `+0x40`); it is the start of vertex constant buffer 2 | 143 of 150 draws |
 | vertex data base | `[geometry+0x20] + 0x00` | all |
-| index area base | `[geometry+0x20] + 0x68` | all |
+| index area base | `[[geometry+0x28]]`: the geometry's index buffer object, as `f_a75e90` reads it; usually the second object of the vertex buffer's record (`[geometry+0x20] + 0x68`), not always (one town object: 1.5% of draws there) | all |
 | bones (vertex constant buffer 4) | `object+0x110 → +0x138` | skinned draws (59 of 112) |
 | vertex constant buffer 6 (material values?) | `object+0x280 → +0x328 → +0x140` | all shadow, 62 of 112 |
 
