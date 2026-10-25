@@ -9,7 +9,10 @@ typedef struct {
     uint64_t vertices, indices;          /* guest addresses (in the imported memory pools) */
     uint32_t vertex_count, index_count;  /* index_count 0: not indexed */
     uint32_t stride, index_type;         /* NVN index type: 1 = 16-bit, 2 = 32-bit */
-    uint8_t cull, front, pad[2];         /* NVN polygon state bytes 0 and 1, as the game drew it */
+    uint8_t cull, front;                 /* NVN polygon state bytes 0 and 1, as the game drew it */
+    uint8_t skin4, pad;                  /* skinned with up to 4 bones (26b707): the weights' NVN format and
+                                          * offset in uv_format/uv_offset, the bone indices' in
+                                          * wind_format/wind_offset */
     float mvp[16];                       /* projection x view x world, row-major */
     float threshold;                     /* cut-out casters (texture != 0): the material's alpha threshold, */
     uint64_t texture;                    /* texture handle, and the texture coordinates' NVN format and */

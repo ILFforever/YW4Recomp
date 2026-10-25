@@ -136,6 +136,34 @@ static const Layout layouts[] = {
     {0x019409e34b708547ull, {{PART_W3, 0}, {PART_VW, 4}, {PART_WVP, 8}}},
     {0xa829043068f86fa4ull, {{PART_W4, 0}, {PART_GAME, 4}}},  /* rows 4-6: vectors, not the camera's */
     {0xb1370bd14a618520ull, {{PART_W4, 0}, {PART_W4, 12}}},
+    /* the owner's late-game walk: instanced */
+    {0x28a4b7fbc068096cull, {{PART_W3, 0}, {PART_W4, 12}}},  /* G-buffer */
+    {0x87d7852c4459fe6cull, {{PART_W3, 0}, {PART_W4, 12}}},  /* G-buffer */
+    {0x787aabf5c97b2845ull, {{PART_W3, 0}, {PART_W4, 12}}},  /* G-buffer */
+    {0xb646189b842cb8fcull, {{PART_W3, 0}}},
+    {0x4da03ae0981b950eull, {{PART_W3, 0}}},
+    {0xca5b9234f79b185bull, {{PART_W3, 0}}},
+    /* and not instanced */
+    {0xb2b60a755b17e672ull, {{PART_W3, 0}, {PART_W4, 12}}},  /* G-buffer */
+    {0x6ae546090f0cbd2dull, {{PART_VW, 4}, {PART_WVP, 8}, {PART_GAME, 16}}},  /* G-buffer, skinned */
+    {0x93b0158e30bfb40dull, {{PART_W3, 0}, {PART_GAME, 16}}},  /* G-buffer, skinned */
+    {0xcd1d6c554ed8c338ull, {{PART_W3, 0}, {PART_GAME, 16}}},  /* G-buffer, skinned */
+    {0x44b6b7c41ae9b46full, {{PART_W4, 0}, {PART_WVP, 8}}},
+    {0x87d989a31a32d11full, {{PART_W3, 0}, {PART_VW, 4}, {PART_WVP, 8}}},
+    {0x89a9c9e98c7a9bd5ull, {{PART_W3, 0}, {PART_VW, 4}, {PART_WVP, 8}}},
+    {0xe92af2d2f17d3c1bull, {{PART_W3, 0}, {PART_VW, 4}, {PART_WVP, 8}}},  /* row 6 only of view x W */
+    {0xb31f6350967c3751ull, {{PART_W3, 0}, {PART_VW, 4}}},
+    {0xf852410659ddecf2ull, {{PART_W3, 0}, {PART_WVP, 8}}},
+    {0x26dc7f86eff34f41ull, {{PART_W3, 0}}},
+    {0x8af60251ee659360ull, {{PART_W3, 0}}},
+    {0x5205f9ae60fe652full, {{PART_W3, 0}}},
+    {0x1e2809f82a457694ull, {{PART_W3, 0}}},
+    {0xc2a564c07aafeaa6ull, {{PART_WVP, 8}}},
+    {0x7297f0550d3775c0ull, {{PART_WVP, 8}}},
+    /* found by check mode's survey (rows the game's constants hold, with the rows the program reads) */
+    {0xb65cb9128690f752ull, {{PART_W3, 0}, {PART_VW, 4}, {PART_WVP, 8}}},
+    {0xeab579fd0ad7df1dull, {{PART_W3, 0}, {PART_WVP, 8}}},
+    {0xb0f1cf2d937ca7bdull, {{PART_WVP, 8}}},
 };
 static int part_rows(int what) { return what == PART_W3 ? 3 : what ? 4 : 0; }
 /* Are the layout's parts the same, bit for bit, in a and b? */
@@ -155,7 +183,7 @@ static int layout_of(const NvnProgram *p) {
 static int layout_on(int l) {
     static long long mask = -2;
     if (mask == -2) mask = getenv("YW4_GBUFFER_LAYOUTS") ? strtoll(getenv("YW4_GBUFFER_LAYOUTS"), NULL, 16) : -1;
-    return (int)(mask >> l & 1);
+    return l < 64 ? (int)(mask >> l & 1) : mask == -1;  /* the mask names the first 64 */
 }
 
 static void init_mode(void) {
@@ -246,6 +274,7 @@ static _Thread_local struct {
 static _Thread_local struct { long n, exact, ib, item, mat_n, mat_ok[2]; } lay_st[LAYOUTS];
 /* game: the game's bound vertex constants 2, for the parts we copy (PART_GAME) */
 static void object_constants(const Layout *l, const float *game, float out[GBUFFER_OBJECT_FLOATS]);
+static void survey_summary(void);
 
 /* Same-frame A/B (gpu_ab.c): the compared pass's layer, open in this command buffer until the next
  * layer starts there or the game ends the buffer's recording (thread B's G-buffer layer is the
@@ -390,6 +419,7 @@ static void summary(void) {
                     pass_name, layouts[l].vs, lay_st[l].n, lay_st[l].exact, lay_st[l].ib, lay_st[l].item,
                     lay_st[l].mat_n, lay_st[l].mat_ok[0], lay_st[l].mat_ok[1]);
     memset(lay_st, 0, sizeof lay_st);
+    survey_summary();
     for (int i = 0; i < SOURCES; i++)
         if (sources[i].n)
             fprintf(stderr, "yw4: gbuffer:   world from call site main+%#" PRIx64 ": [sp+%#x]+%#x, %ld draws\n",
@@ -446,12 +476,47 @@ static void find_world(const float *game_world) {
     unexplained[cur.ret == 0xa4c2d0]++;
 }
 
+/* Programs not in the table: at which rows the game's constants 2 hold which part, bit for bit,
+ * to write their table entries from (with the rows the translated program reads). */
+enum { SURVEY = 64 };
+static _Thread_local struct { uint64_t vs; long n, hit[5][PART_GAME]; } survey[SURVEY];
+
+static void survey_draw(uint64_t vs, const float *game) {
+    int i = 0;
+    while (i < SURVEY && survey[i].n && survey[i].vs != vs) i++;
+    if (i == SURVEY) return;
+    survey[i].vs = vs, survey[i].n++;
+    Layout one = {0};
+    float ours[GBUFFER_OBJECT_FLOATS];
+    for (int s = 0; s < 5; s++)
+        for (int what = PART_W3; what < PART_GAME; what++) {
+            one.part[0].what = (uint8_t)what, one.part[0].row = (uint8_t)(4 * s);
+            object_constants(&one, game, ours);
+            survey[i].hit[s][what] += same_parts(&one, game, ours);
+        }
+}
+
+static void survey_summary(void) {
+    static const char *const part_name[PART_GAME] = {"", "W3", "W4", "VW", "WVP"};
+    for (int i = 0; i < SURVEY && survey[i].n; i++) {
+        fprintf(stderr, "yw4: %s: not in the table: vs %016" PRIx64 ", %ld draws:", pass_name, survey[i].vs, survey[i].n);
+        for (int s = 0; s < 5; s++)
+            for (int what = PART_W3; what < PART_GAME; what++)
+                if (survey[i].hit[s][what])
+                    fprintf(stderr, " row %d %s %ld,", 4 * s, part_name[what], survey[i].hit[s][what]);
+        fprintf(stderr, "\n");
+    }
+    memset(survey, 0, sizeof survey);
+}
+
 void gbuffer_check_draw(const NvnCmdBuf *cb, uint64_t index_addr, uint32_t type, uint32_t count) {
     if (!cur.armed) return;
     cur.armed = 0;
     st.draws++;
     const NvnProgram *p = cb->program;
     int l = layout_of(p);
+    if (l < 0 && p && cb->trace_ub[0][2] && cur.have_world)
+        survey_draw(p->stages[0].key, (const float *)(uintptr_t)cb->trace_ub[0][2]);
     if (l >= 0 && cb->trace_ub[0][2] && cur.have_world) {  /* our constants against the game's, bit for bit */
         const Layout *lay = &layouts[l];
         const float *game = (const float *)(uintptr_t)cb->trace_ub[0][2];

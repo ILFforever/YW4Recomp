@@ -44,14 +44,17 @@ static VkShaderModule module(const char *name) {
 /* Kinds of caster, each its own shaders and pipeline layout. The instanced ones draw all of a
  * submesh's copies at once, their matrices in the copies ring. */
 enum {
-    KIND_STATIC, KIND_CUTOUT, KIND_SKINNED, KIND_INST, KIND_INST_CUTOUT, KIND_INST_FADE, KIND_INST_FADE_CUTOUT, KIND_WIND,
-    KINDS
+    KIND_STATIC, KIND_CUTOUT, KIND_SKINNED, KIND_SKINNED4, KIND_INST, KIND_INST_CUTOUT, KIND_INST_FADE,
+    KIND_INST_FADE_CUTOUT, KIND_WIND, KINDS
 };
 /* Push constants: the matrix (64 bytes), for cut-out casters also the threshold; instanced ones
  * only the threshold (their matrices come per copy); wind-swayed ones projection x view, the
  * threshold and their header's index in the copies ring. */
-static const uint32_t push_size[KINDS] = {64, 68, 64, 4, 4, 4, 4, 72};
+static const uint32_t push_size[KINDS] = {64, 68, 64, 64, 4, 4, 4, 4, 72};
 static int kind_instanced(int kind) { return kind >= KIND_INST; }
+static int kind_skinned(int kind) { return kind == KIND_SKINNED || kind == KIND_SKINNED4; }
+/* kinds with three vertex bindings (the same vertices, at the second and third attributes' offsets) */
+static int kind_three(int kind) { return kind == KIND_WIND || kind == KIND_SKINNED4; }
 
 /* Instanced casters' copies: a ring in host-visible memory, as the palettes'. The render thread
  * that gathers a pass writes each draw's copies in (gpu_shadow_copies); the draw's first instance
@@ -229,7 +232,7 @@ static VkPipelineLayout layout(int kind) {
     static VkPipelineLayout l[KINDS];
     if (!l[kind]) {
         VkPushConstantRange pc = {VK_SHADER_STAGE_VERTEX_BIT, 0, push_size[kind]};
-        VkDescriptorSetLayout set[2] = {kind == KIND_SKINNED ? palette_set_layout()
+        VkDescriptorSetLayout set[2] = {kind_skinned(kind) ? palette_set_layout()
                                         : kind == KIND_WIND  ? wind_set_layout()
                                                              : textures_set_layout(kind_textures(kind)),
                                         copies_set_layout()};
@@ -261,10 +264,11 @@ static VkPipeline pipeline(VkFormat depth, int kind, VkFormat uv, VkFormat wind)
     if (n == MAX) gpu_stop("shadow pass: too many pipelines");
     static VkShaderModule vs[KINDS], fs[KINDS];
     static const char *const vs_name[KINDS] = {"shadow_static.vert",          "shadow_cutout.vert",
-                                               "shadow_skinned.vert",         "shadow_instanced.vert",
+                                               "shadow_skinned.vert",         "shadow_skinned4.vert",
+                                               "shadow_instanced.vert",
                                                "shadow_instanced_cutout.vert", "shadow_instanced.vert",
                                                "shadow_instanced_cutout.vert", "shadow_wind.vert"};
-    static const char *const fs_name[KINDS] = {NULL, "shadow_cutout.frag", NULL, NULL, "shadow_cutout.frag",
+    static const char *const fs_name[KINDS] = {NULL, "shadow_cutout.frag", NULL, NULL, NULL, "shadow_cutout.frag",
                                                "shadow_fade.frag", "shadow_fade_cutout.frag", "shadow_cutout.frag"};
     if (!vs[kind]) vs[kind] = module(vs_name[kind]);
     if (fs_name[kind] && !fs[kind]) fs[kind] = module(fs_name[kind]);
@@ -280,9 +284,9 @@ static VkPipeline pipeline(VkFormat depth, int kind, VkFormat uv, VkFormat wind)
         attr[1] = (VkVertexInputAttributeDescription){1, 0, VK_FORMAT_R32G32B32A32_UINT, 28};
         attr[2] = (VkVertexInputAttributeDescription){2, 0, VK_FORMAT_R16G16B16A16_UINT, 44};
     }
-    uint32_t nattr = kind == KIND_SKINNED || kind == KIND_WIND ? 3 : kind_has_uv(kind) ? 2 : 1;
+    uint32_t nattr = kind == KIND_SKINNED || kind_three(kind) ? 3 : kind_has_uv(kind) ? 2 : 1;
     VkPipelineVertexInputStateCreateInfo vi = {.sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO,
-                                               .vertexBindingDescriptionCount = kind == KIND_WIND ? 3 : kind_has_uv(kind) ? 2 : 1,
+                                               .vertexBindingDescriptionCount = kind_three(kind) ? 3 : kind_has_uv(kind) ? 2 : 1,
                                                .pVertexBindingDescriptions = bind,
                                                .vertexAttributeDescriptionCount = nattr,
                                                .pVertexAttributeDescriptions = attr};
@@ -410,24 +414,26 @@ static void draw_pass(VkCommandBuffer cb, GpuState *s, const ShadowPass *p) {
         VkDeviceSize voff[3], ioff, stride[3] = {d->stride, d->stride, d->stride};
         uint32_t isize = d->index_type == 2 ? 4 : 2;
         VkDescriptorImageInfo ii[4];  /* the cut-out texture, the dither, the wind noise, the wind map */
-        VkFormat uv = d->texture ? gpu_format(d->uv_format) : VK_FORMAT_UNDEFINED;
-        VkFormat wind = d->wind_tex[0] ? gpu_format(d->wind_format) : VK_FORMAT_UNDEFINED;
+        /* 4-bone skinned casters: the weights' format in uv_format, the bone indices' in wind_format */
+        VkFormat uv = d->texture || d->skin4 ? gpu_format(d->uv_format) : VK_FORMAT_UNDEFINED;
+        VkFormat wind = d->wind_tex[0] || d->skin4 ? gpu_format(d->wind_format) : VK_FORMAT_UNDEFINED;
         if (!gpu_buffer_at(d->vertices, (uint64_t)d->vertex_count * d->stride, &vb[0], &voff[0]) ||
             (d->index_count && !gpu_buffer_at(d->indices, (uint64_t)d->index_count * isize, &ib, &ioff)) ||
             (d->texture && (uv == VK_FORMAT_UNDEFINED || !gpu_handle_texture(cb, s, d->texture, 0, &ii[0]))) ||
+            (d->skin4 && (uv == VK_FORMAT_UNDEFINED || wind == VK_FORMAT_UNDEFINED)) ||
             (d->dither && !gpu_handle_texture(cb, s, d->dither, 0, &ii[1])) ||
             (d->wind_tex[0] && (wind == VK_FORMAT_UNDEFINED || !gpu_handle_texture(cb, s, d->wind_tex[0], 0, &ii[2]) ||
                                 !gpu_handle_texture(cb, s, d->wind_tex[1], 0, &ii[3])))) {
             skipped++;
             continue;
         }
-        int kind = d->palette_size ? KIND_SKINNED
+        int kind = d->palette_size ? (d->skin4 ? KIND_SKINNED4 : KIND_SKINNED)
                    : d->wind_tex[0] ? KIND_WIND
                    : d->copies     ? (d->dither ? (d->texture ? KIND_INST_FADE_CUTOUT : KIND_INST_FADE)
                                                 : (d->texture ? KIND_INST_CUTOUT : KIND_INST))
                    : d->texture    ? KIND_CUTOUT
                                    : KIND_STATIC;
-        if (kind == KIND_SKINNED && !pal.buf) {  /* can't happen: the gather made the ring */
+        if (kind_skinned(kind) && !pal.buf) {  /* can't happen: the gather made the ring */
             skipped++;
             continue;
         }
@@ -440,9 +446,9 @@ static void draw_pass(VkCommandBuffer cb, GpuState *s, const ShadowPass *p) {
         }
         if (d->cull != cull || d->front != front) gpu_cull(cb, d->cull, d->front), cull = d->cull, front = d->front;
         vb[1] = vb[2] = vb[0], voff[1] = voff[0] + d->uv_offset, voff[2] = voff[0] + d->wind_offset;
-        vkCmdBindVertexBuffers2(cb, 0, kind == KIND_WIND ? 3 : kind_has_uv(kind) ? 2 : 1, vb, voff, NULL, stride);
-        if (kind == KIND_SKINNED)
-            vkCmdBindDescriptorSets(cb, VK_PIPELINE_BIND_POINT_GRAPHICS, layout(KIND_SKINNED), 0, 1, &pal.set, 1,
+        vkCmdBindVertexBuffers2(cb, 0, kind_three(kind) ? 3 : kind_has_uv(kind) ? 2 : 1, vb, voff, NULL, stride);
+        if (kind_skinned(kind))
+            vkCmdBindDescriptorSets(cb, VK_PIPELINE_BIND_POINT_GRAPHICS, layout(kind), 0, 1, &pal.set, 1,
                                     &d->palette_offset);
         uint32_t ntex = kind_textures(kind);
         if (ntex) {  /* the cut-out texture at binding 0 if any, then the dither, or the wind textures */

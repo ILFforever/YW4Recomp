@@ -212,6 +212,10 @@ enum { PASS_DRAWS = 4096, RING = 64 };
  * pattern while the object fades out (fs cbuf 3 byte 28 below 1); while it is 1 nothing is
  * dropped and our depth-only draw is the same. */
 #define SKINNED_VS 0x71faac9f597b428dull
+/* The same with up to 4 bones per vertex: float weights (attribute 1) and bone indices (attribute 2)
+ * in the formats the game's vertex layout gives, no 1/65535 scale (shadow_skinned4.vert). */
+#define SKINNED4_VS 0x26b7074dd30b03b3ull
+static int is_skinned(uint64_t vs) { return vs == SKINNED_VS || vs == SKINNED4_VS; }
 #define FADE_FS 0xb7cd6ed8cd28a184ull
 /* Fading instanced casters: the instanced programs for copies the callback nudged (flag x 100
  * added to the first value). The vertex program decodes each copy: first value sign x 100 x
@@ -240,7 +244,7 @@ static int is_fading(uint64_t vs) { return vs == FADE_INSTANCED_VS || vs == FADE
 static int mirrored(uint64_t vs, uint64_t fs) {
     return ((vs == STATIC_VS || vs == INSTANCED_VS) && fs == DEPTH_FS) ||
            ((vs == CUTOUT_STATIC_VS || vs == CUTOUT_INSTANCED_VS) && fs == CUTOUT_FS) ||
-           (vs == SKINNED_VS && (fs == DEPTH_FS || fs == FADE_FS)) || (vs == FADE_INSTANCED_VS && fs == FADE_FS) ||
+           (is_skinned(vs) && (fs == DEPTH_FS || fs == FADE_FS)) || (vs == FADE_INSTANCED_VS && fs == FADE_FS) ||
            (vs == FADE_CUTOUT_INSTANCED_VS && fs == FADE_CUTOUT_FS) || (is_wind(vs) && fs == CUTOUT_FS);
 }
 
@@ -489,12 +493,15 @@ static int palette_close(const float *ours, const float *game, uint32_t size) {
 /* A skinned draw our pass can repeat: the vertex layout our pipeline reads (position at 0,
  * weights 0x2f at 28, bone indices 0x2c at 44, one vertex buffer and stride), our palette
  * the game's cbuf 4 (palette_close), and with the fade program, the fade at 1. */
-static int skinned_ok(const NvnCmdBuf *cb, uint64_t obj, uint64_t sub, uint64_t fs) {
+static int skinned_ok(const NvnCmdBuf *cb, uint64_t obj, uint64_t sub, uint64_t vs, uint64_t fs, Cutout *cut) {
     static const uint32_t want[3] = {0x22, 0x2f | 28u << 13, 0x2c | 44u << 13};
     if (cb->trace_nattribs < 3) return 0;
     for (uint32_t i = 0; i < cb->trace_nattribs; i++) {
         uint32_t a = cb->trace_attribs[i], stream = a >> 8 & 0x1F;
-        if (i >= 3 ? (a & 0xFF) != 0 : (a & ~(0x1Fu << 8)) != want[i]) return 0;
+        /* the 4-bone program: position at 0, weights and bone indices in any format and place */
+        if (vs == SKINNED4_VS ? (i >= 3 ? (a & 0xFF) != 0 : i == 0 ? (a & ~(0x1Fu << 8)) != want[0] : !(a & 0xFF))
+                              : (i >= 3 ? (a & 0xFF) != 0 : (a & ~(0x1Fu << 8)) != want[i]))
+            return 0;
         if (i < 3 && (stream >= 4 || cb->trace_vb[stream] != cb->trace_vb[0] ||
                       (uint32_t)cb->trace_streams[stream] != (uint32_t)cb->trace_streams[0]))
             return 0;
@@ -512,6 +519,11 @@ static int skinned_ok(const NvnCmdBuf *cb, uint64_t obj, uint64_t sub, uint64_t 
         if (!cb->trace_ub[1][3]) return 0;
         memcpy(&fade, (const void *)(uintptr_t)(cb->trace_ub[1][3] + 28), 4);
         if (fade != 1.0f) return 0;
+    }
+    if (vs == SKINNED4_VS) {  /* the weights' and bone indices' formats and offsets, for our draw */
+        uint32_t a1 = cb->trace_attribs[1], a2 = cb->trace_attribs[2];
+        cut->uv_format = a1 & 0xFF, cut->uv_offset = a1 >> 13;
+        cut->wind_format = a2 & 0xFF, cut->wind_offset = a2 >> 13;
     }
     return 1;
 }
@@ -605,7 +617,7 @@ void shadow_check_draw(const NvnCmdBuf *cb, uint64_t index_addr, const ShadowDra
     int ok = mirrored(vs, fs) &&
              (reject = R_LAYOUT, fs != CUTOUT_FS || (is_wind(vs) ? wind_of(cb, &cut) : cutout_of(cb, &cut))) &&
              (reject = R_FADE, !is_fading(vs) || fading_of(cb, fs, &cut)) &&
-             (reject = R_SKINNED, vs != SKINNED_VS || skinned_ok(cb, obj, sub, fs)) &&
+             (reject = R_SKINNED, !is_skinned(vs) || skinned_ok(cb, obj, sub, vs, fs, &cut)) &&
              compare_draw(cb, obj, sub, index_addr, call, is_instanced(vs) ? 1 : vs == WIND_VS ? 2 : 0);
     learn(obj, sub, vs, fs, ok, cb->polygon, &cut);
     if (!ok) note_other(vs, fs, reject);
@@ -659,7 +671,7 @@ static int describe(const Caster *c, const Mat4 *vp, ShadowDraw *d) {
     d->index_type = index_type(c->submesh);
     d->texture = 0, d->threshold = 0, d->uv_format = d->uv_offset = 0;
     d->palette_offset = d->palette_size = 0;
-    d->dither = 0, d->first_copy = d->copies = 0;
+    d->dither = 0, d->first_copy = d->copies = 0, d->skin4 = 0;
     d->wind_tex[0] = d->wind_tex[1] = 0, d->wind_format = d->wind_offset = d->wind_header = 0;
     memcpy(d->mvp, mvp.m, sizeof d->mvp);
     return d->stride && (d->index_count ? d->indices != 0 : d->vertex_count != 0);
@@ -700,7 +712,7 @@ static int leave_to_game(uint64_t vs, uint64_t fs) {
     if (no_cutout < 0) no_cutout = env_on("YW4_SHADOWS_NO_CUTOUT");
     if (no_instanced < 0) no_instanced = env_on("YW4_SHADOWS_NO_INSTANCED");
     if (no_wind < 0) no_wind = env_on("YW4_SHADOWS_NO_WIND");
-    return (no_skinned && vs == SKINNED_VS) || (no_cutout && (fs == CUTOUT_FS || fs == FADE_CUTOUT_FS)) ||
+    return (no_skinned && is_skinned(vs)) || (no_cutout && (fs == CUTOUT_FS || fs == FADE_CUTOUT_FS)) ||
            (no_instanced && is_instanced(vs)) || (no_wind && is_wind(vs));
 }
 
@@ -761,7 +773,12 @@ static int ours(const Caster *c, const Mat4 *vp, uint64_t device, ShadowDraw *d,
         if (one.wind_offset + 4 > one.stride) return -1;
         return wind_draw(c, vp, device, learned[h].vs, &one, d, room);
     }
-    if (learned[h].vs == SKINNED_VS) {
+    if (learned[h].vs == SKINNED4_VS) {  /* weights and bone indices as the game's layout had them */
+        one.skin4 = 1;
+        one.wind_format = learned[h].cut.wind_format, one.wind_offset = learned[h].cut.wind_offset;
+        if (one.uv_offset + 4 > one.stride || one.wind_offset + 4 > one.stride) return -1;
+    }
+    if (is_skinned(learned[h].vs)) {
         /* the palette the game's draw would use, copied for ours: the snapshot the model renderer
          * bound to vs cbuf 4 (equal to the game's draw in every check; the submesh's own buffer
          * that palette_of finds is being written with the next pose and matched about half the

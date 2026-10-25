@@ -65,7 +65,7 @@ def run(cfg: config.Config, save: Path | None, replay: Path | None, seconds: int
     args = [str(exe), str(cfg.work_dir / "exefs"), str(cfg.romfs_dir), str(run_save if save else cfg.work_dir / "save")]
     with open(log, "wb") as out:
         try:
-            subprocess.run(args, env=env, stdout=out, stderr=subprocess.STDOUT, timeout=seconds)
+            subprocess.run(args, env=env, stdout=out, stderr=subprocess.STDOUT, timeout=seconds or None)
         except subprocess.TimeoutExpired:
             pass  # the run's time is up; the log has what it wrote
     return log
@@ -76,7 +76,7 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--save", type=Path, help="save directory to start from (copied first); default: work/save as is")
     ap.add_argument("--replay", type=Path, default=Path("work/inputs/load_save.txt"),
                     help="input replay (default: presses through the title into the save)")
-    ap.add_argument("--seconds", type=int, default=120, help="stop the game after this long")
+    ap.add_argument("--seconds", type=int, default=120, help="stop the game after this long (0: when you close it)")
     ap.add_argument("--exit", action="store_true", help="quit when the replay ends (YW4_REPLAY_EXIT)")
     ap.add_argument("--shots", help="screenshot frames, comma separated")
     ap.add_argument("--shot-dir", type=Path)
