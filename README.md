@@ -67,7 +67,7 @@ The renderer itself, pass by pass:
 | | Pass | Where it stands |
 |---|---|---|
 | ✅ | Shadow maps | Our own pass ([decision 0024](docs/decisions/0024-shadow-pass.md)) |
-| ✅ | G-buffer | Our draws and shaders, identical to the game's ([decision 0026](docs/decisions/0026-gbuffer-pass.md)) |
+| ✅ | G-buffer | Our draws, our shaders for the main surfaces and characters, identical to the game's ([decision 0026](docs/decisions/0026-gbuffer-pass.md)) |
 | 🚧 | Lit material pass | Our draws; our shaders for most surfaces, identical to the game's |
 | ⬜ | Post-processing, UI | The game's |
 
