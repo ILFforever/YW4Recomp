@@ -94,6 +94,11 @@ draw calls one by one ([decision 0024](docs/decisions/0024-shadow-pass.md)). It 
 instanced casters, including props fading in and out and wind-swayed plants; the game still draws the rest (a second
 kind of character, a few others).
 
+The shadow pass is the first step, not the end point: the plan is to **replace the game's whole renderer with our
+own**, one pass at a time (see [the goal below](#goal-our-own-renderer)). Replaying the game's draw calls ties every
+frame to the Switch's choices: its resolution, its 16:9 layout, its shadow map size and filters. A renderer of our
+own draws the same scene from the game's data, so those choices become ours to change.
+
 Same save and frame, the game's shadows against ours. The only differences are animation timing between the two
 runs (Whisper's float, idle poses, leaves):
 
@@ -120,13 +125,36 @@ RTX 4070 Laptop):
 ### Shadow quality: map size (F8) and PCSS (F7)
 
 - **Shadow map size (F8):** 1024 (the game's), 2048 or 4096. Bigger maps give sharper edges.
-- **PCSS, soft contact shadows (F7):** off, ×1, ×2, ×4. A shadow is sharp where it touches its caster and gets
-  softer the farther the caster is from the ground, so feet and poles stay crisp while tree canopies turn into soft
-  dappled shade instead of a field of dots. It is added to the game's screen-space shadow mask shader only, so
-  loading is as fast as before.
+- **PCSS, soft contact shadows (F7):** off, ×1, ×2, ×4. PCSS (percentage-closer soft shadows) makes shadows behave
+  more like real ones:
+  - **Close shadows stay sharp.** Where a shadow touches the thing casting it (feet, poles, the base of a wall), the
+    edge stays crisp.
+  - **Farther shadows get softer.** The farther the caster is from the surface the shadow falls on, the softer its
+    edge, so tree canopies become soft dappled shade instead of a field of hard dots.
+  - **Less shimmering.** Hard shadow edges flicker and crawl as the camera moves, because each edge snaps to the
+    shadow map's texels. Softer edges spread that over more pixels, so distant shadows shimmer much less.
+
+  It is added to the game's screen-space shadow mask shader only, so loading is as fast as before.
 
 **Default: 4096 map with PCSS ×2**: sharp contact shadows and soft, clean canopy shade. For the game's original
 shadows, start with `YW4_SHADOW_RES=1024 YW4_PCSS=0` (or press F8 and F7).
+
+### Goal: our own renderer
+
+The project's main goal is a renderer of our own for the whole frame, built pass by pass on the game's data
+([decision 0023](docs/decisions/0023-custom-renderer-plan.md)). What it is for:
+
+- **Higher resolution**: render the 3D scene above the game's 1600×900 (sharper on 1080p, 1440p and 4K screens).
+- **Better shadows**: bigger maps and PCSS today; contact shadows and steadier cascades next.
+- **Ultrawide and other aspect ratios**: a wider view of the scene, with the UI laid out correctly.
+- **Smoother frame rates** above the game's 30 frames/s (this also needs the game's timing patched).
+- **Better anti-aliasing** and other effects the Switch had no budget for.
+
+Each replaced pass first has to look exactly like the game's (checked pixel by pixel) before anything is changed.
+Done so far: the shadow pass; the G-buffer and the lit material pass now draw with our own draw calls and our own
+shaders for most surfaces, and match the game's output bit for bit
+([decision 0026](docs/decisions/0026-gbuffer-pass.md)). Still the game's: the choice of what to draw, textures,
+character bones, and the post-processing and UI.
 
 **Shadow map size.** The bamboo forest with PCSS off at each size, and 2048 with PCSS ×1 added:
 
