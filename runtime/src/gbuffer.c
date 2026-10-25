@@ -116,6 +116,9 @@ static const Layout layouts[] = {
     {0x98c09b816c2787a2ull, {{PART_NONE, 0}}},  /* reads no object constants */
     {0x6488f2ab4b0873d5ull, {{PART_W3, 0}, {PART_W4, 12}}},  /* G-buffer */
     {0x99c29881d52eb8b7ull, {{PART_W3, 0}, {PART_W4, 12}}},  /* G-buffer */
+    {0xdd7df0ff45403bfeull, {{PART_W3, 0}, {PART_VW, 4}, {PART_WVP, 8}}},  /* reads only row 6 of view x W */
+    {0x1e14f9290339d1d5ull, {{PART_W3, 0}, {PART_VW, 4}, {PART_W4, 12}}},  /* G-buffer; row 6 only */
+    {0x948d32df75118c5full, {{PART_W3, 0}, {PART_VW, 4}}},                 /* stages */
     /* the main view's stage layers' */
     {0xea32f254e28caa24ull, {{PART_WVP, 8}}},
     {0xf7b17fd7a6ebea03ull, {{PART_WVP, 8}}},
