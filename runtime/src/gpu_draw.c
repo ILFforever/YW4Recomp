@@ -1060,6 +1060,7 @@ static int ncaps;
 
 int gpu_capture_pending(void) { return ncaps; }
 
+static void capture_targets(VkCommandBuffer cb, GpuState *s, const char *name);
 static void capture_after_draw(VkCommandBuffer cb, GpuState *s, const Program *g) {
     static const char *want;
     static uint64_t at;
@@ -1079,6 +1080,13 @@ static void capture_after_draw(VkCommandBuffer cb, GpuState *s, const Program *g
         w += n + (w[n] == ',');
     }
     if (!hit) return;
+    char name[32];
+    snprintf(name, sizeof name, "cap_%02d_%.8s", ncaps, key);
+    capture_targets(cb, s, name);
+}
+
+/* Copies the bound colour targets for gpu_capture_flush to write as work/dump/<name>_t<i>.raw. */
+static void capture_targets(VkCommandBuffer cb, GpuState *s, const char *name) {
     gpu_end_rendering(cb, s);
     for (int i = 0; i < s->ncolor && ncaps < 64; i++) {
         GpuImage *im = s->rt.color[i] ? image_find(s->rt.color[i]) : NULL;
@@ -1088,7 +1096,7 @@ static void capture_after_draw(VkCommandBuffer cb, GpuState *s, const Program *g
                                                                      : 4;
         Capture *c = &caps[ncaps++];
         c->w = im->width, c->h = im->height, c->format = (uint32_t)im->format, c->size = im->width * im->height * bpp;
-        snprintf(c->name, sizeof c->name, "cap_%02d_%.8s_t%d", ncaps - 1, key, i);
+        snprintf(c->name, sizeof c->name, "%s_t%d", name, i);
         VkBufferCreateInfo bci = {.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO, .size = c->size,
                                   .usage = VK_BUFFER_USAGE_TRANSFER_DST_BIT};
         CHECK(vkCreateBuffer(vk.device, &bci, NULL, &c->buf));
@@ -1105,6 +1113,29 @@ static void capture_after_draw(VkCommandBuffer cb, GpuState *s, const Program *g
         vkCmdCopyImageToBuffer(cb, im->image, VK_IMAGE_LAYOUT_GENERAL, c->buf, 1, &cp);
         full_barrier(cb);
     }
+}
+
+/* CMD_NATIVE (gbuffer.c, YW4_CAPTURE_LAYER_AT=<GPU frames>): the colour targets as a pass of ours
+ * left them, in those frames; `data` is the pass's name. */
+void gpu_capture_layer(void *vk_cb, void *gpu_state, const void *data, uint32_t size) {
+    static uint64_t at[32];
+    static int nat = -1;
+    if (nat < 0) {
+        nat = 0;
+        const char *e = getenv("YW4_CAPTURE_LAYER_AT");
+        for (char *end; e && *e && nat < 32; e = *end ? end + 1 : end) {
+            at[nat] = strtoull(e, &end, 10);
+            if (end == e) break;
+            nat++;
+        }
+    }
+    uint64_t f = gpu_frames();
+    int i = 0;
+    while (i < nat && at[i] != f) i++;
+    if (i == nat) return;
+    char name[40];
+    snprintf(name, sizeof name, "layer_%.*s_f%" PRIu64, (int)(size < 12 ? size : 12), (const char *)data, f);
+    capture_targets(vk_cb, gpu_state, name);
 }
 
 void gpu_capture_flush(void) {

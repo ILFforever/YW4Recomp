@@ -36,7 +36,18 @@ extern uint64_t yw4_frames_presented;  /* dispatch.c */
 #define U32(a) (*(const uint32_t *)(uintptr_t)(a))
 #define U64(a) (*(const uint64_t *)(uintptr_t)(a))
 
-enum { LAYER_GBUFFER = 2 };
+enum { LAYER_MATERIAL = 0, LAYER_GBUFFER = 2 };
+
+/* The lit material pass (docs/frame.md "Main view: the passes"): the same objects again with full
+ * materials, layers of kind 0 with sort keys 0..2 (render thread C). Our draws go there too, in the
+ * same mode as the G-buffer's (YW4_MATERIAL=0: not); the programs are in the same table. */
+static int material_layer(uint64_t item) {
+    static int on = -1;
+    if (on < 0) on = !getenv("YW4_MATERIAL") || atoi(getenv("YW4_MATERIAL"));
+    return on && U8(item + 8) == LAYER_MATERIAL && *(const uint16_t *)(uintptr_t)(item + 0xa) == 0 &&
+           *(const uint16_t *)(uintptr_t)(item + 0xc) == 2;
+}
+static _Thread_local const char *pass_name = "gbuffer";  /* this thread's pass, for the summaries */
 enum { MODE_GAME, MODE_CHECK, MODE_PROGRAMS, MODE_NATIVE };
 static int mode = -1;
 int gbuffer_checking;
@@ -73,6 +84,20 @@ static const Layout layouts[] = {
     {0x15c39ce2be80ffbdull, {{PART_VW, 4}, {PART_WVP, 8}, {PART_GAME, 16}}},
     {0xdfe0364f78f6b929ull, {{PART_W3, 0}, {PART_W4, 12}}},
     {0x045ee58bf4978aacull, {{PART_W3, 0}, {PART_W4, 12}}},
+    /* the lit material pass's */
+    {0x046b2a15a631058full, {{PART_W3, 0}, {PART_WVP, 8}}},
+    {0xdcc6c449f889ccfeull, {{PART_W3, 0}, {PART_WVP, 8}}},
+    {0x2a1b178ed00aa1f6ull, {{PART_W3, 0}, {PART_WVP, 8}}},
+    {0x8871f59f38c71272ull, {{PART_W3, 0}, {PART_WVP, 8}}},
+    {0x2e114dd75c870331ull, {{PART_W3, 0}, {PART_WVP, 8}}},  /* skinned */
+    {0x58da2816a6c92e87ull, {{PART_W3, 0}}},
+    {0x3e96b46f8899902dull, {{PART_W3, 0}}},
+    {0xce3616ad2c7ba2c3ull, {{PART_W3, 0}}},
+    {0x37b9e7176d0468f6ull, {{PART_W3, 0}}},
+    {0xce03c241bb3aaf4cull, {{PART_W3, 0}}},
+    {0xa4ec7992db13fd68ull, {{PART_W3, 0}}},
+    {0xadc29b1b44829818ull, {{PART_W3, 0}}},
+    {0x9b9f9ed2cc08aa0eull, {{PART_W3, 0}}},
 };
 static int part_rows(int what) { return what == PART_W3 ? 3 : what ? 4 : 0; }
 /* Are the layout's parts the same, bit for bit, in a and b? */
@@ -159,15 +184,15 @@ static int guest_ptr(uint64_t p) { return p >= 0x7000000000ull && p < 0x78000000
 /* Where the world matrix of a mismatching draw came from: per call site, a stack slot of the
  * model renderer holding a pointer whose +0 or +0x40 is the world the game put in constants 2. */
 enum { SOURCES = 16 };
-static struct { uint64_t ret; int slot, at; long n; } sources[SOURCES];
-static long unexplained[2];
+static _Thread_local struct { uint64_t ret; int slot, at; long n; } sources[SOURCES];
+static _Thread_local long unexplained[2];
 
 /* Projection x view of the last frame's G-buffer layer, for last frame's matrix (rows 12-15). */
 static Mat4 prev_vp, this_vp;
 static uint64_t this_vp_frame = ~0ull;
 
 /* What the checks found since the last summary. */
-static struct {
+static _Thread_local struct {
     long layers, submeshes, draws, main_vs;
     long vb_ok, ib_ok, world_ok, wvp_ok, prev_a, prev_b, prev_c;
     float wvp_worst;
@@ -177,7 +202,7 @@ static struct {
 } st;
 /* per layout: draws, how many had all their parts of constants 2 bit-identical to ours, and our
  * index buffer */
-static struct { long n, exact, ib; } lay_st[LAYOUTS];
+static _Thread_local struct { long n, exact, ib; } lay_st[LAYOUTS];
 /* game: the game's bound vertex constants 2, for the parts we copy (PART_GAME) */
 static void object_constants(const Layout *l, const float *game, float out[GBUFFER_OBJECT_FLOATS]);
 
@@ -185,8 +210,14 @@ void gbuffer_layer_start(const CPUState *ctx) {
     if (__atomic_load_n(&mode, __ATOMIC_ACQUIRE) < 0) init_mode();
     uint64_t item = ctx->x[2];
     cur.armed = 0;
-    cur.active = mode != MODE_GAME && item && U8(item + 8) == LAYER_GBUFFER;
+    /* the previous layer on this thread was a material layer: its colour target as it left it */
+    static _Thread_local int after_material;
+    if (after_material && getenv("YW4_CAPTURE_LAYER_AT"))
+        nvn_record_native(ctx, U64(ctx->x[0] + 0x10d0) + 0xd8, gpu_capture_layer, "material", 8);
+    after_material = item && material_layer(item) && mode != MODE_GAME;
+    cur.active = mode != MODE_GAME && item && (U8(item + 8) == LAYER_GBUFFER || material_layer(item));
     if (!cur.active) return;
+    pass_name = U8(item + 8) == LAYER_GBUFFER ? "gbuffer" : "material";
     cur.device = ctx->x[0];
     /* the camera's projection and view in the render state (the shadow cascades' jobs put theirs
      * at the same offsets on their own thread) */
@@ -216,7 +247,7 @@ void gbuffer_submesh(const CPUState *ctx) {
 }
 
 static void summary(void) {
-    static uint64_t last;
+    static _Thread_local uint64_t last;
     uint64_t frame = __atomic_load_n(&yw4_frames_presented, __ATOMIC_RELAXED);
     if (frame < last + 300) return;
     last = frame;
@@ -233,8 +264,8 @@ static void summary(void) {
             st.ib_bad[1]);
     for (int l = 0; l < LAYOUTS; l++)
         if (lay_st[l].n)
-            fprintf(stderr, "yw4: gbuffer:   vs %016" PRIx64 ": %ld draws, constants 2 bit-identical %ld, index buffer"
-                    " ours %ld\n", layouts[l].vs, lay_st[l].n, lay_st[l].exact, lay_st[l].ib);
+            fprintf(stderr, "yw4: %s:   vs %016" PRIx64 ": %ld draws, constants 2 bit-identical %ld, index buffer"
+                    " ours %ld\n", pass_name, layouts[l].vs, lay_st[l].n, lay_st[l].exact, lay_st[l].ib);
     memset(lay_st, 0, sizeof lay_st);
     for (int i = 0; i < SOURCES; i++)
         if (sources[i].n)
@@ -390,7 +421,7 @@ void gbuffer_check_draw(const NvnCmdBuf *cb, uint64_t index_addr, uint32_t type,
 
 /* ---- step 2b: our draw in place of the game's */
 
-static struct {
+static _Thread_local struct {
     long taken, left[6];  /* left to the game: program, no world, not a plain triangle list, vertex
                            * buffer or layout, index buffer, count or type */
     struct { uint64_t vs, fs; long n; } other[24];  /* the programs left to the game, by draws */
@@ -404,16 +435,16 @@ static void note_other(const NvnProgram *p) {
 }
 
 static void native_summary(void) {
-    static uint64_t last;
+    static _Thread_local uint64_t last;
     uint64_t frame = __atomic_load_n(&yw4_frames_presented, __ATOMIC_RELAXED);
     if (frame < last + 300) return;
     last = frame;
-    fprintf(stderr, "yw4: gbuffer: native: %ld draws ours; the game's: %ld other programs, %ld no world, %ld not a "
+    fprintf(stderr, "yw4: %s: native: %ld draws ours; the game's: %ld other programs, %ld no world, %ld not a "
             "triangle list, %ld other vertex buffer or layout, %ld other index buffer, %ld other count or type\n",
-            nat.taken, nat.left[0], nat.left[1], nat.left[2], nat.left[3], nat.left[4], nat.left[5]);
+            pass_name, nat.taken, nat.left[0], nat.left[1], nat.left[2], nat.left[3], nat.left[4], nat.left[5]);
     for (int i = 0; i < 24 && nat.other[i].n; i++)
-        fprintf(stderr, "yw4: gbuffer:   the game's: vs %016" PRIx64 " fs %016" PRIx64 ": %ld draws\n", nat.other[i].vs,
-                nat.other[i].fs, nat.other[i].n);
+        fprintf(stderr, "yw4: %s:   the game's: vs %016" PRIx64 " fs %016" PRIx64 ": %ld draws\n", pass_name,
+                nat.other[i].vs, nat.other[i].fs, nat.other[i].n);
     memset(&nat, 0, sizeof nat);
 }
 

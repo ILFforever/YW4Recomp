@@ -33,6 +33,9 @@ typedef struct {
 /* nvn_cmdbuf.c, DrawElements(cmd, primitive, type, count, address) (indexed) or DrawArrays(cmd,
  * primitive, first, count): 1 if our draw went in its place (then the game's is not recorded). */
 int gbuffer_take_draw(CPUState *c, const NvnCmdBuf *cb, int indexed);
+/* CMD_NATIVE callback (gpu_draw.c): copies the bound colour targets in the frames of
+ * YW4_CAPTURE_LAYER_AT; `data` is a name. */
+void gpu_capture_layer(void *vk_cb, void *gpu_state, const void *data, uint32_t size);
 /* CMD_NATIVE callback (gpu_draw.c): `data` holds a GBufferDraw. */
 void gpu_gbuffer_draw(void *vk_cb, void *gpu_state, const void *data, uint32_t size);
 
