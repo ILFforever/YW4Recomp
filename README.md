@@ -76,13 +76,23 @@ shadows here are our own pass ("CUSTOM").
   <img src="docs/screenshots/11-hud-in-town.jpg" alt="In town with the performance HUD: frame time, work, GPU, CPU, memory and a frame-time graph" width="820">
 </p>
 
-## Native shadow pass
+## Improvements
 
-Optional (`YW4_SHADOWS=native`): our own renderer draws the shadow casters the game would draw, from the game's
-data, instead of replaying the game's draw calls one by one
-([decision 0024](docs/decisions/0024-shadow-pass.md)). It covers static, cut-out, skinned and instanced casters,
-including props fading in and out and wind-swayed plants; the game still draws the rest (a second kind of
-character, a few others).
+Improvements over the original game:
+
+| Improvement | Key | What it does |
+|---|---|---|
+| Performance HUD | F3 | Frame time, CPU and GPU cost, memory and the settings below, in the window's corner |
+| Native shadow pass | F9 | Our own renderer draws the shadow casters from the game's data |
+| Shadow map size | F8 | 1024 (the game's), 2048 or 4096: sharper shadow edges. Default: 4096 |
+| PCSS (soft contact shadows) | F7 | Shadows sharp at the contact, softer with distance: off, ×1, ×2, ×4. Default: ×2 |
+
+### Native shadow pass (F9)
+
+Our own renderer draws the shadow casters the game would draw, from the game's data, instead of replaying the game's
+draw calls one by one ([decision 0024](docs/decisions/0024-shadow-pass.md)). It covers static, cut-out, skinned and
+instanced casters, including props fading in and out and wind-swayed plants; the game still draws the rest (a second
+kind of character, a few others).
 
 Same save and frame, the game's shadows against ours. The only differences are animation timing between the two
 runs (Whisper's float, idle poses, leaves):
@@ -106,6 +116,33 @@ RTX 4070 Laptop):
 | Game work, 95th percentile | 18.0 ms | 16.8 ms | **−1.2 ms** |
 | GPU busy, average | 11.3 ms | 10.9 ms | −0.3 ms |
 | Process CPU | 72.7% of a core | 71.3% of a core | −1.4 points |
+
+### Shadow quality: map size (F8) and PCSS (F7)
+
+- **Shadow map size (F8):** 1024 (the game's), 2048 or 4096. Bigger maps give sharper edges.
+- **PCSS, soft contact shadows (F7):** off, ×1, ×2, ×4. A shadow is sharp where it touches its caster and gets
+  softer the farther the caster is from the ground, so feet and poles stay crisp while tree canopies turn into soft
+  dappled shade instead of a field of dots. It is added to the game's screen-space shadow mask shader only, so
+  loading is as fast as before.
+
+**Default: 4096 map with PCSS ×2**: sharp contact shadows and soft, clean canopy shade. For the game's original
+shadows, start with `YW4_SHADOW_RES=1024 YW4_PCSS=0` (or press F8 and F7).
+
+**Shadow map size.** The bamboo forest with PCSS off at each size, and 2048 with PCSS ×1 added:
+
+| 1024 (the game's) | 2048 |
+|---|---|
+| ![1024 shadow map](docs/screenshots/12-shadow-map-1024.jpg) | ![2048 shadow map](docs/screenshots/13-shadow-map-2048.jpg) |
+| **4096** | **2048 + PCSS ×1** |
+| ![4096 shadow map](docs/screenshots/14-shadow-map-4096.jpg) | ![2048 shadow map with PCSS x1](docs/screenshots/15-shadow-map-2048-pcss-x1.jpg) |
+
+**PCSS.** Another spot in the bamboo forest, 4096 map, PCSS off and its three strengths:
+
+| PCSS off | PCSS ×1 |
+|---|---|
+| ![PCSS off: hard, speckled leaf shadows](docs/screenshots/16-pcss-off.jpg) | ![PCSS x1](docs/screenshots/17-pcss-x1.jpg) |
+| **PCSS ×2 (default)** | **PCSS ×4** |
+| ![PCSS x2](docs/screenshots/18-pcss-x2.jpg) | ![PCSS x4](docs/screenshots/19-pcss-x4.jpg) |
 
 ## Building from source
 
