@@ -46,20 +46,18 @@ a locked 30 frames/s. Expect missing effects and crashes in places nobody has re
 
 ## Goals
 
-| | Goal | Where it stands |
+| Status | Goal | Where it stands |
 |---|---|---|
-| ✅ | **Native performance** | The game runs as a native Windows program: about 10 ms of CPU work per frame against the 33 ms its 30 frames/s allow, under one core |
-| 🚧 | **Our own renderer** | Replace the game's renderer pass by pass, so the improvements below become possible (see below) |
-| 🚧 | **Better shadows** | Bigger shadow maps and PCSS soft shadows done; contact shadows and steadier cascades next |
-| ⬜ | **Higher resolution** | Render the 3D scene above the game's 1600×900, sharper on 1080p, 1440p and 4K screens |
-| ⬜ | **Ultrawide and other aspect ratios** | A wider view of the scene, with the UI laid out correctly |
-| ⬜ | **Higher frame rates** | Above the game's 30 frames/s; also needs the game's timing patched |
-| ⬜ | **Better anti-aliasing** | And other effects the Switch had no budget for |
-| ⬜ | **Mod support** | Load replaced game files from a mod folder without touching your dump (first use: the English translation mod) |
-| ⬜ | **Input remapping** | Keyboard, mouse and controller bindings of your choice |
-| ⬜ | **Linux** | The runtime is written to be portable; not built or tested there yet |
-
-✅ done · 🚧 in progress · ⬜ planned
+| In progress | **Native performance** | Runs as a native program, no emulation; a steady 30 frames/s everywhere is not there yet (some scenes still dip) |
+| In progress | **Our own renderer** | Replace the game's renderer pass by pass, so the improvements below become possible (see below) |
+| In progress | **Better shadows** | Bigger shadow maps and PCSS soft shadows done; contact shadows and steadier cascades next |
+| Planned | **Higher resolution** | Render the 3D scene above the game's 1600×900, sharper on 1080p, 1440p and 4K screens |
+| Planned | **Ultrawide and other aspect ratios** | A wider view of the scene, with the UI laid out correctly |
+| Planned | **Higher frame rates** | Above the game's 30 frames/s; also needs the game's timing patched |
+| Planned | **Better anti-aliasing** | And other effects the Switch had no budget for |
+| Planned | **Mod support** | Load replaced game files from a mod folder without touching your dump (first use: the English translation mod) |
+| Planned | **Input remapping** | Keyboard, mouse and controller bindings of your choice |
+| Planned | **Linux** | The runtime is written to be portable; not built or tested there yet |
 
 ### Our own renderer
 
@@ -68,12 +66,12 @@ shadow settings. A renderer of our own draws the same scene from the game's data
 change ([decision 0023](docs/decisions/0023-custom-renderer-plan.md)). Each replaced pass first has to look exactly
 like the game's (checked pixel by pixel) before anything is changed.
 
-| | Pass | Where it stands |
+| Status | Pass | Where it stands |
 |---|---|---|
-| ✅ | Shadow maps | Our own pass ([decision 0024](docs/decisions/0024-shadow-pass.md)) |
-| ✅ | G-buffer | Our draws, our shaders for the main surfaces and characters, identical to the game's ([decision 0026](docs/decisions/0026-gbuffer-pass.md)) |
-| 🚧 | Lit material pass | Our draws; our shaders for most surfaces, identical to the game's |
-| ⬜ | Post-processing, UI | The game's |
+| Done | Shadow maps | Our own pass ([decision 0024](docs/decisions/0024-shadow-pass.md)) |
+| Done | G-buffer | Our draws, our shaders for the main surfaces and characters, identical to the game's ([decision 0026](docs/decisions/0026-gbuffer-pass.md)) |
+| In progress | Lit material pass | Our draws; our shaders for most surfaces, identical to the game's |
+| Planned | Post-processing, UI | The game's |
 
 Still the game's everywhere: the choice of what to draw, textures and character bones.
 
@@ -119,6 +117,13 @@ Improvements over the original game. Details, comparisons and measurements: [doc
 | Native shadow pass | F9 | Our own renderer draws the shadow casters from the game's data; slightly faster than the game's |
 | Shadow map size | F8 | 1024 (the game's), 2048 or 4096: sharper shadow edges. Recommended: 4096 |
 | PCSS (soft shadows) | F7 | Off, ×1, ×2, ×4. Recommended: ×2 |
+
+**Shadow map size**: a bigger shadow map gives sharper, more detailed shadow edges, most visibly on shadows far from
+the camera. The bamboo forest, PCSS off:
+
+| 1024 (the game's) | 2048 | 4096 (recommended) |
+|---|---|---|
+| ![1024 shadow map](docs/screenshots/12-shadow-map-1024.jpg) | ![2048 shadow map](docs/screenshots/13-shadow-map-2048.jpg) | ![4096 shadow map](docs/screenshots/14-shadow-map-4096.jpg) |
 
 **PCSS** (percentage-closer soft shadows) makes shadows behave more like real ones:
 
