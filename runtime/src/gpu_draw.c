@@ -1458,6 +1458,48 @@ static void draw(VkCommandBuffer cb, GpuState *s, const CmdRec *r) {
                                e->has_view ? e->view.num_layers : 0);
                 else fprintf(stderr, "none\n");
             }
+        /* YW4_GPU_TRACE_SCREEN=1: constants that look like a screen-derived size (1600x900 and the game's
+         * smaller copies of it) or 0.25..4 over one (offsets of a few pixels): what resolution scaling
+         * must change; coincidences come too (0.01 = 2/200). Once per
+         * shader, block and float. */
+        static int screen_scan = -1;
+        if (screen_scan < 0) screen_scan = getenv("YW4_GPU_TRACE_SCREEN") && atoi(getenv("YW4_GPU_TRACE_SCREEN"));
+        for (int st = 0; screen_scan && st < 2; st++) {
+            const Shader *sh = g->sh[st];
+            if (!sh) continue;
+            static const float sizes[] = {1600, 900, 800, 450, 533, 300, 400, 225, 200, 112, 120, 67, 1920, 1080};
+            static const float muls[] = {0.25f, 0.5f, 0.75f, 1, 1.25f, 1.5f, 2, 2.5f, 3, 4};
+            static uint64_t seen[4096];
+            for (int i = 0; i < sh->nb; i++) {
+                const Binding *b = &sh->b[i];
+                if (b->kind != 'c' || b->slot >= UBOS) continue;
+                GpuRange ub = s->ubo[nvn_stage[st]][b->slot];
+                if (!ub.size || ub.size > 0x10000 || !host_readable(ub.addr, ub.size)) continue;
+                const float *f = (const float *)(uintptr_t)ub.addr;
+                for (uint64_t k = 0; k < ub.size / 4; k++) {
+                    float v = f[k], a = v < 0 ? -v : v;
+                    if (!(a > 1e-5f) || a > 5000) continue;
+                    const char *what = NULL;
+                    float x = 0, m = 0;
+                    for (size_t z = 0; !what && z < sizeof sizes / sizeof *sizes; z++) {
+                        if (a == sizes[z]) what = "size", x = sizes[z];
+                        for (size_t q = 0; !what && q < sizeof muls / sizeof *muls; q++) {
+                            float r = muls[q] / sizes[z];
+                            if (a > r * 0.9999f && a < r * 1.0001f) what = "1/size", x = sizes[z], m = muls[q];
+                        }
+                    }
+                    if (!what) continue;
+                    uint64_t id = sh->key ^ (uint64_t)b->slot << 56 ^ k << 40 ^ (uint64_t)st << 62;
+                    size_t at = (size_t)(id * 0x9E3779B97F4A7C15ull >> 52), n;
+                    for (n = 0; n < 4096 && seen[at] && seen[at] != id; n++) at = (at + 1) & 4095;
+                    if (n == 4096 || seen[at] == id) continue;
+                    seen[at] = id;
+                    fprintf(stderr, "yw4: screen const: %s %016" PRIx64 " cbuf %u row %" PRIu64 ".%c = %g (%g/%g) target %ux%u"
+                            " row: %g %g %g %g\n", stage_names[st], sh->key, b->slot, k / 4, "xyzw"[k % 4], v, m ? m : x,
+                            m ? x : 1, w, h, f[k & ~3ull], f[(k & ~3ull) + 1], f[(k & ~3ull) + 2], f[(k & ~3ull) + 3]);
+                }
+            }
+        }
         /* the vertex stage's constant buffers: where, how big, and their first 16 floats */
         for (int i = 0; i < vs->nb; i++) {
             const Binding *b = &vs->b[i];

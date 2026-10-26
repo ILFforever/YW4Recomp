@@ -284,6 +284,51 @@ So at our submesh-draw hook the engine has already resolved a draw's textures an
 G-buffer or material pass can take them from the bound state (as the shadow pass does for cut-out textures) and only
 a full takeover needs the descriptors decoded.
 
+## What depends on the screen size (measured 2026-10-27)
+
+For resolution scaling of the 3D view: what in a frame is sized from the game's 1600×900. Town walk, one frame
+(`YW4_GPU_TRACE` with `YW4_GPU_TRACE_SCREEN=1`, which logs every constant that equals a screen-derived size or
+0.25..4 over one; and a scan of the 565 translated fragment shaders in `work/shaders/asm`).
+
+**Images.** Every image sized from the screen is a GPU-only render target:
+
+| Size | Of 1600×900 | Used for |
+|---|---|---|
+| 1600×900 | 1 | G-buffer (3 colour + depth), lit material pass, lighting/fog/effects, and the UI (drawn into the same colour image) |
+| 800×450 | 1/2 | depth copy, shadow mask, lamp lights, effects |
+| 533×300 | 1/3 | effects |
+| 400×225, 200×112, 120×67 | 1/4, 1/8, ~1/13 | bloom chain |
+
+Not screen-sized and left alone: the window image (1920×1080; the last pass copies the 1600×900 image into it by
+sampling), the occlusion boxes (240×135 depth, culling only), the ambient cube (128×128), the minimap (340×304,
+516×460), the shadow maps (own setting, F8).
+
+**Shaders: resolution-independent, nearly.** They reach the screen three ways, none tied to the size:
+
+- the pixel position (`fragment.position.xy`, 295 shaders): times 1/16 to tile a 16×16 dither texture (the
+  screen-door fade of objects), or written out as depth. At a higher resolution the dither pattern gets finer.
+- whole-pixel reads (`TXF`, 261 shaders): position × 16, truncated, into the same dither texture.
+- size queries (`TXQ`, 74 shaders): they return the image's real size, so they follow it.
+
+Screen images are read in 0..1 coordinates from interpolated positions, so the ratio between images (a half-size
+image read at half the position) holds as long as all of them grow by the same factor.
+
+**Constants.** One row: the camera block (`CBUSE_UB_CAMERA_IDX`, cbuf 8) row 32 = 1.5/1600, 1.5/900, 0.75/533,
+0.75/300: tap offsets in 0..1 coordinates, read by 215 shaders (the lit pass's edge-aware upsample of the half-size
+lighting: the position ± row 32, a few taps). Unscaled, the taps spread wider in new pixels (a little softer, not
+wrong); scaled by 1/factor, the same look. Row 33 = 1920, 1080 (the window), read by no shader. Every other match
+was a coincidence (fog and light distances of 300, 120, 200; 0.01 written in 397 shaders). Three shaders hold odd
+small numbers worth a look before shipping: `4f5854cdab65c4b5` (0.005), `5ef1a937fe5a9908` (1/320, 1/160), the
+compute shader `ff9fe0a375532914` (1/1920-like; not run in a town frame).
+
+**Commands.** The frame copies no image by command (no copy, blit or resolve is recorded): the engine shrinks images
+by drawing them into smaller ones. Pixel rectangles appear only as viewports and scissors (and clears through the
+scissor), which the runtime already scales for the shadow maps (`gpu_dynamic_state`).
+
+So resolution scaling is runtime work: make the screen-sized images bigger by one factor (fractional: 1440p is ×1.6,
+and 533 does not divide evenly), scale viewports and scissors of draws into them, and scale camera row 32. Battles,
+menus and cutscenes are still to be checked for other screen-sized images.
+
 ## Open
 
 - ~~Which job draws into which target in the main view~~: measured, see "Main view: the passes". Still open: which
