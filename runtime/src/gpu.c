@@ -735,13 +735,57 @@ void gpu_shadow_res_cycle(void) {
     fprintf(stderr, "yw4: gpu: shadow maps %dx%d (F8)\n", r, r);
 }
 
-static uint32_t shadow_map_scale(const NvnTexture *t) {
-    int res = gpu_shadow_res();
-    if (res == 1024 || t->layout.width != 1024 || t->layout.height != 1024 || t->layout.layers != 3 ||
-        t->layout.levels > 1 || !(t->pool_flags & POOL_CPU_NO_ACCESS) ||
-        !(aspect_of(gpu_format(t->format)) & VK_IMAGE_ASPECT_DEPTH_BIT))
-        return 1;
-    return (uint32_t)res / 1024;
+/* Resolution of the 3D view (docs/frame.md, "What depends on the screen size"): the game renders the
+ * scene, and the UI over it, into 1600x900 targets and smaller copies (1/2, 1/3, 1/4, 1/8, ~1/13),
+ * then copies the result into the 1920x1080 window image by sampling. These targets are made
+ * height / 900 times larger: 900 (the game's), 1080, 1440 or 2160. The shaders read them in 0..1
+ * coordinates, so they follow; draws into them get their viewport and scissor scaled
+ * (gpu_dynamic_state). YW4_RES=<height> at start, F4 cycles. */
+static int res_height = -1;
+
+int gpu_res_height(void) {
+    int r = __atomic_load_n(&res_height, __ATOMIC_ACQUIRE);
+    if (r < 0) {
+        const char *e = getenv("YW4_RES");
+        int v = e ? atoi(e) : 900;
+        r = v == 1080 || v == 1440 || v == 2160 ? v : 900;
+        __atomic_store_n(&res_height, r, __ATOMIC_RELEASE);
+    }
+    return r;
+}
+
+void gpu_res_cycle(void) {
+    int r = gpu_res_height();
+    r = r == 900 ? 1080 : r == 1080 ? 1440 : r == 1440 ? 2160 : 900;
+    __atomic_store_n(&res_height, r, __ATOMIC_RELEASE);
+    fprintf(stderr, "yw4: gpu: 3D view %dx%d (F4)\n", r * 16 / 9, r);
+}
+
+/* The screen-sized targets: GPU-only 2D images of one of these sizes. The window image (1920x1080)
+ * too: the game copies the 3D view into its top-left 1600x900 and presents that crop (gpu_present
+ * scales the crop with it). The engine can also render the scene at 1920x1080 (it makes its targets
+ * that size first at start, then 1600x900 at the same addresses), with smaller copies of that:
+ * 960x540, 639x359, 480x270 seen so far; all get the same factor so their ratios hold. */
+static int screen_sized(const NvnTexture *t) {
+    static const uint16_t sizes[][2] = {{1600, 900}, {800, 450}, {533, 300}, {400, 225}, {200, 112}, {120, 67},
+                                        {1920, 1080}, {960, 540}, {639, 359}, {480, 270}};
+    if (t->target != TARGET_2D || t->layout.levels > 1 || t->layout.layers > 1 || !(t->pool_flags & POOL_CPU_NO_ACCESS))
+        return 0;
+    for (size_t i = 0; i < sizeof sizes / sizeof *sizes; i++)
+        if (t->layout.width == sizes[i][0] && t->layout.height == sizes[i][1]) return 1;
+    return 0;
+}
+
+/* How much larger t's image is made (0 / 0: not). */
+static void image_scale(const NvnTexture *t, uint32_t *num, uint32_t *den) {
+    *num = *den = 0;
+    int res = gpu_shadow_res(), h = gpu_res_height();
+    if (res != 1024 && t->layout.width == 1024 && t->layout.height == 1024 && t->layout.layers == 3 &&
+        t->layout.levels <= 1 && t->pool_flags & POOL_CPU_NO_ACCESS &&
+        aspect_of(gpu_format(t->format)) & VK_IMAGE_ASPECT_DEPTH_BIT)
+        *num = (uint32_t)res, *den = 1024;
+    else if (h != 900 && screen_sized(t))
+        *num = (uint32_t)h, *den = 900;
 }
 
 static ImageKey key_of(const NvnTexture *t) {
@@ -752,7 +796,7 @@ static ImageKey key_of(const NvnTexture *t) {
     k.layers = t->layout.layers, k.levels = t->layout.levels;
     k.block_height_log2 = t->layout.block_height_log2, k.block_depth_log2 = t->layout.block_depth_log2;
     k.linear = (t->flags & FLAG_LINEAR) != 0;
-    k.scale = shadow_map_scale(t);
+    image_scale(t, &k.scale_num, &k.scale_den);
     return k;
 }
 
@@ -831,11 +875,26 @@ GpuImage *image_of(VkCommandBuffer cb, NvnTexture *t) {
     g->aspect = aspect_of(fmt);
     g->width = t->layout.width, g->height = t->layout.height, g->depth = t->layout.depth ? t->layout.depth : 1;
     g->layers = t->layout.layers ? t->layout.layers : 1, g->levels = t->layout.levels ? t->layout.levels : 1;
-    g->scale = g->key.scale ? g->key.scale : 1;
-    g->width *= g->scale, g->height *= g->scale;
-    if (g->scale > 1)
-        fprintf(stderr, "yw4: gpu: shadow map at %#" PRIx64 " made %ux%u (the game's is 1024x1024)\n", t->addr, g->width,
-                g->height);
+    g->scale_num = g->key.scale_den ? g->key.scale_num : 1, g->scale_den = g->key.scale_den ? g->key.scale_den : 1;
+    if (g->key.scale_den) {
+        g->width = gpu_scaled(g->width, g->scale_num, g->scale_den);
+        g->height = gpu_scaled(g->height, g->scale_num, g->scale_den);
+        static int logged;
+        if (logged++ < 16)
+            fprintf(stderr, "yw4: gpu: target at %#" PRIx64 " made %ux%u (the game's is %ux%u)\n", t->addr, g->width,
+                    g->height, t->layout.width, t->layout.height);
+    } else if (gpu_res_height() != 900 && t->pool_flags & POOL_CPU_NO_ACCESS && t->target == TARGET_2D) {
+        /* GPU-only 2D images of other sizes stay the game's: named once per size, to find screen-sized
+         * targets of scenes not measured yet (docs/frame.md) */
+        static uint32_t seen[64];
+        uint32_t wh = t->layout.width << 16 | t->layout.height, i;
+        for (i = 0; i < 64 && seen[i] && seen[i] != wh; i++) {}
+        if (i < 64 && !seen[i]) {
+            seen[i] = wh;
+            fprintf(stderr, "yw4: gpu: GPU-only target %ux%u format %#x kept at the game's size\n", t->layout.width,
+                    t->layout.height, t->format);
+        }
+    }
     VkFormatProperties fp;
     vkGetPhysicalDeviceFormatProperties(vk.gpu, fmt, &fp);
     VkImageUsageFlags usage = VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT;
@@ -1435,8 +1494,12 @@ void gpu_present(NvnTexture *t, uint64_t frame, const int crop[4]) {
     }
     host_unlock(&gpu_lock);
     VkRect2D r = {{0, 0}, {g->width, g->height}};
-    if (crop[2] > 0 && crop[3] > 0 && crop[0] >= 0 && crop[1] >= 0 && (uint32_t)(crop[0] + crop[2]) <= g->width &&
-        (uint32_t)(crop[1] + crop[3]) <= g->height)
-        r = (VkRect2D){{crop[0], crop[1]}, {(uint32_t)crop[2], (uint32_t)crop[3]}};
+    /* the crop, in the game's pixels: scaled with the window image (YW4_RES) */
+    uint32_t cx = gpu_scaled(crop[0] > 0 ? (uint32_t)crop[0] : 0, g->scale_num, g->scale_den);
+    uint32_t cy = gpu_scaled(crop[1] > 0 ? (uint32_t)crop[1] : 0, g->scale_num, g->scale_den);
+    uint32_t cw = gpu_scaled(crop[2] > 0 ? (uint32_t)crop[2] : 0, g->scale_num, g->scale_den);
+    uint32_t ch = gpu_scaled(crop[3] > 0 ? (uint32_t)crop[3] : 0, g->scale_num, g->scale_den);
+    if (crop[2] > 0 && crop[3] > 0 && crop[0] >= 0 && crop[1] >= 0 && cx + cw <= g->width && cy + ch <= g->height)
+        r = (VkRect2D){{(int32_t)cx, (int32_t)cy}, {cw, ch}};
     window_present_image(g->image, g->format, r, frame);
 }

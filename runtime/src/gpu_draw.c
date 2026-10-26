@@ -59,7 +59,8 @@ typedef struct Shader {
     VkDescriptorSetLayout layout;
     VkShaderModule ours;  /* our readable program with the same interface, if we have one (0: none) */
     int pcf_float;  /* samples a shadow map: the float in cbuf 8 where its filter spread starts (2), else -1 */
-    uint32_t cb8_bytes;  /* ... and how much of cbuf 8 it reads */
+    int screen_taps;  /* reads cbuf 8 row 32 (tap offsets in the screen-sized targets) */
+    uint32_t cb8_bytes;  /* how much of cbuf 8 it reads (with pcf_float or screen_taps) */
 } Shader;
 
 static Shader *shaders;
@@ -182,16 +183,27 @@ static Shader *load_shader(uint64_t key, int stage) {
         }
     }
     free(text);
-    /* The shaders that sample a shadow map average 5 taps spread by a cbuf 8 value the game sets
-     * (half a texel of the 1024 map and up): cbuf 8 d[31].zw in most, d[8].zw in the rest. Found
-     * in the GLSL, so shadow quality can scale it with the map (bind_stage_set). */
-    s->pcf_float = -1;
-    for (int i = 0; i < s->nb; i++)
-        if (s->b[i].kind == 't' && s->b[i].shadow) {
+    /* Two cbuf 8 (camera) values are in pixels of a target we may make larger (bind_stage_set scales
+     * them in a copy):
+     * - the shaders that sample a shadow map average 5 taps spread by a value the game sets (half a
+     *   texel of the 1024 map and up): d[31].zw in most, d[8].zw in the rest (shadow quality, F8);
+     * - row 32 = 1.5/1600, 1.5/900, 0.75/533, 0.75/300: tap offsets in the screen-sized targets
+     *   (resolution of the 3D view, F4; docs/frame.md).
+     * Found in the GLSL. */
+    s->pcf_float = -1, s->screen_taps = 0;
+    int has_cb8 = 0, has_shadow = 0;
+    for (int i = 0; i < s->nb; i++) {
+        if (s->b[i].kind == 'c' && s->b[i].slot == 8) has_cb8 = 1;
+        if (s->b[i].kind == 't' && s->b[i].shadow) has_shadow = 1;
+    }
+    if (has_cb8) {
+        {
             snprintf(path, sizeof path, "%s/%016" PRIx64 ".%s", shader_dir(), key, stage_names[stage]);
             char *glsl = read_file(path, &n);
             if (glsl) {
-                s->pcf_float = strstr(glsl, "cb8.d[31].zw") ? 31 * 4 + 2 : strstr(glsl, "cb8.d[8].zw") ? 8 * 4 + 2 : -1;
+                if (has_shadow)
+                    s->pcf_float = strstr(glsl, "cb8.d[31].zw") ? 31 * 4 + 2 : strstr(glsl, "cb8.d[8].zw") ? 8 * 4 + 2 : -1;
+                s->screen_taps = strstr(glsl, "cb8.d[32]") != NULL;
                 /* the copy only needs what the shader reads: up to its highest constant index
                  * (any computed index: all of it) */
                 s->cb8_bytes = 0;
@@ -203,8 +215,8 @@ static Shader *load_shader(uint64_t key, int stage) {
                 }
                 free(glsl);
             }
-            break;
         }
+    }
     VkDescriptorSetLayoutCreateInfo lci = {.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
                                            .bindingCount = (uint32_t)s->nb, .pBindings = lb};
     CHECK(vkCreateDescriptorSetLayout(vk.device, &lci, NULL, &s->layout));
@@ -829,14 +841,22 @@ static uint8_t *ring_alloc(VkDeviceSize size, VkBuffer *buf, VkDeviceSize *offse
     return pcf_ptr + at;
 }
 
-static int pcf_scaled_copy(uint64_t addr, VkDeviceSize range, int pcf_float, VkBuffer *buf, VkDeviceSize *offset) {
-    int res = gpu_shadow_res();
-    if (res == 1024 || range > 65536 || (VkDeviceSize)(pcf_float + 2) * 4 > range) return 0;
+/* The same for the screen-sized targets (YW4_RES, F4): cbuf 8 row 32 (tap offsets in them, 0..1
+ * coordinates) scaled by 900 / height, so the taps stay as many pixels apart as the game's. */
+static int cb8_scaled_copy(uint64_t addr, VkDeviceSize range, const Shader *sh, VkBuffer *buf, VkDeviceSize *offset) {
+    int res = gpu_shadow_res(), h = gpu_res_height();
+    int pcf = sh->pcf_float >= 0 && res != 1024 && (VkDeviceSize)(sh->pcf_float + 2) * 4 <= range;
+    int taps = sh->screen_taps && h != 900 && 33 * 16 <= range;
+    if (!(pcf || taps) || range > 65536) return 0;
     uint8_t *p = ring_alloc(range, buf, offset);
     if (!p) return 0;
     memcpy(p, (const void *)(uintptr_t)addr, (size_t)range);
-    float *spread = (float *)p + pcf_float;
-    spread[0] *= 1024.0f / (float)res, spread[1] *= 1024.0f / (float)res;
+    if (pcf) {
+        float *spread = (float *)p + sh->pcf_float;
+        spread[0] *= 1024.0f / (float)res, spread[1] *= 1024.0f / (float)res;
+    }
+    if (taps)
+        for (int i = 0; i < 4; i++) ((float *)p)[32 * 4 + i] *= 900.0f / (float)h;
     return 1;
 }
 
@@ -920,10 +940,10 @@ static int bind_stage_set(VkCommandBuffer cb, const GpuState *s, const Shader *s
                     uint8_t *p = ring_alloc(sizeof own->object, &bi[i].buffer, &bi[i].offset);
                     if (p) memcpy(p, own->object, sizeof own->object), range = sizeof own->object;
                     else bi[i].buffer = dummy_buffer(), bi[i].offset = 0, range = 65536;
-                } else if (b->kind == 'c' && b->slot == 8 && sh->pcf_float >= 0 && r.size &&
-                    pcf_scaled_copy(r.addr, range < sh->cb8_bytes ? range : sh->cb8_bytes, sh->pcf_float,
-                                    &bi[i].buffer, &bi[i].offset)) {
-                    /* a copy with the shadow filter spread scaled to the shadow maps' size */
+                } else if (b->kind == 'c' && b->slot == 8 && (sh->pcf_float >= 0 || sh->screen_taps) && r.size &&
+                    cb8_scaled_copy(r.addr, range < sh->cb8_bytes ? range : sh->cb8_bytes, sh, &bi[i].buffer,
+                                    &bi[i].offset)) {
+                    /* a copy with the shadow filter spread and the screen tap offsets scaled to the targets' sizes */
                     if (range > sh->cb8_bytes) range = sh->cb8_bytes;
                 } else if (!r.size || !gpu_buffer_at(r.addr, range, &bi[i].buffer, &bi[i].offset)) {
                     bi[i].buffer = dummy_buffer(), bi[i].offset = 0, range = 65536;
@@ -1228,19 +1248,23 @@ void gpu_dynamic_state(VkCommandBuffer cb, const GpuState *s, VkFormat depth, ui
     DynState d;
     memset(&d, 0, sizeof d);  /* padding too: the states are compared as bytes */
     int flip = nvn_window_origin == 1;
-    /* a target made larger than the game's texture (YW4_SHADOW_RES): the game's viewport and
-     * scissor scaled with it */
-    const GpuImage *tg = s->rt.depth ? image_find(s->rt.depth) : NULL;
-    int64_t k = tg && tg->scale > 1 ? tg->scale : 1;
-    float vx = 0, vy = 0, vw = (float)w, vh = (float)h;
-    if (s->have_viewport) vx = (float)(s->viewport[0] * k), vy = (float)(s->viewport[1] * k),
-                          vw = (float)(s->viewport[2] * k), vh = (float)(s->viewport[3] * k);
+    /* a target made larger than the game's texture (YW4_SHADOW_RES, YW4_RES): the game's viewport and
+     * scissor scaled with it (the depth target's scale, else the first colour target's: bound targets
+     * share a size) */
+    const GpuImage *tg = s->rt.depth ? image_find(s->rt.depth) : s->ncolor && s->rt.color[0] ? image_find(s->rt.color[0]) : NULL;
+    int64_t kn = tg ? tg->scale_num : 1, kd = tg ? tg->scale_den : 1;
+    float vx = 0, vy = 0, vw = (float)w, vh = (float)h, kf = (float)kn / (float)kd;
+    if (s->have_viewport) vx = (float)s->viewport[0] * kf, vy = (float)s->viewport[1] * kf,
+                          vw = (float)s->viewport[2] * kf, vh = (float)s->viewport[3] * kf;
     d.viewport = (VkViewport){vx, flip ? vy + vh : vy, vw, flip ? -vh : vh, s->depth_range[0], s->depth_range[1]};
     d.scissor = (VkRect2D){{0, 0}, {w, h}};
     if (s->have_scissor) {
-        int64_t x = s->scissor[0] < 0 ? 0 : s->scissor[0] * k, y = s->scissor[1] < 0 ? 0 : s->scissor[1] * k;
-        int64_t sw = s->scissor[2] > 0 ? s->scissor[2] * k : 0, sh = s->scissor[3] > 0 ? s->scissor[3] * k : 0;
-        if (k > 1) {  /* the game's "whole target" scissor can be huge: keep it inside the target */
+        /* edges scaled: left and top down, right and bottom up, so the scissor covers what it did */
+        int64_t x0 = s->scissor[0] < 0 ? 0 : s->scissor[0], y0 = s->scissor[1] < 0 ? 0 : s->scissor[1];
+        int64_t x1 = x0 + (s->scissor[2] > 0 ? s->scissor[2] : 0), y1 = y0 + (s->scissor[3] > 0 ? s->scissor[3] : 0);
+        int64_t x = x0 * kn / kd, y = y0 * kn / kd;
+        int64_t sw = (x1 * kn + kd - 1) / kd - x, sh = (y1 * kn + kd - 1) / kd - y;
+        if (kn != kd) {  /* the game's "whole target" scissor can be huge: keep it inside the target */
             if (x > w) x = w;
             if (y > h) y = h;
             if (sw > w - x) sw = w - x;

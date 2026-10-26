@@ -20,6 +20,10 @@ void gpu_request_dump(void);
  * cycle 1024 -> 2048 -> 4096 -> 1024. */
 int gpu_shadow_res(void);
 void gpu_shadow_res_cycle(void);
+/* Resolution of the 3D view: the height of the game's 1600x900 targets as made (900 is the game's;
+ * YW4_RES at start), and F4's cycle 900 -> 1080 -> 1440 -> 2160 -> 900. */
+int gpu_res_height(void);
+void gpu_res_cycle(void);
 /* F5: per-pass GPU timing on or off (gpu_passes.c) */
 void gpu_passes_toggle(void);
 /* Soft shadows (PCSS): 0 off (the game's filter), 1..3 on with stronger softening; F7 cycles. */

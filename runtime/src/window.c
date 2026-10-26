@@ -724,6 +724,7 @@ void window_run(void (*guest)(void *), void *arg) {
             if (e.key.key == SDLK_F9) shadow_toggle(), yw4_hid_note_key("F9");          /* our shadow pass on/off */
             if (e.key.key == SDLK_F3) __atomic_store_n(&hud_on, hud_enabled() ? 0 : 1, __ATOMIC_RELEASE);  /* the HUD */
             if (e.key.key == SDLK_F8) gpu_shadow_res_cycle();  /* shadow quality: 1024 / 2048 / 4096 */
+            if (e.key.key == SDLK_F4) gpu_res_cycle();  /* 3D view: 900 / 1080 / 1440 / 2160 lines */
             if (e.key.key == SDLK_F5) gpu_passes_toggle();  /* per-pass GPU timing in the log */
             if (e.key.key == SDLK_F7) gpu_pcss_cycle();  /* PCSS (soft contact shadows): off / x1 / x2 / x4 */
             if (e.key.key == SDLK_F6) gbuffer_toggle(), yw4_hid_note_key("F6");  /* the G-buffer: the game's programs or ours */

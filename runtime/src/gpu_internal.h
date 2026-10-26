@@ -53,8 +53,15 @@ typedef struct GpuView GpuView;
 typedef struct {
     uint64_t addr;
     uint32_t format, target, width, height, depth, layers, levels, block_height_log2, block_depth_log2, linear;
-    uint32_t scale;  /* shadow maps: made this many times larger (YW4_SHADOW_RES / F8); else 1 */
+    /* made larger by scale_num / scale_den (0 / 0: the game's size): the shadow maps (YW4_SHADOW_RES / F8,
+     * res / 1024) and the screen-sized targets (YW4_RES / F4, height / 900) */
+    uint32_t scale_num, scale_den;
 } ImageKey;
+
+/* v made num / den times larger, rounded to the nearest whole pixel */
+static inline uint32_t gpu_scaled(uint32_t v, uint32_t num, uint32_t den) {
+    return (uint32_t)(((uint64_t)v * num + den / 2) / den);
+}
 
 typedef struct GpuImage GpuImage;
 struct GpuImage {
@@ -67,7 +74,7 @@ struct GpuImage {
     VkFormat format;
     VkImageAspectFlags aspect;
     uint32_t width, height, depth, layers, levels;
-    uint32_t scale;  /* width and height are this many times the texture's (key.scale) */
+    uint32_t scale_num, scale_den;  /* width and height are the texture's times this (key's; 1 / 1 if none) */
     GpuView *views;  /* cached image views */
     uint64_t uploaded_frame;  /* YW4_GPU_REUPLOAD: the frame it was last uploaded in */
     uint32_t upload_gen;      /* write generation (gpu.c) when it was last uploaded */
