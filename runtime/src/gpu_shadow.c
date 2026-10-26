@@ -399,6 +399,22 @@ static void draw_pass(VkCommandBuffer cb, GpuState *s, const ShadowPass *p) {
                 uploaded[t] = once[t];
             }
     }
+    /* the casters' geometry in video memory (gpu.c, YW4_VRAM_GEOMETRY): copies first, outside rendering */
+    int copies = 0;
+    for (uint32_t i = 0; i < p->n && !copies; i++) {
+        const ShadowDraw *d = &p->d[i];
+        copies = gpu_geometry_needs_copy(d->vertices, (uint64_t)d->vertex_count * d->stride) ||
+                 (d->index_count && gpu_geometry_needs_copy(d->indices, (uint64_t)d->index_count * (d->index_type == 2 ? 4 : 2)));
+    }
+    if (copies) {
+        gpu_end_rendering(cb, s);
+        for (uint32_t i = 0; i < p->n; i++) {
+            const ShadowDraw *d = &p->d[i];
+            gpu_geometry_copy(cb, d->vertices, (uint64_t)d->vertex_count * d->stride);
+            if (d->index_count) gpu_geometry_copy(cb, d->indices, (uint64_t)d->index_count * (d->index_type == 2 ? 4 : 2));
+        }
+        full_barrier(cb);
+    }
     VkFormat color[8], depth;
     uint32_t w, h;
     if (!gpu_begin_targets(cb, s, color, &depth, &w, &h)) {
@@ -417,8 +433,8 @@ static void draw_pass(VkCommandBuffer cb, GpuState *s, const ShadowPass *p) {
         /* 4-bone skinned casters: the weights' format in uv_format, the bone indices' in wind_format */
         VkFormat uv = d->texture || d->skin4 ? gpu_format(d->uv_format) : VK_FORMAT_UNDEFINED;
         VkFormat wind = d->wind_tex[0] || d->skin4 ? gpu_format(d->wind_format) : VK_FORMAT_UNDEFINED;
-        if (!gpu_buffer_at(d->vertices, (uint64_t)d->vertex_count * d->stride, &vb[0], &voff[0]) ||
-            (d->index_count && !gpu_buffer_at(d->indices, (uint64_t)d->index_count * isize, &ib, &ioff)) ||
+        if (!gpu_geometry_at(d->vertices, (uint64_t)d->vertex_count * d->stride, &vb[0], &voff[0]) ||
+            (d->index_count && !gpu_geometry_at(d->indices, (uint64_t)d->index_count * isize, &ib, &ioff)) ||
             (d->texture && (uv == VK_FORMAT_UNDEFINED || !gpu_handle_texture(cb, s, d->texture, 0, &ii[0]))) ||
             (d->skin4 && (uv == VK_FORMAT_UNDEFINED || wind == VK_FORMAT_UNDEFINED)) ||
             (d->dither && !gpu_handle_texture(cb, s, d->dither, 0, &ii[1])) ||

@@ -20,6 +20,8 @@ void gpu_request_dump(void);
  * cycle 1024 -> 2048 -> 4096 -> 1024. */
 int gpu_shadow_res(void);
 void gpu_shadow_res_cycle(void);
+/* F5: per-pass GPU timing on or off (gpu_passes.c) */
+void gpu_passes_toggle(void);
 /* Soft shadows (PCSS): 0 off (the game's filter), 1..3 on with stronger softening; F7 cycles. */
 int gpu_pcss_level(void);
 void gpu_pcss_cycle(void);

@@ -19,6 +19,15 @@ void gpu_ab_targets(VkCommandBuffer cb, GpuState *s);
 int gpu_ab_pending(void);
 void gpu_ab_flush(void);
 
+/* ---- gpu_passes.c: per-pass GPU timing (F5) */
+void gpu_passes_begin(VkCommandBuffer cb, int slot);
+void gpu_passes_end(VkCommandBuffer cb);
+void gpu_passes_targets(VkCommandBuffer cb, const GpuState *s);
+void gpu_passes_other(VkCommandBuffer cb, const char *what, uint64_t key);
+void gpu_passes_draw(const NvnProgram *p, uint64_t vertices);  /* vertices (or indices) x instances */
+void gpu_passes_collect(int slot);
+void gpu_passes_note(int what);  /* 1 rendering ended, 2 a texture uploaded */
+
 /* ---- gpu.c */
 
 void full_barrier(VkCommandBuffer cb);
@@ -26,6 +35,12 @@ uint64_t gpu_frames(void);  /* frames presented so far */
 
 /* The imported pool buffer holding [addr, addr + size); 0 if no pool does. */
 int gpu_buffer_at(uint64_t addr, uint64_t size, VkBuffer *buf, VkDeviceSize *off);
+/* Geometry in video memory (YW4_VRAM_GEOMETRY): whether a vertex or index range needs copying,
+ * the copy (outside rendering), and the range's copy if current, else the pool as gpu_buffer_at. */
+int gpu_vram_geometry(void);
+int gpu_geometry_needs_copy(uint64_t addr, uint64_t size);
+void gpu_geometry_copy(VkCommandBuffer cb, uint64_t addr, uint64_t size);
+int gpu_geometry_at(uint64_t addr, uint64_t size, VkBuffer *buf, VkDeviceSize *off);
 
 /* Per submission, freed when it completes: descriptor sets. */
 VkDescriptorSet gpu_alloc_set(VkDescriptorSetLayout layout);

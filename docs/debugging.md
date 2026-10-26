@@ -20,6 +20,8 @@ game with them and compare results: [tools/dev](../tools/dev/README.md).
 | `YW4_GBUFFER=check` | Our G-buffer pass ([decision 0026](decisions/0026-gbuffer-pass.md)), step 1: compares what it would use with the game's G-buffer draws (buffers, matrices) and logs a summary every 300 frames; nothing is drawn |
 | `YW4_GBUFFER=native` | Our G-buffer pass, step 2b: our own draws (our vertex and index buffers and object constants; the game's material constants, textures and targets) with our readable programs (`runtime/shaders/gbuffer_*`) in place of the game's main G-buffer draws; logs a summary every 300 frames; F6 switches while playing (the HUD's G-BUFFER line) |
 | `YW4_GBUFFER=programs` | Step 2a only: our readable programs in the game's own draws |
+| `YW4_VRAM_GEOMETRY=0` | The game's vertex and index data read from its memory pools in system memory, as before decision 0028, instead of copies in video memory (the default; about 3x less GPU time in busy towns) |
+| `YW4_GPU_PASSES=1` | Per-pass GPU timing from the start (F5 switches it): every 300 frames the log lists the most expensive passes in ms per frame, with their targets, draws, render pass restarts, texture uploads, vertices and first programs (`runtime/src/gpu_passes.c`) |
 | `YW4_SHADOW_PROGRAMS=0` | With `YW4_GBUFFER=native`, the shadow layers' draws our shadow pass leaves to the game (programs it has no shader for) stay the game's; by default they are ours, drawn in place with the game's program and our matrices |
 | `YW4_GBUFFER_SKIP=<keys>` | Native mode leaves these vertex programs (hex keys, comma separated) to the game, to narrow a fault down |
 | `YW4_MATERIAL=0` | Leave the lit material pass (layer kind 0, keys 0..2) to the game; by default it follows `YW4_GBUFFER` (our draws there too in `native` mode) |
@@ -47,6 +49,7 @@ Saved screenshots get the same sRGB decode as the window, so their colours match
 | F8 | Shadow quality: cycles the shadow maps 1024 (the game's) → 2048 → 4096 (the default), with the filter spread scaled to match; the HUD's SHADOWS line shows the size. The frame of the switch can show wrong shadows once |
 | F6 | The G-buffer: the game's programs or ours ([decision 0026](decisions/0026-gbuffer-pass.md)); recorded and replayed like F9 |
 | F7 | PCSS (soft contact shadows): off → x1 → x2 (the default) → x4; the HUD's PCSS line shows it |
+| F5 | Per-pass GPU timing on or off (`YW4_GPU_PASSES`): where the GPU's time goes, in the log every 300 frames |
 | F3 | Show or hide the performance HUD in the window's top-left corner: frames per second, frame interval, the game's work per frame, GPU busy time, draws, process CPU, memory, whose shadow casters are drawn. Averages over the last 30 frames, from the perf log's numbers (`YW4_PERF=0` leaves it empty). F12 screenshots include it while it is shown |
 
 ## Recording and replaying input

@@ -661,6 +661,7 @@ void gpu_state_init(GpuState *s) {
 
 void gpu_end_rendering(VkCommandBuffer cb, GpuState *s) {
     if (!s->rendering) return;
+    gpu_passes_note(1);
     vkCmdEndRendering(cb);
     full_barrier(cb);
     s->rendering = 0;
@@ -1257,6 +1258,28 @@ static void draw(VkCommandBuffer cb, GpuState *s, const CmdRec *r) {
         for (int i = 0; i < s->ncolor; i++)
             if (s->rt.color[i]) image_of(cb, s->rt.color[i]);
     if (!s->rendering && s->rt.depth) image_of(cb, s->rt.depth);
+    /* geometry in video memory (gpu.c, YW4_VRAM_GEOMETRY): the vertex streams the program reads and
+     * the indices, copied outside rendering when they need it */
+    if (gpu_vram_geometry() && g->sh[ST_VERT]) {
+        GpuRange geo[17];
+        int ngeo = 0, need = 0;
+        uint32_t used = 0;
+        for (uint32_t loc = 0; loc < 32; loc++) {
+            uint32_t a = loc < s->nattribs ? s->attribs[loc] : 0;
+            if (g->sh[ST_VERT]->inputs[loc] && a & 0xFF) used |= 1u << (a >> 8 & 0x1F);
+        }
+        for (uint32_t i = 0; i < 16; i++) {
+            GpuRange vr = own ? (GpuRange){own->vertices, own->vertex_bytes} : s->vbuf[i];
+            if (used >> i & 1 && vr.size) geo[ngeo++] = vr;
+        }
+        if (r->op == CMD_DRAW_ELEMENTS && r->x[1]) geo[ngeo++] = (GpuRange){r->x[3], r->x[2] * (r->x[1] == 1 ? 2 : 4)};
+        for (int i = 0; i < ngeo; i++) need |= gpu_geometry_needs_copy(geo[i].addr, geo[i].size);
+        if (need) {
+            gpu_end_rendering(cb, s);
+            for (int i = 0; i < ngeo; i++) gpu_geometry_copy(cb, geo[i].addr, geo[i].size);
+            full_barrier(cb);
+        }
+    }
 
     PipeKey k;
     memset(&k, 0, sizeof k);
@@ -1318,7 +1341,7 @@ static void draw(VkCommandBuffer cb, GpuState *s, const CmdRec *r) {
         VkBuffer buf;
         VkDeviceSize off;
         GpuRange vr = own ? (GpuRange){own->vertices, own->vertex_bytes} : s->vbuf[i];  /* ours: every stream */
-        if (!vr.size || !gpu_buffer_at(vr.addr, vr.size, &buf, &off)) buf = dummy_buffer(), off = 0;
+        if (!vr.size || !gpu_geometry_at(vr.addr, vr.size, &buf, &off)) buf = dummy_buffer(), off = 0;
         vkCmdBindVertexBuffers(cb, i, 1, &buf, &off);
     }
 
@@ -1413,7 +1436,7 @@ static void draw(VkCommandBuffer cb, GpuState *s, const CmdRec *r) {
         if (type == 0) gpu_stop("8-bit indices");
         VkBuffer buf;
         VkDeviceSize off;
-        if (!gpu_buffer_at(r->x[3], (uint64_t)r->x[2] * size, &buf, &off))
+        if (!gpu_geometry_at(r->x[3], (uint64_t)r->x[2] * size, &buf, &off))
             gpu_stop("index buffer %#" PRIx64 " outside the memory pools", r->x[3]);
         vkCmdBindIndexBuffer(cb, buf, off, type == 1 ? VK_INDEX_TYPE_UINT16 : VK_INDEX_TYPE_UINT32);
         vkCmdDrawIndexed(cb, (uint32_t)r->x[2], (uint32_t)r->x[6] ? (uint32_t)r->x[6] : 1, 0, (int32_t)r->x[4],

@@ -26,6 +26,7 @@
 #include "gbuffer.h"
 #include "gpu_internal.h"
 #include "host.h"
+#include "shadow.h"
 #include "tegra.h"
 #include "window.h"
 
@@ -154,6 +155,7 @@ static void collect_times(void) {
             if (t[0] < f->first) f->first = t[0];
             if (t[1] > f->last) f->last = t[1];
         }
+        gpu_passes_collect(p.slot);
         pending[i] = pending[--npending];
     }
 }
@@ -172,10 +174,13 @@ int gpu_frame_time(uint64_t frame, double *busy_ms, double *span_ms) {
 
 /* The next slot of the ring, its command buffer begun; waits if the GPU still runs it, then
  * frees what its last submission used. gpu_lock held. */
+static void geo_reset_if_full(void);
+
 static VkCommandBuffer begin(void) {
     Slot *s = &ring[ring_next];
     ring_next = (ring_next + 1) % RING;
     gpu_wait(s->seq, UINT64_MAX);
+    geo_reset_if_full();
     collect_times();  /* before the slot's queries are reset below */
     for (int i = 0; i < s->ndesc; i++) CHECK(vkResetDescriptorPool(vk.device, s->desc[i], 0));
     for (int i = 0; i < s->nstaging; i++) {
@@ -192,12 +197,14 @@ static VkCommandBuffer begin(void) {
         vkCmdResetQueryPool(s->cb, qpool, q, 2);
         vkCmdWriteTimestamp(s->cb, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, qpool, q);
     }
+    gpu_passes_begin(s->cb, (int)(s - ring));
     s->seq = submitted + 1;
     cur = s;
     return s->cb;
 }
 
 static void submit(VkCommandBuffer cb) {
+    gpu_passes_end(cb);
     if (ts_period_ns && cur) vkCmdWriteTimestamp(cb, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, qpool, (uint32_t)(cur - ring) * 2 + 1);
     CHECK(vkEndCommandBuffer(cb));
     uint64_t seq = submitted + 1;
@@ -382,6 +389,118 @@ void gpu_pool_finalize(NvnPool *p) {
     p->gpu = NULL;
 }
 
+/* ---- geometry in video memory (decision 0028; YW4_VRAM_GEOMETRY=0: off): the pools are the
+ * game's memory imported as is, so a draw read its vertices and indices from system memory across
+ * PCIe, which made the G-buffer and material passes of a busy street take 15 ms each. Here a draw's
+ * vertex and index ranges get a copy in one device-local arena, made once and made again when the
+ * CPU has written one of the range's pages since (write generations, as for textures). A range
+ * the CPU keeps writing (UI, effects) is left in the pool after a few copies. When the arena is
+ * full, it is emptied at the start of the next submission, once the GPU is done with it. */
+enum { GEO_ARENA = 1u << 30, GEO_SLOTS = 1 << 16, GEO_DYNAMIC = 4 };
+typedef struct {
+    uint64_t addr, size, at;     /* the range, and where its copy is in the arena */
+    uint32_t copied_gen, checked_gen;
+    uint32_t copies;             /* made again this many times: GEO_DYNAMIC and it stays in the pool */
+} GeoCopy;
+static GeoCopy geo[GEO_SLOTS];
+static VkBuffer geo_buf;
+static VkDeviceMemory geo_mem;
+static uint64_t geo_used;
+static int geo_on = -1, geo_full;
+
+int gpu_vram_geometry(void) {
+    if (geo_on < 0) geo_on = !getenv("YW4_VRAM_GEOMETRY") || atoi(getenv("YW4_VRAM_GEOMETRY"));
+    return geo_on;
+}
+
+/* begin(): the arena filled up: empty it, after everything submitted has run (no recorded
+ * command refers to it then). */
+static void geo_reset_if_full(void) {
+    if (!geo_full) return;
+    gpu_wait(submitted, UINT64_MAX);
+    memset(geo, 0, sizeof geo);
+    geo_used = 0, geo_full = 0;
+    fprintf(stderr, "yw4: gpu: geometry arena emptied\n");
+}
+
+static GeoCopy *geo_find(uint64_t addr, uint64_t size, int add) {
+    uint32_t h = (uint32_t)((addr ^ size * 0x9E3779B97F4A7C15ull) * 0x9E3779B97F4A7C15ull >> 48);
+    for (uint32_t i = 0; i < 64; i++, h = (h + 1) & (GEO_SLOTS - 1)) {
+        GeoCopy *c = &geo[h];
+        if (c->size && c->addr == addr && c->size == size) return c;
+        if (!c->size) {
+            if (!add) return NULL;
+            uint64_t at = (geo_used + 255) & ~255ull;
+            if (at + size > GEO_ARENA) {
+                geo_full = 1;
+                return NULL;
+            }
+            geo_used = at + size;
+            *c = (GeoCopy){.addr = addr, .size = size, .at = at};
+            return c;
+        }
+    }
+    return NULL;
+}
+
+/* Does the range's copy need making (again)? Its pages, checked once a frame. */
+static int geo_stale(GeoCopy *c, const NvnPool *p) {
+    if (!c->copied_gen) return 1;
+    if (c->checked_gen == write_gen) return 0;
+    const GpuPool *gp = p->gpu;
+    for (uint64_t a = (c->addr - p->storage) >> 12, z = (c->addr + c->size - 1 - p->storage) >> 12; a <= z; a++)
+        if (gp->page_gen[a] > c->copied_gen) return 1;
+    c->checked_gen = write_gen;
+    return 0;
+}
+
+/* gpu_draw.c, before rendering: 1 if the range would be copied now (rendering must end first). */
+int gpu_geometry_needs_copy(uint64_t addr, uint64_t size) {
+    if (!gpu_vram_geometry() || !size) return 0;
+    NvnPool *p = pool_of(addr);
+    if (!p || addr + size > p->storage + p->size || ((GpuPool *)p->gpu)->untracked) return 0;
+    GeoCopy *c = geo_find(addr, size, 1);
+    return c && c->copies < GEO_DYNAMIC && geo_stale(c, p);
+}
+
+/* gpu_draw.c, outside rendering: makes the range's copy if it needs one. */
+void gpu_geometry_copy(VkCommandBuffer cb, uint64_t addr, uint64_t size) {
+    if (!gpu_geometry_needs_copy(addr, size)) return;
+    if (!geo_buf) {
+        VkBufferCreateInfo bci = {.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO, .size = GEO_ARENA,
+                                  .usage = VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_VERTEX_BUFFER_BIT |
+                                           VK_BUFFER_USAGE_INDEX_BUFFER_BIT};
+        CHECK(vkCreateBuffer(vk.device, &bci, NULL, &geo_buf));
+        VkMemoryRequirements mr;
+        vkGetBufferMemoryRequirements(vk.device, geo_buf, &mr);
+        VkMemoryAllocateInfo mai = {.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO, .allocationSize = mr.size,
+                                    .memoryTypeIndex = vk_memory_type(mr.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT)};
+        CHECK(vkAllocateMemory(vk.device, &mai, NULL, &geo_mem));
+        CHECK(vkBindBufferMemory(vk.device, geo_buf, geo_mem, 0));
+        fprintf(stderr, "yw4: gpu: geometry in video memory (%u MiB arena)\n", GEO_ARENA >> 20);
+    }
+    NvnPool *p = pool_of(addr);
+    GeoCopy *c = geo_find(addr, size, 0);
+    if (!c) return;
+    VkBufferCopy bc = {.srcOffset = addr - p->storage, .dstOffset = c->at, .size = size};
+    vkCmdCopyBuffer(cb, ((GpuPool *)p->gpu)->buf, geo_buf, 1, &bc);
+    if (c->copied_gen) c->copies++;
+    c->copied_gen = c->checked_gen = write_gen;
+}
+
+/* The range's copy in video memory if it has a current one, else 0. */
+static int geometry_at(uint64_t addr, uint64_t size, VkBuffer *buf, VkDeviceSize *off) {
+    if (!gpu_vram_geometry() || !geo_buf) return 0;
+    GeoCopy *c = geo_find(addr, size, 0);
+    if (!c || !c->copied_gen || c->checked_gen != write_gen || c->copies >= GEO_DYNAMIC) return 0;
+    *buf = geo_buf, *off = c->at;
+    return 1;
+}
+
+int gpu_geometry_at(uint64_t addr, uint64_t size, VkBuffer *buf, VkDeviceSize *off) {
+    return geometry_at(addr, size, buf, off) || gpu_buffer_at(addr, size, buf, off);
+}
+
 int gpu_buffer_at(uint64_t addr, uint64_t size, VkBuffer *buf, VkDeviceSize *off) {
     for (int i = 0; i < npools; i++) {
         const NvnPool *p = pools[i];
@@ -491,6 +610,7 @@ static VkImageAspectFlags aspect_of(VkFormat f) {
 
 /* Copies t's texels from the game's memory into its image: every level and layer. */
 static void upload(VkCommandBuffer cb, NvnTexture *t, GpuImage *g) {
+    gpu_passes_note(2);
     const TexLayout *L = &t->layout;
     const FormatInfo *f = L->fmt;
     if (g->aspect != VK_IMAGE_ASPECT_COLOR_BIT) return;  /* depth/stencil: rendered, not loaded */
@@ -989,6 +1109,7 @@ void gpu_execute(uint64_t handle) {
             s.ncolor = (int)r->x[0];
             s.targets_noted = 0;  /* noted at the first draw, with the state the game draws with */
             gpu_ab_targets(cb, &s);
+            gpu_passes_targets(cb, &s);
             break;
         case CMD_SET_VIEWPORTS:  /* (x, y, w, h) */
             for (int i = 0; i < 4; i++) s.viewport[i] = (int32_t)r->x[i];
@@ -1046,6 +1167,8 @@ void gpu_execute(uint64_t handle) {
         }
         case CMD_DRAW_ARRAYS: case CMD_DRAW_ELEMENTS:
             if (!s.targets_noted) gpu_shadow_note_targets(&s), s.targets_noted = 1;
+            /* (primitive, type, count, ...) / (primitive, first, count, ...): count, and the instances */
+            gpu_passes_draw(s.program, r->x[2] * (r->op == CMD_DRAW_ELEMENTS ? (r->x[6] ? r->x[6] : 1) : (r->x[4] ? r->x[4] : 1)));
             gpu_draw(cb, &s, r);
             break;
         case CMD_DRAW_ARRAYS_INDIRECT: case CMD_DRAW_ELEMENTS_INDIRECT: case CMD_DRAW_TRANSFORM_FEEDBACK: {
@@ -1054,7 +1177,9 @@ void gpu_execute(uint64_t handle) {
             break;
         }
         case CMD_DISPATCH: {
+            gpu_passes_other(cb, "compute", s.program ? s.program->stages[5].key : 0);
             gpu_dispatch(cb, &s, r);
+            gpu_passes_targets(cb, &s);
             break;
         }
         case CMD_BARRIER:
@@ -1065,6 +1190,16 @@ void gpu_execute(uint64_t handle) {
             if ((NvnNativePass)(uintptr_t)r->x[0] == gpu_ab_native) {  /* same-frame A/B: may run a range again */
                 if (gpu_ab_marker(cb, &s, r->extra, (uint32_t)r->x[1], exec, at + r->size, &at)) continue;
                 break;
+            }
+            if ((NvnNativePass)(uintptr_t)r->x[0] == gpu_shadow_pass) {  /* our shadow pass: its own time */
+                gpu_passes_other(cb, "our shadow pass", 0);
+                gpu_shadow_pass(cb, &s, r->extra, (uint32_t)r->x[1]);
+                gpu_passes_targets(cb, &s);
+                break;
+            }
+            if ((NvnNativePass)(uintptr_t)r->x[0] == gpu_gbuffer_draw) {  /* a draw, in place */
+                const GBufferDraw *d = (const GBufferDraw *)r->extra;
+                gpu_passes_draw(s.program, (uint64_t)(d->index_count ? d->index_count : d->vertex_count) * (d->instances ? d->instances : 1));
             }
             ((NvnNativePass)(uintptr_t)r->x[0])(cb, &s, r->extra, (uint32_t)r->x[1]);
             break;
