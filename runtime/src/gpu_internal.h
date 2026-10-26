@@ -141,6 +141,8 @@ int gpu_handle_texture(VkCommandBuffer cb, const GpuState *s, uint64_t handle, i
 void gpu_cull(VkCommandBuffer cb, uint8_t cull_mode, uint8_t front_face);
 /* The pipelines' dynamic state from s (viewport, scissor, cull, depth, stencil, bias). */
 void gpu_dynamic_state(VkCommandBuffer cb, const GpuState *s, VkFormat depth, uint32_t w, uint32_t h);
+/* begin(): the command buffer has no dynamic state yet (gpu_dynamic_state sets only what changed). */
+void gpu_dynamic_forget(void);
 /* gpu_shadow.c: the first draw into s's targets since they were set; depth-only ones are
  * remembered with the state the game draws with, so a shadow pass can draw into its layer after
  * the game has moved on to another target. */

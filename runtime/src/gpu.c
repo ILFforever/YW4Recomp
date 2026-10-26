@@ -198,6 +198,7 @@ static VkCommandBuffer begin(void) {
         vkCmdWriteTimestamp(s->cb, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, qpool, q);
     }
     gpu_passes_begin(s->cb, (int)(s - ring));
+    gpu_dynamic_forget();  /* a new command buffer: no dynamic state set yet */
     s->seq = submitted + 1;
     cur = s;
     return s->cb;
