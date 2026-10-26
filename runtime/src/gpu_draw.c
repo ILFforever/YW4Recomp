@@ -60,10 +60,37 @@ typedef struct Shader {
     VkShaderModule ours;  /* our readable program with the same interface, if we have one (0: none) */
     int pcf_float;  /* samples a shadow map: the float in cbuf 8 where its filter spread starts (2), else -1 */
     int screen_taps;  /* reads cbuf 8 row 32 (tap offsets in the screen-sized targets) */
+    int dof;          /* the distance blur's composite (gpu_dof) */
     uint32_t cb8_bytes;  /* how much of cbuf 8 it reads (with pcf_float or screen_taps) */
 } Shader;
 
 static Shader *shaders;
+
+/* Distance blur (depth of field): the game blurs the scene by distance. Fragment shader 27b63a2b... reads
+ * depth, turns it into an amount with cbuf 6 row 0 (a, b, c, w: clamp((a / (b z + cam) + c) w)) and draws
+ * a blurred half-size image over the scene with that amount as opacity (2026-10-27: it takes 63% of the
+ * fine detail of a schoolyard's background and none of the foreground). The blurred image comes from
+ * 800x450 passes whose taps are in pixels, so a larger 3D view (YW4_RES) weakens it. YW4_DOF=2 the
+ * game's (default), 1 half (w halved), 0 off (the draw skipped). */
+enum { DOF_SHADER = 0x27b63a2bf65deaf0ull };
+static int dof_level = -1;
+
+int gpu_dof(void) {
+    int l = __atomic_load_n(&dof_level, __ATOMIC_ACQUIRE);
+    if (l < 0) {
+        const char *e = getenv("YW4_DOF");
+        l = e ? atoi(e) : 2;
+        if (l < 0 || l > 2) l = 2;
+        __atomic_store_n(&dof_level, l, __ATOMIC_RELEASE);
+    }
+    return l;
+}
+
+void gpu_dof_cycle(void) {
+    int l = (gpu_dof() + 2) % 3;  /* 2 -> 1 -> 0 -> 2 */
+    __atomic_store_n(&dof_level, l, __ATOMIC_RELEASE);
+    fprintf(stderr, "yw4: gpu: distance blur %s\n", l == 2 ? "the game's" : l == 1 ? "half" : "off");
+}
 
 static const char *shader_dir(void) {
     const char *d = getenv("YW4_SHADER_DIR");
@@ -191,6 +218,7 @@ static Shader *load_shader(uint64_t key, int stage) {
      *   (resolution of the 3D view, F4; docs/frame.md).
      * Found in the GLSL. */
     s->pcf_float = -1, s->screen_taps = 0;
+    s->dof = stage == ST_FRAG && key == DOF_SHADER;
     int has_cb8 = 0, has_shadow = 0;
     for (int i = 0; i < s->nb; i++) {
         if (s->b[i].kind == 'c' && s->b[i].slot == 8) has_cb8 = 1;
@@ -925,6 +953,7 @@ static int bind_stage_set(VkCommandBuffer cb, const GpuState *s, const Shader *s
                 GpuRange r = b->kind == 'c' ? (b->slot < UBOS ? s->ubo[ns][b->slot] : (GpuRange){0})
                                             : (b->slot < SSBOS ? s->ssbo[ns][b->slot] : (GpuRange){0});
                 VkDeviceSize range = b->kind == 'c' && r.size > 65536 ? 65536 : r.size;
+                uint8_t *p6;
                 int taken = 0;
                 for (uint32_t u = 0; own_t && b->kind == 'c' && u < own_t->nubo; u++)
                     if (own_t->ubo[u].slot == b->slot && own_t->ubo[u].stages >> ns & 1) {  /* a block of ours */
@@ -940,6 +969,12 @@ static int bind_stage_set(VkCommandBuffer cb, const GpuState *s, const Shader *s
                     uint8_t *p = ring_alloc(sizeof own->object, &bi[i].buffer, &bi[i].offset);
                     if (p) memcpy(p, own->object, sizeof own->object), range = sizeof own->object;
                     else bi[i].buffer = dummy_buffer(), bi[i].offset = 0, range = 65536;
+                } else if (b->kind == 'c' && b->slot == 6 && sh->dof && gpu_dof() == 1 && r.size >= 16 &&
+                           (p6 = ring_alloc(range < 32 ? range : 32, &bi[i].buffer, &bi[i].offset)) != NULL) {
+                    /* the distance blur at half: its amount's factor (row 0 .w) halved in a copy */
+                    range = range < 32 ? range : 32;
+                    memcpy(p6, (const void *)(uintptr_t)r.addr, (size_t)range);
+                    ((float *)p6)[3] *= 0.5f;
                 } else if (b->kind == 'c' && b->slot == 8 && (sh->pcf_float >= 0 || sh->screen_taps) && r.size &&
                     cb8_scaled_copy(r.addr, range < sh->cb8_bytes ? range : sh->cb8_bytes, sh, &bi[i].buffer,
                                     &bi[i].offset)) {
@@ -1330,6 +1365,7 @@ static void draw(VkCommandBuffer cb, GpuState *s, const CmdRec *r) {
                     s->program ? s->program->stages[5].key : 0);
         return;
     }
+    if (g->sh[ST_FRAG] && g->sh[ST_FRAG]->dof && !gpu_dof()) return;  /* distance blur off */
     if (s->color[2] != 8) {
         static int logged;
         if (!logged++) fprintf(stderr, "yw4: gpu: alpha test %u ignored for now\n", s->color[2]);
