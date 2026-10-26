@@ -142,6 +142,15 @@ drive (the other colour targets' blend states, the colour state's logic op). Che
 ~4.4 million draws: **our objects equal the engine's byte for byte on every draw**. The check was tested by switching
 the conversion off: then nearly every draw differs, in every part but the two flags.
 
+**Vertex layout: decoded (`vertex_layout`).** It belongs to the effect, not the geometry (`f_965070`): the effect's
+handle in the manager's array lists vertex elements (`+0x10`, u16 `+0x22` of them, 8 bytes: semantic, offset,
+stream, NVN format at `+4`), and the pass's program entry (handle `+8`, 0x22 bytes by the pass record's byte `+0xd`)
+maps each semantic to the shader's attribute. Each attribute of stream 0 gets a stream of its own (the attribute's
+number) over the submesh's vertices with its stride: the five streams on one buffer seen in 0026. Check mode, four
+saves: attribute states and strides equal the bound ones on every draw (~4.4 million); no draw had elements on
+another stream. Self-test (every offset +4): no draw matches. (A lesson from that self-test: a run that fails to
+start leaves the previous log as the newest; the runs now check that a new log appeared.)
+
 ## Alternatives
 
 - **Selection first.** Removes the walk, but needs the rules that the shadow streaks showed we don't have, and

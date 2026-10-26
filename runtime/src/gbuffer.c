@@ -266,6 +266,7 @@ static _Thread_local struct {
     long smp_n, smp_state, smp_desc;             /* their samplers: our state = the engine's, our settings = bound */
     long rs_ok, rs_bytes[33];                    /* render state block = the engine's; draws where byte i differs */
     long pg_n, pg_eff, pg_stages;                /* shader effect ours; vertex and fragment programs ours */
+    long vl_n, vl_ok, vl_other;                  /* vertex layouts: ours = the bound attributes and strides; other streams */
     long nv_ok, nv_regions[8];                   /* NVN state objects = the engine's; draws where each part differs */
     long bn_n, bn_hook, bn_late;                 /* bone palettes bound: = ours (the newest), = the one before */
 } prog_st[PROGRAM_STATS];
@@ -599,6 +600,42 @@ static int bone_palette_previous(uint64_t item, uint64_t *data) {
     return 1;
 }
 
+/* The draw's vertex layout (f_965070): the effect's handle in the manager's array ([mgr+0x10] +
+ * 0x28 x (id-1), the effect object at +0) lists vertex elements at +0x10 (u16 +0x22 of them, 8 bytes:
+ * semantic, offset in the vertex, stream, then the NVN format at +4); the pass's program entry (the
+ * handle's +8 table, 0x22 bytes by the pass record's byte +0xd) maps a semantic (u16 at +2 + 2 x
+ * semantic) to the shader's attribute, or -1. Each attribute of stream 0 reads the submesh's vertices
+ * through a stream of its own, the attribute's number. out: our packing of the attribute states
+ * (nvn_objects.c: format, stream << 8, offset << 13), 0 where unused. Returns the attributes used
+ * (bit mask), 0 if there is no layout; *other: elements on other streams (left to the game). */
+static uint32_t vertex_layout(uint64_t item, uint32_t out[16], int *other) {
+    static uint64_t base;
+    if (!base)
+        for (size_t i = 0; i < yw4_ncode; i++)
+            if (!strcmp(yw4_code[i].name, "main")) base = *yw4_code[i].base;
+    unsigned id = effect_id(item);
+    *other = 0;
+    if (!id) return 0;
+    uint64_t handle = U64(U64(base + 0x58656e8) + 0x10) + 0x28ull * (id - 1), pass = effect_pass(U64(handle));
+    uint64_t elems = U64(handle + 0x10), progs = U64(handle + 8);
+    if (!pass || !elems || !progs) return 0;
+    uint64_t map = progs + 0x22ull * U8(pass + 0xd);
+    uint32_t used = 0;
+    memset(out, 0, 16 * sizeof *out);
+    for (unsigned i = 0; i < U16(handle + 0x22); i++) {
+        uint64_t e = elems + 8ull * i;
+        int16_t attr = (int16_t)U16(map + 2 + 2ull * U8(e));
+        if (attr < 0 || attr >= 16) continue;
+        if (U8(e + 2)) {
+            (*other)++;
+            continue;
+        }
+        out[attr] = (U32(e + 4) & 0xFF) | (uint32_t)attr << 8 | (uint32_t)U8(e + 1) << 13;
+        used |= 1u << attr;
+    }
+    return used;
+}
+
 /* The render state block the draw is made with: the material's (render_state), then the effect
  * pass's own (id, value) pairs (record +0xc of them from u16 +0xa, in the effect's +0x40), then what
  * the commit (f_9759d0) changes by the device's settings: +0x4629 flips the cull face (byte 0x1b
@@ -737,6 +774,8 @@ static void summary(void) {
                 prog_st[i].bn_late, prog_st[i].rs_ok, prog_st[i].item);
         for (int b = 0; b < 33; b++)
             if (prog_st[i].rs_bytes[b]) fprintf(stderr, " %#x:%ld", b, prog_st[i].rs_bytes[b]);
+        fprintf(stderr, "; vertex layouts %ld: ours %ld, other streams %ld", prog_st[i].vl_n, prog_st[i].vl_ok,
+                prog_st[i].vl_other);
         fprintf(stderr, "; NVN state ours %ld, parts differing:", prog_st[i].nv_ok);
         for (int q = 0; q < 8; q++)
             if (prog_st[i].nv_regions[q]) fprintf(stderr, " %d:%ld", q, prog_st[i].nv_regions[q]);
@@ -897,6 +936,28 @@ void gbuffer_check_draw(const NvnCmdBuf *cb, uint64_t index_addr, uint32_t type,
             for (int q = 0; q < 8; q++)
                 if (memcmp(nv + part[q].at, eng + part[q].at, part[q].n)) prog_st[l].nv_regions[q]++, nsame = 0;
             prog_st[l].nv_ok += nsame;
+            /* the vertex layout, against the attribute and stream states the game bound */
+            uint32_t attrs[16];
+            int other;
+            uint32_t used = vertex_layout(cur.item, attrs, &other), stride = U8(cur.submesh + 0x3e);
+            if (used) {
+                int vsame = !other && cb->trace_nattribs <= 16;
+                for (uint32_t a = 0; vsame && a < cb->trace_nattribs; a++)
+                    vsame = attrs[a] == cb->trace_attribs[a] && (!(used >> a & 1) || a >= 8 ||
+                                                                 (uint32_t)cb->trace_streams[a] == stride);
+                prog_st[l].vl_n++;
+                prog_st[l].vl_ok += vsame;
+                prog_st[l].vl_other += other != 0;
+                static int shown;
+                if (!vsame && !other && shown++ < 6) {
+                    fprintf(stderr, "yw4: gbuffer: vertex layout differs: stride %u, game:", stride);
+                    for (uint32_t a = 0; a < cb->trace_nattribs; a++)
+                        fprintf(stderr, " %#x/%u", cb->trace_attribs[a], a < 8 ? (uint32_t)cb->trace_streams[a] : 0);
+                    fprintf(stderr, "; ours:");
+                    for (int a = 0; a < 16; a++) if (attrs[a]) fprintf(stderr, " %d=%#x", a, attrs[a]);
+                    fprintf(stderr, "\n");
+                }
+            }
         }
         /* the material constants, against what the game bound at the draw list's slot (+0x7a) */
         uint8_t mat[0x80];
