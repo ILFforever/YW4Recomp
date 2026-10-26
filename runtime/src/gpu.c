@@ -396,8 +396,8 @@ void gpu_pool_finalize(NvnPool *p) {
  * vertex and index ranges get a copy in one device-local arena, made once and made again when the
  * CPU has written one of the range's pages since (write generations, as for textures). A range
  * the CPU keeps writing (UI, effects) is left in the pool after a few copies. When the arena is
- * full, it is emptied at the start of the next submission, once the GPU is done with it. */
-enum { GEO_ARENA = 1u << 30, GEO_SLOTS = 1 << 16, GEO_DYNAMIC = 4 };
+ * full (or its table crowded), it is emptied at the start of the next submission, once the GPU is done with it. */
+enum { GEO_ARENA = 1u << 30, GEO_SLOTS = 1 << 18, GEO_DYNAMIC = 4 };
 typedef struct {
     uint64_t addr, size, at;     /* the range, and where its copy is in the arena */
     uint32_t copied_gen, checked_gen;
@@ -407,6 +407,7 @@ static GeoCopy geo[GEO_SLOTS];
 static VkBuffer geo_buf;
 static VkDeviceMemory geo_mem;
 static uint64_t geo_used;
+static uint32_t geo_count;  /* ranges in the table */
 static int geo_on = -1, geo_full;
 
 int gpu_vram_geometry(void) {
@@ -420,12 +421,12 @@ static void geo_reset_if_full(void) {
     if (!geo_full) return;
     gpu_wait(submitted, UINT64_MAX);
     memset(geo, 0, sizeof geo);
-    geo_used = 0, geo_full = 0;
+    geo_used = 0, geo_full = 0, geo_count = 0;
     fprintf(stderr, "yw4: gpu: geometry arena emptied\n");
 }
 
 static GeoCopy *geo_find(uint64_t addr, uint64_t size, int add) {
-    uint32_t h = (uint32_t)((addr ^ size * 0x9E3779B97F4A7C15ull) * 0x9E3779B97F4A7C15ull >> 48);
+    uint32_t h = (uint32_t)((addr ^ size * 0x9E3779B97F4A7C15ull) * 0x9E3779B97F4A7C15ull >> 32) & (GEO_SLOTS - 1);
     for (uint32_t i = 0; i < 64; i++, h = (h + 1) & (GEO_SLOTS - 1)) {
         GeoCopy *c = &geo[h];
         if (c->size && c->addr == addr && c->size == size) return c;
@@ -438,8 +439,16 @@ static GeoCopy *geo_find(uint64_t addr, uint64_t size, int add) {
             }
             geo_used = at + size;
             *c = (GeoCopy){.addr = addr, .size = size, .at = at};
+            if (++geo_count % 8192 == 0)
+                fprintf(stderr, "yw4: gpu: geometry table: %u ranges, %" PRIu64 " MiB\n", geo_count, geo_used >> 20);
             return c;
         }
+    }
+    if (add && !geo_full) {  /* no free slot near: empty the table as if the arena were full (the
+                              * arena fills slower than the table: most ranges are under 16 KB) */
+        geo_full = 1;
+        fprintf(stderr, "yw4: gpu: geometry table crowded (%u ranges, %" PRIu64 " MiB of the arena used)\n", geo_count,
+                geo_used >> 20);
     }
     return NULL;
 }
@@ -485,7 +494,12 @@ void gpu_geometry_copy(VkCommandBuffer cb, uint64_t addr, uint64_t size) {
     if (!c) return;
     VkBufferCopy bc = {.srcOffset = addr - p->storage, .dstOffset = c->at, .size = size};
     vkCmdCopyBuffer(cb, ((GpuPool *)p->gpu)->buf, geo_buf, 1, &bc);
-    if (c->copied_gen) c->copies++;
+    if (c->copied_gen && ++c->copies == GEO_DYNAMIC) {
+        static int logged;
+        if (logged++ < 8)
+            fprintf(stderr, "yw4: gpu: geometry range %#" PRIx64 " (%" PRIu64 " bytes) rewritten %d times: left in system memory\n",
+                    addr, size, GEO_DYNAMIC);
+    }
     c->copied_gen = c->checked_gen = write_gen;
 }
 
