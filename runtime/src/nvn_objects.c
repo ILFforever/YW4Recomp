@@ -506,6 +506,7 @@ static void register_texture(CPUState *c) {  /* (pool, id, texture, view or NULL
     e->snap.gpu = NULL;
     e->tex = &e->snap;
     e->has_view = A(3) != 0;
+    e->guest = A(2);
     if (e->has_view) memcpy(&e->view, AP(3), sizeof e->view);
     int tr = nvn_trace_texpool((uint32_t)A(1));
     if (tr) {

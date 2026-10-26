@@ -36,24 +36,32 @@ Two steps, in this order:
 
 ## Progress
 
-**Textures (in progress, `YW4_PROBE_TEXTURES=<frame>`, temporary probe in `gbuffer.c`).** A material's texture
+**Textures: decoded (`material_textures` in `gbuffer.c`, counted by `YW4_GBUFFER=check`).** A material's texture
 reference (6 bytes in the draw item's `+0x28` table; byte 0 = entry of the model record's texture table `+0xf8`)
-gives a texture resource (0x48 bytes) and an index. The resource's `+0x18` is a Level-5 **G4TX** texture container.
-Its per-texture records are 0x18 bytes at `hdr + 4×u16(hdr+0xa) + 4×u16(hdr+0x3e) + 0x18×index` (two pointers and a
-zero); the engine's NVN textures of one container sit in one array, 0x140 bytes apart, with consecutive texture pool
-ids. Measured (schoolyard, 254,000 references): the bound texture equals `[record(index+1)] + 0x18` for every
-reference whose texture is found bound; no other reading matched.
+gives a texture resource (0x48 bytes) and an index. The resource's `+0x18` is a Level-5 **G4TX** texture container:
+byte `+0x20` images, each with a 0x18-byte record at `hdr + 4×u16(hdr+0xa) + 4×u16(hdr+0x3e) + 0x18×index`
+whose first word + 0x18 is the NVN texture the engine made for it (the engine's textures of one container sit in
+one array, 0x140 bytes apart, with consecutive texture pool ids). An index past the images is a region of an
+atlas: its record (`+0x42` table) starts with the image it lies in, then the region's rectangle.
 
-The engine binds its texture slot *s* to shader binding *s* (the program's table at `+0xb8`, count `+0xc0`, of the
-per-stage shader objects at program `+0xc8/+0xd0/+0xd8`; program = `[device+0x10d0]+0x2f8`: identity in every
-program seen). The shader headers name each binding (`in_tex0` 0, `in_texNrm` 1, `in_texOccl` 2, ...).
+**Material texture *k* goes to fragment slot *k*.** The engine binds its slot *s* to shader binding *s* (the
+program's per-stage table of (slot, binding) pairs: program `[device+0x10d0]+0x2f8`, stage objects
+`+0xc8/+0xd0/+0xd8`, table `+0xb8`, count `+0xc0`); the same table lists exactly the slots the shader reads, so the
+check compares only those. The shader headers name the bindings: `in_tex0` 0, `in_texNrm` 1, ...; the two-layer
+ground material, for example, lists colour, normal, colour 2, normal 2, height, in slots 0-4.
 
-Open: which slot a material's reference *k* goes to. Reference order is not the slot order (`5eb3b2`'s second
-reference is found in slots 0, 2 or 4 by material), and the colour texture in slot 0 is, for `5eb3b2`, always
-0x280 bytes (two array entries) before what the rule above gives for the second reference. Not yet decoded:
-`f_a45890` stores the descriptors per reference into three arrays (`device+0x3808/0x3b08/0x3e08`, 0x18 each) and a
-pending list (`device+0x1d78`), read somewhere in the commit `f_977e30` and its helpers (not in `f_975540`,
-`f_9759d0`, `f_965880`, `f_965eb0`, `f_966120` by offset search).
+How it was found: first a search for the bound texture inside the resource, which failed, then a probe that only
+recorded *where* each bound texture lies relative to each reference, run over four saves (schoolyard, the town walk
+replay, the late-game forest, the evening town). One off-by-one in the record index had made the slot order look
+scrambled; with it fixed every program followed slot = *k*.
+
+Check mode, four saves, all four kinds of layer (G-buffer, material pass, stage layers, shadows): **all 5.7 million
+texture slots read equal ours**, none wrong, none left undecoded (the engine's other table, model record `+0xf0`
+when the geometry's `+0x108` is set, would show as a difference: not met).
+
+Still open for textures: the atlas region's rectangle becomes a UV transform in the constants (decoded from the same
+record; needed once we stop taking constants from the game), and the samplers (each binding's handle also carries a
+sampler).
 
 ## Alternatives
 

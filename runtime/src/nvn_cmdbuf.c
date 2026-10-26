@@ -229,6 +229,7 @@ static void trace_set_pool(const CPUState *c, const char *kind) {
 }
 NVN(nvnCommandBufferSetTexturePool) {
     record(c, CMD_SET_TEXTURE_POOL, 0)->x[0] = (uint64_t)(uintptr_t)HOST(NvnDescPool, A(1));
+    cb_of(A(0))->trace_texpool = HOST(NvnDescPool, A(1));
     trace_set_pool(c, "Texture");
 }
 NVN(nvnCommandBufferSetSamplerPool) {

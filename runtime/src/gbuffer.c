@@ -247,7 +247,11 @@ static _Thread_local struct {
 /* per program: draws, how many had the rows of constants 2 it reads bit-identical to ours, and our
  * index buffer */
 enum { PROGRAM_STATS = 96 };
-static _Thread_local struct { uint64_t vs; long n, exact, ib, item, mat_n, mat_ok[2]; } prog_st[PROGRAM_STATS];
+static _Thread_local struct {
+    uint64_t vs;
+    long n, exact, ib, item, mat_n, mat_ok[2];
+    long tex_n, tex_ok, tex_other, tex_unknown;  /* material textures: ours bound at slot k, another, not decoded */
+} prog_st[PROGRAM_STATS];
 /* game: the game's bound vertex constants 2, for last frame's rows */
 static void object_constants(const float *game, float out[GBUFFER_OBJECT_FLOATS]);
 
@@ -351,6 +355,37 @@ static int material_constants(uint64_t item, uint8_t out[0x80]) {
     return 1;
 }
 
+/* The material's textures (decision 0030): the guest NVNtexture of each, in the order the engine
+ * binds them, texture k to fragment slot k (check mode: equal on all 5.7 million slots read, four saves).
+ * The material record's +6 (start) and +0xc (count) pick 6-byte references in the item's +0x28;
+ * a reference's byte 0 is an entry of the model record's texture table (+0xf8, 16 bytes: resource,
+ * then a u16 index). The resource's +0x18 is a Level-5 G4TX container; its 0x18-byte texture
+ * records start at 4 x (u16 +0xa + u16 +0x3e), and a record's first word + 0x18 is the NVN texture
+ * the engine made for it. The container holds byte +0x20 images; an index past them (and past byte
+ * +0x23 more) is a region of an atlas, whose record (at 4 x (u16 +0xa + u16 +0x42)) starts with the
+ * image it is in. Not decoded: the engine's other table (+0xf0, when the geometry's +0x108 is set;
+ * not met in four saves): 0 there. Returns the count. */
+static unsigned material_textures(uint64_t item, uint64_t out[8]) {
+    uint64_t model = U64(item + 8);
+    uint64_t rec = U64(item + 0x18) + 16ull * U8(cur.submesh + 0x43);
+    uint64_t table = U64(model + 0xf8), refs = U64(item + 0x28) + 6ull * U16(rec + 6);
+    unsigned n = U8(rec + 0xc) < 8 ? U8(rec + 0xc) : 8;
+    for (unsigned k = 0; k < n; k++) {
+        uint64_t entry = table + 16ull * U8(refs + 6ull * k), r = U64(entry);
+        unsigned index = U16(entry + 8);
+        out[k] = 0;
+        if (!guest_ptr(r) || !readable(r, 0x48)) continue;
+        uint64_t hdr = U64(r + 0x18);
+        if (!guest_ptr(hdr)) continue;
+        unsigned images = U8(hdr + 0x20), base = images + U8(hdr + 0x23);
+        if (index >= base)  /* a sub-image (atlas region): its 0x18-byte record names the image */
+            index = U16(hdr + 4ull * U16(hdr + 0xa) + 4ull * U16(hdr + 0x42) + 0x18ull * (index - base));
+        if (index >= images) continue;
+        out[k] = U64(hdr + 4ull * U16(hdr + 0xa) + 4ull * U16(hdr + 0x3e) + 0x18ull * index) + 0x18;
+    }
+    return n;
+}
+
 void gbuffer_disarm(void) { cur.armed = 0; }
 
 int gbuffer_hook_world(const CPUState *ctx, float out[12]) {
@@ -395,9 +430,11 @@ static void summary(void) {
             st.ib_bad[1]);
     for (int i = 0; i < PROGRAM_STATS && prog_st[i].n; i++)
         fprintf(stderr, "yw4: %s:   vs %016" PRIx64 ": %ld draws, constants 2 bit-identical %ld, index buffer"
-                " ours %ld; draw item found %ld, material constants %ld: ours bound in vs %ld, fs %ld\n",
+                " ours %ld; draw item found %ld, material constants %ld: ours bound in vs %ld, fs %ld; textures %ld:"
+                " ours bound %ld, another %ld, not decoded %ld\n",
                 pass_name, prog_st[i].vs, prog_st[i].n, prog_st[i].exact, prog_st[i].ib, prog_st[i].item,
-                prog_st[i].mat_n, prog_st[i].mat_ok[0], prog_st[i].mat_ok[1]);
+                prog_st[i].mat_n, prog_st[i].mat_ok[0], prog_st[i].mat_ok[1], prog_st[i].tex_n, prog_st[i].tex_ok,
+                prog_st[i].tex_other, prog_st[i].tex_unknown);
     memset(prog_st, 0, sizeof prog_st);
     for (int i = 0; i < SOURCES; i++)
         if (sources[i].n)
@@ -471,6 +508,30 @@ void gbuffer_check_draw(const NvnCmdBuf *cb, uint64_t index_addr, uint32_t type,
         prog_st[l].vs = p->stages[0].key;
         prog_st[l].n++;
         prog_st[l].exact += same_rows(rows, game, ours);
+        /* the material's textures, against the guest NVNtexture the game bound at fragment slot k (a
+         * slot the program doesn't read may hold an older texture: "another" is not by itself wrong) */
+        uint64_t tex[8];
+        unsigned ntex = cur.item ? material_textures(cur.item, tex) : 0;
+        /* the slots the fragment program reads: the engine's program ([device+0x10d0]+0x2f8) keeps per
+         * stage (+0xc8, +0xd0, +0xd8: fragment) a table of (engine slot, binding) pairs at +0xb8, count
+         * +0xc0, for the textures the shader uses (engine slot = binding in every program seen) */
+        uint32_t reads = 0;
+        uint64_t eprog = U64(cur.device + 0x10d0), fsobj = 0, tab;
+        if (guest_ptr(eprog) && guest_ptr(eprog = U64(eprog + 0x2f8))) fsobj = U64(eprog + 0xd8);
+        if (guest_ptr(fsobj) && guest_ptr(tab = U64(fsobj + 0xb8)))
+            for (unsigned j = 0; j < U32(fsobj + 0xc0) && j < 32; j++)
+                if (U32(tab + 8ull * j) < 32) reads |= 1u << U32(tab + 8ull * j);
+        for (unsigned k = 0; k < ntex && cb->trace_texpool; k++) {
+            if (!(reads >> k & 1)) continue;
+            uint64_t h = cb->trace_tex[1][k];
+            uint32_t id = (uint32_t)(h & 0xFFFFF);
+            const NvnTexEntry *e = h && (int)id < cb->trace_texpool->count
+                                       ? (const NvnTexEntry *)cb->trace_texpool->entries + id : NULL;
+            prog_st[l].tex_n++;
+            if (!tex[k]) prog_st[l].tex_unknown++;
+            else if (e && e->tex && e->guest == tex[k]) prog_st[l].tex_ok++;
+            else prog_st[l].tex_other++;
+        }
         /* the material constants, against what the game bound at the draw list's slot (+0x7a) */
         uint8_t mat[0x80];
         unsigned slot = U16(cur.list + 0x7a);

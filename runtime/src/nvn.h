@@ -96,6 +96,7 @@ typedef struct {
     NvnTexture snap;
     NvnTextureView view;
     int has_view;
+    uint64_t guest;  /* the guest NVNtexture* it was registered from (diagnostic) */
 } NvnTexEntry;
 
 /* The data of a SetRenderTargets record (x[0] = colour count): copies of the textures as
@@ -165,6 +166,7 @@ typedef struct {
     uint64_t trace_vb0, trace_ub[2][16];  /* bound last, vertex and fragment stage (YW4_TRACE_DRAWLIST) */
     uint64_t trace_vb[8], trace_streams[8];  /* vertex buffers 0-7 and stream states 0-7 bound last */
     uint64_t trace_tex[2][TRACE_TEXTURES];  /* texture handles bound last, vertex and fragment stage */
+    const NvnDescPool *trace_texpool;       /* texture pool set last */
     uint32_t trace_attribs[16], trace_nattribs;  /* vertex attribute state bound last */
     uint64_t depth_addr;    /* depth target set last: texels' address, first layer of its view */
     uint32_t depth_layer;
