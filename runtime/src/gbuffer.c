@@ -251,6 +251,7 @@ static _Thread_local struct {
     uint64_t vs;
     long n, exact, ib, item, mat_n, mat_ok[2];
     long tex_n, tex_ok, tex_other, tex_unknown;  /* material textures: ours bound at slot k, another, not decoded */
+    long smp_n, smp_state, smp_desc;             /* their samplers: our state = the engine's, our settings = bound */
 } prog_st[PROGRAM_STATS];
 /* game: the game's bound vertex constants 2, for last frame's rows */
 static void object_constants(const float *game, float out[GBUFFER_OBJECT_FLOATS]);
@@ -386,6 +387,78 @@ static unsigned material_textures(uint64_t item, uint64_t out[8]) {
     return n;
 }
 
+/* The sampler of material texture k (decision 0030). The engine keeps a 15-byte sampler state per
+ * texture slot (device+0x1120 + 0xf x slot) and makes an NVN sampler from it at the draw (f_976ab0).
+ * The state starts each layer from defaults (device+0x1300 + 0x1e0 x level + 0xf x slot, level =
+ * byte device+0x4631); a texture reference's byte 1 counts (field, value) byte pairs, from u16 +4,
+ * in the geometry header blob (geometry+0x18) at 4 x (u16 +0xa + u16 +0x6e), each setting one byte
+ * of the state. Only the first 12 references have one. Returns 0 if there is none. */
+static int sampler_state(uint64_t item, unsigned k, uint8_t out[15]) {
+    if (k >= 12) return 0;
+    uint64_t rec = U64(item + 0x18) + 16ull * U8(cur.submesh + 0x43);
+    uint64_t ref = U64(item + 0x28) + 6ull * (U16(rec + 6) + k), blob = U64(U64(item) + 0x18);
+    if (!guest_ptr(blob)) return 0;
+    memcpy(out, (const void *)(uintptr_t)(cur.device + 0x1300 + 0x1e0ull * U8(cur.device + 0x4631) + 0xfull * k), 15);
+    uint64_t pairs = blob + 4ull * (U16(blob + 0xa) + U16(blob + 0x6e)) + 2ull * U16(ref + 4);
+    for (unsigned i = 0; i < U8(ref + 1); i++)
+        if (U8(pairs + 2 * i) < 15) out[U8(pairs + 2 * i)] = U8(pairs + 2 * i + 1);
+    return 1;
+}
+
+/* The NVN sampler settings f_976ab0 makes from a sampler state (its constants read from the game).
+ * Bytes: 1-3 wrap s, t, r; 4 and 5 minification and magnification (low 4 bits; bit 4 of either:
+ * anisotropic, bit 5: mipmaps linear); 6 anisotropy; 7, 8 level-of-detail clamp; 9 bias (signed);
+ * 0xa depth compare function (0: off); 0xb-0xe border colour. The device's texture quality
+ * settings (+0x4620 mode, +0x4624 anisotropy, +0x4625 on) can raise the filter and anisotropy. */
+static void sampler_desc(const uint8_t s[15], NvnSamplerDesc *d) {
+    static uint64_t base;
+    if (!base)
+        for (size_t i = 0; i < yw4_ncode; i++)
+            if (!strcmp(yw4_code[i].name, "main")) base = *yw4_code[i].base;
+    float c16, c17, c18, c19;
+    memcpy(&c16, (const void *)(uintptr_t)(base + 0x11fdba0), 4);
+    memcpy(&c17, (const void *)(uintptr_t)(base + 0x11fdbe8), 4);
+    memcpy(&c18, (const void *)(uintptr_t)(base + 0x11fdf24), 4);
+    memcpy(&c19, (const void *)(uintptr_t)(base + 0x11fe17c), 4);
+    uint8_t min = s[4], mag = s[5];
+    unsigned aniso_level = s[6], minsel, magsel;
+    int aniso = (min >> 4 & 1) || (mag >> 4 & 1);
+    if (aniso) minsel = magsel = 2;
+    else minsel = min & 0xf, magsel = mag & 0xf;
+    int linear = (magsel & 3) == 2, filter;
+    if (minsel & 1) filter = min & 0x20 ? 4 : 2;
+    else if (minsel >> 1 & 1) filter = min & 0x20 ? 5 : 3;
+    else filter = 0;
+    if (U8(cur.device + 0x4625)) {
+        uint32_t qmode = U32(cur.device + 0x4620);
+        if (qmode & 1) {
+            if (filter == 4) filter = 2;
+            else if (filter == 5) filter = 3;
+        } else if (qmode >> 1 & 1) {
+            if (filter == 2) filter = 4;
+            else if (filter == 3) filter = 5;
+        }
+        int8_t q = (int8_t)U8(cur.device + 0x4624);
+        if (q >= 0) {
+            if (aniso_level <= (unsigned)(uint8_t)q) aniso_level = (uint8_t)q;
+            if (min == 2 && mag == 2) {
+                linear = 1;
+                if (filter == 0) filter = 1;
+                else if (filter == 4) filter = 5;
+                else if (filter == 2) filter = 3;
+            }
+        }
+    }
+    memset(d, 0, sizeof *d);
+    d->min_filter = (uint32_t)filter, d->mag_filter = (uint32_t)linear;
+    d->max_aniso = aniso ? (float)aniso_level * c17 * 15.0f + 1.0f : 1.0f;
+    d->wrap[0] = s[1], d->wrap[1] = s[2], d->wrap[2] = s[3];
+    for (int i = 0; i < 4; i++) d->border[i] = (float)s[0xb + i] / c18;
+    d->lod_min = (float)s[7] / c18 * 15.0f, d->lod_max = (float)s[8] / c18 * 15.0f;
+    d->lod_bias = (float)(int8_t)s[9] * c16 * c19;
+    d->compare_mode = s[0xa] != 0, d->compare_func = s[0xa] ? s[0xa] : 8;
+}
+
 void gbuffer_disarm(void) { cur.armed = 0; }
 
 int gbuffer_hook_world(const CPUState *ctx, float out[12]) {
@@ -431,10 +504,11 @@ static void summary(void) {
     for (int i = 0; i < PROGRAM_STATS && prog_st[i].n; i++)
         fprintf(stderr, "yw4: %s:   vs %016" PRIx64 ": %ld draws, constants 2 bit-identical %ld, index buffer"
                 " ours %ld; draw item found %ld, material constants %ld: ours bound in vs %ld, fs %ld; textures %ld:"
-                " ours bound %ld, another %ld, not decoded %ld\n",
+                " ours bound %ld, another %ld, not decoded %ld; samplers %ld: state ours %ld, settings ours %ld\n",
                 pass_name, prog_st[i].vs, prog_st[i].n, prog_st[i].exact, prog_st[i].ib, prog_st[i].item,
                 prog_st[i].mat_n, prog_st[i].mat_ok[0], prog_st[i].mat_ok[1], prog_st[i].tex_n, prog_st[i].tex_ok,
-                prog_st[i].tex_other, prog_st[i].tex_unknown);
+                prog_st[i].tex_other, prog_st[i].tex_unknown, prog_st[i].smp_n, prog_st[i].smp_state,
+                prog_st[i].smp_desc);
     memset(prog_st, 0, sizeof prog_st);
     for (int i = 0; i < SOURCES; i++)
         if (sources[i].n)
@@ -531,6 +605,29 @@ void gbuffer_check_draw(const NvnCmdBuf *cb, uint64_t index_addr, uint32_t type,
             if (!tex[k]) prog_st[l].tex_unknown++;
             else if (e && e->tex && e->guest == tex[k]) prog_st[l].tex_ok++;
             else prog_st[l].tex_other++;
+            /* its sampler: our state against the engine's at the draw, our settings against the
+             * sampler bound with the texture (the handle's high bits) */
+            uint8_t ss[15];
+            uint32_t sid = (uint32_t)(h >> 20);
+            if (!h || !sampler_state(cur.item, k, ss)) continue;
+            prog_st[l].smp_n++;
+            prog_st[l].smp_state += !memcmp(ss, (const void *)(uintptr_t)(cur.device + 0x1120 + 0xfull * k), 15);
+            if (!cb->trace_samplerpool || (int)sid >= cb->trace_samplerpool->count) continue;
+            NvnSamplerDesc ours, game = ((const NvnSamplerDesc *)cb->trace_samplerpool->entries)[sid];
+            sampler_desc(ss, &ours);
+            ours.reduction = game.reduction;  /* not set by the engine */
+            if (!memcmp(&ours, &game, sizeof ours)) prog_st[l].smp_desc++;
+            else {
+                static int shown;
+                if (shown++ < 6)
+                    fprintf(stderr, "yw4: gbuffer: sampler differs: game min %u mag %u wrap %u %u %u cmp %u %u lod %g %g"
+                            " bias %g aniso %g; ours min %u mag %u wrap %u %u %u cmp %u %u lod %g %g bias %g aniso %g\n",
+                            game.min_filter, game.mag_filter, game.wrap[0], game.wrap[1], game.wrap[2],
+                            game.compare_mode, game.compare_func, game.lod_min, game.lod_max, game.lod_bias,
+                            game.max_aniso, ours.min_filter, ours.mag_filter, ours.wrap[0], ours.wrap[1], ours.wrap[2],
+                            ours.compare_mode, ours.compare_func, ours.lod_min, ours.lod_max, ours.lod_bias,
+                            ours.max_aniso);
+            }
         }
         /* the material constants, against what the game bound at the draw list's slot (+0x7a) */
         uint8_t mat[0x80];

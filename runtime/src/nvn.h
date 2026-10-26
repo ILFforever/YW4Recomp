@@ -167,6 +167,7 @@ typedef struct {
     uint64_t trace_vb[8], trace_streams[8];  /* vertex buffers 0-7 and stream states 0-7 bound last */
     uint64_t trace_tex[2][TRACE_TEXTURES];  /* texture handles bound last, vertex and fragment stage */
     const NvnDescPool *trace_texpool;       /* texture pool set last */
+    const NvnDescPool *trace_samplerpool;   /* sampler pool set last */
     uint32_t trace_attribs[16], trace_nattribs;  /* vertex attribute state bound last */
     uint64_t depth_addr;    /* depth target set last: texels' address, first layer of its view */
     uint32_t depth_layer;

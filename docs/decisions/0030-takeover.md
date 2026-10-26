@@ -60,8 +60,26 @@ texture slots read equal ours**, none wrong, none left undecoded (the engine's o
 when the geometry's `+0x108` is set, would show as a difference: not met).
 
 Still open for textures: the atlas region's rectangle becomes a UV transform in the constants (decoded from the same
-record; needed once we stop taking constants from the game), and the samplers (each binding's handle also carries a
-sampler).
+record; needed once we stop taking constants from the game).
+
+**Samplers: decoded (`sampler_state`, `sampler_desc` in `gbuffer.c`).** The engine makes a new NVN sampler id for
+most draws, so the id means nothing; the settings do. A first probe that looked for the settings in the reference,
+texture and UV bytes found no single byte that decides them. The engine's sampler builder (`f_976ab0`, the only
+caller of `nvnSamplerBuilderSetWrapMode`) showed the path instead:
+
+- Per texture slot the engine keeps a **15-byte sampler state** (`device+0x1120 + 0xf×slot`). Each layer starts it
+  from defaults (`device+0x1300 + 0x1e0×level + 0xf×slot`, level = byte `device+0x4631`).
+- A texture reference's byte 1 counts `(field, value)` byte pairs, starting at its u16 `+4`, in the geometry's header
+  blob at `4×(u16 +0xa + u16 +0x6e)`; each sets one byte of the slot's state (first 12 references only).
+- `f_976ab0` turns the 15 bytes into NVN settings: bytes 1-3 wrap s/t/r; 4 and 5 minification and magnification
+  (low 4 bits; bit 4: anisotropic; bit 5: linear between mipmaps); 6 anisotropy; 7, 8 level-of-detail clamp (/255
+  ×15); 9 level-of-detail bias (signed); 0xa depth compare function (0: off); 0xb-0xe border colour (/255). The
+  device's texture quality settings (`+0x4620` mode, `+0x4624` anisotropy, `+0x4625` on) can raise the filter and
+  the anisotropy.
+
+Check mode, four saves, all layer kinds: **all 6.1 million samplers** equal the engine's state byte for byte, and our
+settings equal the bound sampler's field for field. The layer defaults are still read from the engine's state (set
+once per layer, not per draw).
 
 ## Alternatives
 
