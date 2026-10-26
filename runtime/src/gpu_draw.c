@@ -721,7 +721,11 @@ int gpu_begin_targets(VkCommandBuffer cb, GpuState *s, VkFormat color[8], VkForm
 }
 
 /* The texture and sampler a handle names in the current pools. */
+/* A takeover draw's textures (gpu_takeover_draw): handles with the top bit set name its copies. */
+static _Thread_local NvnTexEntry *own_tex;
+
 static NvnTexEntry *tex_entry(const GpuState *s, uint64_t handle) {
+    if (handle >> 63) return own_tex && own_tex[handle & 0xFF].tex ? &own_tex[handle & 0xFF] : NULL;
     uint32_t id = (uint32_t)(handle & 0xFFFFF);
     if (!s->tex_pool || !handle || (int)id >= s->tex_pool->count) return NULL;
     NvnTexEntry *e = (NvnTexEntry *)s->tex_pool->entries + id;
@@ -729,6 +733,7 @@ static NvnTexEntry *tex_entry(const GpuState *s, uint64_t handle) {
 }
 
 static const NvnSamplerDesc *sampler_entry(const GpuState *s, uint64_t handle) {
+    if (handle >> 63) return NULL;  /* a takeover draw's: its own sampler settings (bind_stage_set) */
     uint32_t id = (uint32_t)(handle >> 20 & 0xFFF);
     if (!s->sampler_pool || (int)id >= s->sampler_pool->count) return NULL;
     return (const NvnSamplerDesc *)s->sampler_pool->entries + id;
@@ -1561,6 +1566,10 @@ void gpu_takeover_draw(void *vk_cb, void *gpu_state, const void *data, uint32_t 
     uint8_t blend[8][8], color[4], ds[8], polygon[4];
     uint32_t mask = s->channel_mask, attribs[16], nattribs = s->nattribs, streams[16][2], nstreams = s->nstreams;
     uint64_t tex[TAKEOVER_TEXTURES];
+    uint32_t sref[2], smask[2];
+    float offset[3];
+    memcpy(sref, s->stencil_ref, sizeof sref), memcpy(smask, s->stencil_mask, sizeof smask);
+    memcpy(offset, s->polygon_offset, sizeof offset);
     memcpy(blend, s->blend, sizeof blend), memcpy(color, s->color, 4), memcpy(ds, s->depth_stencil, 8);
     memcpy(polygon, s->polygon, 4), memcpy(attribs, s->attribs, sizeof attribs), memcpy(streams, s->streams, sizeof streams);
     memcpy(tex, s->tex[1], sizeof tex);
@@ -1575,8 +1584,22 @@ void gpu_takeover_draw(void *vk_cb, void *gpu_state, const void *data, uint32_t 
     s->nattribs = t->nattribs;
     for (int i = 0; i < 16; i++) s->streams[i][0] = t->stride, s->streams[i][1] = 0;
     s->nstreams = 16;
+    /* the textures: our copies of their pool entries, each pointing at its own snapshot */
+    static _Thread_local NvnTexEntry ents[TAKEOVER_TEXTURES];
     for (int k = 0; k < TAKEOVER_TEXTURES; k++)
-        if (t->tex_mask >> k & 1) s->tex[1][k] = t->tex_id[k];
+        if (t->tex_mask >> k & 1) {
+            ents[k] = t->tex[k];
+            ents[k].tex = &ents[k].snap;
+            s->tex[1][k] = 1ull << 63 | (uint64_t)k;
+        }
+    own_tex = ents;
+    /* stencil reference and write mask, polygon offset: what the engine's commit sets from the state it
+     * keeps (f_974cd0: state+0x2b8, +0x2b4; +0x2c0, +0x2bc, +0x2c4 = factor, units, clamp) */
+    uint32_t ref, wmask;
+    memcpy(&ref, t->nvn + 0x78, 4), memcpy(&wmask, t->nvn + 0x74, 4);
+    s->stencil_ref[0] = s->stencil_ref[1] = ref, s->stencil_mask[0] = s->stencil_mask[1] = wmask;
+    memcpy(&s->polygon_offset[0], t->nvn + 0x80, 4), memcpy(&s->polygon_offset[1], t->nvn + 0x7c, 4);
+    memcpy(&s->polygon_offset[2], t->nvn + 0x84, 4);
     CmdRec r;
     memset(&r, 0, sizeof r);
     r.size = sizeof r;
@@ -1590,11 +1613,13 @@ void gpu_takeover_draw(void *vk_cb, void *gpu_state, const void *data, uint32_t 
     }
     own = d, own_t = t;
     draw(vk_cb, s, &r);
-    own = NULL, own_t = NULL;
+    own = NULL, own_t = NULL, own_tex = NULL;
     /* the game's, back */
     s->program = program;
     memcpy(s->blend, blend, sizeof blend), memcpy(s->color, color, 4), memcpy(s->depth_stencil, ds, 8);
     memcpy(s->polygon, polygon, 4), memcpy(s->attribs, attribs, sizeof attribs), memcpy(s->streams, streams, sizeof streams);
     s->channel_mask = mask, s->nattribs = nattribs, s->nstreams = nstreams;
     memcpy(s->tex[1], tex, sizeof tex);
+    memcpy(s->stencil_ref, sref, sizeof sref), memcpy(s->stencil_mask, smask, sizeof smask);
+    memcpy(s->polygon_offset, offset, sizeof offset);
 }

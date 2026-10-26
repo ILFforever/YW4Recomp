@@ -65,7 +65,9 @@ typedef struct {
     uint8_t nvn[0xb8];              /* NVN state objects as the engine keeps them from state+0x240 */
     uint32_t attribs[16], nattribs, stride;
     uint32_t tex_mask;              /* fragment texture slots of ours */
-    uint32_t tex_id[TAKEOVER_TEXTURES];  /* texture pool ids */
+    NvnTexEntry tex[TAKEOVER_TEXTURES];  /* their texture pool entries, copied when recorded: the engine
+                                          * registers textures at rising ids that wrap, so an id can name
+                                          * another texture by the time the draw runs */
     NvnSamplerDesc samp[TAKEOVER_TEXTURES];
     struct { uint8_t slot, stages; uint32_t offset, size; } ubo[TAKEOVER_UBOS];
     uint32_t nubo;

@@ -944,6 +944,20 @@ static int takeover_frame(void) {
     return !alt || (__atomic_load_n(&yw4_frames_presented, __ATOMIC_RELAXED) & 1);
 }
 
+/* The texture pool entry a takeover draw can copy for guest NVNtexture g: the one it was registered at
+ * last, still naming it, and still a picture of it as it is now (a texture made again after loading
+ * gets registered again by the engine's commit: until then the entry is old). NULL if not. */
+static const NvnTexEntry *fresh_entry(const NvnCmdBuf *cb, uint64_t g) {
+    const NvnTexture *nt = g ? HOST(NvnTexture, g) : NULL;
+    if (!nt || !cb || !cb->trace_texpool || nt->pool_id < 0 || nt->pool_id >= cb->trace_texpool->count) return NULL;
+    const NvnTexEntry *e = (const NvnTexEntry *)cb->trace_texpool->entries + nt->pool_id;
+    if (!e->tex || e->guest != g || e->snap.addr != nt->addr || e->snap.width != nt->width ||
+        e->snap.height != nt->height || e->snap.depth != nt->depth || e->snap.format != nt->format ||
+        e->snap.levels != nt->levels)
+        return NULL;
+    return e;
+}
+
 static void add_ubo(TakeoverDraw *t, unsigned slot, unsigned stages, uint32_t offset, uint32_t size) {
     t->ubo[t->nubo].slot = (uint8_t)slot, t->ubo[t->nubo].stages = (uint8_t)stages;
     t->ubo[t->nubo].offset = offset, t->ubo[t->nubo].size = size;
@@ -985,14 +999,11 @@ static int takeover(const CPUState *ctx) {
     const NvnCmdBuf *cb = HOST(NvnCmdBuf, U64(cur.device + 0x10d0) + 0xd8);
     for (unsigned k = 0; k < ntex && k < TAKEOVER_TEXTURES; k++) {
         if (!(tf >> k & 1)) continue;
-        const NvnTexture *nt = texs[k] ? HOST(NvnTexture, texs[k]) : NULL;
+        const NvnTexEntry *e = fresh_entry(cb, texs[k]);
         uint8_t ss[15];
-        if (!nt || !cb || !cb->trace_texpool || nt->pool_id < 0 || nt->pool_id >= cb->trace_texpool->count ||
-            ((const NvnTexEntry *)cb->trace_texpool->entries)[nt->pool_id].guest != texs[k] ||
-            !sampler_state(cur.item, k, ss))
-            return TK_TEXTURE;
+        if (!e || !sampler_state(cur.item, k, ss)) return TK_TEXTURE;
         t->tex_mask |= 1u << k;
-        t->tex_id[k] = (uint32_t)nt->pool_id;
+        t->tex[k] = *e;
         sampler_desc(ss, &t->samp[k]);
     }
     /* the other fragment textures it reads (the scene's, the per-object reflection probe) */
@@ -1001,12 +1012,10 @@ static int takeover(const CPUState *ctx) {
         uint8_t ss[15];
         uint64_t g = slot_texture(k, ss);
         if (!g) continue;  /* none: what the game bound stays */
-        const NvnTexture *nt = HOST(NvnTexture, g);
-        if (!nt || !cb || !cb->trace_texpool || nt->pool_id < 0 || nt->pool_id >= cb->trace_texpool->count ||
-            ((const NvnTexEntry *)cb->trace_texpool->entries)[nt->pool_id].guest != g)
-            return TK_TEXTURE;
+        const NvnTexEntry *e = fresh_entry(cb, g);
+        if (!e) return TK_TEXTURE;
         t->tex_mask |= 1u << k;
-        t->tex_id[k] = (uint32_t)nt->pool_id;
+        t->tex[k] = *e;
         sampler_desc(ss, &t->samp[k]);
     }
     /* vertex layout and buffers */
