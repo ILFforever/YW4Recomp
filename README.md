@@ -32,11 +32,6 @@
 > - Linux - x86-64, Vulkan: planned; the runtime is written to be portable but has not been tested yet
 
 > [!NOTE]
-> **Can I play it?** Not as a download, and not yet as a whole game. There is no ready-to-play build: you build it
-> yourself from your own copy of the game, which takes developer tools and some technical comfort
-> ([Building from source](#building-from-source)). What runs today is listed under [Status](#status).
-
-> [!NOTE]
 > **Bring your own game.** Nothing from the game is in this repository. You need files from your own copy of
 > *Yo-kai Watch 4++* with the last update, **2.2.0**. Getting those files is up to you and is not covered here.
 >
