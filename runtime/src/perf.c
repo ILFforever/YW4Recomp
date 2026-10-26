@@ -247,13 +247,7 @@ void yw4_perf_hud(HudContent *c) {
         }
         c->npoints = (int)p;
     }
-    LINE("3D VIEW: %dx%d (F4)", gpu_res_height() * 16 / 9, gpu_res_height());
-    if (gpu_aniso()) LINE("TEXTURES: ANISO X%d (F2)", gpu_aniso());
-    else LINE("TEXTURES: GAME (F2)");
-    LINE("SHADOWS: %s  %d", shadow_mode_name(), gpu_shadow_res());
-    static const char *const soft[4] = {"OFF", "X1", "X2", "X4"};
-    LINE("PCSS: %s (F7)", soft[gpu_pcss_level() & 3]);
-    LINE("G-BUFFER: %s (F6)", gbuffer_native() ? "OURS" : "GAME");
+    LINE("F1: SETTINGS");
 #undef LINE
 }
 

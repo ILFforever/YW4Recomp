@@ -6,6 +6,8 @@
 
 #include <stdint.h>
 
+#include "settings.h"
+
 enum { HUD_COLS = 40, HUD_LINES = 8, HUD_POINTS = 180 };
 
 typedef struct {
@@ -34,5 +36,8 @@ int gbuffer_native(void);
 
 /* Draws c into rgba (w x h texels, 4 bytes each, rows of w); *used_w and *used_h: the part drawn. */
 void hud_render(uint8_t *rgba, int w, int h, const HudContent *c, int *used_w, int *used_h);
+/* The settings panel (settings.h) the same way: every row with all its options, the current one boxed. */
+void panel_render(uint8_t *rgba, int w, int h, const SettingRow *rows, int n, int selected, int *used_w,
+                  int *used_h);
 
 #endif

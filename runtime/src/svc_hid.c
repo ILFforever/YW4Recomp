@@ -20,6 +20,7 @@
 
 #include "gbuffer.h"
 #include "ipc_simple.h"
+#include "settings.h"
 #include "window.h"
 
 #define HID_SHARED_MEMORY_SIZE 0x40000
@@ -81,7 +82,7 @@ static uint64_t scripted(uint64_t tick) {
  * Every change of the physical input (buttons, sticks) and every capture key (F9/F10/F11/F12) is
  * written, with the vsync tick (60 per second since start), to work/inputs/rec_<time>.txt:
  *     s <tick> <buttons hex> <lx> <ly> <rx> <ry>
- *     k <tick> <F9|F10|F11|F12>
+ *     k <tick> <F9|F10|F11|F12|F6|F1|UP|DOWN|LEFT|RIGHT>  (the last four: the settings panel's keys)
  * A replay feeds the same states back at the same ticks (instead of the keyboard and gamepad)
  * and presses the same capture keys, so a route a person played can be run again by a script.
  * The game's loading times vary a little from run to run, so long routes can drift. */
@@ -211,6 +212,11 @@ static int replay_state(uint64_t tick, uint64_t *buttons, int32_t sticks[4]) {
         else if (!strcmp(k, "F12")) window_request_screenshot();
         else if (!strcmp(k, "F9")) shadow_toggle();
         else if (!strcmp(k, "F6")) gbuffer_toggle();
+        else if (!strcmp(k, "F1")) settings_toggle();  /* the settings panel, and its keys while open */
+        else if (!strcmp(k, "UP")) settings_action(SETTINGS_UP);
+        else if (!strcmp(k, "DOWN")) settings_action(SETTINGS_DOWN);
+        else if (!strcmp(k, "LEFT")) settings_action(SETTINGS_LEFT);
+        else if (!strcmp(k, "RIGHT")) settings_action(SETTINGS_RIGHT);
     }
     return 1;
 }

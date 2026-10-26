@@ -71,7 +71,7 @@ static Shader *shaders;
  * a blurred half-size image over the scene with that amount as opacity (2026-10-27: it takes 63% of the
  * fine detail of a schoolyard's background and none of the foreground). The blurred image comes from
  * 800x450 passes whose taps are in pixels, so a larger 3D view (YW4_RES) weakens it. YW4_DOF=2 the
- * game's (default), 1 half (w halved), 0 off (the draw skipped). */
+ * game's, 1 half (w halved; the default, the owner's pick), 0 off (the draw skipped). */
 enum { DOF_SHADER = 0x27b63a2bf65deaf0ull };
 static int dof_level = -1;
 
@@ -79,7 +79,7 @@ int gpu_dof(void) {
     int l = __atomic_load_n(&dof_level, __ATOMIC_ACQUIRE);
     if (l < 0) {
         const char *e = getenv("YW4_DOF");
-        l = e ? atoi(e) : 2;
+        l = e ? atoi(e) : 1;
         if (l < 0 || l > 2) l = 2;
         __atomic_store_n(&dof_level, l, __ATOMIC_RELEASE);
     }

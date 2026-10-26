@@ -30,6 +30,7 @@
 #include "gbuffer.h"
 #include "gpu.h"
 #include "hud.h"
+#include "settings.h"
 #include "vk.h"
 #include "window.h"
 
@@ -68,13 +69,18 @@ static void *staging_ptr;
 static VkImage frame;
 static uint32_t frame_w, frame_h;
 
-/* The performance HUD (hud.h): F3 or YW4_HUD=1; drawn by the presenting thread. */
+/* Overlays drawn by the presenting thread on the CPU (hud.c) and copied onto the window: the performance
+ * HUD (hud.h: F3 or YW4_HUD=1) and the settings panel (settings.h: F1). */
+typedef struct {
+    uint32_t w, h;  /* the image's size; what is drawn is at its top-left */
+    VkImage image;
+    VkBuffer buffer;  /* mapped staging copy (ptr) */
+    VkDeviceMemory image_mem, buffer_mem;
+    void *ptr;
+} Overlay;
 enum { HUD_W = 256, HUD_H = 128 };
+static Overlay hud = {HUD_W, HUD_H}, panel = {480, 160};
 static int hud_on = -1;
-static VkImage hud_image;
-static VkBuffer hud_buffer;
-static VkDeviceMemory hud_image_mem, hud_buffer_mem;
-static void *hud_ptr;
 
 void gpu_request_trace(int draws);  /* gpu_draw.c */
 void gpu_request_dump(void);        /* gpu.c */
@@ -391,22 +397,22 @@ static int hud_enabled(void) {
     return on > 0;
 }
 
-/* The HUD's staging buffer (mapped) and image, made on first use. 0 when ready. */
-static int hud_resources(void) {
-    if (hud_image) return 0;
-    VkBufferCreateInfo bci = {.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO, .size = (VkDeviceSize)HUD_W * HUD_H * 4,
+/* An overlay's staging buffer (mapped) and image, made on first use. 0 when ready. */
+static int overlay_resources(Overlay *o) {
+    if (o->image) return 0;
+    VkBufferCreateInfo bci = {.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO, .size = (VkDeviceSize)o->w * o->h * 4,
                               .usage = VK_BUFFER_USAGE_TRANSFER_SRC_BIT};
-    if (vkCreateBuffer(vk.device, &bci, NULL, &hud_buffer) != VK_SUCCESS) return -1;
+    if (vkCreateBuffer(vk.device, &bci, NULL, &o->buffer) != VK_SUCCESS) return -1;
     VkMemoryRequirements mr;
-    vkGetBufferMemoryRequirements(vk.device, hud_buffer, &mr);
+    vkGetBufferMemoryRequirements(vk.device, o->buffer, &mr);
     VkMemoryAllocateInfo mai = {.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO, .allocationSize = mr.size,
                                 .memoryTypeIndex = vk_memory_type(mr.memoryTypeBits, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT |
                                                                                       VK_MEMORY_PROPERTY_HOST_COHERENT_BIT)};
-    if (vkAllocateMemory(vk.device, &mai, NULL, &hud_buffer_mem) != VK_SUCCESS) return -1;
-    vkBindBufferMemory(vk.device, hud_buffer, hud_buffer_mem, 0);
-    vkMapMemory(vk.device, hud_buffer_mem, 0, VK_WHOLE_SIZE, 0, &hud_ptr);
+    if (vkAllocateMemory(vk.device, &mai, NULL, &o->buffer_mem) != VK_SUCCESS) return -1;
+    vkBindBufferMemory(vk.device, o->buffer, o->buffer_mem, 0);
+    vkMapMemory(vk.device, o->buffer_mem, 0, VK_WHOLE_SIZE, 0, &o->ptr);
     VkImageCreateInfo ici = {.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO, .imageType = VK_IMAGE_TYPE_2D,
-                             .format = VK_FORMAT_R8G8B8A8_UNORM, .extent = {HUD_W, HUD_H, 1}, .mipLevels = 1,
+                             .format = VK_FORMAT_R8G8B8A8_UNORM, .extent = {o->w, o->h, 1}, .mipLevels = 1,
                              .arrayLayers = 1, .samples = VK_SAMPLE_COUNT_1_BIT, .tiling = VK_IMAGE_TILING_OPTIMAL,
                              .usage = VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT};
     VkImage image;
@@ -414,35 +420,30 @@ static int hud_resources(void) {
     vkGetImageMemoryRequirements(vk.device, image, &mr);
     mai.allocationSize = mr.size;
     mai.memoryTypeIndex = vk_memory_type(mr.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
-    if (vkAllocateMemory(vk.device, &mai, NULL, &hud_image_mem) != VK_SUCCESS) return -1;
-    vkBindImageMemory(vk.device, image, hud_image_mem, 0);
-    hud_image = image;
+    if (vkAllocateMemory(vk.device, &mai, NULL, &o->image_mem) != VK_SUCCESS) return -1;
+    vkBindImageMemory(vk.device, image, o->image_mem, 0);
+    o->image = image;
     return 0;
 }
 
 /* Draws the HUD's lines into its buffer and records copying them onto dst (in TRANSFER_DST
  * layout) at the frame's top-left corner (x0, y0), scaled up with the window. The previous
  * present's fence has been waited for, so the buffer is free to write. */
-static int hud_shown_w, hud_shown_h;  /* the part of hud_ptr drawn at the last present (0: none) */
+static int hud_shown_w, hud_shown_h;  /* the part of hud.ptr drawn at the last present (0: none) */
 
-static void hud_draw(VkImage dst, int32_t x0, int32_t y0) {
-    hud_shown_w = hud_shown_h = 0;
-    if (!hud_enabled() || hud_resources()) return;
-    static HudContent content;
-    int w, h;
-    yw4_perf_hud(&content);
-    hud_render(hud_ptr, HUD_W, HUD_H, &content, &w, &h);
-    hud_shown_w = w, hud_shown_h = h;
-    barrier(hud_image, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 0, VK_ACCESS_TRANSFER_WRITE_BIT);
-    VkBufferImageCopy copy = {.bufferRowLength = HUD_W, .imageSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1},
+/* Records copying an overlay's drawn w x h part onto dst (in TRANSFER_DST layout) with its top-left at
+ * (x, y), each texel s x s window pixels. */
+static void overlay_show(Overlay *o, VkImage dst, int w, int h, int32_t x, int32_t y, int32_t s) {
+    barrier(o->image, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 0, VK_ACCESS_TRANSFER_WRITE_BIT);
+    VkBufferImageCopy copy = {.bufferRowLength = o->w, .imageSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1},
                               .imageExtent = {(uint32_t)w, (uint32_t)h, 1}};
-    vkCmdCopyBufferToImage(cmd, hud_buffer, hud_image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &copy);
-    barrier(hud_image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+    vkCmdCopyBufferToImage(cmd, o->buffer, o->image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &copy);
+    barrier(o->image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
             VK_ACCESS_TRANSFER_WRITE_BIT, VK_ACCESS_TRANSFER_READ_BIT);
     barrier(dst, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
             VK_ACCESS_TRANSFER_WRITE_BIT, VK_ACCESS_TRANSFER_WRITE_BIT);
-    int32_t s = swap_extent.height >= 2160 ? 2 : 1;  /* the 5x7 font at 1:1 up to 1440p */
-    int32_t x = x0 + 6 * s, y = y0 + 6 * s;
+    if (x < 0) x = 0;
+    if (y < 0) y = 0;
     int32_t xe = x + w * s, ye = y + h * s;  /* clipped to the window */
     if (xe > (int32_t)swap_extent.width) xe = (int32_t)swap_extent.width;
     if (ye > (int32_t)swap_extent.height) ye = (int32_t)swap_extent.height;
@@ -451,20 +452,54 @@ static void hud_draw(VkImage dst, int32_t x0, int32_t y0) {
                         .srcOffsets = {{0, 0, 0}, {(xe - x) / s, (ye - y) / s, 1}},
                         .dstSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1},
                         .dstOffsets = {{x, y, 0}, {x + (xe - x) / s * s, y + (ye - y) / s * s, 1}}};
-    vkCmdBlitImage(cmd, hud_image, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, dst, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1,
+    vkCmdBlitImage(cmd, o->image, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, dst, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1,
                    &blit, VK_FILTER_NEAREST);
 }
 
-/* Screenshots show the HUD when it is on: its texels from the last present, pasted 1:1 at the
- * frame's top-left corner like in the window (rgba: the w x h frame, colours as the window shows). */
+static int32_t overlay_scale(void) { return swap_extent.height >= 2160 ? 2 : 1; }  /* the 5x7 font 1:1 up to 1440p */
+
+static void hud_draw(VkImage dst, int32_t x0, int32_t y0) {
+    hud_shown_w = hud_shown_h = 0;
+    if (!hud_enabled() || overlay_resources(&hud)) return;
+    static HudContent content;
+    int w, h;
+    yw4_perf_hud(&content);
+    hud_render(hud.ptr, HUD_W, HUD_H, &content, &w, &h);
+    hud_shown_w = w, hud_shown_h = h;
+    int32_t s = overlay_scale();
+    overlay_show(&hud, dst, w, h, x0 + 6 * s, y0 + 6 * s, s);
+}
+
+/* The settings panel (F1), in the middle of the picture (bw x bh at x0, y0). */
+static int panel_shown_w, panel_shown_h;  /* the part of panel.ptr drawn at the last present (0: none) */
+
+static void panel_draw(VkImage dst, int32_t x0, int32_t y0, uint32_t bw, uint32_t bh) {
+    panel_shown_w = panel_shown_h = 0;
+    if (!settings_open() || overlay_resources(&panel)) return;
+    SettingRow rows[16];
+    int sel, n = settings_rows(rows, 16, &sel), w, h;
+    panel_render(panel.ptr, (int)panel.w, (int)panel.h, rows, n, sel, &w, &h);
+    panel_shown_w = w, panel_shown_h = h;
+    int32_t s = overlay_scale();
+    overlay_show(&panel, dst, w, h, x0 + ((int32_t)bw - w * s) / 2, y0 + ((int32_t)bh - h * s) / 2, s);
+}
+
+/* An overlay's drawn cw x ch part pasted 1:1 into rgba (the w x h frame) at (x, y), clipped. */
+static void paste(uint8_t *rgba, uint32_t w, uint32_t h, const Overlay *o, int cw, int ch, uint32_t x, uint32_t y) {
+    if (!cw || !o->ptr || x >= w || y >= h) return;
+    uint32_t pw = (uint32_t)cw < w - x ? (uint32_t)cw : w - x, ph = (uint32_t)ch < h - y ? (uint32_t)ch : h - y;
+    for (uint32_t r = 0; r < ph; r++)
+        memcpy(rgba + ((size_t)(y + r) * w + x) * 4, (const uint8_t *)o->ptr + (size_t)r * o->w * 4, (size_t)pw * 4);
+}
+
+/* Screenshots show the HUD and the settings panel when they are on: their texels from the last
+ * present, 1:1, the HUD at the frame's top-left corner and the panel in its middle, like in the window
+ * (rgba: the w x h frame, colours as the window shows). */
 static void hud_onto(uint8_t *rgba, uint32_t w, uint32_t h) {
-    if (!hud_shown_w || !hud_ptr) return;
-    uint32_t x = 6, y = 6;
-    if (x >= w || y >= h) return;
-    uint32_t cw = (uint32_t)hud_shown_w < w - x ? (uint32_t)hud_shown_w : w - x;
-    uint32_t ch = (uint32_t)hud_shown_h < h - y ? (uint32_t)hud_shown_h : h - y;
-    for (uint32_t r = 0; r < ch; r++)
-        memcpy(rgba + ((size_t)(y + r) * w + x) * 4, (const uint8_t *)hud_ptr + (size_t)r * HUD_W * 4, (size_t)cw * 4);
+    paste(rgba, w, h, &hud, hud_shown_w, hud_shown_h, 6, 6);
+    if (panel_shown_w && (uint32_t)panel_shown_w < w && (uint32_t)panel_shown_h < h)
+        paste(rgba, w, h, &panel, panel_shown_w, panel_shown_h, (w - (uint32_t)panel_shown_w) / 2,
+              (h - (uint32_t)panel_shown_h) / 2);
 }
 
 /* Scales src (w x h colour texels) into the next swapchain image and presents it.
@@ -519,6 +554,7 @@ static int present_image(VkImage src, VkImageLayout layout, VkRect2D r0, int rea
                         .dstOffsets = {{x0, y0, 0}, {x0 + (int32_t)bw, y0 + (int32_t)bh, 1}}};
     vkCmdBlitImage(cmd, src, layout, dst, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &blit, VK_FILTER_LINEAR);
     hud_draw(dst, x0, y0);
+    panel_draw(dst, x0, y0, bw, bh);
     barrier(dst, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR, VK_ACCESS_TRANSFER_WRITE_BIT, 0);
     vkEndCommandBuffer(cmd);
 
@@ -620,10 +656,13 @@ static void update_input(void) {
                 {SDL_SCANCODE_P, 10}, {SDL_SCANCODE_M, 11}, {SDL_SCANCODE_LEFT, 12}, {SDL_SCANCODE_UP, 13},
                 {SDL_SCANCODE_RIGHT, 14}, {SDL_SCANCODE_DOWN, 15}};
     uint64_t b = 0;
-    for (size_t i = 0; i < sizeof keys / sizeof *keys; i++)
-        if (k[keys[i].key]) b |= 1ull << keys[i].bit;
-    int32_t s[4] = {(k[SDL_SCANCODE_D] - k[SDL_SCANCODE_A]) * 32767, (k[SDL_SCANCODE_W] - k[SDL_SCANCODE_S]) * 32767,
-                    (k[SDL_SCANCODE_L] - k[SDL_SCANCODE_J]) * 32767, (k[SDL_SCANCODE_I] - k[SDL_SCANCODE_K]) * 32767};
+    int32_t s[4] = {0, 0, 0, 0};
+    if (!settings_open()) {  /* the settings panel takes the keyboard while it is open */
+        for (size_t i = 0; i < sizeof keys / sizeof *keys; i++)
+            if (k[keys[i].key]) b |= 1ull << keys[i].bit;
+        s[0] = (k[SDL_SCANCODE_D] - k[SDL_SCANCODE_A]) * 32767, s[1] = (k[SDL_SCANCODE_W] - k[SDL_SCANCODE_S]) * 32767;
+        s[2] = (k[SDL_SCANCODE_L] - k[SDL_SCANCODE_J]) * 32767, s[3] = (k[SDL_SCANCODE_I] - k[SDL_SCANCODE_K]) * 32767;
+    }
     if (gamepad) {
         static const struct {
             SDL_GamepadButton button;
@@ -727,6 +766,14 @@ void window_run(void (*guest)(void *), void *arg) {
             if (e.key.key == SDLK_F8) gpu_shadow_res_cycle();  /* shadow quality: 1024 / 2048 / 4096 */
             if (e.key.key == SDLK_F4) gpu_res_cycle();  /* 3D view: 900 / 1080 / 1440 / 2160 lines */
             if (e.key.key == SDLK_F2) gpu_aniso_cycle();  /* texture filtering: the game's / x2 .. x16 */
+            if (e.key.key == SDLK_F1) settings_toggle();  /* the settings panel */
+            if (settings_open() && !e.key.repeat) {
+                if (e.key.key == SDLK_UP) settings_action(SETTINGS_UP);
+                if (e.key.key == SDLK_DOWN) settings_action(SETTINGS_DOWN);
+                if (e.key.key == SDLK_LEFT) settings_action(SETTINGS_LEFT);
+                if (e.key.key == SDLK_RIGHT) settings_action(SETTINGS_RIGHT);
+                if (e.key.key == SDLK_ESCAPE) settings_action(SETTINGS_CLOSE);
+            }
             if (e.key.key == SDLK_F5) gpu_passes_toggle();  /* per-pass GPU timing in the log */
             if (e.key.key == SDLK_F7) gpu_pcss_cycle();  /* PCSS (soft contact shadows): off / x1 / x2 / x4 */
             if (e.key.key == SDLK_F6) gbuffer_toggle(), yw4_hid_note_key("F6");  /* the G-buffer: the game's programs or ours */

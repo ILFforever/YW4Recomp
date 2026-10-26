@@ -31,7 +31,7 @@ static const struct {
     {'.', {0x00, 0x00, 0x00, 0x00, 0x00, 0x0C, 0x0C}}, {':', {0x00, 0x0C, 0x0C, 0x00, 0x0C, 0x0C, 0x00}},
     {'%', {0x18, 0x19, 0x02, 0x04, 0x08, 0x13, 0x03}}, {'/', {0x00, 0x01, 0x02, 0x04, 0x08, 0x10, 0x00}},
     {'-', {0x00, 0x00, 0x00, 0x1F, 0x00, 0x00, 0x00}}, {'(', {0x02, 0x04, 0x08, 0x08, 0x08, 0x04, 0x02}},
-    {')', {0x08, 0x04, 0x02, 0x02, 0x02, 0x04, 0x08}},
+    {')', {0x08, 0x04, 0x02, 0x02, 0x02, 0x04, 0x08}}, {'>', {0x08, 0x04, 0x02, 0x01, 0x02, 0x04, 0x08}},
 };
 
 static const uint8_t *glyph(char c) {
@@ -112,5 +112,47 @@ void hud_render(uint8_t *rgba, int w, int h, const HudContent *c, int *used_w, i
         snprintf(s, sizeof s, "TOP %.0f MS", top);
         text(&cv, gx + 11 * CELL_W, ly, s, GREY);
     }
+    *used_w = cv.bw, *used_h = cv.bh;
+}
+
+static const uint8_t PANEL[3] = {20, 22, 30}, CHOSEN[3] = {230, 190, 60}, DARK[3] = {16, 16, 20};
+
+void panel_render(uint8_t *rgba, int w, int h, const SettingRow *rows, int n, int selected, int *used_w,
+                  int *used_h) {
+    enum { NAME_COLS = 19, GAP = 2 };
+    int cols = 0;
+    for (int i = 0; i < n; i++) {
+        int c = 2 + NAME_COLS;
+        for (int k = 0; k < rows[i].noptions; k++) c += (int)strlen(rows[i].options[k]) + GAP;
+        if (c > cols) cols = c;
+    }
+    static const char *const hint = "UP/DOWN: CHOOSE   LEFT/RIGHT: CHANGE   F1: CLOSE";
+    if ((int)strlen(hint) > cols) cols = (int)strlen(hint);
+    Canvas cv = {rgba, w, h, 2 * MARGIN + cols * CELL_W, 2 * MARGIN + (n + 3) * (CELL_H + 3)};
+    if (cv.bw > w) cv.bw = w;
+    if (cv.bh > h) cv.bh = h;
+    for (int y = 0; y < cv.bh; y++)
+        for (int x = 0; x < cv.bw; x++) put(&cv, x, y, PANEL);
+    int y = MARGIN;
+    text(&cv, MARGIN, y, "SETTINGS", WHITE);
+    y += 2 * (CELL_H + 3);
+    for (int i = 0; i < n; i++, y += CELL_H + 3) {
+        const uint8_t *namecol = i == selected ? CHOSEN : WHITE;
+        if (i == selected) text(&cv, MARGIN, y, ">", CHOSEN);
+        text(&cv, MARGIN + 2 * CELL_W, y, rows[i].name, namecol);
+        int x = MARGIN + (2 + NAME_COLS) * CELL_W;
+        for (int k = 0; k < rows[i].noptions; k++) {
+            int len = (int)strlen(rows[i].options[k]);
+            if (k == rows[i].current) {  /* the current option on a box */
+                for (int by = y - 2; by < y + 9; by++)
+                    for (int bx = x - 2; bx < x + len * CELL_W + 1; bx++) put(&cv, bx, by, i == selected ? CHOSEN : WHITE);
+                text(&cv, x, y, rows[i].options[k], DARK);
+            } else {
+                text(&cv, x, y, rows[i].options[k], GREY);
+            }
+            x += (len + GAP) * CELL_W;
+        }
+    }
+    text(&cv, MARGIN, y + 3, hint, GREY);
     *used_w = cv.bw, *used_h = cv.bh;
 }
