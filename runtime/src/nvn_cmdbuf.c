@@ -198,12 +198,12 @@ NVN(nvnCommandBufferBindVertexBuffer) {  /* (cmd, index, address, size) */
 }
 NVN(nvnCommandBufferBindUniformBuffer) {  /* (cmd, stage, index, address, size) */
     record(c, CMD_BIND_UNIFORM_BUFFERS, 0);
-    if (A(1) < 2 && A(2) < 16) cb_of(A(0))->trace_ub[A(1)][A(2)] = A(3);
+    if (A(1) < 2 && A(2) < 16) cb_of(A(0))->trace_ub[A(1)][A(2)] = A(3), cb_of(A(0))->bound_ub[A(1)] |= 1u << A(2);
 }
 PLAIN(nvnCommandBufferBindStorageBuffer, CMD_BIND_STORAGE_BUFFERS)    /* (cmd, stage, index, address, size) */
 NVN(nvnCommandBufferBindTexture) {  /* (cmd, stage, index, handle) */
     record(c, CMD_BIND_TEXTURES, 0);
-    if (A(1) < 2 && A(2) < TRACE_TEXTURES) cb_of(A(0))->trace_tex[A(1)][A(2)] = A(3);
+    if (A(1) < 2 && A(2) < TRACE_TEXTURES) cb_of(A(0))->trace_tex[A(1)][A(2)] = A(3), cb_of(A(0))->bound_tex[A(1)] |= 1u << A(2);
     if (nvn_trace_texpool((uint32_t)(A(3) & 0xFFFFF)) > 0) {  /* once per (stage, index, texture id, fragment shader) */
         enum { SEEN = 1024 };
         static uint64_t seen[SEEN];

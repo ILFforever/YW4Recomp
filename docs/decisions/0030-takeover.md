@@ -168,6 +168,27 @@ other stage keeps an older block bound. Summary over four saves, every layer kin
 textures, samplers, effect, programs, bones, render state, NVN state and vertex layout equal the game's on every
 draw; last frame's bones on 99.6% of skinned draws.
 
+**What else changes per draw.** Check mode now counts, per layer kind, the constant buffers (only slots the draw's
+shaders read, and only when the contents change) and textures the engine binds for a draw beyond what ours
+provides: what a draw that skips the engine's work would still miss. Schoolyard, before the model material block:
+
+| Slot | Name (shader headers) | Changes on |
+|---|---|---|
+| constants 3 | `CBUSE_UB_MODEL_MATERIAL` | every draw (now decoded, below) |
+| constants 11 | `CBUSE_UB_USER_DATA01` | 12-30% of draws: instance copies |
+| fragment constants 12 | `CBUSE_UB_USER_DATA02` | 79% of material-pass draws |
+| fragment constants 10 | `CBUSE_UB_POINT_LIGHT` | ~2% of material-pass draws |
+| fragment texture 9 | `in_texCube` | 6% of material-pass draws: a reflection probe per object |
+
+Everything else rebound per draw is the same value again (counts of ~730 per run are once per layer).
+
+**Model material block: decoded (`model_material`).** Constants 3 (0x160 bytes, slot u16 `list+0x74`), built on the
+model renderer's stack: `u_ubParam` (1, 0, submesh index + model `+0x1fe`, alpha test reference), diffuse, ambient
+and specular from a 0x30-byte colour record (diffuse times the object's colour and a fade: object `+0x1bc` × the
+model record's per-submesh `+0x138`, on RGB for additive-style blending else on alpha), the UV transforms and the
+atlas regions' rectangles. Check mode, four saves: equal on every draw (~3.7 million); self-test (fade × 1.001):
+no draw equal.
+
 ## Alternatives
 
 - **Selection first.** Removes the walk, but needs the rules that the shadow streaks showed we don't have, and
