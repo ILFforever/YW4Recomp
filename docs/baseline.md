@@ -91,14 +91,21 @@ performance log of the same session.
 | Frame time | avg 33.4 ms, min 32.0, max 80.6 | min 31.6, max 66.7 ms on the HUD; whole session (11,506 frames): avg 33.4 ms, p99 34.0, 0.2% of frames over 34.5 ms, one frame of 133 ms |
 | GPU time per frame | not available | 7.4 ms |
 | Game work per frame | not available | 18.5 ms (of the 33.3 ms budget) |
-| CPU | not measured this time | 1.7 of 16 cores (11%) |
-| Memory | not measured this time | 2.97 GB |
+| CPU (30 s side by side, per process) | 308% of one core (peak 501%) | 159% (peak 174%); the HUD showed 1.7 of 16 cores |
+| GPU, 3D engine, this process only | 11.6% (peak 12.9%) | 17.5% (peak 20.3%); 8.5 ms of GPU time a frame |
+| Memory, private (Task Manager's column) | 1.26 GB | 2.86 GB |
+| Memory, committed | 6.74 GB | 5.21 GB |
+| Frame time over the same 30 s | (overlay above) | avg 33.35 ms, p99 34.1, max 50.1; game work 15.2 ms |
 
 Notes:
 - The same frame rate as Eden at the game's 30 cap, with a shorter worst frame at this spot. The session's single
   133 ms frame is not explained yet (a first-use pipeline build or an area load are the likely causes).
 - The GPU is idle most of each frame (7.4 of 33 ms): room for higher resolution later.
-- CPU and memory per process were not measured side by side this time; the 2026-10-22 tables above are the last such
-  measurement (before 0028/0029).
+- CPU: about half of Eden's, with much smaller peaks. GPU: about 1.5x Eden's, partly our own settings (4096 shadow
+  maps where Eden draws the game's 1024, PCSS x2) and partly our translation's barriers; still 8.5 of 33 ms a frame.
+- Memory: as on 2026-10-22, Task Manager's column counts our 2.9 GB game heap but not Eden's mapped console RAM;
+  committed memory is lower for us.
+- Measured with a script sampling both processes once a second for 30 s (CPU time, private working set, commit, GPU
+  engine counters by process id).
 - The owner's slow evening and night towns (`work/testsaves/save_base_lag`..`lag4`), 20-26 fps before 0028, now run
   at 29.9 fps with 12 ms of GPU time and ~13 ms of game work a frame.
