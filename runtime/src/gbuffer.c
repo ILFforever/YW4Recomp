@@ -328,6 +328,8 @@ static _Thread_local struct {
     /* check mode: what a takeover draw would use, captured at the hook (before the engine's commit) */
     float hook_object[GBUFFER_OBJECT_FLOATS];  /* constants 2 */
     uint8_t hook_old_bones[3 * 256 * 16];      /* last frame's bones */
+    uint64_t hook_tex[TAKEOVER_TEXTURES];      /* the other fragment textures (slot_texture) */
+    uint8_t hook_samp[TAKEOVER_TEXTURES][15];
     int have_world;
     uint64_t list;     /* the layer's draw list */
     uint64_t item;     /* the draw item (0x48 bytes) of this submesh, 0 if not found */
@@ -386,6 +388,7 @@ static _Thread_local struct {
     long pg_n, pg_eff, pg_stages;                /* shader effect ours; vertex and fragment programs ours */
     long vl_n, vl_ok, vl_other;                  /* vertex layouts: ours = the bound attributes and strides; other streams */
     long mm_n, mm_ok, mm_rows[22];               /* model material block (constants 3): ours; draws per differing row */
+    long st_n, st_tex, st_samp;                  /* other fragment textures: read, texture ours, sampler ours */
     long nv_ok, nv_regions[8];                   /* NVN state objects = the engine's; draws where each part differs */
     long bn_n, bn_hook, bn_old_n, bn_late;       /* bone palettes: this frame's ours; last frame's ours */
 } prog_st[PROGRAM_STATS];
@@ -640,6 +643,8 @@ static unsigned effect_id(uint64_t item) {
  * key is the layer's pass key (device+0x45d4); the (device+0x45d0 + 1)-th of them, or the first;
  * with none, the pass with the engine's default key (main+0x5865650) if device+0x4628 is set.
  * Returns the pass record (+0x38, 0x10 bytes) or 0. */
+static _Thread_local unsigned effect_pass_count;  /* of the pass effect_pass chose last: the commit draws
+                                                    * that many consecutive pass records (f_977e30) */
 static uint64_t effect_pass(uint64_t effect) {
     static uint64_t base;
     if (!base)
@@ -656,6 +661,7 @@ static uint64_t effect_pass(uint64_t effect) {
     if (sel == 0xffff && U8(cur.device + 0x4628))
         for (unsigned i = 0; i < n && sel == 0xffff; i++)
             if (U32(passes + 8ull * i) == U32(base + 0x5865650)) sel = i;
+    effect_pass_count = sel == 0xffff ? 0 : U16(passes + 8ull * sel + 6);
     return sel == 0xffff ? 0 : U64(effect + 0x38) + 0x10ull * U16(passes + 8ull * sel + 4);
 }
 
@@ -819,6 +825,20 @@ static void model_material(uint64_t item, const uint8_t state[33], uint8_t out[0
     }
 }
 
+/* A fragment texture slot's texture as the engine will bind it at the commit (f_966120): the pending
+ * texture record the model renderer left for the slot (device+0x3e08 + 0x18 x slot, when its int at +8
+ * is 0: the record's second word is a texture view), else the view already in the engine's slot
+ * (state+0xb80 + 0x10 x slot); the view's first word + 0x18 is the guest NVNtexture (the per-object
+ * reflection probe in slot 9: equal on every draw checked). Its sampler: the slot's 15-byte sampler
+ * state (device+0x1120 + 0xf x slot). 0 if none. */
+static uint64_t slot_texture(unsigned slot, uint8_t samp[15]) {
+    uint64_t pend = cur.device + 0x3e08 + 0x18ull * slot, state = U64(cur.device + 0x10d0), view = 0;
+    if (!U32(pend + 8) && guest_ptr(U64(pend)) && U64(U64(pend))) view = U64(U64(pend) + 8);
+    else if (guest_ptr(state)) view = U64(state + 0xb80 + 0x10ull * slot);
+    if (samp) memcpy(samp, (const void *)(uintptr_t)(cur.device + 0x1120 + 0xfull * slot), 15);
+    return guest_ptr(view) && guest_ptr(U64(view)) ? U64(view) + 0x18 : 0;
+}
+
 /* The render state block the draw is made with: the material's (render_state), then the effect
  * pass's own (id, value) pairs (record +0xc of them from u16 +0xa, in the effect's +0x40), then what
  * the commit (f_9759d0) changes by the device's settings: +0x4629 flips the cull face (byte 0x1b
@@ -890,11 +910,11 @@ static void nvn_state(const uint8_t b[33], uint8_t out[NVN_STATE_BYTES]) {
 /* ---- the takeover (decision 0030): a draw made from the game's data alone, at the submesh-draw
  * hook, in place of the engine's state work (its commit) and draw */
 
-enum { TK_DRAWN, TK_OFF, TK_FIRST, TK_ITEM, TK_PRIMITIVE, TK_PROGRAM, TK_READS, TK_TEXTURE, TK_LAYOUT, TK_CONSTANTS, TK_BONES,
-       TK_REASONS };
+enum { TK_DRAWN, TK_OFF, TK_FIRST, TK_ITEM, TK_PRIMITIVE, TK_PROGRAM, TK_READS, TK_PASSES, TK_TEXTURE, TK_LAYOUT,
+       TK_CONSTANTS, TK_BONES, TK_REASONS };
 static const char *const tk_reason[TK_REASONS] = {
     "", "off", "first draw of the layer", "no draw item or world", "not triangles", "program not known",
-    "reads texture 9 or vertex textures, or split instances", "texture or sampler",
+    "vertex textures or split instances", "more than one pass", "texture or sampler",
     "vertex layout", "constant blocks", "bones"};
 static _Thread_local struct { long taken, left[TK_REASONS], bytes; } tk;  /* bytes: our records' sizes */
 
@@ -932,8 +952,9 @@ static void add_ubo(TakeoverDraw *t, unsigned slot, unsigned stages, uint32_t of
 
 /* TK_DRAWN (0): ours is recorded; else the reason the draw stays the game's. */
 static int takeover(const CPUState *ctx) {
-    if (!takeover_on() || !takeover_frame() || (__atomic_load_n(&mode, __ATOMIC_ACQUIRE) != MODE_NATIVE && __atomic_load_n(&mode, __ATOMIC_ACQUIRE) != MODE_CHECK) ||
-        cur.kind != LAYER_GBUFFER)
+    int m = __atomic_load_n(&mode, __ATOMIC_ACQUIRE);
+    if (!takeover_on() || !takeover_frame() || (m != MODE_NATIVE && m != MODE_CHECK) ||
+        (cur.kind != LAYER_GBUFFER && strcmp(pass_name, "material")))
         return TK_OFF;
     if (!cur.game_drew || cur.layer_fresh) return TK_FIRST;
     if (!cur.item || !cur.have_world) return TK_ITEM;
@@ -946,7 +967,8 @@ static int takeover(const CPUState *ctx) {
     uint32_t cv = cbuf_slots(p->stages[0].key), cf = cbuf_slots(p->stages[1].key);
     uint64_t rows = local_rows(p);
     uint32_t tf = tex_slots(p->stages[1].key);
-    if (!rows || tex_slots(p->stages[0].key) || tf >> 9 & 1) return TK_READS;
+    if (!rows || tex_slots(p->stages[0].key)) return TK_READS;
+    if (effect_pass_count != 1) return TK_PASSES;
     /* instanced draws: the copies' count the model renderer left for the submesh draw (f_a75e90; the
      * other path, device+0x3230 set, draws split copies another way) */
     uint32_t instances = U32(cur.device + 0x45cc);
@@ -968,6 +990,20 @@ static int takeover(const CPUState *ctx) {
         if (!nt || !cb || !cb->trace_texpool || nt->pool_id < 0 || nt->pool_id >= cb->trace_texpool->count ||
             ((const NvnTexEntry *)cb->trace_texpool->entries)[nt->pool_id].guest != texs[k] ||
             !sampler_state(cur.item, k, ss))
+            return TK_TEXTURE;
+        t->tex_mask |= 1u << k;
+        t->tex_id[k] = (uint32_t)nt->pool_id;
+        sampler_desc(ss, &t->samp[k]);
+    }
+    /* the other fragment textures it reads (the scene's, the per-object reflection probe) */
+    for (unsigned k = ntex; k < TAKEOVER_TEXTURES; k++) {
+        if (!(tf >> k & 1)) continue;
+        uint8_t ss[15];
+        uint64_t g = slot_texture(k, ss);
+        if (!g) continue;  /* none: what the game bound stays */
+        const NvnTexture *nt = HOST(NvnTexture, g);
+        if (!nt || !cb || !cb->trace_texpool || nt->pool_id < 0 || nt->pool_id >= cb->trace_texpool->count ||
+            ((const NvnTexEntry *)cb->trace_texpool->entries)[nt->pool_id].guest != g)
             return TK_TEXTURE;
         t->tex_mask |= 1u << k;
         t->tex_id[k] = (uint32_t)nt->pool_id;
@@ -1088,6 +1124,7 @@ int gbuffer_submesh(const CPUState *ctx) {
     st.submeshes++;
     if (mode == MODE_CHECK && cur.have_world) {  /* what the takeover would use, for the checks */
         object_constants(NULL, cur.hook_object);
+        for (unsigned k = 0; k < TAKEOVER_TEXTURES; k++) cur.hook_tex[k] = slot_texture(k, cur.hook_samp[k]);
         uint64_t prev;
         if (cur.bones_size && bone_palette_previous(cur.item, &prev))
             memcpy(cur.hook_old_bones, (const void *)(uintptr_t)prev, cur.bones_size);
@@ -1136,6 +1173,8 @@ static void summary(void) {
             if (prog_st[i].rs_bytes[b]) fprintf(stderr, " %#x:%ld", b, prog_st[i].rs_bytes[b]);
         fprintf(stderr, "; vertex layouts %ld: ours %ld, other streams %ld", prog_st[i].vl_n, prog_st[i].vl_ok,
                 prog_st[i].vl_other);
+        fprintf(stderr, "; other textures %ld: ours %ld, samplers ours %ld", prog_st[i].st_n, prog_st[i].st_tex,
+                prog_st[i].st_samp);
         fprintf(stderr, "; model material %ld: ours %ld, rows differing:", prog_st[i].mm_n, prog_st[i].mm_ok);
         for (int row = 0; row < 22; row++)
             if (prog_st[i].mm_rows[row]) fprintf(stderr, " %d:%ld", row, prog_st[i].mm_rows[row]);
@@ -1319,6 +1358,25 @@ void gbuffer_check_draw(const NvnCmdBuf *cb, uint64_t index_addr, uint32_t type,
         }
         ((NvnCmdBuf *)cb)->bound_ub[0] = ((NvnCmdBuf *)cb)->bound_ub[1] = 0;
         ((NvnCmdBuf *)cb)->bound_tex[0] = ((NvnCmdBuf *)cb)->bound_tex[1] = 0;
+        /* the fragment textures beyond the material's (scene textures, the reflection probe), against the
+         * game's binding: texture and sampler, as captured at the hook */
+        if (p && cb->trace_texpool && cb->trace_samplerpool) {
+            uint64_t mt[8];
+            unsigned nmat = cur.item ? material_textures(cur.item, mt) : 0;
+            uint32_t reads = tex_slots(p->stages[1].key);
+            for (unsigned k = nmat; k < TAKEOVER_TEXTURES && k < TRACE_TEXTURES; k++) {
+                if (!(reads >> k & 1)) continue;
+                uint64_t h = cb->trace_tex[1][k];
+                uint32_t id = (uint32_t)(h & 0xFFFFF), sid = (uint32_t)(h >> 20);
+                if (!h || (int)id >= cb->trace_texpool->count || (int)sid >= cb->trace_samplerpool->count) continue;
+                NvnSamplerDesc ours, game = ((const NvnSamplerDesc *)cb->trace_samplerpool->entries)[sid];
+                sampler_desc(cur.hook_samp[k], &ours);
+                ours.reduction = game.reduction;
+                prog_st[l].st_n++;
+                prog_st[l].st_tex += ((const NvnTexEntry *)cb->trace_texpool->entries)[id].guest == cur.hook_tex[k];
+                prog_st[l].st_samp += !memcmp(&ours, &game, sizeof ours);
+            }
+        }
         /* the bone palettes, against vertex constants 4 (this frame's) and 5 (last frame's) the game bound */
         uint64_t prev;
         if (cur.bones_size && cb->trace_ub[0][4] && cur.item) {

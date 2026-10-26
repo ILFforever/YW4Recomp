@@ -264,7 +264,34 @@ slot is already in the executor's state: skipping those leaves ~3.2 KB per recor
 game work 12.31 → 11.48 ms, GPU 6.93 → 6.64 ms; the G-buffer's render thread 10.3% → 7.0% of a core (−32%), the
 other two render threads and the main thread lower too.
 
-A bug found on the way: the "off for this layer" reason had the value of "recorded", so in the first run the shadow
+**The material pass joins (texture 9 and every other fragment texture decoded).** The reflection probe (`in_texCube`,
+fragment slot 9) is chosen per object after our hook. The engine's slot holds the previous object's probe (right on
+93-94% of draws); write watches on the slot led through the draw callback to the texture binder and then to
+`f_966120`, which fills the engine's texture slots (`state+0x780 + 0x200×set + 0x10×slot`) from the **pending texture
+records** the model renderer left (`device+0x3808 + 0x300×set + 0x18×slot`; fragment set at `+0x3e08`), the same
+records material textures go through. So a fragment slot's texture is the pending record's view (its second word,
+when the record's int at `+8` is 0) or else the slot's view, the view's first word + 0x18 being the NVN texture; its
+sampler the slot's 15-byte state (`slot_texture`). Check mode, every fragment slot the programs read beyond the
+material's own (scene textures, the probe): textures and samplers equal on every draw (~3.4 million, two saves).
+
+The commit also loops over consecutive pass records (`u16 +6` of the chosen pass entry), one draw each; a material
+with more than one stays the game's (none met so far).
+
+With that, the takeover takes the lit material pass too (layer kind 0, keys 0..2): 85% of its draws in the
+schoolyard, 89% in the town walk; the rest read vertex-stage textures or draw split instances, or have a constant
+block too big for the record (0.8%). Check mode with the takeover on: every remaining game draw equal. Screenshots of
+alternating frames: the difference between neighbouring frames (ours and the game's) is the same share of motion as
+in a control run without the takeover (13-15%), and no object stands out as the trunks did.
+
+**Speed, honestly.** Town walk, 3 pairs: process CPU 73.6% → 73.3%, game work 11.62 → 11.83 ms, GPU 6.81 → 7.30 ms:
+no gain this time, against −3.7 points for the G-buffer alone an hour earlier; between sessions the same setting
+moves 2-3 points, so single comparisons of this size are noise. The sampling profile of the threads that submit GPU
+work, same walk with and without: the engine's per-draw functions halve (`f_974cd0` 0.6 → 0.3% of samples,
+`f_965880`, `f_965eb0`, `f_966120`, `f_976ab0`, `f_975540`, `f_976730` down too), our hook adds 0.2%, the
+renderer's walk (`f_a45890`, kept) 2.1-2.3%; game code in all 7.1% both ways. The per-draw state work the takeover
+removes was ~1% of these threads' samples; the threads wait ~90% of the time and the frame follows the main thread.
+So the takeover is for owning the draws (what decision 0026 said of the hybrid), and the CPU left on the render
+threads is the renderer's own walk: step 2. so in the first run the shadow
 and material layers' draws were skipped with nothing in their place. The per-pass counters showed it at once.
 
 ## Alternatives
