@@ -151,6 +151,23 @@ saves: attribute states and strides equal the bound ones on every draw (~4.4 mil
 another stream. Self-test (every offset +4): no draw matches. (A lesson from that self-test: a run that fails to
 start leaves the previous log as the newest; the runs now check that a new log appeared.)
 
+**Last frame's matrices and bones (motion vectors).** Constants 2 are now ours in every row:
+
+- last frame's world (rows 12-15) is this frame's world on every draw checked, walking characters too (they move
+  through their bones); its bottom row is copied from the record (the game has -0 there on some objects, a last-bit
+  difference otherwise);
+- last frame's view × world (rows 16-19) is the renderer's record `+0x240`, which **the engine writes during its
+  commit**, after our hook: read before the commit it was wrong on ~2% of G-buffer draws (the skinned ones and a few
+  others). Our draws read it when the draw is recorded, after the commit. A draw that skips the commit has to compute
+  it, or stay with the game while its program reads rows 16-19 (open);
+- last frame's bones (constants 5) are the palette before the newest, on 99.6% of skinned draws; the rest have the
+  newest there too (not decoded; it only touches motion vectors).
+
+The check counts material constants only in the stages whose shader reads their slot (the shader's `.iface`); the
+other stage keeps an older block bound. Summary over four saves, every layer kind: constants 2, material constants,
+textures, samplers, effect, programs, bones, render state, NVN state and vertex layout equal the game's on every
+draw; last frame's bones on 99.6% of skinned draws.
+
 ## Alternatives
 
 - **Selection first.** Removes the walk, but needs the rules that the shadow streaks showed we don't have, and

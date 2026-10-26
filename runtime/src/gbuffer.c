@@ -107,6 +107,45 @@ static uint64_t read_local_rows(uint64_t vs) {
     return local && !(rows >> LOCAL_ROWS) ? rows : 0;
 }
 
+/* The constant buffer slots a translated shader reads (its .iface "r <slot> <rows>" lines), as a
+ * bit mask; remembered per shader. */
+static uint32_t read_cbuf_slots(uint64_t key) {
+    char path[1024], line[256];
+    snprintf(path, sizeof path, "%s/%016" PRIx64 ".iface", shader_dir(), key);
+    FILE *f = fopen(path, "r");
+    if (!f) return 0;
+    uint32_t mask = 0;
+    while (fgets(line, sizeof line, f)) {
+        unsigned slot;
+        if (line[0] == 'r' && sscanf(line + 1, "%u", &slot) == 1 && slot < 32) mask |= 1u << slot;
+    }
+    fclose(f);
+    return mask;
+}
+static uint32_t cbuf_slots(uint64_t key) {
+    enum { SLOTS = 1 << 12 };
+    static struct { uint64_t key; uint32_t mask; } seen[SLOTS];  /* mask | 1 << 31 once read */
+    uint32_t h = (uint32_t)(key * 0x9E3779B97F4A7C15ull >> 52);
+    for (uint32_t i = 0; i < SLOTS; i++, h = (h + 1) & (SLOTS - 1)) {
+        uint64_t k = __atomic_load_n(&seen[h].key, __ATOMIC_ACQUIRE);
+        if (k == key) {
+            uint32_t m = __atomic_load_n(&seen[h].mask, __ATOMIC_ACQUIRE);
+            if (m) return m & ~(1u << 31);
+            break;
+        }
+        if (!k) {
+            uint64_t zero = 0;
+            if (!__atomic_compare_exchange_n(&seen[h].key, &zero, key, 0, __ATOMIC_ACQ_REL, __ATOMIC_ACQUIRE) &&
+                zero != key)
+                continue;
+            uint32_t m = read_cbuf_slots(key);
+            __atomic_store_n(&seen[h].mask, m | 1u << 31, __ATOMIC_RELEASE);
+            return m;
+        }
+    }
+    return read_cbuf_slots(key);
+}
+
 /* The same, remembered per program (the render threads ask before every model draw). */
 static uint64_t local_rows(const NvnProgram *p) {
     enum { SLOTS = 1 << 11 };
@@ -211,6 +250,8 @@ static _Thread_local struct {
     uint64_t object, geometry, submesh;
     uint64_t sp, ret;  /* the model renderer's stack and which of its two call sites */
     float world[12];   /* the renderer's world for this draw ([sp+0x30]+0x40), read at the hook */
+    float world_row3[4];  /* ... its bottom row as the game stores it (0 0 0 1, sometimes with -0), +0x70 */
+    float old_vw[16];  /* last frame's view x world, 4x4 ([sp+0x30]+0x240) */
     int have_world;
     uint64_t list;     /* the layer's draw list */
     uint64_t item;     /* the draw item (0x48 bytes) of this submesh, 0 if not found */
@@ -261,14 +302,14 @@ static _Thread_local struct {
 enum { PROGRAM_STATS = 96 };
 static _Thread_local struct {
     uint64_t vs;
-    long n, exact, ib, item, mat_n, mat_ok[2];
+    long n, exact, ib, item, mat_n, mat_ok[2], mat_read, mat_any;
     long tex_n, tex_ok, tex_other, tex_unknown;  /* material textures: ours bound at slot k, another, not decoded */
     long smp_n, smp_state, smp_desc;             /* their samplers: our state = the engine's, our settings = bound */
     long rs_ok, rs_bytes[33];                    /* render state block = the engine's; draws where byte i differs */
     long pg_n, pg_eff, pg_stages;                /* shader effect ours; vertex and fragment programs ours */
     long vl_n, vl_ok, vl_other;                  /* vertex layouts: ours = the bound attributes and strides; other streams */
     long nv_ok, nv_regions[8];                   /* NVN state objects = the engine's; draws where each part differs */
-    long bn_n, bn_hook, bn_late;                 /* bone palettes bound: = ours (the newest), = the one before */
+    long bn_n, bn_hook, bn_old_n, bn_late;       /* bone palettes: this frame's ours; last frame's ours */
 } prog_st[PROGRAM_STATS];
 /* game: the game's bound vertex constants 2, for last frame's rows */
 static void object_constants(const float *game, float out[GBUFFER_OBJECT_FLOATS]);
@@ -589,7 +630,8 @@ static int bone_palette(uint64_t item, uint64_t *data, uint32_t *size) {
     return *size && *size % 48 == 0 && *size <= 3 * 256 * 16;
 }
 
-/* The palette before the newest (for the check: the game's copy is one of the two). */
+/* Last frame's bones (vertex constants 5, for motion vectors): the palette before the newest; on
+ * 0.5% of skinned draws the game binds the newest there too (not decoded). */
 static int bone_palette_previous(uint64_t item, uint64_t *data) {
     uint64_t model = U64(item + 8), hdr = U64(cur.geometry + 0x18);
     uint64_t subs = hdr + 4ull * U16(hdr + 0xa) + 4ull * U16(hdr + 0x60);
@@ -725,6 +767,8 @@ void gbuffer_submesh(const CPUState *ctx) {
     cur.object = U64(ctx->sp + 0x390), cur.geometry = ctx->x[1], cur.submesh = ctx->x[2];
     cur.sp = ctx->sp, cur.ret = ret;
     cur.have_world = gbuffer_hook_world(ctx, cur.world);
+    if (cur.have_world)
+        memcpy(cur.world_row3, (const void *)(uintptr_t)(U64(ctx->sp + 0x30) + 0x70), sizeof cur.world_row3);
     cur.item = find_item(ctx->sp, ret == 0xa4c2d0);
     /* the layer's render state: the model renderer saved the block (the newest of its 0x21-byte
      * copies at device+0xefb, byte device+0x4630 of them) before this first submesh's material
@@ -762,16 +806,16 @@ static void summary(void) {
             st.ib_bad[1]);
     for (int i = 0; i < PROGRAM_STATS && prog_st[i].n; i++)
         fprintf(stderr, "yw4: %s:   vs %016" PRIx64 ": %ld draws, constants 2 bit-identical %ld, index buffer"
-                " ours %ld; draw item found %ld, material constants %ld: ours bound in vs %ld, fs %ld; textures %ld:"
+                " ours %ld; draw item found %ld, material constants %ld: ours bound in vs %ld, fs %ld; read %ld, ours %ld; textures %ld:"
                 " ours bound %ld, another %ld, not decoded %ld; samplers %ld: state ours %ld, settings ours %ld\n",
                 pass_name, prog_st[i].vs, prog_st[i].n, prog_st[i].exact, prog_st[i].ib, prog_st[i].item,
-                prog_st[i].mat_n, prog_st[i].mat_ok[0], prog_st[i].mat_ok[1], prog_st[i].tex_n, prog_st[i].tex_ok,
+                prog_st[i].mat_n, prog_st[i].mat_ok[0], prog_st[i].mat_ok[1], prog_st[i].mat_read, prog_st[i].mat_any, prog_st[i].tex_n, prog_st[i].tex_ok,
                 prog_st[i].tex_other, prog_st[i].tex_unknown, prog_st[i].smp_n, prog_st[i].smp_state,
                 prog_st[i].smp_desc);
     for (int i = 0; i < PROGRAM_STATS && prog_st[i].n; i++) {
-        fprintf(stderr, "yw4: %s:   vs %016" PRIx64 ": effect ours %ld of %ld, programs ours %ld; bones %ld: ours %ld, one step behind %ld; render state ours %ld of %ld; bytes differing:", pass_name,
+        fprintf(stderr, "yw4: %s:   vs %016" PRIx64 ": effect ours %ld of %ld, programs ours %ld; bones %ld: ours %ld, last frame's %ld: ours %ld; render state ours %ld of %ld; bytes differing:", pass_name,
                 prog_st[i].vs, prog_st[i].pg_eff, prog_st[i].pg_n, prog_st[i].pg_stages, prog_st[i].bn_n, prog_st[i].bn_hook,
-                prog_st[i].bn_late, prog_st[i].rs_ok, prog_st[i].item);
+                prog_st[i].bn_old_n, prog_st[i].bn_late, prog_st[i].rs_ok, prog_st[i].item);
         for (int b = 0; b < 33; b++)
             if (prog_st[i].rs_bytes[b]) fprintf(stderr, " %#x:%ld", b, prog_st[i].rs_bytes[b]);
         fprintf(stderr, "; vertex layouts %ld: ours %ld, other streams %ld", prog_st[i].vl_n, prog_st[i].vl_ok,
@@ -901,15 +945,16 @@ void gbuffer_check_draw(const NvnCmdBuf *cb, uint64_t index_addr, uint32_t type,
                             ours.max_aniso);
             }
         }
-        /* the bone palette, against the vertex constants 4 the game bound: ours (the newest, read at the
-         * hook), or the one before it (the game read +0x118 before the animation moved it) */
+        /* the bone palettes, against vertex constants 4 (this frame's) and 5 (last frame's) the game bound */
         uint64_t prev;
         if (cur.bones_size && cb->trace_ub[0][4] && cur.item) {
-            const void *game = (const void *)(uintptr_t)cb->trace_ub[0][4];
             prog_st[l].bn_n++;
-            if (!memcmp(cur.bones, game, cur.bones_size)) prog_st[l].bn_hook++;
-            else if (bone_palette_previous(cur.item, &prev) && !memcmp((const void *)(uintptr_t)prev, game, cur.bones_size))
-                prog_st[l].bn_late++;
+            prog_st[l].bn_hook += !memcmp(cur.bones, (const void *)(uintptr_t)cb->trace_ub[0][4], cur.bones_size);
+            if (cb->trace_ub[0][5] && bone_palette_previous(cur.item, &prev)) {
+                prog_st[l].bn_old_n++;
+                prog_st[l].bn_late += !memcmp((const void *)(uintptr_t)prev, (const void *)(uintptr_t)cb->trace_ub[0][5],
+                                              cur.bones_size);
+            }
         }
         /* the shader effect, the program and the render state block, against the engine's at the draw */
         if (cur.item) {
@@ -964,9 +1009,15 @@ void gbuffer_check_draw(const NvnCmdBuf *cb, uint64_t index_addr, uint32_t type,
         unsigned slot = U16(cur.list + 0x7a);
         if (cur.item && slot < 16 && material_constants(cur.item, mat)) {
             prog_st[l].mat_n++;
-            for (int stage = 0; stage < 2; stage++)
-                prog_st[l].mat_ok[stage] += cb->trace_ub[stage][slot] &&
-                                            !memcmp((const void *)(uintptr_t)cb->trace_ub[stage][slot], mat, 0x80);
+            int reads = 0, eq_all = 1;
+            for (int stage = 0; stage < 2; stage++) {
+                int eq = cb->trace_ub[stage][slot] && !memcmp((const void *)(uintptr_t)cb->trace_ub[stage][slot], mat, 0x80);
+                prog_st[l].mat_ok[stage] += eq;
+                /* only the stages whose shader reads the slot: the other may hold an older block */
+                if (p && cbuf_slots(p->stages[stage].key) >> slot & 1) reads = 1, eq_all &= eq;
+            }
+            prog_st[l].mat_read += reads;
+            prog_st[l].mat_any += reads && eq_all;
         }
         prog_st[l].item += cur.item != 0;
         uint64_t bufs = U64(cur.geometry + 0x20);
@@ -1083,8 +1134,12 @@ static void native_summary(void) {
 }
 
 /* Vertex constants 2 (the local matrix block) for the submesh noted last: the renderer's world,
- * view x world, projection x view x world; last frame's two from the game's bound block. */
+ * view x world, projection x view x world; last frame's world is this frame's (on every draw checked,
+ * walking characters too: they move through their bones), with the record's own bottom row (-0
+ * where the game has it); last frame's view x world is the renderer's record's +0x240, which the
+ * engine writes at the commit (after our hook): read when the draw is recorded. */
 static void object_constants(const float *game, float out[GBUFFER_OBJECT_FLOATS]) {
+    (void)game;
     Mat4 w = {{0}};
     memcpy(w.m, cur.world, sizeof cur.world);
     w.m[15] = 1;
@@ -1096,7 +1151,10 @@ static void object_constants(const float *game, float out[GBUFFER_OBJECT_FLOATS]
     memcpy(out, w.m, sizeof w.m);
     memcpy(out + 16, vw.m, sizeof vw.m);
     memcpy(out + 32, wvp.m, sizeof wvp.m);
-    memcpy(out + 4 * OUR_ROWS, game + 4 * OUR_ROWS, 16 * (LOCAL_ROWS - OUR_ROWS));
+    memcpy(out + 48, cur.world, sizeof cur.world);
+    memcpy(out + 60, cur.world_row3, sizeof cur.world_row3);
+    memcpy(cur.old_vw, (const void *)(uintptr_t)(U64(cur.sp + 0x30) + 0x240), sizeof cur.old_vw);
+    memcpy(out + 64, cur.old_vw, sizeof cur.old_vw);
 }
 
 int gbuffer_take_draw(CPUState *ctx, const NvnCmdBuf *cb, int indexed, int instanced) {
