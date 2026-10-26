@@ -81,6 +81,32 @@ Check mode, four saves, all layer kinds: **all 6.1 million samplers** equal the 
 settings equal the bound sampler's field for field. The layer defaults are still read from the engine's state (set
 once per layer, not per draw).
 
+**Render state: decoded as a block (`render_state`, `effect_id`, `effect_pass`, `draw_state` in `gbuffer.c`).** The
+engine keeps the draw's fixed-function state in a 33-byte block (`device+0xeb9`), one byte per field, and turns
+changed fields into NVN state at the commit through a table of handlers (`main+0x14d23b0`, one per field; e.g.
+`f_979a90` for fields 4-7 and 9: depth test, depth write, depth compare function, stencil). A draw's block is:
+
+1. **The layer's block**, after the layer's own setup (the model renderer sets some fields at its start, and the
+   shadow and material layers push one of their own): the newest of the engine's saved copies
+   (`device+0xefb + 0x21×(level-1)`, level = byte `device+0x4630`) at the layer's first submesh.
+2. **The material's pairs**: `(field, value)` bytes, material record `+4` start and `+0xb` count, in the geometry
+   header blob at `4×(u16 +0xa + u16 +0x6c)`. Setting field 20 without 21 and 22 while field 0x14 is 2 also sets
+   0x15 = 1 and 0x16 = 2. In G-buffer and shadow layers they count only if they leave field 5 (depth write) set,
+   and then field 0x10 is cleared. The engine restores the block after each draw.
+3. **The shader pass's pairs.** The material names a **shader effect** (id: per-object overrides in the model
+   record's `+0xe8` table, else the model record's `+0x110` table at the submesh's byte `+0x42`). The commit
+   (`f_977e30`) picks the effect's pass whose key is the layer's pass key (`device+0x45d4`) and applies that pass's
+   own pairs. This is where the material pass gets depth compare "equal" for alpha-tested materials (found with a
+   write watch on the field: the only other write was the layer setup). The same pass record also picks the
+   programs (next).
+4. **The device's settings** at the commit (`f_9759d0`): `+0x4629` flips the cull face, `+0x462a` and `+0x462b`
+   clear fields 5 and 0x10, `+0x462d` raises field 0x1c.
+
+Check mode, four saves, all layer kinds, ~4.9 million draws: **every draw's block equals the engine's**, and every
+effect id always names the same effect object. Still from the engine: the effect object itself (looked up by id
+through a resource manager, `main+0x58656e8`; the id → effect relation is fixed, so a table can replace the
+lookup), and the conversion of the block to NVN state (the handlers; we read the NVN state the game binds).
+
 ## Alternatives
 
 - **Selection first.** Removes the walk, but needs the rules that the shadow streaks showed we don't have, and

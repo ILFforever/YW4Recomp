@@ -208,6 +208,9 @@ static _Thread_local struct {
     int have_world;
     uint64_t list;     /* the layer's draw list */
     uint64_t item;     /* the draw item (0x48 bytes) of this submesh, 0 if not found */
+    uint8_t kind;      /* the layer's kind */
+    uint8_t layer_state[33];  /* the render state block (device+0xeb9) after the layer's own setup */
+    int layer_fresh;          /* no submesh of the layer seen yet */
 } cur;
 
 /* host_readable is a system call: remember the answer per 64 KiB block */
@@ -252,6 +255,8 @@ static _Thread_local struct {
     long n, exact, ib, item, mat_n, mat_ok[2];
     long tex_n, tex_ok, tex_other, tex_unknown;  /* material textures: ours bound at slot k, another, not decoded */
     long smp_n, smp_state, smp_desc;             /* their samplers: our state = the engine's, our settings = bound */
+    long rs_ok, rs_bytes[33];                    /* render state block = the engine's; draws where byte i differs */
+    long ef_n, ef_same;                          /* effect ids: the effect the engine uses is the one seen before for it */
 } prog_st[PROGRAM_STATS];
 /* game: the game's bound vertex constants 2, for last frame's rows */
 static void object_constants(const float *game, float out[GBUFFER_OBJECT_FLOATS]);
@@ -304,6 +309,8 @@ void gbuffer_layer_start(const CPUState *ctx) {
     pass_name = U8(item + 8) == LAYER_GBUFFER ? "gbuffer" : material_layer(item) ? "material"
                 : shadow_layer(item)          ? "shadow"  : "stages";
     cur.device = ctx->x[0], cur.list = ctx->x[1];
+    cur.kind = U8(item + 8);
+    cur.layer_fresh = 1;
     /* the camera's projection and view in the render state (the shadow cascades' jobs put theirs
      * at the same offsets on their own thread) */
     Mat4 proj = mat4_load(cur.device + 0x280), view = mat4_load(cur.device + 0x2c0);
@@ -459,6 +466,84 @@ static void sampler_desc(const uint8_t s[15], NvnSamplerDesc *d) {
     d->compare_mode = s[0xa] != 0, d->compare_func = s[0xa] ? s[0xa] : 8;
 }
 
+/* The render state block (33 bytes, device+0xeb9) at a submesh's draw (decision 0030). The model
+ * renderer saves the block before each material and restores it after the draw, so the block a
+ * draw sees is the layer's plus the material's own entries: (id, value) byte pairs, the material
+ * record's +4 (start) and +0xb (count), in the geometry header blob at 4 x (u16 +0xa + u16 +0x6c).
+ * Setting id 20 without 21 and 22 while byte 0x14 is 2 also sets bytes 0x15 = 1 and 0x16 = 2. In
+ * the G-buffer and shadow layers (kinds 2 and 1) a material's entries count only when they leave
+ * byte 5 set, and then byte 0x10 is cleared. */
+static void render_state(uint64_t item, uint8_t out[33]) {
+    memcpy(out, cur.layer_state, 33);
+    uint64_t rec = U64(item + 0x18) + 16ull * U8(cur.submesh + 0x43), blob = U64(U64(item) + 0x18);
+    if (!guest_ptr(blob)) return;
+    uint64_t pairs = blob + 4ull * (U16(blob + 0xa) + U16(blob + 0x6c)) + 2ull * U16(rec + 4);
+    uint32_t set = 0;
+    for (unsigned i = 0; i < U8(rec + 0xb); i++) {
+        unsigned id = U8(pairs + 2 * i);
+        if (!id || id >= 33) continue;
+        out[id] = U8(pairs + 2 * i + 1);
+        set |= 1u << id;
+    }
+    if ((set >> 20 & 1) && !(set & 0x600000) && out[0x14] == 2) out[0x15] = 1, out[0x16] = 2;
+    if (cur.kind == LAYER_SHADOW || cur.kind == LAYER_GBUFFER) {
+        if (!out[5]) memcpy(out, cur.layer_state, 33);
+        else out[0x10] = 0;
+    }
+}
+
+/* The material's shader effect id (decision 0030): per object overrides first (model record +0xe8,
+ * u16 +0x20a of them, 0x18 bytes: u16 +0x10 the submesh, u16 +0x12 the id), else the model
+ * record's table (+0x110) at the submesh's byte +0x42. The engine looks the effect up by it. */
+static unsigned effect_id(uint64_t item) {
+    uint64_t model = U64(item + 8), ov = U64(model + 0xe8);
+    unsigned sub = U16(item + 0x40);
+    for (unsigned i = 0; ov && i < U16(model + 0x20a); i++)
+        if (U16(ov + 0x18ull * i + 0x10) == sub) return U16(ov + 0x18ull * i + 0x12);
+    return U16(U64(model + 0x110) + 2ull * U8(cur.submesh + 0x42));
+}
+
+/* The effect's pass for this layer (f_977e30): the passes (+0x30, 8 bytes: key, u16 record) whose
+ * key is the layer's pass key (device+0x45d4); the (device+0x45d0 + 1)-th of them, or the first;
+ * with none, the pass with the engine's default key (main+0x5865650) if device+0x4628 is set.
+ * Returns the pass record (+0x38, 0x10 bytes) or 0. */
+static uint64_t effect_pass(uint64_t effect) {
+    static uint64_t base;
+    if (!base)
+        for (size_t i = 0; i < yw4_ncode; i++)
+            if (!strcmp(yw4_code[i].name, "main")) base = *yw4_code[i].base;
+    uint64_t passes = U64(effect + 0x30);
+    unsigned n = U8(effect + 0x48), sel = 0xffff, matches = 0;
+    if (!passes) return 0;
+    for (unsigned i = 0; i < n; i++)
+        if (U32(passes + 8ull * i) == U32(cur.device + 0x45d4)) {
+            if (++matches > U32(cur.device + 0x45d0)) { sel = i; break; }
+            if (sel == 0xffff) sel = i;
+        }
+    if (sel == 0xffff && U8(cur.device + 0x4628))
+        for (unsigned i = 0; i < n && sel == 0xffff; i++)
+            if (U32(passes + 8ull * i) == U32(base + 0x5865650)) sel = i;
+    return sel == 0xffff ? 0 : U64(effect + 0x38) + 0x10ull * U16(passes + 8ull * sel + 4);
+}
+
+/* The render state block the draw is made with: the material's (render_state), then the effect
+ * pass's own (id, value) pairs (record +0xc of them from u16 +0xa, in the effect's +0x40), then what
+ * the commit (f_9759d0) changes by the device's settings: +0x4629 flips the cull face (byte 0x1b
+ * 1 <-> 2), +0x462a clears byte 5, +0x462b byte 0x10, +0x462d adds to byte 0x1c (up to 0xff). */
+static void draw_state(uint64_t item, uint64_t effect, uint8_t out[33]) {
+    render_state(item, out);
+    uint64_t pass = effect ? effect_pass(effect) : 0;
+    for (unsigned i = 0; pass && i < U8(pass + 0xc); i++) {
+        uint64_t p = U64(effect + 0x40) + 2ull * (U16(pass + 0xa) + i);
+        if (U8(p) < 33) out[U8(p)] = U8(p + 1);
+    }
+    if (U8(cur.device + 0x4629) && out[0x1b]) out[0x1b] = out[0x1b] == 1 ? 2 : 1;
+    if (U8(cur.device + 0x462a)) out[5] = 0;
+    if (U8(cur.device + 0x462b)) out[0x10] = 0;
+    unsigned add = U8(cur.device + 0x462d);
+    if (add && out[0x1c] != 0xff) out[0x1c] = (uint8_t)(out[0x1c] + (add < (uint8_t)~out[0x1c] ? add : (uint8_t)~out[0x1c]));
+}
+
 void gbuffer_disarm(void) { cur.armed = 0; }
 
 int gbuffer_hook_world(const CPUState *ctx, float out[12]) {
@@ -481,6 +566,15 @@ void gbuffer_submesh(const CPUState *ctx) {
     cur.sp = ctx->sp, cur.ret = ret;
     cur.have_world = gbuffer_hook_world(ctx, cur.world);
     cur.item = find_item(ctx->sp, ret == 0xa4c2d0);
+    /* the layer's render state: the model renderer saved the block (the newest of its 0x21-byte
+     * copies at device+0xefb, byte device+0x4630 of them) before this first submesh's material
+     * changed it; the shadow and material layers have pushed one of their own before that */
+    unsigned level = U8(cur.device + 0x4630);
+    if (cur.layer_fresh && level) {
+        memcpy(cur.layer_state, (const void *)(uintptr_t)(cur.device + 0xefb + 0x21ull * (level - 1)),
+               sizeof cur.layer_state);
+        cur.layer_fresh = 0;
+    }
     cur.armed = 1;
     st.submeshes++;
 }
@@ -509,6 +603,13 @@ static void summary(void) {
                 prog_st[i].mat_n, prog_st[i].mat_ok[0], prog_st[i].mat_ok[1], prog_st[i].tex_n, prog_st[i].tex_ok,
                 prog_st[i].tex_other, prog_st[i].tex_unknown, prog_st[i].smp_n, prog_st[i].smp_state,
                 prog_st[i].smp_desc);
+    for (int i = 0; i < PROGRAM_STATS && prog_st[i].n; i++) {
+        fprintf(stderr, "yw4: %s:   vs %016" PRIx64 ": effect id consistent %ld of %ld; render state ours %ld of %ld; bytes differing:", pass_name,
+                prog_st[i].vs, prog_st[i].ef_same, prog_st[i].ef_n, prog_st[i].rs_ok, prog_st[i].item);
+        for (int b = 0; b < 33; b++)
+            if (prog_st[i].rs_bytes[b]) fprintf(stderr, " %#x:%ld", b, prog_st[i].rs_bytes[b]);
+        fprintf(stderr, "\n");
+    }
     memset(prog_st, 0, sizeof prog_st);
     for (int i = 0; i < SOURCES; i++)
         if (sources[i].n)
@@ -628,6 +729,26 @@ void gbuffer_check_draw(const NvnCmdBuf *cb, uint64_t index_addr, uint32_t type,
                             ours.compare_mode, ours.compare_func, ours.lod_min, ours.lod_max, ours.lod_bias,
                             ours.max_aniso);
             }
+        }
+        /* the render state block, against the engine's at the draw */
+        if (cur.item) {
+            uint8_t rs[33];
+            uint64_t effect = U64(cur.device + 0x27a0);
+            draw_state(cur.item, effect, rs);
+            {  /* the effect id names one effect: the one the engine looked up for it before */
+                enum { IDS = 4096 };
+                static uint64_t seen[IDS];
+                unsigned id = effect_id(cur.item);
+                prog_st[l].ef_n++;
+                if (id < IDS) {
+                    uint64_t old = __atomic_exchange_n(&seen[id], effect, __ATOMIC_RELAXED);
+                    prog_st[l].ef_same += !old || old == effect;
+                }
+            }
+            int same = 1;
+            for (int b = 0; b < 33; b++)
+                if (rs[b] != U8(cur.device + 0xeb9 + b)) prog_st[l].rs_bytes[b]++, same = 0;
+            prog_st[l].rs_ok += same;
         }
         /* the material constants, against what the game bound at the draw list's slot (+0x7a) */
         uint8_t mat[0x80];
