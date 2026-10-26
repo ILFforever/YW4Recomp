@@ -896,14 +896,15 @@ static const char *const tk_reason[TK_REASONS] = {
     "", "off", "first draw of the layer", "no draw item or world", "not triangles", "program not known",
     "reads texture 9 or vertex textures, or split instances", "texture or sampler",
     "vertex layout", "constant blocks", "bones"};
-static _Thread_local struct { long taken, left[TK_REASONS]; } tk;
+static _Thread_local struct { long taken, left[TK_REASONS], bytes; } tk;  /* bytes: our records' sizes */
 
 static void takeover_summary(void) {
     static _Thread_local uint64_t last;
     uint64_t frame = __atomic_load_n(&yw4_frames_presented, __ATOMIC_RELAXED);
     if (frame < last + 300) return;
     last = frame;
-    fprintf(stderr, "yw4: takeover: %s: %ld draws ours; the game's:", pass_name, tk.taken);
+    fprintf(stderr, "yw4: takeover: %s: %ld draws ours (%ld bytes each); the game's:", pass_name, tk.taken,
+            tk.taken ? tk.bytes / tk.taken : 0);
     for (int i = TK_FIRST; i < TK_REASONS; i++)
         if (tk.left[i]) fprintf(stderr, " %s %ld;", tk_reason[i], tk.left[i]);
     fprintf(stderr, "\n");
@@ -1033,12 +1034,16 @@ static int takeover(const CPUState *ctx) {
             uint64_t slot = cur.device + 13000 + 0x150ull * (st ? 2 : 0) + 0x18ull * (unsigned)sl, b = U64(slot);
             uint32_t size = U32(slot + 8);
             if (!guest_ptr(b) || !U64(b + 0x40) || !size) continue;
+            /* already bound as it is (not a per-draw copy, and the command buffer's last binding of the
+             * slot): the executor's state has it, nothing to copy */
+            if (!U8(slot + 0x15) && cb && cb->trace_ub[st][sl] == U64(b + 0x40) + U32(b + 0x58)) continue;
             if (size > 0x10000 || t->nubo == TAKEOVER_UBOS || at + size > sizeof buf) return TK_CONSTANTS;
             memcpy(buf + at, (const void *)(uintptr_t)(U64(b + 0x40) + U32(b + 0x58)), size);
             add_ubo(t, (unsigned)sl, st ? 2u : 1u, at, size);
             at += (size + 15) & ~15u;
         }
     nvn_record_native(ctx, U64(cur.device + 0x10d0) + 0xd8, gpu_takeover_draw, buf, at);
+    tk.bytes += at;
     return TK_DRAWN;
 }
 

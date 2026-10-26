@@ -235,6 +235,35 @@ periodic summaries after loading, since runs stopped by the time limit write no 
 29% less; the others within a point. This is the engine's per-draw state work for ~70% of one pass's draws; the
 material pass (blocked by constants 12) and the shadow layers are bigger.
 
+**Extended (b483776): every constant block, instancing, last frame's view × world.**
+
+- Last frame's view × world is the device's derived matrix 10 (`f_977680`, a lazily computed matrix cache at
+  `[device+0xe90] + (n-7)×0x40`, dirty bits at `device+18000`; our "record" is that cache): last frame's view (the
+  device's matrix 4, `+0x380`) times last frame's world (matrix 6: this frame's). Computed at the hook, bit-identical
+  on every draw checked (found with a write watch on record `+0x240`: the writer was `f_976730`, the commit's builder
+  of the local matrix block).
+- The commit's constant uploads (`f_965eb0`) bind, per stage set (vertex 0, fragment 2) and slot 0-13, the buffer
+  object the model renderer left pending (`device+13000 + 0x150×set + 0x18×slot`, size at `+8`), copying it when the
+  slot's flag `+0x15` is set: the fresh address of constants 12 on every draw is that copy. The pending block equals
+  the bound one by contents on every draw checked (constants 10, 11, 12). A takeover draw now copies the pending block
+  of every slot its shaders read except the ones it builds.
+- Two faults found with alternating-frame dumps and difference maps (red: ours against the game's; green: the game
+  against itself), each class switched off in turn: the characters' rim term (fragment constants 9, the rim settings,
+  bound by the commit: our draw had inherited an older block) and the instanced props (tree trunks, a wall): the
+  executor drew one instance; the count the renderer leaves (`device+0x45cc`) equals the game's draw on every draw.
+  Check mode with the takeover on found no fault in the game's own remaining draws (the engine's caches stay right).
+- Check mode now compares constants 2 and last frame's bones as captured at the hook (what a takeover draw uses).
+
+G-buffer draws ours: 86% (schoolyard), 89% (town walk), 91% (late-game forest), 93% (evening town); left: texture 9
+or vertex-stage textures or split instances, and the first draw of each layer. Alternating frames: ours against the
+game's no further apart than the game against itself.
+
+Copying every pending block cost what skipping the engine saved (town walk, 3 pairs: 77.8% against 75.3% process
+CPU). A block that is not a per-draw copy (slot flag `+0x15` clear) and is what the command buffer bound last for the
+slot is already in the executor's state: skipping those leaves ~3.2 KB per record. Then: process CPU 76.0% → 72.3%,
+game work 12.31 → 11.48 ms, GPU 6.93 → 6.64 ms; the G-buffer's render thread 10.3% → 7.0% of a core (−32%), the
+other two render threads and the main thread lower too.
+
 A bug found on the way: the "off for this layer" reason had the value of "recorded", so in the first run the shadow
 and material layers' draws were skipped with nothing in their place. The per-pass counters showed it at once.
 
