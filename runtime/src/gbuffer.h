@@ -58,7 +58,7 @@ void gpu_gbuffer_draw(void *vk_cb, void *gpu_state, const void *data, uint32_t s
 /* The takeover (decision 0030, YW4_TAKEOVER=1 with YW4_GBUFFER=native): a draw of ours made at the
  * submesh-draw hook from the game's data alone, in place of the engine's state work and draw. The
  * blocks of constants follow the record (ubo[i].offset from its start). */
-enum { TAKEOVER_TEXTURES = 8, TAKEOVER_UBOS = 4 };
+enum { TAKEOVER_TEXTURES = 8, TAKEOVER_UBOS = 32 };
 typedef struct {
     GBufferDraw d;                  /* buffers, indices, vertex constants 2 */
     uint64_t program, vs_code, fs_code;  /* the guest NVNprogram, and the code it must still have */

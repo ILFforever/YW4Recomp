@@ -325,7 +325,9 @@ static _Thread_local struct {
     uint64_t sp, ret;  /* the model renderer's stack and which of its two call sites */
     float world[12];   /* the renderer's world for this draw ([sp+0x30]+0x40), read at the hook */
     float world_row3[4];  /* ... its bottom row as the game stores it (0 0 0 1, sometimes with -0), +0x70 */
-    float old_vw[16];  /* last frame's view x world, 4x4 ([sp+0x30]+0x240) */
+    /* check mode: what a takeover draw would use, captured at the hook (before the engine's commit) */
+    float hook_object[GBUFFER_OBJECT_FLOATS];  /* constants 2 */
+    uint8_t hook_old_bones[3 * 256 * 16];      /* last frame's bones */
     int have_world;
     uint64_t list;     /* the layer's draw list */
     uint64_t item;     /* the draw item (0x48 bytes) of this submesh, 0 if not found */
@@ -892,8 +894,8 @@ enum { TK_DRAWN, TK_OFF, TK_FIRST, TK_ITEM, TK_PRIMITIVE, TK_PROGRAM, TK_READS, 
        TK_REASONS };
 static const char *const tk_reason[TK_REASONS] = {
     "", "off", "first draw of the layer", "no draw item or world", "not triangles", "program not known",
-    "reads per-object data (constants 10-12, texture 9, rows 16-19, vertex textures)", "texture or sampler",
-    "vertex layout", "material constants", "bones"};
+    "reads texture 9 or vertex textures, or split instances", "texture or sampler",
+    "vertex layout", "constant blocks", "bones"};
 static _Thread_local struct { long taken, left[TK_REASONS]; } tk;
 
 static void takeover_summary(void) {
@@ -929,7 +931,7 @@ static void add_ubo(TakeoverDraw *t, unsigned slot, unsigned stages, uint32_t of
 
 /* TK_DRAWN (0): ours is recorded; else the reason the draw stays the game's. */
 static int takeover(const CPUState *ctx) {
-    if (!takeover_on() || !takeover_frame() || __atomic_load_n(&mode, __ATOMIC_ACQUIRE) != MODE_NATIVE ||
+    if (!takeover_on() || !takeover_frame() || (__atomic_load_n(&mode, __ATOMIC_ACQUIRE) != MODE_NATIVE && __atomic_load_n(&mode, __ATOMIC_ACQUIRE) != MODE_CHECK) ||
         cur.kind != LAYER_GBUFFER)
         return TK_OFF;
     if (!cur.game_drew || cur.layer_fresh) return TK_FIRST;
@@ -943,11 +945,13 @@ static int takeover(const CPUState *ctx) {
     uint32_t cv = cbuf_slots(p->stages[0].key), cf = cbuf_slots(p->stages[1].key);
     uint64_t rows = local_rows(p);
     uint32_t tf = tex_slots(p->stages[1].key);
-    if ((cv | cf) & (1u << 10 | 1u << 11 | 1u << 12) || !rows || rows >> 16 & 0xF || tex_slots(p->stages[0].key) ||
-        tf >> 9 & 1)
-        return TK_READS;
+    if (!rows || tex_slots(p->stages[0].key) || tf >> 9 & 1) return TK_READS;
+    /* instanced draws: the copies' count the model renderer left for the submesh draw (f_a75e90; the
+     * other path, device+0x3230 set, draws split copies another way) */
+    uint32_t instances = U32(cur.device + 0x45cc);
+    if (U64(cur.device + 0x3230)) return TK_READS;
 
-    static _Thread_local uint8_t buf[sizeof(TakeoverDraw) + 0x80 + 0x160 + 2 * 3 * 256 * 16];
+    static _Thread_local uint8_t buf[512 * 1024];
     TakeoverDraw *t = (TakeoverDraw *)buf;
     memset(t, 0, sizeof *t);
     uint32_t at = sizeof *t;
@@ -982,7 +986,7 @@ static int takeover(const CPUState *ctx) {
     d->indices = d->index_count ? indices_of(cur.geometry, cur.submesh) : 0;
     d->index_type = !d->index_count ? 0 : U8(cur.submesh + 0x3f) & 2 ? 2 : 1;
     d->primitive = 4;
-    d->instances = 1;
+    d->instances = instances ? instances : 1;
     if (!d->vertices || !t->stride || (d->index_count && !d->indices)) return TK_LAYOUT;
     object_constants(NULL, d->object);
     /* render state */
@@ -1014,6 +1018,26 @@ static int takeover(const CPUState *ctx) {
             at += size;
         }
     }
+    /* every other constant block the program reads: what the model renderer left pending for the slot
+     * in the stage's set (device+13000 + 0x150 x set + 0x18 x slot: buffer object, size at +8; vertex
+     * set 0, fragment set 2), copied now, as the engine's commit binds them (f_965eb0, slots 0-13):
+     * the per-object ones (10 point lights, 11 instance copies, 12 USER_DATA02, 9 a character's rim
+     * settings, ...) and the layer's alike. A slot with nothing pending keeps what the game bound. */
+    uint32_t ours[2] = {1u << 2, 0};
+    for (uint32_t u = 0; u < t->nubo; u++)
+        for (int st = 0; st < 2; st++)
+            if (t->ubo[u].stages >> st & 1) ours[st] |= 1u << t->ubo[u].slot;
+    for (int st = 0; st < 2; st++)
+        for (int sl = 0; sl < 14; sl++) {
+            if (!((st ? cf : cv) >> sl & 1) || ours[st] >> sl & 1) continue;
+            uint64_t slot = cur.device + 13000 + 0x150ull * (st ? 2 : 0) + 0x18ull * (unsigned)sl, b = U64(slot);
+            uint32_t size = U32(slot + 8);
+            if (!guest_ptr(b) || !U64(b + 0x40) || !size) continue;
+            if (size > 0x10000 || t->nubo == TAKEOVER_UBOS || at + size > sizeof buf) return TK_CONSTANTS;
+            memcpy(buf + at, (const void *)(uintptr_t)(U64(b + 0x40) + U32(b + 0x58)), size);
+            add_ubo(t, (unsigned)sl, st ? 2u : 1u, at, size);
+            at += (size + 15) & ~15u;
+        }
     nvn_record_native(ctx, U64(cur.device + 0x10d0) + 0xd8, gpu_takeover_draw, buf, at);
     return TK_DRAWN;
 }
@@ -1057,6 +1081,12 @@ int gbuffer_submesh(const CPUState *ctx) {
     if (mode == MODE_CHECK && cur.item && bone_palette(cur.item, &bones, &cur.bones_size))
         memcpy(cur.bones, (const void *)(uintptr_t)bones, cur.bones_size);
     st.submeshes++;
+    if (mode == MODE_CHECK && cur.have_world) {  /* what the takeover would use, for the checks */
+        object_constants(NULL, cur.hook_object);
+        uint64_t prev;
+        if (cur.bones_size && bone_palette_previous(cur.item, &prev))
+            memcpy(cur.hook_old_bones, (const void *)(uintptr_t)prev, cur.bones_size);
+    }
     int why = takeover(ctx);
     if (takeover_on()) {
         if (why != TK_DRAWN) tk.left[why]++;
@@ -1169,6 +1199,7 @@ static void find_world(const float *game_world) {
 void gbuffer_check_draw(const NvnCmdBuf *cb, uint64_t index_addr, uint32_t type, uint32_t count) {
     if (!cur.armed) return;
     cur.armed = 0;
+    learn_program(cb);  /* the takeover may run in check mode too */
     st.draws++;
     const NvnProgram *p = cb->program;
     uint64_t rows = local_rows(p);
@@ -1181,7 +1212,7 @@ void gbuffer_check_draw(const NvnCmdBuf *cb, uint64_t index_addr, uint32_t type,
         if (l == PROGRAM_STATS) l = PROGRAM_STATS - 1;  /* full: the last one counts the rest */
         prog_st[l].vs = p->stages[0].key;
         prog_st[l].n++;
-        prog_st[l].exact += same_rows(rows, game, ours);
+        prog_st[l].exact += same_rows(rows, game, cur.hook_object);  /* as captured at the hook */
         /* the material's textures, against the guest NVNtexture the game bound at fragment slot k (a
          * slot the program doesn't read may hold an older texture: "another" is not by itself wrong) */
         uint64_t tex[8];
@@ -1288,10 +1319,9 @@ void gbuffer_check_draw(const NvnCmdBuf *cb, uint64_t index_addr, uint32_t type,
         if (cur.bones_size && cb->trace_ub[0][4] && cur.item) {
             prog_st[l].bn_n++;
             prog_st[l].bn_hook += !memcmp(cur.bones, (const void *)(uintptr_t)cb->trace_ub[0][4], cur.bones_size);
-            if (cb->trace_ub[0][5] && bone_palette_previous(cur.item, &prev)) {
+            if (cb->trace_ub[0][5] && bone_palette_previous(cur.item, &prev)) {  /* as captured at the hook */
                 prog_st[l].bn_old_n++;
-                prog_st[l].bn_late += !memcmp((const void *)(uintptr_t)prev, (const void *)(uintptr_t)cb->trace_ub[0][5],
-                                              cur.bones_size);
+                prog_st[l].bn_late += !memcmp(cur.hook_old_bones, (const void *)(uintptr_t)cb->trace_ub[0][5], cur.bones_size);
             }
         }
         /* the shader effect, the program and the render state block, against the engine's at the draw */
@@ -1521,8 +1551,13 @@ static void object_constants(const float *game, float out[GBUFFER_OBJECT_FLOATS]
     memcpy(out + 32, wvp.m, sizeof wvp.m);
     memcpy(out + 48, cur.world, sizeof cur.world);
     memcpy(out + 60, cur.world_row3, sizeof cur.world_row3);
-    memcpy(cur.old_vw, (const void *)(uintptr_t)(U64(cur.sp + 0x30) + 0x240), sizeof cur.old_vw);
-    memcpy(out + 64, cur.old_vw, sizeof cur.old_vw);
+    /* last frame's view x world: the device's derived matrix 10 (f_977680, computed at the commit
+     * into the matrix cache at [device+0xe90] - 0x180, our record's +0x240): last frame's view (the
+     * device's matrix 4, +0x380) times last frame's world (matrix 6: this frame's, with its bottom row) */
+    Mat4 w6 = w, oldview = mat4_load(cur.device + 0x380);
+    memcpy(w6.m + 12, cur.world_row3, sizeof cur.world_row3);
+    Mat4 ovw = mat4_mul(&oldview, &w6);
+    memcpy(out + 64, ovw.m, sizeof ovw.m);
 }
 
 int gbuffer_take_draw(CPUState *ctx, const NvnCmdBuf *cb, int indexed, int instanced) {

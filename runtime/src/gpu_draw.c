@@ -1583,10 +1583,10 @@ void gpu_takeover_draw(void *vk_cb, void *gpu_state, const void *data, uint32_t 
     const GBufferDraw *d = &t->d;
     if (d->index_count) {  /* (primitive, index type, count, index address, base vertex, base instance, instances) */
         r.op = CMD_DRAW_ELEMENTS;
-        r.x[0] = d->primitive, r.x[1] = d->index_type, r.x[2] = d->index_count, r.x[3] = d->indices, r.x[6] = 1;
+        r.x[0] = d->primitive, r.x[1] = d->index_type, r.x[2] = d->index_count, r.x[3] = d->indices, r.x[6] = d->instances ? d->instances : 1;
     } else {  /* (primitive, first, count, base instance, instances) */
         r.op = CMD_DRAW_ARRAYS;
-        r.x[0] = d->primitive, r.x[2] = d->vertex_count, r.x[4] = 1;
+        r.x[0] = d->primitive, r.x[2] = d->vertex_count, r.x[4] = d->instances ? d->instances : 1;
     }
     own = d, own_t = t;
     draw(vk_cb, s, &r);
