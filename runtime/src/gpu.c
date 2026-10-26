@@ -743,10 +743,20 @@ static uint32_t key_hash(const ImageKey *k) {
     return (uint32_t)(h ^ h >> 32) % IMAGE_BUCKETS;
 }
 
+/* Bumped when an image is freed: a texture's remembered image (found) is only used while its
+ * epoch is current, and its description must still match. Draws look their textures up several
+ * times each; the hash and the bucket's list cost more than the compare. */
+static uint32_t image_epoch = 1;
+
 GpuImage *image_find(const NvnTexture *t) {
     ImageKey k = key_of(t);
+    GpuImage *m = t->found;
+    if (m && t->found_epoch == image_epoch && !memcmp(&m->key, &k, sizeof k)) return m;
     for (GpuImage *g = images[key_hash(&k)]; g; g = g->next)
-        if (!memcmp(&g->key, &k, sizeof k)) return g;
+        if (!memcmp(&g->key, &k, sizeof k)) {
+            ((NvnTexture *)t)->found = g, ((NvnTexture *)t)->found_epoch = image_epoch;
+            return g;
+        }
     return NULL;
 }
 
@@ -872,6 +882,7 @@ struct GpuView {
 };
 
 static void image_destroy(GpuImage *g) {
+    image_epoch++;
     for (GpuView *v = g->views, *n; v; v = n) {
         n = v->next;
         vkDestroyImageView(vk.device, v->view, NULL);

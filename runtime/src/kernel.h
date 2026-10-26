@@ -11,6 +11,8 @@
 /* Performance log: what a guest thread was seen doing, and each thread's CPU use. */
 enum { YW4_ROLE_PRESENT = 1, YW4_ROLE_SUBMIT = 2 };
 void yw4_thread_role(int role);
+/* The guest thread id of the calling thread (the performance report's "thread N"); 0 if none. */
+uint64_t yw4_thread_id(void);
 void yw4_thread_cpu_report(FILE *f, int64_t interval_ns);
 
 /* Horizon memory types and permissions, as svcQueryMemory reports them. */

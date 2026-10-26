@@ -531,6 +531,8 @@ void yw4_thread_role(int role) {
     if (cur) cur->roles |= role;
 }
 
+uint64_t yw4_thread_id(void) { return cur ? cur->id : 0; }
+
 /* One line per guest thread that used CPU since the last call: its share of one core over
    `interval_ns`, entry point, priority, core and roles. For the performance summary. */
 void yw4_thread_cpu_report(FILE *f, int64_t interval_ns) {

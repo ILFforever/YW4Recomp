@@ -3,6 +3,7 @@
  * YW4_PROFILE=1 samples the thread that presents frames (the game's main thread);
  * YW4_PROFILE=submit samples every thread that submits GPU command lists instead.
  * YW4_PROFILE_FROM=<frame> starts at that frame, to skip start-up.
+ * YW4_PROFILE_THREAD=<n> samples only guest thread n (the performance report's "thread n").
  *
  * Every millisecond a host thread stops each sampled thread, reads where it is, and lets it
  * go again. The counts go to work/perf/profile_<time>.txt (rewritten every 10 s and at exit)
@@ -150,6 +151,8 @@ void yw4_profile_thread(int role, uint64_t frame) {
         if (!mode) return;
     }
     if ((role == YW4_ROLE_PRESENT) != (mode == 1) || frame < from_frame) return;
+    const char *only = getenv("YW4_PROFILE_THREAD");
+    if (only && *only && strtoull(only, NULL, 10) != yw4_thread_id()) return;
     added = 1;
     HANDLE h;
     if (!DuplicateHandle(GetCurrentProcess(), GetCurrentThread(), GetCurrentProcess(), &h,
