@@ -1210,6 +1210,9 @@ void gpu_execute(uint64_t handle) {
                 break;
             }
             if ((NvnNativePass)(uintptr_t)r->x[0] == gpu_gbuffer_draw) {  /* a draw, in place */
+                /* noted as the game's draws are: our shadow pass draws where a layer's draws went
+                 * (a cutscene's second shadow map), and a layer can be all in-place draws */
+                if (!s.targets_noted) gpu_shadow_note_targets(&s), s.targets_noted = 1;
                 const GBufferDraw *d = (const GBufferDraw *)r->extra;
                 gpu_passes_draw(s.program, (uint64_t)(d->index_count ? d->index_count : d->vertex_count) * (d->instances ? d->instances : 1));
             }
