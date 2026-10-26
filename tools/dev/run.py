@@ -7,6 +7,7 @@ The save directory is copied to <work>/testsaves/save_run first, so every run st
 (the game autosaves). ENV=value pairs go to the game's environment (docs/debugging.md). Refuses to run
 while another yw4.exe is running: a second game spoils timings and the build can't replace the exe.
 Prints the log's path and the lines matching --grep (default: the summaries of the passes and perf).
+Use that path to read the log later: `ls -t work/logs` in Git Bash does not list the newest file first.
 
 Examples:
     python -m tools.dev.run --save work/testsaves/save_school --exit YW4_GBUFFER=check

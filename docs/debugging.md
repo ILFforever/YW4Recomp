@@ -37,7 +37,7 @@ game with them and compare results: [tools/dev](../tools/dev/README.md).
 | `YW4_SHADOW_RES=1024` (`2048`, `4096`) | Shadow map size at start (default 4096; 1024 is the game's; F8 cycles it): the shadow maps that size instead of the game's 1024, and the shadow filter's spread scaled down to match, so edges get sharper, mostly in the far cascades. Costs GPU time and memory. Works with either shadow pass |
 | `YW4_PCSS=0` (`1`, `2`, `3`) | PCSS (soft contact shadows) at start: off (x1, x2, x4); default x2; F7 cycles it. `YW4_SHADOW_RES=1024 YW4_PCSS=0` gives the game's original shadows. Only the game's screen-space shadow mask shader has it (`PCSS_SHADERS` in recomp/shader.py) |
 | `YW4_PCSS_SCALE=a,b,c,d` / `YW4_PCSS_MAX=<texels>` / `YW4_PCSS_EPS=<depth>` | PCSS tuning: blur radius per unit of depth gap for cascades 0-3 (default 0.01,0.005,0.0025,0.0025), largest radius and search area (default 6 texels of a 1024 map), smallest depth gap that counts as a caster |
-| `YW4_PCSS_DEBUG=1`..`6` | PCSS debug views in place of the shadow: casters found, blur radius, the game's lookup, raw depth, a hand-made compare, the reference depth |
+| `YW4_PCSS_DEBUG=1`..`6` | PCSS debug views in place of the shadow: casters found, blur radius, the game's lookup, raw depth, a hand-made compare, the reference depth. Not visible as such on screen: the value goes into the shadow mask; capture the mask to read it ([tools/dev/README.md](../tools/dev/README.md), pitfalls) |
 | `YW4_PREBUILD=0` | Don't build the listed pipelines (the PCSS shadow mask) on a background thread at start-up |
 
 Saved screenshots get the same sRGB decode as the window, so their colours match what is on screen.

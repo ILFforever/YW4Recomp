@@ -75,5 +75,16 @@ wrong for posed parts and moving objects.
   the exe while it runs (`run.py` refuses to start then).
 - Writing C with a Python heredoc turns `"\n"` in C strings into a real line break and breaks the build: edit C
   files with an editor, or write the script to a file first.
+- Find a run's log by the path `run.py` prints, never by "the newest file in `work/logs`": `ls -t` in Git Bash
+  listed a 2026-10-23 log first on 2026-10-27, and a grep on it reported "no such line" for a line that was there.
+  `dev_run_*.log` (what `run.py` captures) and `yw4_*.log` (the runtime's own copy, `runtime/src/log.c`) hold the
+  same lines.
+- `YW4_PCSS_DEBUG` changes nothing you can judge on screen: its value replaces the shadow mask's lookup, which the
+  lighting then uses. Read it from the mask itself: `YW4_CAPTURE_FS=06d03ad7 YW4_DUMP_IMAGE_AT=<frame>`, decoded
+  with `tools.yw4.capview.decode` (the mask is VkFormat 122, B10G11R11 float, not RGBA8: decoding it as bytes
+  gives coloured bands); the value is in red. Mode 2 (radius) returns the game's own lookup (0 or 1, lit or not)
+  where the search finds no caster, not a radius, so compare it against a capture with `YW4_PCSS=0`.
+- A capture can be missing after a run (one of four on 2026-10-27, cause unknown): check the file exists before
+  reading it.
 - The owner can reach any place in the game faster than a replay can, and is a good judge of flicker: for
   visual checks, launch the game for them with the right settings and ask.
