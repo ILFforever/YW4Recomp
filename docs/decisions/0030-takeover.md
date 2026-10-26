@@ -102,10 +102,23 @@ changed fields into NVN state at the commit through a table of handlers (`main+0
 4. **The device's settings** at the commit (`f_9759d0`): `+0x4629` flips the cull face, `+0x462a` and `+0x462b`
    clear fields 5 and 0x10, `+0x462d` raises field 0x1c.
 
-Check mode, four saves, all layer kinds, ~4.9 million draws: **every draw's block equals the engine's**, and every
-effect id always names the same effect object. Still from the engine: the effect object itself (looked up by id
-through a resource manager, `main+0x58656e8`; the id → effect relation is fixed, so a table can replace the
-lookup), and the conversion of the block to NVN state (the handlers; we read the NVN state the game binds).
+Check mode, four saves, all layer kinds, ~4.9 million draws: **every draw's block equals the engine's**. Still from
+the engine: the conversion of the block to NVN state (the handlers; we read the NVN state the game binds).
+
+**Effect and program: decoded (`effect_of`, `pass_shaders`).** The effect manager (`main+0x58656e8`) is a set of
+plain arrays, read through small virtual methods (vtable `main+0x14deba8`):
+
+- effect by id (from 1): `[mgr+0x10] + 0x28×(id-1)`, the effect object first (`f_a9edf0`);
+- the pass record (above) names the stage shader objects: u16 `+4` the vertex shader in `[mgr+0x30]` (0x20 bytes
+  each), u16 `+6` the fragment shader in `[mgr+0x78]` (0x10 bytes), u16 `+8` a third in `[mgr+0xc0]`
+  (`f_a9ee60`, `f_a9eec0`, `f_a9ee90`);
+- a stage object's first word is its shader code, the address our runtime names its translated shader by;
+- the engine joins the stages into one NVN program (`f_965880`, cached by the stages' ids); the engine's program
+  object *is* that NVN program.
+
+Check mode, four saves: on every draw (about 4.6 million) our effect is the engine's and our vertex and fragment
+code are the bound program's. So a material, through its effect and the layer's pass key, names its programs,
+its render state, its textures and samplers, all from the game's data.
 
 ## Alternatives
 

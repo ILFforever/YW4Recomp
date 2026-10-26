@@ -256,7 +256,7 @@ static _Thread_local struct {
     long tex_n, tex_ok, tex_other, tex_unknown;  /* material textures: ours bound at slot k, another, not decoded */
     long smp_n, smp_state, smp_desc;             /* their samplers: our state = the engine's, our settings = bound */
     long rs_ok, rs_bytes[33];                    /* render state block = the engine's; draws where byte i differs */
-    long ef_n, ef_same;                          /* effect ids: the effect the engine uses is the one seen before for it */
+    long pg_n, pg_eff, pg_stages;                /* shader effect ours; vertex and fragment programs ours */
 } prog_st[PROGRAM_STATS];
 /* game: the game's bound vertex constants 2, for last frame's rows */
 static void object_constants(const float *game, float out[GBUFFER_OBJECT_FLOATS]);
@@ -526,6 +526,35 @@ static uint64_t effect_pass(uint64_t effect) {
     return sel == 0xffff ? 0 : U64(effect + 0x38) + 0x10ull * U16(passes + 8ull * sel + 4);
 }
 
+/* The material's shader effect: the effect manager (main+0x58656e8) keeps them in an array (+0x10,
+ * 0x28 bytes each, the effect object first) by id from 1 (f_a9edf0). 0 if none. */
+static uint64_t effect_of(uint64_t item) {
+    static uint64_t base;
+    if (!base)
+        for (size_t i = 0; i < yw4_ncode; i++)
+            if (!strcmp(yw4_code[i].name, "main")) base = *yw4_code[i].base;
+    unsigned id = effect_id(item);
+    return id ? U64(U64(U64(base + 0x58656e8) + 0x10) + 0x28ull * (id - 1)) : 0;
+}
+
+/* The shader code of the effect's pass for this layer: the pass record names the stage shader
+ * objects by index into the effect manager's arrays (u16 +4: vertex, manager +0x30, 0x20 bytes each,
+ * count u16 +0x4c; u16 +6: fragment, +0x78, 0x10 bytes, count +0x94; f_a9ee60, f_a9eec0); a stage
+ * object's first word is its code (the address the NVN program is made from, which names our
+ * translated shader). The engine combines the stages into one NVN program (f_965880, cached by the
+ * stages' ids). 0 if there is no pass. */
+static int pass_shaders(uint64_t effect, uint64_t *vs, uint64_t *fs) {
+    static uint64_t base;
+    if (!base)
+        for (size_t i = 0; i < yw4_ncode; i++)
+            if (!strcmp(yw4_code[i].name, "main")) base = *yw4_code[i].base;
+    uint64_t pass = effect ? effect_pass(effect) : 0, mgr = U64(base + 0x58656e8);
+    if (!pass) return 0;
+    *vs = U16(pass + 4) < U16(mgr + 0x4c) ? U64(U64(U64(mgr + 0x30) + 0x20ull * U16(pass + 4))) : 0;
+    *fs = U16(pass + 6) < U16(mgr + 0x94) ? U64(U64(U64(mgr + 0x78) + 0x10ull * U16(pass + 6))) : 0;
+    return *vs && *fs;
+}
+
 /* The render state block the draw is made with: the material's (render_state), then the effect
  * pass's own (id, value) pairs (record +0xc of them from u16 +0xa, in the effect's +0x40), then what
  * the commit (f_9759d0) changes by the device's settings: +0x4629 flips the cull face (byte 0x1b
@@ -604,8 +633,8 @@ static void summary(void) {
                 prog_st[i].tex_other, prog_st[i].tex_unknown, prog_st[i].smp_n, prog_st[i].smp_state,
                 prog_st[i].smp_desc);
     for (int i = 0; i < PROGRAM_STATS && prog_st[i].n; i++) {
-        fprintf(stderr, "yw4: %s:   vs %016" PRIx64 ": effect id consistent %ld of %ld; render state ours %ld of %ld; bytes differing:", pass_name,
-                prog_st[i].vs, prog_st[i].ef_same, prog_st[i].ef_n, prog_st[i].rs_ok, prog_st[i].item);
+        fprintf(stderr, "yw4: %s:   vs %016" PRIx64 ": effect ours %ld of %ld, programs ours %ld; render state ours %ld of %ld; bytes differing:", pass_name,
+                prog_st[i].vs, prog_st[i].pg_eff, prog_st[i].pg_n, prog_st[i].pg_stages, prog_st[i].rs_ok, prog_st[i].item);
         for (int b = 0; b < 33; b++)
             if (prog_st[i].rs_bytes[b]) fprintf(stderr, " %#x:%ld", b, prog_st[i].rs_bytes[b]);
         fprintf(stderr, "\n");
@@ -730,21 +759,15 @@ void gbuffer_check_draw(const NvnCmdBuf *cb, uint64_t index_addr, uint32_t type,
                             ours.max_aniso);
             }
         }
-        /* the render state block, against the engine's at the draw */
+        /* the shader effect, the program and the render state block, against the engine's at the draw */
         if (cur.item) {
             uint8_t rs[33];
-            uint64_t effect = U64(cur.device + 0x27a0);
+            uint64_t effect = effect_of(cur.item), vs = 0, fs = 0;
             draw_state(cur.item, effect, rs);
-            {  /* the effect id names one effect: the one the engine looked up for it before */
-                enum { IDS = 4096 };
-                static uint64_t seen[IDS];
-                unsigned id = effect_id(cur.item);
-                prog_st[l].ef_n++;
-                if (id < IDS) {
-                    uint64_t old = __atomic_exchange_n(&seen[id], effect, __ATOMIC_RELAXED);
-                    prog_st[l].ef_same += !old || old == effect;
-                }
-            }
+            prog_st[l].pg_n++;
+            prog_st[l].pg_eff += effect == U64(cur.device + 0x27a0);
+            prog_st[l].pg_stages += pass_shaders(effect, &vs, &fs) && cb->program && vs == cb->program->stages[0].code &&
+                                    fs == cb->program->stages[1].code;
             int same = 1;
             for (int b = 0; b < 33; b++)
                 if (rs[b] != U8(cur.device + 0xeb9 + b)) prog_st[l].rs_bytes[b]++, same = 0;
