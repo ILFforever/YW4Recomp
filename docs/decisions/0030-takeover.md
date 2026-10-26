@@ -189,6 +189,23 @@ model record's per-submesh `+0x138`, on RGB for additive-style blending else on 
 atlas regions' rectangles. Check mode, four saves: equal on every draw (~3.7 million); self-test (fade × 1.001):
 no draw equal.
 
+**Where the last per-draw inputs come from (measured, not yet ours).** The engine keeps per constant slot the
+buffer object it means to bind (`device+0x32c8 + 0x18×slot`, data at `[B+0x40] + [B+0x58]`), set during its walk,
+before our hook:
+
+- constants 11 (instance copies): that pending object is the bound block on every draw (walk save): a draw of ours
+  can bind it as is;
+- constants 10 (point lights): on 87%;
+- constants 12 (`USER_DATA02`): nothing pending at our hook; a fresh block is uploaded inside the commit on every
+  draw, like last frame's view × world (record `+0x240`). Both come from code the skipped draw would skip; the likely
+  source is the per-draw callback the commit calls after choosing the pass (`f_977e30`, `device+0x32c0`);
+- texture 9 (`in_texCube`, the reflection probe): changes per object on 6% of material-pass draws, source not found
+  in the object, model record or draw item.
+
+So the first draws that can skip the engine's work are those whose shaders read none of constants 10 and 12,
+texture 9 or rows 16-19 of constants 2 (most of the G-buffer and shadow layers); the material pass needs the
+commit's callback decoded first.
+
 ## Alternatives
 
 - **Selection first.** Removes the walk, but needs the rules that the shadow streaks showed we don't have, and
