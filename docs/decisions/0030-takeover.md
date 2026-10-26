@@ -300,3 +300,11 @@ and material layers' draws were skipped with nothing in their place. The per-pas
   every draw's data still comes from the game: nothing to skip yet.
 - **Leave the hybrid.** Fine for pictures, but the engine keeps doing every draw's state work and our renderer can't
   draw anything the game didn't set up (no resolution scaling of materials, no new passes).
+
+**Owner's playtest (late-game save, night town).** With the takeover on: grey untextured characters while circling
+the camera, and no glow on street lamps, lit windows and signs; F6 (the game's draws) brought both back. Causes: the
+engine registers textures at rising pool ids that wrap, and a takeover draw named a texture by the id of its last
+registration, which could name another texture by the time the draw ran (the draw now carries copies of its
+textures' pool entries, used only while they still picture the live texture); and the stencil reference, stencil
+write mask and polygon offset, set by the commit the takeover skips (`f_974cd0`), were whatever the game's previous
+draw left (now from our decoded state). Second playtest (12 minutes): owner confirms everything looks right.
