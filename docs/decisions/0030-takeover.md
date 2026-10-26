@@ -130,8 +130,17 @@ probe named the last match. Check mode, four saves: **every skinned draw** (~390
 Everything one draw needs from its material is now decoded and checked in four saves, every layer kind:
 constants 2 (matrices), material constants, textures, samplers, render state block, effect, programs, bones.
 Still the game's: last frame's matrices and bones (motion vectors), the scene's constant buffers (camera,
-lights; per layer), vertex attribute formats, the atlas regions' UV transforms, and turning the render state block
-into NVN state. Next: skip the game's per-draw setup for draws whose inputs are all ours.
+lights; per layer), vertex attribute formats, the atlas regions' UV transforms. Next: skip the game's per-draw
+setup for draws whose inputs are all ours.
+
+**The block as NVN state: decoded (`nvn_state`).** At the commit the engine runs one handler per changed field
+(table `main+0x14d23b0`), which writes NVN state objects in its state (`[device+0x10d0]+0x240..0x2f2`): blend
+states per colour target, channel mask, colour state, depth stencil, multisample, polygon, plus the stencil reference
+and mask and the depth bias as plain fields. Which bytes feed which call is listed at `nvn_state`. We build the same
+objects in our own packing (`nvn_objects.c`), starting each layer from the engine's objects for what the block doesn't
+drive (the other colour targets' blend states, the colour state's logic op). Check mode, four saves, all layer kinds,
+~4.4 million draws: **our objects equal the engine's byte for byte on every draw**. The check was tested by switching
+the conversion off: then nearly every draw differs, in every part but the two flags.
 
 ## Alternatives
 

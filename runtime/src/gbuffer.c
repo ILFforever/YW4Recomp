@@ -196,6 +196,12 @@ void gbuffer_toggle(void) {
             __atomic_load_n(&yw4_frames_presented, __ATOMIC_RELAXED));
 }
 
+/* The engine keeps the NVN state objects a draw binds in its state ([device+0x10d0]), from +0x240:
+ * blend states (8 bytes per colour target), +0x280 channel mask, +0x284 colour state, +0x288 depth
+ * stencil, +0x290 multisample (0x18 bytes), +0x2a8 polygon, then plain fields up to +0x2f2. */
+#define NVN_STATE_AT 0x240
+#define NVN_STATE_BYTES 0xb8
+
 /* The layer being drawn on this thread, and the submesh about to be drawn. */
 static _Thread_local struct {
     int active;  /* a G-buffer layer */
@@ -213,6 +219,7 @@ static _Thread_local struct {
     uint32_t bones_size;      /* check mode: the bone palette as read at the submesh's hook, 0 if none */
     float bones[3 * 256 * 4];
     int layer_fresh;          /* no submesh of the layer seen yet */
+    uint8_t layer_nvn[NVN_STATE_BYTES];  /* the engine's NVN state objects ([device+0x10d0]+0x240) then */
 } cur;
 
 /* host_readable is a system call: remember the answer per 64 KiB block */
@@ -259,6 +266,7 @@ static _Thread_local struct {
     long smp_n, smp_state, smp_desc;             /* their samplers: our state = the engine's, our settings = bound */
     long rs_ok, rs_bytes[33];                    /* render state block = the engine's; draws where byte i differs */
     long pg_n, pg_eff, pg_stages;                /* shader effect ours; vertex and fragment programs ours */
+    long nv_ok, nv_regions[8];                   /* NVN state objects = the engine's; draws where each part differs */
     long bn_n, bn_hook, bn_late;                 /* bone palettes bound: = ours (the newest), = the one before */
 } prog_st[PROGRAM_STATS];
 /* game: the game's bound vertex constants 2, for last frame's rows */
@@ -609,6 +617,56 @@ static void draw_state(uint64_t item, uint64_t effect, uint8_t out[33]) {
     if (add && out[0x1c] != 0xff) out[0x1c] = (uint8_t)(out[0x1c] + (add < (uint8_t)~out[0x1c] ? add : (uint8_t)~out[0x1c]));
 }
 
+/* An NVN depth or stencil compare function from a block byte, as the engine's handlers do: 2-8 are
+ * NVN's LESS..ALWAYS, anything else NEVER (1). */
+static uint8_t nvn_compare(uint8_t b) { return b >= 2 && b <= 8 ? b : 1; }
+
+/* The NVN state objects a draw binds, made from its render state block as the engine's per-field
+ * handlers do at the commit (the table at main+0x14d23b0), into our packing of the objects
+ * (nvn_objects.c); out starts as the layer's objects, for what the block doesn't drive (the other
+ * colour targets' blend states, the colour state's logic op). Offsets from state+0x240.
+ *   f_979950 (bytes 0xf-0x16), colour target 0: channel mask (0xf, bits r g b a), blend enable
+ *     (0x10), blend equations colour and alpha (0x11, 0x12) and factors (0x13-0x16);
+ *   f_979a90, f_979ba0 (4-0xe): depth test (4), depth write (5), depth compare (6), stencil test (7),
+ *     stencil compare both faces (9), stencil ops fail, depth fail, pass (0xc, 0xe, 0xd), stencil
+ *     reference (0xb, +0x2b8) and mask (0xa when 8 is set, +0x2b4);
+ *   f_979c70 (0x1b, 0x1d, 0x1e): cull face, front face counter-clockwise, polygon mode and the
+ *     polygon offset enables for it (main+0x12be4ac), +0x2f1 set by 0x1d;
+ *   f_979da0 (0x1c): depth bias -byte at +0x2bc, +0x2c0 cleared;
+ *   f_979d40 (0x1f, 0x20): +0x2f0, multisample enable. */
+static void nvn_state(const uint8_t b[33], uint8_t out[NVN_STATE_BYTES]) {
+    static uint64_t base;
+    if (!base)
+        for (size_t i = 0; i < yw4_ncode; i++)
+            if (!strcmp(yw4_code[i].name, "main")) base = *yw4_code[i].base;
+    memcpy(out, cur.layer_nvn, NVN_STATE_BYTES);
+    uint8_t *blend = out, *color = out + 0x44, *ds = out + 0x48, *ms = out + 0x50, *poly = out + 0x68;
+    uint32_t mask, u;
+    memcpy(&mask, out + 0x40, 4);
+    mask = (mask & ~0xFu) | (b[0xf] & 0xF);
+    memcpy(out + 0x40, &mask, 4);
+    color[0] = b[0x10] ? color[0] | 1 : color[0] & ~1;
+    blend[5] = b[0x11], blend[6] = b[0x12];
+    for (int i = 0; i < 4; i++) blend[1 + i] = b[0x13 + i];
+    ds[0] = b[4] != 0, ds[1] = b[5] != 0, ds[2] = nvn_compare(b[6]), ds[3] = b[7] != 0;
+    uint8_t f = nvn_compare(b[9]);
+    ds[4] = (uint8_t)(f | f << 4);
+    uint32_t ops = (uint32_t)((b[0xc] & 0xF) | (b[0xe] & 0xF) << 4 | (b[0xd] & 0xF) << 8), packed = ops | ops << 12;
+    ds[5] = (uint8_t)packed, ds[6] = (uint8_t)(packed >> 8), ds[7] = (uint8_t)(packed >> 16);
+    u = b[0xb];
+    memcpy(out + 0x78, &u, 4);
+    u = b[8] ? b[0xa] : 0;
+    memcpy(out + 0x74, &u, 4);
+    poly[0] = b[0x1b], poly[1] = 1, poly[2] = b[0x1e];
+    poly[3] = b[0x1e] < 3 ? (uint8_t)U32(base + 0x12be4ac + 4ull * b[0x1e]) : 0;
+    out[0xb1] = b[0x1d] != 0;
+    float bias = -(float)b[0x1c];
+    memcpy(out + 0x7c, &bias, 4);
+    memset(out + 0x80, 0, 8);
+    out[0xb0] = b[0x1f] != 0;
+    ms[0] = b[0x20] != 0;
+}
+
 void gbuffer_disarm(void) { cur.armed = 0; }
 
 int gbuffer_hook_world(const CPUState *ctx, float out[12]) {
@@ -638,6 +696,7 @@ void gbuffer_submesh(const CPUState *ctx) {
     if (cur.layer_fresh && level) {
         memcpy(cur.layer_state, (const void *)(uintptr_t)(cur.device + 0xefb + 0x21ull * (level - 1)),
                sizeof cur.layer_state);
+        memcpy(cur.layer_nvn, (const void *)(uintptr_t)(U64(cur.device + 0x10d0) + NVN_STATE_AT), NVN_STATE_BYTES);
         cur.layer_fresh = 0;
     }
     uint64_t bones;
@@ -678,6 +737,9 @@ static void summary(void) {
                 prog_st[i].bn_late, prog_st[i].rs_ok, prog_st[i].item);
         for (int b = 0; b < 33; b++)
             if (prog_st[i].rs_bytes[b]) fprintf(stderr, " %#x:%ld", b, prog_st[i].rs_bytes[b]);
+        fprintf(stderr, "; NVN state ours %ld, parts differing:", prog_st[i].nv_ok);
+        for (int q = 0; q < 8; q++)
+            if (prog_st[i].nv_regions[q]) fprintf(stderr, " %d:%ld", q, prog_st[i].nv_regions[q]);
         fprintf(stderr, "\n");
     }
     memset(prog_st, 0, sizeof prog_st);
@@ -823,6 +885,18 @@ void gbuffer_check_draw(const NvnCmdBuf *cb, uint64_t index_addr, uint32_t type,
             for (int b = 0; b < 33; b++)
                 if (rs[b] != U8(cur.device + 0xeb9 + b)) prog_st[l].rs_bytes[b]++, same = 0;
             prog_st[l].rs_ok += same;
+            /* the NVN state objects made from our block, against the engine's (blend 0, channel mask,
+             * colour, depth stencil, multisample, polygon, stencil reference and mask and depth bias,
+             * the two flags) */
+            static const struct { uint8_t at, n; } part[8] = {{0, 8}, {0x40, 4}, {0x44, 4}, {0x48, 8}, {0x50, 0x18},
+                                                              {0x68, 4}, {0x74, 0x14}, {0xb0, 2}};
+            uint8_t nv[NVN_STATE_BYTES];
+            const uint8_t *eng = (const uint8_t *)(uintptr_t)(U64(cur.device + 0x10d0) + NVN_STATE_AT);
+            nvn_state(rs, nv);
+            int nsame = 1;
+            for (int q = 0; q < 8; q++)
+                if (memcmp(nv + part[q].at, eng + part[q].at, part[q].n)) prog_st[l].nv_regions[q]++, nsame = 0;
+            prog_st[l].nv_ok += nsame;
         }
         /* the material constants, against what the game bound at the draw list's slot (+0x7a) */
         uint8_t mat[0x80];
