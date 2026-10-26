@@ -396,8 +396,10 @@ void gpu_pool_finalize(NvnPool *p) {
  * vertex and index ranges get a copy in one device-local arena, made once and made again when the
  * CPU has written one of the range's pages since (write generations, as for textures). A range
  * the CPU keeps writing (UI, effects) is left in the pool after a few copies. When the arena is
- * full (or its table crowded), it is emptied at the start of the next submission, once the GPU is done with it. */
-enum { GEO_ARENA = 1u << 30, GEO_SLOTS = 1 << 18, GEO_DYNAMIC = 4 };
+ * full (or its table crowded), it is emptied at the start of the next submission. The arena has two
+ * halves, filled in turn: emptying switches to the other half, which the GPU finished with long
+ * ago, so the CPU doesn't wait for the work in flight (waiting made one 50 ms frame). */
+enum { GEO_ARENA = 1u << 30, GEO_HALF = GEO_ARENA / 2, GEO_SLOTS = 1 << 18, GEO_DYNAMIC = 4 };
 typedef struct {
     uint64_t addr, size, at;     /* the range, and where its copy is in the arena */
     uint32_t copied_gen, checked_gen;
@@ -406,8 +408,10 @@ typedef struct {
 static GeoCopy geo[GEO_SLOTS];
 static VkBuffer geo_buf;
 static VkDeviceMemory geo_mem;
-static uint64_t geo_used;
+static uint64_t geo_used;   /* in the current half */
 static uint32_t geo_count;  /* ranges in the table */
+static int geo_half;        /* the half being filled */
+static uint64_t geo_retired[2];  /* the last submission that read each half before it was left */
 static int geo_on = -1, geo_full;
 
 int gpu_vram_geometry(void) {
@@ -415,14 +419,16 @@ int gpu_vram_geometry(void) {
     return geo_on;
 }
 
-/* begin(): the arena filled up: empty it, after everything submitted has run (no recorded
- * command refers to it then). */
+/* begin(): the half filled up: go on in the other one, once the submissions that read it have run
+ * (they ran long ago: a half lasts minutes, so the wait is almost always none). */
 static void geo_reset_if_full(void) {
     if (!geo_full) return;
-    gpu_wait(submitted, UINT64_MAX);
+    geo_retired[geo_half] = submitted;
+    geo_half ^= 1;
+    int waited = gpu_wait(geo_retired[geo_half], UINT64_MAX);
     memset(geo, 0, sizeof geo);
     geo_used = 0, geo_full = 0, geo_count = 0;
-    fprintf(stderr, "yw4: gpu: geometry arena emptied\n");
+    fprintf(stderr, "yw4: gpu: geometry arena emptied (now half %d%s)\n", geo_half, waited ? ", waited for the GPU" : "");
 }
 
 static GeoCopy *geo_find(uint64_t addr, uint64_t size, int add) {
@@ -433,19 +439,19 @@ static GeoCopy *geo_find(uint64_t addr, uint64_t size, int add) {
         if (!c->size) {
             if (!add) return NULL;
             uint64_t at = (geo_used + 255) & ~255ull;
-            if (at + size > GEO_ARENA) {
+            if (at + size > GEO_HALF) {
                 geo_full = 1;
                 return NULL;
             }
             geo_used = at + size;
-            *c = (GeoCopy){.addr = addr, .size = size, .at = at};
+            *c = (GeoCopy){.addr = addr, .size = size, .at = (uint64_t)geo_half * GEO_HALF + at};
             if (++geo_count % 8192 == 0)
                 fprintf(stderr, "yw4: gpu: geometry table: %u ranges, %" PRIu64 " MiB\n", geo_count, geo_used >> 20);
             return c;
         }
     }
     if (add && !geo_full) {  /* no free slot near: empty the table as if the arena were full (the
-                              * arena fills slower than the table: most ranges are under 16 KB) */
+                              * table fills first: ~1.5 KB per range in a long session) */
         geo_full = 1;
         fprintf(stderr, "yw4: gpu: geometry table crowded (%u ranges, %" PRIu64 " MiB of the arena used)\n", geo_count,
                 geo_used >> 20);
