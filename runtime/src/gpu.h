@@ -24,6 +24,10 @@ void gpu_shadow_res_cycle(void);
  * YW4_RES at start), and F4's cycle 900 -> 1080 -> 1440 -> 2160 -> 900. */
 int gpu_res_height(void);
 void gpu_res_cycle(void);
+/* Texture filtering: 0 the game's, else blending between mip levels and anisotropic filtering with up
+ * to this many taps (16 by default; YW4_ANISO at start), and F2's cycle 0 -> 2 -> 4 -> 8 -> 16 -> 0. */
+int gpu_aniso(void);
+void gpu_aniso_cycle(void);
 /* F5: per-pass GPU timing on or off (gpu_passes.c) */
 void gpu_passes_toggle(void);
 /* Soft shadows (PCSS): 0 off (the game's filter), 1..3 on with stronger softening; F7 cycles. */

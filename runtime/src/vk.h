@@ -57,6 +57,7 @@ typedef struct {
     HostLock queue_lock;
     VkPhysicalDeviceProperties props;
     int host_import;               /* VK_EXT_external_memory_host is enabled */
+    int sampler_anisotropy;        /* the samplerAnisotropy feature is enabled */
     VkDeviceSize host_import_align;
 } VkContext;
 extern VkContext vk;

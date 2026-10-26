@@ -1076,15 +1076,47 @@ static VkCompareOp compare_op(uint32_t f) {
     return f < 9 ? ops[f] : VK_COMPARE_OP_ALWAYS;
 }
 
+/* Texture filtering: every sampler the game makes has anisotropic filtering off and picks one mip
+ * level per texel (linear within it, nearest between levels: min filter 3), so distant and slanted
+ * surfaces drop to small, blurry levels early, in steps (2026-10-27, YW4_SAMPLER_LOG). With this on,
+ * mipmapped samplers that don't compare (not the shadow maps) blend between levels and filter
+ * anisotropically with up to this many taps. YW4_ANISO=0 (the game's) / 2 / 4 / 8 / 16 (the default)
+ * at start, F2 cycles. */
+static int aniso = -1;
+
+int gpu_aniso(void) {
+    if (!vk.device) return 0;  /* asked before the device exists: decide later */
+    int a = __atomic_load_n(&aniso, __ATOMIC_ACQUIRE);
+    if (a < 0) {
+        const char *e = getenv("YW4_ANISO");
+        int v = e ? atoi(e) : 16;
+        a = v == 0 || v == 2 || v == 4 || v == 8 ? v : 16;
+        if (!vk.sampler_anisotropy) a = 0;
+        __atomic_store_n(&aniso, a, __ATOMIC_RELEASE);
+    }
+    return a;
+}
+
+void gpu_aniso_cycle(void) {
+    int a = gpu_aniso();
+    a = a == 0 ? 2 : a == 2 ? 4 : a == 4 ? 8 : a == 8 ? 16 : 0;
+    if (!vk.sampler_anisotropy) a = 0;
+    __atomic_store_n(&aniso, a, __ATOMIC_RELEASE);
+    fprintf(stderr, "yw4: gpu: texture filtering %s (F2)\n", a ? (a == 2 ? "x2" : a == 4 ? "x4" : a == 8 ? "x8" : "x16")
+                                                                 : "the game's");
+}
+
 VkSampler gpu_sampler(const NvnSamplerDesc *d) {
     enum { MAX_SAMPLERS = 1024 };
     static struct {
         NvnSamplerDesc desc;
+        int aniso;  /* gpu_aniso() it was made with */
         VkSampler s;
     } cache[MAX_SAMPLERS];
     static int n;
+    int af = gpu_aniso();
     for (int i = 0; i < n; i++)
-        if (!memcmp(&cache[i].desc, d, sizeof *d)) return cache[i].s;
+        if (cache[i].aniso == af && !memcmp(&cache[i].desc, d, sizeof *d)) return cache[i].s;
     if (n == MAX_SAMPLERS) gpu_stop("more than %d different samplers", MAX_SAMPLERS);
     VkSamplerCreateInfo si = {.sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO};
     si.magFilter = d->mag_filter == 1 ? VK_FILTER_LINEAR : VK_FILTER_NEAREST;
@@ -1108,6 +1140,11 @@ VkSampler gpu_sampler(const NvnSamplerDesc *d) {
     if (si.maxLod < si.minLod) si.maxLod = si.minLod;
     si.mipLodBias = d->lod_bias;
     if (d->max_aniso > 1) si.anisotropyEnable = VK_TRUE, si.maxAnisotropy = fminf(d->max_aniso, 16);
+    if (af && mf >= 2 && !d->compare_mode && si.maxLod > si.minLod + 0.25f) {  /* better filtering (above) */
+        si.mipmapMode = VK_SAMPLER_MIPMAP_MODE_LINEAR;
+        if (si.minFilter == VK_FILTER_LINEAR && (float)af > d->max_aniso)
+            si.anisotropyEnable = VK_TRUE, si.maxAnisotropy = fminf((float)af, vk.props.limits.maxSamplerAnisotropy);
+    }
     if (d->compare_mode) si.compareEnable = VK_TRUE, si.compareOp = compare_op(d->compare_func);
     if (border) {  /* nearest standard border colour (custom colours: to do) */
         const float *c = d->border;
@@ -1115,7 +1152,13 @@ VkSampler gpu_sampler(const NvnSamplerDesc *d) {
                          : c[0] + c[1] + c[2] > 1.5f ? VK_BORDER_COLOR_FLOAT_OPAQUE_WHITE
                                                      : VK_BORDER_COLOR_FLOAT_OPAQUE_BLACK;
     }
-    cache[n].desc = *d;
+    static int log_samplers = -1;
+    if (log_samplers < 0) log_samplers = getenv("YW4_SAMPLER_LOG") && atoi(getenv("YW4_SAMPLER_LOG"));
+    if (log_samplers)  /* YW4_SAMPLER_LOG=1: each new sampler as the game set it */
+        fprintf(stderr, "yw4: sampler %d: min %u mag %u wrap %u,%u lod %g..%g bias %g aniso %g compare %u\n", n,
+                d->min_filter, d->mag_filter, d->wrap[0], d->wrap[1], d->lod_min, d->lod_max, d->lod_bias, d->max_aniso,
+                d->compare_mode);
+    cache[n].desc = *d, cache[n].aniso = af;
     CHECK(vkCreateSampler(vk.device, &si, NULL, &cache[n].s));
     return cache[n++].s;
 }

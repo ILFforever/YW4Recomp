@@ -249,6 +249,7 @@ static int vk_init(void) {
     VkPhysicalDeviceFeatures2 have = {.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2, .pNext = &f11};
     vkGetPhysicalDeviceFeatures2(vk.gpu, &have);
     const VkPhysicalDeviceFeatures *h = &have.features;
+    vk.sampler_anisotropy = h->samplerAnisotropy;
     VkPhysicalDeviceVulkan13Features e13 = {.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_3_FEATURES,
                                             .dynamicRendering = f13.dynamicRendering,
                                             .synchronization2 = f13.synchronization2};
@@ -725,6 +726,7 @@ void window_run(void (*guest)(void *), void *arg) {
             if (e.key.key == SDLK_F3) __atomic_store_n(&hud_on, hud_enabled() ? 0 : 1, __ATOMIC_RELEASE);  /* the HUD */
             if (e.key.key == SDLK_F8) gpu_shadow_res_cycle();  /* shadow quality: 1024 / 2048 / 4096 */
             if (e.key.key == SDLK_F4) gpu_res_cycle();  /* 3D view: 900 / 1080 / 1440 / 2160 lines */
+            if (e.key.key == SDLK_F2) gpu_aniso_cycle();  /* texture filtering: the game's / x2 .. x16 */
             if (e.key.key == SDLK_F5) gpu_passes_toggle();  /* per-pass GPU timing in the log */
             if (e.key.key == SDLK_F7) gpu_pcss_cycle();  /* PCSS (soft contact shadows): off / x1 / x2 / x4 */
             if (e.key.key == SDLK_F6) gbuffer_toggle(), yw4_hid_note_key("F6");  /* the G-buffer: the game's programs or ours */

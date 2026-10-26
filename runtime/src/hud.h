@@ -25,6 +25,8 @@ const char *shadow_mode_name(void);
 int gpu_shadow_res(void);
 /* gpu.c: the 3D view's height (900 is the game's; F4). */
 int gpu_res_height(void);
+/* gpu.c: texture filtering, 0 the game's, else anisotropic up to this (F2). */
+int gpu_aniso(void);
 /* gpu_draw.c: PCSS (soft contact shadows), 0 off, 1..3 = x1, x2, x4 (F7). */
 int gpu_pcss_level(void);
 /* gbuffer.c: our G-buffer programs on (F6). */
