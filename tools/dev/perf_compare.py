@@ -18,11 +18,26 @@ from tools.dev.run import run
 from tools.yw4 import config
 
 
+def periodic(text: str) -> dict[str, float]:
+    """A run stopped by the time limit writes no whole-run summary: the periodic ones instead,
+    averaged, without the first two (title and loading)."""
+    out = {}
+    for key, label in (("work", "game work ms"), ("gpu", "GPU busy ms")):
+        found = re.findall(label + r": avg ([\d.]+)\s+p50 [\d.]+\s+p95 ([\d.]+)", text)[2:]
+        if found:
+            out[key] = sum(float(a) for a, _ in found) / len(found)
+            out[key + "_p95"] = sum(float(b) for _, b in found) / len(found)
+    cpu = [float(x) for x in re.findall(r"process CPU: (\d+)%", text)][2:]
+    if cpu:
+        out["cpu"] = sum(cpu) / len(cpu)
+    return out
+
+
 def summary(log: Path) -> dict[str, float]:
     text = log.read_text(errors="ignore")
     i = text.rfind("perf, whole run")
     if i < 0:
-        return {}
+        return periodic(text)
     part = text[i:i + 2000]
     out = {}
     for key, label in (("work", "game work ms"), ("gpu", "GPU busy ms")):
