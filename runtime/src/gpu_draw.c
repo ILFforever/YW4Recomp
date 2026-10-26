@@ -953,7 +953,7 @@ static int bind_stage_set(VkCommandBuffer cb, const GpuState *s, const Shader *s
                 NvnTexEntry *e = tex_entry(s, handle);
                 const NvnSamplerDesc *sd = sampler_entry(s, handle);
                 if (own_t && ns == 1 && b->slot < TAKEOVER_TEXTURES && own_t->tex_mask >> b->slot & 1)
-                    sd = &own_t->samp[b->slot];  /* the takeover's sampler, by its settings */
+                    sd = &takeover_tex(own_t, b->slot)->samp;  /* the takeover's sampler, by its settings */
                 NvnSamplerDesc d = sd ? *sd : (NvnSamplerDesc){.min_filter = 1, .mag_filter = 1, .lod_max = 1000};
                 if (b->shadow && !d.compare_mode) d.compare_mode = 1, d.compare_func = 4;  /* LEQUAL */
                 if (!b->shadow) d.compare_mode = 0;
@@ -1588,7 +1588,7 @@ void gpu_takeover_draw(void *vk_cb, void *gpu_state, const void *data, uint32_t 
     static _Thread_local NvnTexEntry ents[TAKEOVER_TEXTURES];
     for (int k = 0; k < TAKEOVER_TEXTURES; k++)
         if (t->tex_mask >> k & 1) {
-            ents[k] = t->tex[k];
+            ents[k] = takeover_tex(t, (unsigned)k)->e;
             ents[k].tex = &ents[k].snap;
             s->tex[1][k] = 1ull << 63 | (uint64_t)k;
         }

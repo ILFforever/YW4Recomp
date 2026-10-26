@@ -991,20 +991,23 @@ static int takeover(const CPUState *ctx) {
     static _Thread_local uint8_t buf[512 * 1024];
     TakeoverDraw *t = (TakeoverDraw *)buf;
     memset(t, 0, sizeof *t);
-    uint32_t at = sizeof *t;
+    uint32_t at = (sizeof *t + 15) & ~15u;
     t->program = guest, t->vs_code = vs, t->fs_code = fs;
     /* textures and samplers, in the fragment slots the program reads */
     uint64_t texs[8];
     unsigned ntex = material_textures(cur.item, texs);
     const NvnCmdBuf *cb = HOST(NvnCmdBuf, U64(cur.device + 0x10d0) + 0xd8);
+    t->tex_at = at;  /* the TakeoverTex in slot order: the two loops go up the slots */
     for (unsigned k = 0; k < ntex && k < TAKEOVER_TEXTURES; k++) {
         if (!(tf >> k & 1)) continue;
         const NvnTexEntry *e = fresh_entry(cb, texs[k]);
         uint8_t ss[15];
         if (!e || !sampler_state(cur.item, k, ss)) return TK_TEXTURE;
+        TakeoverTex *x = (TakeoverTex *)(buf + at);
         t->tex_mask |= 1u << k;
-        t->tex[k] = *e;
-        sampler_desc(ss, &t->samp[k]);
+        x->e = *e;
+        sampler_desc(ss, &x->samp);
+        at += sizeof *x;
     }
     /* the other fragment textures it reads (the scene's, the per-object reflection probe) */
     for (unsigned k = ntex; k < TAKEOVER_TEXTURES; k++) {
@@ -1014,10 +1017,13 @@ static int takeover(const CPUState *ctx) {
         if (!g) continue;  /* none: what the game bound stays */
         const NvnTexEntry *e = fresh_entry(cb, g);
         if (!e) return TK_TEXTURE;
+        TakeoverTex *x = (TakeoverTex *)(buf + at);
         t->tex_mask |= 1u << k;
-        t->tex[k] = *e;
-        sampler_desc(ss, &t->samp[k]);
+        x->e = *e;
+        sampler_desc(ss, &x->samp);
+        at += sizeof *x;
     }
+    at = (at + 15) & ~15u;
     /* vertex layout and buffers */
     int other;
     if (!vertex_layout(cur.item, t->attribs, &other) || other) return TK_LAYOUT;

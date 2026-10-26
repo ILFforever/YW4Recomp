@@ -65,13 +65,20 @@ typedef struct {
     uint8_t nvn[0xb8];              /* NVN state objects as the engine keeps them from state+0x240 */
     uint32_t attribs[16], nattribs, stride;
     uint32_t tex_mask;              /* fragment texture slots of ours */
-    NvnTexEntry tex[TAKEOVER_TEXTURES];  /* their texture pool entries, copied when recorded: the engine
-                                          * registers textures at rising ids that wrap, so an id can name
-                                          * another texture by the time the draw runs */
-    NvnSamplerDesc samp[TAKEOVER_TEXTURES];
+    uint32_t tex_at;                /* their TakeoverTex, one per slot in tex_mask in slot order, from here */
     struct { uint8_t slot, stages; uint32_t offset, size; } ubo[TAKEOVER_UBOS];
     uint32_t nubo;
 } TakeoverDraw;
+/* A texture of a takeover draw: its pool entry, copied when recorded (the engine registers textures at
+ * rising ids that wrap, so an id can name another texture by the time the draw runs), and its sampler. */
+typedef struct {
+    NvnTexEntry e;
+    NvnSamplerDesc samp;
+} TakeoverTex;
+/* The TakeoverTex of fragment slot k (in tex_mask). */
+static inline const TakeoverTex *takeover_tex(const TakeoverDraw *t, unsigned k) {
+    return (const TakeoverTex *)((const uint8_t *)t + t->tex_at) + __builtin_popcount(t->tex_mask & ((1u << k) - 1));
+}
 /* CMD_NATIVE callback (gpu_draw.c): `data` holds a TakeoverDraw and its blocks. */
 void gpu_takeover_draw(void *vk_cb, void *gpu_state, const void *data, uint32_t size);
 
