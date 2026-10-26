@@ -46,6 +46,32 @@ reached yet.
 - How it got here, step by step: [docs/progress.md](docs/progress.md)
 - What is known to be missing or wrong: [docs/known-issues.md](docs/known-issues.md)
 
+## Why not just use an emulator?
+
+Switch emulators already run *Yo-kai Watch 4++* at full speed on a good PC. This project aims further:
+**better rendering, better graphics and better performance** than the Switch version (see [Goals](#goals)).
+
+An emulator can't do most of this. It imitates the console and plays the game's GPU commands as they are, so the
+game still decides its shadow quality, its 16:9 UI, its 30 frames/s and its effects. Here the game's renderer is
+being replaced with our own, so those become ours to change: bigger shadow maps and soft shadows are already in,
+higher resolution, ultrawide, higher frame rates and better anti-aliasing are next.
+
+A town street, same spot: the game's shadows (1024 map, no PCSS) against ours (4096 map, PCSS ×2). The
+characters' shadows keep their shape, and the tree shade on the pavement is soft:
+
+| Stock (the game's) | Improved (ours) |
+|---|---|
+| ![Stock shadows: blurry character shadows, hard tree shade](docs/screenshots/20-shadows-stock.jpg) | ![Improved shadows: defined character shadows, soft tree shade](docs/screenshots/21-shadows-improved.jpg) |
+
+It is also lighter to run. The same busy street on the same laptop ([docs/baseline.md](docs/baseline.md),
+2026-10-22):
+
+| | Emulator (Eden) | This project |
+|---|---|---|
+| CPU | 210% of one core | 111% |
+| Memory | 15.7 GB | 3.9 GB |
+| GPU | 30% | 33% |
+
 ## Goals
 
 | Status | Goal | Where it stands |
