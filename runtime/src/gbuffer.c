@@ -210,6 +210,8 @@ static _Thread_local struct {
     uint64_t item;     /* the draw item (0x48 bytes) of this submesh, 0 if not found */
     uint8_t kind;      /* the layer's kind */
     uint8_t layer_state[33];  /* the render state block (device+0xeb9) after the layer's own setup */
+    uint32_t bones_size;      /* check mode: the bone palette as read at the submesh's hook, 0 if none */
+    float bones[3 * 256 * 4];
     int layer_fresh;          /* no submesh of the layer seen yet */
 } cur;
 
@@ -257,6 +259,7 @@ static _Thread_local struct {
     long smp_n, smp_state, smp_desc;             /* their samplers: our state = the engine's, our settings = bound */
     long rs_ok, rs_bytes[33];                    /* render state block = the engine's; draws where byte i differs */
     long pg_n, pg_eff, pg_stages;                /* shader effect ours; vertex and fragment programs ours */
+    long bn_n, bn_hook, bn_late;                 /* bone palettes bound: = ours (the newest), = the one before */
 } prog_st[PROGRAM_STATS];
 /* game: the game's bound vertex constants 2, for last frame's rows */
 static void object_constants(const float *game, float out[GBUFFER_OBJECT_FLOATS]);
@@ -555,6 +558,39 @@ static int pass_shaders(uint64_t effect, uint64_t *vs, uint64_t *fs) {
     return *vs && *fs;
 }
 
+/* A skinned submesh's bone palette (3x4 floats per bone, vertex constants 4). The model record's
+ * per-submesh records (+0xc8, 0x140 bytes, by the submesh's index in the geometry's submesh table)
+ * hold three palettes, 0x38 bytes apart from +0x70 (each: a buffer object at +8, its data at
+ * [B+0x40] + [B+0x58]; the size at +0x28), written in turn by the animation; +0x118 points at the
+ * newest, which the model renderer copies into vertex constants 4 at the commit (equal on every
+ * skinned draw checked, read at our hook). The shadow pass's first palette (+0x78 always) was the
+ * right one a third of the time. 0 if none. */
+static int bone_palette(uint64_t item, uint64_t *data, uint32_t *size) {
+    uint64_t model = U64(item + 8), recs = U64(model + 0xc8), hdr = U64(cur.geometry + 0x18);
+    if (!recs || !guest_ptr(hdr)) return 0;
+    uint64_t subs = hdr + 4ull * U16(hdr + 0xa) + 4ull * U16(hdr + 0x60);
+    if (cur.submesh < subs || (cur.submesh - subs) % 0x50 || (cur.submesh - subs) / 0x50 >= U16(model + 0x200))
+        return 0;
+    uint64_t rec = recs + 0x140 * ((cur.submesh - subs) / 0x50), pal = U64(rec + 0x118);
+    if (pal < rec + 0x70 || (pal - (rec + 0x70)) % 0x38 || pal > rec + 0xe0) return 0;
+    uint64_t b = U64(pal + 8);
+    if (!guest_ptr(b) || !U64(b + 0x40)) return 0;
+    *data = U64(b + 0x40) + U32(b + 0x58);
+    *size = U32(pal + 0x28);
+    return *size && *size % 48 == 0 && *size <= 3 * 256 * 16;
+}
+
+/* The palette before the newest (for the check: the game's copy is one of the two). */
+static int bone_palette_previous(uint64_t item, uint64_t *data) {
+    uint64_t model = U64(item + 8), hdr = U64(cur.geometry + 0x18);
+    uint64_t subs = hdr + 4ull * U16(hdr + 0xa) + 4ull * U16(hdr + 0x60);
+    uint64_t rec = U64(model + 0xc8) + 0x140 * ((cur.submesh - subs) / 0x50), pal = U64(rec + 0x118);
+    uint64_t prev = rec + 0x70 + 0x38 * (((pal - (rec + 0x70)) / 0x38 + 2) % 3), b = U64(prev + 8);
+    if (!guest_ptr(b) || !U64(b + 0x40)) return 0;
+    *data = U64(b + 0x40) + U32(b + 0x58);
+    return 1;
+}
+
 /* The render state block the draw is made with: the material's (render_state), then the effect
  * pass's own (id, value) pairs (record +0xc of them from u16 +0xa, in the effect's +0x40), then what
  * the commit (f_9759d0) changes by the device's settings: +0x4629 flips the cull face (byte 0x1b
@@ -604,6 +640,10 @@ void gbuffer_submesh(const CPUState *ctx) {
                sizeof cur.layer_state);
         cur.layer_fresh = 0;
     }
+    uint64_t bones;
+    cur.bones_size = 0;
+    if (mode == MODE_CHECK && cur.item && bone_palette(cur.item, &bones, &cur.bones_size))
+        memcpy(cur.bones, (const void *)(uintptr_t)bones, cur.bones_size);
     cur.armed = 1;
     st.submeshes++;
 }
@@ -633,8 +673,9 @@ static void summary(void) {
                 prog_st[i].tex_other, prog_st[i].tex_unknown, prog_st[i].smp_n, prog_st[i].smp_state,
                 prog_st[i].smp_desc);
     for (int i = 0; i < PROGRAM_STATS && prog_st[i].n; i++) {
-        fprintf(stderr, "yw4: %s:   vs %016" PRIx64 ": effect ours %ld of %ld, programs ours %ld; render state ours %ld of %ld; bytes differing:", pass_name,
-                prog_st[i].vs, prog_st[i].pg_eff, prog_st[i].pg_n, prog_st[i].pg_stages, prog_st[i].rs_ok, prog_st[i].item);
+        fprintf(stderr, "yw4: %s:   vs %016" PRIx64 ": effect ours %ld of %ld, programs ours %ld; bones %ld: ours %ld, one step behind %ld; render state ours %ld of %ld; bytes differing:", pass_name,
+                prog_st[i].vs, prog_st[i].pg_eff, prog_st[i].pg_n, prog_st[i].pg_stages, prog_st[i].bn_n, prog_st[i].bn_hook,
+                prog_st[i].bn_late, prog_st[i].rs_ok, prog_st[i].item);
         for (int b = 0; b < 33; b++)
             if (prog_st[i].rs_bytes[b]) fprintf(stderr, " %#x:%ld", b, prog_st[i].rs_bytes[b]);
         fprintf(stderr, "\n");
@@ -758,6 +799,16 @@ void gbuffer_check_draw(const NvnCmdBuf *cb, uint64_t index_addr, uint32_t type,
                             ours.compare_mode, ours.compare_func, ours.lod_min, ours.lod_max, ours.lod_bias,
                             ours.max_aniso);
             }
+        }
+        /* the bone palette, against the vertex constants 4 the game bound: ours (the newest, read at the
+         * hook), or the one before it (the game read +0x118 before the animation moved it) */
+        uint64_t prev;
+        if (cur.bones_size && cb->trace_ub[0][4] && cur.item) {
+            const void *game = (const void *)(uintptr_t)cb->trace_ub[0][4];
+            prog_st[l].bn_n++;
+            if (!memcmp(cur.bones, game, cur.bones_size)) prog_st[l].bn_hook++;
+            else if (bone_palette_previous(cur.item, &prev) && !memcmp((const void *)(uintptr_t)prev, game, cur.bones_size))
+                prog_st[l].bn_late++;
         }
         /* the shader effect, the program and the render state block, against the engine's at the draw */
         if (cur.item) {

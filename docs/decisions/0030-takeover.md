@@ -120,6 +120,19 @@ Check mode, four saves: on every draw (about 4.6 million) our effect is the engi
 code are the bound program's. So a material, through its effect and the layer's pass key, names its programs,
 its render state, its textures and samplers, all from the game's data.
 
+**Bones: decoded (`bone_palette`).** A skinned submesh's record (model record `+0xc8`, 0x140 bytes) holds three
+palettes, 0x38 bytes apart from `+0x70`, which the animation writes in turn; `+0x118` points at the newest, and that
+is the one the engine copies into vertex constants 4. The shadow pass had always read the first one (right a third
+of the time, hence its copy of the engine's bound constants). A probe first suggested a race (the game "one step
+behind" in 12% of draws); it was the probe: a character standing still has the same pose in two buffers, and the
+probe named the last match. Check mode, four saves: **every skinned draw** (~390,000) equals ours.
+
+Everything one draw needs from its material is now decoded and checked in four saves, every layer kind:
+constants 2 (matrices), material constants, textures, samplers, render state block, effect, programs, bones.
+Still the game's: last frame's matrices and bones (motion vectors), the scene's constant buffers (camera,
+lights; per layer), vertex attribute formats, the atlas regions' UV transforms, and turning the render state block
+into NVN state. Next: skip the game's per-draw setup for draws whose inputs are all ours.
+
 ## Alternatives
 
 - **Selection first.** Removes the walk, but needs the rules that the shadow streaks showed we don't have, and
