@@ -78,3 +78,27 @@ Notes:
 - GPU: Eden 8-10% (20 s and 60 s averages), ours 16% in one 20 s sample, 12.2% in a Task Manager snapshot. Ours is heavier but by an uncertain amount, between 1x and 2x; repeat over a longer run once the crash below is fixed.
 - GPU: ours uses more GPU time than Eden for the same scene. Expected at this stage: full barriers between all work, images kept in the general layout, no pipeline cache across runs, and textures re-uploaded each frame. Optimising this is a later phase.
 - Visual difference seen in the same scene: Eden's floor and Jibanyan are more saturated and brighter; ours is flatter and darker. Something in the lighting or post-processing is still missing.
+
+## Recompiled build vs Eden, schoolyard street corner, 2026-10-26
+
+After decisions 0028 (geometry in video memory) and 0029 (the GPU worker thread). The owner stood at the same street
+corner (daytime) in both, side by side; Eden's numbers from its frame-time overlay, ours from the HUD (F3) and the
+performance log of the same session.
+
+| Measure | Eden v0.2.1 | Recompiled build |
+|---|---|---|
+| Frame rate | 30 fps (min 29, max 31) | 29.8 fps on the HUD; 29.9 over the whole session after loading |
+| Frame time | avg 33.4 ms, min 32.0, max 80.6 | min 31.6, max 66.7 ms on the HUD; whole session (11,506 frames): avg 33.4 ms, p99 34.0, 0.2% of frames over 34.5 ms, one frame of 133 ms |
+| GPU time per frame | not available | 7.4 ms |
+| Game work per frame | not available | 18.5 ms (of the 33.3 ms budget) |
+| CPU | not measured this time | 1.7 of 16 cores (11%) |
+| Memory | not measured this time | 2.97 GB |
+
+Notes:
+- The same frame rate as Eden at the game's 30 cap, with a shorter worst frame at this spot. The session's single
+  133 ms frame is not explained yet (a first-use pipeline build or an area load are the likely causes).
+- The GPU is idle most of each frame (7.4 of 33 ms): room for higher resolution later.
+- CPU and memory per process were not measured side by side this time; the 2026-10-22 tables above are the last such
+  measurement (before 0028/0029).
+- The owner's slow evening and night towns (`work/testsaves/save_base_lag`..`lag4`), 20-26 fps before 0028, now run
+  at 29.9 fps with 12 ms of GPU time and ~13 ms of game work a frame.
