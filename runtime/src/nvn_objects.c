@@ -152,7 +152,7 @@ static void show(NvnTexture *t, uint64_t frame, const int crop[4]) {
     static size_t cap;
     static uint32_t logged_format;
     if (t && gpu_ready()) {
-        gpu_present(t, frame, crop);
+        gpu_queue_present(t, frame, crop);
         return;
     }
     if (!t || !t->addr || t->target != 1 /* 2D */ || t->layout.fmt->bw != 1) return;
@@ -208,14 +208,14 @@ NVN(nvnQueuePresentTexture) {  /* (queue, window, texture index) */
  * waits for (gpu.c, decision 0021). Fencing takes the latest submission. Headless, GPU work
  * is done the moment it is submitted and every sync is signalled. One queue: the GPU never
  * has to wait for another queue (QueueWaitSync). */
-NVN(nvnQueueFenceSync) { G(uint64_t, A(1), 0) = gpu_submitted(); }  /* (queue, sync, condition, flags) */
+NVN(nvnQueueFenceSync) { G(uint64_t, A(1), 0) = gpu_queue_fence(); }  /* (queue, sync, condition, flags) */
 NVN(nvnQueueWaitSync) { RET(1); }  /* (queue, sync) */
 NVN(nvnSyncInitialize) { G(uint64_t, A(0), 0) = 0; RET(1); }
 NVN(nvnSyncFinalize) { (void)c; }
 /* (sync, timeout ns) -> ALREADY_SIGNALED 0, CONDITION_SATISFIED 1, TIMEOUT_EXPIRED 2 */
 NVN(nvnSyncWait) {
     int64_t t = host_now_ns();
-    int r = gpu_wait(G(uint64_t, A(0), 0), A(1));
+    int r = gpu_queue_wait(G(uint64_t, A(0), 0), A(1));
     yw4_perf_add(PERF_SYNC, host_now_ns() - t);
     RET(r);
 }
@@ -241,9 +241,15 @@ NVN(nvnMemoryPoolInitialize) {
     SET_HOST(A(0), p);
     RET(1);
 }
+/* Freeing an object that queued GPU work may still use goes through the GPU worker's queue
+ * (decision 0029): it runs after that work. */
+static void finalize_pool(void *p) { gpu_pool_finalize(p), free(p); }
+static void finalize_texture(void *t) { gpu_texture_finalize(t), free(t); }
+static void finalize_program(void *p) { gpu_program_finalize(p), free(p); }
+static void finalize_desc_pool(void *p) { NvnDescPool *d = p; free(d->entries), free(d); }
+
 NVN(nvnMemoryPoolFinalize) {
-    gpu_pool_finalize(HOST(NvnPool, A(0)));
-    free(HOST(NvnPool, A(0)));
+    gpu_queue_call(finalize_pool, HOST(NvnPool, A(0)));
     SET_HOST(A(0), 0);
 }
 NVN(nvnMemoryPoolMap) { RET(HOST(NvnPool, A(0))->storage); }
@@ -374,8 +380,7 @@ NVN(nvnTextureFinalize) {
     if (HOST(NvnTexture, A(0))->registered && finalized_registered++ < 5)
         fprintf(stderr, "yw4: NVN: texture %ux%u finalized while registered in a texture pool\n",
                 HOST(NvnTexture, A(0))->width, HOST(NvnTexture, A(0))->height);
-    gpu_texture_finalize(HOST(NvnTexture, A(0)));
-    free(HOST(NvnTexture, A(0)));
+    gpu_queue_call(finalize_texture, HOST(NvnTexture, A(0)));
     SET_HOST(A(0), 0);
 }
 NVN(nvnTextureGetFlags) { RET(HOST(NvnTexture, A(0))->flags); }
@@ -481,7 +486,7 @@ static void desc_pool_init(CPUState *c, size_t entry) {  /* (pool, memory pool, 
 static void desc_pool_finalize(CPUState *c) {
     NvnDescPool *d = HOST(NvnDescPool, A(0));
     if (nvn_trace_texpool(UINT32_MAX) > 0) fprintf(stderr, "yw4: texpool: pool %p finalized\n", (void *)d);
-    if (d) free(d->entries), free(d);
+    if (d) gpu_queue_call(finalize_desc_pool, d);
     SET_HOST(A(0), 0);
 }
 static void *desc_entry(CPUState *c, size_t entry) {  /* (pool, id, ...) */
@@ -535,8 +540,7 @@ NVN(nvnSamplerPoolRegisterSamplerBuilder) {  /* (pool, id, builder) */
 
 NVN(nvnProgramInitialize) { SET_HOST(A(0), alloc(sizeof(NvnProgram))); RET(1); }
 NVN(nvnProgramFinalize) {
-    gpu_program_finalize(HOST(NvnProgram, A(0)));
-    free(HOST(NvnProgram, A(0)));
+    gpu_queue_call(finalize_program, HOST(NvnProgram, A(0)));
     SET_HOST(A(0), 0);
 }
 /* (program, count, const NVNshaderData*): each {u64 code address, const void *control}. The
@@ -546,6 +550,7 @@ NVN(nvnProgramSetShaders) {
     NvnProgram *p = HOST(NvnProgram, A(0));
     int n = (int)A(1);
     const uint64_t *data = AP(2);
+    gpu_queue_drain();  /* queued work may still draw with the old shaders (decision 0029) */
     gpu_program_finalize(p);
     memset(p, 0, sizeof *p);
     for (int i = 0; i < n; i++) {
@@ -595,7 +600,7 @@ NVN(nvnWindowSetPresentInterval) {
 }
 NVN(nvnWindowAcquireTexture) {  /* (window, sync signalled when it's free, int *index) */
     NvnWindow *w = HOST(NvnWindow, A(0));
-    if (A(1)) G(uint64_t, A(1), 0) = gpu_submitted();  /* free once what was submitted has run */
+    if (A(1)) G(uint64_t, A(1), 0) = gpu_queue_fence();  /* free once what was submitted has run */
     *(int32_t *)AP(2) = w->next;
     w->next = (w->next + 1) % w->active;
     RET(0);  /* NVN_WINDOW_ACQUIRE_TEXTURE_RESULT_SUCCESS */

@@ -11,11 +11,13 @@
 typedef struct { void *p; } HostLock;
 typedef struct { void *p; } HostCond;
 #define HOST_LOCK_INIT {0}
+#define HOST_COND_INIT {0}
 #else
 #include <pthread.h>
 typedef pthread_mutex_t HostLock;
 typedef pthread_cond_t HostCond;
 #define HOST_LOCK_INIT PTHREAD_MUTEX_INITIALIZER
+#define HOST_COND_INIT PTHREAD_COND_INITIALIZER
 #endif
 
 void host_lock_init(HostLock *l);
@@ -24,6 +26,7 @@ void host_unlock(HostLock *l);
 
 void host_cond_init(HostCond *c);
 void host_cond_signal(HostCond *c);
+void host_cond_broadcast(HostCond *c);  /* wakes every waiter */
 /* Releases l, waits for a signal or at most timeout_ns (< 0: no limit), takes l again.
  * May wake early (spurious wake-ups): callers re-check their condition. */
 void host_cond_wait(HostCond *c, HostLock *l, int64_t timeout_ns);

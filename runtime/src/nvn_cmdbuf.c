@@ -370,7 +370,7 @@ static void clear_color(NvnTexture *t, const float color[4], uint32_t mask) {
 
 void nvn_execute(uint64_t handle) {
     int gpu = gpu_ready();
-    if (gpu) gpu_execute(handle);  /* the draw path (0021); the walk below then only counts */
+    if (gpu) gpu_queue_execute(handle);  /* the draw path (0021, 0029); the walk below then only counts */
     uint64_t at = handle;
     for (int n = 0;; n++) {
         const CmdRec *r = (const CmdRec *)(uintptr_t)at;

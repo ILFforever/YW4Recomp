@@ -50,4 +50,15 @@ int gpu_frame_time(uint64_t frame, double *busy_ms, double *span_ms);
  * renders at a lower resolution and crops to it (dynamic resolution). */
 void gpu_present(NvnTexture *t, uint64_t frame, const int crop[4]);
 
+/* The GPU worker (gpu_queue.c, decision 0029): command lists, presents and the freeing of objects
+ * queued work may use run on one worker thread in submission order (YW4_GPU_THREAD=0: in the
+ * caller). A fence is a ticket in that queue; waiting for one waits for the worker, then the GPU
+ * (0 already done, 1 waited, 2 timed out). Drain: wait until everything queued has run. */
+void gpu_queue_execute(uint64_t handle);
+void gpu_queue_present(NvnTexture *texture, uint64_t frame, const int crop[4]);
+void gpu_queue_call(void (*fn)(void *), void *arg);
+uint64_t gpu_queue_fence(void);
+int gpu_queue_wait(uint64_t fence, uint64_t timeout_ns);
+void gpu_queue_drain(void);
+
 #endif

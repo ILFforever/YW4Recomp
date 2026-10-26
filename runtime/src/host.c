@@ -18,6 +18,7 @@ void host_unlock(HostLock *l) { ReleaseSRWLockExclusive((PSRWLOCK)l); }
 
 void host_cond_init(HostCond *c) { InitializeConditionVariable((PCONDITION_VARIABLE)c); }
 void host_cond_signal(HostCond *c) { WakeConditionVariable((PCONDITION_VARIABLE)c); }
+void host_cond_broadcast(HostCond *c) { WakeAllConditionVariable((PCONDITION_VARIABLE)c); }
 
 void host_cond_wait(HostCond *c, HostLock *l, int64_t timeout_ns) {
     /* Millisecond resolution, rounded up so a wait is never shorter than asked. */
@@ -213,6 +214,7 @@ void host_cond_init(HostCond *c) {
     pthread_condattr_destroy(&a);
 }
 void host_cond_signal(HostCond *c) { pthread_cond_signal(c); }
+void host_cond_broadcast(HostCond *c) { pthread_cond_broadcast(c); }
 
 void host_cond_wait(HostCond *c, HostLock *l, int64_t timeout_ns) {
     if (timeout_ns < 0) {
