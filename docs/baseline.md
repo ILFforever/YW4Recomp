@@ -105,6 +105,10 @@ Notes:
   maps where Eden draws the game's 1024, PCSS x2) and partly our translation's barriers; still 8.5 of 33 ms a frame.
 - Memory: as on 2026-10-22, Task Manager's column counts our 2.9 GB game heap but not Eden's mapped console RAM;
   committed memory is lower for us.
+- **At the game's own shadow settings** (F8 to 1024, F7 PCSS off; same spot, both running, 30 s): ours GPU 14.3%
+  (5.5 ms a frame) vs Eden 13.2%; CPU 147% (peak 161%) vs Eden 318% (peak 604%); frame time avg 33.37 ms, p99 34.0.
+  So the GPU gap above is our shadow upgrade (4096 maps + PCSS x2: ~3 ms of GPU time a frame); at equal settings
+  the GPU use is about Eden's. Eden's own GPU share moved between the two samples (11.6% / 13.2%).
 - Measured with a script sampling both processes once a second for 30 s (CPU time, private working set, commit, GPU
   engine counters by process id).
 - The owner's slow evening and night towns (`work/testsaves/save_base_lag`..`lag4`), 20-26 fps before 0028, now run
