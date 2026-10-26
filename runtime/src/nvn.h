@@ -69,6 +69,7 @@ typedef struct {
     void *gpu;            /* the draw path's image (gpu.c) */
     int cpu_written;      /* WriteTexels changed its storage: upload before the GPU uses it */
     int registered;       /* times registered in a texture pool (diagnostic) */
+    int pool_id;          /* the id it was registered at last (the takeover finds textures by it) */
     void *found;          /* the image gpu.c found for it last, valid while found_epoch is current */
     uint32_t found_epoch;
 } NvnTexture;

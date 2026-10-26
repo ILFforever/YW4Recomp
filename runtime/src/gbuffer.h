@@ -9,8 +9,9 @@
 
 /* From the model renderer hook (shadow.c), at the start of every layer. */
 void gbuffer_layer_start(const CPUState *ctx);
-/* From the submesh-draw hook (shadow.c), before every submesh draw. */
-void gbuffer_submesh(const CPUState *ctx);
+/* From the submesh-draw hook (shadow.c), before every submesh draw: 1 if our takeover recorded the
+ * draw itself (decision 0030; then the game's submesh draw is skipped). */
+int gbuffer_submesh(const CPUState *ctx);
 /* The shadow pass drew the submesh noted last itself (the game's draw is skipped): forget it. */
 void gbuffer_disarm(void);
 /* The renderer's world for the submesh about to be drawn ([sp+0x30]+0x40 at the submesh-draw
@@ -53,6 +54,24 @@ void gbuffer_end_recording(const CPUState *ctx, uint64_t cmd);  /* nvn_cmdbuf.c:
 extern int gpu_ab_game;
 /* CMD_NATIVE callback (gpu_draw.c): `data` holds a GBufferDraw. */
 void gpu_gbuffer_draw(void *vk_cb, void *gpu_state, const void *data, uint32_t size);
+
+/* The takeover (decision 0030, YW4_TAKEOVER=1 with YW4_GBUFFER=native): a draw of ours made at the
+ * submesh-draw hook from the game's data alone, in place of the engine's state work and draw. The
+ * blocks of constants follow the record (ubo[i].offset from its start). */
+enum { TAKEOVER_TEXTURES = 8, TAKEOVER_UBOS = 4 };
+typedef struct {
+    GBufferDraw d;                  /* buffers, indices, vertex constants 2 */
+    uint64_t program, vs_code, fs_code;  /* the guest NVNprogram, and the code it must still have */
+    uint8_t nvn[0xb8];              /* NVN state objects as the engine keeps them from state+0x240 */
+    uint32_t attribs[16], nattribs, stride;
+    uint32_t tex_mask;              /* fragment texture slots of ours */
+    uint32_t tex_id[TAKEOVER_TEXTURES];  /* texture pool ids */
+    NvnSamplerDesc samp[TAKEOVER_TEXTURES];
+    struct { uint8_t slot, stages; uint32_t offset, size; } ubo[TAKEOVER_UBOS];
+    uint32_t nubo;
+} TakeoverDraw;
+/* CMD_NATIVE callback (gpu_draw.c): `data` holds a TakeoverDraw and its blocks. */
+void gpu_takeover_draw(void *vk_cb, void *gpu_state, const void *data, uint32_t size);
 
 /* YW4_GBUFFER=check: nvn_cmdbuf.c calls gbuffer_check_draw for every draw while this is set. */
 extern int gbuffer_checking;

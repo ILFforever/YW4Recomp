@@ -882,6 +882,8 @@ static int pcss_settings(VkBuffer *buf, VkDeviceSize *offset) {
 /* A draw of our G-buffer pass (gbuffer.h): its own vertex and index buffers and vertex constants 2
  * in place of the bound ones. */
 static _Thread_local const GBufferDraw *own;
+/* ... and a takeover draw (decision 0030): also its constant blocks and samplers */
+static _Thread_local const TakeoverDraw *own_t;
 
 static int bind_stage_set(VkCommandBuffer cb, const GpuState *s, const Shader *sh, int ns, VkPipelineBindPoint bp,
                           VkPipelineLayout layout, uint32_t setno) {
@@ -898,7 +900,18 @@ static int bind_stage_set(VkCommandBuffer cb, const GpuState *s, const Shader *s
                 GpuRange r = b->kind == 'c' ? (b->slot < UBOS ? s->ubo[ns][b->slot] : (GpuRange){0})
                                             : (b->slot < SSBOS ? s->ssbo[ns][b->slot] : (GpuRange){0});
                 VkDeviceSize range = b->kind == 'c' && r.size > 65536 ? 65536 : r.size;
-                if (own && ns == 0 && b->kind == 'c' && b->slot == 2) {  /* our object constants */
+                int taken = 0;
+                for (uint32_t u = 0; own_t && b->kind == 'c' && u < own_t->nubo; u++)
+                    if (own_t->ubo[u].slot == b->slot && own_t->ubo[u].stages >> ns & 1) {  /* a block of ours */
+                        uint8_t *p = ring_alloc(own_t->ubo[u].size, &bi[i].buffer, &bi[i].offset);
+                        if (p) memcpy(p, (const uint8_t *)own_t + own_t->ubo[u].offset, own_t->ubo[u].size),
+                                   range = own_t->ubo[u].size;
+                        else bi[i].buffer = dummy_buffer(), bi[i].offset = 0, range = 65536;
+                        taken = 1;
+                        break;
+                    }
+                if (taken) {
+                } else if (own && ns == 0 && b->kind == 'c' && b->slot == 2) {  /* our object constants */
                     uint8_t *p = ring_alloc(sizeof own->object, &bi[i].buffer, &bi[i].offset);
                     if (p) memcpy(p, own->object, sizeof own->object), range = sizeof own->object;
                     else bi[i].buffer = dummy_buffer(), bi[i].offset = 0, range = 65536;
@@ -934,6 +947,8 @@ static int bind_stage_set(VkCommandBuffer cb, const GpuState *s, const Shader *s
                 uint64_t handle = b->slot < TEXTURES ? s->tex[ns][b->slot] : 0;
                 NvnTexEntry *e = tex_entry(s, handle);
                 const NvnSamplerDesc *sd = sampler_entry(s, handle);
+                if (own_t && ns == 1 && b->slot < TAKEOVER_TEXTURES && own_t->tex_mask >> b->slot & 1)
+                    sd = &own_t->samp[b->slot];  /* the takeover's sampler, by its settings */
                 NvnSamplerDesc d = sd ? *sd : (NvnSamplerDesc){.min_filter = 1, .mag_filter = 1, .lod_max = 1000};
                 if (b->shadow && !d.compare_mode) d.compare_mode = 1, d.compare_func = 4;  /* LEQUAL */
                 if (!b->shadow) d.compare_mode = 0;
@@ -1523,4 +1538,63 @@ void gpu_gbuffer_draw(void *vk_cb, void *gpu_state, const void *data, uint32_t s
     own = d;
     draw(vk_cb, gpu_state, &r);
     own = NULL;
+}
+
+/* CMD_NATIVE: a takeover draw (gbuffer.c, decision 0030). The engine did no state work for it: its
+ * program, NVN state objects, vertex layout, material textures (fragment slots) and constant blocks
+ * go into the executor's state for this one draw and are put back after, so the game's next draw
+ * finds the state the game's own commands left. Everything else (targets, scene constants and
+ * textures, stencil reference, depth bias) is what the game bound for the layer. */
+void gpu_takeover_draw(void *vk_cb, void *gpu_state, const void *data, uint32_t size) {
+    const TakeoverDraw *t = data;
+    GpuState *s = gpu_state;
+    if (size < sizeof *t) return;
+    NvnProgram *prog = t->program ? (NvnProgram *)(uintptr_t)*(const uint64_t *)(uintptr_t)t->program : NULL;
+    if (!prog || prog->stages[0].code != t->vs_code || prog->stages[1].code != t->fs_code) {
+        static int logged;
+        if (logged++ < 4) fprintf(stderr, "yw4: takeover: program %#" PRIx64 " is no longer the one recorded: draw lost\n",
+                                  t->program);
+        return;
+    }
+    /* what we change, saved */
+    NvnProgram *program = s->program;
+    uint8_t blend[8][8], color[4], ds[8], polygon[4];
+    uint32_t mask = s->channel_mask, attribs[16], nattribs = s->nattribs, streams[16][2], nstreams = s->nstreams;
+    uint64_t tex[TAKEOVER_TEXTURES];
+    memcpy(blend, s->blend, sizeof blend), memcpy(color, s->color, 4), memcpy(ds, s->depth_stencil, 8);
+    memcpy(polygon, s->polygon, 4), memcpy(attribs, s->attribs, sizeof attribs), memcpy(streams, s->streams, sizeof streams);
+    memcpy(tex, s->tex[1], sizeof tex);
+    /* ours */
+    s->program = prog;
+    memcpy(s->blend, t->nvn, 0x40);
+    memcpy(&s->channel_mask, t->nvn + 0x40, 4);
+    memcpy(s->color, t->nvn + 0x44, 4);
+    memcpy(s->depth_stencil, t->nvn + 0x48, 8);
+    memcpy(s->polygon, t->nvn + 0x68, 4);
+    memcpy(s->attribs, t->attribs, sizeof t->attribs);
+    s->nattribs = t->nattribs;
+    for (int i = 0; i < 16; i++) s->streams[i][0] = t->stride, s->streams[i][1] = 0;
+    s->nstreams = 16;
+    for (int k = 0; k < TAKEOVER_TEXTURES; k++)
+        if (t->tex_mask >> k & 1) s->tex[1][k] = t->tex_id[k];
+    CmdRec r;
+    memset(&r, 0, sizeof r);
+    r.size = sizeof r;
+    const GBufferDraw *d = &t->d;
+    if (d->index_count) {  /* (primitive, index type, count, index address, base vertex, base instance, instances) */
+        r.op = CMD_DRAW_ELEMENTS;
+        r.x[0] = d->primitive, r.x[1] = d->index_type, r.x[2] = d->index_count, r.x[3] = d->indices, r.x[6] = 1;
+    } else {  /* (primitive, first, count, base instance, instances) */
+        r.op = CMD_DRAW_ARRAYS;
+        r.x[0] = d->primitive, r.x[2] = d->vertex_count, r.x[4] = 1;
+    }
+    own = d, own_t = t;
+    draw(vk_cb, s, &r);
+    own = NULL, own_t = NULL;
+    /* the game's, back */
+    s->program = program;
+    memcpy(s->blend, blend, sizeof blend), memcpy(s->color, color, 4), memcpy(s->depth_stencil, ds, 8);
+    memcpy(s->polygon, polygon, 4), memcpy(s->attribs, attribs, sizeof attribs), memcpy(s->streams, streams, sizeof streams);
+    s->channel_mask = mask, s->nattribs = nattribs, s->nstreams = nstreams;
+    memcpy(s->tex[1], tex, sizeof tex);
 }

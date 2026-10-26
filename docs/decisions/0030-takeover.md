@@ -206,6 +206,38 @@ So the first draws that can skip the engine's work are those whose shaders read 
 texture 9 or rows 16-19 of constants 2 (most of the G-buffer and shadow layers); the material pass needs the
 commit's callback decoded first.
 
+## The first skipped draws (`YW4_TAKEOVER=1`, with `YW4_GBUFFER=native`)
+
+G-buffer layers only, to start. At the submesh-draw hook (`gbuffer.c` `takeover`), a draw whose inputs are all
+ours is recorded as one `CMD_NATIVE` (`TakeoverDraw`: buffers, constants 2, program, NVN state objects, vertex layout,
+material textures by pool id with their sampler settings, and the model material, material constants and bone
+blocks appended), and the hook returns 1: the engine's commit (`f_977e30`: state handlers, program, uploads, texture
+views) and its NVN calls don't run for it. The executor (`gpu_draw.c` `gpu_takeover_draw`) puts our program, state,
+layout and textures into its state for that one draw and back after, and binds our blocks and samplers in
+`bind_stage_set`; targets, scene constants and textures, stencil reference and depth bias stay what the game bound for
+the layer.
+
+Left to the game: the first draw of each layer (its commit binds the targets and the scene's constants), draws whose
+shaders read per-object data not ours yet (constants 10-12, texture 9, constants 2 rows 16-19, vertex-stage
+textures), and anything not resolved (program not seen yet: the registry is learned from the game's own draws, keyed
+by vertex and fragment code; texture without a pool entry; sampler state; layout).
+
+Schoolyard: 70% of the G-buffer's draws taken (40,200 of 57,774 per 300 frames); the rest per-object data (17,274)
+and first draws (300). Check: with `YW4_TAKEOVER_ALTERNATE=1` (ours on odd frames only) and the G-buffer targets
+dumped for 8 frames, ours against the game's differs as much as the game against itself (2,500-10,300 texels, the
+running NPC; game against game 2,700-10,000); self-test (projection × view × world nudged by 0.01 in our draws only):
+561,000 texels differ, game against game unchanged.
+
+Measured (town walk replay, 3 alternating pairs of runs, `YW4_GBUFFER=native` with and without the takeover; the
+periodic summaries after loading, since runs stopped by the time limit write no whole-run summary): process CPU
+75.4% → 71.0% of a core, game work 12.50 → 11.94 ms (one slow baseline run; the other two 12.05), GPU unchanged
+(6.84 / 6.83 ms). By thread: one render thread (19, the one whose CPU fell: the G-buffer's) 8.0% → 5.7% of a core,
+29% less; the others within a point. This is the engine's per-draw state work for ~70% of one pass's draws; the
+material pass (blocked by constants 12) and the shadow layers are bigger.
+
+A bug found on the way: the "off for this layer" reason had the value of "recorded", so in the first run the shadow
+and material layers' draws were skipped with nothing in their place. The per-pass counters showed it at once.
+
 ## Alternatives
 
 - **Selection first.** Removes the walk, but needs the rules that the shadow streaks showed we don't have, and

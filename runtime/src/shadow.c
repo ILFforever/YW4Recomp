@@ -1101,7 +1101,7 @@ int yw4_hook_model_renderer(CPUState *ctx) {
  * game's draw that follows is learned from); in native mode replaced by ours when we can. */
 int yw4_hook_submesh_draw(CPUState *ctx) {
     trace_draws++;
-    gbuffer_submesh(ctx);
+    if (gbuffer_submesh(ctx)) return 1;  /* the takeover drew it (decision 0030) */
     if (!lay || !lay->active || lay->ndrawn >= MAX_CASTERS) return 0;
     static uint64_t base;
     if (!base)

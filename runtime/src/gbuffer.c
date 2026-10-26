@@ -146,6 +146,80 @@ static uint32_t cbuf_slots(uint64_t key) {
     return read_cbuf_slots(key);
 }
 
+/* The texture slots a translated shader reads (.iface "t <slot> <dim>"), as a bit mask; remembered. */
+static uint32_t read_tex_slots(uint64_t key) {
+    char path[1024], line[256];
+    snprintf(path, sizeof path, "%s/%016" PRIx64 ".iface", shader_dir(), key);
+    FILE *f = fopen(path, "r");
+    if (!f) return ~0u;  /* unknown: as if it read everything */
+    uint32_t mask = 0;
+    while (fgets(line, sizeof line, f)) {
+        unsigned slot;
+        if (line[0] == 't' && sscanf(line + 1, "%u", &slot) == 1 && slot < 32) mask |= 1u << slot;
+    }
+    fclose(f);
+    return mask;
+}
+static uint32_t tex_slots(uint64_t key) {
+    enum { SLOTS = 1 << 12 };
+    static struct { uint64_t key; uint64_t mask; } seen[SLOTS];  /* mask | 1 << 32 once read */
+    uint32_t h = (uint32_t)(key * 0x9E3779B97F4A7C15ull >> 52);
+    for (uint32_t i = 0; i < SLOTS; i++, h = (h + 1) & (SLOTS - 1)) {
+        uint64_t k = __atomic_load_n(&seen[h].key, __ATOMIC_ACQUIRE);
+        if (k == key) {
+            uint64_t m = __atomic_load_n(&seen[h].mask, __ATOMIC_ACQUIRE);
+            if (m) return (uint32_t)m;
+            break;
+        }
+        if (!k) {
+            uint64_t zero = 0;
+            if (!__atomic_compare_exchange_n(&seen[h].key, &zero, key, 0, __ATOMIC_ACQ_REL, __ATOMIC_ACQUIRE) &&
+                zero != key)
+                continue;
+            uint32_t m = read_tex_slots(key);
+            __atomic_store_n(&seen[h].mask, m | 1ull << 32, __ATOMIC_RELEASE);
+            return m;
+        }
+    }
+    return read_tex_slots(key);
+}
+
+/* The NVN programs the engine has made, by their vertex and fragment code (decision 0030): learned
+ * from the game's own draws (the engine makes one program per combination of stage shaders and keeps
+ * it), so a takeover draw can bind the program the engine would have. 0 if not seen yet. */
+enum { PROGRAMS = 1 << 12 };
+static struct { uint64_t vs, fs, guest; } programs[PROGRAMS];
+static void learn_program(const NvnCmdBuf *cb) {
+    const NvnProgram *p = cb->program;
+    if (!p || !cb->program_guest || p->stage_mask != 3) return;
+    uint64_t vs = p->stages[0].code, fs = p->stages[1].code;
+    uint32_t h = (uint32_t)((vs ^ fs * 0x9E3779B97F4A7C15ull) * 0x9E3779B97F4A7C15ull >> 52);
+    for (uint32_t i = 0; i < PROGRAMS; i++, h = (h + 1) & (PROGRAMS - 1)) {
+        uint64_t k = __atomic_load_n(&programs[h].vs, __ATOMIC_ACQUIRE);
+        if (k == vs && __atomic_load_n(&programs[h].fs, __ATOMIC_ACQUIRE) == fs) {
+            __atomic_store_n(&programs[h].guest, cb->program_guest, __ATOMIC_RELEASE);
+            return;
+        }
+        if (!k) {
+            uint64_t zero = 0;
+            if (!__atomic_compare_exchange_n(&programs[h].vs, &zero, vs, 0, __ATOMIC_ACQ_REL, __ATOMIC_ACQUIRE)) continue;
+            __atomic_store_n(&programs[h].fs, fs, __ATOMIC_RELEASE);
+            __atomic_store_n(&programs[h].guest, cb->program_guest, __ATOMIC_RELEASE);
+            return;
+        }
+    }
+}
+static uint64_t program_of(uint64_t vs, uint64_t fs) {
+    uint32_t h = (uint32_t)((vs ^ fs * 0x9E3779B97F4A7C15ull) * 0x9E3779B97F4A7C15ull >> 52);
+    for (uint32_t i = 0; i < PROGRAMS; i++, h = (h + 1) & (PROGRAMS - 1)) {
+        uint64_t k = __atomic_load_n(&programs[h].vs, __ATOMIC_ACQUIRE);
+        if (!k) return 0;
+        if (k == vs && __atomic_load_n(&programs[h].fs, __ATOMIC_ACQUIRE) == fs)
+            return __atomic_load_n(&programs[h].guest, __ATOMIC_ACQUIRE);
+    }
+    return 0;
+}
+
 /* The same, remembered per program (the render threads ask before every model draw). */
 static uint64_t local_rows(const NvnProgram *p) {
     enum { SLOTS = 1 << 11 };
@@ -260,6 +334,7 @@ static _Thread_local struct {
     uint32_t bones_size;      /* check mode: the bone palette as read at the submesh's hook, 0 if none */
     float bones[3 * 256 * 4];
     int layer_fresh;          /* no submesh of the layer seen yet */
+    int game_drew;            /* the game drew a submesh of this layer (its commit bound the targets) */
     uint8_t layer_nvn[NVN_STATE_BYTES];  /* the engine's NVN state objects ([device+0x10d0]+0x240) then */
 } cur;
 
@@ -314,6 +389,7 @@ static _Thread_local struct {
 } prog_st[PROGRAM_STATS];
 /* game: the game's bound vertex constants 2, for last frame's rows */
 static void object_constants(const float *game, float out[GBUFFER_OBJECT_FLOATS]);
+static uint64_t indices_of(uint64_t geometry, uint64_t submesh);
 
 /* Same-frame A/B (gpu_ab.c): the compared pass's layer, open in this command buffer until the next
  * layer starts there or the game ends the buffer's recording (thread B's G-buffer layer is the
@@ -365,6 +441,7 @@ void gbuffer_layer_start(const CPUState *ctx) {
     cur.device = ctx->x[0], cur.list = ctx->x[1];
     cur.kind = U8(item + 8);
     cur.layer_fresh = 1;
+    cur.game_drew = 0;
     /* the camera's projection and view in the render state (the shadow cascades' jobs put theirs
      * at the same offsets on their own thread) */
     Mat4 proj = mat4_load(cur.device + 0x280), view = mat4_load(cur.device + 0x2c0);
@@ -808,6 +885,139 @@ static void nvn_state(const uint8_t b[33], uint8_t out[NVN_STATE_BYTES]) {
     ms[0] = b[0x20] != 0;
 }
 
+/* ---- the takeover (decision 0030): a draw made from the game's data alone, at the submesh-draw
+ * hook, in place of the engine's state work (its commit) and draw */
+
+enum { TK_DRAWN, TK_OFF, TK_FIRST, TK_ITEM, TK_PRIMITIVE, TK_PROGRAM, TK_READS, TK_TEXTURE, TK_LAYOUT, TK_CONSTANTS, TK_BONES,
+       TK_REASONS };
+static const char *const tk_reason[TK_REASONS] = {
+    "", "off", "first draw of the layer", "no draw item or world", "not triangles", "program not known",
+    "reads per-object data (constants 10-12, texture 9, rows 16-19, vertex textures)", "texture or sampler",
+    "vertex layout", "material constants", "bones"};
+static _Thread_local struct { long taken, left[TK_REASONS]; } tk;
+
+static void takeover_summary(void) {
+    static _Thread_local uint64_t last;
+    uint64_t frame = __atomic_load_n(&yw4_frames_presented, __ATOMIC_RELAXED);
+    if (frame < last + 300) return;
+    last = frame;
+    fprintf(stderr, "yw4: takeover: %s: %ld draws ours; the game's:", pass_name, tk.taken);
+    for (int i = TK_FIRST; i < TK_REASONS; i++)
+        if (tk.left[i]) fprintf(stderr, " %s %ld;", tk_reason[i], tk.left[i]);
+    fprintf(stderr, "\n");
+    memset(&tk, 0, sizeof tk);
+}
+
+static int takeover_on(void) {
+    static int on = -1;
+    if (on < 0) on = getenv("YW4_TAKEOVER") && atoi(getenv("YW4_TAKEOVER"));
+    return on;
+}
+/* YW4_TAKEOVER_ALTERNATE=1: only on odd presented frames, the game draws on the even ones (for
+ * comparisons within one run: tools.dev.frame_ab) */
+static int takeover_frame(void) {
+    static int alt = -1;
+    if (alt < 0) alt = getenv("YW4_TAKEOVER_ALTERNATE") && atoi(getenv("YW4_TAKEOVER_ALTERNATE"));
+    return !alt || (__atomic_load_n(&yw4_frames_presented, __ATOMIC_RELAXED) & 1);
+}
+
+static void add_ubo(TakeoverDraw *t, unsigned slot, unsigned stages, uint32_t offset, uint32_t size) {
+    t->ubo[t->nubo].slot = (uint8_t)slot, t->ubo[t->nubo].stages = (uint8_t)stages;
+    t->ubo[t->nubo].offset = offset, t->ubo[t->nubo].size = size;
+    t->nubo++;
+}
+
+/* TK_DRAWN (0): ours is recorded; else the reason the draw stays the game's. */
+static int takeover(const CPUState *ctx) {
+    if (!takeover_on() || !takeover_frame() || __atomic_load_n(&mode, __ATOMIC_ACQUIRE) != MODE_NATIVE ||
+        cur.kind != LAYER_GBUFFER)
+        return TK_OFF;
+    if (!cur.game_drew || cur.layer_fresh) return TK_FIRST;
+    if (!cur.item || !cur.have_world) return TK_ITEM;
+    if (U8(cur.submesh + 0x3d) != 1) return TK_PRIMITIVE;
+    uint64_t effect = effect_of(cur.item), vs = 0, fs = 0;
+    if (!pass_shaders(effect, &vs, &fs)) return TK_PROGRAM;
+    uint64_t guest = program_of(vs, fs);
+    const NvnProgram *p = guest ? HOST(NvnProgram, guest) : NULL;
+    if (!p || p->stages[0].code != vs || p->stages[1].code != fs || p->stage_mask != 3) return TK_PROGRAM;
+    uint32_t cv = cbuf_slots(p->stages[0].key), cf = cbuf_slots(p->stages[1].key);
+    uint64_t rows = local_rows(p);
+    uint32_t tf = tex_slots(p->stages[1].key);
+    if ((cv | cf) & (1u << 10 | 1u << 11 | 1u << 12) || !rows || rows >> 16 & 0xF || tex_slots(p->stages[0].key) ||
+        tf >> 9 & 1)
+        return TK_READS;
+
+    static _Thread_local uint8_t buf[sizeof(TakeoverDraw) + 0x80 + 0x160 + 2 * 3 * 256 * 16];
+    TakeoverDraw *t = (TakeoverDraw *)buf;
+    memset(t, 0, sizeof *t);
+    uint32_t at = sizeof *t;
+    t->program = guest, t->vs_code = vs, t->fs_code = fs;
+    /* textures and samplers, in the fragment slots the program reads */
+    uint64_t texs[8];
+    unsigned ntex = material_textures(cur.item, texs);
+    const NvnCmdBuf *cb = HOST(NvnCmdBuf, U64(cur.device + 0x10d0) + 0xd8);
+    for (unsigned k = 0; k < ntex && k < TAKEOVER_TEXTURES; k++) {
+        if (!(tf >> k & 1)) continue;
+        const NvnTexture *nt = texs[k] ? HOST(NvnTexture, texs[k]) : NULL;
+        uint8_t ss[15];
+        if (!nt || !cb || !cb->trace_texpool || nt->pool_id < 0 || nt->pool_id >= cb->trace_texpool->count ||
+            ((const NvnTexEntry *)cb->trace_texpool->entries)[nt->pool_id].guest != texs[k] ||
+            !sampler_state(cur.item, k, ss))
+            return TK_TEXTURE;
+        t->tex_mask |= 1u << k;
+        t->tex_id[k] = (uint32_t)nt->pool_id;
+        sampler_desc(ss, &t->samp[k]);
+    }
+    /* vertex layout and buffers */
+    int other;
+    if (!vertex_layout(cur.item, t->attribs, &other) || other) return TK_LAYOUT;
+    t->nattribs = 16;
+    t->stride = U8(cur.submesh + 0x3e);
+    GBufferDraw *d = &t->d;
+    uint64_t bufs = U64(cur.geometry + 0x20);
+    d->vertices = bufs ? U64(bufs) + U32(cur.submesh) : 0;
+    d->vertex_count = U32(cur.submesh + 8);
+    d->vertex_bytes = d->vertex_count * t->stride;
+    d->index_count = U32(cur.submesh + 0xc);
+    d->indices = d->index_count ? indices_of(cur.geometry, cur.submesh) : 0;
+    d->index_type = !d->index_count ? 0 : U8(cur.submesh + 0x3f) & 2 ? 2 : 1;
+    d->primitive = 4;
+    d->instances = 1;
+    if (!d->vertices || !t->stride || (d->index_count && !d->indices)) return TK_LAYOUT;
+    object_constants(NULL, d->object);
+    /* render state */
+    uint8_t rs[33], ms[33];
+    draw_state(cur.item, effect, rs);
+    nvn_state(rs, t->nvn);
+    /* constant blocks: the model material block, the material constants, the bones */
+    unsigned mmslot = U16(cur.list + 0x74), mslot = U16(cur.list + 0x7a), n;
+    uint8_t stages;
+    if (mmslot < 16 && (stages = (uint8_t)((cv >> mmslot & 1) | (cf >> mmslot & 1) << 1))) {
+        render_state(cur.item, ms);
+        model_material(cur.item, ms, buf + at, &n);
+        add_ubo(t, mmslot, stages, at, 0x160);
+        at += 0x160;
+    }
+    if (mslot < 16 && mslot != mmslot && (stages = (uint8_t)((cv >> mslot & 1) | (cf >> mslot & 1) << 1))) {
+        if (!material_constants(cur.item, buf + at)) return TK_CONSTANTS;
+        add_ubo(t, mslot, stages, at, 0x80);
+        at += 0x80;
+    }
+    if ((cv | cf) & (1u << 4 | 1u << 5)) {
+        uint64_t pal, prev;
+        uint32_t size;
+        if (!bone_palette(cur.item, &pal, &size) || !bone_palette_previous(cur.item, &prev)) return TK_BONES;
+        for (int sl = 4; sl <= 5; sl++) {
+            if (!((cv | cf) >> sl & 1)) continue;
+            memcpy(buf + at, (const void *)(uintptr_t)(sl == 4 ? pal : prev), size);
+            add_ubo(t, (unsigned)sl, (cv >> sl & 1) | (cf >> sl & 1) << 1, at, size);
+            at += size;
+        }
+    }
+    nvn_record_native(ctx, U64(cur.device + 0x10d0) + 0xd8, gpu_takeover_draw, buf, at);
+    return TK_DRAWN;
+}
+
 void gbuffer_disarm(void) { cur.armed = 0; }
 
 int gbuffer_hook_world(const CPUState *ctx, float out[12]) {
@@ -817,14 +1027,14 @@ int gbuffer_hook_world(const CPUState *ctx, float out[12]) {
     return 1;
 }
 
-void gbuffer_submesh(const CPUState *ctx) {
-    if (!cur.active) return;
+int gbuffer_submesh(const CPUState *ctx) {
+    if (!cur.active) return 0;
     static uint64_t base;
     if (!base)
         for (size_t i = 0; i < yw4_ncode; i++)
             if (!strcmp(yw4_code[i].name, "main")) base = *yw4_code[i].base;
     uint64_t ret = ctx->x[30] - base;
-    if (ret != 0xa4bf94 && ret != 0xa4c2d0) return;  /* from the model renderer */
+    if (ret != 0xa4bf94 && ret != 0xa4c2d0) return 0;  /* from the model renderer */
     /* the object being drawn is in the model renderer's stack slot sp+0x390 */
     cur.object = U64(ctx->sp + 0x390), cur.geometry = ctx->x[1], cur.submesh = ctx->x[2];
     cur.sp = ctx->sp, cur.ret = ret;
@@ -846,8 +1056,17 @@ void gbuffer_submesh(const CPUState *ctx) {
     cur.bones_size = 0;
     if (mode == MODE_CHECK && cur.item && bone_palette(cur.item, &bones, &cur.bones_size))
         memcpy(cur.bones, (const void *)(uintptr_t)bones, cur.bones_size);
-    cur.armed = 1;
     st.submeshes++;
+    int why = takeover(ctx);
+    if (takeover_on()) {
+        if (why != TK_DRAWN) tk.left[why]++;
+        else tk.taken++;
+        takeover_summary();
+    }
+    if (why == TK_DRAWN) return cur.armed = 0, 1;  /* ours: the engine's commit and draw are skipped */
+    cur.game_drew = 1;
+    cur.armed = 1;
+    return 0;
 }
 
 static void summary(void) {
@@ -1307,6 +1526,7 @@ static void object_constants(const float *game, float out[GBUFFER_OBJECT_FLOATS]
 }
 
 int gbuffer_take_draw(CPUState *ctx, const NvnCmdBuf *cb, int indexed, int instanced) {
+    if (cur.armed) learn_program(cb);
     if (!cur.armed || __atomic_load_n(&mode, __ATOMIC_ACQUIRE) != MODE_NATIVE) return 0;
     cur.armed = 0;
     native_summary();

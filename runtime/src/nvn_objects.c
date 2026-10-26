@@ -502,6 +502,7 @@ static void register_texture(CPUState *c) {  /* (pool, id, texture, view or NULL
     NvnTexEntry *e = desc_entry(c, sizeof *e);
     NvnTexture *t = HOST(NvnTexture, A(2));
     t->registered++;
+    t->pool_id = (int)A(1);
     e->snap = *t;  /* a copy, as the hardware's descriptor is */
     e->snap.gpu = NULL;
     e->tex = &e->snap;
