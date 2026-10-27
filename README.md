@@ -119,9 +119,13 @@ pages. The DualSense's **touchpad** shows the performance HUD (F3). Your choices
 `settings.ini` next to `yw4.exe` and kept for the next start. Settings are only in the panel; the other function keys
 are debugging tools ([docs/debugging.md](docs/debugging.md)).
 
-| Settings (F1) | Controls (F2), with a DualSense |
-|---|---|
-| ![The settings panel](docs/screenshots/22-settings-panel.png) | ![The controls page with a DualSense: cross, circle, square, triangle, L1 to R3](docs/screenshots/28-controls-dualsense.png) |
+**Settings (F1)**
+
+![The settings panel](docs/screenshots/22-settings-panel.png)
+
+**Controls (F2)**, with a DualSense
+
+![The controls page with a DualSense: cross, circle, square, triangle, L1 to R3](docs/screenshots/28-controls-dualsense.png)
 
 **Controllers:** Xbox, PlayStation and Nintendo pads work, and the controls page names the buttons as printed on
 yours (A B X Y and LB/RT on Xbox; × ○ □ △ and L1-R3 on PlayStation; ZL/ZR on Nintendo). By default the game's
