@@ -766,6 +766,19 @@ void gpu_res_cycle(void) {
  * scales the crop with it). The engine can also render the scene at 1920x1080 (it makes its targets
  * that size first at start, then 1600x900 at the same addresses), with smaller copies of that:
  * 960x540, 639x359, 480x270 seen so far; all get the same factor so their ratios hold. */
+/* The battle's start grows the 3D view in steps of 32 x 18 from 1600x900 towards 1920x1080 (1632x918 ...
+ * 1888x1062, seen 2026-10-28), with its smaller copies at 1/2, 1/3, 1/4 and 1/8 (rounded down): the
+ * divisor of w x h in that chain, 0 if it is not one. Without it those targets kept the game's shape: a
+ * 16:9 battle with the swirl before it left at the sides for a few seconds (widescreen). They are widened
+ * but not made larger (image_scale). */
+static int zoom_chain(uint32_t w, uint32_t h) {
+    static const uint32_t divs[] = {1, 2, 3, 4, 8};
+    for (uint32_t k = 1; k < 10; k++)
+        for (size_t i = 0; i < sizeof divs / sizeof *divs; i++)
+            if (w == (1600 + 32 * k) / divs[i] && h == (900 + 18 * k) / divs[i]) return (int)divs[i];
+    return 0;
+}
+
 static int screen_sized(const NvnTexture *t) {
     static const uint16_t sizes[][2] = {{1600, 900}, {800, 450}, {533, 300}, {400, 225}, {200, 112}, {120, 67},
                                         {1920, 1080}, {960, 540}, {639, 359}, {480, 270}};
@@ -773,7 +786,7 @@ static int screen_sized(const NvnTexture *t) {
         return 0;
     for (size_t i = 0; i < sizeof sizes / sizeof *sizes; i++)
         if (t->layout.width == sizes[i][0] && t->layout.height == sizes[i][1]) return 1;
-    return 0;
+    return zoom_chain(t->layout.width, t->layout.height) != 0;
 }
 
 /* How much larger t's image is made (0 / 0: not). */
@@ -853,6 +866,10 @@ static void image_scale(const NvnTexture *t, uint32_t *num, uint32_t *den) {
         t->layout.levels <= 1 && t->pool_flags & POOL_CPU_NO_ACCESS &&
         aspect_of(gpu_format(t->format)) & VK_IMAGE_ASPECT_DEPTH_BIT)
         *num = (uint32_t)res, *den = 1024;
+    /* the battle's zoom chain is widened (key_of) but keeps the game's resolution: each step is a new size,
+     * so a new set of images, and nine sets at 4K ran the GPU out of memory (2026-10-28) */
+    else if (zoom_chain(t->layout.width, t->layout.height))
+        return;
     else if (screen_sized(t) && gpu_effects_full() && half_sized(t))
         *num = 2 * (uint32_t)h, *den = 900;
     else if (h != 900 && screen_sized(t))

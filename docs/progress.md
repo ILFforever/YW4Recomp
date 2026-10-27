@@ -12,6 +12,7 @@ draws the shadow casters, the G-buffer and the lit material pass from the game's
 
 | Date | Step | Result |
 |---|---|---|
+| 2026-10-28 | Widescreen in battles: the battle's opening zoom renders at sizes between 1600×900 and 1920×1080; they are now widened (at the game's resolution: at 4K they ran out of video memory) (0033) | **No swirl left at the sides** when a battle starts |
 | 2026-10-28 | Widescreen: UI layers over the whole screen found from the vertex program's position (written by the shader translator) and the draw's corners; one-colour layers stretched, 16:9 pictures kept in the middle with black bars (0033) | **Dialog dimming and the loading screen reach the sides** (loading screen checked at 16:10, 21:9 and 32:9; dimming at 21:9); map backdrops get black sides |
 | 2026-10-27 | Model detail at a distance: the engine's level-of-detail class (`gmdCObjModelLodInfo`) found, but never set up in the town, the bamboo forest or the Yo-kai World ([frame.md](frame.md)) | Nothing to push further there; the distance drop-off was the blur and the filtering (above) |
 | 2026-10-27 | Settings panel (F1), styled after the game's menus: groups, every option shown, an explanation per setting and option (checked by a test), scaled with the window; the settings' own function keys removed | **All graphics settings in one place**, explained |

@@ -61,6 +61,13 @@ draw copies that into one of **two** window images (1920×1080) that it presents
    against the memory pools (`gpu_buffer_at`): checking them with `host_readable` (`VirtualQuery`) stopped the
    game at the title screen in every test run, though only reads were added. The cause was not found.
 
+6. **The battle's zoom** (added 2026-10-28): at a battle's start the game grows the 3D view in steps of 32×18
+   from 1600×900 (1632×918 … 1888×1062, with copies at ½, ⅓, ¼ and ⅛). Those sizes were not screen-sized, so
+   they stayed 16:9 and the swirl before the battle stayed at the sides for a few seconds. `zoom_chain` (`gpu.c`)
+   makes them screen-sized: widened, but kept at the game's resolution. Making them 4K too ran the GPU out of
+   memory within a few battles (`vkAllocateMemory` -2, frames up to 450 ms before it): every step is a new size,
+   so a new set of images.
+
 ## How it was checked
 
 Schoolyard, standing still and walking: 21:9 is 2133×900 at the 900 setting with the UI centred and the right size;

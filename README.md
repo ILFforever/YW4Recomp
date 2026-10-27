@@ -134,6 +134,18 @@ width; pictures made for 16:9 (the copyright notice, movies, the dungeon map's b
 with black bars, and the town's fast-travel map shows more of the town at the sides. At 4K ultrawide there are
 occasional stutters in heavy scenes; more optimization is planned ([known issues](docs/known-issues.md)).
 
+Menus, maps and battles at 21:9 (the dialog at 2133×900, the rest at 5120×2160):
+
+| Yo-kai Pad | Fast-travel map: more of the town at the sides |
+|---|---|
+| ![21:9 Yo-kai Pad menu](docs/screenshots/55-ultrawide-yokai-pad.jpg) | ![21:9 town fast-travel map reaching the edges](docs/screenshots/56-ultrawide-town-map.jpg) |
+| **Dungeon map: a 16:9 picture with black bars** | **Dialog: the dimming covers the full width** |
+| ![21:9 bamboo forest map with black side bars](docs/screenshots/57-ultrawide-dungeon-map.jpg) | ![21:9 dialog with the whole screen dimmed](docs/screenshots/58-ultrawide-dialog.jpg) |
+| **Into a battle** | **Battle start** |
+| ![21:9 swirl into a battle](docs/screenshots/59-ultrawide-battle-swirl.jpg) | ![21:9 battle start with the enemy yo-kai](docs/screenshots/60-ultrawide-battle-start.jpg) |
+| **Battle** | **Battle results** |
+| ![21:9 battle with the command wheel](docs/screenshots/61-ultrawide-battle.jpg) | ![21:9 battle results over the blurred field](docs/screenshots/62-ultrawide-battle-results.jpg) |
+
 </details>
 
 <details>
