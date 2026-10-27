@@ -82,7 +82,7 @@ It is also lighter to run. The same busy street on the same laptop ([docs/baseli
 | 🔧 | **Better shadows** | Bigger shadow maps and PCSS soft shadows done; contact shadows and steadier cascades next |
 | ✅ | **Sharper distance** | Anisotropic texture filtering and a softer distance blur: distant ground, roads and buildings stay sharp without 4K |
 | ✅ | **Higher resolution** | The 3D view at 1080p, 1440p or 4K instead of the game's 1600×900 (30 frames/s at 4K on an RTX 4070 laptop) |
-| 🔧 | **Ultrawide and other aspect ratios** | 16:10, 21:9 and 32:9 in the panel: a wider view of the world with the UI kept 16:9 in the middle; menus, battles and cutscenes still to check |
+| 🔧 | **Ultrawide and other aspect ratios** | 16:10, 21:9 and 32:9 in the panel: a wider view of the world with the UI kept 16:9 in the middle; exploring, battles and cutscenes work; dialog dimming and the loading screen still 16:9 |
 | 🗓️ | **Higher frame rates** | Above the game's 30 frames/s; also needs the game's timing patched |
 | 🔧 | **Better anti-aliasing** | FXAA, SMAA and now TAA (steady thin edges: fences, nets, leaves) on the 3D scene before the UI is drawn, so text stays crisp; per-object motion for TAA next |
 | 🗓️ | **Mod support** | Load replaced game files from a mod folder without touching your dump (first use: the English translation mod) |
@@ -138,6 +138,17 @@ F3 shows a performance HUD in the window's corner: frame time, CPU and GPU cost 
 they are on the Switch.
 
 ![21:9 ultrawide: a wider schoolyard with the UI in the middle](docs/screenshots/23-ultrawide-21-9.jpg)
+
+Exploring, cutscenes and battles all work at the wider ratios. 21:9 at 4K height (5120×2160), from play:
+
+| Town | Mansion |
+|---|---|
+| ![21:9 town street](docs/screenshots/24-ultrawide-town.jpg) | ![21:9 mansion hall](docs/screenshots/25-ultrawide-mansion.jpg) |
+| **Cutscene: arriving at Mount Oomori** | **Cutscene: dialogue** |
+| ![21:9 cutscene with the location title](docs/screenshots/26-ultrawide-cutscene-title.jpg) | ![21:9 cutscene with Jibanyan and Whisper](docs/screenshots/27-ultrawide-cutscene-dialogue.jpg) |
+
+Still to fix: screen-wide layers drawn with the UI (the dimming behind a dialog, the loading screen's black) cover
+only the middle 16:9 ([known issues](docs/known-issues.md)).
 
 **Shadow map size**: a bigger shadow map gives sharper, more detailed shadow edges, most visibly on shadows far from
 the camera. The bamboo forest, PCSS off:
