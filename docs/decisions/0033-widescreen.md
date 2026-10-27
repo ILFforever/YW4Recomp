@@ -36,8 +36,8 @@ draw copies that into one of **two** window images (1920×1080) that it presents
    image (the copy of the finished 3D picture into the UI image reads one). UI draws keep the game's width and are
    moved to the middle. TAA no longer shifts anything after the composite either (the rule it used, "after this
    frame's TAA by the frame counter", broke when render threads overlap).
-4. **Setting:** PICTURE SHAPE in the panel: 16:9 (the game's), 16:10, 21:9, 32:9 (`YW4_ASPECT`). The window already
-   fits any picture shape with black bars.
+4. **Setting:** ASPECT RATIO in the panel: 16:9 (the game's), 16:10, 21:9, 32:9 (`YW4_ASPECT`). The window already
+   fits any aspect ratio with black bars.
 
 ## How it was checked
 

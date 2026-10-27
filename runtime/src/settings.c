@@ -45,13 +45,13 @@ static int gbuffer_index(void) { return gbuffer_native(); }
 /* In the order shown; a row starts a new group when its category differs from the row before. The texts
  * use the HUD font's characters (hud.c): upper case, digits, . , : % / - ( ) ' ! ? */
 static const Setting settings[] = {
-    {"PICTURE", "3D VIEW",
+    {"PICTURE", "RESOLUTION",
      "THE RESOLUTION THE WORLD IS DRAWN AT. HIGHER IS SHARPER AND COSTS GPU TIME. MENUS AND TEXT ARE DRAWN AT THE "
      "SAME SIZE.",
      {"1600X900", "1920X1080", "2560X1440", "3840X2160"},
      {"THE SWITCH'S RESOLUTION", "FULL HD", "SHARP, A LITTLE GPU TIME", "SHARPEST, THE MOST GPU TIME"}, 4,
      res_index, gpu_res_cycle, "YW4_RES", {"900", "1080", "1440", "2160"}},
-    {"PICTURE", "PICTURE SHAPE",
+    {"PICTURE", "ASPECT RATIO",
      "WIDER THAN THE SWITCH'S 16:9 FOR WIDE MONITORS: THE WORLD SHOWS MORE AT THE SIDES, THE MENUS STAY 16:9 IN "
      "THE MIDDLE.",
      {"16:9", "16:10", "21:9", "32:9"},

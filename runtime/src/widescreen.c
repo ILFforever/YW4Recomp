@@ -42,7 +42,7 @@ int gpu_wide(void) {
 void gpu_wide_cycle(void) {
     int s = (gpu_wide() + 1) % SHAPES;
     __atomic_store_n(&shape, s, __ATOMIC_RELEASE);
-    fprintf(stderr, "yw4: gpu: picture shape %s\n", shapes[s].name);
+    fprintf(stderr, "yw4: gpu: aspect ratio %s\n", shapes[s].name);
 }
 
 void gpu_wide_factor(uint32_t *num, uint32_t *den) {
