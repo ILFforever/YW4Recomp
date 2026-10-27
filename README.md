@@ -54,7 +54,8 @@ Switch emulators already run *Yo-kai Watch 4++* at full speed on a good PC. This
 An emulator can't do most of this. It imitates the console and plays the game's GPU commands as they are, so the
 game still decides its shadow quality, its 16:9 UI, its 30 frames/s and its effects. Here the game's renderer is
 being replaced with our own, so those become ours to change: higher resolution, sharper textures, bigger and soft
-shadows and anti-aliasing that leaves the UI sharp are already in; ultrawide and higher frame rates are next.
+shadows, anti-aliasing that leaves the UI sharp (TAA included) and ultrawide are already in; higher frame rates are
+next.
 
 A town street, same spot: the game's shadows (1024 map, no PCSS) against ours (4096 map, PCSS ×2). The
 characters' shadows keep their shape, and the tree shade on the pavement is soft:
@@ -120,17 +121,23 @@ for the next start. Settings are only in the panel; the other function keys are 
 
 | Setting | What it does |
 |---|---|
-| 3D view | 1600×900 (the game's), 1920×1080, 2560×1440 or 3840×2160; the UI is drawn at the same size |
-| Anti-aliasing | Off (default), FXAA or SMAA, applied to the 3D scene before the UI is drawn, so edges are smoothed and text stays sharp |
-| Texture filtering | The game's, or anisotropic ×2 to ×16: distant and slanted ground, roads and walls stay sharp. Default ×16 |
-| Distance blur | The game's, half or off: the game blurs everything far away. Default half |
-| Effects resolution | Half (the game's) or full: the shadow mask, lamp lights and ambient occlusion at the 3D view's size, for sharper shadow edges. Costs ~2 ms of GPU at 1600×900 |
-| Shadow map | 1024 (the game's), 2048 or 4096: sharper shadow edges. Default 4096 |
-| Soft shadows (PCSS) | Off, ×1, ×2, ×4. Default ×2 |
+| Resolution | 1600×900 (the Switch's), 1920×1080, 2560×1440 or 3840×2160; the UI is drawn at the same size |
+| Aspect ratio | 16:9 (the Switch's), 16:10, 21:9 or 32:9: the world shows more at the sides, the UI stays 16:9 in the middle |
+| Anti-aliasing | Off (default), FXAA, SMAA or TAA, applied to the 3D scene before the UI is drawn, so text stays sharp. TAA also steadies thin things that shimmer: fences, nets, leaves |
+| Texture filtering | Off (the Switch's) or anisotropic ×2 to ×16: distant and slanted ground, roads and walls stay sharp. Default ×16 |
+| Distance blur | Full (the Switch's), half or off: the game blurs everything far away. Default half |
+| Effects resolution | Half (the Switch's) or full: the shadow mask, lamp lights and ambient occlusion at the 3D view's size, for sharper shadow edges. Costs ~2 ms of GPU at 1600×900 |
+| Shadow map | 1024 (the Switch's), 2048 or 4096: sharper shadow edges. Default 4096 |
+| Soft shadows (PCSS) | Off (the Switch's), ×1, ×2, ×4. Default ×2 |
 | Shadow pass | The game's or our custom renderer draws the shadow casters; the same picture, ours slightly faster |
 | G-buffer | The game's or our custom renderer draws the world's surfaces; the same picture |
 
 F3 shows a performance HUD in the window's corner: frame time, CPU and GPU cost and memory.
+
+**Aspect ratio**: 21:9, the schoolyard. The world goes on at the sides; the minimap and button hints stay where
+they are on the Switch.
+
+![21:9 ultrawide: a wider schoolyard with the UI in the middle](docs/screenshots/23-ultrawide-21-9.jpg)
 
 **Shadow map size**: a bigger shadow map gives sharper, more detailed shadow edges, most visibly on shadows far from
 the camera. The bamboo forest, PCSS off:
@@ -151,8 +158,8 @@ the camera. The bamboo forest, PCSS off:
 |---|---|
 | ![PCSS off: hard, speckled leaf shadows](docs/screenshots/16-pcss-off.jpg) | ![PCSS x2](docs/screenshots/18-pcss-x2.jpg) |
 
-The game starts at the game's 1600×900 with a 4096 shadow map, PCSS ×2, ×16 texture filtering, half distance blur,
-half-size effects and no anti-aliasing. For the game's original look, set every setting to its first choice in the
+The game starts at the Switch's 1600×900 and 16:9 with a 4096 shadow map, PCSS ×2, ×16 texture filtering, half
+distance blur, half-size effects and no anti-aliasing. For the game's original look, set every setting to its first choice in the
 panel.
 
 ## Screenshots
