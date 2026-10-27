@@ -672,12 +672,10 @@ static void update_input(void) {
                 {SDL_SCANCODE_RIGHT, 14}, {SDL_SCANCODE_DOWN, 15}};
     uint64_t b = 0;
     int32_t s[4] = {0, 0, 0, 0};
-    if (!settings_open()) {  /* the settings panel takes the keyboard while it is open */
-        for (size_t i = 0; i < sizeof keys / sizeof *keys; i++)
-            if (k[keys[i].key]) b |= 1ull << keys[i].bit;
-        s[0] = (k[SDL_SCANCODE_D] - k[SDL_SCANCODE_A]) * 32767, s[1] = (k[SDL_SCANCODE_W] - k[SDL_SCANCODE_S]) * 32767;
-        s[2] = (k[SDL_SCANCODE_L] - k[SDL_SCANCODE_J]) * 32767, s[3] = (k[SDL_SCANCODE_I] - k[SDL_SCANCODE_K]) * 32767;
-    }
+    for (size_t i = 0; i < sizeof keys / sizeof *keys; i++)
+        if (k[keys[i].key]) b |= 1ull << keys[i].bit;
+    s[0] = (k[SDL_SCANCODE_D] - k[SDL_SCANCODE_A]) * 32767, s[1] = (k[SDL_SCANCODE_W] - k[SDL_SCANCODE_S]) * 32767;
+    s[2] = (k[SDL_SCANCODE_L] - k[SDL_SCANCODE_J]) * 32767, s[3] = (k[SDL_SCANCODE_I] - k[SDL_SCANCODE_K]) * 32767;
     if (gamepad) {
         static const struct {
             SDL_GamepadButton button;
@@ -702,10 +700,56 @@ static void update_input(void) {
             if (v > 4000 || v < -4000) s[i] = v;  /* dead zone: the keyboard wins near the centre */
         }
     }
+    /* The settings panel takes the keyboard and the gamepad while it is open, and after it closes until
+     * everything is let go, so the button that closed it (B, Escape) doesn't reach the game as well. */
+    static int withheld;
+    if (settings_open()) withheld = 1;
+    if (withheld) {
+        if (!b && !s[0] && !s[1] && !s[2] && !s[3] && !settings_open()) withheld = 0;
+        b = 0, memset(s, 0, sizeof s);
+    }
     host_lock(&input_lock);
     input_buttons = b;
     memcpy(input_sticks, s, sizeof s);
     host_unlock(&input_lock);
+}
+
+/* The settings panel from the gamepad: Home (Guide), or Minus and Plus together, opens and closes it;
+ * the D-pad or the left stick choose (up/down) and change (left/right); B closes. Named like the keys,
+ * so recordings and replays see the same presses. */
+void yw4_hid_note_key(const char *name);  /* svc_hid.c: key presses go into the input recording */
+
+static void panel_pad_button(SDL_GamepadButton button) {
+    int both = SDL_GetGamepadButton(gamepad, SDL_GAMEPAD_BUTTON_BACK) &&
+               SDL_GetGamepadButton(gamepad, SDL_GAMEPAD_BUTTON_START);
+    if (button == SDL_GAMEPAD_BUTTON_GUIDE ||
+        (both && (button == SDL_GAMEPAD_BUTTON_BACK || button == SDL_GAMEPAD_BUTTON_START))) {
+        settings_toggle(), yw4_hid_note_key("F1");
+        return;
+    }
+    if (!settings_open()) return;
+    static const struct {
+        SDL_GamepadButton button;
+        int action;
+        const char *name;
+    } map[] = {{SDL_GAMEPAD_BUTTON_DPAD_UP, SETTINGS_UP, "UP"}, {SDL_GAMEPAD_BUTTON_DPAD_DOWN, SETTINGS_DOWN, "DOWN"},
+               {SDL_GAMEPAD_BUTTON_DPAD_LEFT, SETTINGS_LEFT, "LEFT"},
+               {SDL_GAMEPAD_BUTTON_DPAD_RIGHT, SETTINGS_RIGHT, "RIGHT"},
+               {SDL_GAMEPAD_BUTTON_SOUTH, SETTINGS_CLOSE, "F1"}};  /* south: B on a Switch controller */
+    for (size_t i = 0; i < sizeof map / sizeof *map; i++)
+        if (button == map[i].button) settings_action(map[i].action), yw4_hid_note_key(map[i].name);
+}
+
+/* The left stick as a D-pad in the panel: one step each time it is pushed past half way. */
+static void panel_pad_stick(void) {
+    static int held;  /* the direction pushed, until the stick comes back near the centre */
+    int x = SDL_GetGamepadAxis(gamepad, SDL_GAMEPAD_AXIS_LEFTX), y = SDL_GetGamepadAxis(gamepad, SDL_GAMEPAD_AXIS_LEFTY);
+    int ax = x < 0 ? -x : x, ay = y < 0 ? -y : y;
+    if (ax < 8000 && ay < 8000) held = 0;
+    if (held || !settings_open() || (ax < 16000 && ay < 16000)) return;
+    held = 1;
+    panel_pad_button(ay > ax ? (y < 0 ? SDL_GAMEPAD_BUTTON_DPAD_UP : SDL_GAMEPAD_BUTTON_DPAD_DOWN)
+                             : (x < 0 ? SDL_GAMEPAD_BUTTON_DPAD_LEFT : SDL_GAMEPAD_BUTTON_DPAD_RIGHT));
 }
 
 /* ---- the window's thread */
@@ -722,8 +766,6 @@ static void guest_main(void *p) {
 }
 
 void window_request_screenshot(void) { __atomic_store_n(&screenshot_requested, screenshot_burst(), __ATOMIC_RELEASE); }
-
-void yw4_hid_note_key(const char *name);  /* svc_hid.c: key presses go into the input recording */
 
 void window_run(void (*guest)(void *), void *arg) {
     const char *dir = getenv("YW4_SCREENSHOT_DIR");
@@ -768,6 +810,12 @@ void window_run(void (*guest)(void *), void *arg) {
                 gamepad = NULL;
                 fprintf(stderr, "yw4: window: gamepad removed\n");
             }
+            break;
+        case SDL_EVENT_GAMEPAD_BUTTON_DOWN:
+            if (gamepad && SDL_GetGamepadID(gamepad) == e.gbutton.which) panel_pad_button(e.gbutton.button);
+            break;
+        case SDL_EVENT_GAMEPAD_AXIS_MOTION:
+            if (gamepad && SDL_GetGamepadID(gamepad) == e.gaxis.which) panel_pad_stick();
             break;
         case SDL_EVENT_QUIT:
             fprintf(stderr, "yw4: window closed\n");

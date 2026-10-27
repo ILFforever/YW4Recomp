@@ -110,8 +110,8 @@ Still the game's: the choice of what to draw (which objects, in which order) and
 
 Improvements over the original game. Details, comparisons and measurements: [docs/graphics.md](docs/graphics.md).
 
-Press **F1** in game for the settings panel: every option with all its choices, and what each one does (arrow
-keys to choose and change). Your choices are saved in `settings.ini` next to `yw4.exe` and kept
+Press **F1** (on a gamepad: **Home**, or **Minus + Plus**) in game for the settings panel: every option with all
+its choices, and what each one does (arrow keys or D-pad to choose and change). Your choices are saved in `settings.ini` next to `yw4.exe` and kept
 for the next start. Settings are only in the panel; the other function keys are debugging tools
 ([docs/debugging.md](docs/debugging.md)).
 

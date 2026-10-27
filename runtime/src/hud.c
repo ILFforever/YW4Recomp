@@ -206,7 +206,7 @@ void panel_render(uint8_t *rgba, int w, int h, const SettingRow *rows, int n, in
     fill(&cv, 2, 2, pw - 4, HEADER - 2, PURPLE);
     for (int x = 2; x < pw - 2; x += 4) put(&cv, x, HEADER - 1, PURPLE2);
     text2(&cv, PAD + 2, 6, "SETTINGS", WHITE2);
-    text(&cv, pw - PAD - 9 * CELL_W, 10, "F1: CLOSE", ROWSEL);
+    text(&cv, pw - PAD - 13 * CELL_W, 10, "F1 / B: CLOSE", ROWSEL);
     /* rows */
     int y = HEADER + 8;
     int optx = PAD + (2 + NAME_COLS) * CELL_W;

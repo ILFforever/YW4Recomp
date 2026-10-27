@@ -1,8 +1,8 @@
-/* The settings panel (F1): the graphics settings in groups, each with all its options shown and the current
- * one marked, and a description of the chosen setting and option. Up/Down pick a setting, Left/Right change
- * it, F1 or Escape close the panel. While it is open the keyboard doesn't reach the game (a gamepad still
- * does). The F keys stay as shortcuts; both go through the same functions (gpu.c, gpu_draw.c, gpu_aa.c,
- * shadow.c, gbuffer.c). Drawn by hud.c (panel_render), shown by window.c. */
+/* The settings panel (F1, or a gamepad's Home or Minus+Plus): the graphics settings in groups, each with all
+ * its options shown and the current one marked, and a description of the chosen setting and option. Up/Down
+ * pick a setting, Left/Right change it, F1, Escape or B close the panel. While it is open neither the keyboard
+ * nor the gamepad reaches the game. The settings change through their own functions (gpu.c, gpu_draw.c,
+ * gpu_aa.c, shadow.c, gbuffer.c). Drawn by hud.c (panel_render), shown by window.c. */
 #ifndef YW4_SETTINGS_H
 #define YW4_SETTINGS_H
 
