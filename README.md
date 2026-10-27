@@ -111,42 +111,6 @@ Still the game's: the choice of what to draw (which objects, in which order) and
 
 Improvements over the original game. Details, comparisons and measurements: [docs/graphics.md](docs/graphics.md).
 
-Press **F1** in game for the settings panel: every option with all its choices, and what each one does (arrow keys or
-D-pad to choose and change). **F2** opens the **CONTROLS** page: two keys and one gamepad button for every Switch
-button and stick direction, changed by pressing the new one. On a gamepad the DualSense's **mic button** (Share on
-Xbox pads) opens the settings and **Create + Options** (Minus + Plus) the controls; L/R or the triggers switch
-pages. The DualSense's **touchpad** shows the performance HUD (F3). Your choices are saved in
-`settings.ini` next to `yw4.exe` and kept for the next start. Settings are only in the panel; the other function keys
-are debugging tools ([docs/debugging.md](docs/debugging.md)).
-
-**Settings (F1)**
-
-![The settings panel](docs/screenshots/22-settings-panel.png)
-
-**Controls (F2)**, with a DualSense
-
-![The controls page with a DualSense: cross, circle, square, triangle, L1 to R3](docs/screenshots/28-controls-dualsense.png)
-
-**Controllers:** Xbox, PlayStation and Nintendo pads work, and the controls page names the buttons as printed on
-yours (A B X Y and LB/RT on Xbox; × ○ □ △ and L1-R3 on PlayStation; ZL/ZR on Nintendo). By default the game's
-confirm is your controller's own confirm: × on a DualSense, A on Xbox. Tested by playing with a **DualSense (PS5)**,
-battles included, and with the controls page.
-
-| Setting | What it does |
-|---|---|
-| Resolution | 1600×900 (the Switch's), 1920×1080, 2560×1440 or 3840×2160; the UI is drawn at the same size |
-| Aspect ratio | 16:9 (the Switch's), 16:10, 21:9 or 32:9: the world shows more at the sides, the UI stays 16:9 in the middle |
-| Anti-aliasing | Off (default), FXAA, SMAA or TAA, applied to the 3D scene before the UI is drawn, so text stays sharp. TAA also steadies thin things that shimmer: fences, nets, leaves |
-| Texture filtering | Off (the Switch's) or anisotropic ×2 to ×16: distant and slanted ground, roads and walls stay sharp. Default ×16 |
-| Distance blur | Full (the Switch's), half or off: the game blurs everything far away. Default half |
-| Effects resolution | Half (the Switch's) or full: the shadow mask, lamp lights and ambient occlusion at the 3D view's size, for sharper shadow edges. Costs ~2 ms of GPU at 1600×900 |
-| Shadow map | 1024 (the Switch's), 2048 or 4096: sharper shadow edges. Default 4096 |
-| Soft shadows (PCSS) | Off (the Switch's), ×1, ×2, ×4. Default ×2 |
-| Shadow pass | The game's or our custom renderer draws the shadow casters; the same picture, ours slightly faster |
-| G-buffer | The game's or our custom renderer draws the world's surfaces; the same picture |
-
-F3 shows a performance HUD in the window's corner: frame time, CPU and GPU cost and memory.
-
 **Aspect ratio**: 21:9, the schoolyard. The world goes on at the sides; the minimap and button hints stay where
 they are on the Switch.
 
@@ -182,6 +146,42 @@ the camera. The bamboo forest, PCSS off:
 | PCSS off | PCSS ×2 (recommended) |
 |---|---|
 | ![PCSS off: hard, speckled leaf shadows](docs/screenshots/16-pcss-off.jpg) | ![PCSS x2](docs/screenshots/18-pcss-x2.jpg) |
+
+Press **F1** in game for the settings panel: every option with all its choices, and what each one does (arrow keys or
+D-pad to choose and change). **F2** opens the **CONTROLS** page: two keys and one gamepad button for every Switch
+button and stick direction, changed by pressing the new one. On a gamepad the DualSense's **mic button** (Share on
+Xbox pads) opens the settings and **Create + Options** (Minus + Plus) the controls; L/R or the triggers switch
+pages. The DualSense's **touchpad** shows the performance HUD (F3). Your choices are saved in
+`settings.ini` next to `yw4.exe` and kept for the next start. Settings are only in the panel; the other function keys
+are debugging tools ([docs/debugging.md](docs/debugging.md)).
+
+**Settings (F1)**
+
+![The settings panel](docs/screenshots/22-settings-panel.png)
+
+**Controls (F2)**, with a DualSense
+
+![The controls page with a DualSense: cross, circle, square, triangle, L1 to R3](docs/screenshots/28-controls-dualsense.png)
+
+**Controllers:** Xbox, PlayStation and Nintendo pads work, and the controls page names the buttons as printed on
+yours (A B X Y and LB/RT on Xbox; × ○ □ △ and L1-R3 on PlayStation; ZL/ZR on Nintendo). By default the game's
+confirm is your controller's own confirm: × on a DualSense, A on Xbox. Tested by playing with a **DualSense (PS5)**,
+battles included, and with the controls page.
+
+| Setting | What it does |
+|---|---|
+| Resolution | 1600×900 (the Switch's), 1920×1080, 2560×1440 or 3840×2160; the UI is drawn at the same size |
+| Aspect ratio | 16:9 (the Switch's), 16:10, 21:9 or 32:9: the world shows more at the sides, the UI stays 16:9 in the middle |
+| Anti-aliasing | Off (default), FXAA, SMAA or TAA, applied to the 3D scene before the UI is drawn, so text stays sharp. TAA also steadies thin things that shimmer: fences, nets, leaves |
+| Texture filtering | Off (the Switch's) or anisotropic ×2 to ×16: distant and slanted ground, roads and walls stay sharp. Default ×16 |
+| Distance blur | Full (the Switch's), half or off: the game blurs everything far away. Default half |
+| Effects resolution | Half (the Switch's) or full: the shadow mask, lamp lights and ambient occlusion at the 3D view's size, for sharper shadow edges. Costs ~2 ms of GPU at 1600×900 |
+| Shadow map | 1024 (the Switch's), 2048 or 4096: sharper shadow edges. Default 4096 |
+| Soft shadows (PCSS) | Off (the Switch's), ×1, ×2, ×4. Default ×2 |
+| Shadow pass | The game's or our custom renderer draws the shadow casters; the same picture, ours slightly faster |
+| G-buffer | The game's or our custom renderer draws the world's surfaces; the same picture |
+
+F3 shows a performance HUD in the window's corner: frame time, CPU and GPU cost and memory.
 
 The game starts at the Switch's 1600×900 and 16:9 with a 4096 shadow map, PCSS ×2, ×16 texture filtering, half
 distance blur, half-size effects and no anti-aliasing. For the game's original look, set every setting to its first choice in the
