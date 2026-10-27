@@ -8,8 +8,10 @@
 #include "bindings.h"
 #include "settings.h"
 
-/* A gamepad input: a button (SDL_GamepadButton), or a stick or trigger pushed one way. */
-enum { PAD_NONE = -1, PAD_AXIS = 100 };
+/* A gamepad input: a button (SDL_GamepadButton), a stick or trigger pushed one way, or a face button by its
+ * name (PAD_FACE + 0..3: A, B, X, Y as printed on the connected controller: confirm on a PlayStation pad is
+ * cross, on a Nintendo one the right button). */
+enum { PAD_NONE = -1, PAD_AXIS = 100, PAD_FACE = 200 };
 #define AXIS(a, positive) (PAD_AXIS + (a) * 2 + (positive))
 
 typedef struct {
@@ -21,10 +23,10 @@ typedef struct {
 } Input;
 
 static const Input inputs[] = {
-    {"BUTTONS", "A", "A", 0, 0, 0, {SDL_SCANCODE_SPACE, SDL_SCANCODE_RETURN}, SDL_GAMEPAD_BUTTON_EAST},
-    {"BUTTONS", "B", "B", 1, 0, 0, {SDL_SCANCODE_BACKSPACE, SDL_SCANCODE_ESCAPE}, SDL_GAMEPAD_BUTTON_SOUTH},
-    {"BUTTONS", "X", "X", 2, 0, 0, {SDL_SCANCODE_X}, SDL_GAMEPAD_BUTTON_NORTH},
-    {"BUTTONS", "Y", "Y", 3, 0, 0, {SDL_SCANCODE_Y}, SDL_GAMEPAD_BUTTON_WEST},
+    {"BUTTONS", "A", "A", 0, 0, 0, {SDL_SCANCODE_SPACE, SDL_SCANCODE_RETURN}, PAD_FACE + 0},
+    {"BUTTONS", "B", "B", 1, 0, 0, {SDL_SCANCODE_BACKSPACE, SDL_SCANCODE_ESCAPE}, PAD_FACE + 1},
+    {"BUTTONS", "X", "X", 2, 0, 0, {SDL_SCANCODE_X}, PAD_FACE + 2},
+    {"BUTTONS", "Y", "Y", 3, 0, 0, {SDL_SCANCODE_Y}, PAD_FACE + 3},
     {"BUTTONS", "L", "L", 6, 0, 0, {SDL_SCANCODE_Q}, SDL_GAMEPAD_BUTTON_LEFT_SHOULDER},
     {"BUTTONS", "R", "R", 7, 0, 0, {SDL_SCANCODE_E}, SDL_GAMEPAD_BUTTON_RIGHT_SHOULDER},
     {"BUTTONS", "ZL", "ZL", 8, 0, 0, {SDL_SCANCODE_1}, AXIS(SDL_GAMEPAD_AXIS_LEFT_TRIGGER, 1)},
@@ -89,6 +91,7 @@ static const struct {
     {AXIS(SDL_GAMEPAD_AXIS_RIGHTX, 0), "R STICK LEFT"}, {AXIS(SDL_GAMEPAD_AXIS_RIGHTX, 1), "R STICK RIGHT"},
     {AXIS(SDL_GAMEPAD_AXIS_RIGHTY, 0), "R STICK UP"}, {AXIS(SDL_GAMEPAD_AXIS_RIGHTY, 1), "R STICK DOWN"},
     {AXIS(SDL_GAMEPAD_AXIS_LEFT_TRIGGER, 1), "L TRIGGER"}, {AXIS(SDL_GAMEPAD_AXIS_RIGHT_TRIGGER, 1), "R TRIGGER"},
+    {PAD_FACE + 0, "A BUTTON"}, {PAD_FACE + 1, "B BUTTON"}, {PAD_FACE + 2, "X BUTTON"}, {PAD_FACE + 3, "Y BUTTON"},
 };
 
 static const char *pad_name(int pad) {
@@ -102,7 +105,18 @@ static int pad_style;  /* the connected controller's (bindings_read); Xbox names
 
 int bindings_pad_nintendo(void) { return pad_style == STYLE_NINTENDO; }
 
+/* A face button by name as the button it is on the connected controller; anything else as it is. */
+static int resolve(int pad) {
+    static const int nintendo[4] = {SDL_GAMEPAD_BUTTON_EAST, SDL_GAMEPAD_BUTTON_SOUTH, SDL_GAMEPAD_BUTTON_NORTH,
+                                    SDL_GAMEPAD_BUTTON_WEST},
+                     others[4] = {SDL_GAMEPAD_BUTTON_SOUTH, SDL_GAMEPAD_BUTTON_EAST, SDL_GAMEPAD_BUTTON_WEST,
+                                  SDL_GAMEPAD_BUTTON_NORTH};
+    if (pad < PAD_FACE || pad > PAD_FACE + 3) return pad;
+    return (pad_style == STYLE_NINTENDO ? nintendo : others)[pad - PAD_FACE];
+}
+
 static const char *pad_label(int pad) {
+    pad = resolve(pad);
     static const struct {
         int pad;
         const char *name[3];  /* Xbox, PlayStation, Nintendo */
@@ -149,6 +163,7 @@ static const char *key_name(int scancode) {
 
 /* How far a gamepad input is pressed, 0..32767. */
 static int32_t pad_amount(SDL_Gamepad *g, int pad) {
+    pad = resolve(pad);
     if (!g || pad == PAD_NONE) return 0;
     if (pad < PAD_AXIS) return SDL_GetGamepadButton(g, (SDL_GamepadButton)pad) ? 32767 : 0;
     int32_t v = SDL_GetGamepadAxis(g, (SDL_GamepadAxis)((pad - PAD_AXIS) / 2));
@@ -254,7 +269,7 @@ static int also_used(int self, int key, int pad) {
         if (i == self) continue;
         for (int k = 0; k < BIND_KEYS; k++)
             if (key && bound[i].keys[k] == key) return i;
-        if (pad != PAD_NONE && bound[i].pad == pad) return i;
+        if (pad != PAD_NONE && resolve(bound[i].pad) == resolve(pad)) return i;
     }
     return -1;
 }
@@ -324,6 +339,10 @@ int bindings_load_line(const char *name, const char *value) {
         snprintf(want, sizeof want, "PAD_%s", inputs[i].id);
         if (!strcmp(name, want)) {
             bound[i].pad = pad_from_name(value);
+            /* the first defaults went by the Switch's positions (A on the right button): those become the
+             * controller's own A, B, X, Y */
+            static const char *const old[4] = {"EAST", "SOUTH", "NORTH", "WEST"};
+            if (i < 4 && !strcmp(value, old[i])) bound[i].pad = PAD_FACE + i;
             return 1;
         }
     }
