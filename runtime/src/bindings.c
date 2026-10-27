@@ -107,8 +107,21 @@ static const char *pad_label(int pad) {
         int pad;
         const char *name[3];  /* Xbox, PlayStation, Nintendo */
     } labels[] = {
-        {SDL_GAMEPAD_BUTTON_SOUTH, {"A", "CROSS", "B"}}, {SDL_GAMEPAD_BUTTON_EAST, {"B", "CIRCLE", "A"}},
-        {SDL_GAMEPAD_BUTTON_WEST, {"X", "SQUARE", "Y"}}, {SDL_GAMEPAD_BUTTON_NORTH, {"Y", "TRIANGLE", "X"}},
+        /* \x01..\x08: the panel font's arrows (up, down, left, right) and PlayStation shapes (hud.c) */
+        {SDL_GAMEPAD_BUTTON_SOUTH, {"A", "\x08", "B"}}, {SDL_GAMEPAD_BUTTON_EAST, {"B", "\x06", "A"}},
+        {SDL_GAMEPAD_BUTTON_WEST, {"X", "\x07", "Y"}}, {SDL_GAMEPAD_BUTTON_NORTH, {"Y", "\x05", "X"}},
+        {SDL_GAMEPAD_BUTTON_DPAD_UP, {"D-PAD \x01", "D-PAD \x01", "D-PAD \x01"}},
+        {SDL_GAMEPAD_BUTTON_DPAD_DOWN, {"D-PAD \x02", "D-PAD \x02", "D-PAD \x02"}},
+        {SDL_GAMEPAD_BUTTON_DPAD_LEFT, {"D-PAD \x03", "D-PAD \x03", "D-PAD \x03"}},
+        {SDL_GAMEPAD_BUTTON_DPAD_RIGHT, {"D-PAD \x04", "D-PAD \x04", "D-PAD \x04"}},
+        {AXIS(SDL_GAMEPAD_AXIS_LEFTY, 0), {"L STICK \x01", "L STICK \x01", "L STICK \x01"}},
+        {AXIS(SDL_GAMEPAD_AXIS_LEFTY, 1), {"L STICK \x02", "L STICK \x02", "L STICK \x02"}},
+        {AXIS(SDL_GAMEPAD_AXIS_LEFTX, 0), {"L STICK \x03", "L STICK \x03", "L STICK \x03"}},
+        {AXIS(SDL_GAMEPAD_AXIS_LEFTX, 1), {"L STICK \x04", "L STICK \x04", "L STICK \x04"}},
+        {AXIS(SDL_GAMEPAD_AXIS_RIGHTY, 0), {"R STICK \x01", "R STICK \x01", "R STICK \x01"}},
+        {AXIS(SDL_GAMEPAD_AXIS_RIGHTY, 1), {"R STICK \x02", "R STICK \x02", "R STICK \x02"}},
+        {AXIS(SDL_GAMEPAD_AXIS_RIGHTX, 0), {"R STICK \x03", "R STICK \x03", "R STICK \x03"}},
+        {AXIS(SDL_GAMEPAD_AXIS_RIGHTX, 1), {"R STICK \x04", "R STICK \x04", "R STICK \x04"}},
         {SDL_GAMEPAD_BUTTON_BACK, {"VIEW", "SHARE", "MINUS"}}, {SDL_GAMEPAD_BUTTON_START, {"MENU", "OPTIONS", "PLUS"}},
         {SDL_GAMEPAD_BUTTON_GUIDE, {"GUIDE", "PS", "HOME"}},
         {SDL_GAMEPAD_BUTTON_LEFT_SHOULDER, {"LB", "L1", "L"}}, {SDL_GAMEPAD_BUTTON_RIGHT_SHOULDER, {"RB", "R1", "R"}},
