@@ -122,6 +122,8 @@ static void lookup_textures(VkCommandBuffer cb) {
     CHECK(vkBindBufferMemory(vk.device, buf, mem, 0));
     uint8_t *p;
     CHECK(vkMapMemory(vk.device, mem, 0, VK_WHOLE_SIZE, 0, (void **)&p));
+    /* row 0 first: Vulkan's texture coordinates start at the top like Direct3D's, which SMAA's tables assume
+     * (flipping either made no difference to the weights, 2026-10-27) */
     memcpy(p, areaTexBytes, AREATEX_SIZE);
     memcpy(p + AREATEX_SIZE, searchTexBytes, SEARCHTEX_SIZE);
     to_general(cb, area.image), to_general(cb, search.image);
@@ -149,7 +151,7 @@ static void working_images(VkCommandBuffer cb, uint32_t w, uint32_t h) {
 
 /* ---- pipelines: one layout (5 sampled images, the size as a push constant), one pipeline per pass */
 
-enum { P_ENCODE, P_FXAA, P_EDGE, P_WEIGHT, P_BLEND, PASSES };
+enum { P_ENCODE, P_FXAA, P_EDGE, P_WEIGHT, P_BLEND, P_SHOW_EDGES, P_SHOW_WEIGHTS, P_TEST, PASSES };
 
 static VkDescriptorSetLayout set_layout;
 static VkPipelineLayout pipe_layout;
@@ -185,9 +187,11 @@ static VkPipeline pipeline(int pass, VkFormat out) {
         if (pipes[i].pass == pass && pipes[i].out == out) return pipes[i].pipe;
     if (n == MAX) gpu_stop("anti-aliasing: too many pipelines");
     static const char *const vs_name[PASSES] = {"aa_fullscreen.vert", "aa_fullscreen.vert", "smaa_edge.vert",
-                                                "smaa_weight.vert", "smaa_blend.vert"};
-    static const char *const fs_name[PASSES] = {"aa_encode.frag", "fxaa.frag", "smaa_edge.frag", "smaa_weight.frag",
-                                                "smaa_blend.frag"};
+                                                "smaa_weight.vert",   "smaa_blend.vert",    "aa_fullscreen.vert",
+                                                "aa_fullscreen.vert", "aa_fullscreen.vert"};
+    static const char *const fs_name[PASSES] = {"aa_encode.frag",   "fxaa.frag",           "smaa_edge.frag",
+                                                "smaa_weight.frag", "smaa_blend.frag",     "aa_show_edges.frag",
+                                                "aa_show_weights.frag", "aa_test.frag"};
     static VkShaderModule vs[PASSES], fs[PASSES];
     if (!vs[pass]) vs[pass] = module(vs_name[pass]), fs[pass] = module(fs_name[pass]);
     VkPipelineShaderStageCreateInfo st[2] = {
@@ -274,13 +278,17 @@ void gpu_aa_apply(VkCommandBuffer cb, GpuState *s) {
     lookup_textures(cb);
     working_images(cb, w, h);
     full_barrier(cb);
-    pass(cb, P_ENCODE, encoded.view, VK_FORMAT_R16G16B16A16_SFLOAT, w, h, 0, scene);
+    /* YW4_AA_DEBUG=1 / 2: SMAA's edges / blend weights in place of the picture; 3: a test pattern in place
+     * of the scene, anti-aliased as usual */
+    static int debug = -1;
+    if (debug < 0) debug = getenv("YW4_AA_DEBUG") ? atoi(getenv("YW4_AA_DEBUG")) : 0;
+    pass(cb, debug == 3 ? P_TEST : P_ENCODE, encoded.view, VK_FORMAT_R16G16B16A16_SFLOAT, w, h, 0, scene);
     if (mode == 1) {
         pass(cb, P_FXAA, target, fmt, w, h, 0, NULL);
     } else {
         pass(cb, P_EDGE, edges.view, VK_FORMAT_R8G8_UNORM, w, h, 1, NULL);
         pass(cb, P_WEIGHT, weights.view, VK_FORMAT_R8G8B8A8_UNORM, w, h, 1, NULL);
-        pass(cb, P_BLEND, target, fmt, w, h, 0, NULL);
+        pass(cb, debug == 1 ? P_SHOW_EDGES : debug == 2 ? P_SHOW_WEIGHTS : P_BLEND, target, fmt, w, h, 0, NULL);
     }
     gpu_dynamic_forget();  /* our pipelines set viewport and scissor: the game's next draw sets its own again */
 }
