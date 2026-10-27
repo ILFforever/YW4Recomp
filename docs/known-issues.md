@@ -5,6 +5,11 @@ What is known to be missing or wrong, roughly in the order it is likely to matte
 
 ## Graphics
 
+- **Stutters at 4K ultrawide; to optimize** (owner, 2026-10-28; 3840p-high 21:9, TAA, full-size effects). From the
+  owner's session logs: bamboo forest (late-game save) GPU 23.2 ms per frame on average, 36.4 ms at the 99th
+  percentile (budget 33.3), 419 of 27,382 frames over 50 ms; school save GPU 18.2 / 27.6 ms, 134 of 5,620 over
+  50 ms. Two sources: the GPU near its limit in heavy scenes, and rare long spikes in the game's own CPU work (up to
+  ~400 ms). Not yet split by pass (F5 per-pass GPU timing) or by cause of the CPU spikes.
 - **Wider aspect ratios: the screen dimming behind dialogs covers only the middle 16:9** (seen 2026-10-27,
   21:9 at 4K, bamboo forest, the "time changed" penalty dialog): the sides stay bright. The dimming is a UI draw, and
   every UI draw is kept at 16:9 in the middle ([decision 0033](decisions/0033-widescreen.md)). Fix idea: a UI draw

@@ -157,7 +157,8 @@ Exploring, cutscenes and battles all work at the wider ratios. 21:9 at 4K height
 | ![21:9 cutscene with the location title](docs/screenshots/26-ultrawide-cutscene-title.jpg) | ![21:9 cutscene with Jibanyan and Whisper](docs/screenshots/27-ultrawide-cutscene-dialogue.jpg) |
 
 Still to fix: screen-wide layers drawn with the UI (the dimming behind a dialog, the loading screen's black) cover
-only the middle 16:9 ([known issues](docs/known-issues.md)).
+only the middle 16:9 ([known issues](docs/known-issues.md)). At 4K ultrawide there are occasional stutters in heavy scenes; more
+optimization is planned.
 
 **Shadow map size**: a bigger shadow map gives sharper, more detailed shadow edges, most visibly on shadows far from
 the camera. The bamboo forest, PCSS off:
