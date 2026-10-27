@@ -5,7 +5,7 @@ What is known to be missing or wrong, roughly in the order it is likely to matte
 
 ## Graphics
 
-- **Stutters at 4K ultrawide; to optimize** (owner, 2026-10-28; 3840p-high 21:9, TAA, full-size effects). From the
+- **Stutters at 4K ultrawide; to optimize** (owner, 2026-10-28; 4K height at 21:9 = 5120×2160, TAA, full-size effects). From the
   owner's session logs: bamboo forest (late-game save) GPU 23.2 ms per frame on average, 36.4 ms at the 99th
   percentile (budget 33.3), 419 of 27,382 frames over 50 ms; school save GPU 18.2 / 27.6 ms, 134 of 5,620 over
   50 ms. Two sources: the GPU near its limit in heavy scenes, and rare long spikes in the game's own CPU work (up to
