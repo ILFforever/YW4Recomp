@@ -685,7 +685,7 @@ static void update_input(void) {
     host_unlock(&input_lock);
 }
 
-/* The settings panel from the gamepad: Home (Guide), or Minus and Plus together, opens and closes it;
+/* The settings panel from the gamepad: Home (Guide, PS), the touchpad, or Minus and Plus together, opens and closes it;
  * the D-pad or the left stick choose (up/down) and change (left/right); B closes; on the controls page A
  * changes a binding and X clears it (A, B, X as named on the controller); L and R switch pages. Named like the keys, so recordings and replays
  * see the same presses. While the controls wait for an input, the press goes there instead. */
@@ -694,7 +694,8 @@ void yw4_hid_note_key(const char *name);  /* svc_hid.c: key presses go into the 
 static void panel_pad_button(SDL_GamepadButton button) {
     int both = SDL_GetGamepadButton(gamepad, SDL_GAMEPAD_BUTTON_BACK) &&
                SDL_GetGamepadButton(gamepad, SDL_GAMEPAD_BUTTON_START);
-    if (button == SDL_GAMEPAD_BUTTON_GUIDE ||
+    /* buttons a Switch controller doesn't have, so the game never sees them: Home / PS, the DualSense's touchpad */
+    if (button == SDL_GAMEPAD_BUTTON_GUIDE || button == SDL_GAMEPAD_BUTTON_TOUCHPAD ||
         (both && (button == SDL_GAMEPAD_BUTTON_BACK || button == SDL_GAMEPAD_BUTTON_START))) {
         settings_toggle(), yw4_hid_note_key("F1");
         return;
