@@ -1284,10 +1284,24 @@ void gpu_dynamic_state(VkCommandBuffer cb, const GpuState *s, VkFormat depth, ui
     DynState d;
     memset(&d, 0, sizeof d);  /* padding too: the states are compared as bytes */
     int flip = nvn_window_origin == 1;
-    /* a target made larger than the game's texture (YW4_SHADOW_RES, YW4_RES): the game's viewport and
-     * scissor scaled with it (the depth target's scale, else the first colour target's: bound targets
-     * share a size) */
-    const GpuImage *tg = s->rt.depth ? image_find(s->rt.depth) : s->ncolor && s->rt.color[0] ? image_find(s->rt.color[0]) : NULL;
+    /* a target made larger than the game's texture (YW4_SHADOW_RES, YW4_RES, YW4_EFFECTS): the game's
+     * viewport and scissor scaled with it: the first colour target's scale, else the depth target's.
+     * They can differ: the distance blur draws into its own half-size images (kept at the game's ratio)
+     * with the effects' half-size depth attached but unused (depth test and write off) */
+    const GpuImage *tc = s->ncolor && s->rt.color[0] ? image_find(s->rt.color[0]) : NULL;
+    const GpuImage *td = s->rt.depth ? image_find(s->rt.depth) : NULL;
+    const GpuImage *tg = tc ? tc : td;
+    /* Scaled differently and the draw uses depth: the colour wins and the depth goes unused for this draw.
+     * Met once: the distance blur's first copy (fs 95ea1b) also copies depth into the effects' half-size
+     * depth, which the same copy into a matching target redoes two passes later, before anyone reads it. */
+    int mismatch = tc && td && (uint64_t)tc->scale_num * td->scale_den != (uint64_t)td->scale_num * tc->scale_den &&
+                   (s->depth_stencil[0] || s->depth_stencil[1] || s->depth_stencil[3]);
+    if (mismatch) {
+        static int logged;
+        if (logged++ < 4)
+            fprintf(stderr, "yw4: gpu: colour and depth targets scaled differently (%ux%u, %ux%u) in a draw that uses "
+                            "depth: drawn without depth\n", tc->width, tc->height, td->width, td->height);
+    }
     int64_t kn = tg ? tg->scale_num : 1, kd = tg ? tg->scale_den : 1;
     float vx = 0, vy = 0, vw = (float)w, vh = (float)h, kf = (float)kn / (float)kd;
     if (s->have_viewport) vx = (float)s->viewport[0] * kf, vy = (float)s->viewport[1] * kf,
@@ -1316,6 +1330,7 @@ void gpu_dynamic_state(VkCommandBuffer cb, const GpuState *s, VkFormat depth, ui
     d.depth_test = has_depth && ds[0], d.depth_write = has_depth && ds[1];
     d.depth_op = compare_fn(ds[2]);
     d.stencil_test = has_stencil && ds[3];
+    if (mismatch) d.depth_test = d.depth_write = d.stencil_test = 0;  /* above */
     uint32_t ops = ds[5] | ds[6] << 8 | ds[7] << 16;
     for (int face = 0; face < 2; face++) {
         uint32_t o = ops >> (12 * face);

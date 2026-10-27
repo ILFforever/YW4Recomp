@@ -825,6 +825,24 @@ static int half_sized(const NvnTexture *t) {
         return 0;
     for (int i = 0; i < KEEP_RATIO; i++)
         if (__atomic_load_n(&keep_ratio[i], __ATOMIC_ACQUIRE) == t->addr) return 0;
+    /* YW4_EFFECTS_KEEP=<hex addr>[,...]: these keep the game's ratio too (to find which image an effect
+     * that breaks at full size reads) */
+    static uint64_t keep[16];
+    static int nkeep = -1;
+    if (nkeep < 0) {
+        int n = 0;
+        const char *e = getenv("YW4_EFFECTS_KEEP");
+        while (e && *e && n < 16) {
+            char *end;
+            keep[n] = strtoull(e, &end, 16);
+            if (end == e) break;
+            n++;
+            e = *end == ',' ? end + 1 : end;
+        }
+        __atomic_store_n(&nkeep, n, __ATOMIC_RELEASE);
+    }
+    for (int i = 0; i < nkeep; i++)
+        if (keep[i] == t->addr) return 0;
     return 1;
 }
 
@@ -933,9 +951,10 @@ GpuImage *image_of(VkCommandBuffer cb, NvnTexture *t) {
         g->width = gpu_scaled(g->width, g->scale_num, g->scale_den);
         g->height = gpu_scaled(g->height, g->scale_num, g->scale_den);
         static int logged;
-        if (logged++ < 16)
-            fprintf(stderr, "yw4: gpu: target at %#" PRIx64 " made %ux%u (the game's is %ux%u)\n", t->addr, g->width,
-                    g->height, t->layout.width, t->layout.height);
+        int half = (t->layout.width == 800 || t->layout.width == 960) && g->width >= 2 * t->layout.width - 2;
+        if (logged++ < 16 || half)  /* the effects-resolution ones always: they are few */
+            fprintf(stderr, "yw4: gpu: target at %#" PRIx64 " format %#x made %ux%u (the game's is %ux%u)\n", t->addr,
+                    t->format, g->width, g->height, t->layout.width, t->layout.height);
     } else if (gpu_res_height() != 900 && t->pool_flags & POOL_CPU_NO_ACCESS && t->target == TARGET_2D) {
         /* GPU-only 2D images of other sizes stay the game's: named once per size, to find screen-sized
          * targets of scenes not measured yet (docs/frame.md) */

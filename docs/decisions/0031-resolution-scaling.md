@@ -63,6 +63,14 @@ their low resolution (full size gave +60% distant detail, undoing the blur setti
 draws (fragment shaders `b8856cfd2725bc25`, `27b63a2bf65deaf0`) and keep the game's ratio. Bamboo forest, 1600×900:
 GPU 6.9 → 8.6 ms; brightness unchanged.
 
+**First playtest: the Yo-kai World's sky went dark with a ghost shape.** Bisected with `YW4_EFFECTS_KEEP`: the
+effects' half-size depth. The distance blur's passes draw into its kept half-size images with that depth attached
+but unused (depth test and write off), and the viewport was scaled from the depth target: the blur images were
+drawn at twice their size, and the blur spread them over everything far. Now the viewport follows the colour target.
+One draw does use both: the blur's first copy (`95ea1b`) also copies depth into the half-size depth; with the scales
+different it is drawn without depth (logged), since the same copy into a matching target redoes it two passes later,
+before it is read.
+
 ## Open
 
 - Battles, menus and cutscenes: other screen-sized targets (GPU-only 2D targets of sizes not in the list are logged
