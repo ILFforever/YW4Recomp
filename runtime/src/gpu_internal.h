@@ -56,6 +56,9 @@ typedef struct {
     /* made larger by scale_num / scale_den (0 / 0: the game's size): the shadow maps (YW4_SHADOW_RES / panel,
      * res / 1024) and the screen-sized targets (YW4_RES / panel, height / 900) */
     uint32_t scale_num, scale_den;
+    /* the width also times wide_num / wide_den (0 / 0: not): the screen-sized targets in another picture
+     * shape than 16:9 (widescreen.c) */
+    uint32_t wide_num, wide_den;
 } ImageKey;
 
 /* v made num / den times larger, rounded to the nearest whole pixel */
@@ -75,6 +78,7 @@ struct GpuImage {
     VkImageAspectFlags aspect;
     uint32_t width, height, depth, layers, levels;
     uint32_t scale_num, scale_den;  /* width and height are the texture's times this (key's; 1 / 1 if none) */
+    uint32_t wide_num, wide_den;    /* ... and the width also times this (key's; 1 / 1 if none) */
     GpuView *views;  /* cached image views */
     uint64_t uploaded_frame;  /* YW4_GPU_REUPLOAD: the frame it was last uploaded in */
     uint32_t upload_gen;      /* write generation (gpu.c) when it was last uploaded */
@@ -135,6 +139,8 @@ typedef struct GpuState {
     uint32_t stencil_ref[2], stencil_mask[2], stencil_value_mask[2];
     float polygon_offset[3];  /* factor, units, clamp */
     int rasterizer_discard, depth_clamp;
+    int after_composite;  /* this command list drew the bloom composite: what follows (but the copy into the
+                           * window's image) is the UI (gpu_draw.c) */
 } GpuState;
 
 void gpu_state_init(GpuState *s);
@@ -156,8 +162,10 @@ void gpu_dynamic_forget(void);
 void gpu_aa_apply(VkCommandBuffer cb, GpuState *s);
 /* TAA (gpu_aa.c): the shift in pixels for a 3D draw into a w x h target (0: none), and the draws' targets
  * (the G-buffer's motion target is noted, and copied when its targets change). */
-int gpu_taa_jitter(uint32_t w, uint32_t h, float *jx, float *jy);
+int gpu_taa_jitter(uint32_t w, uint32_t h, float *jx, float *jy);  /* not for the UI: the caller checks */
 void gpu_taa_note_targets(const GpuState *s);
+/* One of the textures presented lately (the window's images; gpu.c). */
+int gpu_is_presented(uint64_t addr);
 void gpu_taa_targets_end(VkCommandBuffer cb);
 /* gpu_shadow.c: the first draw into s's targets since they were set; depth-only ones are
  * remembered with the state the game draws with, so a shadow pass can draw into its layer after

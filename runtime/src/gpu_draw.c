@@ -66,6 +66,8 @@ typedef struct Shader {
 } Shader;
 
 static Shader *shaders;
+/* the draw being bound reads a screen-sized image: after the composite it is not UI (widescreen; gpu_dynamic_state) */
+static int dyn_reads_screen;
 
 /* Distance blur (depth of field): the game blurs the scene by distance. Fragment shader 27b63a2b... reads
  * depth, turns it into an amount with cbuf 6 row 0 (a, b, c, w: clamp((a / (b z + cam) + c) w)) and draws
@@ -873,11 +875,14 @@ static uint8_t *ring_alloc(VkDeviceSize size, VkBuffer *buf, VkDeviceSize *offse
 }
 
 /* The same for the screen-sized targets (YW4_RES, F4): cbuf 8 row 32 (tap offsets in them, 0..1
- * coordinates) scaled by 900 / height, so the taps stay as many pixels apart as the game's. */
+ * coordinates: x, y of the full size, x, y of the third) scaled by 900 / height, and the x ones also by the
+ * picture's width factor (widescreen.c), so the taps stay as many pixels apart as the game's. */
 static int cb8_scaled_copy(uint64_t addr, VkDeviceSize range, const Shader *sh, VkBuffer *buf, VkDeviceSize *offset) {
     int res = gpu_shadow_res(), h = gpu_res_height();
+    uint32_t wn, wd;
+    gpu_wide_factor(&wn, &wd);
     int pcf = sh->pcf_float >= 0 && res != 1024 && (VkDeviceSize)(sh->pcf_float + 2) * 4 <= range;
-    int taps = sh->screen_taps && h != 900 && 33 * 16 <= range;
+    int taps = sh->screen_taps && (h != 900 || wn != wd) && 33 * 16 <= range;
     if (!(pcf || taps) || range > 65536) return 0;
     uint8_t *p = ring_alloc(range, buf, offset);
     if (!p) return 0;
@@ -887,7 +892,7 @@ static int cb8_scaled_copy(uint64_t addr, VkDeviceSize range, const Shader *sh, 
         spread[0] *= 1024.0f / (float)res, spread[1] *= 1024.0f / (float)res;
     }
     if (taps)
-        for (int i = 0; i < 4; i++) ((float *)p)[32 * 4 + i] *= 900.0f / (float)h;
+        for (int i = 0; i < 4; i++) ((float *)p)[32 * 4 + i] *= 900.0f / (float)h * (i & 1 ? 1.0f : (float)wd / (float)wn);
     return 1;
 }
 
@@ -1018,6 +1023,10 @@ static int bind_stage_set(VkCommandBuffer cb, const GpuState *s, const Shader *s
                 if (b->kind == 'd') d.min_filter = d.mag_filter = 0;  /* raw depth: nearest texel */
                 ii[i].imageView = e ? gpu_sample_view(cb, e->tex, &e->view, e->has_view, b->view)
                                     : gpu_dummy_view(cb, b->view);
+                if (e && ns == 1) {  /* widescreen: a fragment program reading a screen-sized image */
+                    const GpuImage *ti = image_find(e->tex);
+                    if (ti && ti->wide_num != ti->wide_den) dyn_reads_screen = 1;
+                }
                 ii[i].sampler = gpu_sampler(&d);
                 ii[i].imageLayout = VK_IMAGE_LAYOUT_GENERAL;
                 w[i].dstBinding = (b->kind == 'd' ? 96 : 16) + b->slot;
@@ -1306,21 +1315,32 @@ void gpu_dynamic_state(VkCommandBuffer cb, const GpuState *s, VkFormat depth, ui
                             "depth: drawn without depth\n", tc->width, tc->height, td->width, td->height);
     }
     int64_t kn = tg ? tg->scale_num : 1, kd = tg ? tg->scale_den : 1;
-    float vx = 0, vy = 0, vw = (float)w, vh = (float)h, kf = (float)kn / (float)kd;
-    if (s->have_viewport) vx = (float)s->viewport[0] * kf, vy = (float)s->viewport[1] * kf,
-                          vw = (float)s->viewport[2] * kf, vh = (float)s->viewport[3] * kf;
+    /* widescreen: across, also times the image's width factor; the UI (what follows the composite in its
+     * command list, but the copy into the window's image and draws that read a screen-sized image, like the
+     * finished 3D picture's copy) keeps the game's width in the middle */
+    int64_t xn = kn * (tg ? tg->wide_num : 1), xd = kd * (tg ? tg->wide_den : 1);
+    float xoff = 0;
+    if (tg && tg->wide_num != tg->wide_den && s->after_composite && !dyn_reads_screen &&
+        !gpu_is_presented(tg->key.addr)) {
+        xn = kn, xd = kd;
+        xoff = ((float)tg->width - (float)tg->key.width * (float)kn / (float)kd) * 0.5f;
+    }
+    float vx = 0, vy = 0, vw = (float)w, vh = (float)h, kf = (float)kn / (float)kd, xf = (float)xn / (float)xd;
+    if (s->have_viewport) vx = xoff + (float)s->viewport[0] * xf, vy = (float)s->viewport[1] * kf,
+                          vw = (float)s->viewport[2] * xf, vh = (float)s->viewport[3] * kf;
     d.viewport = (VkViewport){vx, flip ? vy + vh : vy, vw, flip ? -vh : vh, s->depth_range[0], s->depth_range[1]};
     float jx, jy;
-    if (dyn_model && gpu_taa_jitter(w, h, &jx, &jy)) d.viewport.x += jx, d.viewport.y += jy;
-    dyn_model = 0;
+    if (dyn_model && !s->after_composite && gpu_taa_jitter(w, h, &jx, &jy)) d.viewport.x += jx, d.viewport.y += jy;
+    dyn_model = dyn_reads_screen = 0;
     d.scissor = (VkRect2D){{0, 0}, {w, h}};
     if (s->have_scissor) {
         /* edges scaled: left and top down, right and bottom up, so the scissor covers what it did */
         int64_t x0 = s->scissor[0] < 0 ? 0 : s->scissor[0], y0 = s->scissor[1] < 0 ? 0 : s->scissor[1];
         int64_t x1 = x0 + (s->scissor[2] > 0 ? s->scissor[2] : 0), y1 = y0 + (s->scissor[3] > 0 ? s->scissor[3] : 0);
-        int64_t x = x0 * kn / kd, y = y0 * kn / kd;
-        int64_t sw = (x1 * kn + kd - 1) / kd - x, sh = (y1 * kn + kd - 1) / kd - y;
-        if (kn != kd) {  /* the game's "whole target" scissor can be huge: keep it inside the target */
+        int64_t x = x0 * xn / xd, y = y0 * kn / kd;
+        int64_t sw = (x1 * xn + xd - 1) / xd - x, sh = (y1 * kn + kd - 1) / kd - y;
+        x += (int64_t)xoff;
+        if (kn != kd || xn != xd || xoff) {  /* the game's "whole target" scissor can be huge: keep it inside */
             if (x > w) x = w;
             if (y > h) y = h;
             if (sw > w - x) sw = w - x;
@@ -1640,7 +1660,10 @@ static void draw(VkCommandBuffer cb, GpuState *s, const CmdRec *r) {
     }
     capture_after_draw(cb, s, g);
     /* the bloom composite, the last 3D pass before the UI: anti-aliasing here (gpu_aa.c) */
-    if (g->sh[ST_FRAG] && g->sh[ST_FRAG]->key == COMPOSITE_SHADER && gpu_aa()) gpu_aa_apply(cb, s);
+    if (g->sh[ST_FRAG] && g->sh[ST_FRAG]->key == COMPOSITE_SHADER) {
+        s->after_composite = 1;
+        if (gpu_aa()) gpu_aa_apply(cb, s);
+    }
 }
 
 void gpu_draw(VkCommandBuffer cb, GpuState *s, const CmdRec *r) { draw(cb, s, r); }

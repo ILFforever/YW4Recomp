@@ -868,6 +868,7 @@ static ImageKey key_of(const NvnTexture *t) {
     k.block_height_log2 = t->layout.block_height_log2, k.block_depth_log2 = t->layout.block_depth_log2;
     k.linear = (t->flags & FLAG_LINEAR) != 0;
     image_scale(t, &k.scale_num, &k.scale_den);
+    if (gpu_wide() && screen_sized(t)) gpu_wide_factor(&k.wide_num, &k.wide_den);
     return k;
 }
 
@@ -947,8 +948,9 @@ GpuImage *image_of(VkCommandBuffer cb, NvnTexture *t) {
     g->width = t->layout.width, g->height = t->layout.height, g->depth = t->layout.depth ? t->layout.depth : 1;
     g->layers = t->layout.layers ? t->layout.layers : 1, g->levels = t->layout.levels ? t->layout.levels : 1;
     g->scale_num = g->key.scale_den ? g->key.scale_num : 1, g->scale_den = g->key.scale_den ? g->key.scale_den : 1;
-    if (g->key.scale_den) {
-        g->width = gpu_scaled(g->width, g->scale_num, g->scale_den);
+    g->wide_num = g->key.wide_den ? g->key.wide_num : 1, g->wide_den = g->key.wide_den ? g->key.wide_den : 1;
+    if (g->key.scale_den || g->key.wide_den) {
+        g->width = gpu_scaled(gpu_scaled(g->width, g->scale_num, g->scale_den), g->wide_num, g->wide_den);
         g->height = gpu_scaled(g->height, g->scale_num, g->scale_den);
         static int logged;
         int half = (t->layout.width == 800 || t->layout.width == 960) && g->width >= 2 * t->layout.width - 2;
@@ -1252,6 +1254,7 @@ void gpu_execute(uint64_t handle) {
     static GpuState s;
     static int state_ready;
     if (!state_ready) gpu_state_init(&s), state_ready = 1;
+    s.after_composite = 0;  /* ... except this: the UI follows the composite in the same list (gpu_draw.c) */
     uint64_t at = handle;
     static uint64_t exec;  /* which run of a list this is (gpu_ab.c) */
     exec++;
@@ -1583,11 +1586,24 @@ static void dump_images(uint64_t frame) {
         }
 }
 
+/* The textures presented lately: the game alternates two window images (widescreen's UI rule, gpu_draw.c). */
+static uint64_t presented[4];
+
+int gpu_is_presented(uint64_t addr) {
+    for (int i = 0; i < 4; i++)
+        if (addr && __atomic_load_n(&presented[i], __ATOMIC_RELAXED) == addr) return 1;
+    return 0;
+}
+
 void gpu_present(NvnTexture *t, uint64_t frame, const int crop[4]) {
     host_lock(&gpu_lock);
     present_count++;
     scan_writes();
     if (present_count % 300 == 0) evict_images();
+    if (!gpu_is_presented(t->addr)) {
+        static int next;
+        __atomic_store_n(&presented[next++ % 4], t->addr, __ATOMIC_RELAXED);
+    }
     GpuImage *g = image_find(t);
     if (!g) {  /* never drawn to: make it (black) */
         VkCommandBuffer cb = begin();
@@ -1611,9 +1627,11 @@ void gpu_present(NvnTexture *t, uint64_t frame, const int crop[4]) {
     host_unlock(&gpu_lock);
     VkRect2D r = {{0, 0}, {g->width, g->height}};
     /* the crop, in the game's pixels: scaled with the window image (YW4_RES) */
-    uint32_t cx = gpu_scaled(crop[0] > 0 ? (uint32_t)crop[0] : 0, g->scale_num, g->scale_den);
+    uint32_t cx = gpu_scaled(gpu_scaled(crop[0] > 0 ? (uint32_t)crop[0] : 0, g->scale_num, g->scale_den), g->wide_num,
+                             g->wide_den);
     uint32_t cy = gpu_scaled(crop[1] > 0 ? (uint32_t)crop[1] : 0, g->scale_num, g->scale_den);
-    uint32_t cw = gpu_scaled(crop[2] > 0 ? (uint32_t)crop[2] : 0, g->scale_num, g->scale_den);
+    uint32_t cw = gpu_scaled(gpu_scaled(crop[2] > 0 ? (uint32_t)crop[2] : 0, g->scale_num, g->scale_den), g->wide_num,
+                             g->wide_den);
     uint32_t ch = gpu_scaled(crop[3] > 0 ? (uint32_t)crop[3] : 0, g->scale_num, g->scale_den);
     if (crop[2] > 0 && crop[3] > 0 && crop[0] >= 0 && crop[1] >= 0 && cx + cw <= g->width && cy + ch <= g->height)
         r = (VkRect2D){{(int32_t)cx, (int32_t)cy}, {cw, ch}};

@@ -29,6 +29,7 @@
 #include "gbuffer.h"
 #include "host.h"
 #include "mat4.h"
+#include "yw4load.h"
 
 extern uint64_t yw4_frames_presented;  /* dispatch.c */
 
@@ -452,6 +453,30 @@ void gbuffer_layer_start(const CPUState *ctx) {
     Mat4 proj = mat4_load(cur.device + 0x280), view = mat4_load(cur.device + 0x2c0);
     cur.vp = mat4_mul(&proj, &view);
     uint64_t frame = __atomic_load_n(&yw4_frames_presented, __ATOMIC_RELAXED);
+    static uint64_t logged_at;  /* YW4_LOG_CAMERA=<frame>: the render state's projection, once (widescreen work) */
+    if (getenv("YW4_LOG_CAMERA") && !logged_at && frame >= strtoull(getenv("YW4_LOG_CAMERA"), NULL, 10) &&
+        U8(item + 8) == LAYER_GBUFFER) {
+        logged_at = frame;
+        const float *p = (const float *)(uintptr_t)(cur.device + 0x280);
+        fprintf(stderr, "yw4: camera: frame %llu device %#llx projection at %#llx:", (unsigned long long)frame,
+                (unsigned long long)cur.device, (unsigned long long)(cur.device + 0x280));
+        for (int i = 0; i < 16; i++) fprintf(stderr, " %g", p[i]);
+        fprintf(stderr, "\n");
+        /* the camera list (f_7eeb10: array at [main+0x15fb7c0], count u16 at main+0x15fb7d0): each camera's
+         * floats, to find its aspect, field of view and matrices */
+        uint64_t mb = *yw4_modules[YW4_MAIN].base, list = U64(mb + 0x15fb7c0);
+        unsigned n = U16(mb + 0x15fb7d0);
+        for (unsigned c = 0; c < n && c < 4 && list; c++) {
+            uint64_t cam = U64(list + 8ull * c);
+            if (!cam) continue;
+            fprintf(stderr, "yw4: camera %u at %#llx id %u:", c, (unsigned long long)cam, U32(cam + 0x70));
+            for (unsigned o = 0; o < 0x400; o += 4) {
+                float f = *(const float *)(uintptr_t)(cam + o);
+                if (f != 0.0f && f > -1e5f && f < 1e5f && (f > 1e-4f || f < -1e-4f)) fprintf(stderr, " +%x=%g", o, f);
+            }
+            fprintf(stderr, "\n");
+        }
+    }
     if (frame != this_vp_frame && !shadow_layer(item)) prev_vp = this_vp, this_vp = cur.vp, this_vp_frame = frame;
     st.layers++;
 }

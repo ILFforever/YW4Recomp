@@ -291,7 +291,6 @@ static uint32_t scene_w, scene_h;  /* the scene's size at the last anti-aliasing
 static NvnTexture *gbuffer_motion;  /* the open G-buffer pass's motion target (NULL: none open) */
 static AaImage motion;
 static uint64_t motion_frame = ~0ull;  /* the frame it was copied in */
-static uint64_t resolved_frame = ~0ull;  /* the frame TAA last ran in: the UI drawn after it is not shifted */
 static int taa_cur;
 
 static float halton(int i, int base) {
@@ -301,18 +300,17 @@ static float halton(int i, int base) {
 }
 
 /* The shift, in pixels, for a 3D draw into a w x h target this frame: TAA on and the target the scene's
- * size, and not past this frame's TAA (the UI); else none (0). 8 positions (Halton 2, 3), one per frame. */
+ * size (the caller leaves out what follows the composite); else none (0). 8 positions (Halton 2, 3),
+ * one per frame. */
 int gpu_taa_jitter(uint32_t w, uint32_t h, float *jx, float *jy) {
     if (gpu_aa() != 3 || !scene_w || w != scene_w || h != scene_h) return 0;
-    static int nshift, nafter;  /* YW4_TAA_LOG: counted per frame, logged every 300 */
+    static int nshift;  /* YW4_TAA_LOG: counted per frame, logged every 300 */
     static uint64_t counted = ~0ull;
     if (counted != gpu_frames()) {
         if (counted % 300 == 0 && getenv("YW4_TAA_LOG"))
-            fprintf(stderr, "yw4: taa: frame %llu: %d draws shifted, %d after TAA not\n", (unsigned long long)counted,
-                    nshift, nafter);
-        counted = gpu_frames(), nshift = nafter = 0;
+            fprintf(stderr, "yw4: taa: frame %llu: %d draws shifted\n", (unsigned long long)counted, nshift);
+        counted = gpu_frames(), nshift = 0;
     }
-    if (resolved_frame == gpu_frames()) return nafter++, 0;
     nshift++;
     int i = (int)(gpu_frames() % 8) + 1;
     *jx = halton(i, 2) - 0.5f, *jy = halton(i, 3) - 0.5f;
@@ -377,7 +375,6 @@ static void taa(VkCommandBuffer cb, VkImageView target, VkFormat fmt, uint32_t w
     pass(cb, P_TAA_OUT, target, fmt, w, h, 0, result);
     pass_params[0] = 0.0f;
     taa_cur = next, history_valid = 1;
-    resolved_frame = now;
 }
 
 void gpu_aa_apply(VkCommandBuffer cb, GpuState *s) {

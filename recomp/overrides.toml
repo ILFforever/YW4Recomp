@@ -143,3 +143,9 @@ module = "main"
 offset = "0x7ed350"
 native = "yw4_hook_cascade_end"
 why = "the job that ends a shadow cascade: our pass is queued here, after the game's draws of the layer (runtime/src/shadow.c)"
+
+[[hook]]
+module = "main"
+offset = "0x97f510"
+native = "yw4_hook_camera_update"
+why = "copies every camera's settings into the fields its projection is built from; widescreen sets the aspect there afterwards (runtime/src/widescreen.c)"

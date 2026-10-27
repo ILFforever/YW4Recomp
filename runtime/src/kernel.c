@@ -220,8 +220,9 @@ static void backtrace(const CPUState *ctx) {
 /* YW4_WATCHW: a write to the watched bytes, on the writing thread (host.c watchpoint) */
 static void write_watch_report(uint64_t pc, uint64_t addr) {
     char where[48];
-    fprintf(stderr, "yw4: write to %#" PRIx64 " by guest thread %" PRIu64 " (host pc %#" PRIx64 ")\n", addr,
-            cur ? cur->id : 0, pc);
+    /* the pc also relative to a function of ours, so llvm-nm on yw4.exe can name the recompiled function */
+    fprintf(stderr, "yw4: write to %#" PRIx64 " by guest thread %" PRIu64 " (host pc %#" PRIx64 " = yw4_describe%+lld)\n",
+            addr, cur ? cur->id : 0, pc, (long long)(pc - (uint64_t)(uintptr_t)&yw4_describe));
     if (!cur) return;
     uint64_t st[12];
     int k = yw4_call_stack(cur->ctx, st, 12);

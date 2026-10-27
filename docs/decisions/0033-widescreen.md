@@ -1,0 +1,53 @@
+# 0033 — Widescreen: a wider camera, wider screen images, the UI kept 16:9 in the middle
+
+Status: accepted, first version (2026-10-27). The owner asked for widescreen/ultrawide next ("go wide").
+
+## What we found
+
+**The camera.** The main view's projection in the render state (`device+0x280`, device `main+0x56d8060`) has a
+vertical field of view of 45° and 1.358 = 2.41421 / (16/9) across. Write watches led to the engine's camera objects:
+
+| Camera offset | Value in town | Meaning |
+|---|---|---|
+| `+0x1a4`, `+0x1a8`, `+0x1ac`, `+0x1b0` | 0.785398, 1.77778, 0.1, 4000 | working field of view, aspect, near, far |
+| `+0x1c0` | 1.358, …, 2.41421, … | the projection matrix (16 floats) |
+| `+0x2e4`, `+0x2e8`, `+0x2ec`, `+0x2f0` | the same | the settings |
+
+Every frame `f_97f510` walks the engine's camera list (`[main+0x5865720]`, count `main+0x5865728`) and copies each
+camera's settings into its working fields. The projection is built from the **setting** `+0x2e8`: writing only the
+working `+0x1a8` changed nothing, writing `+0x2e8` changed the projection (1.358 → 1.0347 for 21:9) and the picture
+widened. The game's culling follows: objects at the new edges are drawn. A float 16/9 at `main+0x11fdf28` is only a
+default that `f_53b3a0` (on-screen markers, it reads camera `+0x2e8`) uses when there is no camera; writing it at
+start changed nothing.
+
+**The images.** The screen-sized targets (docs/frame.md: 1600×900 and 1920×1080 with their smaller copies) carry
+everything up to the composite; the UI is drawn after the bloom composite into a 1600×900 image; the game's last
+draw copies that into one of **two** window images (1920×1080) that it presents in turn.
+
+## Decision
+
+1. **Camera:** a hook on `f_97f510` sets `+0x2e8` of every camera whose setting is 16:9 (or one of our shapes, so
+   going back restores them) to the chosen aspect before the copy. The vertical view stays; the sides grow.
+2. **Images:** every screen-sized target's width is also multiplied by the shape's factor against 16:9 (`ImageKey`
+   `wide_num / wide_den`: 16:10 = 9/10, 21:9 = 4/3, 32:9 = 2). Viewports and scissors across follow it, as do the
+   camera block's row 32 tap offsets (x only) and the present's crop.
+3. **UI stays 16:9 in the middle:** a draw is UI when, in the same command list, it comes after the bloom composite,
+   does not draw into one of the recently presented images (the window copies), and does not read a screen-sized
+   image (the copy of the finished 3D picture into the UI image reads one). UI draws keep the game's width and are
+   moved to the middle. TAA no longer shifts anything after the composite either (the rule it used, "after this
+   frame's TAA by the frame counter", broke when render threads overlap).
+4. **Setting:** PICTURE SHAPE in the panel: 16:9 (the game's), 16:10, 21:9, 32:9 (`YW4_ASPECT`). The window already
+   fits any picture shape with black bars.
+
+## How it was checked
+
+Schoolyard, standing still and walking: 21:9 is 2133×900 at the 900 setting with the UI centred and the right size;
+32:9 3200×900; with TAA at 21:9; the settings panel at 16:9 unchanged.
+
+## Not done yet
+
+- On-screen markers: `f_53b3a0` projects with the camera's (now wider) aspect into the 16:9 UI, so markers away
+  from the middle may sit a little off their targets. Not seen in the frames checked; to look at.
+- Menus, battles, cutscenes, full-screen fades and screen effects drawn after the composite (a fade would cover
+  only the middle) are untested.
+- At 16:10 the sides are cut, not the top: the vertical field of view is kept for every shape.
