@@ -158,6 +158,16 @@ void settings_toggle(void) {
 
 int settings_page(void) { return __atomic_load_n(&page, __ATOMIC_ACQUIRE); }
 
+void settings_show(int p) {
+    bindings_cancel();
+    if (settings_open() && settings_page() == p) {
+        __atomic_store_n(&panel_open, 0, __ATOMIC_RELEASE);
+        return;
+    }
+    __atomic_store_n(&page, p, __ATOMIC_RELEASE);
+    __atomic_store_n(&panel_open, 1, __ATOMIC_RELEASE);
+}
+
 void settings_action(int action) {
     if (action == SETTINGS_PAGE) {
         bindings_cancel();

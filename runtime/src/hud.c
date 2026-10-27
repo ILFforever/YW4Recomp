@@ -183,8 +183,7 @@ static int wrap(const char *s, int cols, char lines[][96], int max) {
 
 /* The card both pages are drawn on: a square card in a dark frame (the window copies overlays without
  * blending, so nothing can be see-through, and rounded corners inside a square frame looked off), its
- * title bar square too, with the two pages' names as tabs, the shown one bright. */
-static const uint8_t TAB_OFF[3] = {178, 146, 214};
+ * title bar square too, with the page's name. */
 enum { CARD_PAD = 10, CARD_HEADER = 26 };
 
 static void card(const Canvas *cv, int pw, int ph, int page) {
@@ -192,9 +191,8 @@ static void card(const Canvas *cv, int pw, int ph, int page) {
     fill(cv, 2, 2, pw - 4, ph - 4, CREAM);
     fill(cv, 2, 2, pw - 4, CARD_HEADER - 2, PURPLE);
     for (int x = 2; x < pw - 2; x += 4) put(cv, x, CARD_HEADER - 1, PURPLE2);
-    text2(cv, CARD_PAD + 2, 6, "SETTINGS", page ? TAB_OFF : WHITE2);
-    text2(cv, CARD_PAD + 2 + 10 * 2 * CELL_W, 6, "CONTROLS", page ? WHITE2 : TAB_OFF);
-    text(cv, pw - CARD_PAD - 13 * CELL_W, 10, "F1 / B: CLOSE", ROWSEL);
+    text2(cv, CARD_PAD + 2, 6, page ? "CONTROLS" : "SETTINGS", WHITE2);
+    text(cv, pw - CARD_PAD - 13 * CELL_W, 10, page ? "F2 / B: CLOSE" : "F1 / B: CLOSE", ROWSEL);
 }
 
 static void hint(const Canvas *cv, int pw, int y, const char *s) {
@@ -270,7 +268,7 @@ void panel_render(uint8_t *rgba, int w, int h, const SettingRow *rows, int n, in
         text(&cv, PAD + 2, y + desc_h - 14, note, PINK);
     }
     y += desc_h + 6;
-    hint(&cv, pw, y, "UP/DOWN: CHOOSE   LEFT/RIGHT: CHANGE   TAB, L/R: CONTROLS");
+    hint(&cv, pw, y, "UP/DOWN: CHOOSE   LEFT/RIGHT: CHANGE   F2, L/R: CONTROLS");
     *used_w = cv.bw, *used_h = cv.bh;
 }
 
@@ -345,7 +343,7 @@ void controls_render(uint8_t *rgba, int w, int h, const BindRow *rows, int n, in
     int k = wrap(help, text_cols, l, DESC_LINES);
     for (int j = 0; j < k; j++) text(&cv, PAD + 2, y + 6 + j * 10, l[j], capturing ? PINK : INK);
     y += desc_h + 6;
-    hint(&cv, pw, y, "ARROWS: MOVE  ENTER/A: CHANGE  DEL/X: CLEAR  TAB, L/R: SETTINGS");
+    hint(&cv, pw, y, "ARROWS: MOVE  ENTER/A: CHANGE  DEL/X: CLEAR  F1, L/R: SETTINGS");
     *used_w = cv.bw, *used_h = cv.bh;
 }
 

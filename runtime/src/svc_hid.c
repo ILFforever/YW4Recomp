@@ -212,14 +212,15 @@ static int replay_state(uint64_t tick, uint64_t *buttons, int32_t sticks[4]) {
         else if (!strcmp(k, "F12")) window_request_screenshot();
         else if (!strcmp(k, "F9")) shadow_toggle();
         else if (!strcmp(k, "F6")) gbuffer_toggle();
-        else if (!strcmp(k, "F1")) settings_toggle();  /* the settings panel, and its keys while open */
+        else if (!strcmp(k, "F1")) settings_show(0);  /* the settings panel, and its keys while open */
+        else if (!strcmp(k, "F2")) settings_show(1);  /* its controls page */
         else if (!strcmp(k, "UP")) settings_action(SETTINGS_UP);
         else if (!strcmp(k, "DOWN")) settings_action(SETTINGS_DOWN);
         else if (!strcmp(k, "LEFT")) settings_action(SETTINGS_LEFT);
         else if (!strcmp(k, "RIGHT")) settings_action(SETTINGS_RIGHT);
         else if (!strcmp(k, "ENTER")) settings_action(SETTINGS_ACCEPT);
         else if (!strcmp(k, "DELETE")) settings_action(SETTINGS_CLEAR);
-        else if (!strcmp(k, "TAB")) settings_action(SETTINGS_PAGE);
+        else if (!strcmp(k, "PAGE")) settings_action(SETTINGS_PAGE);
     }
     return 1;
 }

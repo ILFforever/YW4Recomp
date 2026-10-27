@@ -27,8 +27,11 @@ enum { SETTINGS_UP, SETTINGS_DOWN, SETTINGS_LEFT, SETTINGS_RIGHT, SETTINGS_CLOSE
 void settings_load(void);
 int settings_open(void);
 void settings_toggle(void);
-/* The page shown: 0 the settings, 1 the controls (bindings.h); SETTINGS_PAGE switches. */
+/* The page shown: 0 the settings (F1), 1 the controls (F2, bindings.h); SETTINGS_PAGE switches (a gamepad's
+ * L/R, which has no F keys). */
 int settings_page(void);
+/* F1/F2: opens the panel on that page, or switches to it; closes the panel if it already shows it. */
+void settings_show(int page);
 /* Writes the settings file (the settings and the controls); every change calls it. */
 void settings_save(void);
 /* One of the actions above, from the window's key presses while the panel is open. */

@@ -710,8 +710,8 @@ static void panel_pad_button(SDL_GamepadButton button) {
                /* by position, as on a Switch controller: south B, east A, north X */
                {SDL_GAMEPAD_BUTTON_SOUTH, SETTINGS_CLOSE, "F1"}, {SDL_GAMEPAD_BUTTON_EAST, SETTINGS_ACCEPT, "ENTER"},
                {SDL_GAMEPAD_BUTTON_NORTH, SETTINGS_CLEAR, "DELETE"},
-               {SDL_GAMEPAD_BUTTON_LEFT_SHOULDER, SETTINGS_PAGE, "TAB"},
-               {SDL_GAMEPAD_BUTTON_RIGHT_SHOULDER, SETTINGS_PAGE, "TAB"}};
+               {SDL_GAMEPAD_BUTTON_LEFT_SHOULDER, SETTINGS_PAGE, "PAGE"},
+               {SDL_GAMEPAD_BUTTON_RIGHT_SHOULDER, SETTINGS_PAGE, "PAGE"}};
     for (size_t i = 0; i < sizeof map / sizeof *map; i++)
         if (button == map[i].button) settings_action(map[i].action), yw4_hid_note_key(map[i].name);
 }
@@ -808,7 +808,8 @@ void window_run(void (*guest)(void *), void *arg) {
             /* the settings live in the panel only (F1); its keys are recorded like the F keys, so a replay
              * of a recording changes the same settings at the same ticks. While the controls page waits for
              * a key, any key but F1..F12 is the new binding. */
-            if (e.key.key == SDLK_F1) settings_toggle(), yw4_hid_note_key("F1");
+            if (e.key.key == SDLK_F1) settings_show(0), yw4_hid_note_key("F1");  /* the settings */
+            if (e.key.key == SDLK_F2) settings_show(1), yw4_hid_note_key("F2");  /* the controls */
             if (settings_open() && !e.key.repeat &&
                 !((e.key.scancode < SDL_SCANCODE_F1 || e.key.scancode > SDL_SCANCODE_F12) &&
                   bindings_capture_key(e.key.scancode))) {
@@ -820,7 +821,7 @@ void window_run(void (*guest)(void *), void *arg) {
                            {SDLK_LEFT, SETTINGS_LEFT, "LEFT"},     {SDLK_RIGHT, SETTINGS_RIGHT, "RIGHT"},
                            {SDLK_ESCAPE, SETTINGS_CLOSE, "F1"},    {SDLK_RETURN, SETTINGS_ACCEPT, "ENTER"},
                            {SDLK_KP_ENTER, SETTINGS_ACCEPT, "ENTER"}, {SDLK_DELETE, SETTINGS_CLEAR, "DELETE"},
-                           {SDLK_BACKSPACE, SETTINGS_CLEAR, "DELETE"}, {SDLK_TAB, SETTINGS_PAGE, "TAB"}};
+                           {SDLK_BACKSPACE, SETTINGS_CLEAR, "DELETE"}};
                 for (size_t i = 0; i < sizeof map / sizeof *map; i++)
                     if (e.key.key == map[i].key) settings_action(map[i].action), yw4_hid_note_key(map[i].name);
             }
