@@ -38,6 +38,28 @@ draw copies that into one of **two** window images (1920×1080) that it presents
    frame's TAA by the frame counter", broke when render threads overlap).
 4. **Setting:** ASPECT RATIO in the panel: 16:9 (the game's), 16:10, 21:9, 32:9 (`YW4_ASPECT`). The window already
    fits any aspect ratio with black bars.
+5. **Full-screen layers are stretched** (added 2026-10-28): a UI draw that covers the game's whole screen is drawn
+   across the full width instead of in the middle, so the dimming behind a dialog and the loading screen's black
+   reach the sides. The runtime finds them without running the vertex program: the shader translator writes where
+   a vertex program's position comes from into its interface (`m <buffer> <rows of x y z w>` when it is one constant
+   buffer's rows dotted with input 0, as all four UI programs seen do; `m in` when it is input 0 as it is, the
+   full-screen pass program), and `covers_screen` (`gpu_draw.c`) computes the corners of draws with 3 to 6
+   vertices. Corners at the edges of clip space (±0.99 or beyond): the whole screen. Then, by the textures it
+   samples:
+   - a texture of exactly 16:9 shape from the game's files, a picture made for the screen (the copyright notice
+     1920×1080, movies: 1920×1080 and two 960×540 planes, the dungeon map's backdrop 960×540): kept 16:9 in the
+     middle, and the sides cleared to black first (`vkCmdClearAttachments`). Stretching made the copyright
+     notice's silhouettes a third wider (owner: keep pictures 16:9); without the bars the 3D world the game still
+     draws behind the bamboo forest's map showed at the sides (owner: black bars);
+   - a texture of 16:9 shape the game renders into (a GPU-only memory pool: the map's UI, drawn into a
+     1920×1080 image first): kept 16:9 like the rest of the UI, no bars;
+   - anything else is stretched; a full-screen pass program only with no texture at all (it also copies images).
+
+   The dimming samples a part of a 2048×2304 sheet and is stretched. The town's fast-travel map needs none of
+   this: its tiles are drawn by a 3D model program (local-matrix block) with its own camera, which point 1
+   widens, and they come out across the full width, showing more of the town (owner checked, 2026-10-28). The vertex and index reads are checked
+   against the memory pools (`gpu_buffer_at`): checking them with `host_readable` (`VirtualQuery`) stopped the
+   game at the title screen in every test run, though only reads were added. The cause was not found.
 
 ## How it was checked
 
@@ -45,10 +67,18 @@ Schoolyard, standing still and walking: 21:9 is 2133×900 at the 900 setting wit
 32:9 3200×900; with TAA at 21:9; the settings panel at 16:9 unchanged. The owner played at 21:9 / 4K (2026-10-28): exploring, battles
 and cutscenes work; screenshots in the README.
 
+Full-screen layers (point 5), 21:9 from the Yo-kai World save, screenshots from boot to after the "time changed"
+dialog: the loading screen's black and the dialog's dimming reach the sides; the copyright notice, the LEVEL-5
+movie, the autosave notice and the diary stay 16:9 with black sides, as before. At 16:10 and 32:9 the loading
+screen and the copyright notice behave the same (the dialog had closed by then in those runs). 16:9 is unchanged
+(nothing is checked there).
+
 ## Not done yet
 
 - On-screen markers: `f_53b3a0` projects with the camera's (now wider) aspect into the 16:9 UI, so markers away
   from the middle may sit a little off their targets. Not seen in the frames checked; to look at.
-- Full-screen UI layers stay 16:9: seen with the dimming behind a dialog (known-issues.md). Fades, menu
-  backgrounds still to check.
+- Full-screen layers seen so far: the ones above; the owner checked the Yo-kai Pad and both maps at 21:9 / 4K.
+  Other menus (Yo-kai Pad apps, battle results) not checked yet: one of one colour stretches, a 16:9 picture
+  gets black bars.
+- A 16:9 picture fading in: the bars are black at once while the middle fades.
 - At 16:10 the sides are cut, not the top: the vertical field of view is kept for every shape.

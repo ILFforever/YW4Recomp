@@ -105,6 +105,31 @@ class TranslatorTest(unittest.TestCase):
         self.assertEqual(iface["cbuffers"], [2])
         self.assertEqual(iface["colors"], [0])
 
+    def test_position_source(self):
+        from recomp import shader
+        head = ("!!NVvp5.0\nOPTION NV_internal;\nCBUFFER buf2[] = { program.buffer[2] };\n"
+                "ATTRIB vertex_attrib[] = { vertex.attrib[0..1] };\nTEMP R0, R1, R2;\n")
+        # straight into the position, and through a register with a moved component
+        direct = ("LDC.F32X4 R0, buf2[48];\nDP4.F32 result.position.w, R0, vertex.attrib[0];\n"
+                  "LDC.F32X4 R0, buf2[0];\nDP4.F32 result.position.x, vertex.attrib[0], R0;\n"
+                  "LDC.F32X4 R0, buf2[16];\nDP4.F32 result.position.y, vertex.attrib[0], R0;\n"
+                  "LDC.F32X4 R0, buf2[32];\nDP4.F32 result.position.z, vertex.attrib[0], R0;\n")
+        moved = ("LDC.F32X4 R0, buf2[128];\nDP4.F32 R2.x, vertex.attrib[0], R0;\n"
+                 "LDC.F32X4 R0, buf2[176];\nDP4.F32 R1.x, R0, vertex.attrib[0];\n"
+                 "LDC.F32X4 R0, buf2[144];\nDP4.F32 R2.y, vertex.attrib[0], R0;\n"
+                 "LDC.F32X4 R0, buf2[160];\nDP4.F32 R2.z, vertex.attrib[0], R0;\n"
+                 "MOV.F R2.w, R1.x;\nMOV.F result.position, R2;\n")
+        self.assertEqual(shader.position_source(head + direct + "END"), "2 0 1 2 3")
+        self.assertEqual(shader.position_source(head + moved + "END"), "2 8 9 10 11")
+        # anything else on the way: not a plain matrix
+        for bad in ("ADD.F32 R2.x, R2, R1;\n", "LDC.F32X4 R0, buf2[64];\nMOV.F R2.w, R0.x;\n"):
+            self.assertIsNone(shader.position_source(head + moved.replace("MOV.F result", bad + "MOV.F result") + "END"))
+        self.assertIsNone(shader.position_source(head + direct.replace("vertex.attrib[0]", "vertex.attrib[1]") + "END"))
+        # a full-screen pass: the input as it is (a moved component is not)
+        self.assertEqual(shader.position_source(head + "MOV.F result.position, vertex.attrib[0];\nEND"), "in")
+        self.assertIsNone(shader.position_source(head + "MOV.F result.position, vertex.attrib[0].yxzw;\nEND"))
+        self.assertIn("m 2 0 1 2 3", shader.iface_text(shader.translate("k", "vert", head + direct + "END")[1]))
+
     def test_rejects(self):
         from recomp import shader
         for bad in ("LDC.U64 D0.x, buf14[R0.x];", "LDC.F32 R0.x, buf14[0];", "FOO.F R0, R1;",

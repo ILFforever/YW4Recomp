@@ -63,11 +63,18 @@ typedef struct Shader {
     int dof;          /* the distance blur's composite (gpu_dof) */
     uint32_t cb8_bytes;  /* how much of cbuf 8 it reads (with pcf_float or screen_taps) */
     int model;  /* a vertex program with the engine's local-matrix block in slot 2: it draws 3D objects */
+    /* a vertex program whose position is one constant buffer's rows dotted with input 0 (the UI's):
+     * that buffer + 1 and the rows of x, y, z, w; or input 0 as it is (pos_input: full-screen passes);
+     * neither: the iface has no line m */
+    uint32_t pos_cbuf, pos_rows[4];
+    int pos_input;
 } Shader;
 
 static Shader *shaders;
 /* the draw being bound reads a screen-sized image: after the composite it is not UI (widescreen; gpu_dynamic_state) */
 static int dyn_reads_screen;
+/* the draw being bound is a UI layer over the game's whole screen: stretched, not kept 16:9 (widescreen) */
+static int dyn_full_screen;
 
 /* Distance blur (depth of field): the game blurs the scene by distance. Fragment shader 27b63a2b... reads
  * depth, turns it into an amount with cbuf 6 row 0 (a, b, c, w: clamp((a / (b z + cam) + c) w)) and draws
@@ -185,13 +192,22 @@ static Shader *load_shader(uint64_t key, int stage) {
     VkDescriptorSetLayoutBinding lb[MAX_BINDINGS];
     for (char *line = strtok(text, "\n"); line; line = strtok(NULL, "\n")) {
         char kind, dim[32] = "";
-        unsigned slot;
+        unsigned slot, rx, ry, rz, rw;
+        if (!strncmp(line, "m in", 4)) {  /* the position: input 0 as it is */
+            s->pos_input = 1;
+            continue;
+        }
         if (sscanf(line, "%c %u %31s", &kind, &slot, dim) < 2) continue;
         if (kind == 'a') {
             if (slot < 32) s->inputs[slot] = dim[0];
             continue;
         }
         if (kind == 'r') continue;  /* rows read from a constant buffer: for gbuffer.c */
+        if (kind == 'm') {  /* the position: a matrix, buffer and rows of x y z w */
+            if (sscanf(line, "m %u %u %u %u %u", &slot, &rx, &ry, &rz, &rw) == 5 && slot < UBOS)
+                s->pos_cbuf = slot + 1, s->pos_rows[0] = rx, s->pos_rows[1] = ry, s->pos_rows[2] = rz, s->pos_rows[3] = rw;
+            continue;
+        }
         if (kind == 'c' && slot == 2 && stage == ST_VERT && !strcmp(dim, "CBUSE_UB_LOCAL_MATRIX_IDX")) s->model = 1;
         if (s->nb == MAX_BINDINGS) gpu_stop("shader %016" PRIx64 " has too many bindings", key);
         Binding *b = &s->b[s->nb];
@@ -1290,6 +1306,73 @@ void gpu_cull(VkCommandBuffer cb, uint8_t cull_mode, uint8_t front_face) {
     if (cb == dyn_cb) dyn_last.cull = cull, dyn_last.front = front;
 }
 
+/* Widescreen: does this draw cover the game's whole screen? The UI's full-screen layers (the dimming
+ * behind a dialog, the loading screen's black) are one quad whose corners reach the edges of clip
+ * space; with the program's position matrix (Shader.pos_cbuf) and vertex input 0 they are computed
+ * here (the loading screen's black: input 0 is the position, Shader.pos_input). Only small draws (a
+ * quad: 4 or 6 vertices) and float positions; anything else: no.
+ * The reads are checked against the memory pools (gpu_buffer_at), not with host_readable: calling
+ * host_readable (VirtualQuery) on these vertex and index addresses every frame stopped the game at
+ * the title screen in every test run (2026-10-28; cause not found). */
+static int covers_screen(const GpuState *s, const Shader *vs, const CmdRec *r) {
+    if (!vs || !(vs->pos_cbuf || vs->pos_input) || !s->nattribs || !(s->attribs[0] & 0xFF)) return 0;
+    uint32_t count = (uint32_t)r->x[2];
+    if (count < 3 || count > 6) return 0;
+    VkBuffer pb;
+    VkDeviceSize po;
+    static const float identity[16] = {1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1};
+    static const uint32_t identity_rows[4] = {0, 1, 2, 3};
+    const float *m = identity;
+    const uint32_t *rows = identity_rows;
+    if (vs->pos_cbuf) {
+        GpuRange ub = s->ubo[0][vs->pos_cbuf - 1];
+        uint32_t top = 0;
+        for (int i = 0; i < 4; i++) top = vs->pos_rows[i] > top ? vs->pos_rows[i] : top;
+        if (!ub.size || ub.size < (top + 1) * 16ull || !gpu_buffer_at(ub.addr, (top + 1) * 16ull, &pb, &po)) return 0;
+        m = (const float *)(uintptr_t)ub.addr, rows = vs->pos_rows;
+    }
+    uint32_t a = s->attribs[0], stream = a >> 8 & 0x1F, offset = a >> 13, n;
+    switch (vertex_format(a & 0xFF)) {
+    case VK_FORMAT_R32G32_SFLOAT: n = 2; break;
+    case VK_FORMAT_R32G32B32_SFLOAT: n = 3; break;
+    case VK_FORMAT_R32G32B32A32_SFLOAT: n = 4; break;
+    default: return 0;
+    }
+    uint32_t stride = stream < s->nstreams ? s->streams[stream][0] : 0;
+    GpuRange vb = s->vbuf[stream];
+    float lo[2] = {1e9f, 1e9f}, hi[2] = {-1e9f, -1e9f};
+    for (uint32_t i = 0; i < count; i++) {
+        uint64_t v;
+        if (r->op == CMD_DRAW_ARRAYS) {
+            v = (uint64_t)r->x[1] + i;
+        } else {  /* (primitive, index type, count, index address, base vertex, ...) */
+            uint32_t size = r->x[1] == 1 ? 2 : 4;
+            if (!gpu_buffer_at(r->x[3] + (uint64_t)i * size, size, &pb, &po)) return 0;
+            const uint8_t *ix = (const uint8_t *)(uintptr_t)(r->x[3] + (uint64_t)i * size);
+            v = (size == 2 ? *(const uint16_t *)ix : *(const uint32_t *)ix) + (uint64_t)r->x[4];
+        }
+        uint64_t at = v * stride + offset;
+        if (at + n * 4 > vb.size || !gpu_buffer_at(vb.addr + at, n * 4, &pb, &po)) return 0;
+        const float *p = (const float *)(uintptr_t)(vb.addr + at);
+        float in[4] = {p[0], p[1], n > 2 ? p[2] : 0, n > 3 ? p[3] : 1}, out[4];
+        for (int c = 0; c < 4; c++) {
+            const float *row = m + rows[c] * 4;
+            out[c] = row[0] * in[0] + row[1] * in[1] + row[2] * in[2] + row[3] * in[3];
+        }
+        if (!(out[3] > 0)) return 0;
+        for (int c = 0; c < 2; c++) {
+            float q = out[c] / out[3];
+            lo[c] = q < lo[c] ? q : lo[c], hi[c] = q > hi[c] ? q : hi[c];
+        }
+    }
+    return lo[0] <= -0.99f && hi[0] >= 0.99f && lo[1] <= -0.99f && hi[1] >= 0.99f;
+}
+
+/* Widescreen: the draw's viewport spans the game's whole width of t (none set: all of it). */
+static int whole_width(const GpuState *s, const GpuImage *t) {
+    return !s->have_viewport || (s->viewport[0] <= 0 && s->viewport[0] + s->viewport[2] >= (int32_t)t->key.width);
+}
+
 /* The dynamic state of the pipelines (gpu_draw's and the native passes'), from s: viewport
  * (flipped for the upper-left origin), scissor, cull, front face, depth, stencil, bias. */
 void gpu_dynamic_state(VkCommandBuffer cb, const GpuState *s, VkFormat depth, uint32_t w, uint32_t h) {
@@ -1316,11 +1399,12 @@ void gpu_dynamic_state(VkCommandBuffer cb, const GpuState *s, VkFormat depth, ui
     }
     int64_t kn = tg ? tg->scale_num : 1, kd = tg ? tg->scale_den : 1;
     /* widescreen: across, also times the image's width factor; the UI (what follows the composite in its
-     * command list, but the copy into the window's image and draws that read a screen-sized image, like the
-     * finished 3D picture's copy) keeps the game's width in the middle */
+     * command list, but the copy into the window's image, draws that read a screen-sized image, like the
+     * finished 3D picture's copy, and layers over the whole screen) keeps the game's width in the middle */
     int64_t xn = kn * (tg ? tg->wide_num : 1), xd = kd * (tg ? tg->wide_den : 1);
     float xoff = 0;
-    if (tg && tg->wide_num != tg->wide_den && s->after_composite && !dyn_reads_screen &&
+    int full = dyn_full_screen && tg && whole_width(s, tg);
+    if (tg && tg->wide_num != tg->wide_den && s->after_composite && !dyn_reads_screen && !full &&
         !gpu_is_presented(tg->key.addr)) {
         xn = kn, xd = kd;
         xoff = ((float)tg->width - (float)tg->key.width * (float)kn / (float)kd) * 0.5f;
@@ -1331,7 +1415,7 @@ void gpu_dynamic_state(VkCommandBuffer cb, const GpuState *s, VkFormat depth, ui
     d.viewport = (VkViewport){vx, flip ? vy + vh : vy, vw, flip ? -vh : vh, s->depth_range[0], s->depth_range[1]};
     float jx, jy;
     if (dyn_model && !s->after_composite && gpu_taa_jitter(w, h, &jx, &jy)) d.viewport.x += jx, d.viewport.y += jy;
-    dyn_model = dyn_reads_screen = 0;
+    dyn_model = dyn_reads_screen = dyn_full_screen = 0;
     d.scissor = (VkRect2D){{0, 0}, {w, h}};
     if (s->have_scissor) {
         /* edges scaled: left and top down, right and bottom up, so the scissor covers what it did */
@@ -1634,7 +1718,45 @@ static void draw(VkCommandBuffer cb, GpuState *s, const CmdRec *r) {
 
     gpu_taa_note_targets(s);
     dyn_model = g->sh[ST_VERT] && g->sh[ST_VERT]->model;
+    /* A layer over the whole screen (widescreen), by the textures it samples:
+     * - a 16:9 texture from the game's files, a picture made for the screen (the map's backdrop 960x540,
+     *   the copyright notice 1920x1080, movies: 1920x1080 and 960x540 planes): kept 16:9 in the middle
+     *   with black bars at the sides, also over the 3D world the game still draws behind the map;
+     * - a 16:9 texture the game renders into (the map's UI, drawn into a 1920x1080 image first): kept
+     *   16:9 like the rest of the UI;
+     * - anything else is stretched: the dimming behind a dialog (a part of a 2048x2304 sheet), the
+     *   loading screen's black (no texture). A full-screen pass program (input 0 is the position) only
+     *   with no texture at all: it also copies other images. */
+    int samples = 0, picture = 0, layer = 0;
+    for (int i = 0; g->sh[ST_FRAG] && i < g->sh[ST_FRAG]->nb; i++) {
+        const Binding *b = &g->sh[ST_FRAG]->b[i];
+        if (b->kind != 't' || b->slot >= TEXTURES) continue;
+        samples = 1;
+        NvnTexEntry *e = tex_entry(s, s->tex[nvn_stage[ST_FRAG]][b->slot]);
+        if (e && (uint64_t)e->tex->width * 9 == (uint64_t)e->tex->height * 16) {
+            if (e->tex->pool_flags & POOL_CPU_NO_ACCESS) layer = 1;
+            else picture = 1;
+        }
+    }
+    int full = s->after_composite && gpu_wide() && !dyn_reads_screen && !layer && covers_screen(s, vs, r);
+    dyn_full_screen = full && !picture && !(vs->pos_input && samples);
+    const GpuImage *ti = s->ncolor && s->rt.color[0] ? image_find(s->rt.color[0]) : NULL;
+    int bars = full && picture && ti && whole_width(s, ti) && !gpu_is_presented(ti->key.addr);
+    if (dyn_full_screen || bars) {
+        static int logged;
+        if (logged++ < 8)
+            fprintf(stderr, "yw4: gpu: widescreen: UI layer over the whole screen %s (vs %016" PRIx64 " fs %016" PRIx64
+                            ", frame %" PRIu64 ")\n", bars ? "kept 16:9 with black bars" : "stretched", vs->key,
+                    g->sh[ST_FRAG] ? g->sh[ST_FRAG]->key : 0, gpu_frames());
+    }
     gpu_dynamic_state(cb, s, k.depth, w, h);
+    if (bars) {  /* the sides black, then the picture in the middle */
+        uint32_t inner = gpu_scaled(ti->key.width, ti->scale_num, ti->scale_den), side = w > inner ? (w - inner) / 2 : 0;
+        VkClearAttachment ca = {.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT, .colorAttachment = 0,
+                                .clearValue.color = {{0, 0, 0, 1}}};
+        VkClearRect cr[2] = {{{{0, 0}, {side, h}}, 0, 1}, {{{(int32_t)(w - side), 0}, {side, h}}, 0, 1}};
+        if (side) vkCmdClearAttachments(cb, 1, &ca, 2, cr);
+    }
     uint32_t pos_fix = nvn_depth_mode == 0 ? (g->sh[ST_GEOM] ? 2u : 1u) : 0u;
     vkCmdPushConstants(cb, g->layout, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_GEOMETRY_BIT, 0, 4, &pos_fix);
 

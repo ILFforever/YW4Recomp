@@ -891,11 +891,83 @@ def iface_text(iface: dict, names: dict[int, str] | None = None) -> str:
     lines += [f"s {n}" for n in iface["storage"]]
     if iface["stage"] == "vert":
         lines += [f"a {k} {v}" for k, v in iface["inputs"].items()]
+        if iface.get("position"):
+            lines.append(f"m {iface['position']}")
     return "\n".join(lines) + "\n"
 
 
+def position_source(text: str) -> str | None:
+    """Where a vertex program's position comes from, when it is simple enough for the runtime to work
+    out a draw's corners without running the program (gpu_draw.c, widescreen): "<slot> <row x> <row y>
+    <row z> <row w>" when it is one constant buffer's 16-byte rows each dotted with vertex input 0 (DP4),
+    as the UI's programs do; "in" when it is input 0 as it is (full-screen passes); else None."""
+    slots = {m.group(1): int(m.group(2))
+             for m in re.finditer(r"CBUFFER\s+(\w+)\[\]\s*=\s*\{\s*program\.buffer\[(\d+)\]", text)}
+    rows: dict[tuple[str, str], tuple[int, int]] = {}  # (register, component) -> (slot, row) loaded there
+    # (register, component) -> the row it holds dotted with input 0, or ("in", component of input 0)
+    dots: dict[tuple[str, str], tuple] = {}
+    pos: dict[str, tuple] = {}
+
+    def dest(t: str) -> tuple[str, str]:
+        m = re.fullmatch(r"(.*?)(?:\.([xyzw]+))?", t.strip())
+        return m.group(1), m.group(2) or SWZ
+
+    for ln in text.splitlines():
+        m = re.match(r"\s*([A-Z0-9]+)(?:\.[A-Z0-9]+)*\s+(.*);", ln)
+        if not m or ln.lstrip().startswith(("CBUFFER", "ATTRIB", "OUTPUT", "TEMP", "OPTION")):
+            continue
+        op, args = m.group(1), split_args(m.group(2))
+        if not args:
+            continue
+        reg, mask = dest(args[0])
+        values: dict[str, tuple[int, int] | None] = {}
+        if op == "LDC" and len(args) == 2 and (c := re.fullmatch(r"(\w+)\[(\d+)\]", args[1])) and c.group(1) in slots:
+            values = {k: (slots[c.group(1)], int(c.group(2)) >> 4) for k in mask}
+            for k in mask:
+                rows[reg, k] = values[k]
+            for k in mask:
+                dots.pop((reg, k), None)
+            continue
+        if op == "DP4" and len(args) == 3:
+            a, b = parse_operand(args[1]), parse_operand(args[2])
+            if b.text == "vertex.attrib[0]":
+                a, b = b, a
+            src = {rows.get((b.text, k)) for k in b.swizzle}
+            ok = a.text == "vertex.attrib[0]" and a.swizzle == SWZ and not (a.neg or b.neg or a.abs or b.abs)
+            row = src.pop() if ok and len(src) == 1 and b.swizzle == SWZ else None
+            values = {k: row for k in mask}
+        elif op == "MOV" and len(args) == 2:
+            s = parse_operand(args[1])
+            values = {k: None if s.neg or s.abs else
+                      ("in", s.swizzle[SWZ.index(k)]) if s.text == "vertex.attrib[0]" else
+                      dots.get((s.text, s.swizzle[SWZ.index(k)])) for k in mask}
+        else:
+            values = {k: None for k in mask}
+        for k in mask:
+            rows.pop((reg, k), None)
+            if reg == "result.position":
+                if values[k] is None:
+                    pos.pop(k, None)
+                else:
+                    pos[k] = values[k]
+            elif values[k] is None:
+                dots.pop((reg, k), None)
+            else:
+                dots[reg, k] = values[k]
+    if len(pos) != 4:
+        return None
+    if all(pos[k] == ("in", k) for k in SWZ):
+        return "in"
+    if len({s for s, _ in pos.values()}) != 1 or pos["x"][0] == "in":
+        return None
+    return " ".join(str(v) for v in [pos["x"][0]] + [pos[k][1] for k in SWZ])
+
+
 def translate(key: str, stage: str, text: str) -> tuple[str, dict]:
-    return Translator(key, stage, text).translate()
+    glsl, iface = Translator(key, stage, text).translate()
+    if stage == "vert":
+        iface["position"] = position_source(text)
+    return glsl, iface
 
 
 def glslang(cfg: config.Config) -> str | None:
