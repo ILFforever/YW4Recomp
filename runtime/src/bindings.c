@@ -66,8 +66,9 @@ static void ready(void) {
     if (!bound_ready) reset();
 }
 
-/* ---- gamepad inputs by name: the face buttons by position (south is B on a Switch controller, A on an
- * Xbox one), so a binding means the same button on any pad */
+/* ---- gamepad inputs by name, for the settings file: the face buttons by position (south is B on a Switch
+ * controller, A on an Xbox one), so a binding means the same button on any pad. The panel shows the
+ * controller's own names (pad_label). */
 
 static const struct {
     int pad;
@@ -95,6 +96,32 @@ static const char *pad_name(int pad) {
         if (pad_names[i].pad == pad) return pad_names[i].name;
     return pad == PAD_NONE ? "-" : "?";
 }
+/* What the connected controller prints on its buttons (the settings file keeps the position names above). */
+enum { STYLE_XBOX, STYLE_PLAYSTATION, STYLE_NINTENDO };
+static int pad_style;  /* the connected controller's (bindings_read); Xbox names when there is none */
+
+int bindings_pad_nintendo(void) { return pad_style == STYLE_NINTENDO; }
+
+static const char *pad_label(int pad) {
+    static const struct {
+        int pad;
+        const char *name[3];  /* Xbox, PlayStation, Nintendo */
+    } labels[] = {
+        {SDL_GAMEPAD_BUTTON_SOUTH, {"A", "CROSS", "B"}}, {SDL_GAMEPAD_BUTTON_EAST, {"B", "CIRCLE", "A"}},
+        {SDL_GAMEPAD_BUTTON_WEST, {"X", "SQUARE", "Y"}}, {SDL_GAMEPAD_BUTTON_NORTH, {"Y", "TRIANGLE", "X"}},
+        {SDL_GAMEPAD_BUTTON_BACK, {"VIEW", "SHARE", "MINUS"}}, {SDL_GAMEPAD_BUTTON_START, {"MENU", "OPTIONS", "PLUS"}},
+        {SDL_GAMEPAD_BUTTON_GUIDE, {"GUIDE", "PS", "HOME"}},
+        {SDL_GAMEPAD_BUTTON_LEFT_SHOULDER, {"LB", "L1", "L"}}, {SDL_GAMEPAD_BUTTON_RIGHT_SHOULDER, {"RB", "R1", "R"}},
+        {AXIS(SDL_GAMEPAD_AXIS_LEFT_TRIGGER, 1), {"LT", "L2", "ZL"}},
+        {AXIS(SDL_GAMEPAD_AXIS_RIGHT_TRIGGER, 1), {"RT", "R2", "ZR"}},
+        {SDL_GAMEPAD_BUTTON_LEFT_STICK, {"L STICK PRESS", "L3", "L STICK PRESS"}},
+        {SDL_GAMEPAD_BUTTON_RIGHT_STICK, {"R STICK PRESS", "R3", "R STICK PRESS"}},
+    };
+    for (size_t i = 0; i < sizeof labels / sizeof *labels; i++)
+        if (labels[i].pad == pad) return labels[i].name[pad_style];
+    return pad_name(pad);  /* the D-pad, the sticks' directions: the same on every controller */
+}
+
 static int pad_from_name(const char *name) {
     for (size_t i = 0; i < sizeof pad_names / sizeof *pad_names; i++)
         if (!strcmp(pad_names[i].name, name)) return pad_names[i].pad;
@@ -118,6 +145,13 @@ static int32_t pad_amount(SDL_Gamepad *g, int pad) {
 
 void bindings_read(const bool *keyboard, struct SDL_Gamepad *gamepad, uint64_t *buttons, int32_t sticks[4]) {
     ready();
+    if (gamepad) {
+        SDL_GamepadType t = SDL_GetGamepadType(gamepad);
+        pad_style = t == SDL_GAMEPAD_TYPE_PS3 || t == SDL_GAMEPAD_TYPE_PS4 || t == SDL_GAMEPAD_TYPE_PS5 ? STYLE_PLAYSTATION
+                    : t >= SDL_GAMEPAD_TYPE_NINTENDO_SWITCH_PRO && t <= SDL_GAMEPAD_TYPE_NINTENDO_SWITCH_JOYCON_PAIR
+                        ? STYLE_NINTENDO
+                        : STYLE_XBOX;
+    }
     uint64_t b = 0;
     int32_t key_stick[4] = {0, 0, 0, 0}, pad_stick[4] = {0, 0, 0, 0};
     for (int i = 0; i < NINPUTS; i++) {
@@ -227,7 +261,7 @@ int bindings_rows(BindRow *rows, int max, int *sel_row, int *sel_col, char *help
             snprintf(r->cells[k], BIND_NAME, "%s", key_name(bound[i].keys[k]));
             r->conflict[k] = also_used(i, bound[i].keys[k], PAD_NONE) >= 0;
         }
-        snprintf(r->cells[BIND_KEYS], BIND_NAME, "%s", pad_name(bound[i].pad));
+        snprintf(r->cells[BIND_KEYS], BIND_NAME, "%s", pad_label(bound[i].pad));
         r->conflict[BIND_KEYS] = also_used(i, 0, bound[i].pad) >= 0;
     }
     if (n < max) {
@@ -252,11 +286,11 @@ int bindings_rows(BindRow *rows, int max, int *sel_row, int *sel_col, char *help
                  title);
     else if (o >= 0)
         snprintf(help, (size_t)help_size, "%s ALSO PRESSES %s. BOTH WORK, BUT THE GAME SEES THEM TOGETHER.",
-                 col < BIND_KEYS ? key_name(key) : pad_name(pad), other);
+                 col < BIND_KEYS ? key_name(key) : pad_label(pad), other);
     else
         snprintf(help, (size_t)help_size,
-                 "%s: TWO KEYS AND ONE GAMEPAD INPUT. ENTER OR A: CHANGE. DELETE OR X: CLEAR. GAMEPAD FACE BUTTONS "
-                 "GO BY POSITION: EAST IS A ON A SWITCH PAD, B ON AN XBOX PAD.",
+                 "%s: TWO KEYS AND ONE GAMEPAD INPUT. ENTER OR A: CHANGE. DELETE OR X: CLEAR. GAMEPAD BUTTONS ARE "
+                 "NAMED AS ON YOUR CONTROLLER.",
                  title);
     return n;
 }

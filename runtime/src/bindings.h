@@ -24,6 +24,9 @@ typedef struct {
 struct SDL_Gamepad;
 void bindings_read(const bool *keyboard, struct SDL_Gamepad *gamepad, uint64_t *buttons, int32_t sticks[4]);
 
+/* The connected controller is a Nintendo one (its A is on the right, B at the bottom; others the other way). */
+int bindings_pad_nintendo(void);
+
 /* The panel page: settings.h's actions (UP, DOWN, LEFT, RIGHT, ACCEPT, CLEAR) while it shows. */
 void bindings_action(int action);
 /* Waiting for a key or gamepad input to bind: the window passes presses here instead of to the panel.

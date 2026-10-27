@@ -687,7 +687,7 @@ static void update_input(void) {
 
 /* The settings panel from the gamepad: Home (Guide), or Minus and Plus together, opens and closes it;
  * the D-pad or the left stick choose (up/down) and change (left/right); B closes; on the controls page A
- * changes a binding and X clears it; L and R switch pages. Named like the keys, so recordings and replays
+ * changes a binding and X clears it (A, B, X as named on the controller); L and R switch pages. Named like the keys, so recordings and replays
  * see the same presses. While the controls wait for an input, the press goes there instead. */
 void yw4_hid_note_key(const char *name);  /* svc_hid.c: key presses go into the input recording */
 
@@ -700,16 +700,19 @@ static void panel_pad_button(SDL_GamepadButton button) {
         return;
     }
     if (!settings_open() || bindings_capture_button(button)) return;
-    static const struct {
+    /* A changes, B closes, X clears, by the names on the controller: a Nintendo one has A on the right, B at the
+     * bottom and X on top; Xbox and PlayStation ones A (cross) at the bottom, B (circle) right, X (square) left */
+    int nin = bindings_pad_nintendo();
+    const struct {
         SDL_GamepadButton button;
         int action;
         const char *name;
     } map[] = {{SDL_GAMEPAD_BUTTON_DPAD_UP, SETTINGS_UP, "UP"}, {SDL_GAMEPAD_BUTTON_DPAD_DOWN, SETTINGS_DOWN, "DOWN"},
                {SDL_GAMEPAD_BUTTON_DPAD_LEFT, SETTINGS_LEFT, "LEFT"},
                {SDL_GAMEPAD_BUTTON_DPAD_RIGHT, SETTINGS_RIGHT, "RIGHT"},
-               /* by position, as on a Switch controller: south B, east A, north X */
-               {SDL_GAMEPAD_BUTTON_SOUTH, SETTINGS_CLOSE, "F1"}, {SDL_GAMEPAD_BUTTON_EAST, SETTINGS_ACCEPT, "ENTER"},
-               {SDL_GAMEPAD_BUTTON_NORTH, SETTINGS_CLEAR, "DELETE"},
+               {nin ? SDL_GAMEPAD_BUTTON_SOUTH : SDL_GAMEPAD_BUTTON_EAST, SETTINGS_CLOSE, "F1"},
+               {nin ? SDL_GAMEPAD_BUTTON_EAST : SDL_GAMEPAD_BUTTON_SOUTH, SETTINGS_ACCEPT, "ENTER"},
+               {nin ? SDL_GAMEPAD_BUTTON_NORTH : SDL_GAMEPAD_BUTTON_WEST, SETTINGS_CLEAR, "DELETE"},
                {SDL_GAMEPAD_BUTTON_LEFT_SHOULDER, SETTINGS_PAGE, "PAGE"},
                {SDL_GAMEPAD_BUTTON_RIGHT_SHOULDER, SETTINGS_PAGE, "PAGE"}};
     for (size_t i = 0; i < sizeof map / sizeof *map; i++)
