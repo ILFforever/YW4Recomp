@@ -79,15 +79,16 @@ It is also lighter to run. The same busy street on the same laptop ([docs/baseli
 | 🔧 | **Native performance** | Runs as a native program, no emulation; a steady 30 frames/s everywhere is not there yet (some scenes still dip) |
 | 🔧 | **Our own renderer** | Replace the game's renderer pass by pass, so the improvements below become possible (see below) |
 | 🔧 | **Better shadows** | Bigger shadow maps and PCSS soft shadows done; contact shadows and steadier cascades next |
-| 🗓️ | **Higher resolution** | Render the 3D scene above the game's 1600×900, sharper on 1080p, 1440p and 4K screens |
+| ✅ | **Sharper distance** | Anisotropic texture filtering and a softer distance blur: distant ground, roads and buildings stay sharp without 4K |
+| ✅ | **Higher resolution** | The 3D view at 1080p, 1440p or 4K instead of the game's 1600×900 (30 frames/s at 4K on an RTX 4070 laptop) |
 | 🗓️ | **Ultrawide and other aspect ratios** | A wider view of the scene, with the UI laid out correctly |
 | 🗓️ | **Higher frame rates** | Above the game's 30 frames/s; also needs the game's timing patched |
-| 🗓️ | **Better anti-aliasing** | And other effects the Switch had no budget for |
+| 🗓️ | **Better anti-aliasing** | Smooth edges applied before the UI is drawn, so text stays crisp; then temporal AA |
 | 🗓️ | **Mod support** | Load replaced game files from a mod folder without touching your dump (first use: the English translation mod) |
 | 🗓️ | **Input remapping** | Keyboard, mouse and controller bindings of your choice with corresponding hints on screen |
 | 🗓️ | **Linux** | The runtime is written to be portable; not built or tested there yet |
 
-🔧 = In progress, 🗓️ = Planned
+✅ = Done, 🔧 = In progress, 🗓️ = Planned
 
 ### Our own renderer
 
@@ -108,12 +109,20 @@ Still the game's everywhere: the choice of what to draw, textures and character 
 
 Improvements over the original game. Details, comparisons and measurements: [docs/graphics.md](docs/graphics.md).
 
+Press **F1** in game for the settings panel: every option with all its choices, the current one boxed.
+
+![The settings panel](docs/screenshots/22-settings-panel.png)
+
 | Option | Key | What it does |
 |---|---|---|
-| Performance HUD | F3 | Frame time, CPU and GPU cost, memory and the settings below, in the window's corner |
-| Native shadow pass | F9 | Our own renderer draws the shadow casters from the game's data; slightly faster than the game's |
+| Settings panel | F1 | All the options below in one list; arrow keys to choose and change |
+| 3D view | F4 | 1600×900 (the game's), 1920×1080, 2560×1440 or 3840×2160; the UI is drawn at the same size |
+| Texture filtering | F2 | The game's, or anisotropic ×2 to ×16: distant and slanted ground, roads and walls stay sharp. Default ×16 |
+| Distance blur | panel | The game's, half or off: the game blurs everything far away. Default half |
 | Shadow map size | F8 | 1024 (the game's), 2048 or 4096: sharper shadow edges. Recommended: 4096 |
 | PCSS (soft shadows) | F7 | Off, ×1, ×2, ×4. Recommended: ×2 |
+| Native shadow pass | F9 | Our own renderer draws the shadow casters from the game's data; slightly faster than the game's |
+| Performance HUD | F3 | Frame time, CPU and GPU cost and memory, in the window's corner |
 
 **Shadow map size**: a bigger shadow map gives sharper, more detailed shadow edges, most visibly on shadows far from
 the camera. The bamboo forest, PCSS off:
@@ -134,8 +143,8 @@ the camera. The bamboo forest, PCSS off:
 |---|---|
 | ![PCSS off: hard, speckled leaf shadows](docs/screenshots/16-pcss-off.jpg) | ![PCSS x2](docs/screenshots/18-pcss-x2.jpg) |
 
-The game starts with the recommended 4096 map and PCSS ×2. For the game's original shadows, press F8 until the map
-is 1024 and F7 until PCSS is off.
+The game starts with the recommended 4096 map, PCSS ×2, ×16 texture filtering and half distance blur, at the game's
+1600×900. For the game's original look, set all of them back to their first choice in the panel.
 
 ## Screenshots
 
