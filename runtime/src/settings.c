@@ -38,6 +38,7 @@ static const Setting settings[] = {
     {"3D VIEW", {"1600X900", "1920X1080", "2560X1440", "3840X2160"}, 4, res_index, gpu_res_cycle},
     {"TEXTURE FILTERING", {"GAME", "X2", "X4", "X8", "X16"}, 5, aniso_index, gpu_aniso_cycle},
     {"DISTANCE BLUR", {"GAME", "HALF", "OFF"}, 3, dof_index, gpu_dof_cycle},
+    {"EFFECTS RESOLUTION", {"HALF", "FULL"}, 2, gpu_effects_full, gpu_effects_cycle},
     {"SHADOW MAP", {"1024", "2048", "4096"}, 3, shadow_res_index, gpu_shadow_res_cycle},
     {"SOFT SHADOWS", {"OFF", "X1", "X2", "X4"}, 4, pcss_index, gpu_pcss_cycle},
     {"SHADOW PASS", {"GAME", "OURS"}, 2, shadow_pass_index, shadow_toggle},

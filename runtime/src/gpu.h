@@ -31,6 +31,9 @@ void gpu_aniso_cycle(void);
 /* Distance blur (depth of field, gpu_draw.c): 2 the game's, 1 half, 0 off (YW4_DOF at start). */
 int gpu_dof(void);
 void gpu_dof_cycle(void);
+/* Effects resolution (gpu.c): 1 if the game's half-size targets are made the 3D view's size (YW4_EFFECTS). */
+int gpu_effects_full(void);
+void gpu_effects_cycle(void);
 /* F5: per-pass GPU timing on or off (gpu_passes.c) */
 void gpu_passes_toggle(void);
 /* Soft shadows (PCSS): 0 off (the game's filter), 1..3 on with stronger softening; F7 cycles. */

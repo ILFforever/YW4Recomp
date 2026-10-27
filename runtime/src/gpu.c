@@ -777,6 +777,57 @@ static int screen_sized(const NvnTexture *t) {
 }
 
 /* How much larger t's image is made (0 / 0: not). */
+/* Effects resolution: the game draws its shadow mask, lamp lights, ambient occlusion and effects into
+ * half-size targets (800x450, 960x540 in the 1920x1080 chain) and spreads them over the picture, which
+ * softens shadow edges and makes them blocky up close. FULL makes those targets twice as large as the
+ * rest (the 3D view's size); their readers sample them in 0..1 coordinates. YW4_EFFECTS=0 (the game's,
+ * half) / 1 (full) at start. */
+static int effects_full = -1;
+
+int gpu_effects_full(void) {
+    int f = __atomic_load_n(&effects_full, __ATOMIC_ACQUIRE);
+    if (f < 0) {
+        const char *e = getenv("YW4_EFFECTS");
+        f = e && atoi(e) == 1;
+        __atomic_store_n(&effects_full, f, __ATOMIC_RELEASE);
+    }
+    return f;
+}
+
+void gpu_effects_cycle(void) {
+    int f = !gpu_effects_full();
+    __atomic_store_n(&effects_full, f, __ATOMIC_RELEASE);
+    fprintf(stderr, "yw4: gpu: effects at %s resolution\n", f ? "full" : "half (the game's)");
+}
+
+/* The distance blur's half-size images stay half size even then: its blur comes mostly from that low
+ * resolution, so full-size images would weaken it (+60% distant detail in the bamboo forest) and blur its
+ * own setting (gpu_dof). gpu_draw.c names them from the draws that use them; the image is made again at the
+ * right size from the next use on. */
+enum { KEEP_RATIO = 16 };
+static uint64_t keep_ratio[KEEP_RATIO];
+
+void gpu_keep_game_ratio(const NvnTexture *t) {
+    if (!t || !t->addr) return;
+    for (int i = 0; i < KEEP_RATIO; i++) {
+        uint64_t a = __atomic_load_n(&keep_ratio[i], __ATOMIC_ACQUIRE);
+        if (a == t->addr) return;
+        if (!a && __atomic_compare_exchange_n(&keep_ratio[i], &a, t->addr, 0, __ATOMIC_ACQ_REL, __ATOMIC_ACQUIRE)) {
+            fprintf(stderr, "yw4: gpu: distance-blur image at %#" PRIx64 " (%ux%u) keeps the game's size ratio\n", t->addr,
+                    t->layout.width, t->layout.height);
+            return;
+        }
+    }
+}
+
+static int half_sized(const NvnTexture *t) {
+    if (!((t->layout.width == 800 && t->layout.height == 450) || (t->layout.width == 960 && t->layout.height == 540)))
+        return 0;
+    for (int i = 0; i < KEEP_RATIO; i++)
+        if (__atomic_load_n(&keep_ratio[i], __ATOMIC_ACQUIRE) == t->addr) return 0;
+    return 1;
+}
+
 static void image_scale(const NvnTexture *t, uint32_t *num, uint32_t *den) {
     *num = *den = 0;
     int res = gpu_shadow_res(), h = gpu_res_height();
@@ -784,6 +835,8 @@ static void image_scale(const NvnTexture *t, uint32_t *num, uint32_t *den) {
         t->layout.levels <= 1 && t->pool_flags & POOL_CPU_NO_ACCESS &&
         aspect_of(gpu_format(t->format)) & VK_IMAGE_ASPECT_DEPTH_BIT)
         *num = (uint32_t)res, *den = 1024;
+    else if (screen_sized(t) && gpu_effects_full() && half_sized(t))
+        *num = 2 * (uint32_t)h, *den = 900;
     else if (h != 900 && screen_sized(t))
         *num = (uint32_t)h, *den = 900;
 }

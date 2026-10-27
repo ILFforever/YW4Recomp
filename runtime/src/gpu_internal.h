@@ -81,6 +81,8 @@ struct GpuImage {
     uint32_t checked_gen;     /* ... when its pages were last found unchanged */
 };
 
+/* Effects resolution: t (a distance-blur image) keeps the game's size ratio (gpu.c). */
+void gpu_keep_game_ratio(const NvnTexture *t);
 /* t's image: made on first use, uploaded from the game's memory unless the GPU owns it. */
 GpuImage *image_of(VkCommandBuffer cb, NvnTexture *t);
 /* t's image if it exists (no upload, no creation). */

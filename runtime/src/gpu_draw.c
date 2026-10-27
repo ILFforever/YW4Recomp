@@ -72,7 +72,7 @@ static Shader *shaders;
  * fine detail of a schoolyard's background and none of the foreground). The blurred image comes from
  * 800x450 passes whose taps are in pixels, so a larger 3D view (YW4_RES) weakens it. YW4_DOF=2 the
  * game's, 1 half (w halved; the default, the owner's pick), 0 off (the draw skipped). */
-enum { DOF_SHADER = 0x27b63a2bf65deaf0ull };
+enum { DOF_SHADER = 0x27b63a2bf65deaf0ull, DOF_BLUR_SHADER = 0xb8856cfd2725bc25ull };  /* composite; the blur passes */
 static int dof_level = -1;
 
 int gpu_dof(void) {
@@ -1365,7 +1365,13 @@ static void draw(VkCommandBuffer cb, GpuState *s, const CmdRec *r) {
                     s->program ? s->program->stages[5].key : 0);
         return;
     }
-    if (g->sh[ST_FRAG] && g->sh[ST_FRAG]->dof && !gpu_dof()) return;  /* distance blur off */
+    if (g->sh[ST_FRAG] && (g->sh[ST_FRAG]->dof || g->sh[ST_FRAG]->key == DOF_BLUR_SHADER)) {
+        /* the distance blur's images keep the game's size ratio (gpu.c, effects resolution) */
+        NvnTexEntry *e = tex_entry(s, s->tex[nvn_stage[ST_FRAG]][0]);
+        if (e) gpu_keep_game_ratio(e->tex);
+        if (!g->sh[ST_FRAG]->dof && s->ncolor) gpu_keep_game_ratio(s->rt.color[0]);
+        if (g->sh[ST_FRAG]->dof && !gpu_dof()) return;  /* distance blur off */
+    }
     if (s->color[2] != 8) {
         static int logged;
         if (!logged++) fprintf(stderr, "yw4: gpu: alpha test %u ignored for now\n", s->color[2]);

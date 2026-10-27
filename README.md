@@ -118,6 +118,7 @@ Press **F1** in game for the settings panel: every option with all its choices, 
 | Settings panel | F1 | All the options below in one list; arrow keys to choose and change |
 | 3D view | F4 | 1600×900 (the game's), 1920×1080, 2560×1440 or 3840×2160; the UI is drawn at the same size |
 | Texture filtering | F2 | The game's, or anisotropic ×2 to ×16: distant and slanted ground, roads and walls stay sharp. Default ×16 |
+| Effects resolution | panel | Half (the game's) or full: the shadow mask, lamp lights and ambient occlusion at the 3D view's size, for sharper shadow edges. Costs ~2 ms of GPU at 1600×900 |
 | Distance blur | panel | The game's, half or off: the game blurs everything far away. Default half |
 | Shadow map size | F8 | 1024 (the game's), 2048 or 4096: sharper shadow edges. Recommended: 4096 |
 | PCSS (soft shadows) | F7 | Off, ×1, ×2, ×4. Recommended: ×2 |

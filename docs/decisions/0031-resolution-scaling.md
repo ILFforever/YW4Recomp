@@ -54,6 +54,15 @@ The cost grows much slower than the pixel count: the passes are dominated by ver
 picture is the game's (the code path is the old one with a ratio of 1; screenshots differ between runs only as much
 as two runs of the same build do).
 
+## Effects resolution (added 2026-10-27)
+
+The same rule allows what a uniform scale can't: the half-size targets (shadow mask, lamp lights, ambient
+occlusion, effects) made twice as large as the rest, i.e. the 3D view's size (`YW4_EFFECTS=1`, panel). Shadow edges
+lose their blocky smear. One exception found: the distance blur's two half-size images, whose blur comes mostly from
+their low resolution (full size gave +60% distant detail, undoing the blur setting); they are named from the blur's
+draws (fragment shaders `b8856cfd2725bc25`, `27b63a2bf65deaf0`) and keep the game's ratio. Bamboo forest, 1600×900:
+GPU 6.9 → 8.6 ms; brightness unchanged.
+
 ## Open
 
 - Battles, menus and cutscenes: other screen-sized targets (GPU-only 2D targets of sizes not in the list are logged
