@@ -5,6 +5,11 @@ What is known to be missing or wrong, roughly in the order it is likely to matte
 
 ## Graphics
 
+- **Wider aspect ratios: the screen dimming behind dialogs covers only the middle 16:9** (seen 2026-10-27,
+  21:9 at 4K, bamboo forest, the "time changed" penalty dialog): the sides stay bright. The dimming is a UI draw, and
+  every UI draw is kept at 16:9 in the middle ([decision 0033](decisions/0033-widescreen.md)). Fix idea: a UI draw
+  that covers the game's whole screen (a full-screen quad of one colour) should be stretched to the full width
+  instead; fades to black and menu backgrounds likely need the same.
 - **PCSS (soft shadows) only reaches what the shadow mask covers.** It is in the game's screen-space shadow mask shader, which
   shadows everything drawn into the G-buffer. Objects the game draws forward (6 other shadow shaders seen so far) keep
   the game's filter. Its strengths are tuned by eye in the town and the bamboo forest only.

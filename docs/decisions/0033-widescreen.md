@@ -48,6 +48,6 @@ Schoolyard, standing still and walking: 21:9 is 2133×900 at the 900 setting wit
 
 - On-screen markers: `f_53b3a0` projects with the camera's (now wider) aspect into the 16:9 UI, so markers away
   from the middle may sit a little off their targets. Not seen in the frames checked; to look at.
-- Menus, battles, cutscenes, full-screen fades and screen effects drawn after the composite (a fade would cover
-  only the middle) are untested.
+- Full-screen UI layers stay 16:9: seen with the dimming behind a dialog (known-issues.md). Fades, menu
+  backgrounds, battles and cutscenes are untested.
 - At 16:10 the sides are cut, not the top: the vertical field of view is kept for every shape.
