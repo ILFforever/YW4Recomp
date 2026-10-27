@@ -685,8 +685,8 @@ static void update_input(void) {
     host_unlock(&input_lock);
 }
 
-/* The settings panel from the gamepad: Home (Guide, PS), the mic button (Share on Xbox pads), or Minus and Plus
- * together, opens and closes it; the D-pad or the left stick choose (up/down) and change (left/right); B closes;
+/* The settings panel from the gamepad: the mic button (Share on Xbox pads), or Minus and Plus together, opens
+ * and closes it (not Home / PS: Steam takes that one and opens Big Picture); the D-pad or the left stick choose (up/down) and change (left/right); B closes;
  * on the controls page A changes a binding and X clears it (A, B, X as named on the controller); the shoulder
  * buttons and the triggers switch pages. The touchpad shows or hides the performance HUD (F3). Named like the
  * keys, so recordings and replays see the same presses. While the controls wait for an input, the press goes
@@ -696,13 +696,13 @@ void yw4_hid_note_key(const char *name);  /* svc_hid.c: key presses go into the 
 static void panel_pad_button(SDL_GamepadButton button) {
     int both = SDL_GetGamepadButton(gamepad, SDL_GAMEPAD_BUTTON_BACK) &&
                SDL_GetGamepadButton(gamepad, SDL_GAMEPAD_BUTTON_START);
-    /* buttons a Switch controller doesn't have, so the game never sees them: Home / PS, the mic button, the
-     * DualSense's touchpad */
+    /* buttons a Switch controller doesn't have, so the game never sees them: the mic button, the DualSense's
+     * touchpad */
     if (button == SDL_GAMEPAD_BUTTON_TOUCHPAD) {
         __atomic_store_n(&hud_on, hud_enabled() ? 0 : 1, __ATOMIC_RELEASE);
         return;
     }
-    if (button == SDL_GAMEPAD_BUTTON_GUIDE || button == SDL_GAMEPAD_BUTTON_MISC1 ||
+    if (button == SDL_GAMEPAD_BUTTON_MISC1 ||
         (both && (button == SDL_GAMEPAD_BUTTON_BACK || button == SDL_GAMEPAD_BUTTON_START))) {
         settings_toggle(), yw4_hid_note_key("F1");
         return;
