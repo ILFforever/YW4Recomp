@@ -124,8 +124,8 @@ are debugging tools ([docs/debugging.md](docs/debugging.md)).
 
 **Controllers:** Xbox, PlayStation and Nintendo pads work, and the controls page names the buttons as printed on
 yours (A B X Y and LB/RT on Xbox; × ○ □ △ and L1-R3 on PlayStation; ZL/ZR on Nintendo). By default the game's
-confirm is your controller's own confirm: × on a DualSense, A on Xbox. Tested with a **DualSense (PS5)**: every
-button, both sticks and the triggers in the field, menus and battles, and rebinding from the controls page.
+confirm is your controller's own confirm: × on a DualSense, A on Xbox. Tested by playing with a **DualSense (PS5)**,
+battles included, and with the controls page.
 
 | Setting | What it does |
 |---|---|
