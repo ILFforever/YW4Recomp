@@ -35,6 +35,12 @@ static const struct {
     {'<', {0x02, 0x04, 0x08, 0x10, 0x08, 0x04, 0x02}}, {',', {0x00, 0x00, 0x00, 0x00, 0x0C, 0x04, 0x08}},
     {'\'', {0x0C, 0x04, 0x08, 0x00, 0x00, 0x00, 0x00}}, {'!', {0x04, 0x04, 0x04, 0x04, 0x04, 0x00, 0x04}},
     {'?', {0x0E, 0x11, 0x01, 0x02, 0x04, 0x00, 0x04}},
+    /* for key names on the controls page */
+    {'[', {0x0E, 0x08, 0x08, 0x08, 0x08, 0x08, 0x0E}}, {']', {0x0E, 0x02, 0x02, 0x02, 0x02, 0x02, 0x0E}},
+    {';', {0x00, 0x0C, 0x0C, 0x00, 0x0C, 0x04, 0x08}}, {'=', {0x00, 0x00, 0x1F, 0x00, 0x1F, 0x00, 0x00}},
+    {'+', {0x00, 0x04, 0x04, 0x1F, 0x04, 0x04, 0x00}}, {'\\', {0x00, 0x10, 0x08, 0x04, 0x02, 0x01, 0x00}},
+    {'`', {0x08, 0x04, 0x02, 0x00, 0x00, 0x00, 0x00}}, {'*', {0x00, 0x04, 0x15, 0x0E, 0x15, 0x04, 0x00}},
+    {'#', {0x0A, 0x0A, 0x1F, 0x0A, 0x1F, 0x0A, 0x0A}},
 };
 
 static const uint8_t *glyph(char c) {
@@ -175,6 +181,26 @@ static int wrap(const char *s, int cols, char lines[][96], int max) {
     return n;
 }
 
+/* The card both pages are drawn on: a square card in a dark frame (the window copies overlays without
+ * blending, so nothing can be see-through, and rounded corners inside a square frame looked off), its
+ * title bar square too, with the two pages' names as tabs, the shown one bright. */
+static const uint8_t TAB_OFF[3] = {178, 146, 214};
+enum { CARD_PAD = 10, CARD_HEADER = 26 };
+
+static void card(const Canvas *cv, int pw, int ph, int page) {
+    fill(cv, 0, 0, pw, ph, OUTLINE);
+    fill(cv, 2, 2, pw - 4, ph - 4, CREAM);
+    fill(cv, 2, 2, pw - 4, CARD_HEADER - 2, PURPLE);
+    for (int x = 2; x < pw - 2; x += 4) put(cv, x, CARD_HEADER - 1, PURPLE2);
+    text2(cv, CARD_PAD + 2, 6, "SETTINGS", page ? TAB_OFF : WHITE2);
+    text2(cv, CARD_PAD + 2 + 10 * 2 * CELL_W, 6, "CONTROLS", page ? WHITE2 : TAB_OFF);
+    text(cv, pw - CARD_PAD - 13 * CELL_W, 10, "F1 / B: CLOSE", ROWSEL);
+}
+
+static void hint(const Canvas *cv, int pw, int y, const char *s) {
+    text(cv, (pw - (int)strlen(s) * CELL_W) / 2, y + 2, s, MUTED);
+}
+
 void panel_render(uint8_t *rgba, int w, int h, const SettingRow *rows, int n, int selected, int *used_w,
                   int *used_h) {
     enum { PAD = 10, ROW_H = 13, NAME_COLS = 21, GAP = 3, HEADER = 26, DESC_LINES = 5 };
@@ -199,14 +225,7 @@ void panel_render(uint8_t *rgba, int w, int h, const SettingRow *rows, int n, in
     int desc_h = (help_lines + 2) * 10 + 10;
     int ph = HEADER + 8 + (n + groups) * ROW_H + 6 + desc_h + 6 + 14;
     Canvas cv = {rgba, w, h, pw < w ? pw : w, ph < h ? ph : h};
-    /* a square card in a dark frame (the window copies overlays without blending, so nothing can be
-     * see-through, and rounded corners inside a square frame looked off), its title bar square too */
-    fill(&cv, 0, 0, pw, ph, OUTLINE);
-    fill(&cv, 2, 2, pw - 4, ph - 4, CREAM);
-    fill(&cv, 2, 2, pw - 4, HEADER - 2, PURPLE);
-    for (int x = 2; x < pw - 2; x += 4) put(&cv, x, HEADER - 1, PURPLE2);
-    text2(&cv, PAD + 2, 6, "SETTINGS", WHITE2);
-    text(&cv, pw - PAD - 13 * CELL_W, 10, "F1 / B: CLOSE", ROWSEL);
+    card(&cv, pw, ph, 0);
     /* rows */
     int y = HEADER + 8;
     int optx = PAD + (2 + NAME_COLS) * CELL_W;
@@ -251,8 +270,82 @@ void panel_render(uint8_t *rgba, int w, int h, const SettingRow *rows, int n, in
         text(&cv, PAD + 2, y + desc_h - 14, note, PINK);
     }
     y += desc_h + 6;
-    static const char *const hint = "UP/DOWN: CHOOSE    LEFT/RIGHT: CHANGE";
-    text(&cv, (pw - (int)strlen(hint) * CELL_W) / 2, y + 2, hint, MUTED);
+    hint(&cv, pw, y, "UP/DOWN: CHOOSE   LEFT/RIGHT: CHANGE   TAB, L/R: CONTROLS");
+    *used_w = cv.bw, *used_h = cv.bh;
+}
+
+static int same_group(const BindRow *a, const BindRow *b) {
+    return a->group && b->group ? !strcmp(a->group, b->group) : a->group == b->group;
+}
+
+/* The controls page: a row per Switch input in groups, its two keys and gamepad input in columns, the
+ * chosen cell on a chip (pink, orange when its key also presses another input), and the explanation box. */
+void controls_render(uint8_t *rgba, int w, int h, const BindRow *rows, int n, int row, int col, int capturing,
+                     const char *help, int *used_w, int *used_h) {
+    enum { PAD = CARD_PAD, ROW_H = 13, NAME_COLS = 19, CELL_COLS = 16, DESC_LINES = 4, SHOWN = 13, LINES = 64 };
+    int pw = 2 * PAD + (2 + NAME_COLS + BIND_COLS * CELL_COLS) * CELL_W, text_cols = (pw - 2 * PAD - 12) / CELL_W;
+    /* the lines: a group's label, then its rows; SHOWN of them at a time (so the card is as tall as the
+     * settings page and scales up the same), scrolled to keep the chosen row in view with a line around it */
+    int line_row[LINES], nlines = 0, sel_line = 0;
+    for (int i = 0; i < n && nlines + 2 <= LINES; i++) {
+        if (!i || !same_group(&rows[i], &rows[i - 1])) line_row[nlines++] = -1 - i;  /* label of i's group */
+        if (i == row) sel_line = nlines;
+        line_row[nlines++] = i;
+    }
+    static int first;
+    if (sel_line - 1 < first) first = sel_line - 1;
+    if (sel_line + 2 > first + SHOWN) first = sel_line + 2 - SHOWN;
+    if (first > nlines - SHOWN) first = nlines - SHOWN;
+    if (first < 0) first = 0;
+    int desc_h = DESC_LINES * 10 + 12;
+    int ph = CARD_HEADER + 8 + ROW_H + SHOWN * ROW_H + 6 + desc_h + 6 + 14;
+    Canvas cv = {rgba, w, h, pw < w ? pw : w, ph < h ? ph : h};
+    card(&cv, pw, ph, 1);
+    int y = CARD_HEADER + 8, cellx = PAD + (2 + NAME_COLS) * CELL_W;
+    static const char *const heads[BIND_COLS] = {"KEY", "OTHER KEY", "GAMEPAD"};
+    for (int c = 0; c < BIND_COLS; c++) text(&cv, cellx + c * CELL_COLS * CELL_W, y + 2, heads[c], TEAL);
+    /* more above / below: small teal triangles at the right edge */
+    for (int k = 0; k < 4; k++) {
+        if (first > 0) fill(&cv, pw - PAD - 4 - k, y + 2 + k, 2 * k + 1, 1, TEAL);
+        if (first + SHOWN < nlines) fill(&cv, pw - PAD - 4 - k, y + ROW_H * (SHOWN + 1) + 3 - k, 2 * k + 1, 1, TEAL);
+    }
+    y += ROW_H;
+    for (int li = first; li < nlines && li < first + SHOWN; li++, y += ROW_H) {
+        if (line_row[li] < 0) {  /* the group's label and line (none above the reset row) */
+            const BindRow *r = &rows[-1 - line_row[li]];
+            const char *g = r->group ? r->group : "";
+            text(&cv, PAD, y + 3, g, TEAL);
+            int lx = PAD + ((int)strlen(g) + (*g ? 1 : 0)) * CELL_W;
+            fill(&cv, lx, y + 6, pw - PAD - lx, 1, TEAL);
+            continue;
+        }
+        int i = line_row[li], sel = i == row;
+        if (sel) box(&cv, PAD - 4, y - 1, pw - 2 * PAD + 8, ROW_H, 4, ROWSEL, NULL);
+        if (sel) text(&cv, PAD + 2, y + 2, ">", PINK);
+        text(&cv, PAD + 2 * CELL_W, y + 2, rows[i].name, INK);
+        if (!rows[i].group) continue;
+        for (int c = 0; c < BIND_COLS; c++) {
+            char s[CELL_COLS];
+            snprintf(s, sizeof s, "%s", sel && c == col && capturing ? (c < BIND_KEYS ? "PRESS A KEY" : "PRESS INPUT")
+                                                                     : rows[i].cells[c]);
+            int x = cellx + c * CELL_COLS * CELL_W;
+            if (sel && c == col) {
+                box(&cv, x - 3, y, (int)strlen(s) * CELL_W + 5, ROW_H - 2, 3,
+                    rows[i].conflict[c] && !capturing ? ORANGE : PINK, NULL);
+                text(&cv, x, y + 2, s, WHITE2);
+            } else {
+                text(&cv, x, y + 2, s, rows[i].conflict[c] ? ORANGE : !strcmp(s, "-") ? MUTED : INK);
+            }
+        }
+    }
+    y = CARD_HEADER + 8 + ROW_H + SHOWN * ROW_H;
+    y += 6;
+    box(&cv, PAD - 4, y, pw - 2 * PAD + 8, desc_h, 5, DESC, TEAL);
+    char l[DESC_LINES][96];
+    int k = wrap(help, text_cols, l, DESC_LINES);
+    for (int j = 0; j < k; j++) text(&cv, PAD + 2, y + 6 + j * 10, l[j], capturing ? PINK : INK);
+    y += desc_h + 6;
+    hint(&cv, pw, y, "ARROWS: MOVE  ENTER/A: CHANGE  DEL/X: CLEAR  TAB, L/R: SETTINGS");
     *used_w = cv.bw, *used_h = cv.bh;
 }
 

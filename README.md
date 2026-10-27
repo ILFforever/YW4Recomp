@@ -85,7 +85,7 @@ It is also lighter to run. The same busy street on the same laptop ([docs/baseli
 | 🗓️ | **Higher frame rates** | Above the game's 30 frames/s; also needs the game's timing patched |
 | 🔧 | **Better anti-aliasing** | FXAA and SMAA on the 3D scene before the UI is drawn, so text stays crisp, done; temporal AA next |
 | 🗓️ | **Mod support** | Load replaced game files from a mod folder without touching your dump (first use: the English translation mod) |
-| 🗓️ | **Input remapping** | Keyboard, mouse and controller bindings of your choice with corresponding hints on screen |
+| 🔧 | **Input remapping** | Keyboard and controller bindings of your choice on the panel's CONTROLS page, saved, done; mouse and matching button hints on screen next |
 | 🗓️ | **Linux** | The runtime is written to be portable; not built or tested there yet |
 
 ✅ = Done, 🔧 = In progress, 🗓️ = Planned
@@ -111,7 +111,8 @@ Still the game's: the choice of what to draw (which objects, in which order) and
 Improvements over the original game. Details, comparisons and measurements: [docs/graphics.md](docs/graphics.md).
 
 Press **F1** (on a gamepad: **Home**, or **Minus + Plus**) in game for the settings panel: every option with all
-its choices, and what each one does (arrow keys or D-pad to choose and change). Your choices are saved in `settings.ini` next to `yw4.exe` and kept
+its choices, and what each one does (arrow keys or D-pad to choose and change). Its second page, **CONTROLS** (Tab,
+or L/R), sets which keys and gamepad buttons press each Switch button. Your choices are saved in `settings.ini` next to `yw4.exe` and kept
 for the next start. Settings are only in the panel; the other function keys are debugging tools
 ([docs/debugging.md](docs/debugging.md)).
 

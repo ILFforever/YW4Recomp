@@ -6,6 +6,7 @@
 
 #include <SDL3/SDL_filesystem.h>
 
+#include "bindings.h"
 #include "gbuffer.h"
 #include "gpu.h"
 #include "settings.h"
@@ -90,7 +91,7 @@ static const Setting settings[] = {
 };
 enum { NSETTINGS = sizeof settings / sizeof *settings };
 
-static int panel_open, selected;
+static int panel_open, page, selected;
 
 /* ---- the settings file: YW4_SETTINGS_FILE, or settings.ini next to the executable; "none": no file */
 
@@ -128,12 +129,13 @@ void settings_load(void) {
         value[strcspn(value, "\r\n")] = 0;
         for (int i = 0; i < NSETTINGS; i++)  /* only the panel's settings, and never over the environment */
             if (!strcmp(line, settings[i].env) && !getenv(line)) set_env(line, value), n++;
+        n += bindings_load_line(line, value);
     }
     fclose(f);
     fprintf(stderr, "yw4: settings: %d from %s\n", n, path);
 }
 
-static void settings_save(void) {
+void settings_save(void) {
     const char *path = settings_file();
     FILE *f = *path ? fopen(path, "w") : NULL;
     if (!f) return;
@@ -143,14 +145,34 @@ static void settings_save(void) {
         int c = settings[i].current();
         if (c >= 0 && c < settings[i].noptions) fprintf(f, "%s=%s\n", settings[i].env, settings[i].values[c]);
     }
+    bindings_save(f);
     fclose(f);
 }
 
 int settings_open(void) { return __atomic_load_n(&panel_open, __ATOMIC_ACQUIRE); }
 
-void settings_toggle(void) { __atomic_store_n(&panel_open, !settings_open(), __ATOMIC_RELEASE); }
+void settings_toggle(void) {
+    bindings_cancel();
+    __atomic_store_n(&panel_open, !settings_open(), __ATOMIC_RELEASE);
+}
+
+int settings_page(void) { return __atomic_load_n(&page, __ATOMIC_ACQUIRE); }
 
 void settings_action(int action) {
+    if (action == SETTINGS_PAGE) {
+        bindings_cancel();
+        __atomic_store_n(&page, !settings_page(), __ATOMIC_RELEASE);
+        return;
+    }
+    if (action == SETTINGS_CLOSE) {
+        bindings_cancel();
+        __atomic_store_n(&panel_open, 0, __ATOMIC_RELEASE);
+        return;
+    }
+    if (settings_page()) {
+        bindings_action(action);
+        return;
+    }
     const Setting *s = &settings[selected];
     switch (action) {
     case SETTINGS_UP: selected = (selected + NSETTINGS - 1) % NSETTINGS; break;
@@ -160,7 +182,6 @@ void settings_action(int action) {
         for (int i = 0; i < s->noptions - 1; i++) s->next();
         settings_save();
         break;
-    case SETTINGS_CLOSE: __atomic_store_n(&panel_open, 0, __ATOMIC_RELEASE); break;
     }
 }
 

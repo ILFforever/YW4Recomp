@@ -27,6 +27,7 @@
 #include <SDL3/SDL_vulkan.h>
 
 #include "host.h"
+#include "bindings.h"
 #include "gbuffer.h"
 #include "gpu.h"
 #include "hud.h"
@@ -79,7 +80,7 @@ typedef struct {
     void *ptr;
 } Overlay;
 enum { HUD_W = 256, HUD_H = 128 };
-static Overlay hud = {HUD_W, HUD_H}, panel = {480, 360};
+static Overlay hud = {HUD_W, HUD_H}, panel = {480, 480};
 static int hud_on = -1;
 
 void gpu_request_trace(int draws);  /* gpu_draw.c */
@@ -477,9 +478,17 @@ static uint32_t panel_scale(uint32_t bw, uint32_t bh);  /* below */
 static void panel_draw(VkImage dst, int32_t x0, int32_t y0, uint32_t bw, uint32_t bh) {
     panel_shown_w = panel_shown_h = 0;
     if (!settings_open() || overlay_resources(&panel)) return;
-    SettingRow rows[16];
-    int sel, n = settings_rows(rows, 16, &sel), w, h;
-    panel_render(panel.ptr, (int)panel.w, (int)panel.h, rows, n, sel, &w, &h);
+    int w, h;
+    if (settings_page()) {
+        static BindRow rows[32];
+        char help[256];
+        int row, col, n = bindings_rows(rows, 32, &row, &col, help, sizeof help);
+        controls_render(panel.ptr, (int)panel.w, (int)panel.h, rows, n, row, col, bindings_capturing(), help, &w, &h);
+    } else {
+        SettingRow rows[16];
+        int sel, n = settings_rows(rows, 16, &sel);
+        panel_render(panel.ptr, (int)panel.w, (int)panel.h, rows, n, sel, &w, &h);
+    }
     panel_shown_w = w, panel_shown_h = h;
     /* scaled up by whole steps (the pixel font stays crisp) to about two thirds of the picture's height */
     int32_t s = (int32_t)panel_scale(bw, bh);
@@ -657,49 +666,11 @@ void window_input(uint64_t *buttons, int32_t sticks[4]) {
     host_unlock(&input_lock);
 }
 
-/* Keyboard: Space/Enter A, Backspace/Escape B, X X, Y Y, arrows D-pad, WASD left stick,
- * IJKL right stick, Q/E L/R, 1/3 ZL/ZR, P Plus, M Minus, left/right Shift stick clicks.
- * Gamepad: by position, as on a Switch controller (east A, south B, north X, west Y). */
+/* The keyboard and the gamepad through the controls (bindings.c; the settings panel's second page). */
 static void update_input(void) {
-    const bool *k = SDL_GetKeyboardState(NULL);
-    static const struct {
-        SDL_Scancode key;
-        int bit;
-    } keys[] = {{SDL_SCANCODE_SPACE, 0}, {SDL_SCANCODE_RETURN, 0}, {SDL_SCANCODE_BACKSPACE, 1}, {SDL_SCANCODE_ESCAPE, 1},
-                {SDL_SCANCODE_X, 2}, {SDL_SCANCODE_Y, 3}, {SDL_SCANCODE_LSHIFT, 4}, {SDL_SCANCODE_RSHIFT, 5},
-                {SDL_SCANCODE_Q, 6}, {SDL_SCANCODE_E, 7}, {SDL_SCANCODE_1, 8}, {SDL_SCANCODE_3, 9},
-                {SDL_SCANCODE_P, 10}, {SDL_SCANCODE_M, 11}, {SDL_SCANCODE_LEFT, 12}, {SDL_SCANCODE_UP, 13},
-                {SDL_SCANCODE_RIGHT, 14}, {SDL_SCANCODE_DOWN, 15}};
-    uint64_t b = 0;
-    int32_t s[4] = {0, 0, 0, 0};
-    for (size_t i = 0; i < sizeof keys / sizeof *keys; i++)
-        if (k[keys[i].key]) b |= 1ull << keys[i].bit;
-    s[0] = (k[SDL_SCANCODE_D] - k[SDL_SCANCODE_A]) * 32767, s[1] = (k[SDL_SCANCODE_W] - k[SDL_SCANCODE_S]) * 32767;
-    s[2] = (k[SDL_SCANCODE_L] - k[SDL_SCANCODE_J]) * 32767, s[3] = (k[SDL_SCANCODE_I] - k[SDL_SCANCODE_K]) * 32767;
-    if (gamepad) {
-        static const struct {
-            SDL_GamepadButton button;
-            int bit;
-        } pad[] = {{SDL_GAMEPAD_BUTTON_EAST, 0}, {SDL_GAMEPAD_BUTTON_SOUTH, 1}, {SDL_GAMEPAD_BUTTON_NORTH, 2},
-                   {SDL_GAMEPAD_BUTTON_WEST, 3}, {SDL_GAMEPAD_BUTTON_LEFT_STICK, 4},
-                   {SDL_GAMEPAD_BUTTON_RIGHT_STICK, 5}, {SDL_GAMEPAD_BUTTON_LEFT_SHOULDER, 6},
-                   {SDL_GAMEPAD_BUTTON_RIGHT_SHOULDER, 7}, {SDL_GAMEPAD_BUTTON_START, 10}, {SDL_GAMEPAD_BUTTON_BACK, 11},
-                   {SDL_GAMEPAD_BUTTON_DPAD_LEFT, 12}, {SDL_GAMEPAD_BUTTON_DPAD_UP, 13},
-                   {SDL_GAMEPAD_BUTTON_DPAD_RIGHT, 14}, {SDL_GAMEPAD_BUTTON_DPAD_DOWN, 15}};
-        for (size_t i = 0; i < sizeof pad / sizeof *pad; i++)
-            if (SDL_GetGamepadButton(gamepad, pad[i].button)) b |= 1ull << pad[i].bit;
-        if (SDL_GetGamepadAxis(gamepad, SDL_GAMEPAD_AXIS_LEFT_TRIGGER) > 16000) b |= 1ull << 8;
-        if (SDL_GetGamepadAxis(gamepad, SDL_GAMEPAD_AXIS_RIGHT_TRIGGER) > 16000) b |= 1ull << 9;
-        static const SDL_GamepadAxis axes[4] = {SDL_GAMEPAD_AXIS_LEFTX, SDL_GAMEPAD_AXIS_LEFTY, SDL_GAMEPAD_AXIS_RIGHTX,
-                                                SDL_GAMEPAD_AXIS_RIGHTY};
-        for (int i = 0; i < 4; i++) {
-            int32_t v = SDL_GetGamepadAxis(gamepad, axes[i]);
-            if (i & 1) v = -v;  /* SDL: down positive; Switch: up positive */
-            if (v > 32767) v = 32767;
-            if (v < -32767) v = -32767;
-            if (v > 4000 || v < -4000) s[i] = v;  /* dead zone: the keyboard wins near the centre */
-        }
-    }
+    uint64_t b;
+    int32_t s[4];
+    bindings_read(SDL_GetKeyboardState(NULL), gamepad, &b, s);
     /* The settings panel takes the keyboard and the gamepad while it is open, and after it closes until
      * everything is let go, so the button that closed it (B, Escape) doesn't reach the game as well. */
     static int withheld;
@@ -715,8 +686,9 @@ static void update_input(void) {
 }
 
 /* The settings panel from the gamepad: Home (Guide), or Minus and Plus together, opens and closes it;
- * the D-pad or the left stick choose (up/down) and change (left/right); B closes. Named like the keys,
- * so recordings and replays see the same presses. */
+ * the D-pad or the left stick choose (up/down) and change (left/right); B closes; on the controls page A
+ * changes a binding and X clears it; L and R switch pages. Named like the keys, so recordings and replays
+ * see the same presses. While the controls wait for an input, the press goes there instead. */
 void yw4_hid_note_key(const char *name);  /* svc_hid.c: key presses go into the input recording */
 
 static void panel_pad_button(SDL_GamepadButton button) {
@@ -727,7 +699,7 @@ static void panel_pad_button(SDL_GamepadButton button) {
         settings_toggle(), yw4_hid_note_key("F1");
         return;
     }
-    if (!settings_open()) return;
+    if (!settings_open() || bindings_capture_button(button)) return;
     static const struct {
         SDL_GamepadButton button;
         int action;
@@ -735,7 +707,11 @@ static void panel_pad_button(SDL_GamepadButton button) {
     } map[] = {{SDL_GAMEPAD_BUTTON_DPAD_UP, SETTINGS_UP, "UP"}, {SDL_GAMEPAD_BUTTON_DPAD_DOWN, SETTINGS_DOWN, "DOWN"},
                {SDL_GAMEPAD_BUTTON_DPAD_LEFT, SETTINGS_LEFT, "LEFT"},
                {SDL_GAMEPAD_BUTTON_DPAD_RIGHT, SETTINGS_RIGHT, "RIGHT"},
-               {SDL_GAMEPAD_BUTTON_SOUTH, SETTINGS_CLOSE, "F1"}};  /* south: B on a Switch controller */
+               /* by position, as on a Switch controller: south B, east A, north X */
+               {SDL_GAMEPAD_BUTTON_SOUTH, SETTINGS_CLOSE, "F1"}, {SDL_GAMEPAD_BUTTON_EAST, SETTINGS_ACCEPT, "ENTER"},
+               {SDL_GAMEPAD_BUTTON_NORTH, SETTINGS_CLEAR, "DELETE"},
+               {SDL_GAMEPAD_BUTTON_LEFT_SHOULDER, SETTINGS_PAGE, "TAB"},
+               {SDL_GAMEPAD_BUTTON_RIGHT_SHOULDER, SETTINGS_PAGE, "TAB"}};
     for (size_t i = 0; i < sizeof map / sizeof *map; i++)
         if (button == map[i].button) settings_action(map[i].action), yw4_hid_note_key(map[i].name);
 }
@@ -747,6 +723,7 @@ static void panel_pad_stick(void) {
     int ax = x < 0 ? -x : x, ay = y < 0 ? -y : y;
     if (ax < 8000 && ay < 8000) held = 0;
     if (held || !settings_open() || (ax < 16000 && ay < 16000)) return;
+    if (bindings_capturing()) return;  /* bindings_capture_axis takes it */
     held = 1;
     panel_pad_button(ay > ax ? (y < 0 ? SDL_GAMEPAD_BUTTON_DPAD_UP : SDL_GAMEPAD_BUTTON_DPAD_DOWN)
                              : (x < 0 ? SDL_GAMEPAD_BUTTON_DPAD_LEFT : SDL_GAMEPAD_BUTTON_DPAD_RIGHT));
@@ -815,7 +792,9 @@ void window_run(void (*guest)(void *), void *arg) {
             if (gamepad && SDL_GetGamepadID(gamepad) == e.gbutton.which) panel_pad_button(e.gbutton.button);
             break;
         case SDL_EVENT_GAMEPAD_AXIS_MOTION:
-            if (gamepad && SDL_GetGamepadID(gamepad) == e.gaxis.which) panel_pad_stick();
+            if (gamepad && SDL_GetGamepadID(gamepad) == e.gaxis.which && settings_open() &&
+                !bindings_capture_axis(e.gaxis.axis, e.gaxis.value))
+                panel_pad_stick();
             break;
         case SDL_EVENT_QUIT:
             fprintf(stderr, "yw4: window closed\n");
@@ -827,14 +806,23 @@ void window_run(void (*guest)(void *), void *arg) {
             if (e.key.key == SDLK_F3) __atomic_store_n(&hud_on, hud_enabled() ? 0 : 1, __ATOMIC_RELEASE);  /* the HUD */
             if (e.key.key == SDLK_F5) gpu_passes_toggle();  /* per-pass GPU timing in the log */
             /* the settings live in the panel only (F1); its keys are recorded like the F keys, so a replay
-             * of a recording changes the same settings at the same ticks */
+             * of a recording changes the same settings at the same ticks. While the controls page waits for
+             * a key, any key but F1..F12 is the new binding. */
             if (e.key.key == SDLK_F1) settings_toggle(), yw4_hid_note_key("F1");
-            if (settings_open() && !e.key.repeat) {
-                if (e.key.key == SDLK_UP) settings_action(SETTINGS_UP), yw4_hid_note_key("UP");
-                if (e.key.key == SDLK_DOWN) settings_action(SETTINGS_DOWN), yw4_hid_note_key("DOWN");
-                if (e.key.key == SDLK_LEFT) settings_action(SETTINGS_LEFT), yw4_hid_note_key("LEFT");
-                if (e.key.key == SDLK_RIGHT) settings_action(SETTINGS_RIGHT), yw4_hid_note_key("RIGHT");
-                if (e.key.key == SDLK_ESCAPE) settings_action(SETTINGS_CLOSE), yw4_hid_note_key("F1");
+            if (settings_open() && !e.key.repeat &&
+                !((e.key.scancode < SDL_SCANCODE_F1 || e.key.scancode > SDL_SCANCODE_F12) &&
+                  bindings_capture_key(e.key.scancode))) {
+                static const struct {
+                    SDL_Keycode key;
+                    int action;
+                    const char *name;
+                } map[] = {{SDLK_UP, SETTINGS_UP, "UP"},           {SDLK_DOWN, SETTINGS_DOWN, "DOWN"},
+                           {SDLK_LEFT, SETTINGS_LEFT, "LEFT"},     {SDLK_RIGHT, SETTINGS_RIGHT, "RIGHT"},
+                           {SDLK_ESCAPE, SETTINGS_CLOSE, "F1"},    {SDLK_RETURN, SETTINGS_ACCEPT, "ENTER"},
+                           {SDLK_KP_ENTER, SETTINGS_ACCEPT, "ENTER"}, {SDLK_DELETE, SETTINGS_CLEAR, "DELETE"},
+                           {SDLK_BACKSPACE, SETTINGS_CLEAR, "DELETE"}, {SDLK_TAB, SETTINGS_PAGE, "TAB"}};
+                for (size_t i = 0; i < sizeof map / sizeof *map; i++)
+                    if (e.key.key == map[i].key) settings_action(map[i].action), yw4_hid_note_key(map[i].name);
             }
             break;
         case SDL_EVENT_WINDOW_PIXEL_SIZE_CHANGED:

@@ -217,6 +217,9 @@ static int replay_state(uint64_t tick, uint64_t *buttons, int32_t sticks[4]) {
         else if (!strcmp(k, "DOWN")) settings_action(SETTINGS_DOWN);
         else if (!strcmp(k, "LEFT")) settings_action(SETTINGS_LEFT);
         else if (!strcmp(k, "RIGHT")) settings_action(SETTINGS_RIGHT);
+        else if (!strcmp(k, "ENTER")) settings_action(SETTINGS_ACCEPT);
+        else if (!strcmp(k, "DELETE")) settings_action(SETTINGS_CLEAR);
+        else if (!strcmp(k, "TAB")) settings_action(SETTINGS_PAGE);
     }
     return 1;
 }

@@ -6,6 +6,7 @@
 
 #include <stdint.h>
 
+#include "bindings.h"
 #include "settings.h"
 
 enum { HUD_COLS = 40, HUD_LINES = 8, HUD_POINTS = 180 };
@@ -39,5 +40,9 @@ void hud_render(uint8_t *rgba, int w, int h, const HudContent *c, int *used_w, i
 /* The settings panel (settings.h) the same way: every row with all its options, the current one boxed. */
 void panel_render(uint8_t *rgba, int w, int h, const SettingRow *rows, int n, int selected, int *used_w,
                   int *used_h);
+/* The panel's controls page (bindings.h) the same way: the chosen row and column, whether it waits for an
+ * input, and the text for the explanation box. */
+void controls_render(uint8_t *rgba, int w, int h, const BindRow *rows, int n, int row, int col, int capturing,
+                     const char *help, int *used_w, int *used_h);
 
 #endif

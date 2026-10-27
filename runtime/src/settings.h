@@ -18,7 +18,8 @@ typedef struct {
     int current;  /* index into options */
 } SettingRow;
 
-enum { SETTINGS_UP, SETTINGS_DOWN, SETTINGS_LEFT, SETTINGS_RIGHT, SETTINGS_CLOSE };
+enum { SETTINGS_UP, SETTINGS_DOWN, SETTINGS_LEFT, SETTINGS_RIGHT, SETTINGS_CLOSE, SETTINGS_ACCEPT, SETTINGS_CLEAR,
+       SETTINGS_PAGE };
 
 /* Reads the settings file (settings.ini next to the executable, or YW4_SETTINGS_FILE; "none": no file) into the
  * environment, line by line, where the variable isn't set already, so the environment still wins. Called
@@ -26,6 +27,10 @@ enum { SETTINGS_UP, SETTINGS_DOWN, SETTINGS_LEFT, SETTINGS_RIGHT, SETTINGS_CLOSE
 void settings_load(void);
 int settings_open(void);
 void settings_toggle(void);
+/* The page shown: 0 the settings, 1 the controls (bindings.h); SETTINGS_PAGE switches. */
+int settings_page(void);
+/* Writes the settings file (the settings and the controls); every change calls it. */
+void settings_save(void);
 /* One of the actions above, from the window's key presses while the panel is open. */
 void settings_action(int action);
 /* The rows as they are now, and the selected one; returns the count. */
