@@ -62,6 +62,7 @@ typedef struct Shader {
     int screen_taps;  /* reads cbuf 8 row 32 (tap offsets in the screen-sized targets) */
     int dof;          /* the distance blur's composite (gpu_dof) */
     uint32_t cb8_bytes;  /* how much of cbuf 8 it reads (with pcf_float or screen_taps) */
+    int model;  /* a vertex program with the engine's local-matrix block in slot 2: it draws 3D objects */
 } Shader;
 
 static Shader *shaders;
@@ -189,6 +190,7 @@ static Shader *load_shader(uint64_t key, int stage) {
             continue;
         }
         if (kind == 'r') continue;  /* rows read from a constant buffer: for gbuffer.c */
+        if (kind == 'c' && slot == 2 && stage == ST_VERT && !strcmp(dim, "CBUSE_UB_LOCAL_MATRIX_IDX")) s->model = 1;
         if (s->nb == MAX_BINDINGS) gpu_stop("shader %016" PRIx64 " has too many bindings", key);
         Binding *b = &s->b[s->nb];
         b->kind = kind, b->slot = slot;
@@ -1256,6 +1258,7 @@ typedef struct {
     float bias[3], blend[4];
 } DynState;
 static DynState dyn_last;
+static int dyn_model;  /* the next gpu_dynamic_state is for a 3D object's draw (TAA shifts it, gpu_aa.c) */
 static VkCommandBuffer dyn_cb;  /* NULL: nothing known */
 
 void gpu_dynamic_forget(void) { dyn_cb = VK_NULL_HANDLE; }
@@ -1307,6 +1310,9 @@ void gpu_dynamic_state(VkCommandBuffer cb, const GpuState *s, VkFormat depth, ui
     if (s->have_viewport) vx = (float)s->viewport[0] * kf, vy = (float)s->viewport[1] * kf,
                           vw = (float)s->viewport[2] * kf, vh = (float)s->viewport[3] * kf;
     d.viewport = (VkViewport){vx, flip ? vy + vh : vy, vw, flip ? -vh : vh, s->depth_range[0], s->depth_range[1]};
+    float jx, jy;
+    if (dyn_model && gpu_taa_jitter(w, h, &jx, &jy)) d.viewport.x += jx, d.viewport.y += jy;
+    dyn_model = 0;
     d.scissor = (VkRect2D){{0, 0}, {w, h}};
     if (s->have_scissor) {
         /* edges scaled: left and top down, right and bottom up, so the scissor covers what it did */
@@ -1606,6 +1612,8 @@ static void draw(VkCommandBuffer cb, GpuState *s, const CmdRec *r) {
         }
     }
 
+    gpu_taa_note_targets(s);
+    dyn_model = g->sh[ST_VERT] && g->sh[ST_VERT]->model;
     gpu_dynamic_state(cb, s, k.depth, w, h);
     uint32_t pos_fix = nvn_depth_mode == 0 ? (g->sh[ST_GEOM] ? 2u : 1u) : 0u;
     vkCmdPushConstants(cb, g->layout, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_GEOMETRY_BIT, 0, 4, &pos_fix);

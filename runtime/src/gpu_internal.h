@@ -154,6 +154,11 @@ void gpu_dynamic_state(VkCommandBuffer cb, const GpuState *s, VkFormat depth, ui
 void gpu_dynamic_forget(void);
 /* gpu_aa.c: anti-aliasing of the scene in s's first colour target, outside rendering (ends it). */
 void gpu_aa_apply(VkCommandBuffer cb, GpuState *s);
+/* TAA (gpu_aa.c): the shift in pixels for a 3D draw into a w x h target (0: none), and the draws' targets
+ * (the G-buffer's motion target is noted, and copied when its targets change). */
+int gpu_taa_jitter(uint32_t w, uint32_t h, float *jx, float *jy);
+void gpu_taa_note_targets(const GpuState *s);
+void gpu_taa_targets_end(VkCommandBuffer cb);
 /* gpu_shadow.c: the first draw into s's targets since they were set; depth-only ones are
  * remembered with the state the game draws with, so a shadow pass can draw into its layer after
  * the game has moved on to another target. */

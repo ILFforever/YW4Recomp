@@ -83,7 +83,7 @@ It is also lighter to run. The same busy street on the same laptop ([docs/baseli
 | ✅ | **Higher resolution** | The 3D view at 1080p, 1440p or 4K instead of the game's 1600×900 (30 frames/s at 4K on an RTX 4070 laptop) |
 | 🗓️ | **Ultrawide and other aspect ratios** | A wider view of the scene, with the UI laid out correctly |
 | 🗓️ | **Higher frame rates** | Above the game's 30 frames/s; also needs the game's timing patched |
-| 🔧 | **Better anti-aliasing** | FXAA and SMAA on the 3D scene before the UI is drawn, so text stays crisp, done; temporal AA next |
+| 🔧 | **Better anti-aliasing** | FXAA, SMAA and now TAA (steady thin edges: fences, nets, leaves) on the 3D scene before the UI is drawn, so text stays crisp; per-object motion for TAA next |
 | 🗓️ | **Mod support** | Load replaced game files from a mod folder without touching your dump (first use: the English translation mod) |
 | 🔧 | **Input remapping** | Keyboard and controller bindings of your choice on the panel's CONTROLS page, saved, done; mouse and matching button hints on screen next |
 | 🗓️ | **Linux** | The runtime is written to be portable; not built or tested there yet |

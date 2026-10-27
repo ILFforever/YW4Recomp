@@ -6,7 +6,10 @@
  * RGBA16F image through a reversible curve (runtime/shaders/aa.glsl), and the last pass writes the result
  * back into the game's image through the inverse. SMAA (third_party/smaa, MIT): edges (RG8), blending
  * weights (RGBA8, with its area and search lookup textures), neighbourhood blending. FXAA: one pass.
- * YW4_AA=0 off / 1 FXAA / 2 SMAA at start; the settings panel (F1) cycles it. */
+ * TAA: the 3D draws shifted by a fraction of a pixel per frame (gpu_taa_jitter, applied to the viewport in
+ * gpu_dynamic_state), each frame blended into a history moved by the game's own motion vectors (the
+ * G-buffer's first target, noted by gpu_taa_note_targets); runtime/shaders/taa_resolve.frag.
+ * YW4_AA=0 off / 1 FXAA / 2 SMAA / 3 TAA at start; the settings panel (F1) cycles it. */
 #include <inttypes.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -23,16 +26,16 @@ int gpu_aa(void) {
     if (m < 0) {
         const char *e = getenv("YW4_AA");
         m = e ? atoi(e) : 0;
-        if (m < 0 || m > 2) m = 0;
+        if (m < 0 || m > 3) m = 0;
         __atomic_store_n(&aa_mode, m, __ATOMIC_RELEASE);
     }
     return m;
 }
 
 void gpu_aa_cycle(void) {
-    int m = (gpu_aa() + 1) % 3;
+    int m = (gpu_aa() + 1) % 4;
     __atomic_store_n(&aa_mode, m, __ATOMIC_RELEASE);
-    fprintf(stderr, "yw4: gpu: anti-aliasing %s\n", m == 2 ? "SMAA" : m == 1 ? "FXAA" : "off");
+    fprintf(stderr, "yw4: gpu: anti-aliasing %s\n", m == 3 ? "TAA" : m == 2 ? "SMAA" : m == 1 ? "FXAA" : "off");
 }
 
 static VkShaderModule module(const char *name) {
@@ -100,7 +103,8 @@ static void to_general(VkCommandBuffer cb, VkImage image) {
                          &b);
 }
 
-static AaImage encoded, edges, weights, area, search;
+static AaImage encoded, edges, weights, area, search, history[2];
+static int history_valid;  /* history[taa_cur] holds last frame's result */
 
 /* The SMAA lookup textures, uploaded once (in cb, outside rendering). */
 static void lookup_textures(VkCommandBuffer cb) {
@@ -141,17 +145,22 @@ static void working_images(VkCommandBuffer cb, uint32_t w, uint32_t h) {
     if (encoded.image) {
         gpu_wait(gpu_submitted(), UINT64_MAX);
         image_free(&encoded), image_free(&edges), image_free(&weights);
+        image_free(&history[0]), image_free(&history[1]);
     }
+    history_valid = 0;
     VkImageUsageFlags u = VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT;
     image_make(&encoded, VK_FORMAT_R16G16B16A16_SFLOAT, w, h, u);
     image_make(&edges, VK_FORMAT_R8G8_UNORM, w, h, u);
     image_make(&weights, VK_FORMAT_R8G8B8A8_UNORM, w, h, u);
+    image_make(&history[0], VK_FORMAT_R16G16B16A16_SFLOAT, w, h, u);
+    image_make(&history[1], VK_FORMAT_R16G16B16A16_SFLOAT, w, h, u);
     to_general(cb, encoded.image), to_general(cb, edges.image), to_general(cb, weights.image);
+    to_general(cb, history[0].image), to_general(cb, history[1].image);
 }
 
 /* ---- pipelines: one layout (5 sampled images, the size as a push constant), one pipeline per pass */
 
-enum { P_ENCODE, P_FXAA, P_EDGE, P_WEIGHT, P_BLEND, P_SHOW_EDGES, P_SHOW_WEIGHTS, P_TEST, PASSES };
+enum { P_ENCODE, P_FXAA, P_EDGE, P_WEIGHT, P_BLEND, P_SHOW_EDGES, P_SHOW_WEIGHTS, P_TEST, P_TAA, P_TAA_OUT, PASSES };
 
 static VkDescriptorSetLayout set_layout;
 static VkPipelineLayout pipe_layout;
@@ -166,7 +175,7 @@ static void layouts(void) {
     VkDescriptorSetLayoutCreateInfo lci = {.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO, .bindingCount = 5,
                                            .pBindings = b};
     CHECK(vkCreateDescriptorSetLayout(vk.device, &lci, NULL, &set_layout));
-    VkPushConstantRange pc = {VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, 16};
+    VkPushConstantRange pc = {VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, 32};
     VkPipelineLayoutCreateInfo pli = {.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO, .setLayoutCount = 1,
                                       .pSetLayouts = &set_layout, .pushConstantRangeCount = 1, .pPushConstantRanges = &pc};
     CHECK(vkCreatePipelineLayout(vk.device, &pli, NULL, &pipe_layout));
@@ -188,10 +197,12 @@ static VkPipeline pipeline(int pass, VkFormat out) {
     if (n == MAX) gpu_stop("anti-aliasing: too many pipelines");
     static const char *const vs_name[PASSES] = {"aa_fullscreen.vert", "aa_fullscreen.vert", "smaa_edge.vert",
                                                 "smaa_weight.vert",   "smaa_blend.vert",    "aa_fullscreen.vert",
-                                                "aa_fullscreen.vert", "aa_fullscreen.vert"};
+                                                "aa_fullscreen.vert", "aa_fullscreen.vert", "aa_fullscreen.vert",
+                                                "aa_fullscreen.vert"};
     static const char *const fs_name[PASSES] = {"aa_encode.frag",   "fxaa.frag",           "smaa_edge.frag",
                                                 "smaa_weight.frag", "smaa_blend.frag",     "aa_show_edges.frag",
-                                                "aa_show_weights.frag", "aa_test.frag"};
+                                                "aa_show_weights.frag", "aa_test.frag", "taa_resolve.frag",
+                                                "taa_output.frag"};
     static VkShaderModule vs[PASSES], fs[PASSES];
     if (!vs[pass]) vs[pass] = module(vs_name[pass]), fs[pass] = module(fs_name[pass]);
     VkPipelineShaderStageCreateInfo st[2] = {
@@ -228,10 +239,14 @@ static VkPipeline pipeline(int pass, VkFormat out) {
     return pipes[n++].pipe;
 }
 
-/* One full-screen pass into `view` (w x h, format out), reading the given images (NULL: a stand-in). */
-static void pass(VkCommandBuffer cb, int p, VkImageView view, VkFormat out, uint32_t w, uint32_t h, int clear,
-                 VkImageView scene_in) {
-    VkImageView in[5] = {scene_in ? scene_in : encoded.view, edges.view, area.view, search.view, weights.view};
+static float pass_params[4];  /* the passes' second push constant (TAA's) */
+
+/* One full-screen pass into `view` (w x h, format out), reading the given images: binding 0 scene_in (NULL:
+ * the encoded scene), 1 in1 (NULL: edges), 2 and 3 SMAA's tables, 4 in4 (NULL: weights). */
+static void pass_with(VkCommandBuffer cb, int p, VkImageView view, VkFormat out, uint32_t w, uint32_t h, int clear,
+                      VkImageView scene_in, VkImageView in1, VkImageView in4) {
+    VkImageView in[5] = {scene_in ? scene_in : encoded.view, in1 ? in1 : edges.view, area.view, search.view,
+                         in4 ? in4 : weights.view};
     VkDescriptorSet set = gpu_alloc_set(set_layout);
     VkDescriptorImageInfo ii[5];
     VkWriteDescriptorSet wr[5];
@@ -255,11 +270,114 @@ static void pass(VkCommandBuffer cb, int p, VkImageView view, VkFormat out, uint
     VkRect2D sc = {{0, 0}, {w, h}};
     vkCmdSetViewport(cb, 0, 1, &vpt);
     vkCmdSetScissor(cb, 0, 1, &sc);
-    float metrics[4] = {1.0f / (float)w, 1.0f / (float)h, (float)w, (float)h};
-    vkCmdPushConstants(cb, pipe_layout, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, 16, metrics);
+    float push[8] = {1.0f / (float)w, 1.0f / (float)h, (float)w, (float)h,
+                     pass_params[0], pass_params[1], pass_params[2], pass_params[3]};
+    vkCmdPushConstants(cb, pipe_layout, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, 32, push);
     vkCmdDraw(cb, 3, 1, 0, 0);
     vkCmdEndRendering(cb);
     full_barrier(cb);
+}
+
+static void pass(VkCommandBuffer cb, int p, VkImageView view, VkFormat out, uint32_t w, uint32_t h, int clear,
+                 VkImageView scene_in) {
+    pass_with(cb, p, view, out, w, h, clear, scene_in, NULL, NULL);
+}
+
+/* ---- TAA: the jitter and the game's motion target */
+
+static uint32_t scene_w, scene_h;  /* the scene's size at the last anti-aliasing (0: none yet) */
+/* The game's motion target is used for other things later in the frame, so it is copied into our own image
+ * as soon as the G-buffer pass ends (gpu_taa_targets_end). */
+static NvnTexture *gbuffer_motion;  /* the open G-buffer pass's motion target (NULL: none open) */
+static AaImage motion;
+static uint64_t motion_frame = ~0ull;  /* the frame it was copied in */
+static uint64_t resolved_frame = ~0ull;  /* the frame TAA last ran in: the UI drawn after it is not shifted */
+static int taa_cur;
+
+static float halton(int i, int base) {
+    float f = 1.0f, r = 0.0f;
+    for (; i > 0; i /= base) f /= (float)base, r += f * (float)(i % base);
+    return r;
+}
+
+/* The shift, in pixels, for a 3D draw into a w x h target this frame: TAA on and the target the scene's
+ * size, and not past this frame's TAA (the UI); else none (0). 8 positions (Halton 2, 3), one per frame. */
+int gpu_taa_jitter(uint32_t w, uint32_t h, float *jx, float *jy) {
+    if (gpu_aa() != 3 || !scene_w || w != scene_w || h != scene_h) return 0;
+    static int nshift, nafter;  /* YW4_TAA_LOG: counted per frame, logged every 300 */
+    static uint64_t counted = ~0ull;
+    if (counted != gpu_frames()) {
+        if (counted % 300 == 0 && getenv("YW4_TAA_LOG"))
+            fprintf(stderr, "yw4: taa: frame %llu: %d draws shifted, %d after TAA not\n", (unsigned long long)counted,
+                    nshift, nafter);
+        counted = gpu_frames(), nshift = nafter = 0;
+    }
+    if (resolved_frame == gpu_frames()) return nafter++, 0;
+    nshift++;
+    int i = (int)(gpu_frames() % 8) + 1;
+    *jx = halton(i, 2) - 0.5f, *jy = halton(i, 3) - 0.5f;
+    return 1;
+}
+
+/* A draw's targets: the G-buffer's (3 colour targets, the first RG16F: the game's motion) is noted. */
+void gpu_taa_note_targets(const GpuState *s) {
+    if (gpu_aa() != 3 || s->ncolor != 3 || !s->rt.color[0]) return;
+    const GpuImage *g = image_find(s->rt.color[0]);
+    if (g && g->format == VK_FORMAT_R16G16_SFLOAT) gbuffer_motion = s->rt.color[0];
+}
+
+/* The render targets change (rendering has ended): if the G-buffer was drawn into, copy its motion. */
+void gpu_taa_targets_end(VkCommandBuffer cb) {
+    NvnTexture *t = gbuffer_motion;
+    gbuffer_motion = NULL;
+    if (!t) return;
+    GpuImage *g = image_of(cb, t);
+    if (!g || g->format != VK_FORMAT_R16G16_SFLOAT) return;
+    if (!motion.image || motion.w != g->width || motion.h != g->height) {
+        if (motion.image) gpu_wait(gpu_submitted(), UINT64_MAX), image_free(&motion);
+        image_make(&motion, VK_FORMAT_R16G16_SFLOAT, g->width, g->height,
+                   VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT);
+        to_general(cb, motion.image);
+    }
+    full_barrier(cb);
+    VkImageCopy c = {.srcSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1},
+                     .dstSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1}, .extent = {g->width, g->height, 1}};
+    vkCmdCopyImage(cb, g->image, VK_IMAGE_LAYOUT_GENERAL, motion.image, VK_IMAGE_LAYOUT_GENERAL, 1, &c);
+    full_barrier(cb);
+    motion_frame = gpu_frames();
+}
+
+static void taa(VkCommandBuffer cb, VkImageView target, VkFormat fmt, uint32_t w, uint32_t h, int debug) {
+    /* the G-buffer and the composite run on different render threads: a frame apart at most */
+    uint64_t now = gpu_frames();
+    VkImageView mv = motion.image && motion_frame + 1 >= now && motion_frame <= now + 1 ? motion.view : NULL;
+    static uint64_t last = ~0ull;  /* a frame without TAA in between (a menu without the 3D view): start over */
+    if (last + 1 != gpu_frames()) history_valid = 0;
+    last = gpu_frames();
+    float sy = nvn_window_origin == 1 ? -1.0f : 1.0f;  /* the game's screen y runs up when the origin is flipped */
+    pass_params[0] = history_valid && mv ? 1.0f : 0.0f, pass_params[1] = 0.0f;
+    pass_params[2] = 1.0f, pass_params[3] = sy;
+    const char *e = getenv("YW4_TAA_SIGN");  /* testing: "x,y" overrides the motion's signs */
+    if (e) sscanf(e, "%f,%f", &pass_params[2], &pass_params[3]);
+    int next = !taa_cur;
+    pass_with(cb, P_TAA, history[next].view, VK_FORMAT_R16G16B16A16_SFLOAT, w, h, 0, NULL,
+              mv ? mv : encoded.view, history[taa_cur].view);
+    VkImageView result = history[next].view;
+    if (debug == 4 || debug == 5) {  /* the motion, or the moved history's difference: into a spare image */
+        pass_params[1] = (float)debug;
+        pass_with(cb, P_TAA, weights.view, VK_FORMAT_R8G8B8A8_UNORM, w, h, 0, NULL, mv ? mv : encoded.view,
+                  history[taa_cur].view);
+        result = weights.view;
+    }
+    memset(pass_params, 0, sizeof pass_params);
+    /* sharpening after the blend (YW4_TAA_SHARPEN, 0 none; the debug views: none) */
+    static float sharpen = -1.0f;
+    if (sharpen < 0.0f) sharpen = getenv("YW4_TAA_SHARPEN") ? (float)atof(getenv("YW4_TAA_SHARPEN")) : 0.5f;
+    pass_params[0] = result == history[next].view ? sharpen : 0.0f;
+    pass(cb, P_TAA_OUT, target, fmt, w, h, 0, result);
+    pass_params[0] = 0.0f;
+    taa_cur = next, history_valid = 1;
+    resolved_frame = now;
 }
 
 void gpu_aa_apply(VkCommandBuffer cb, GpuState *s) {
@@ -277,13 +395,16 @@ void gpu_aa_apply(VkCommandBuffer cb, GpuState *s) {
     layouts();
     lookup_textures(cb);
     working_images(cb, w, h);
+    scene_w = w, scene_h = h;
     full_barrier(cb);
     /* YW4_AA_DEBUG=1 / 2: SMAA's edges / blend weights in place of the picture; 3: a test pattern in place
      * of the scene, anti-aliased as usual */
     static int debug = -1;
     if (debug < 0) debug = getenv("YW4_AA_DEBUG") ? atoi(getenv("YW4_AA_DEBUG")) : 0;
     pass(cb, debug == 3 ? P_TEST : P_ENCODE, encoded.view, VK_FORMAT_R16G16B16A16_SFLOAT, w, h, 0, scene);
-    if (mode == 1) {
+    if (mode == 3) {
+        taa(cb, target, fmt, w, h, debug);
+    } else if (mode == 1) {
         pass(cb, P_FXAA, target, fmt, w, h, 0, NULL);
     } else {
         pass(cb, P_EDGE, edges.view, VK_FORMAT_R8G8_UNORM, w, h, 1, NULL);

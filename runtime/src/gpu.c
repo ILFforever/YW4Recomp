@@ -1310,6 +1310,7 @@ void gpu_execute(uint64_t handle) {
         }
         case CMD_SET_RENDER_TARGETS:
             gpu_end_rendering(cb, &s);
+            gpu_taa_targets_end(cb);  /* TAA: the G-buffer's motion, before the game reuses it */
             memcpy(&s.rt, r->extra, sizeof s.rt);
             render_targets_fix(&s.rt);  /* point at our own copies of the textures */
             s.ncolor = (int)r->x[0];
