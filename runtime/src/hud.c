@@ -199,14 +199,12 @@ void panel_render(uint8_t *rgba, int w, int h, const SettingRow *rows, int n, in
     int desc_h = (help_lines + 2) * 10 + 10;
     int ph = HEADER + 8 + (n + groups) * ROW_H + 6 + desc_h + 6 + 14;
     Canvas cv = {rgba, w, h, pw < w ? pw : w, ph < h ? ph : h};
-    /* a square dark frame (the window copies overlays without blending, so nothing can be see-through) and
-     * the rounded card in it */
+    /* a square card in a dark frame (the window copies overlays without blending, so nothing can be
+     * see-through, and rounded corners inside a square frame looked off), its title bar square too */
     fill(&cv, 0, 0, pw, ph, OUTLINE);
-    box(&cv, 1, 1, pw - 2, ph - 2, 8, CREAM, OUTLINE);
-    /* title bar */
-    box(&cv, 2, 2, pw - 4, HEADER - 2, 7, PURPLE, NULL);
-    fill(&cv, 3, HEADER - 6, pw - 6, 4, PURPLE);  /* square bottom */
-    for (int x = 3; x < pw - 3; x += 4) put(&cv, x, HEADER - 1, PURPLE2);
+    fill(&cv, 2, 2, pw - 4, ph - 4, CREAM);
+    fill(&cv, 2, 2, pw - 4, HEADER - 2, PURPLE);
+    for (int x = 2; x < pw - 2; x += 4) put(&cv, x, HEADER - 1, PURPLE2);
     text2(&cv, PAD + 2, 6, "SETTINGS", WHITE2);
     text(&cv, pw - PAD - 9 * CELL_W, 10, "F1: CLOSE", ROWSEL);
     /* rows */

@@ -74,13 +74,13 @@ static const Setting settings[] = {
      {"THE GAME'S HARD SHADOWS", "SLIGHTLY SOFT", "SOFT (RECOMMENDED)", "VERY SOFT"}, 4, pcss_index, gpu_pcss_cycle},
     {"RENDERER", "SHADOW PASS",
      "WHO DRAWS WHAT CASTS SHADOWS: THE GAME OR OUR OWN RENDERER. THE PICTURE IS THE SAME.",
-     {"GAME", "OURS"},
-     {"THE GAME'S RENDERER", "OUR RENDERER, A LITTLE FASTER"}, 2, shadow_pass_index, shadow_toggle},
+     {"GAME", "CUSTOM"},
+     {"THE GAME'S RENDERER", "OUR CUSTOM RENDERER, A LITTLE FASTER"}, 2, shadow_pass_index, shadow_toggle},
     {"RENDERER", "G-BUFFER",
      "WHO DRAWS THE WORLD'S SURFACES: THE GAME OR OUR OWN RENDERER. THE PICTURE IS THE SAME. OURS LETS FUTURE "
      "UPGRADES IN.",
-     {"GAME", "OURS"},
-     {"THE GAME'S RENDERER", "OUR RENDERER"}, 2, gbuffer_index, gbuffer_toggle},
+     {"GAME", "CUSTOM"},
+     {"THE GAME'S RENDERER", "OUR CUSTOM RENDERER"}, 2, gbuffer_index, gbuffer_toggle},
 };
 enum { NSETTINGS = sizeof settings / sizeof *settings };
 
