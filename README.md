@@ -114,7 +114,8 @@ Improvements over the original game. Details, comparisons and measurements: [doc
 Press **F1** in game for the settings panel: every option with all its choices, and what each one does (arrow keys or
 D-pad to choose and change). **F2** opens the **CONTROLS** page: two keys and one gamepad button for every Switch
 button and stick direction, changed by pressing the new one. On a gamepad the panel opens with the **Home / PS**
-button, the DualSense's **touchpad**, or **Minus + Plus** (Share + Options on a PlayStation pad); L/R switch pages. Your choices are saved in
+button, the DualSense's **mic button**, or **Minus + Plus** (Share + Options on a PlayStation pad); L/R or the
+triggers switch pages. The DualSense's **touchpad** shows the performance HUD (F3). Your choices are saved in
 `settings.ini` next to `yw4.exe` and kept for the next start. Settings are only in the panel; the other function keys
 are debugging tools ([docs/debugging.md](docs/debugging.md)).
 

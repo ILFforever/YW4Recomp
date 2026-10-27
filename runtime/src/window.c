@@ -685,17 +685,24 @@ static void update_input(void) {
     host_unlock(&input_lock);
 }
 
-/* The settings panel from the gamepad: Home (Guide, PS), the touchpad, or Minus and Plus together, opens and closes it;
- * the D-pad or the left stick choose (up/down) and change (left/right); B closes; on the controls page A
- * changes a binding and X clears it (A, B, X as named on the controller); L and R switch pages. Named like the keys, so recordings and replays
- * see the same presses. While the controls wait for an input, the press goes there instead. */
+/* The settings panel from the gamepad: Home (Guide, PS), the mic button (Share on Xbox pads), or Minus and Plus
+ * together, opens and closes it; the D-pad or the left stick choose (up/down) and change (left/right); B closes;
+ * on the controls page A changes a binding and X clears it (A, B, X as named on the controller); the shoulder
+ * buttons and the triggers switch pages. The touchpad shows or hides the performance HUD (F3). Named like the
+ * keys, so recordings and replays see the same presses. While the controls wait for an input, the press goes
+ * there instead. */
 void yw4_hid_note_key(const char *name);  /* svc_hid.c: key presses go into the input recording */
 
 static void panel_pad_button(SDL_GamepadButton button) {
     int both = SDL_GetGamepadButton(gamepad, SDL_GAMEPAD_BUTTON_BACK) &&
                SDL_GetGamepadButton(gamepad, SDL_GAMEPAD_BUTTON_START);
-    /* buttons a Switch controller doesn't have, so the game never sees them: Home / PS, the DualSense's touchpad */
-    if (button == SDL_GAMEPAD_BUTTON_GUIDE || button == SDL_GAMEPAD_BUTTON_TOUCHPAD ||
+    /* buttons a Switch controller doesn't have, so the game never sees them: Home / PS, the mic button, the
+     * DualSense's touchpad */
+    if (button == SDL_GAMEPAD_BUTTON_TOUCHPAD) {
+        __atomic_store_n(&hud_on, hud_enabled() ? 0 : 1, __ATOMIC_RELEASE);
+        return;
+    }
+    if (button == SDL_GAMEPAD_BUTTON_GUIDE || button == SDL_GAMEPAD_BUTTON_MISC1 ||
         (both && (button == SDL_GAMEPAD_BUTTON_BACK || button == SDL_GAMEPAD_BUTTON_START))) {
         settings_toggle(), yw4_hid_note_key("F1");
         return;
@@ -718,6 +725,19 @@ static void panel_pad_button(SDL_GamepadButton button) {
                {SDL_GAMEPAD_BUTTON_RIGHT_SHOULDER, SETTINGS_PAGE, "PAGE"}};
     for (size_t i = 0; i < sizeof map / sizeof *map; i++)
         if (button == map[i].button) settings_action(map[i].action), yw4_hid_note_key(map[i].name);
+}
+
+/* The triggers in the panel switch pages, once per pull past three quarters. */
+static void panel_pad_triggers(void) {
+    static int held[2];
+    for (int i = 0; i < 2; i++) {
+        int v = SDL_GetGamepadAxis(gamepad, i ? SDL_GAMEPAD_AXIS_RIGHT_TRIGGER : SDL_GAMEPAD_AXIS_LEFT_TRIGGER);
+        if (v < 8000) held[i] = 0;
+        else if (v > 24000 && !held[i]) {
+            held[i] = 1;
+            if (!bindings_capturing()) settings_action(SETTINGS_PAGE), yw4_hid_note_key("PAGE");
+        }
+    }
 }
 
 /* The left stick as a D-pad in the panel: one step each time it is pushed past half way. */
@@ -798,7 +818,7 @@ void window_run(void (*guest)(void *), void *arg) {
         case SDL_EVENT_GAMEPAD_AXIS_MOTION:
             if (gamepad && SDL_GetGamepadID(gamepad) == e.gaxis.which && settings_open() &&
                 !bindings_capture_axis(e.gaxis.axis, e.gaxis.value))
-                panel_pad_stick();
+                panel_pad_stick(), panel_pad_triggers();
             break;
         case SDL_EVENT_QUIT:
             fprintf(stderr, "yw4: window closed\n");
