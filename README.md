@@ -1,7 +1,9 @@
 <h1 align="center">YW4 Recomp</h1>
 
 <p align="center">
-  Play <b>Yo-kai Watch 4++</b> as a real PC program, from your own copy of the game: no Switch and no emulator.
+  <b>Yo-kai Watch 4++, recompiled for PC.</b>
+  <br>
+  4K · Ultrawide 21:9 / 32:9 · PCSS soft shadows · TAA / SMAA · ×16 texture filtering · Xbox, PlayStation and Nintendo pads
   <br>
   <sub>A fan static recompilation of the Nintendo Switch game (update 2.2.0), in the style of <a href="https://github.com/N64Recomp/N64Recomp">N64Recomp</a>: the game's code is translated into a native Windows program.</sub>
 </p>
@@ -10,7 +12,7 @@
   <img alt="Phase 4: renderer" src="https://img.shields.io/badge/phase-4%20·%20renderer-6f42c1">
   <img alt="Platform: Windows, Linux planned" src="https://img.shields.io/badge/platform-Windows%20(Linux%20planned)-informational">
   <img alt="Graphics" src="https://img.shields.io/badge/graphics-Vulkan-ac162c">
-  <img alt="Playable: story and towns" src="https://img.shields.io/badge/playable-story%20%26%20towns-success">
+  <img alt="Status: playable" src="https://img.shields.io/badge/status-playable-success">
 </p>
 
 <p align="center">
@@ -38,7 +40,7 @@
 
 ## Status
 
-Early, but playable. The game runs from boot through a new game (logos, title menu, name entry, the opening
+Playable. The game runs from boot through a new game (logos, title menu, name entry, the opening
 cutscenes, the Amano house and town, the Yo-kai Pad menus, the diary and autosave) and from late-game saves: towns at
 night, the bamboo forest, the Yo-kai World. It holds the game's 30 frames/s in most places tested (see the known issues). Expect missing
 effects and crashes in places nobody has reached yet.
