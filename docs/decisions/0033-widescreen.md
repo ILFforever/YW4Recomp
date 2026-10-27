@@ -42,12 +42,13 @@ draw copies that into one of **two** window images (1920×1080) that it presents
 ## How it was checked
 
 Schoolyard, standing still and walking: 21:9 is 2133×900 at the 900 setting with the UI centred and the right size;
-32:9 3200×900; with TAA at 21:9; the settings panel at 16:9 unchanged.
+32:9 3200×900; with TAA at 21:9; the settings panel at 16:9 unchanged. The owner played at 21:9 / 4K (2026-10-28): exploring, battles
+and cutscenes work; screenshots in the README.
 
 ## Not done yet
 
 - On-screen markers: `f_53b3a0` projects with the camera's (now wider) aspect into the 16:9 UI, so markers away
   from the middle may sit a little off their targets. Not seen in the frames checked; to look at.
 - Full-screen UI layers stay 16:9: seen with the dimming behind a dialog (known-issues.md). Fades, menu
-  backgrounds, battles and cutscenes are untested.
+  backgrounds still to check.
 - At 16:10 the sides are cut, not the top: the vertical field of view is kept for every shape.
