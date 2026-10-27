@@ -10,8 +10,9 @@
 const char *shadow_mode_name(void);
 
 typedef struct {
-    const char *name;
+    const char *category, *name, *help;
     const char *options[SETTINGS_MAX_OPTIONS];
+    const char *notes[SETTINGS_MAX_OPTIONS];
     int noptions;
     int (*current)(void);  /* index into options */
     void (*next)(void);    /* one step forward, wrapping */
@@ -34,16 +35,52 @@ static int pcss_index(void) { return gpu_pcss_level() & 3; }
 static int shadow_pass_index(void) { return !strcmp(shadow_mode_name(), "CUSTOM"); }
 static int gbuffer_index(void) { return gbuffer_native(); }
 
+/* In the order shown; a row starts a new group when its category differs from the row before. The texts
+ * use the HUD font's characters (hud.c): upper case, digits, . , : % / - ( ) ' ! ? */
 static const Setting settings[] = {
-    {"3D VIEW", {"1600X900", "1920X1080", "2560X1440", "3840X2160"}, 4, res_index, gpu_res_cycle},
-    {"TEXTURE FILTERING", {"GAME", "X2", "X4", "X8", "X16"}, 5, aniso_index, gpu_aniso_cycle},
-    {"ANTI-ALIASING", {"OFF", "FXAA", "SMAA"}, 3, gpu_aa, gpu_aa_cycle},
-    {"DISTANCE BLUR", {"GAME", "HALF", "OFF"}, 3, dof_index, gpu_dof_cycle},
-    {"EFFECTS RESOLUTION", {"HALF", "FULL"}, 2, gpu_effects_full, gpu_effects_cycle},
-    {"SHADOW MAP", {"1024", "2048", "4096"}, 3, shadow_res_index, gpu_shadow_res_cycle},
-    {"SOFT SHADOWS", {"OFF", "X1", "X2", "X4"}, 4, pcss_index, gpu_pcss_cycle},
-    {"SHADOW PASS", {"GAME", "OURS"}, 2, shadow_pass_index, shadow_toggle},
-    {"G-BUFFER", {"GAME", "OURS"}, 2, gbuffer_index, gbuffer_toggle},
+    {"PICTURE", "3D VIEW",
+     "THE RESOLUTION THE WORLD IS DRAWN AT. HIGHER IS SHARPER AND COSTS GPU TIME. MENUS AND TEXT ARE DRAWN AT THE "
+     "SAME SIZE.",
+     {"1600X900", "1920X1080", "2560X1440", "3840X2160"},
+     {"THE SWITCH'S RESOLUTION", "FULL HD", "SHARP, A LITTLE GPU TIME", "SHARPEST, THE MOST GPU TIME"}, 4,
+     res_index, gpu_res_cycle},
+    {"PICTURE", "ANTI-ALIASING",
+     "SMOOTHS THE JAGGED EDGES OF OBJECTS. APPLIED BEFORE THE MENUS ARE DRAWN, SO TEXT STAYS SHARP.",
+     {"OFF", "FXAA", "SMAA"},
+     {"THE GAME'S EDGES", "SMOOTHEST, TEXTURES A LITTLE SOFTER", "CLEAN EDGES, TEXTURES STAY SHARP"}, 3, gpu_aa,
+     gpu_aa_cycle},
+    {"PICTURE", "TEXTURE FILTERING",
+     "KEEPS GROUND, ROADS AND WALLS SHARP WHEN SEEN FROM AFAR OR AT AN ANGLE.",
+     {"GAME", "X2", "X4", "X8", "X16"},
+     {"THE GAME'S: BLURRY IN THE DISTANCE", "A LITTLE SHARPER", "SHARPER", "SHARPER STILL", "SHARPEST, NO REAL COST"},
+     5, aniso_index, gpu_aniso_cycle},
+    {"EFFECTS", "DISTANCE BLUR",
+     "THE GAME BLURS FAR AWAY THINGS ON PURPOSE, FOR A SOFT, MINIATURE LOOK.",
+     {"GAME", "HALF", "OFF"},
+     {"AS ON THE SWITCH", "A LIGHTER BLUR", "EVERYTHING SHARP"}, 3, dof_index, gpu_dof_cycle},
+    {"EFFECTS", "EFFECTS RESOLUTION",
+     "SHADOWS, LAMP LIGHT AND SHADING ARE DRAWN AT HALF SIZE, THEN SPREAD OVER THE PICTURE.",
+     {"HALF", "FULL"},
+     {"THE GAME'S: SOFTER, BLOCKY EDGES", "CLEANER SHADOW EDGES, ABOUT 2 MS"}, 2, gpu_effects_full,
+     gpu_effects_cycle},
+    {"SHADOWS", "SHADOW MAP",
+     "HOW DETAILED SHADOWS ARE. BIGGER IS SHARPER, MOST OF ALL FAR FROM THE CAMERA.",
+     {"1024", "2048", "4096"},
+     {"THE GAME'S", "SHARPER", "SHARPEST (RECOMMENDED)"}, 3, shadow_res_index, gpu_shadow_res_cycle},
+    {"SHADOWS", "SOFT SHADOWS",
+     "SHADOWS GET SOFTER THE FURTHER THEY FALL FROM WHAT CASTS THEM, LIKE REAL ONES. TREE SHADE STOPS "
+     "SHIMMERING.",
+     {"OFF", "X1", "X2", "X4"},
+     {"THE GAME'S HARD SHADOWS", "SLIGHTLY SOFT", "SOFT (RECOMMENDED)", "VERY SOFT"}, 4, pcss_index, gpu_pcss_cycle},
+    {"RENDERER", "SHADOW PASS",
+     "WHO DRAWS WHAT CASTS SHADOWS: THE GAME OR OUR OWN RENDERER. THE PICTURE IS THE SAME.",
+     {"GAME", "OURS"},
+     {"THE GAME'S RENDERER", "OUR RENDERER, A LITTLE FASTER"}, 2, shadow_pass_index, shadow_toggle},
+    {"RENDERER", "G-BUFFER",
+     "WHO DRAWS THE WORLD'S SURFACES: THE GAME OR OUR OWN RENDERER. THE PICTURE IS THE SAME. OURS LETS FUTURE "
+     "UPGRADES IN.",
+     {"GAME", "OURS"},
+     {"THE GAME'S RENDERER", "OUR RENDERER"}, 2, gbuffer_index, gbuffer_toggle},
 };
 enum { NSETTINGS = sizeof settings / sizeof *settings };
 
@@ -69,8 +106,9 @@ void settings_action(int action) {
 int settings_rows(SettingRow *rows, int max, int *sel) {
     int n = NSETTINGS < max ? NSETTINGS : max;
     for (int i = 0; i < n; i++) {
-        rows[i].name = settings[i].name;
+        rows[i].category = settings[i].category, rows[i].name = settings[i].name, rows[i].help = settings[i].help;
         memcpy(rows[i].options, settings[i].options, sizeof rows[i].options);
+        memcpy(rows[i].notes, settings[i].notes, sizeof rows[i].notes);
         rows[i].noptions = settings[i].noptions;
         rows[i].current = settings[i].current();
     }

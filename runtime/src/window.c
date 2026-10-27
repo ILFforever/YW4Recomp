@@ -79,7 +79,7 @@ typedef struct {
     void *ptr;
 } Overlay;
 enum { HUD_W = 256, HUD_H = 128 };
-static Overlay hud = {HUD_W, HUD_H}, panel = {480, 160};
+static Overlay hud = {HUD_W, HUD_H}, panel = {480, 360};
 static int hud_on = -1;
 
 void gpu_request_trace(int draws);  /* gpu_draw.c */
@@ -472,6 +472,7 @@ static void hud_draw(VkImage dst, int32_t x0, int32_t y0) {
 
 /* The settings panel (F1), in the middle of the picture (bw x bh at x0, y0). */
 static int panel_shown_w, panel_shown_h;  /* the part of panel.ptr drawn at the last present (0: none) */
+static uint32_t panel_scale(uint32_t bw, uint32_t bh);  /* below */
 
 static void panel_draw(VkImage dst, int32_t x0, int32_t y0, uint32_t bw, uint32_t bh) {
     panel_shown_w = panel_shown_h = 0;
@@ -480,26 +481,40 @@ static void panel_draw(VkImage dst, int32_t x0, int32_t y0, uint32_t bw, uint32_
     int sel, n = settings_rows(rows, 16, &sel), w, h;
     panel_render(panel.ptr, (int)panel.w, (int)panel.h, rows, n, sel, &w, &h);
     panel_shown_w = w, panel_shown_h = h;
-    int32_t s = overlay_scale();
+    /* scaled up by whole steps (the pixel font stays crisp) to about two thirds of the picture's height */
+    int32_t s = (int32_t)panel_scale(bw, bh);
     overlay_show(&panel, dst, w, h, x0 + ((int32_t)bw - w * s) / 2, y0 + ((int32_t)bh - h * s) / 2, s);
 }
 
 /* An overlay's drawn cw x ch part pasted 1:1 into rgba (the w x h frame) at (x, y), clipped. */
-static void paste(uint8_t *rgba, uint32_t w, uint32_t h, const Overlay *o, int cw, int ch, uint32_t x, uint32_t y) {
+static void paste(uint8_t *rgba, uint32_t w, uint32_t h, const Overlay *o, int cw, int ch, uint32_t x, uint32_t y,
+                  uint32_t scale) {
     if (!cw || !o->ptr || x >= w || y >= h) return;
-    uint32_t pw = (uint32_t)cw < w - x ? (uint32_t)cw : w - x, ph = (uint32_t)ch < h - y ? (uint32_t)ch : h - y;
-    for (uint32_t r = 0; r < ph; r++)
-        memcpy(rgba + ((size_t)(y + r) * w + x) * 4, (const uint8_t *)o->ptr + (size_t)r * o->w * 4, (size_t)pw * 4);
+    uint32_t pw = (uint32_t)cw * scale < w - x ? (uint32_t)cw * scale : w - x;
+    uint32_t ph = (uint32_t)ch * scale < h - y ? (uint32_t)ch * scale : h - y;
+    for (uint32_t r = 0; r < ph; r++) {
+        const uint8_t *src = (const uint8_t *)o->ptr + (size_t)(r / scale) * o->w * 4;
+        uint8_t *dst = rgba + ((size_t)(y + r) * w + x) * 4;
+        for (uint32_t c = 0; c < pw; c++) memcpy(dst + c * 4, src + (c / scale) * 4, 4);
+    }
+}
+
+/* The panel's whole-step scale for a picture of bw x bh (as panel_draw shows it). */
+static uint32_t panel_scale(uint32_t bw, uint32_t bh) {
+    uint32_t s = panel_shown_h ? bh * 2 / 3 / (uint32_t)panel_shown_h : 1, sw = panel_shown_w ? bw * 9 / 10 / (uint32_t)panel_shown_w : 1;
+    if (sw < s) s = sw;
+    return s ? s : 1;
 }
 
 /* Screenshots show the HUD and the settings panel when they are on: their texels from the last
- * present, 1:1, the HUD at the frame's top-left corner and the panel in its middle, like in the window
- * (rgba: the w x h frame, colours as the window shows). */
+ * present, the HUD 1:1 at the frame's top-left corner and the panel in its middle at the window's scale
+ * for a picture of this size (rgba: the w x h frame, colours as the window shows). */
 static void hud_onto(uint8_t *rgba, uint32_t w, uint32_t h) {
-    paste(rgba, w, h, &hud, hud_shown_w, hud_shown_h, 6, 6);
-    if (panel_shown_w && (uint32_t)panel_shown_w < w && (uint32_t)panel_shown_h < h)
-        paste(rgba, w, h, &panel, panel_shown_w, panel_shown_h, (w - (uint32_t)panel_shown_w) / 2,
-              (h - (uint32_t)panel_shown_h) / 2);
+    paste(rgba, w, h, &hud, hud_shown_w, hud_shown_h, 6, 6, 1);
+    uint32_t s = panel_scale(w, h);
+    if (panel_shown_w && (uint32_t)panel_shown_w * s <= w && (uint32_t)panel_shown_h * s <= h)
+        paste(rgba, w, h, &panel, panel_shown_w, panel_shown_h, (w - (uint32_t)panel_shown_w * s) / 2,
+              (h - (uint32_t)panel_shown_h * s) / 2, s);
 }
 
 /* Scales src (w x h colour texels) into the next swapchain image and presents it.

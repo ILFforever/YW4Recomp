@@ -1,15 +1,19 @@
-/* The settings panel (F1): the graphics settings in one list, each with all its options shown and the
- * current one marked. Up/Down pick a setting, Left/Right change it, F1 or Escape close the panel. While it
- * is open the keyboard doesn't reach the game (a gamepad still does). The F keys stay as shortcuts; both go
- * through the same functions (gpu.c, gpu_draw.c, shadow.c, gbuffer.c). */
+/* The settings panel (F1): the graphics settings in groups, each with all its options shown and the current
+ * one marked, and a description of the chosen setting and option. Up/Down pick a setting, Left/Right change
+ * it, F1 or Escape close the panel. While it is open the keyboard doesn't reach the game (a gamepad still
+ * does). The F keys stay as shortcuts; both go through the same functions (gpu.c, gpu_draw.c, gpu_aa.c,
+ * shadow.c, gbuffer.c). Drawn by hud.c (panel_render), shown by window.c. */
 #ifndef YW4_SETTINGS_H
 #define YW4_SETTINGS_H
 
 enum { SETTINGS_MAX_OPTIONS = 5 };
 
 typedef struct {
+    const char *category;  /* the group it is listed under */
     const char *name;
+    const char *help;      /* what the setting does */
     const char *options[SETTINGS_MAX_OPTIONS];
+    const char *notes[SETTINGS_MAX_OPTIONS];  /* a few words per option */
     int noptions;
     int current;  /* index into options */
 } SettingRow;

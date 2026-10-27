@@ -109,7 +109,7 @@ Still the game's everywhere: the choice of what to draw, textures and character 
 
 Improvements over the original game. Details, comparisons and measurements: [docs/graphics.md](docs/graphics.md).
 
-Press **F1** in game for the settings panel: every option with all its choices, the current one boxed.
+Press **F1** in game for the settings panel: every option with all its choices, and what each one does.
 
 ![The settings panel](docs/screenshots/22-settings-panel.png)
 
