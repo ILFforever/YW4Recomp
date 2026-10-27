@@ -457,7 +457,8 @@ static void overlay_show(Overlay *o, VkImage dst, int w, int h, int32_t x, int32
                    &blit, VK_FILTER_NEAREST);
 }
 
-static int32_t overlay_scale(void) { return swap_extent.height >= 2160 ? 2 : 1; }  /* the 5x7 font 1:1 up to 1440p */
+/* The HUD's whole-step scale for a picture h pixels high: 1 per 720 (the 5x7 font stays crisp) */
+static int32_t overlay_scale(uint32_t h) { return h >= 1440 ? (int32_t)(h / 720) : 1; }
 
 static void hud_draw(VkImage dst, int32_t x0, int32_t y0) {
     hud_shown_w = hud_shown_h = 0;
@@ -467,7 +468,7 @@ static void hud_draw(VkImage dst, int32_t x0, int32_t y0) {
     yw4_perf_hud(&content);
     hud_render(hud.ptr, HUD_W, HUD_H, &content, &w, &h);
     hud_shown_w = w, hud_shown_h = h;
-    int32_t s = overlay_scale();
+    int32_t s = overlay_scale(swap_extent.height);
     overlay_show(&hud, dst, w, h, x0 + 6 * s, y0 + 6 * s, s);
 }
 
@@ -516,10 +517,11 @@ static uint32_t panel_scale(uint32_t bw, uint32_t bh) {
 }
 
 /* Screenshots show the HUD and the settings panel when they are on: their texels from the last
- * present, the HUD 1:1 at the frame's top-left corner and the panel in its middle at the window's scale
+ * present, the HUD at the top-left corner, scaled as overlay_scale says for its height, and the panel in its middle at the window's scale
  * for a picture of this size (rgba: the w x h frame, colours as the window shows). */
 static void hud_onto(uint8_t *rgba, uint32_t w, uint32_t h) {
-    paste(rgba, w, h, &hud, hud_shown_w, hud_shown_h, 6, 6, 1);
+    uint32_t hs = (uint32_t)overlay_scale(h);
+    paste(rgba, w, h, &hud, hud_shown_w, hud_shown_h, 6 * hs, 6 * hs, hs);
     uint32_t s = panel_scale(w, h);
     if (panel_shown_w && (uint32_t)panel_shown_w * s <= w && (uint32_t)panel_shown_h * s <= h)
         paste(rgba, w, h, &panel, panel_shown_w, panel_shown_h, (w - (uint32_t)panel_shown_w * s) / 2,
