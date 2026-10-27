@@ -48,7 +48,8 @@ def settings() -> list[dict]:
         category, name, *help_parts = c_strings(head)
         count = int(re.search(r"\}\s*,\s*(\d+)\s*,", e).group(1))  # the number after the notes
         out.append({"category": category, "name": name, "help": "".join(help_parts),
-                    "options": c_strings(lists[0]), "notes": c_strings(lists[1]), "count": count})
+                    "options": c_strings(lists[0]), "notes": c_strings(lists[1]), "count": count,
+                    "values": c_strings(lists[2]) if len(lists) > 2 else []})
     return out
 
 
@@ -70,6 +71,7 @@ class SettingsTexts(unittest.TestCase):
                 self.assertGreater(len(r["help"]), 20, "no description")
                 self.assertEqual(len(r["options"]), r["count"], "option count")
                 self.assertEqual(len(r["notes"]), len(r["options"]), "a note per option")
+                self.assertEqual(len(r["values"]), len(r["options"]), "a settings-file value per option")
                 for opt, note in zip(r["options"], r["notes"]):
                     self.assertGreater(len(note.strip()), 2, f"no note for {opt}")
 

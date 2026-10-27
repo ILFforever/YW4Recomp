@@ -49,6 +49,7 @@ def run(cfg: config.Config, save: Path | None, replay: Path | None, seconds: int
         shutil.copytree(save, run_save)
     env = dict(os.environ)
     env.setdefault("YW4_AUDIO", "0")
+    env.setdefault("YW4_SETTINGS_FILE", "none")  # the owner's settings.ini stays out of test runs, and unchanged
     if replay:
         env["YW4_REPLAY"] = str(replay)
     if exit_at_end:

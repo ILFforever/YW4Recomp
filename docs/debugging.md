@@ -7,6 +7,7 @@ game with them and compare results: [tools/dev](../tools/dev/README.md).
 
 | Variable | What it does |
 |---|---|
+| `YW4_SETTINGS_FILE=<file>` (`none`) | Where the settings panel's choices are kept (default `settings.ini` next to `yw4.exe`): read at start, written on every change in the panel, one `YW4_...=value` line per setting. A variable set in the environment wins over its line. `tools.dev.run` sets `none`, so test runs neither read nor change the owner's file |
 | `YW4_SCREENSHOTS=600,2500` | Save a screenshot at these frame numbers (also F12 at any time) |
 | `YW4_SCREENSHOT_DIR=path` | Where screenshots go (default `<work_dir>/screenshots/`) |
 | `YW4_PERF=0` | Turn off the performance log (on by default: `work/perf/perf_<time>.csv` per frame and a `.txt` summary: frame interval, game work, GPU busy/span from timestamp queries, time in command-list translation and GPU waits, CPU, memory; every 600 frames stderr also lists each busy guest thread's share of a core; `YW4_PERF_DIR` moves it) |

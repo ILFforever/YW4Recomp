@@ -1,6 +1,10 @@
 /* The settings panel's list (settings.h): each row reads its setting's current option and steps it with
- * the setting's own cycle function, so the panel and the F keys always agree. */
+ * the setting's own cycle function, so the panel and the replays' keys always agree. */
+#include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
+
+#include <SDL3/SDL_filesystem.h>
 
 #include "gbuffer.h"
 #include "gpu.h"
@@ -16,6 +20,8 @@ typedef struct {
     int noptions;
     int (*current)(void);  /* index into options */
     void (*next)(void);    /* one step forward, wrapping */
+    const char *env;       /* the environment variable it starts from, and its value per option */
+    const char *values[SETTINGS_MAX_OPTIONS];
 } Setting;
 
 static int res_index(void) {
@@ -43,63 +49,118 @@ static const Setting settings[] = {
      "SAME SIZE.",
      {"1600X900", "1920X1080", "2560X1440", "3840X2160"},
      {"THE SWITCH'S RESOLUTION", "FULL HD", "SHARP, A LITTLE GPU TIME", "SHARPEST, THE MOST GPU TIME"}, 4,
-     res_index, gpu_res_cycle},
+     res_index, gpu_res_cycle, "YW4_RES", {"900", "1080", "1440", "2160"}},
     {"PICTURE", "ANTI-ALIASING",
      "SMOOTHS THE JAGGED EDGES OF OBJECTS. APPLIED BEFORE THE MENUS ARE DRAWN, SO TEXT STAYS SHARP.",
      {"OFF", "FXAA", "SMAA"},
      {"THE GAME'S EDGES", "SMOOTHEST, TEXTURES A LITTLE SOFTER", "CLEAN EDGES, TEXTURES STAY SHARP"}, 3, gpu_aa,
-     gpu_aa_cycle},
+     gpu_aa_cycle, "YW4_AA", {"0", "1", "2"}},
     {"PICTURE", "TEXTURE FILTERING",
      "KEEPS GROUND, ROADS AND WALLS SHARP WHEN SEEN FROM AFAR OR AT AN ANGLE.",
      {"GAME", "X2", "X4", "X8", "X16"},
      {"THE GAME'S: BLURRY IN THE DISTANCE", "A LITTLE SHARPER", "SHARPER", "SHARPER STILL", "SHARPEST, NO REAL COST"},
-     5, aniso_index, gpu_aniso_cycle},
+     5, aniso_index, gpu_aniso_cycle, "YW4_ANISO", {"0", "2", "4", "8", "16"}},
     {"EFFECTS", "DISTANCE BLUR",
      "THE GAME BLURS FAR AWAY THINGS ON PURPOSE, FOR A SOFT, MINIATURE LOOK.",
      {"GAME", "HALF", "OFF"},
-     {"AS ON THE SWITCH", "A LIGHTER BLUR", "EVERYTHING SHARP"}, 3, dof_index, gpu_dof_cycle},
+     {"AS ON THE SWITCH", "A LIGHTER BLUR", "EVERYTHING SHARP"}, 3, dof_index, gpu_dof_cycle, "YW4_DOF", {"2", "1", "0"}},
     {"EFFECTS", "EFFECTS RESOLUTION",
      "SHADOWS, LAMP LIGHT AND SHADING ARE DRAWN AT HALF SIZE, THEN SPREAD OVER THE PICTURE.",
      {"HALF", "FULL"},
      {"THE GAME'S: SOFTER, BLOCKY EDGES", "CLEANER SHADOW EDGES, ABOUT 2 MS"}, 2, gpu_effects_full,
-     gpu_effects_cycle},
+     gpu_effects_cycle, "YW4_EFFECTS", {"0", "1"}},
     {"SHADOWS", "SHADOW MAP",
      "HOW DETAILED SHADOWS ARE. BIGGER IS SHARPER, MOST OF ALL FAR FROM THE CAMERA.",
      {"1024", "2048", "4096"},
-     {"THE GAME'S", "SHARPER", "SHARPEST (RECOMMENDED)"}, 3, shadow_res_index, gpu_shadow_res_cycle},
+     {"THE GAME'S", "SHARPER", "SHARPEST (RECOMMENDED)"}, 3, shadow_res_index, gpu_shadow_res_cycle, "YW4_SHADOW_RES", {"1024", "2048", "4096"}},
     {"SHADOWS", "SOFT SHADOWS",
      "SHADOWS GET SOFTER THE FURTHER THEY FALL FROM WHAT CASTS THEM, LIKE REAL ONES. TREE SHADE STOPS "
      "SHIMMERING.",
      {"OFF", "X1", "X2", "X4"},
-     {"THE GAME'S HARD SHADOWS", "SLIGHTLY SOFT", "SOFT (RECOMMENDED)", "VERY SOFT"}, 4, pcss_index, gpu_pcss_cycle},
+     {"THE GAME'S HARD SHADOWS", "SLIGHTLY SOFT", "SOFT (RECOMMENDED)", "VERY SOFT"}, 4, pcss_index, gpu_pcss_cycle, "YW4_PCSS", {"0", "1", "2", "3"}},
     {"RENDERER", "SHADOW PASS",
      "WHO DRAWS WHAT CASTS SHADOWS: THE GAME OR OUR OWN RENDERER. THE PICTURE IS THE SAME.",
      {"GAME", "CUSTOM"},
-     {"THE GAME'S RENDERER", "OUR CUSTOM RENDERER, A LITTLE FASTER"}, 2, shadow_pass_index, shadow_toggle},
+     {"THE GAME'S RENDERER", "OUR CUSTOM RENDERER, A LITTLE FASTER"}, 2, shadow_pass_index, shadow_toggle, "YW4_SHADOWS", {"game", "native"}},
     {"RENDERER", "G-BUFFER",
      "WHO DRAWS THE WORLD'S SURFACES: THE GAME OR OUR OWN RENDERER. THE PICTURE IS THE SAME. OURS LETS FUTURE "
      "UPGRADES IN.",
      {"GAME", "CUSTOM"},
-     {"THE GAME'S RENDERER", "OUR CUSTOM RENDERER"}, 2, gbuffer_index, gbuffer_toggle},
+     {"THE GAME'S RENDERER", "OUR CUSTOM RENDERER"}, 2, gbuffer_index, gbuffer_toggle, "YW4_GBUFFER", {"game", "native"}},
 };
 enum { NSETTINGS = sizeof settings / sizeof *settings };
 
-static int open, selected;
+static int panel_open, selected;
 
-int settings_open(void) { return __atomic_load_n(&open, __ATOMIC_ACQUIRE); }
+/* ---- the settings file: YW4_SETTINGS_FILE, or settings.ini next to the executable; "none": no file */
 
-void settings_toggle(void) { __atomic_store_n(&open, !settings_open(), __ATOMIC_RELEASE); }
+static char file_path[1024];
+
+static const char *settings_file(void) {
+    if (!file_path[0]) {
+        const char *e = getenv("YW4_SETTINGS_FILE");
+        if (e && (!*e || !strcmp(e, "none"))) return "";
+        const char *base = e ? "" : SDL_GetBasePath();
+        snprintf(file_path, sizeof file_path, "%s%s", base ? base : "", e ? e : "settings.ini");
+    }
+    return file_path;
+}
+
+static void set_env(const char *name, const char *value) {
+#ifdef _WIN32
+    _putenv_s(name, value);
+#else
+    setenv(name, value, 0);
+#endif
+}
+
+void settings_load(void) {
+    const char *path = settings_file();
+    FILE *f = *path ? fopen(path, "r") : NULL;
+    if (!f) return;
+    char line[256];
+    int n = 0;
+    while (fgets(line, sizeof line, f)) {
+        char *eq = strchr(line, '=');
+        if (line[0] == '#' || !eq) continue;
+        *eq = 0;
+        char *value = eq + 1;
+        value[strcspn(value, "\r\n")] = 0;
+        for (int i = 0; i < NSETTINGS; i++)  /* only the panel's settings, and never over the environment */
+            if (!strcmp(line, settings[i].env) && !getenv(line)) set_env(line, value), n++;
+    }
+    fclose(f);
+    fprintf(stderr, "yw4: settings: %d from %s\n", n, path);
+}
+
+static void settings_save(void) {
+    const char *path = settings_file();
+    FILE *f = *path ? fopen(path, "w") : NULL;
+    if (!f) return;
+    fprintf(f, "# The settings panel's choices (F1), written when one changes. An environment variable of the same\n"
+               "# name wins over its line here.\n");
+    for (int i = 0; i < NSETTINGS; i++) {
+        int c = settings[i].current();
+        if (c >= 0 && c < settings[i].noptions) fprintf(f, "%s=%s\n", settings[i].env, settings[i].values[c]);
+    }
+    fclose(f);
+}
+
+int settings_open(void) { return __atomic_load_n(&panel_open, __ATOMIC_ACQUIRE); }
+
+void settings_toggle(void) { __atomic_store_n(&panel_open, !settings_open(), __ATOMIC_RELEASE); }
 
 void settings_action(int action) {
     const Setting *s = &settings[selected];
     switch (action) {
     case SETTINGS_UP: selected = (selected + NSETTINGS - 1) % NSETTINGS; break;
     case SETTINGS_DOWN: selected = (selected + 1) % NSETTINGS; break;
-    case SETTINGS_RIGHT: s->next(); break;
+    case SETTINGS_RIGHT: s->next(), settings_save(); break;
     case SETTINGS_LEFT:  /* one step back: the cycle goes forward only */
         for (int i = 0; i < s->noptions - 1; i++) s->next();
+        settings_save();
         break;
-    case SETTINGS_CLOSE: __atomic_store_n(&open, 0, __ATOMIC_RELEASE); break;
+    case SETTINGS_CLOSE: __atomic_store_n(&panel_open, 0, __ATOMIC_RELEASE); break;
     }
 }
 

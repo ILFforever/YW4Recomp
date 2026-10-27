@@ -20,6 +20,10 @@ typedef struct {
 
 enum { SETTINGS_UP, SETTINGS_DOWN, SETTINGS_LEFT, SETTINGS_RIGHT, SETTINGS_CLOSE };
 
+/* Reads the settings file (settings.ini next to the executable, or YW4_SETTINGS_FILE; "none": no file) into the
+ * environment, line by line, where the variable isn't set already, so the environment still wins. Called
+ * first thing at start, before anything reads its variable; every change in the panel writes the file. */
+void settings_load(void);
 int settings_open(void);
 void settings_toggle(void);
 /* One of the actions above, from the window's key presses while the panel is open. */

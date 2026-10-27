@@ -18,6 +18,7 @@
 #include "kernel.h"
 #include "romfs.h"
 #include "savefs.h"
+#include "settings.h"
 #include "window.h"
 #include "yw4load.h"
 
@@ -55,6 +56,7 @@ void yw4_log_start(void);  /* log.c */
 
 int main(int argc, char **argv) {
     yw4_log_start();
+    settings_load();
     if (argc != 4) {
         fprintf(stderr, "usage: yw4 <exefs work directory with main.bin and sdk.bin> <romfs folder> <save data folder>\n");
         return 1;
