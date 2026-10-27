@@ -152,6 +152,8 @@ void gpu_cull(VkCommandBuffer cb, uint8_t cull_mode, uint8_t front_face);
 void gpu_dynamic_state(VkCommandBuffer cb, const GpuState *s, VkFormat depth, uint32_t w, uint32_t h);
 /* begin(): the command buffer has no dynamic state yet (gpu_dynamic_state sets only what changed). */
 void gpu_dynamic_forget(void);
+/* gpu_aa.c: anti-aliasing of the scene in s's first colour target, outside rendering (ends it). */
+void gpu_aa_apply(VkCommandBuffer cb, GpuState *s);
 /* gpu_shadow.c: the first draw into s's targets since they were set; depth-only ones are
  * remembered with the state the game draws with, so a shadow pass can draw into its layer after
  * the game has moved on to another target. */

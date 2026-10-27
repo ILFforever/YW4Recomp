@@ -83,7 +83,7 @@ It is also lighter to run. The same busy street on the same laptop ([docs/baseli
 | ✅ | **Higher resolution** | The 3D view at 1080p, 1440p or 4K instead of the game's 1600×900 (30 frames/s at 4K on an RTX 4070 laptop) |
 | 🗓️ | **Ultrawide and other aspect ratios** | A wider view of the scene, with the UI laid out correctly |
 | 🗓️ | **Higher frame rates** | Above the game's 30 frames/s; also needs the game's timing patched |
-| 🗓️ | **Better anti-aliasing** | Smooth edges applied before the UI is drawn, so text stays crisp; then temporal AA |
+| 🔧 | **Better anti-aliasing** | FXAA and SMAA on the 3D scene before the UI is drawn, so text stays crisp, done; temporal AA next |
 | 🗓️ | **Mod support** | Load replaced game files from a mod folder without touching your dump (first use: the English translation mod) |
 | 🗓️ | **Input remapping** | Keyboard, mouse and controller bindings of your choice with corresponding hints on screen |
 | 🗓️ | **Linux** | The runtime is written to be portable; not built or tested there yet |
@@ -119,6 +119,7 @@ Press **F1** in game for the settings panel: every option with all its choices, 
 | 3D view | F4 | 1600×900 (the game's), 1920×1080, 2560×1440 or 3840×2160; the UI is drawn at the same size |
 | Texture filtering | F2 | The game's, or anisotropic ×2 to ×16: distant and slanted ground, roads and walls stay sharp. Default ×16 |
 | Effects resolution | panel | Half (the game's) or full: the shadow mask, lamp lights and ambient occlusion at the 3D view's size, for sharper shadow edges. Costs ~2 ms of GPU at 1600×900 |
+| Anti-aliasing | panel | Off, FXAA or SMAA, applied to the 3D scene before the UI is drawn, so edges are smoothed and text stays sharp |
 | Distance blur | panel | The game's, half or off: the game blurs everything far away. Default half |
 | Shadow map size | F8 | 1024 (the game's), 2048 or 4096: sharper shadow edges. Recommended: 4096 |
 | PCSS (soft shadows) | F7 | Off, ×1, ×2, ×4. Recommended: ×2 |
@@ -221,6 +222,7 @@ Runtime options, capture keys, input replay and the frame-inspection tools are i
 - **[LAS Recomp](https://github.com/peiikai/LASRecomp)** by peiikai - a static recompilation of *Link's Awakening*
   for Switch; its approach to the Switch SDK and its README layout inspired this project's.
 - **[musl](https://musl.libc.org/)** - the math library (`third_party/musl`, MIT).
+- **[SMAA](https://github.com/iryoku/smaa)** by Jorge Jimenez et al. - the SMAA anti-aliasing shader and lookup textures (`third_party/smaa`, MIT).
 - **[SDL3](https://www.libsdl.org/)** and the **[Vulkan](https://www.vulkan.org/)** headers.
 - **Eden** (a Switch emulator) - used only as a visual and performance reference; none of its code is used.
 - **LEVEL-5** for Yo-kai Watch 4. This project is not affiliated with or endorsed by LEVEL-5 or Nintendo.

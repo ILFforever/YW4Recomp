@@ -73,6 +73,7 @@ static Shader *shaders;
  * 800x450 passes whose taps are in pixels, so a larger 3D view (YW4_RES) weakens it. YW4_DOF=2 the
  * game's, 1 half (w halved; the default, the owner's pick), 0 off (the draw skipped). */
 enum { DOF_SHADER = 0x27b63a2bf65deaf0ull, DOF_BLUR_SHADER = 0xb8856cfd2725bc25ull };  /* composite; the blur passes */
+enum { COMPOSITE_SHADER = 0x58b87f4410e7bc5dull };  /* the bloom composite: the scene is done (gpu_aa.c) */
 static int dof_level = -1;
 
 int gpu_dof(void) {
@@ -1615,6 +1616,8 @@ static void draw(VkCommandBuffer cb, GpuState *s, const CmdRec *r) {
                          (uint32_t)r->x[5]);
     }
     capture_after_draw(cb, s, g);
+    /* the bloom composite, the last 3D pass before the UI: anti-aliasing here (gpu_aa.c) */
+    if (g->sh[ST_FRAG] && g->sh[ST_FRAG]->key == COMPOSITE_SHADER && gpu_aa()) gpu_aa_apply(cb, s);
 }
 
 void gpu_draw(VkCommandBuffer cb, GpuState *s, const CmdRec *r) { draw(cb, s, r); }

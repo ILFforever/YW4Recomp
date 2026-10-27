@@ -34,6 +34,9 @@ void gpu_dof_cycle(void);
 /* Effects resolution (gpu.c): 1 if the game's half-size targets are made the 3D view's size (YW4_EFFECTS). */
 int gpu_effects_full(void);
 void gpu_effects_cycle(void);
+/* Anti-aliasing between the scene and the UI (gpu_aa.c): 0 off, 1 FXAA, 2 SMAA (YW4_AA at start). */
+int gpu_aa(void);
+void gpu_aa_cycle(void);
 /* F5: per-pass GPU timing on or off (gpu_passes.c) */
 void gpu_passes_toggle(void);
 /* Soft shadows (PCSS): 0 off (the game's filter), 1..3 on with stronger softening; F7 cycles. */
