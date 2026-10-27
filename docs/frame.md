@@ -329,6 +329,18 @@ So resolution scaling is runtime work: make the screen-sized images bigger by on
 and 533 does not divide evenly), scale viewports and scissors of draws into them, and scale camera row 32. Battles,
 menus and cutscenes are still to be checked for other screen-sized images.
 
+## Model detail at a distance (checked 2026-10-27): not used
+
+The engine has a level-of-detail class, `lives::gmdCObjModelLodInfo`, registered with its property system in
+`main+0xa31a20`: `m_pLodDistance` at `+0x38` (a pointer to floats in the loaded model data), `m_lodDistanceNum` at
+`+0x40` (a byte), set by `SetupLodDistance` (`main+0xa319e0`: info `x1`, floats `x2`, their size in bytes `x3`);
+`lodChangeFadeTime` suggests models fade between levels. In the town walk, the late-game bamboo forest and the
+Yo-kai World, a hook on `SetupLodDistance` was never called, every object had one geometry (object `+0x1c8`), and
+the submeshes an object draws changed only by a few at a time as the camera turned (per-submesh culling by their
+bounding boxes), never as a swap at a distance. So these maps don't use model LOD, and a "push detail further"
+setting has nothing to act on there. What looked like distance drop-off was the distance blur and the texture
+filtering (decision 0031 and the settings panel). Battles and other maps are not checked.
+
 ## Open
 
 - ~~Which job draws into which target in the main view~~: measured, see "Main view: the passes". Still open: which
