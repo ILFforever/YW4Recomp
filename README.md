@@ -86,7 +86,7 @@ It is also lighter to run. The same busy street on the same laptop ([docs/baseli
 | 🗓️ | **Higher frame rates** | Above the game's 30 frames/s; also needs the game's timing patched |
 | 🔧 | **Better anti-aliasing** | FXAA, SMAA and now TAA (steady thin edges: fences, nets, leaves) on the 3D scene before the UI is drawn, so text stays crisp; per-object motion for TAA next |
 | 🗓️ | **Mod support** | Load replaced game files from a mod folder without touching your dump (first use: the English translation mod) |
-| 🔧 | **Input remapping** | Keyboard and controller bindings of your choice on the panel's CONTROLS page, saved, done; mouse and matching button hints on screen next |
+| 🔧 | **Input remapping** | Keyboard and controller bindings on the panel's CONTROLS page, saved, with your controller's own button names; tested with a DualSense. Mouse and matching on-screen button hints next |
 | 🗓️ | **Linux** | The runtime is written to be portable; not built or tested there yet |
 
 ✅ = Done, 🔧 = In progress, 🗓️ = Planned
@@ -111,13 +111,21 @@ Still the game's: the choice of what to draw (which objects, in which order) and
 
 Improvements over the original game. Details, comparisons and measurements: [docs/graphics.md](docs/graphics.md).
 
-Press **F1** (on a gamepad: **Home**, or **Minus + Plus**) in game for the settings panel: every option with all
-its choices, and what each one does (arrow keys or D-pad to choose and change). **F2** (gamepad: L/R in the panel)
-opens its **CONTROLS** page, which sets which keys and gamepad buttons press each Switch button. Your choices are saved in `settings.ini` next to `yw4.exe` and kept
-for the next start. Settings are only in the panel; the other function keys are debugging tools
-([docs/debugging.md](docs/debugging.md)).
+Press **F1** in game for the settings panel: every option with all its choices, and what each one does (arrow keys or
+D-pad to choose and change). **F2** opens the **CONTROLS** page: two keys and one gamepad button for every Switch
+button and stick direction, changed by pressing the new one. On a gamepad the panel opens with the **Home / PS**
+button (or **Minus + Plus**, Share + Options on a PlayStation pad), L/R switch pages. Your choices are saved in
+`settings.ini` next to `yw4.exe` and kept for the next start. Settings are only in the panel; the other function keys
+are debugging tools ([docs/debugging.md](docs/debugging.md)).
 
-![The settings panel](docs/screenshots/22-settings-panel.png)
+| Settings (F1) | Controls (F2), with a DualSense |
+|---|---|
+| ![The settings panel](docs/screenshots/22-settings-panel.png) | ![The controls page with a DualSense: cross, circle, square, triangle, L1 to R3](docs/screenshots/28-controls-dualsense.png) |
+
+**Controllers:** Xbox, PlayStation and Nintendo pads work, and the controls page names the buttons as printed on
+yours (A B X Y and LB/RT on Xbox; × ○ □ △ and L1-R3 on PlayStation; ZL/ZR on Nintendo). By default the game's
+confirm is your controller's own confirm: × on a DualSense, A on Xbox. Tested with a **DualSense (PS5)**: every
+button, both sticks and the triggers in the field, menus and battles, and rebinding from the controls page.
 
 | Setting | What it does |
 |---|---|
