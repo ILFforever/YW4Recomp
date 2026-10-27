@@ -305,7 +305,7 @@ void gbuffer_toggle(void) {
     int m = gbuffer_native() ? MODE_GAME : MODE_NATIVE;
     gbuffer_checking = 0;
     __atomic_store_n(&mode, m, __ATOMIC_RELEASE);
-    fprintf(stderr, "yw4: gbuffer: %s (F6, presented frame %" PRIu64 ")\n", m == MODE_NATIVE ? "ours" : "the game's",
+    fprintf(stderr, "yw4: gbuffer: %s (settings panel, presented frame %" PRIu64 ")\n", m == MODE_NATIVE ? "ours" : "the game's",
             __atomic_load_n(&yw4_frames_presented, __ATOMIC_RELAXED));
 }
 

@@ -3,7 +3,7 @@
 The options in the [README](../README.md#graphics-options), with the comparisons and measurements behind them. Keys
 work while playing; the environment variables set them at start ([debugging.md](debugging.md)).
 
-## Native shadow pass (F9)
+## Native shadow pass (panel: SHADOW PASS)
 
 Our own renderer draws the shadow casters the game would draw, from the game's data, instead of replaying the game's
 draw calls one by one ([decision 0024](decisions/0024-shadow-pass.md)). It covers static, cut-out, skinned and
@@ -38,7 +38,7 @@ RTX 4070 Laptop):
 | GPU busy, average | 11.3 ms | 10.9 ms | −0.3 ms |
 | Process CPU | 72.7% of a core | 71.3% of a core | −1.4 points |
 
-## Shadow map size (F8)
+## Shadow map size (panel: SHADOW MAP)
 
 1024 (the game's), 2048 or 4096. Bigger maps give sharper edges, mostly in the far cascades. Recommended: 4096.
 
@@ -50,7 +50,7 @@ The bamboo forest with PCSS off at each size, and 2048 with PCSS ×1 added:
 | **4096** | **2048 + PCSS ×1** |
 | ![4096 shadow map](screenshots/14-shadow-map-4096.jpg) | ![2048 shadow map with PCSS x1](screenshots/15-shadow-map-2048-pcss-x1.jpg) |
 
-## PCSS, soft shadows (F7)
+## PCSS, soft shadows (panel: SOFT SHADOWS)
 
 Off, ×1, ×2, ×4. PCSS (percentage-closer soft shadows) makes shadows behave more like real ones:
 
@@ -73,12 +73,12 @@ Another spot in the bamboo forest, 4096 map, PCSS off and its three strengths:
 | ![PCSS x2](screenshots/18-pcss-x2.jpg) | ![PCSS x4](screenshots/19-pcss-x4.jpg) |
 
 **Recommended: 4096 map with PCSS ×2** (also what the game starts with): sharp contact shadows and soft, clean canopy
-shade. For the game's original shadows, start with `YW4_SHADOW_RES=1024 YW4_PCSS=0` (or press F8 and F7).
+shade. For the game's original shadows, start with `YW4_SHADOW_RES=1024 YW4_PCSS=0` (or set SHADOW MAP to 1024 and SOFT SHADOWS to OFF in the panel).
 
-## Our G-buffer and material passes (F6)
+## Our G-buffer and material passes (panel: G-BUFFER)
 
 The G-buffer and the lit material pass draw with our own draw calls and, for most surfaces, our own shaders
-(`runtime/shaders/`), with `YW4_GBUFFER=native`; F6 switches back to the game's
+(`runtime/shaders/`), with `YW4_GBUFFER=native`; the panel's G-BUFFER switches back to the game's
 ([decision 0026](decisions/0026-gbuffer-pass.md)). They look exactly like the game's: compared pixel by pixel
 within the same frame, 0 pixels differ. There is nothing to see yet; this is the base the resolution, aspect ratio
 and lighting work builds on.

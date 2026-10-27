@@ -10,7 +10,7 @@
   <img alt="Phase 4: renderer" src="https://img.shields.io/badge/phase-4%20·%20renderer-6f42c1">
   <img alt="Platform: Windows, Linux planned" src="https://img.shields.io/badge/platform-Windows%20(Linux%20planned)-informational">
   <img alt="Graphics" src="https://img.shields.io/badge/graphics-Vulkan-ac162c">
-  <img alt="Playable: house and town" src="https://img.shields.io/badge/playable-house%20%26%20town-success">
+  <img alt="Playable: story and towns" src="https://img.shields.io/badge/playable-story%20%26%20towns-success">
 </p>
 
 <p align="center">
@@ -38,10 +38,10 @@
 
 ## Status
 
-Early, but playable. The game runs from boot through a new game: logos, title menu, name entry, the opening
-cutscenes with dialogue, free movement in the Amano house and town, the Yo-kai Pad menus, the diary and autosave, at
-the game's 30 frames/s (some scenes still dip below it). Expect missing effects and crashes in places nobody has
-reached yet.
+Early, but playable. The game runs from boot through a new game (logos, title menu, name entry, the opening
+cutscenes, the Amano house and town, the Yo-kai Pad menus, the diary and autosave) and from late-game saves: towns at
+night, the bamboo forest, the Yo-kai World. It holds the game's 30 frames/s in most places tested (see the known issues). Expect missing
+effects and crashes in places nobody has reached yet.
 
 - How it got here, step by step: [docs/progress.md](docs/progress.md)
 - What is known to be missing or wrong: [docs/known-issues.md](docs/known-issues.md)
@@ -53,8 +53,8 @@ Switch emulators already run *Yo-kai Watch 4++* at full speed on a good PC. This
 
 An emulator can't do most of this. It imitates the console and plays the game's GPU commands as they are, so the
 game still decides its shadow quality, its 16:9 UI, its 30 frames/s and its effects. Here the game's renderer is
-being replaced with our own, so those become ours to change: bigger shadow maps and soft shadows are already in,
-higher resolution, ultrawide, higher frame rates and better anti-aliasing are next.
+being replaced with our own, so those become ours to change: higher resolution, sharper textures, bigger and soft
+shadows and anti-aliasing that leaves the UI sharp are already in; ultrawide and higher frame rates are next.
 
 A town street, same spot: the game's shadows (1024 map, no PCSS) against ours (4096 map, PCSS ×2). The
 characters' shadows keep their shape, and the tree shade on the pavement is soft:
@@ -98,33 +98,37 @@ change ([decision 0023](docs/decisions/0023-custom-renderer-plan.md)).
 
 | Status | Pass | Where it stands |
 |---|---|---|
-| Done, off by default (F9) | Shadow maps | Our own pass ([decision 0024](docs/decisions/0024-shadow-pass.md)) |
-| Done, off by default (F6) | G-buffer | Our draws, our shaders for the main surfaces and characters, identical to the game's ([decision 0026](docs/decisions/0026-gbuffer-pass.md)) |
-| In progress, off by default (F6) | Lit material pass | Our draws; our shaders for most surfaces, identical to the game's |
-| Planned | Post-processing, UI | The game's |
+| Done, off by default (panel: SHADOW PASS) | Shadow maps | Our own pass ([decision 0024](docs/decisions/0024-shadow-pass.md)) |
+| Done, off by default (panel: G-BUFFER) | G-buffer | Our draws, our shaders for the main surfaces and characters, identical to the game's ([decision 0026](docs/decisions/0026-gbuffer-pass.md)) |
+| In progress (`YW4_TAKEOVER=1`) | Lit material pass | With the takeover, 85-93% of the G-buffer's and the lit pass's draws are made from the game's data by us, skipping the engine's own draw setup ([decision 0030](docs/decisions/0030-takeover.md)) |
+| Partly ours | Post-processing | The game's, with our anti-aliasing between the 3D scene and the UI |
+| Planned | UI | The game's |
 
-Still the game's everywhere: the choice of what to draw, textures and character bones.
+Still the game's: the choice of what to draw (which objects, in which order) and the engine's own draw walk.
 
 ## Current Graphical Improvements
 
 Improvements over the original game. Details, comparisons and measurements: [docs/graphics.md](docs/graphics.md).
 
-Press **F1** in game for the settings panel: every option with all its choices, and what each one does.
+Press **F1** in game for the settings panel: every option with all its choices, and what each one does (arrow
+keys to choose and change). Settings are only in the panel; the other function keys are debugging tools
+([docs/debugging.md](docs/debugging.md)).
 
 ![The settings panel](docs/screenshots/22-settings-panel.png)
 
-| Option | Key | What it does |
-|---|---|---|
-| Settings panel | F1 | All the options below in one list; arrow keys to choose and change |
-| 3D view | F4 | 1600×900 (the game's), 1920×1080, 2560×1440 or 3840×2160; the UI is drawn at the same size |
-| Texture filtering | F2 | The game's, or anisotropic ×2 to ×16: distant and slanted ground, roads and walls stay sharp. Default ×16 |
-| Effects resolution | panel | Half (the game's) or full: the shadow mask, lamp lights and ambient occlusion at the 3D view's size, for sharper shadow edges. Costs ~2 ms of GPU at 1600×900 |
-| Anti-aliasing | panel | Off, FXAA or SMAA, applied to the 3D scene before the UI is drawn, so edges are smoothed and text stays sharp |
-| Distance blur | panel | The game's, half or off: the game blurs everything far away. Default half |
-| Shadow map size | F8 | 1024 (the game's), 2048 or 4096: sharper shadow edges. Recommended: 4096 |
-| PCSS (soft shadows) | F7 | Off, ×1, ×2, ×4. Recommended: ×2 |
-| Native shadow pass | F9 | Our own renderer draws the shadow casters from the game's data; slightly faster than the game's |
-| Performance HUD | F3 | Frame time, CPU and GPU cost and memory, in the window's corner |
+| Setting | What it does |
+|---|---|
+| 3D view | 1600×900 (the game's), 1920×1080, 2560×1440 or 3840×2160; the UI is drawn at the same size |
+| Anti-aliasing | Off (default), FXAA or SMAA, applied to the 3D scene before the UI is drawn, so edges are smoothed and text stays sharp |
+| Texture filtering | The game's, or anisotropic ×2 to ×16: distant and slanted ground, roads and walls stay sharp. Default ×16 |
+| Distance blur | The game's, half or off: the game blurs everything far away. Default half |
+| Effects resolution | Half (the game's) or full: the shadow mask, lamp lights and ambient occlusion at the 3D view's size, for sharper shadow edges. Costs ~2 ms of GPU at 1600×900 |
+| Shadow map | 1024 (the game's), 2048 or 4096: sharper shadow edges. Default 4096 |
+| Soft shadows (PCSS) | Off, ×1, ×2, ×4. Default ×2 |
+| Shadow pass | The game's or our custom renderer draws the shadow casters; the same picture, ours slightly faster |
+| G-buffer | The game's or our custom renderer draws the world's surfaces; the same picture |
+
+F3 shows a performance HUD in the window's corner: frame time, CPU and GPU cost and memory.
 
 **Shadow map size**: a bigger shadow map gives sharper, more detailed shadow edges, most visibly on shadows far from
 the camera. The bamboo forest, PCSS off:
@@ -145,8 +149,9 @@ the camera. The bamboo forest, PCSS off:
 |---|---|
 | ![PCSS off: hard, speckled leaf shadows](docs/screenshots/16-pcss-off.jpg) | ![PCSS x2](docs/screenshots/18-pcss-x2.jpg) |
 
-The game starts with the recommended 4096 map, PCSS ×2, ×16 texture filtering and half distance blur, at the game's
-1600×900. For the game's original look, set all of them back to their first choice in the panel.
+The game starts at the game's 1600×900 with a 4096 shadow map, PCSS ×2, ×16 texture filtering, half distance blur,
+half-size effects and no anti-aliasing. For the game's original look, set every setting to its first choice in the
+panel.
 
 ## Screenshots
 
@@ -161,7 +166,7 @@ All captured from the recompiled build on Windows.
 
 In town with the performance HUD on (F3). The game is a native Windows program: the frame takes about 10 ms of
 work on the CPU and under one core of a 16-core laptop, against the 33 ms the game's 30 frames/s allow; the
-shadows here are our own pass with no graphical improvements applied ("CUSTOM", switched on with F9).
+shadows here are our own pass with no graphical improvements applied (SHADOW PASS: CUSTOM in the panel).
 
 <p align="center">
   <img src="docs/screenshots/11-hud-in-town.jpg" alt="In town with the performance HUD: frame time, work, GPU, CPU, memory and a frame-time graph" width="820">
@@ -213,6 +218,7 @@ Runtime options, capture keys, input replay and the frame-inspection tools are i
 | `tests/` | Tests on synthetic data (no game files) |
 | `docs/` | Setup, debugging, graphics options, progress, known issues, decision records, recon report, Eden baseline |
 | `third_party/musl/` | musl 1.1.19's math functions (MIT) |
+| `third_party/smaa/` | SMAA's shader and lookup textures (MIT) |
 | `work/`, `build/` | Generated output from your own game files (gitignored, never committed) |
 
 ## Credits
@@ -230,4 +236,4 @@ Runtime options, capture keys, input replay and the frame-inspection tools are i
 ## License
 
 [MIT](LICENSE), for the code and docs in this repository only: not the game, its files, or anything built from
-your copy of it. Third-party code keeps its own license (`third_party/musl`: MIT).
+your copy of it. Third-party code keeps its own license (`third_party/musl`, `third_party/smaa`: MIT).

@@ -82,7 +82,7 @@ static void image_make(AaImage *im, VkFormat fmt, uint32_t w, uint32_t h, VkImag
     im->w = w, im->h = h;
 }
 
-/* Freed only once the GPU is done with every submission (a size change is rare: F4, F1). */
+/* Freed only once the GPU is done with every submission (a size change is rare: the settings panel). */
 static void image_free(AaImage *im) {
     if (!im->image) return;
     vkDestroyImageView(vk.device, im->view, NULL);

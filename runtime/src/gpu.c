@@ -711,7 +711,7 @@ static GpuImage *images[IMAGE_BUCKETS];
 
 /* Shadow quality: the shadow maps (depth, 1024 x 1024, 3 layers: one per cascade; rendered by
  * the GPU only) made 2048 or 4096 instead. 4096 by default (the owner's pick, with PCSS x2);
- * YW4_SHADOW_RES=1024/2048/4096 sets it at start, F8 cycles it while playing. The size is part of the image key, so after a switch the next frame's draws and
+ * YW4_SHADOW_RES=1024/2048/4096 sets it at start, the settings panel (F1) while playing. The size is part of the image key, so after a switch the next frame's draws and
  * samples use an image of the new size (the old one is freed with other unused images). Draws
  * into it get their viewport and scissor scaled (gpu_dynamic_state); the shaders reading it
  * sample in 0..1 coordinates, with their filter spread scaled to match (gpu_draw.c). */
@@ -732,7 +732,7 @@ void gpu_shadow_res_cycle(void) {
     int r = gpu_shadow_res();
     r = r == 1024 ? 2048 : r == 2048 ? 4096 : 1024;
     __atomic_store_n(&shadow_res, r, __ATOMIC_RELEASE);
-    fprintf(stderr, "yw4: gpu: shadow maps %dx%d (F8)\n", r, r);
+    fprintf(stderr, "yw4: gpu: shadow maps %dx%d\n", r, r);
 }
 
 /* Resolution of the 3D view (docs/frame.md, "What depends on the screen size"): the game renders the
@@ -740,7 +740,7 @@ void gpu_shadow_res_cycle(void) {
  * then copies the result into the 1920x1080 window image by sampling. These targets are made
  * height / 900 times larger: 900 (the game's), 1080, 1440 or 2160. The shaders read them in 0..1
  * coordinates, so they follow; draws into them get their viewport and scissor scaled
- * (gpu_dynamic_state). YW4_RES=<height> at start, F4 cycles. */
+ * (gpu_dynamic_state). YW4_RES=<height> at start, the settings panel (F1) while playing. */
 static int res_height = -1;
 
 int gpu_res_height(void) {
@@ -758,7 +758,7 @@ void gpu_res_cycle(void) {
     int r = gpu_res_height();
     r = r == 900 ? 1080 : r == 1080 ? 1440 : r == 1440 ? 2160 : 900;
     __atomic_store_n(&res_height, r, __ATOMIC_RELEASE);
-    fprintf(stderr, "yw4: gpu: 3D view %dx%d (F4)\n", r * 16 / 9, r);
+    fprintf(stderr, "yw4: gpu: 3D view %dx%d\n", r * 16 / 9, r);
 }
 
 /* The screen-sized targets: GPU-only 2D images of one of these sizes. The window image (1920x1080)
@@ -1153,7 +1153,7 @@ static VkCompareOp compare_op(uint32_t f) {
  * surfaces drop to small, blurry levels early, in steps (2026-10-27, YW4_SAMPLER_LOG). With this on,
  * mipmapped samplers that don't compare (not the shadow maps) blend between levels and filter
  * anisotropically with up to this many taps. YW4_ANISO=0 (the game's) / 2 / 4 / 8 / 16 (the default)
- * at start, F2 cycles. */
+ * at start, the settings panel (F1) while playing. */
 static int aniso = -1;
 
 int gpu_aniso(void) {
@@ -1174,7 +1174,7 @@ void gpu_aniso_cycle(void) {
     a = a == 0 ? 2 : a == 2 ? 4 : a == 4 ? 8 : a == 8 ? 16 : 0;
     if (!vk.sampler_anisotropy) a = 0;
     __atomic_store_n(&aniso, a, __ATOMIC_RELEASE);
-    fprintf(stderr, "yw4: gpu: texture filtering %s (F2)\n", a ? (a == 2 ? "x2" : a == 4 ? "x4" : a == 8 ? "x8" : "x16")
+    fprintf(stderr, "yw4: gpu: texture filtering %s\n", a ? (a == 2 ? "x2" : a == 4 ? "x4" : a == 8 ? "x8" : "x16")
                                                                  : "the game's");
 }
 

@@ -301,7 +301,7 @@ For resolution scaling of the 3D view: what in a frame is sized from the game's 
 
 Not screen-sized and left alone: the window image (1920×1080; the last pass copies the 1600×900 image into it by
 sampling), the occlusion boxes (240×135 depth, culling only), the ambient cube (128×128), the minimap (340×304,
-516×460), the shadow maps (own setting, F8).
+516×460), the shadow maps (own setting).
 
 **Shaders: resolution-independent, nearly.** They reach the screen three ways, none tied to the size:
 

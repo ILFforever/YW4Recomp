@@ -776,22 +776,18 @@ void window_run(void (*guest)(void *), void *arg) {
             if (e.key.key == SDLK_F12) __atomic_store_n(&screenshot_requested, screenshot_burst(), __ATOMIC_RELEASE), yw4_hid_note_key("F12");
             if (e.key.key == SDLK_F11) gpu_request_trace(450), yw4_hid_note_key("F11");  /* the draws of the next frame, in the log */
             if (e.key.key == SDLK_F10) gpu_request_dump(), yw4_hid_note_key("F10");      /* shadow maps etc.: work/dump/ */
-            if (e.key.key == SDLK_F9) shadow_toggle(), yw4_hid_note_key("F9");          /* our shadow pass on/off */
             if (e.key.key == SDLK_F3) __atomic_store_n(&hud_on, hud_enabled() ? 0 : 1, __ATOMIC_RELEASE);  /* the HUD */
-            if (e.key.key == SDLK_F8) gpu_shadow_res_cycle();  /* shadow quality: 1024 / 2048 / 4096 */
-            if (e.key.key == SDLK_F4) gpu_res_cycle();  /* 3D view: 900 / 1080 / 1440 / 2160 lines */
-            if (e.key.key == SDLK_F2) gpu_aniso_cycle();  /* texture filtering: the game's / x2 .. x16 */
-            if (e.key.key == SDLK_F1) settings_toggle();  /* the settings panel */
-            if (settings_open() && !e.key.repeat) {
-                if (e.key.key == SDLK_UP) settings_action(SETTINGS_UP);
-                if (e.key.key == SDLK_DOWN) settings_action(SETTINGS_DOWN);
-                if (e.key.key == SDLK_LEFT) settings_action(SETTINGS_LEFT);
-                if (e.key.key == SDLK_RIGHT) settings_action(SETTINGS_RIGHT);
-                if (e.key.key == SDLK_ESCAPE) settings_action(SETTINGS_CLOSE);
-            }
             if (e.key.key == SDLK_F5) gpu_passes_toggle();  /* per-pass GPU timing in the log */
-            if (e.key.key == SDLK_F7) gpu_pcss_cycle();  /* PCSS (soft contact shadows): off / x1 / x2 / x4 */
-            if (e.key.key == SDLK_F6) gbuffer_toggle(), yw4_hid_note_key("F6");  /* the G-buffer: the game's programs or ours */
+            /* the settings live in the panel only (F1); its keys are recorded like the F keys, so a replay
+             * of a recording changes the same settings at the same ticks */
+            if (e.key.key == SDLK_F1) settings_toggle(), yw4_hid_note_key("F1");
+            if (settings_open() && !e.key.repeat) {
+                if (e.key.key == SDLK_UP) settings_action(SETTINGS_UP), yw4_hid_note_key("UP");
+                if (e.key.key == SDLK_DOWN) settings_action(SETTINGS_DOWN), yw4_hid_note_key("DOWN");
+                if (e.key.key == SDLK_LEFT) settings_action(SETTINGS_LEFT), yw4_hid_note_key("LEFT");
+                if (e.key.key == SDLK_RIGHT) settings_action(SETTINGS_RIGHT), yw4_hid_note_key("RIGHT");
+                if (e.key.key == SDLK_ESCAPE) settings_action(SETTINGS_CLOSE), yw4_hid_note_key("F1");
+            }
             break;
         case SDL_EVENT_WINDOW_PIXEL_SIZE_CHANGED:
             host_lock(&present_lock);

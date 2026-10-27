@@ -123,7 +123,7 @@ static VkImageViewType view_type(const char *dim, int *shadow) {
 }
 
 /* Our replacements for game programs (decision 0026): readable GLSL in runtime/shaders with the
- * translated program's interface, used in its place when the G-buffer pass is on (F6). */
+ * translated program's interface, used in its place when the G-buffer pass is on (settings panel). */
 static const struct {
     uint64_t key;
     int stage;
@@ -214,7 +214,7 @@ static Shader *load_shader(uint64_t key, int stage) {
     /* Two cbuf 8 (camera) values are in pixels of a target we may make larger (bind_stage_set scales
      * them in a copy):
      * - the shaders that sample a shadow map average 5 taps spread by a value the game sets (half a
-     *   texel of the 1024 map and up): d[31].zw in most, d[8].zw in the rest (shadow quality, F8);
+     *   texel of the 1024 map and up): d[31].zw in most, d[8].zw in the rest (shadow quality);
      * - row 32 = 1.5/1600, 1.5/900, 0.75/533, 0.75/300: tap offsets in the screen-sized targets
      *   (resolution of the 3D view, F4; docs/frame.md).
      * Found in the GLSL. */
@@ -835,7 +835,7 @@ static int needs_transfers(const GpuState *s, const Program *g) {
 
 /* Writes and binds the descriptor set of one shader stage (ns: its NVN stage number) at set `setno`.
  * 0 if the shader needs something not supported yet (storage images). */
-/* Shadow quality (gpu.c, F8): with shadow maps larger than the game's, a shader that samples one
+/* Shadow quality (gpu.c, shadow map size): with shadow maps larger than the game's, a shader that samples one
  * gets cbuf 8 from a copy whose filter spread (2 floats at pcf_float) is scaled by 1024 / size, so
  * its 5 taps stay as many texels apart as the game's and edges get sharper with the map. Copies
  * go into a host-visible ring, reused in turn (16 MiB: many frames of these draws). The game's
@@ -890,11 +890,11 @@ static int cb8_scaled_copy(uint64_t addr, VkDeviceSize range, const Shader *sh, 
 }
 
 /* Soft shadows (PCSS, yw4_shadow in recomp/shader.py): off, or on with a strength. x2 by default
- * (the owner's pick, with 4096 maps); F7 cycles it, YW4_PCSS=0..3 sets it at start. The settings go to each draw from the ring:
+ * (the owner's pick, with 4096 maps); the settings panel (F1) changes it, YW4_PCSS=0..3 sets it at start. The settings go to each draw from the ring:
  *   mode  = on, (unused), largest radius, smallest radius
  *   scale = radius per unit of depth gap for cascades 0..3 (YW4_PCSS_SCALE=a,b,c,d to try others)
  *   tune  = smallest depth gap that counts as a caster (YW4_PCSS_EPS)
- * Radii are in map coordinates (0..1), so they don't change with the map's size (F8); the smallest
+ * Radii are in map coordinates (0..1), so they don't change with the map's size; the smallest
  * is half a texel of the current map, the game's own filter spread. */
 static int pcss_level = -1;
 static float pcss_scale[4] = {0.01f, 0.005f, 0.0025f, 0.0025f}, pcss_eps, pcss_max = 6.0f / 1024.0f;
@@ -919,7 +919,7 @@ int gpu_pcss_level(void) {
 void gpu_pcss_cycle(void) {
     int l = (gpu_pcss_level() + 1) % 4;
     __atomic_store_n(&pcss_level, l, __ATOMIC_RELEASE);
-    fprintf(stderr, "yw4: gpu: PCSS %s (F7)\n", l ? (l == 1 ? "x1" : l == 2 ? "x2" : "x4") : "off");
+    fprintf(stderr, "yw4: gpu: PCSS %s\n", l ? (l == 1 ? "x1" : l == 2 ? "x2" : "x4") : "off");
 }
 
 static int pcss_settings(VkBuffer *buf, VkDeviceSize *offset) {

@@ -53,8 +53,8 @@ typedef struct GpuView GpuView;
 typedef struct {
     uint64_t addr;
     uint32_t format, target, width, height, depth, layers, levels, block_height_log2, block_depth_log2, linear;
-    /* made larger by scale_num / scale_den (0 / 0: the game's size): the shadow maps (YW4_SHADOW_RES / F8,
-     * res / 1024) and the screen-sized targets (YW4_RES / F4, height / 900) */
+    /* made larger by scale_num / scale_den (0 / 0: the game's size): the shadow maps (YW4_SHADOW_RES / panel,
+     * res / 1024) and the screen-sized targets (YW4_RES / panel, height / 900) */
     uint32_t scale_num, scale_den;
 } ImageKey;
 

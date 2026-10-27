@@ -16,16 +16,16 @@ int gpu_ready(void);
  * F10 dumps every multi-layer depth image (shadow maps) at the next present (gpu.c). */
 void gpu_request_trace(int draws);
 void gpu_request_dump(void);
-/* Shadow quality: the shadow maps' size (1024 is the game's; YW4_SHADOW_RES at start), and F8's
+/* Shadow quality: the shadow maps' size (1024 is the game's; YW4_SHADOW_RES at start), and the panel's
  * cycle 1024 -> 2048 -> 4096 -> 1024. */
 int gpu_shadow_res(void);
 void gpu_shadow_res_cycle(void);
 /* Resolution of the 3D view: the height of the game's 1600x900 targets as made (900 is the game's;
- * YW4_RES at start), and F4's cycle 900 -> 1080 -> 1440 -> 2160 -> 900. */
+ * YW4_RES at start), and the panel's cycle 900 -> 1080 -> 1440 -> 2160 -> 900. */
 int gpu_res_height(void);
 void gpu_res_cycle(void);
 /* Texture filtering: 0 the game's, else blending between mip levels and anisotropic filtering with up
- * to this many taps (16 by default; YW4_ANISO at start), and F2's cycle 0 -> 2 -> 4 -> 8 -> 16 -> 0. */
+ * to this many taps (16 by default; YW4_ANISO at start), and the panel's cycle 0 -> 2 -> 4 -> 8 -> 16 -> 0. */
 int gpu_aniso(void);
 void gpu_aniso_cycle(void);
 /* Distance blur (depth of field, gpu_draw.c): 2 the game's, 1 half, 0 off (YW4_DOF at start). */
@@ -39,7 +39,7 @@ int gpu_aa(void);
 void gpu_aa_cycle(void);
 /* F5: per-pass GPU timing on or off (gpu_passes.c) */
 void gpu_passes_toggle(void);
-/* Soft shadows (PCSS): 0 off (the game's filter), 1..3 on with stronger softening; F7 cycles. */
+/* Soft shadows (PCSS): 0 off (the game's filter), 1..3 on with stronger softening; the panel cycles. */
 int gpu_pcss_level(void);
 void gpu_pcss_cycle(void);
 

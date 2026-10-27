@@ -21,7 +21,9 @@ and keys are in [docs/debugging.md](../../docs/debugging.md). Nothing here conta
 - `work/testsaves/save_base_*`: saves to start from (copied to `save_run` before each run, because the game
   autosaves). The owner's: `save_base_walk` (town), `save_base_lategame` (bamboo forest, late game),
   `save_base_forest` (a forest cutscene), `save_school` (the schoolyard, daytime, a running NPC).
-- A replay file can press keys: a line `k <tick> F6` (F6, F9-F12) at that replay tick (60 per second).
+- A replay file can press keys: a line `k <tick> F1` at that replay tick (60 per second): F1 and `UP` `DOWN` `LEFT`
+  `RIGHT` work the settings panel (recordings capture them), F10-F12 the capture tools, and F6 / F9 still switch the
+  G-buffer / shadow pass (no longer keys in the window).
 
 ## Methods that worked
 

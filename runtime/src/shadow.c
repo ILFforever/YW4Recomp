@@ -370,7 +370,7 @@ static struct { uint64_t addr; uint32_t layer; int known; } cascade_target[3];
 /* Statistics since the last report */
 static long layers_seen, missing_total, extra_total, ours_total, drawn_total;
 static long draws_replaced, draws_native;
-static long draws_since_toggle;  /* submeshes drawn by our pass since the last F9 */
+static long draws_since_toggle;  /* submeshes drawn by our pass since the last switch */
 static long compared, wrong_vb, wrong_ib, wrong_mvp;  /* the game's static and instanced draws vs ours */
 static long compared_inst, wrong_inst, pending_checked, pending_wrong;  /* of those, instanced; instance buffer or count different */
 static long copies_culled;  /* copies the game drew that our culling drops */
@@ -1005,7 +1005,7 @@ static void end_layer(Layer *k, const CPUState *ctx) {
     k->pass = NULL;
 }
 
-/* ---- the mode: YW4_SHADOWS at start, F9 (window.c, or a replay's "k <tick> F9") switches
+/* ---- the mode: YW4_SHADOWS at start, the settings panel (or a replay's "k <tick> F9") switches
  * between the game's shadows and ours while the game runs */
 
 static void init_mode(void) {
@@ -1070,7 +1070,7 @@ int yw4_hook_model_renderer(CPUState *ctx) {
     /* A cascade's job list can draw more than one shadow layer (cutscenes: two per cascade) before
      * the cascade-end job: the next layer of the same cascade ends the previous one, which queues its
      * pass here, still inside the cascade's target. Anything else: not ended by its job, no pass.
-     * Before the mode check: after F9 to the game's shadows the next layer's draws must not be
+     * Before the mode check: after switching to the game's shadows the next layer's draws must not be
      * taken for the open one's. */
     if (lay && lay->active) {
         uint64_t v = U64(ctx->x[0] + 0x2780);

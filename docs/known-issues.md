@@ -5,7 +5,7 @@ What is known to be missing or wrong, roughly in the order it is likely to matte
 
 ## Graphics
 
-- **PCSS (F7) only reaches what the shadow mask covers.** It is in the game's screen-space shadow mask shader, which
+- **PCSS (soft shadows) only reaches what the shadow mask covers.** It is in the game's screen-space shadow mask shader, which
   shadows everything drawn into the G-buffer. Objects the game draws forward (6 other shadow shaders seen so far) keep
   the game's filter. Its strengths are tuned by eye in the town and the bamboo forest only.
 - **To do: contact shadows.** Small gaps where things touch the ground (shoes, bench legs, props against walls)
@@ -26,7 +26,7 @@ What is known to be missing or wrong, roughly in the order it is likely to matte
   pipeline cache. The Vulkan validation layer reports barriers recorded inside dynamic rendering.
 - **Frame rate drops to about 25 frames/s on the bridge in the snowy past-world town** (late game; only on that
   bridge). The GPU is the limit: about 40 ms of GPU work per frame against the 33 ms budget, with about 1,450 draws
-  (the town is about 300); the game's own CPU work is about 17 ms. Not the shadow pass (no change with F9). Which
+  (the town is about 300); the game's own CPU work is about 17 ms. Not the shadow pass (no change when switching it). Which
   pass is heavy is not measured yet: needs per-pass GPU timing.
 
 ## Game and system

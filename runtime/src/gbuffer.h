@@ -18,7 +18,7 @@ void gbuffer_disarm(void);
  * hook, 3 rows of 4): 1 if found. The shadow pass's too. */
 int gbuffer_hook_world(const CPUState *ctx, float out[12]);
 /* YW4_GBUFFER=native (our draws and programs) or =programs (our programs in the game's draws,
- * step 2a): gpu_draw.c asks per draw whether our programs replace the game's. F6 switches
+ * step 2a): gpu_draw.c asks per draw whether our programs replace the game's. The settings panel switches
  * between native and the game's. */
 int gbuffer_native(void);
 int gbuffer_native_frame(uint64_t gpu_frame);  /* the same, with YW4_GBUFFER_ALTERNATE applied */
