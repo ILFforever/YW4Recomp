@@ -111,8 +111,11 @@ Still the game's: the choice of what to draw (which objects, in which order) and
 
 Improvements over the original game. Details, comparisons and measurements: [docs/graphics.md](docs/graphics.md).
 
-**Aspect ratio**: 21:9, the schoolyard. The world goes on at the sides; the minimap and button hints stay where
-they are on the Switch.
+<details>
+<summary><b>Aspect ratio</b>: 16:10, 21:9 and 32:9, the UI kept 16:9 in the middle</summary>
+
+16:9 (the Switch's), 16:10, 21:9 and 32:9. Below, 21:9 in the schoolyard: the world goes on at
+the sides; the minimap and button hints stay where they are on the Switch.
 
 ![21:9 ultrawide: a wider schoolyard with the UI in the middle](docs/screenshots/23-ultrawide-21-9.jpg)
 
@@ -128,14 +131,24 @@ Still to fix: screen-wide layers drawn with the UI (the dimming behind a dialog,
 only the middle 16:9 ([known issues](docs/known-issues.md)). At 4K ultrawide there are occasional stutters in heavy scenes; more
 optimization is planned.
 
-**Shadow map size**: a bigger shadow map gives sharper, more detailed shadow edges, most visibly on shadows far from
+</details>
+
+<details>
+<summary><b>Shadow map size</b>: up to 4096, for sharper shadow edges</summary>
+
+A bigger shadow map gives sharper, more detailed shadow edges, most visibly on shadows far from
 the camera. The bamboo forest, PCSS off:
 
 | 1024 (the game's) | 2048 | 4096 (recommended) |
 |---|---|---|
 | ![1024 shadow map](docs/screenshots/12-shadow-map-1024.jpg) | ![2048 shadow map](docs/screenshots/13-shadow-map-2048.jpg) | ![4096 shadow map](docs/screenshots/14-shadow-map-4096.jpg) |
 
-**PCSS** (percentage-closer soft shadows) makes shadows behave more like real ones:
+</details>
+
+<details>
+<summary><b>Soft shadows (PCSS)</b>: sharp where a shadow touches its caster, softer farther away</summary>
+
+PCSS (percentage-closer soft shadows) makes shadows behave more like real ones:
 
 - **Close shadows stay sharp**: where a shadow touches its caster (feet, poles, the base of a wall).
 - **Farther shadows get softer**: the farther the caster is from the ground, the softer the edge, so tree canopies
@@ -146,6 +159,54 @@ the camera. The bamboo forest, PCSS off:
 | PCSS off | PCSS ×2 (recommended) |
 |---|---|
 | ![PCSS off: hard, speckled leaf shadows](docs/screenshots/16-pcss-off.jpg) | ![PCSS x2](docs/screenshots/18-pcss-x2.jpg) |
+
+</details>
+
+<details>
+<summary><b>Anti-aliasing</b>: FXAA, SMAA and TAA, with the UI kept sharp</summary>
+
+The Switch version has none. Three kinds are in, all applied to the 3D scene before the UI is
+drawn, so text and menus stay sharp:
+
+- **FXAA**: fast, smooths jagged edges in one frame.
+- **SMAA**: sharper edge smoothing than FXAA, also one frame at a time.
+- **TAA**: also fixes shimmer. Thin things (fences, the goal net, wires, leaves) fall between pixels differently
+  every frame, so they crawl while the camera moves. TAA shifts the 3D scene by a fraction of a pixel each frame and
+  blends the frames together, using the motion the game already writes for every pixel. In the schoolyard the goal
+  net breaks into dots and dashes without AA; with TAA it is a continuous mesh. A light sharpen keeps textures crisp
+  ([decision 0032](docs/decisions/0032-taa.md)).
+
+Yo-kai World with TAA, 21:9 at 4K height (5120×2160):
+
+![Yo-kai World street with TAA](docs/screenshots/29-aa-taa-yokai-world.jpg)
+
+The same frame zoomed in 3×: the red railing, the fence by the lamp post and the road line.
+
+| Off | SMAA | TAA |
+|---|---|---|
+| ![Railing, no AA: stair-stepped edges](docs/screenshots/30-aa-rail-off.png) | ![Railing, SMAA](docs/screenshots/31-aa-rail-smaa.png) | ![Railing, TAA: smooth edges](docs/screenshots/32-aa-rail-taa.png) |
+| ![Fence, no AA: sparkling bars](docs/screenshots/33-aa-fence-off.png) | ![Fence, SMAA](docs/screenshots/34-aa-fence-smaa.png) | ![Fence, TAA: steady bars](docs/screenshots/35-aa-fence-taa.png) |
+| ![Road line, no AA](docs/screenshots/36-aa-road-off.png) | ![Road line, SMAA](docs/screenshots/37-aa-road-smaa.png) | ![Road line, TAA](docs/screenshots/38-aa-road-taa.png) |
+
+</details>
+
+<details>
+<summary><b>Texture filtering</b>: anisotropic up to ×16, sharp ground into the distance</summary>
+
+The Switch version uses none, so the ground blurs a short way ahead of the camera. Anisotropic
+filtering keeps the road, pavement and walls sharp into the distance, even at a low angle. Yo-kai World with ×16:
+
+![Yo-kai World street with ×16 texture filtering](docs/screenshots/39-filtering-x16-yokai-world.jpg)
+
+The same spot zoomed in 2×: the crosswalk far ahead, the pavement on the right and the road surface.
+
+| Off (the Switch's) | ×2 | ×4 | ×8 | ×16 |
+|---|---|---|---|---|
+| ![Crosswalk, off: faded, blurred stripes](docs/screenshots/40-filtering-crosswalk-off.png) | ![Crosswalk, x2](docs/screenshots/41-filtering-crosswalk-x2.png) | ![Crosswalk, x4](docs/screenshots/42-filtering-crosswalk-x4.png) | ![Crosswalk, x8](docs/screenshots/43-filtering-crosswalk-x8.png) | ![Crosswalk, x16: crisp white stripes](docs/screenshots/44-filtering-crosswalk-x16.png) |
+| ![Pavement, off: smooth blur](docs/screenshots/45-filtering-pavement-off.png) | ![Pavement, x2](docs/screenshots/46-filtering-pavement-x2.png) | ![Pavement, x4](docs/screenshots/47-filtering-pavement-x4.png) | ![Pavement, x8](docs/screenshots/48-filtering-pavement-x8.png) | ![Pavement, x16: brick pattern visible](docs/screenshots/49-filtering-pavement-x16.png) |
+| ![Road, off: smeared](docs/screenshots/50-filtering-road-off.png) | ![Road, x2](docs/screenshots/51-filtering-road-x2.png) | ![Road, x4](docs/screenshots/52-filtering-road-x4.png) | ![Road, x8](docs/screenshots/53-filtering-road-x8.png) | ![Road, x16: grainy asphalt](docs/screenshots/54-filtering-road-x16.png) |
+
+</details>
 
 Press **F1** in game for the settings panel: every option with all its choices, and what each one does (arrow keys or
 D-pad to choose and change). **F2** opens the **CONTROLS** page: two keys and one gamepad button for every Switch
