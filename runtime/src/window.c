@@ -685,8 +685,8 @@ static void update_input(void) {
     host_unlock(&input_lock);
 }
 
-/* The settings panel from the gamepad: the mic button (Share on Xbox pads), or Minus and Plus together, opens
- * and closes it (not Home / PS: Steam takes that one and opens Big Picture); the D-pad or the left stick choose (up/down) and change (left/right); B closes;
+/* The settings panel from the gamepad: the mic button (Share on Xbox pads) as F1, the settings; Minus and Plus
+ * together (Create + Options) as F2, the controls (not Home / PS: Steam takes that one and opens Big Picture); the D-pad or the left stick choose (up/down) and change (left/right); B closes;
  * on the controls page A changes a binding and X clears it (A, B, X as named on the controller); the shoulder
  * buttons and the triggers switch pages. The touchpad shows or hides the performance HUD (F3). Named like the
  * keys, so recordings and replays see the same presses. While the controls wait for an input, the press goes
@@ -702,9 +702,12 @@ static void panel_pad_button(SDL_GamepadButton button) {
         __atomic_store_n(&hud_on, hud_enabled() ? 0 : 1, __ATOMIC_RELEASE);
         return;
     }
-    if (button == SDL_GAMEPAD_BUTTON_MISC1 ||
-        (both && (button == SDL_GAMEPAD_BUTTON_BACK || button == SDL_GAMEPAD_BUTTON_START))) {
-        settings_toggle(), yw4_hid_note_key("F1");
+    if (button == SDL_GAMEPAD_BUTTON_MISC1) {  /* as F1: the settings */
+        settings_show(0), yw4_hid_note_key("F1");
+        return;
+    }
+    if (both && (button == SDL_GAMEPAD_BUTTON_BACK || button == SDL_GAMEPAD_BUTTON_START)) {  /* as F2: the controls */
+        settings_show(1), yw4_hid_note_key("F2");
         return;
     }
     if (!settings_open() || bindings_capture_button(button)) return;
