@@ -21,6 +21,8 @@ in the project); the image is loaded at yw4_image_base.
 
 from __future__ import annotations
 
+import os
+import re
 import struct
 from dataclasses import dataclass, field
 
@@ -363,6 +365,78 @@ def label(off: int) -> str:
 @dataclass
 class EmitStats:
     unimplemented: dict[str, int] = field(default_factory=dict)  # coverage subgroup -> count
+    cached: int = 0      # functions whose registers live in locals (cache_registers)
+    not_cached: int = 0  # ... and those that keep them in the CPUState
+
+
+# Register caching (decision 0035). Every guest register a function uses becomes a local
+# variable, loaded from the CPUState once at the entry; the CPUState is brought up to date
+# before anything else can look at it (a call, a tail call, a return, the kernel) and the
+# locals are reloaded after a call returns. Within the function the host compiler can then
+# keep guest registers in host registers instead of loading and storing them for every
+# instruction (550 ARM instructions of main+0xa77390 were ~12,800 x86 ones before).
+# Off (decision 0035): measured slower (main thread 9.3-9.8 ms against 8.0 ms per frame: the write-back
+# and reload around every call cost more than the locals save) and it hung the game at start-up in 2 of
+# 6 runs (threads waiting on each other, two running: most likely a wait loop whose memory read the
+# compiler moved out of the loop once nothing else in the loop touched memory). YW4_CACHE_REGISTERS=1
+# turns it on for experiments; it would need a compiler barrier at every loop's back edge first.
+CACHE_REGISTERS = os.environ.get("YW4_CACHE_REGISTERS", "0") == "1"
+REG_REF = re.compile(r"ctx->(x\[(\d+)\]|v\[(\d+)\]|sp\b|nzcv\b)")
+CALL = re.compile(r"\b([fs]_[0-9a-f]+)\(ctx\);")
+# runtime functions that take the CPUState and may read or write registers; their statement is
+# wrapped whole (they are alone in it, and never assign a register after the call)
+KERNEL = re.compile(r"^yw4_(svc|msr_fpcr|guest_trap|unimplemented)\(ctx, [^;]*\);$")
+# what may still mention ctx once the rest is handled: fields that stay in the CPUState
+OTHER_CTX = re.compile(r"ctx->(excl_size|excl_val|excl_addr|tpidrro_el0|tpidr_el0|fpcr|fpsr)\b")
+
+
+def local_name(ref: re.Match) -> str:
+    kind = ref.group(1)
+    if ref.group(2) is not None:
+        return f"rx{ref.group(2)}"
+    if ref.group(3) is not None:
+        return f"rv{ref.group(3)}"
+    return f"r{kind}"
+
+
+def cache_registers(stmts: list[str]) -> tuple[list[str], list[str]] | None:
+    """The statements with registers in locals, and the declarations to put at the entry;
+    None if a statement passes the CPUState somewhere this doesn't know (left uncached)."""
+    used: dict[str, str] = {}  # local -> its CPUState field
+    for s in stmts:
+        for ref in REG_REF.finditer(s):
+            used[local_name(ref)] = ref.group(0)
+    if not used:
+        return [], stmts
+    # Written back: registers the function assigns (whole, a lane, compound) or takes the address
+    # of. A register it only reads still has its value in the CPUState.
+    renamed = "\n".join(REG_REF.sub(local_name, s) for s in stmts)
+    written = {n for n in used
+               if re.search(rf"\b{n}(?:\.\w+\[[^\]]*\])?\s*(?:[-+*/%&|^]|<<|>>)?=(?!=)|[(,=]\s*&\s*{n}\b|\b{n}\s*(?:\+\+|--)", renamed)}
+    order = sorted(used, key=lambda n: (n[1], int(n[2:]) if n[2:].isdigit() else -1, n))
+    flush = " ".join(f"{used[n]} = {n};" for n in order if n in written)
+    reload = " ".join(f"{n} = {used[n]};" for n in order)
+    out = []
+    for s in stmts:
+        t = REG_REF.sub(local_name, s)
+        if KERNEL.match(t):
+            out.append(f"{{ {flush} {t} {reload} }}")
+            continue
+        t = CALL.sub(lambda m: f"{{ {flush} {m.group(1)}(ctx); {reload} }}", t)
+        t = t.replace("c_->fn(ctx);", f"{flush} c_->fn(ctx); {reload}")
+        t = re.sub(r"\b(TAILCALL|TAILCALL_INDIRECT)\(", lambda m: f"{{ {flush} }} {m.group(1)}(", t)
+        if t == "return;":
+            t = f"{{ {flush} return; }}"
+        # anything else that still hands over the CPUState: leave this function as it was
+        rest = t.replace(flush, "").replace(reload, "")
+        rest = OTHER_CTX.sub("", rest)
+        for done in ("(ctx);", "c_->fn(ctx)"):
+            rest = rest.replace(done, "")
+        if re.search(r"\bctx\b", rest) or re.search(r"\breturn\b", rest.replace("{  return; }", "")):
+            return None
+        out.append(t)
+    decls = [f"uint64_t {n} = {used[n]};" if n[1] != "v" else f"v128 {n} = {used[n]};" for n in order]
+    return decls, out
 
 
 def emit_function(code: Code, fn: Function, entries: set[int], subgroup=None,
@@ -457,6 +531,17 @@ def emit_function(code: Code, fn: Function, entries: set[int], subgroup=None,
     if hook:
         out.insert(0, f"int {hook}(CPUState *ctx);  /* hook (recomp/overrides.toml) */")
         out.append(f"    if ({hook}(ctx)) return;")
+    # registers in locals (decision 0035); not with setjmp (a longjmp back would find stale locals)
+    cached = None if njb or not CACHE_REGISTERS else cache_registers([s for _, s in lines])
+    if cached is not None:
+        decls, stmts = cached
+        out += [f"    {d}" for d in decls]
+        lines = [(off, s) for (off, _), s in zip(lines, stmts)]
+    if stats is not None:
+        if cached is not None:
+            stats.cached += 1
+        else:
+            stats.not_cached += 1
     # Blocks are emitted in address order, and a function may own code below its entry
     # (a block it only jumps back to, e.g. main+0xa7d8b4 in main+0xa7d8bc): start at the entry.
     if order and order[0] != fn.entry:

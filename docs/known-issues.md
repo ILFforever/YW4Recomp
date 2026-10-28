@@ -10,6 +10,14 @@ What is known to be missing or wrong, roughly in the order it is likely to matte
   percentile (budget 33.3), 419 of 27,382 frames over 50 ms; school save GPU 18.2 / 27.6 ms, 134 of 5,620 over
   50 ms. Two sources: the GPU near its limit in heavy scenes, and rare long spikes in the game's own CPU work (up to
   ~400 ms). Not yet split by pass (F5 per-pass GPU timing) or by cause of the CPU spikes.
+  **Battles, 16:9 against 21:9** (owner, 2026-10-28, late-game save, 4K, TAA, full-size effects, one session each,
+  not the same moments): slow frames (over 40 ms) 3.1% → 6.9%; most are the game's CPU work, not the GPU (GPU busy
+  over 30 ms in 5 → 62 of them). The game's own code on the main thread 5.9 → 9.0 ms per frame on average; its two
+  hottest functions, the skeleton animation math `f_a79c00` and `f_a77390`, about doubled (a wider view animates
+  more characters). GPU in battle 14.2 → 20.7 ms per frame; most of the extra in two 300-frame windows where the
+  bloom composite's pass (with ~12 more draws, maybe a special move's effects) took 7–11 ms against ~2 ms
+  otherwise; not traced yet. A 1.8 s freeze seen once at a battle's start did not come back (no shader builds
+  logged then).
 - **PCSS (soft shadows) only reaches what the shadow mask covers.** It is in the game's screen-space shadow mask shader, which
   shadows everything drawn into the G-buffer. Objects the game draws forward (6 other shadow shaders seen so far) keep
   the game's filter. Its strengths are tuned by eye in the town and the bamboo forest only.

@@ -26,6 +26,19 @@ from . import check, function, golden
 SRC = check.REPO / "tests" / "functest"
 PI_DIR, INCLUDE = check.PI_DIR, check.INCLUDE
 DISPATCH = check.REPO / "runtime" / "src" / "dispatch.c"
+# What dispatch.c uses from the rest of the runtime (locks, crash reports, watchpoints); the
+# test functions never get there, so stand-ins do (single-threaded, no watchpoints).
+STUBS = r"""
+#include <stdint.h>
+#include <stdlib.h>
+void host_lock(void *l) { (void)l; }
+void host_unlock(void *l) { (void)l; }
+int host_readable(uint64_t addr, uint64_t size) { (void)addr; (void)size; return 1; }
+int yw4_call_stack(const void *ctx, uint64_t *out, int n) { (void)ctx; (void)out; (void)n; return 0; }
+void yw4_setjmp_resume(uint64_t target) { (void)target; abort(); }
+_Noreturn void yw4_stop(void) { abort(); }
+int yw4_write_watch_arm(uint64_t addr, uint64_t size) { (void)addr; (void)size; return -1; }
+"""
 REMOTE_DIR = "yw4-functest"
 
 CFLAGS = ("-O2 -mcpu=cortex-a57 -mgeneral-regs-only -fno-jump-tables -ffreestanding -fno-builtin "
@@ -172,11 +185,13 @@ def main(argv: list[str] | None = None) -> int:
 
     src, with_tables = translate(image, syms)
     with tempfile.TemporaryDirectory() as t:
-        c, exe = Path(t) / "functest.c", Path(t) / "functest.exe"
+        c, exe, stubs = Path(t) / "functest.c", Path(t) / "functest.exe", Path(t) / "stubs.c"
         c.write_text(src)
+        stubs.write_text(STUBS)
         cc = check.host_cc()
-        build = subprocess.run([cc, "-std=c11", args.opt, "-Wall", "-Wno-unused-label", f"-I{INCLUDE}",
-                                f"-I{PI_DIR}", "-o", str(exe), str(c), str(DISPATCH)],
+        build = subprocess.run([cc, "-std=c11", args.opt, *check.target_flags(), "-ffp-contract=off", "-Wall",
+                                "-Wno-unused-label", f"-I{INCLUDE}", f"-I{PI_DIR}", "-o", str(exe), str(c),
+                                str(DISPATCH), str(stubs)],
                                capture_output=True, text=True)
         if build.returncode != 0:
             print(f"host compile failed:\n{build.stderr[-3000:]}", file=sys.stderr)

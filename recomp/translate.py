@@ -279,6 +279,7 @@ def translate(cfg: config.Config, m: Module, overrides: dict[int, str], entries:
         print(f"    {n:10,}  {g}")
     print(f"BR: {dict(brs)}")
     print(f"overridden by native code: {len(overrides)}; hooked: {len(hooks)}; setjmp functions: {len(setjmps)}")
+    print(f"registers in locals: {stats.cached:,} functions; in the CPUState: {stats.not_cached:,} (decision 0035)")
     print(f"flow problems: {len(problems)}")
     for p in problems[:10]:
         print(f"    {p}")

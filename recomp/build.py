@@ -27,6 +27,7 @@ from . import check
 
 RUNTIME = check.REPO / "runtime"
 CFLAGS = ["-std=c11", "-O2", "-ffp-contract=off", "-Wall", "-Wno-unused-label"]
+target_flags = check.target_flags  # the host CPU (decision 0034); musl keeps its verified flags
 
 # musl 1.1.19's math (third_party/musl, decision 0013). These are the flags its results were
 # verified with against the sdk (tools/yw4/sdkref.py --check uses this same list): no FMA
@@ -62,7 +63,7 @@ def generated_header(cfg: config.Config, src: Path) -> float:
 
 
 def compile_one(cc: str, src: Path, obj: Path, includes: list[str]) -> str | None:
-    flags = MUSL_CFLAGS if MUSL in src.parents else [*CFLAGS, *includes]
+    flags = MUSL_CFLAGS if MUSL in src.parents else [*CFLAGS, *target_flags(), *includes]
     proc = subprocess.run([cc, *flags, "-c", str(src), "-o", str(obj)], capture_output=True, text=True)
     if proc.returncode != 0:
         return f"{src.name}:\n{proc.stderr[-2000:]}"
@@ -130,6 +131,10 @@ def main(argv: list[str] | None = None) -> int:
     # runtime/src/*.h are private to the runtime: changing one doesn't rebuild generated code
     rt_hdr = max([hdr, *(h.stat().st_mtime for h in (RUNTIME / "src").glob("*.h"))])
     musl_hdr = max(h.stat().st_mtime for h in MUSL.rglob("*.h"))
+    # other compiler flags than the objects were built with (another YW4_MARCH): everything but musl again
+    stamp = objdir / "flags.txt"
+    flags_now = " ".join([*CFLAGS, *target_flags()])
+    stale_flags = not stamp.exists() or stamp.read_text().strip() != flags_now
     todo, objs = [], []
     for src in sources(cfg):
         rt = src.parent == RUNTIME / "src"
@@ -137,7 +142,7 @@ def main(argv: list[str] | None = None) -> int:
         obj = objdir / (("rt_" if rt else "musl_" if musl else "") + src.stem + ".o")
         objs.append(obj)
         dep = musl_hdr if musl else rt_hdr if rt else generated_header(cfg, src)
-        if not obj.exists() or obj.stat().st_mtime < max(src.stat().st_mtime, dep):
+        if not obj.exists() or obj.stat().st_mtime < max(src.stat().st_mtime, dep) or (stale_flags and not musl):
             todo.append((src, obj))
 
     t0 = time.time()
@@ -148,6 +153,7 @@ def main(argv: list[str] | None = None) -> int:
         print("\n".join(errors), file=sys.stderr)
         print(f"{len(errors)} file(s) failed", file=sys.stderr)
         return 1
+    stamp.write_text(flags_now + "\n")
     exe = cfg.work_dir / "build" / "yw4.exe"
     libs = [*sdl_libs, "-pthread"] + (["-lwinmm", "-lpsapi"] if sys.platform == "win32" else [])  # winmm: timeBeginPeriod
     if sys.platform == "win32":

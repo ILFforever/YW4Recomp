@@ -33,6 +33,15 @@ INCLUDE = REPO / "runtime" / "include"
 PI_DIR = REPO / "recomp" / "pi"
 GOLDEN = REPO / "tests" / "golden"
 
+
+def target_flags() -> list[str]:
+    """The host CPU the game code and runtime are compiled for, and these checks with them (decision
+    0034): the 2003 baseline x86-64 (every PC) unless YW4_MARCH names another (x86-64-v3 = AVX2, Intel
+    since 2013, AMD since 2015; native = this PC only). v3 alone measured no gain (2026-10-28). Results
+    are the same on any of them: -ffp-contract=off keeps every multiply and add separate, and nothing
+    reorders floating point."""
+    return [f"-march={os.environ.get('YW4_MARCH', 'x86-64')}"]
+
 PROGRAM = r"""
 #include "yw4cpu.h"
 #include "testcase.h"
@@ -196,7 +205,7 @@ def main(argv: list[str] | None = None) -> int:
         print(f"no golden files in {GOLDEN}; run python -m recomp.golden first", file=sys.stderr)
         return 1
 
-    flags = [args.opt] + (["-fsanitize=undefined", "-fsanitize-undefined-trap-on-error"] if args.ubsan else [])
+    flags = [args.opt, *target_flags()] + (["-fsanitize=undefined", "-fsanitize-undefined-trap-on-error"] if args.ubsan else [])
     failed = 0
     with tempfile.TemporaryDirectory() as t:
         for name in names:
