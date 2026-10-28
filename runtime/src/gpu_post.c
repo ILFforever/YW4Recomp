@@ -369,6 +369,7 @@ void gpu_bloom_pass(void *vk_cb, void *gpu_state, const void *data, uint32_t siz
     float push[PUSH / 4];
     memset(push, 0, sizeof push);
     memcpy(push, p.bright, sizeof p.bright);
+    gpu_passes_other(cb, "our bloom: bright pass and blur", 0);  /* the per-pass timer (F5) */
     VkImageView in[3] = {rd[BLOOM_IN_SCENE], rd[BLOOM_IN_HALF]};
     pass(cb, P_BRIGHT, &dst[BLOOM_BRIGHT], in, 2, NULL, push);
     static const float weights[4] = {0.15021657943725586f, 0.13866737484931946f, 0.1181645467877388f,
@@ -390,7 +391,9 @@ void gpu_bloom_pass(void *vk_cb, void *gpu_state, const void *data, uint32_t siz
     memset(push, 0, sizeof push);
     memcpy(push, p.composite, sizeof p.composite);
     VkImageView lv[3] = {rd[BLOOM_L0], rd[BLOOM_L1], rd[BLOOM_L2]};
+    gpu_passes_other(cb, "our bloom: composite", 0);
     pass(cb, P_COMPOSITE, &scene, lv, 3, NULL, push);
+    gpu_passes_targets(cb, s);  /* what follows is the game's again */
     gpu_dynamic_forget();  /* our pipelines set viewport and scissor: the game's next draw sets its own again */
     if (p.check) {
         bloom_chk.open = 1, bloom_chk.frame = gpu_frames();
@@ -454,6 +457,7 @@ void gpu_dof_pass(void *vk_cb, void *gpu_state, const void *data, uint32_t size)
     full_barrier(cb);
     float push[PUSH / 4];
     memset(push, 0, sizeof push);
+    gpu_passes_other(cb, "our distance blur: shrink and blur", 0);
     VkImageView in[2] = {rd[DOF_SCENE]};
     pass(cb, P_DOF_COPY, &dst[DOF_A], in, 1, NULL, push);
     memcpy(push + 12, p.weights, sizeof p.weights);
@@ -474,8 +478,10 @@ void gpu_dof_pass(void *vk_cb, void *gpu_state, const void *data, uint32_t size)
         push[20] = 2.0f, push[21] = camera_far(s, p.far);
         VkImageView cv[2] = {rd[DOF_A], rd[DOF_DEPTH]};
         const NvnSamplerDesc *samp[2] = {&color_sampler, &depth_sampler};
+        gpu_passes_other(cb, "our distance blur: composite", 0);
         pass(cb, P_DOF_COMPOSITE, &dst[DOF_SCENE], cv, 2, samp, push);
     }
+    gpu_passes_targets(cb, s);
     gpu_dynamic_forget();
     if (p.check) {
         dof_chk.open = 1, dof_chk.frame = gpu_frames();
