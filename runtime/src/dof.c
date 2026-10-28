@@ -149,9 +149,12 @@ int yw4_hook_dof(CPUState *ctx) {
  * down attachment w4, across attachment w5, record a x6, record b x7). Per round it blurs record a across into
  * the target's attachment w5 (record b) and record b down into attachment w4 (record a), with the weights of
  * gauss_weights and the spread over the target's size. Its callers: the distance blur above (whose own pass draws
- * these rounds when it is ours), the effects pass main+0x7f1bf0 (battles: up to 12 rounds of records 12 and 11)
- * and main+0x804570, main+0x80a0a0. YW4_BLUR_PASS=native: ours; check: ours into copies, then the game's, compared
- * (gpu_post.c); default: the game's. */
+ * these rounds when it is ours), main+0x7f1bf0, main+0x804570, main+0x80a0a0. YW4_BLUR_PASS=native: ours; check:
+ * ours into copies, then the game's, compared (gpu_post.c); default: the game's.
+ * NOT the battles' blur (2026-10-29, probes in a battle): f_7f1bf0 and this function never run there. The battle's
+ * 12 rounds at 960x540 are a loop of their own in the render job main+0x897d90 (w22 < [sp+0x14], draws at
+ * main+0x8988b0 and main+0x898e1c), queued by main+0x89ac00 from main+0x311f40. So BATTLE BLUR (fast) does
+ * nothing in battles yet. */
 
 static int blur_mode(void) {
     int m = __atomic_load_n(&blur_mode_v, __ATOMIC_ACQUIRE);
