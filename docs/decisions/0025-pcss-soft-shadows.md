@@ -86,3 +86,9 @@ Now the first lookup's search (its radius, or "no casters") is reused by the oth
 Checked in one run with `YW4_PCSS_ALTERNATE` (TAA off): old against new differs on no more pixels than two frames
 of the same setting do (1.9% by more than 0.05 against 1.8-2.5%), and the differences are on the moving character.
 `YW4_PCSS_SEARCH=each` gives the old behaviour.
+
+Where the remaining 7.6 ms goes (same scene): the one search ~3.8 ms, the filters ~2.8, the game's own work 1.0.
+The search is slow because its 16 taps spread over 24 texels of the 4096 map with a different disk rotation per
+pixel, so neighbouring pixels read different texels and the cache rarely helps (a quarter of the radius saves ~2
+ms). `YW4_PCSS_BLOCK=2` shares a rotation per 2x2 pixels: 5.0 ms, 4x4: 4.3 ms, but the noise of the soft edges
+gets coarser; left off until judged in game.

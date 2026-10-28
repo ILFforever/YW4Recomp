@@ -926,6 +926,7 @@ static int pcss_search_once = 1;  /* YW4_PCSS_SEARCH=each: a blocker search for 
 /* YW4_PCSS_ALTERNATE=<frame>: for 16 presented frames from that one, odd frames search for every lookup and even
  * frames once, to compare the two in one run (with YW4_CAPTURE_FS=06d03ad7) */
 static long long pcss_alternate = -1;
+static float pcss_block = 1.0f;  /* YW4_PCSS_BLOCK=<n>: n x n pixels share one disk rotation */
 
 int gpu_pcss_level(void) {
     int l = __atomic_load_n(&pcss_level, __ATOMIC_ACQUIRE);
@@ -940,6 +941,7 @@ int gpu_pcss_level(void) {
         if ((e = getenv("YW4_PCSS_DEBUG")) != NULL) pcss_debug = atoi(e);
         if ((e = getenv("YW4_PCSS_SEARCH")) != NULL) pcss_search_once = strcmp(e, "each") != 0;
         if ((e = getenv("YW4_PCSS_ALTERNATE")) != NULL) pcss_alternate = atoll(e);
+        if ((e = getenv("YW4_PCSS_BLOCK")) != NULL) pcss_block = (float)atof(e);
         __atomic_store_n(&pcss_level, l, __ATOMIC_RELEASE);
     }
     return l;
@@ -962,7 +964,7 @@ static int pcss_settings(VkBuffer *buf, VkDeviceSize *offset) {
     int once = pcss_search_once;
     uint64_t fr = gpu_frames();
     if (pcss_alternate >= 0 && fr >= (uint64_t)pcss_alternate && fr < (uint64_t)pcss_alternate + 16) once = !(fr & 1);
-    f[10] = (float)once, f[11] = 0.0f;
+    f[10] = (float)once, f[11] = pcss_block;
     return 1;
 }
 

@@ -803,7 +803,8 @@ class Translator:
 #   mode:  x on, y unused, z largest radius and search radius (0..1 map coordinates), w smallest radius
 #   scale: radius per unit of depth gap, per cascade layer 0..3
 #   tune:  x depth gap below which a texel isn't counted as a caster, y debug view (1 casters
-#          found / 16, 2 radius / largest), z 1: one blocker search per pixel and layer (yw4_search_*)
+#          found / 16, 2 radius / largest), z 1: one blocker search per pixel and layer (yw4_search_*),
+#          w pixels per side of a block that shares one disk rotation (1: every pixel its own)
 # The mask shader's lookups are a little apart with different references, so yw4_seen rarely
 # matches there; with tune.z the later ones reuse the first one's search (its radius, or "no
 # casters") and only filter. The search was most of the cost (decision 0025).
@@ -820,7 +821,8 @@ float yw4_seen_lit[2];
 int yw4_seen_n = 0;
 float yw4_search_layer = -1.0, yw4_search_r = -1.0;
 mat2 yw4_pcss_rotation() {
-    float a = 6.2831853 * fract(52.9829189 * fract(dot(gl_FragCoord.xy, vec2(0.06711056, 0.00583715))));
+    vec2 cell = floor(gl_FragCoord.xy / max(yw4_pcss.tune.w, 1.0));
+    float a = 6.2831853 * fract(52.9829189 * fract(dot(cell, vec2(0.06711056, 0.00583715))));
     return mat2(cos(a), sin(a), -sin(a), cos(a));
 }
 float yw4_pcss_remember(vec2 key, float lit) {
