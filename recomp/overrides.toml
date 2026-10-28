@@ -173,3 +173,9 @@ module = "main"
 offset = "0x8007d0"
 native = "yw4_hook_dof"
 why = "the engine's distance blur (device, renderer): YW4_DOF_PASS=native draws our own in its place (runtime/src/dof.c, decision 0038)"
+
+[[hook]]
+module = "main"
+offset = "0x7f3620"
+native = "yw4_hook_blur"
+why = "the engine's shared blur rounds (the battle effects' 12 rounds among them): YW4_BLUR_PASS=native draws ours (runtime/src/dof.c, decision 0038)"

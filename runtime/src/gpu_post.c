@@ -12,6 +12,7 @@
  * first); after the game's own composite both versions are copied out and compared once the GPU is done
  * (gpu_post_flush). Every 300th frame, or the frames in YW4_BLOOM_CHECK_AT / YW4_DOF_CHECK_AT. */
 #include <inttypes.h>
+#include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -232,6 +233,7 @@ static Check bloom_chk = {"bloom", "YW4_BLOOM_CHECK_AT", 8,
                           {"bright", "level 0 across", "level 0", "level 1 across", "level 1", "level 2 across",
                            "level 2", "scene"}, .nat = -1};
 static Check dof_chk = {"distance blur", "YW4_DOF_CHECK_AT", 3, {"half", "half across", "scene"}, .nat = -1};
+static Check blur_chk = {"blur rounds", "YW4_BLUR_CHECK_AT", 2, {"a", "b"}, .nat = -1};
 
 static int check_now(Check *k) {
     if (k->open || k->pending) return 0;
@@ -306,9 +308,9 @@ static void check_flush(Check *k) {
     fprintf(stderr, "%s\n", line);
 }
 
-int gpu_post_pending(void) { return bloom_chk.pending || dof_chk.pending; }
+int gpu_post_pending(void) { return bloom_chk.pending || dof_chk.pending || blur_chk.pending; }
 
-void gpu_post_flush(void) { check_flush(&bloom_chk), check_flush(&dof_chk); }
+void gpu_post_flush(void) { check_flush(&bloom_chk), check_flush(&dof_chk), check_flush(&blur_chk); }
 
 /* An image the record names: made, and a view to sample it. NULL if not. */
 static GpuImage *record_image(VkCommandBuffer cb, NvnTexture *t, VkImageView *sample) {
@@ -492,4 +494,71 @@ void gpu_dof_pass(void *vk_cb, void *gpu_state, const void *data, uint32_t size)
 void gpu_dof_after_composite(void *vk_cb, void *gpu_state) {
     (void)gpu_state;
     check_copy_out(&dof_chk, vk_cb);
+}
+
+/* ---- the engine's shared blur rounds (dof.c yw4_hook_blur) */
+
+void gpu_blur_pass(void *vk_cb, void *gpu_state, const void *data, uint32_t size) {
+    VkCommandBuffer cb = vk_cb;
+    GpuState *s = gpu_state;
+    BlurPass p;
+    if (size < sizeof p) return;
+    memcpy(&p, data, sizeof p);
+    if (p.check && !check_now(&blur_chk)) return;
+    gpu_end_rendering(cb, s);
+    layouts();
+    NvnTexture *t[2] = {&p.a, &p.b};
+    GpuImage *g[2];
+    VkImageView rd[2];
+    Dest dst[2];
+    for (int i = 0; i < 2; i++) {
+        if (!(g[i] = record_image(cb, t[i], &rd[i]))) return;
+        uint32_t w, h;
+        VkImageView rv = gpu_render_view(cb, t[i], NULL, 0, &w, &h);
+        dst[i] = (Dest){rv, g[i]->format, w, h, g[i]};
+    }
+    if (p.check) {  /* our rounds on copies of both, starting from the same images */
+        for (int i = 0; i < 2; i++) {
+            Copy *c = &blur_chk.ours[i];
+            copy_make(c, g[i]);
+            full_barrier(cb);
+            image_copy(cb, g[i]->image, c->image, g[i]->width, g[i]->height);
+            dst[i].view = rd[i] = c->view;
+        }
+    }
+    full_barrier(cb);
+    /* YW4_BLUR_FAST=1: blurs add up (their widths squared), so n rounds equal one sqrt(n) times as wide; a
+     * quarter of the rounds (at least 1) with the taps sqrt(n / m) times as far apart give the same total width
+     * for a quarter of the passes. Not identical (the 8-tap kernel's ends are cut differently); not in check mode. */
+    if (blur_fast() && !p.check && p.rounds > 2) {
+        uint32_t m = (p.rounds + 3) / 4;
+        float k = sqrtf((float)p.rounds / (float)m);
+        p.step[0] *= k, p.step[1] *= k, p.rounds = m;
+    }
+    gpu_passes_other(cb, "our blur rounds", 0);
+    float push[PUSH / 4];
+    memset(push, 0, sizeof push);
+    memcpy(push + 12, p.weights, sizeof p.weights);
+    push[20] = 1.0f;  /* blur taps */
+    VkImageView in[1];
+    for (uint32_t r = 0; r < p.rounds; r++) {
+        push[8] = p.step[0], push[9] = 0.0f;
+        in[0] = rd[0];
+        pass(cb, P_DOF_BLUR, &dst[1], in, 1, NULL, push);
+        push[8] = 0.0f, push[9] = p.step[1];
+        in[0] = rd[1];
+        pass(cb, P_DOF_BLUR, &dst[0], in, 1, NULL, push);
+    }
+    gpu_passes_targets(cb, s);
+    gpu_dynamic_forget();
+    if (p.check) {
+        blur_chk.open = 1, blur_chk.frame = gpu_frames();
+        blur_chk.game[0] = p.a, blur_chk.game[1] = p.b;
+    }
+}
+
+void gpu_blur_check_end(void *vk_cb, void *gpu_state, const void *data, uint32_t size) {
+    (void)data, (void)size;
+    gpu_end_rendering(vk_cb, gpu_state);
+    check_copy_out(&blur_chk, vk_cb);
 }

@@ -28,6 +28,8 @@ float musl_expf(float);  /* the sdk's expf (hle_math.c) */
 
 enum { MODE_GAME, MODE_CHECK, MODE_NATIVE };
 static int mode = -1;
+static int blur_mode_v = -1;  /* the shared blur rounds' (YW4_BLUR_PASS) */
+static _Thread_local int in_original;  /* the blur hook's check: the game's own run of f_7f3620 */
 static uint64_t variant_seen;  /* calls left to the game: the +0x2c70 variant */
 
 #define U8(a) (*(const uint8_t *)(uintptr_t)(a))
@@ -116,6 +118,14 @@ int yw4_hook_dof(CPUState *ctx) {
         memcpy(&p.tex[i], t, sizeof p.tex[i]);
     }
     p.rounds = rounds > 32 ? 32 : rounds;
+    {   /* the blur's settings when they change (battles use more rounds than towns), the first 32 times */
+        static uint32_t last_rounds, changes;
+        static float last_radius, last_spread;
+        float radius = F32(renderer + 0x864), spread = F32(renderer + 0x860);
+        if ((rounds != last_rounds || radius != last_radius || spread != last_spread) && changes++ < 32)
+            fprintf(stderr, "yw4: distance blur: %u rounds, radius %g, spread %g\n", rounds, radius, spread);
+        last_rounds = rounds, last_radius = radius, last_spread = spread;
+    }
     gauss_weights(F32(renderer + 0x864), p.weights);
     p.spread = F32(renderer + 0x860);
     float n = F32(renderer + 0x86c);
@@ -132,5 +142,97 @@ int yw4_hook_dof(CPUState *ctx) {
     nvn_record_native(ctx, U64(device + 0x10d0) + 0xd8, gpu_dof_pass, &p, sizeof p);
     if (m != MODE_NATIVE) return 0;
     skipped_effects(device, renderer, 2 + 2 * p.rounds);
+    return 1;
+}
+
+/* ---- the engine's shared blur rounds: main+0x7f3620(radius s0, device x0, spread pair x1, rounds w2, target id w3,
+ * down attachment w4, across attachment w5, record a x6, record b x7). Per round it blurs record a across into
+ * the target's attachment w5 (record b) and record b down into attachment w4 (record a), with the weights of
+ * gauss_weights and the spread over the target's size. Its callers: the distance blur above (whose own pass draws
+ * these rounds when it is ours), the effects pass main+0x7f1bf0 (battles: up to 12 rounds of records 12 and 11)
+ * and main+0x804570, main+0x80a0a0. YW4_BLUR_PASS=native: ours; check: ours into copies, then the game's, compared
+ * (gpu_post.c); default: the game's. */
+
+static int blur_mode(void) {
+    int m = __atomic_load_n(&blur_mode_v, __ATOMIC_ACQUIRE);
+    if (m >= 0) return m;
+    const char *s = getenv("YW4_BLUR_PASS");
+    m = s && !strcmp(s, "native") ? MODE_NATIVE : s && !strcmp(s, "check") ? MODE_CHECK : MODE_GAME;
+    int unset = -1;
+    if (__atomic_compare_exchange_n(&blur_mode_v, &unset, m, 0, __ATOMIC_ACQ_REL, __ATOMIC_ACQUIRE) && m != MODE_GAME)
+        fprintf(stderr, "yw4: blur rounds: %s\n", m == MODE_CHECK ? "ours checked against the game's" : "ours");
+    return __atomic_load_n(&blur_mode_v, __ATOMIC_ACQUIRE);
+}
+
+int blur_native(void) { return blur_mode() == MODE_NATIVE; }
+
+static int fast_v = -1;
+
+int blur_fast(void) {
+    int f = __atomic_load_n(&fast_v, __ATOMIC_ACQUIRE);
+    if (f < 0) {
+        f = getenv("YW4_BLUR_FAST") && atoi(getenv("YW4_BLUR_FAST")) ? 1 : 0;
+        __atomic_store_n(&fast_v, f, __ATOMIC_RELEASE);
+    }
+    return f;
+}
+
+void blur_fast_toggle(void) {
+    int f = !blur_fast();
+    __atomic_store_n(&fast_v, f, __ATOMIC_RELEASE);
+    fprintf(stderr, "yw4: blur rounds: %s (settings panel)\n", f ? "fast" : "the game's");
+}
+
+/* A record pointer's texture (the record's +0x10 view, its first word + 0x18), copied; 0 if none. */
+static int record_copy(uint64_t rec, NvnTexture *out) {
+    uint64_t view = rec ? U64(rec + 0x10) : 0, g = view && U64(view) ? U64(view) + 0x18 : 0;
+    const NvnTexture *t = g ? HOST(NvnTexture, g) : NULL;
+    if (!t) return 0;
+    memcpy(out, t, sizeof *out);
+    return 1;
+}
+
+int yw4_hook_blur(CPUState *ctx) {
+    if (in_original) return 0;
+    int m = blur_mode();
+    if (blur_fast()) m = MODE_NATIVE;  /* the fast rounds are ours (and not checked: they differ) */
+    if (m == MODE_GAME) return 0;
+    uint64_t device = ctx->x[0], spread = ctx->x[1], ra = ctx->x[6], rb = ctx->x[7];
+    uint32_t rounds = (uint32_t)ctx->x[2];
+    BlurPass p;
+    memset(&p, 0, sizeof p);
+    if (!rounds || !record_copy(ra, &p.a) || !record_copy(rb, &p.b)) return 0;
+    p.rounds = rounds > 31 ? 32 : rounds;
+    gauss_weights(ctx->v[0].f[0], p.weights);
+    /* over the target's size: the engine's is its render target's (u16 +0x3a, +0x3c), the records' images' */
+    p.step[0] = F32(spread) / (float)p.b.width, p.step[1] = F32(spread + 4) / (float)p.b.height;
+    {   /* what is blurred and how much, when it changes, the first 32 times */
+        static uint32_t last_rounds, changes;
+        static uint64_t last_a;
+        if ((rounds != last_rounds || ra != last_a) && changes++ < 32)
+            fprintf(stderr, "yw4: blur rounds: %u rounds of %ux%u (from main+%#llx), radius %g\n", rounds, p.a.width,
+                    p.a.height, (unsigned long long)(ctx->x[30] - yw4_image_base), ctx->v[0].f[0]);
+        last_rounds = rounds, last_a = ra;
+    }
+    uint64_t cmd = U64(device + 0x10d0) + 0xd8;
+    p.check = m == MODE_CHECK;
+    nvn_record_native(ctx, cmd, gpu_blur_pass, &p, sizeof p);
+    if (m == MODE_CHECK) {  /* the game's rounds now, then the comparison */
+        static GuestFn original;
+        if (!original) original = yw4_lookup(yw4_image_base + 0x7f3620);
+        if (!original) return 0;
+        in_original = 1;
+        original(ctx);
+        in_original = 0;
+        nvn_record_native(ctx, cmd, gpu_blur_check_end, &p, sizeof p);
+        return 1;
+    }
+    U16W(device + 0x45da) |= 1;  /* what f_7f3900 changes besides bindings, per pass (see skipped_effects) */
+    for (int i = 0; i < 2; i++) {
+        uint64_t rec = i ? rb : ra;
+        U32W(device + 0x45ac) |= U8(rec + 0x22) || U8(rec + 0x23) ? 0x12u : 0x10u;
+    }
+    U32W(device + 0x4654) += 2 * p.rounds;
+    U32W(device + 0x4658) += 2 * p.rounds * (4 / 3);
     return 1;
 }

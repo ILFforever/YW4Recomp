@@ -44,6 +44,7 @@ static int shadow_pass_index(void) { return !strcmp(shadow_mode_name(), "CUSTOM"
 static int gbuffer_index(void) { return gbuffer_native(); }
 static int bloom_index(void) { return bloom_native(); }
 static int dof_pass_index(void) { return dof_native(); }
+static int blur_fast_index(void) { return blur_fast(); }
 
 /* In the order shown; a row starts a new group when its category differs from the row before. The texts
  * use the HUD font's characters (hud.c): upper case, digits, . , : % / - ( ) ' ! ? */
@@ -109,6 +110,11 @@ static const Setting settings[] = {
      {"GAME", "CUSTOM"},
      {"THE GAME'S RENDERER", "OUR CUSTOM RENDERER (RECOMMENDED)"}, 2, dof_pass_index, dof_toggle, "YW4_DOF_PASS",
      {"game", "native"}},
+    {"PERFORMANCE", "BATTLE BLUR",
+     "THE BLUR IN BATTLES IS UP TO 12 SMALL BLURS IN A ROW. FAST GETS THE SAME WIDTH WITH A QUARTER AS MANY, WIDER "
+     "ONES: LESS GPU TIME IN BATTLES, A NEARLY IDENTICAL PICTURE.",
+     {"GAME'S", "FAST"},
+     {"THE GAME'S 12 PASSES", "3 WIDER PASSES"}, 2, blur_fast_index, blur_fast_toggle, "YW4_BLUR_FAST", {"0", "1"}},
 };
 enum { NSETTINGS = sizeof settings / sizeof *settings };
 

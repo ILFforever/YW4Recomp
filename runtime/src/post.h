@@ -60,7 +60,25 @@ void dof_toggle(void);
 void gpu_dof_pass(void *vk_cb, void *gpu_state, const void *data, uint32_t size);
 void gpu_dof_after_composite(void *vk_cb, void *gpu_state);
 
-/* Both checks: results waiting to be compared; compare and log (after the GPU finished). */
+/* ---- the engine's shared blur rounds f_7f3620 (dof.c): the distance blur's, the battle effects' (f_7f1bf0) and
+ * two more callers; the distance blur pass of ours above draws its own rounds instead */
+
+typedef struct {
+    NvnTexture a, b;     /* read across into b, then down into a, per round */
+    uint32_t rounds;
+    float weights[8];
+    float step[2];       /* across, down, in texture coordinates */
+    int check;           /* YW4_BLUR_PASS=check: ours into copies; the game's runs after it (dof.c) */
+} BlurPass;
+
+int blur_native(void);
+/* The fast blur rounds (YW4_BLUR_FAST, the settings panel's BATTLE BLUR): fewer, wider rounds; ours draw them. */
+int blur_fast(void);
+void blur_fast_toggle(void);
+void gpu_blur_pass(void *vk_cb, void *gpu_state, const void *data, uint32_t size);
+void gpu_blur_check_end(void *vk_cb, void *gpu_state, const void *data, uint32_t size);  /* after the game's rounds */
+
+/* All checks: results waiting to be compared; compare and log (after the GPU finished). */
 int gpu_post_pending(void);
 void gpu_post_flush(void);
 
