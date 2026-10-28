@@ -19,6 +19,7 @@ game with them and compare results: [tools/dev](../tools/dev/README.md).
 | `YW4_HEADLESS=1` | No window, no Vulkan (nothing is drawn) |
 | `YW4_VULKAN_VALIDATION=1` | Turn on the Vulkan validation layer |
 | `YW4_SHADOWS=native` | Start with our own shadow-caster pass on ([decision 0024](decisions/0024-shadow-pass.md)); work in progress, the default is the game's. The settings panel (F1, SHADOW PASS) switches while playing |
+| `YW4_BONES=game` / `check` | Skeleton matrices by the game's recompiled code instead of ours, for A/B timing; `check` runs both, compares every float and logs `yw4: bones:` summaries and any `MISMATCH` ([decision 0036](decisions/0036-native-bone-matrices.md)). Default: ours |
 | `YW4_GBUFFER=check` | Our G-buffer pass ([decision 0026](decisions/0026-gbuffer-pass.md)), step 1: compares what it would use with the game's G-buffer draws (buffers, matrices) and logs a summary every 300 frames; nothing is drawn |
 | `YW4_GBUFFER=native` | Our G-buffer pass, step 2b: our own draws (our vertex and index buffers and object constants; the game's material constants, textures and targets) with our readable programs (`runtime/shaders/gbuffer_*`) in place of the game's main G-buffer draws; logs a summary every 300 frames; the settings panel (F1, G-BUFFER) switches while playing |
 | `YW4_GBUFFER=programs` | Step 2a only: our readable programs in the game's own draws |

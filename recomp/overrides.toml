@@ -149,3 +149,15 @@ module = "main"
 offset = "0x97f510"
 native = "yw4_hook_camera_update"
 why = "copies every camera's settings into the fields its projection is built from; widescreen sets the aspect there afterwards (runtime/src/widescreen.c)"
+
+[[hook]]
+module = "main"
+offset = "0xa77390"
+native = "yw4_hook_bones_a77390"
+why = "skeleton local transforms -> matrices, the hottest game code; done natively, bit-identical (runtime/src/bones.c, decision 0036)"
+
+[[hook]]
+module = "main"
+offset = "0xa79c00"
+native = "yw4_hook_bones_a79c00"
+why = "the same with a per-bone extra call (main+0xa7a530); done natively (runtime/src/bones.c, decision 0036)"
