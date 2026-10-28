@@ -19,7 +19,8 @@
     X(vkGetPhysicalDeviceSurfaceSupportKHR) X(vkGetPhysicalDeviceSurfaceCapabilitiesKHR)                       \
     X(vkGetPhysicalDeviceSurfaceFormatsKHR) X(vkGetPhysicalDeviceMemoryProperties) X(vkCreateDevice)          \
     X(vkGetDeviceProcAddr) X(vkEnumerateDeviceExtensionProperties) X(vkGetPhysicalDeviceFeatures2)            \
-    X(vkGetPhysicalDeviceProperties2) X(vkGetPhysicalDeviceFormatProperties)
+    X(vkGetPhysicalDeviceProperties2) X(vkGetPhysicalDeviceFormatProperties)                                  \
+    X(vkGetPhysicalDeviceSurfacePresentModesKHR)
 #define VK_DEVICE_FNS(X)                                                                                      \
     X(vkGetDeviceQueue) X(vkCreateSwapchainKHR) X(vkDestroySwapchainKHR) X(vkGetSwapchainImagesKHR)          \
     X(vkAcquireNextImageKHR) X(vkQueuePresentKHR) X(vkCreateCommandPool) X(vkAllocateCommandBuffers)         \

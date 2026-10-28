@@ -184,10 +184,12 @@ NVN(nvnQueuePresentTexture) {  /* (queue, window, texture index) */
     if (index >= 0 && index < w->num) show(HOST(NvnTexture, w->textures[index]), frames + 1, w->crop);
     int64_t perf_shown = host_now_ns();
     yw4_vsync_start();
-    uint64_t now = yw4_vsync_count();
-    if (next_flip < now + 1) next_flip = now + 1;
-    yw4_wait_vsync(next_flip);
-    next_flip += (uint64_t)(w->interval > 0 ? w->interval : 1);
+    if (w->interval > 0) {  /* 0: no frame limit (YW4_FRAME_VSYNCS=0, framerate.c) */
+        uint64_t now = yw4_vsync_count();
+        if (next_flip < now + 1) next_flip = now + 1;
+        yw4_wait_vsync(next_flip);
+        next_flip += (uint64_t)w->interval;
+    }
     static int64_t last_log;  /* host time of the last logged frame, for the rate since then */
     static uint64_t last_frames;
     frames++;
@@ -598,7 +600,7 @@ NVN(nvnWindowFinalize) { free(HOST(NvnWindow, A(0))); SET_HOST(A(0), 0); }
 NVN(nvnWindowSetCrop) { NvnWindow *w = HOST(NvnWindow, A(0)); for (int i = 0; i < 4; i++) w->crop[i] = (int)A(1 + i); }
 NVN(nvnWindowSetPresentInterval) {
     HOST(NvnWindow, A(0))->interval = (int)A(1);
-    fprintf(stderr, "yw4: NVN present interval %d (%d frames/s at most)\n", (int)A(1), A(1) ? 60 / (int)A(1) : 60);
+    fprintf(stderr, "yw4: NVN present interval %d (%s)\n", (int)A(1), A(1) ? "60 frames/s divided by it at most" : "no limit");
 }
 NVN(nvnWindowAcquireTexture) {  /* (window, sync signalled when it's free, int *index) */
     NvnWindow *w = HOST(NvnWindow, A(0));

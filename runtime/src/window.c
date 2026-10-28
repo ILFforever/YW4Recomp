@@ -123,6 +123,21 @@ static int create_swapchain(void) {
         if (fmts[i].format == VK_FORMAT_B8G8R8A8_UNORM || fmts[i].format == VK_FORMAT_R8G8B8A8_UNORM) fmt = fmts[i];
     uint32_t count = caps.minImageCount + 1;
     if (caps.maxImageCount && count > caps.maxImageCount) count = caps.maxImageCount;
+    /* FIFO waits for the monitor's refresh. YW4_FRAME_VSYNCS=0 (no frame limit, framerate.c) takes MAILBOX,
+     * else IMMEDIATE, when the driver has them, so the frame rate isn't capped at the refresh rate. */
+    VkPresentModeKHR mode = VK_PRESENT_MODE_FIFO_KHR;
+    const char *fv = getenv("YW4_FRAME_VSYNCS");
+    if (fv && !strcmp(fv, "0")) {
+        uint32_t nmodes = 0;
+        VkPresentModeKHR modes[16];
+        vkGetPhysicalDeviceSurfacePresentModesKHR(vk.gpu, surface, &nmodes, NULL);
+        if (nmodes > 16) nmodes = 16;
+        vkGetPhysicalDeviceSurfacePresentModesKHR(vk.gpu, surface, &nmodes, modes);
+        for (uint32_t i = 0; i < nmodes; i++)
+            if (modes[i] == VK_PRESENT_MODE_IMMEDIATE_KHR && mode == VK_PRESENT_MODE_FIFO_KHR) mode = modes[i];
+        for (uint32_t i = 0; i < nmodes; i++)
+            if (modes[i] == VK_PRESENT_MODE_MAILBOX_KHR) mode = modes[i];
+    }
     VkSwapchainKHR old = swapchain;
     VkSwapchainCreateInfoKHR ci = {
         .sType = VK_STRUCTURE_TYPE_SWAPCHAIN_CREATE_INFO_KHR,
@@ -136,7 +151,7 @@ static int create_swapchain(void) {
         .imageSharingMode = VK_SHARING_MODE_EXCLUSIVE,
         .preTransform = caps.currentTransform,
         .compositeAlpha = VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR,
-        .presentMode = VK_PRESENT_MODE_FIFO_KHR,  /* always available; the game paces itself to 30 */
+        .presentMode = mode,  /* FIFO is always available; the game paces itself to 30 */
         .clipped = VK_TRUE,
         .oldSwapchain = old,
     };

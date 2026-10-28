@@ -179,3 +179,9 @@ module = "main"
 offset = "0x7f3620"
 native = "yw4_hook_blur"
 why = "the engine's shared blur rounds (the battle effects' 12 rounds among them): YW4_BLUR_PASS=native draws ours (runtime/src/dof.c, decision 0038)"
+
+[[hook]]
+module = "main"
+offset = "0x94ecc0"
+native = "yw4_hook_nnmain"
+why = "nnMain's start: YW4_FRAME_VSYNCS sets the game's vsyncs per frame before it reads them (runtime/src/framerate.c)"

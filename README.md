@@ -56,8 +56,8 @@ Switch emulators already run *Yo-kai Watch 4++* at full speed on a good PC. This
 An emulator can't do most of this. It imitates the console and plays the game's GPU commands as they are, so the
 game still decides its shadow quality, its 16:9 UI, its 30 frames/s and its effects. Here the game's renderer is
 being replaced with our own, so those become ours to change: higher resolution, sharper textures, bigger and soft
-shadows, anti-aliasing that leaves the UI sharp (TAA included) and ultrawide are already in; higher frame rates are
-next.
+shadows, anti-aliasing that leaves the UI sharp (TAA included) and ultrawide are already in; 60 frames/s and above
+run as a test option.
 
 A town street, same spot: the game's shadows (1024 map, no PCSS) against ours (4096 map, PCSS ×2). The
 characters' shadows keep their shape, and the tree shade on the pavement is soft:
@@ -85,7 +85,7 @@ It is also lighter to run. The same busy street on the same laptop ([docs/baseli
 | ✅ | **Sharper distance** | Anisotropic texture filtering and a softer distance blur: distant ground, roads and buildings stay sharp without 4K |
 | ✅ | **Higher resolution** | The 3D view at 1080p, 1440p or 4K instead of the game's 1600×900 (30 frames/s at 4K on an RTX 4070 laptop) |
 | ✅ | **Ultrawide and other aspect ratios** | 16:10, 21:9 and 32:9 in the panel: a wider view of the world with the UI kept 16:9 in the middle; exploring, battles and cutscenes work; dialog dimming and the loading screen cover the full width |
-| 🗓️ | **Higher frame rates** | Above the game's 30 frames/s: first the game's timing patched for a real 60, then frame generation (AMD FSR 3, open source, any GPU) for 120 and more, using the motion the game already writes and keeping the UI out of the made-up frames |
+| 🔧 | **Higher frame rates** | 60 frames/s or no limit, as a test option (`YW4_FRAME_VSYNCS=1` or `0`): the game already moves by the real time between frames, so walking keeps its speed (~140 frames/s at 1600×900, ~55 at 4K 21:9 where the GPU is the limit). Battles, menus and cutscenes are being checked; a switch in the panel next. Later frame generation (AMD FSR 3, open source, any GPU) on top |
 | 🔧 | **Better anti-aliasing** | FXAA, SMAA and now TAA (steady thin edges: fences, nets, leaves) on the 3D scene before the UI is drawn, so text stays crisp; per-object motion for TAA next |
 | 🗓️ | **Mod support** | Load replaced game files from a mod folder without touching your dump (first use: the English translation mod) |
 | 🔧 | **Input remapping** | Keyboard and controller bindings on the panel's CONTROLS page, saved, with your controller's own button names; tested with a DualSense. Mouse and matching on-screen button hints next |
