@@ -329,6 +329,45 @@ So resolution scaling is runtime work: make the screen-sized images bigger by on
 and 533 does not divide evenly), scale viewports and scissors of draws into them, and scale camera row 32. Battles,
 menus and cutscenes are still to be checked for other screen-sized images.
 
+## Post-processing (measured 2026-10-28)
+
+Bamboo forest, late-game save, one frame (`YW4_GPU_TRACE` + `YW4_TRACE_DRAW_CALLERS`, grouped by `tools.yw4.mainview`).
+After the lit pass, the lighting and the effects, two engine functions do the post-processing, then the UI follows:
+
+| Draws | Target | Programs (vs/fs) | What | Drawn by |
+|---|---|---|---|---|
+| 2 | 800×450 | `98c09b`/`2d68c8` | distance blur: the scene shrunk | `f_8007d0` (`f_80eb90`) |
+| 2 | 800×450 | `29d827`/`b8856c` | distance blur: two blur passes | `f_7f3900` < `f_7f3620` < `f_8007d0` |
+| 1 | 1600×900, blend | `93ff16`/`27b63a` | distance blur: blended over the scene by depth (decision 0031's half setting) | `f_8007d0` |
+| 1 | 800×450 | `abf6e5`/`d794c4` | bloom: bright parts | `f_802e40` |
+| 6 | 400×225, 200×112, 120×67 | `e1e948`/`158d33` | bloom: blur, across then down, per level | `f_802e40` |
+| 1 | 1600×900, blend | `53e413`/`58b87f` | bloom: the three levels onto the scene | `f_802e40` |
+
+### Bloom `f_802e40(device, renderer)`
+
+`renderer` is the renderer object (`main+0x56ab1b0`). Its images are 0x28-byte records from `+0x2e28`: record `i` at
+`+0x2e28 + 0x28*i` holds the engine texture object at `+0`, a descriptor at `+8` and two flags at `+0x22`/`+0x23`.
+Render targets come from the target manager `[main+0x5865158]`, vtable slot `+0xd8`, by id; their size is
+`u16 +0x3a` × `u16 +0x3c`.
+
+1. **Bright parts** (`d794c4`, into the 800×450 target) from records 0 (slot 0) and 11 (slot 1). Constants (fragment
+   cbuf 6, 0x30 bytes) = `renderer +0x7f0..+0x80f` (rows 0 and 16) and `+0x7b0`; when `renderer +0x388d` is set, the
+   `.w` of both rows is raised to at least 1.0. The shader: `d = in1 - in0`, `m = max|d|` over rgb,
+   `a = max(in1 - 1.5 m, 0)`, out.rgb = `max(a * row16.rgb - row16.w, in0 * row0.rgb - row0.w)`,
+   out.a = `max(in1.a, in0.a)`, all clamped at 0. Its output is record 9.
+2. **Blur**, three levels, each across (into attachment 1 of target id 7, 8, 9) then down (into attachment 0):
+   9 → 20 → 19 (400×225), 19 → 22 → 21 (200×112), 21 → 24 → 23 (120×67) (tables `main+0x1298380` ids, `+0x129838c`
+   / `+0x12983a4` / `+0x1298398` records). Constants (cbuf 6, 0x40 bytes per pass): row 0 = (step, 0, 0, 0) across or
+   (0, step, 0, 0) down with step = `renderer +0x7c0 + 4*level` / the target's width (or height), row 16 = 1.0 ×4,
+   row 32 = the tap weights 0.150217, 0.138667, 0.118165, 0.092952, row 48 = 0. The shader adds 4 pairs of taps
+   (8 taps) with those weights; the tap positions come from the vertex shader.
+3. **Composite** (`58b87f`, into the 1600×900 scene image, blend on) from records 19, 21, 23 (slots 0, 1, 2).
+   Constants (0x18 bytes, rows 0, 8, 16, two floats each) = (`+0x7d0`, `+0x7e0`), (`+0x7d4`, `+0x7e4`),
+   (`+0x7d8`, `+0x7e8`): per level a brightness and a weight. The shader combines the three levels as a "screen"
+   (1 - (1-a)(1-b)(1-c), each clamped) and its alpha from their brightest channels.
+
+At 4K 21:9 the composite took 1.5-2.2 ms of GPU per frame (2026-10-28), the rest of bloom well under 1 ms.
+
 ## Model detail at a distance (checked 2026-10-27): not used
 
 The engine has a level-of-detail class, `lives::gmdCObjModelLodInfo`, registered with its property system in
