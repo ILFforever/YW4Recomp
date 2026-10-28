@@ -91,4 +91,5 @@ Where the remaining 7.6 ms goes (same scene): the one search ~3.8 ms, the filter
 The search is slow because its 16 taps spread over 24 texels of the 4096 map with a different disk rotation per
 pixel, so neighbouring pixels read different texels and the cache rarely helps (a quarter of the radius saves ~2
 ms). `YW4_PCSS_BLOCK=2` shares a rotation per 2x2 pixels: 5.0 ms, 4x4: 4.3 ms, but the noise of the soft edges
-gets coarser; left off until judged in game.
+gets coarser. The owner played the bamboo forest with 2 and saw no difference, so 2 is the default (mask about
+5.0 ms at 4K 21:9, from 14.2 at the start of the day).

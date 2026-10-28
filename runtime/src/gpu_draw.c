@@ -926,7 +926,7 @@ static int pcss_search_once = 1;  /* YW4_PCSS_SEARCH=each: a blocker search for 
 /* YW4_PCSS_ALTERNATE=<frame>: for 16 presented frames from that one, odd frames search for every lookup and even
  * frames once, to compare the two in one run (with YW4_CAPTURE_FS=06d03ad7) */
 static long long pcss_alternate = -1;
-static float pcss_block = 1.0f;  /* YW4_PCSS_BLOCK=<n>: n x n pixels share one disk rotation */
+static float pcss_block = 2.0f;  /* YW4_PCSS_BLOCK=<n>: n x n pixels share one disk rotation (1: each pixel its own) */
 
 int gpu_pcss_level(void) {
     int l = __atomic_load_n(&pcss_level, __ATOMIC_ACQUIRE);

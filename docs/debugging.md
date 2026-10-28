@@ -55,7 +55,7 @@ game with them and compare results: [tools/dev](../tools/dev/README.md).
 | `YW4_PCSS_DEBUG=1`..`6` | PCSS debug views in place of the shadow: casters found, blur radius, the game's lookup, raw depth, a hand-made compare, the reference depth. Not visible as such on screen: the value goes into the shadow mask; capture the mask to read it ([tools/dev/README.md](../tools/dev/README.md), pitfalls) |
 | `YW4_PCSS_SEARCH=each` | PCSS: a blocker search for every shadow lookup, as before 2026-10-28 (default: one search per pixel and cascade, reused by the mask shader's other lookups; about half the cost at 4K) |
 | `YW4_PCSS_ALTERNATE=<frame>` | For 16 presented frames from that one, odd frames search for every lookup and even frames once: compares the two in one run, with `YW4_CAPTURE_FS=06d03ad7` and a list in `YW4_DUMP_IMAGE_AT` (turn TAA off, `YW4_AA=0`: its jitter moves every pixel) |
-| `YW4_PCSS_BLOCK=<n>` | PCSS: n x n pixels share one rotation of the sample disk (default 1, every pixel its own). Neighbours then read the same shadow-map texels: at 4K 21:9 the mask drops from 7.6 ms to 5.0 (2) or 4.3 (4), but its noise gets coarser (visible in the raw mask at 2, blocky at 4) |
+| `YW4_PCSS_BLOCK=<n>` | PCSS: n x n pixels share one rotation of the sample disk (default 2; 1 = every pixel its own, as before 2026-10-28). Neighbours then read the same shadow-map texels: at 4K 21:9 the mask drops from 7.6 ms to 5.0 (2) or 4.3 (4), but its noise gets coarser (visible in the raw mask at 2 but not in game, owner 2026-10-28; blocky at 4) |
 | `YW4_PREBUILD=0` | Don't build the listed pipelines (the PCSS shadow mask) on a background thread at start-up |
 
 Saved screenshots get the same sRGB decode as the window, so their colours match what is on screen.
