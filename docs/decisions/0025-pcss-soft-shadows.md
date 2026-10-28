@@ -74,3 +74,15 @@ G-buffer. The other 6 shadow forward-drawn objects.
   blockers: a ring of dark dots around every character, including Whisper, who floats. A random start per pixel
   added more dots (the game has no temporal blur to hide them). Worth redoing in our own renderer, with
   full-resolution depth and an edge-aware filter.
+
+## Cost at 4K ultrawide, and one search per pixel (2026-10-28)
+
+Measured on the late-game save at 4K 21:9 with full-size effects (per-pass timer): the mask shader took 14.2 ms per
+frame with PCSS x2, 13.5 ms with x1 and 1.0 ms off, half of the whole GPU frame. x1 and x2 cost the same, so the
+time is the blocker search, not the filter size. The mask shader's lookups (`H0`, `H1`, `H2` in its code) are a
+little apart with different references, so `yw4_seen` rarely matched and every lookup did its own 16-tap search.
+Now the first lookup's search (its radius, or "no casters") is reused by the others in the same cascade
+(`yw4_search_*`, uniform `tune.z`); each still runs its own filter. Mask 14.2 -> 7.6 ms, GPU frame 26.4 -> 19.9 ms.
+Checked in one run with `YW4_PCSS_ALTERNATE` (TAA off): old against new differs on no more pixels than two frames
+of the same setting do (1.9% by more than 0.05 against 1.8-2.5%), and the differences are on the moving character.
+`YW4_PCSS_SEARCH=each` gives the old behaviour.

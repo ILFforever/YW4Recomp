@@ -53,6 +53,8 @@ game with them and compare results: [tools/dev](../tools/dev/README.md).
 | `YW4_PCSS=0` (`1`, `2`, `3`) | PCSS (soft contact shadows) at start: off (x1, x2, x4); default x2; the settings panel changes it. `YW4_SHADOW_RES=1024 YW4_PCSS=0` gives the game's original shadows. Only the game's screen-space shadow mask shader has it (`PCSS_SHADERS` in recomp/shader.py) |
 | `YW4_PCSS_SCALE=a,b,c,d` / `YW4_PCSS_MAX=<texels>` / `YW4_PCSS_EPS=<depth>` | PCSS tuning: blur radius per unit of depth gap for cascades 0-3 (default 0.01,0.005,0.0025,0.0025), largest radius and search area (default 6 texels of a 1024 map), smallest depth gap that counts as a caster |
 | `YW4_PCSS_DEBUG=1`..`6` | PCSS debug views in place of the shadow: casters found, blur radius, the game's lookup, raw depth, a hand-made compare, the reference depth. Not visible as such on screen: the value goes into the shadow mask; capture the mask to read it ([tools/dev/README.md](../tools/dev/README.md), pitfalls) |
+| `YW4_PCSS_SEARCH=each` | PCSS: a blocker search for every shadow lookup, as before 2026-10-28 (default: one search per pixel and cascade, reused by the mask shader's other lookups; about half the cost at 4K) |
+| `YW4_PCSS_ALTERNATE=<frame>` | For 16 presented frames from that one, odd frames search for every lookup and even frames once: compares the two in one run, with `YW4_CAPTURE_FS=06d03ad7` and a list in `YW4_DUMP_IMAGE_AT` (turn TAA off, `YW4_AA=0`: its jitter moves every pixel) |
 | `YW4_PREBUILD=0` | Don't build the listed pipelines (the PCSS shadow mask) on a background thread at start-up |
 
 Saved screenshots get the same sRGB decode as the window, so their colours match what is on screen.
@@ -81,7 +83,7 @@ Saved screenshots get the same sRGB decode as the window, so their colours match
 | Variable | What it does |
 |---|---|
 | `YW4_DUMP_IMAGE=<hex addr>[,<hex addr>...]` `YW4_DUMP_IMAGE_AT=<frame>[,<frame>...]` | Read back the images at those guest addresses at that frame (several frames: the file names get `_f<frame>`) (depth, RGBA8, RGBA16F, R11G11B10F): per-layer min/max/cleared share, `work/dump/image_*.pgm`, and raw floats in `image_*.rgbaf` (colour) or `image_*.depthf` (depth). This is the image's last use in the frame |
-| `YW4_CAPTURE_FS=<fs key prefix>[,...]` with `YW4_DUMP_IMAGE_AT=<frame>` | Copy the colour targets right after each draw with that fragment shader in that frame, to `work/dump/cap_*.raw`; shows a pass's output before later passes reuse the target. `python -m tools.yw4.capview` makes a contact sheet |
+| `YW4_CAPTURE_FS=<fs key prefix>[,...]` with `YW4_DUMP_IMAGE_AT=<frame>[,...]` | Copy the colour targets right after each draw with that fragment shader in those frames (up to 16), to `work/dump/cap_<n>_<fs>_f<frame>_t<target>.raw`; shows a pass's output before later passes reuse the target. `python -m tools.yw4.capview` makes a contact sheet |
 | `YW4_COMPUTE_TRACE=<n>` | Every n frames, the inputs and results of the last dispatch of each compute shader |
 
 Image addresses and shader keys come from the F11 log. Shaders are named by the FNV-1a hash of their assembly:

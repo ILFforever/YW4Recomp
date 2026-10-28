@@ -922,6 +922,10 @@ static int cb8_scaled_copy(uint64_t addr, VkDeviceSize range, const Shader *sh, 
 static int pcss_level = -1;
 static float pcss_scale[4] = {0.01f, 0.005f, 0.0025f, 0.0025f}, pcss_eps, pcss_max = 6.0f / 1024.0f;
 static int pcss_debug;  /* YW4_PCSS_DEBUG: 1 shows casters found / 16, 2 the radius / largest (white = 1) */
+static int pcss_search_once = 1;  /* YW4_PCSS_SEARCH=each: a blocker search for every lookup, as before */
+/* YW4_PCSS_ALTERNATE=<frame>: for 16 presented frames from that one, odd frames search for every lookup and even
+ * frames once, to compare the two in one run (with YW4_CAPTURE_FS=06d03ad7) */
+static long long pcss_alternate = -1;
 
 int gpu_pcss_level(void) {
     int l = __atomic_load_n(&pcss_level, __ATOMIC_ACQUIRE);
@@ -934,6 +938,8 @@ int gpu_pcss_level(void) {
         if ((e = getenv("YW4_PCSS_EPS")) != NULL) pcss_eps = (float)atof(e);
         if ((e = getenv("YW4_PCSS_MAX")) != NULL) pcss_max = (float)atof(e) / 1024.0f;
         if ((e = getenv("YW4_PCSS_DEBUG")) != NULL) pcss_debug = atoi(e);
+        if ((e = getenv("YW4_PCSS_SEARCH")) != NULL) pcss_search_once = strcmp(e, "each") != 0;
+        if ((e = getenv("YW4_PCSS_ALTERNATE")) != NULL) pcss_alternate = atoll(e);
         __atomic_store_n(&pcss_level, l, __ATOMIC_RELEASE);
     }
     return l;
@@ -952,7 +958,11 @@ static int pcss_settings(VkBuffer *buf, VkDeviceSize *offset) {
     float k = (float)(1 << (l ? l - 1 : 0));
     f[0] = l ? 1.0f : 0.0f, f[1] = 0.0f, f[2] = pcss_max, f[3] = 0.5f / (float)gpu_shadow_res();
     for (int i = 0; i < 4; i++) f[4 + i] = pcss_scale[i] * k;
-    f[8] = pcss_eps, f[9] = (float)pcss_debug, f[10] = f[11] = 0.0f;
+    f[8] = pcss_eps, f[9] = (float)pcss_debug;
+    int once = pcss_search_once;
+    uint64_t fr = gpu_frames();
+    if (pcss_alternate >= 0 && fr >= (uint64_t)pcss_alternate && fr < (uint64_t)pcss_alternate + 16) once = !(fr & 1);
+    f[10] = (float)once, f[11] = 0.0f;
     return 1;
 }
 
@@ -1158,10 +1168,10 @@ void gpu_dispatch(VkCommandBuffer cb, GpuState *s, const CmdRec *r) {
     full_barrier(cb);
 }
 
-/* YW4_CAPTURE_FS=<fragment shader key prefixes, comma separated> with YW4_DUMP_IMAGE_AT=<frame>:
- * after each draw with such a fragment shader in that frame, its colour targets are copied to host
- * memory and written as work/dump/cap_<n>_<fs>_t<target>.raw (u32 width, height, VkFormat, then
- * the texels). Unlike YW4_DUMP_IMAGE this sees a target mid-frame, before later passes reuse it. */
+/* YW4_CAPTURE_FS=<fragment shader key prefixes, comma separated> with YW4_DUMP_IMAGE_AT=<frame>[,...]:
+ * after each draw with such a fragment shader in those frames, its colour targets are copied to host
+ * memory and written as work/dump/cap_<n>_<fs>_f<frame>_t<target>.raw (u32 width, height, VkFormat,
+ * then the texels). Unlike YW4_DUMP_IMAGE this sees a target mid-frame, before later passes reuse it. */
 typedef struct {
     VkBuffer buf;
     VkDeviceMemory mem;
@@ -1176,14 +1186,19 @@ int gpu_capture_pending(void) { return ncaps; }
 static void capture_targets(VkCommandBuffer cb, GpuState *s, const char *name);
 static void capture_after_draw(VkCommandBuffer cb, GpuState *s, const Program *g) {
     static const char *want;
-    static uint64_t at;
-    static int init;
+    static uint64_t at[16];
+    static int init, nat;
     if (!init) {
         init = 1;
         want = getenv("YW4_CAPTURE_FS");
-        at = getenv("YW4_DUMP_IMAGE_AT") ? strtoull(getenv("YW4_DUMP_IMAGE_AT"), NULL, 10) : 0;
+        for (const char *e = getenv("YW4_DUMP_IMAGE_AT"); e && *e && nat < 16; e += strcspn(e, ","), e += *e == ',')
+            at[nat++] = strtoull(e, NULL, 10);
     }
-    if (!want || gpu_frames() != at || !g->sh[ST_FRAG]) return;
+    if (!want || !g->sh[ST_FRAG]) return;
+    uint64_t frame = gpu_frames();
+    int now = 0;
+    for (int i = 0; i < nat; i++) now |= at[i] == frame;
+    if (!now) return;
     char key[17];
     snprintf(key, sizeof key, "%016" PRIx64, g->sh[ST_FRAG]->key);
     int hit = 0;
@@ -1194,7 +1209,7 @@ static void capture_after_draw(VkCommandBuffer cb, GpuState *s, const Program *g
     }
     if (!hit) return;
     char name[32];
-    snprintf(name, sizeof name, "cap_%02d_%.8s", ncaps, key);
+    snprintf(name, sizeof name, "cap_%02d_%.8s_f%" PRIu64, ncaps, key, frame);
     capture_targets(cb, s, name);
 }
 

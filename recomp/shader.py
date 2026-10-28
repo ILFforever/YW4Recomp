@@ -803,7 +803,10 @@ class Translator:
 #   mode:  x on, y unused, z largest radius and search radius (0..1 map coordinates), w smallest radius
 #   scale: radius per unit of depth gap, per cascade layer 0..3
 #   tune:  x depth gap below which a texel isn't counted as a caster, y debug view (1 casters
-#          found / 16, 2 radius / largest)
+#          found / 16, 2 radius / largest), z 1: one blocker search per pixel and layer (yw4_search_*)
+# The mask shader's lookups are a little apart with different references, so yw4_seen rarely
+# matches there; with tune.z the later ones reuse the first one's search (its radius, or "no
+# casters") and only filter. The search was most of the cost (decision 0025).
 PCSS_COMMON = """\
 const vec2 YW4_DISK[16] = vec2[16](
     vec2(-0.94201624, -0.39906216), vec2(0.94558609, -0.76890725), vec2(-0.09418410, -0.92938870),
@@ -815,6 +818,7 @@ const vec2 YW4_DISK[16] = vec2[16](
 vec2 yw4_seen_key[2];
 float yw4_seen_lit[2];
 int yw4_seen_n = 0;
+float yw4_search_layer = -1.0, yw4_search_r = -1.0;
 mat2 yw4_pcss_rotation() {
     float a = 6.2831853 * fract(52.9829189 * fract(dot(gl_FragCoord.xy, vec2(0.06711056, 0.00583715))));
     return mat2(cos(a), sin(a), -sin(a), cos(a));
@@ -852,15 +856,23 @@ float yw4_shadow({sig}) {{
     for (int i = 0; i < yw4_seen_n; i++)
         if (yw4_seen_key[i] == {key}) return yw4_seen_lit[i];
     mat2 rot = yw4_pcss_rotation();
-    float gaps = 0.0, casters = 0.0;
-    for (int i = 0; i < 16; i++) {{
-        float z = {fetch.format(uv=tap.format(r="yw4_pcss.mode.z"))};
-        float gap = {ref} - z;
-        if (gap > yw4_pcss.tune.x) {{ gaps += gap; casters += 1.0; }}
+    float r;
+    if (yw4_pcss.tune.z > 0.5 && yw4_search_layer == {layer}) {{
+        if (yw4_search_r < 0.0) return yw4_pcss_remember({key}, {test.format(uv="c.xy")});
+        r = yw4_search_r;
+    }} else {{
+        float gaps = 0.0, casters = 0.0;
+        for (int i = 0; i < 16; i++) {{
+            float z = {fetch.format(uv=tap.format(r="yw4_pcss.mode.z"))};
+            float gap = {ref} - z;
+            if (gap > yw4_pcss.tune.x) {{ gaps += gap; casters += 1.0; }}
+        }}
+        if (yw4_pcss.tune.y == 1.0) return casters * (1.0 / 16.0);
+        yw4_search_layer = {layer}, yw4_search_r = -1.0;
+        if (casters == 0.0) return yw4_pcss_remember({key}, {test.format(uv="c.xy")});
+        r = clamp(gaps / casters * yw4_pcss.scale[min(int({layer} + 0.5), 3)], yw4_pcss.mode.w, yw4_pcss.mode.z);
+        yw4_search_r = r;
     }}
-    if (yw4_pcss.tune.y == 1.0) return casters * (1.0 / 16.0);
-    if (casters == 0.0) return yw4_pcss_remember({key}, {test.format(uv="c.xy")});
-    float r = clamp(gaps / casters * yw4_pcss.scale[min(int({layer} + 0.5), 3)], yw4_pcss.mode.w, yw4_pcss.mode.z);
     if (yw4_pcss.tune.y == 2.0) return r / yw4_pcss.mode.z;
     float lit = 0.0;
     for (int i = 0; i < 16; i++)
