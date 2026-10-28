@@ -1,5 +1,5 @@
 #version 450
-// Bloom, step 3 (gpu_bloom.c, decision 0037): the three blurred levels onto the scene (blend: the scene times
+// Bloom, step 3 (gpu_post.c, decision 0037): the three blurred levels onto the scene (blend: the scene times
 // one minus our alpha, plus our colour). Each level times its brightness (pc.c[0].x, c[0].z, c[1].x,
 // clamped to 0..1) is combined as a screen, 1 - (1-a)(1-b)(1-c); alpha from the brightest channel of each
 // with the weights c[0].y, c[0].w, c[1].y. Operation order as the game's program.

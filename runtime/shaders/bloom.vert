@@ -1,5 +1,5 @@
 #version 450
-// Our bloom pass (runtime/src/gpu_bloom.c, decision 0037): the game's full-screen quad, its corners and
+// Our bloom pass (runtime/src/gpu_post.c, decision 0037): the game's full-screen quad, its corners and
 // texture coordinates as the engine's vertex buffer holds them, drawn as triangles 0,1,2 and 0,2,3 the way
 // the runtime draws the game's quads, so every pixel gets the same interpolated coordinate.
 // Blur (pc.c[3].x = 1): the 8 tap positions of a pass, the centre twice and +-1, 2, 3 steps (pc.c[0].xy).

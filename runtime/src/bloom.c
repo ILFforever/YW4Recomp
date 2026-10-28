@@ -4,11 +4,11 @@
  * down, and a composite onto the scene. A hook (recomp/overrides.toml) runs before it and gathers what
  * those 8 draws use, straight from the renderer object: its images (0x28-byte records from +0x2e28;
  * record +0x10 is a texture view whose first word + 0x18 is the guest NVNtexture) and its settings. Our
- * pass (gpu_bloom.c) is recorded into the device's command buffer in their place.
+ * pass (gpu_post.c) is recorded into the device's command buffer in their place.
  *
  * YW4_BLOOM=native: ours, and the hook skips the engine's function. YW4_BLOOM=check: the engine draws as
  * usual, and ours draws the same into copies first; after the game's composite the two are compared
- * texel by texel (gpu_bloom.c). YW4_BLOOM=game: the engine's. Default: ours; the settings panel (F1, BLOOM)
+ * texel by texel (gpu_post.c). YW4_BLOOM=game: the engine's. Default: ours; the settings panel (F1, BLOOM)
  * switches while playing.
  *
  * When the engine's function is skipped, the engine's record of what is bound (texture slots, constant
@@ -20,7 +20,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include "bloom.h"
+#include "post.h"
 #include "yw4rt.h"
 
 enum { MODE_GAME, MODE_CHECK, MODE_NATIVE };

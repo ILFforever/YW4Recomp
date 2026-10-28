@@ -104,7 +104,7 @@ change ([decision 0023](docs/decisions/0023-custom-renderer-plan.md)).
 | Done, off by default (panel: SHADOW PASS) | Shadow maps | Our own pass ([decision 0024](docs/decisions/0024-shadow-pass.md)) |
 | Done, off by default (panel: G-BUFFER) | G-buffer | Our draws, our shaders for the main surfaces and characters, identical to the game's ([decision 0026](docs/decisions/0026-gbuffer-pass.md)) |
 | In progress (`YW4_TAKEOVER=1`) | Lit material pass | With the takeover, 85-93% of the G-buffer's and the lit pass's draws are made from the game's data by us, skipping the engine's own draw setup ([decision 0030](docs/decisions/0030-takeover.md)) |
-| Partly ours | Post-processing | Bloom is ours, identical to the game's ([decision 0037](docs/decisions/0037-bloom-pass.md)); anti-aliasing ours between the 3D scene and the UI; the distance blur is still the game's |
+| Partly ours | Post-processing | Bloom is ours, identical to the game's ([decision 0037](docs/decisions/0037-bloom-pass.md)); the distance blur is ours too ([decision 0038](docs/decisions/0038-distance-blur-pass.md)); anti-aliasing ours between the 3D scene and the UI |
 | Planned | UI | The game's |
 
 Still the game's: the choice of what to draw (which objects, in which order) and the engine's own draw walk.

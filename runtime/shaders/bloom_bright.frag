@@ -1,5 +1,5 @@
 #version 450
-// Bloom, step 1 (gpu_bloom.c, decision 0037): the bright parts of the scene (in0) and of the half-size image
+// Bloom, step 1 (gpu_post.c, decision 0037): the bright parts of the scene (in0) and of the half-size image
 // in1, each over its threshold: in1 where it stands out from the scene by more than its difference allows,
 // and the scene itself. pc.c[0] / c[1]: per-channel scale (rgb) and threshold (w) for in0 / in1 (renderer
 // +0x800, +0x7f0). The same operations in the same order as the game's program, so the result is identical.

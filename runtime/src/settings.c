@@ -7,7 +7,7 @@
 #include <SDL3/SDL_filesystem.h>
 
 #include "bindings.h"
-#include "bloom.h"
+#include "post.h"
 #include "gbuffer.h"
 #include "gpu.h"
 #include "settings.h"
@@ -43,6 +43,7 @@ static int pcss_index(void) { return gpu_pcss_level() & 3; }
 static int shadow_pass_index(void) { return !strcmp(shadow_mode_name(), "CUSTOM"); }
 static int gbuffer_index(void) { return gbuffer_native(); }
 static int bloom_index(void) { return bloom_native(); }
+static int dof_pass_index(void) { return dof_native(); }
 
 /* In the order shown; a row starts a new group when its category differs from the row before. The texts
  * use the HUD font's characters (hud.c): upper case, digits, . , : % / - ( ) ' ! ? */
@@ -102,6 +103,12 @@ static const Setting settings[] = {
      "FUTURE UPGRADES IN.",
      {"GAME", "CUSTOM"},
      {"THE GAME'S RENDERER", "OUR CUSTOM RENDERER (RECOMMENDED)"}, 2, bloom_index, bloom_toggle, "YW4_BLOOM", {"game", "native"}},
+    {"RENDERER", "DISTANCE BLUR PASS",
+     "WHO DRAWS THE BLUR OF FAR-AWAY THINGS: THE GAME OR OUR OWN RENDERER. THE PICTURE IS THE SAME. OURS LETS "
+     "FUTURE UPGRADES IN.",
+     {"GAME", "CUSTOM"},
+     {"THE GAME'S RENDERER", "OUR CUSTOM RENDERER (RECOMMENDED)"}, 2, dof_pass_index, dof_toggle, "YW4_DOF_PASS",
+     {"game", "native"}},
 };
 enum { NSETTINGS = sizeof settings / sizeof *settings };
 

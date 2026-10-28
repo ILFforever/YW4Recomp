@@ -1,5 +1,5 @@
 #version 450
-// Bloom, step 2 (gpu_bloom.c, decision 0037): one blur pass, across or down: 4 pairs of taps (bloom.vert)
+// Bloom, step 2 (gpu_post.c, decision 0037): one blur pass, across or down: 4 pairs of taps (bloom.vert)
 // with the weights pc.c[1] (centre, 1, 2, 3 steps), then pc.c[2] times the same pairs (zero in the game's
 // passes, added as it does). Operation order as the game's program.
 

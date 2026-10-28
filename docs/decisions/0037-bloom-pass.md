@@ -17,7 +17,7 @@ word + 0x18 is the guest NVNtexture) and its settings (`+0x7c0` blur steps, `+0x
 `+0x7f0..+0x80f` thresholds, `+0x388d` flag), and records one CMD_NATIVE in the device's command buffer. With
 `YW4_BLOOM=native` the hook then skips the engine's function: none of its CPU work or draws happen.
 
-The executor (runtime/src/gpu_bloom.c) draws the same 8 passes with our own shaders (runtime/shaders/bloom*),
+The executor (runtime/src/gpu_post.c) draws the same 8 passes with our own shaders (runtime/shaders/bloom*),
 written from what the game's programs do, with the same operations in the same order (`fma` where the game
 multiplies and adds in one step), the same quad (its corners and texture coordinates as the engine's vertex
 buffer holds them, split into triangles like the runtime splits the game's quads), the same viewport (scaled and

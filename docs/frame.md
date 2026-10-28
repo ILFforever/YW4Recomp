@@ -375,6 +375,37 @@ setting upgrades it (it allows mip levels), so a pass of ours must make its samp
 The full-screen quad in the engine's vertex buffer: corners (-1, 1), (-1, -1), (1, -1), (1, 1) with texture
 coordinates (0, 0), (0, 1), (1, 1), (1, 0).
 
+### Distance blur `f_8007d0(device, renderer)` (decoded 2026-10-28; ours: decision 0038)
+
+Same renderer object and image records as bloom. Nothing is drawn when `renderer +0x868` (the number of blur
+rounds) is 0.
+
+1. **Shrink** into target id 5 (800×450), attachment 0 = record 9. Two variants:
+   - `renderer +0x2c70` clear (the bamboo forest): a plain copy of record 0 (the scene), program by id
+     `+0x38a8` (`98c09b`/`2d68c8`: colour × the vertex colour).
+   - `+0x2c70` set: program `+0x38ea`, reading record 0, record 42 (`+0x34b8`, depth) and a texture from a G4TX
+     container (`[+0x2e00]+0x18`, index `+0x2e1e`), with 0x20 bytes of constants (`+0x2c8c`, `(float)u32 +0x2c90 /
+     +0x2c94`, `+0x2ca4`, `+0x2ca0`, `+0x2ca8`), and three sampler slots set to clamp. Not seen yet.
+2. **Blur** `f_7f3620(radius +0x864, device, (+0x860, +0x860), rounds +0x868 (at most 32), target 5, 0, 1,
+   record 9, record 10)`: per round, across from record 9 into attachment 1 (record 10), then down from record 10
+   into attachment 0 (record 9), each by `f_7f3900` (`29d827`/`b8856c`, sampler slot 0 clamped on all axes). Weights:
+   `w_k = expf(-k²/2r²) / s` for k = 0..7, `s = 2 Σ w` (the centre counted twice; the sdk's `expf` is musl's,
+   runtime/src/hle_math.c). Constants (0x40 bytes): row 0 = (+0x860 / width, 0, 0, 0) across or (0, +0x860 / height,
+   0, 0) down (the target's size), row 16 = 1.0 ×4 (the vertex colour's factor), rows 32 and 48 = the 8 weights.
+   The blur's 16 taps are the centre twice and ±1..7 steps (the vertex program adds the step up as bloom's does).
+3. **Composite** into target id 2 (the scene), program `+0x38c4` (`93ff16`/`27b63a`), from record 9 (slot 0) and
+   record 42 (slot 1, depth): vertex constants (0x10) = `+0x86c` / record 42's width and height (from its
+   descriptor `[+0x34c0]`, u16 +4 / +6); fragment constants (0x20) from the camera's near/far (`+0x5c0`, `+0x5c4`) and
+   the focus settings `+0x850..+0x85c`; it also reads the camera block (cbuf 8, byte 48). The amount is the depth's
+   distance past the focus (5 depth taps: the centre and 4 diagonal neighbours); pixels with almost none are
+   discarded (`KIL`), the rest get the blurred colour with that amount as alpha. With `+0x2c70` set, a 0x70-byte
+   variant with another G4TX texture (`+0x2e20`).
+
+The runtime already changes this pass: the settings panel's DISTANCE BLUR halves the composite's amount (its
+fragment constants row 0 `.w`) or skips the composite, and with full-size effects records 9 and 10 keep the
+game's size ratio (`gpu_keep_game_ratio`, set when the game's draws of these programs are seen). The blur's quad has
+three inputs (position, colour, texture coordinate), bloom's two.
+
 ## Model detail at a distance (checked 2026-10-27): not used
 
 The engine has a level-of-detail class, `lives::gmdCObjModelLodInfo`, registered with its property system in
