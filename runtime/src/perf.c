@@ -96,16 +96,20 @@ static void print_summary(FILE *f, size_t from, const char *what) {
         over34 += rows[i].interval > 34.5, over50 += rows[i].interval > 50;
     }
     double frames = (double)(n - from);
-    double *interval = malloc(n * sizeof *interval), *work = malloc(n * sizeof *work);
-    if (!interval || !work) return;
-    for (size_t i = 0; i < n; i++) interval[i] = rows[i].interval, work[i] = rows[i].work;
-    fprintf(f, "%s: %zu frames, %.1f frames/s average\n", what, n - from, 1000.0 * frames / sum);
+    size_t m = n - from;  /* only the stretch asked for: copying the whole run every report grew with play time */
+    double *interval = malloc(m * sizeof *interval), *work = malloc(m * sizeof *work);
+    if (!interval || !work) {
+        free(interval), free(work);
+        return;
+    }
+    for (size_t i = 0; i < m; i++) interval[i] = rows[from + i].interval, work[i] = rows[from + i].work;
+    fprintf(f, "%s: %zu frames, %.1f frames/s average\n", what, m, 1000.0 * frames / sum);
     fprintf(f, "  interval ms: p50 %.1f  p95 %.1f  p99 %.1f  max %.1f   (slower than 34.5 ms: %zu = %.1f%%, than 50 ms: %zu)\n",
-            percentile(interval, from, n, 50), percentile(interval, from, n, 95), percentile(interval, from, n, 99),
-            percentile(interval, from, n, 100), over34, 100.0 * (double)over34 / frames, over50);
+            percentile(interval, 0, m, 50), percentile(interval, 0, m, 95), percentile(interval, 0, m, 99),
+            percentile(interval, 0, m, 100), over34, 100.0 * (double)over34 / frames, over50);
     fprintf(f, "  game work ms: avg %.1f  p50 %.1f  p95 %.1f  p99 %.1f  max %.1f   (budget at 30 frames/s: 33.3)\n", wsum / frames,
-            percentile(work, from, n, 50), percentile(work, from, n, 95), percentile(work, from, n, 99),
-            percentile(work, from, n, 100));
+            percentile(work, 0, m, 50), percentile(work, 0, m, 95), percentile(work, 0, m, 99),
+            percentile(work, 0, m, 100));
     free(interval);
     free(work);
     size_t g0 = ngpu > (n - from) ? ngpu - (n - from) : 0;  /* the same stretch, roughly */
@@ -148,10 +152,12 @@ static void write_rows(size_t upto) {
     }
 }
 
-static void write_summary(void) {
+/* The whole run's summary (at exit), or meanwhile the last 600 frames': sorting every frame of the run on the
+ * presenting thread every 600 frames was a hitch that grew with play time (220 ms after an hour, 2026-10-28). */
+static void write_summary(size_t from, const char *what) {
     FILE *f = fopen(summary_path, "w");
     if (f) {
-        print_summary(f, 0, "whole run");
+        print_summary(f, from, what);
         fclose(f);
     }
 }
@@ -162,7 +168,7 @@ static void finish(void) {
     write_rows(nrows);
     fclose(csv);
     csv = NULL;
-    write_summary();
+    write_summary(0, "whole run");
     print_summary(stderr, 0, "yw4: perf, whole run");
 }
 
@@ -289,7 +295,8 @@ void yw4_perf_frame(uint64_t frame, int64_t enter, int64_t shown, int64_t exit_,
         if (last_threads) fprintf(stderr, "  threads, last 600 frames:\n");
         yw4_thread_cpu_report(stderr, last_threads ? exit_ - last_threads : 0);  /* 0: only takes the start values */
         last_threads = exit_;
-        write_summary();  /* so a killed or crashed run leaves its numbers */
+        /* so a killed or crashed run leaves numbers (every frame is in the CSV too) */
+        write_summary(nrows > 600 ? nrows - 600 : 0, "last 600 frames (the whole run is written at exit)");
         last_summary_frame = frame;
     }
 }
