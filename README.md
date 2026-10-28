@@ -3,7 +3,7 @@
 <p align="center">
   <b>Yo-kai Watch 4++, recompiled for PC.</b>
   <br>
-  4K · Ultrawide 21:9 / 32:9 · PCSS soft shadows · TAA / SMAA · ×16 texture filtering · Xbox, PlayStation and Nintendo pads
+  4K · Ultrawide 21:9 / 32:9 · PCSS soft shadows · TAA / SMAA · ×16 texture filtering · Xbox, PlayStation and Joy-Cons
   <br>
   <sub>A fan static recompilation of the Nintendo Switch game (update 2.2.0), in the style of <a href="https://github.com/N64Recomp/N64Recomp">N64Recomp</a>: the game's code is translated into a native Windows program.</sub>
 </p>
@@ -104,7 +104,7 @@ change ([decision 0023](docs/decisions/0023-custom-renderer-plan.md)).
 | Done, off by default (panel: SHADOW PASS) | Shadow maps | Our own pass ([decision 0024](docs/decisions/0024-shadow-pass.md)) |
 | Done, off by default (panel: G-BUFFER) | G-buffer | Our draws, our shaders for the main surfaces and characters, identical to the game's ([decision 0026](docs/decisions/0026-gbuffer-pass.md)) |
 | In progress (`YW4_TAKEOVER=1`) | Lit material pass | With the takeover, 85-93% of the G-buffer's and the lit pass's draws are made from the game's data by us, skipping the engine's own draw setup ([decision 0030](docs/decisions/0030-takeover.md)) |
-| Partly ours | Post-processing | The game's, with our anti-aliasing between the 3D scene and the UI |
+| Partly ours | Post-processing | Bloom is ours, identical to the game's ([decision 0037](docs/decisions/0037-bloom-pass.md)); anti-aliasing ours between the 3D scene and the UI; the distance blur is still the game's |
 | Planned | UI | The game's |
 
 Still the game's: the choice of what to draw (which objects, in which order) and the engine's own draw walk.
@@ -239,7 +239,7 @@ are debugging tools ([docs/debugging.md](docs/debugging.md)).
 
 ![The controls page with a DualSense: cross, circle, square, triangle, L1 to R3](docs/screenshots/28-controls-dualsense.png)
 
-**Controllers:** Xbox, PlayStation and Nintendo pads work, and the controls page names the buttons as printed on
+**Controllers:** Xbox, PlayStation and Joy-Cons work, and the controls page names the buttons as printed on
 yours (A B X Y and LB/RT on Xbox; × ○ □ △ and L1-R3 on PlayStation; ZL/ZR on Nintendo). By default the game's
 confirm is your controller's own confirm: × on a DualSense, A on Xbox. Tested by playing with a **DualSense (PS5)**,
 battles included, and with the controls page.

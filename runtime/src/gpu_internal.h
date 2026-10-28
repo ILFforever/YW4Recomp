@@ -160,6 +160,8 @@ void gpu_dynamic_state(VkCommandBuffer cb, const GpuState *s, VkFormat depth, ui
 void gpu_dynamic_forget(void);
 /* gpu_aa.c: anti-aliasing of the scene in s's first colour target, outside rendering (ends it). */
 void gpu_aa_apply(VkCommandBuffer cb, GpuState *s);
+/* One of our shaders, compiled from runtime/shaders by the build (gpu_aa.c). */
+VkShaderModule gpu_native_shader(const char *name);
 /* TAA (gpu_aa.c): the shift in pixels for a 3D draw into a w x h target (0: none), and the draws' targets
  * (the G-buffer's motion target is noted, and copied when its targets change). */
 int gpu_taa_jitter(uint32_t w, uint32_t h, float *jx, float *jy);  /* not for the UI: the caller checks */

@@ -351,7 +351,8 @@ Render targets come from the target manager `[main+0x5865158]`, vtable slot `+0x
 `u16 +0x3a` × `u16 +0x3c`.
 
 1. **Bright parts** (`d794c4`, into the 800×450 target) from records 0 (slot 0) and 11 (slot 1). Constants (fragment
-   cbuf 6, 0x30 bytes) = `renderer +0x7f0..+0x80f` (rows 0 and 16) and `+0x7b0`; when `renderer +0x388d` is set, the
+   cbuf 6, 0x30 bytes) = `renderer +0x800..+0x80f` (row 0, for slot 0), `+0x7f0..+0x7ff` (row 16, for slot 1) and
+   `+0x7b0`; when `renderer +0x388d` is set, the
    `.w` of both rows is raised to at least 1.0. The shader: `d = in1 - in0`, `m = max|d|` over rgb,
    `a = max(in1 - 1.5 m, 0)`, out.rgb = `max(a * row16.rgb - row16.w, in0 * row0.rgb - row0.w)`,
    out.a = `max(in1.a, in0.a)`, all clamped at 0. Its output is record 9.
@@ -367,6 +368,12 @@ Render targets come from the target manager `[main+0x5865158]`, vtable slot `+0x
    (1 - (1-a)(1-b)(1-c), each clamped) and its alpha from their brightest channels.
 
 At 4K 21:9 the composite took 1.5-2.2 ms of GPU per frame (2026-10-28), the rest of bloom well under 1 ms.
+
+All 8 draws use one sampler: min filter 3, mag 1, clamped (7), levels 0-15. The runtime's texture filtering
+setting upgrades it (it allows mip levels), so a pass of ours must make its sampler the same way
+(`gpu_sampler`), or about 20 texels per frame come out one bit different (decision 0037).
+The full-screen quad in the engine's vertex buffer: corners (-1, 1), (-1, -1), (1, -1), (1, 1) with texture
+coordinates (0, 0), (0, 1), (1, 1), (1, 0).
 
 ## Model detail at a distance (checked 2026-10-27): not used
 

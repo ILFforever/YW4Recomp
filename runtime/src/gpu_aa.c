@@ -38,7 +38,7 @@ void gpu_aa_cycle(void) {
     fprintf(stderr, "yw4: gpu: anti-aliasing %s\n", m == 3 ? "TAA" : m == 2 ? "SMAA" : m == 1 ? "FXAA" : "off");
 }
 
-static VkShaderModule module(const char *name) {
+VkShaderModule gpu_native_shader(const char *name) {
     const char *dir = getenv("YW4_NATIVE_SHADER_DIR");
     char path[1024];
     snprintf(path, sizeof path, "%s/%s.spv", dir && *dir ? dir : "work/build/shaders", name);
@@ -204,7 +204,7 @@ static VkPipeline pipeline(int pass, VkFormat out) {
                                                 "aa_show_weights.frag", "aa_test.frag", "taa_resolve.frag",
                                                 "taa_output.frag"};
     static VkShaderModule vs[PASSES], fs[PASSES];
-    if (!vs[pass]) vs[pass] = module(vs_name[pass]), fs[pass] = module(fs_name[pass]);
+    if (!vs[pass]) vs[pass] = gpu_native_shader(vs_name[pass]), fs[pass] = gpu_native_shader(fs_name[pass]);
     VkPipelineShaderStageCreateInfo st[2] = {
         {.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO, .stage = VK_SHADER_STAGE_VERTEX_BIT,
          .module = vs[pass], .pName = "main"},

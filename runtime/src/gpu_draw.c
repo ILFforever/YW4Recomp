@@ -26,6 +26,7 @@
 #include <string.h>
 
 #include "gbuffer.h"
+#include "bloom.h"
 #include "gpu_internal.h"
 #include "host.h"
 #include "kernel.h"
@@ -1800,6 +1801,7 @@ static void draw(VkCommandBuffer cb, GpuState *s, const CmdRec *r) {
     capture_after_draw(cb, s, g);
     /* the bloom composite, the last 3D pass before the UI: anti-aliasing here (gpu_aa.c) */
     if (g->sh[ST_FRAG] && g->sh[ST_FRAG]->key == COMPOSITE_SHADER) {
+        gpu_bloom_after_composite(cb, s);  /* YW4_BLOOM=check: the game's results, before anti-aliasing */
         s->after_composite = 1;
         if (gpu_aa()) gpu_aa_apply(cb, s);
     }

@@ -161,3 +161,9 @@ module = "main"
 offset = "0xa79c00"
 native = "yw4_hook_bones_a79c00"
 why = "the same with a per-bone extra call (main+0xa7a530); done natively (runtime/src/bones.c, decision 0036)"
+
+[[hook]]
+module = "main"
+offset = "0x802e40"
+native = "yw4_hook_bloom"
+why = "the engine's bloom (device, renderer): YW4_BLOOM=native draws our own in its place (runtime/src/bloom.c, decision 0037)"

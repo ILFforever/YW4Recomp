@@ -24,6 +24,7 @@
 #include <string.h>
 
 #include "gbuffer.h"
+#include "bloom.h"
 #include "gpu_internal.h"
 #include "host.h"
 #include "shadow.h"
@@ -1635,6 +1636,10 @@ void gpu_present(NvnTexture *t, uint64_t frame, const int crop[4]) {
     if (gpu_ab_pending()) {
         gpu_wait(gpu_submitted(), UINT64_MAX);
         gpu_ab_flush();
+    }
+    if (gpu_bloom_pending()) {
+        gpu_wait(gpu_submitted(), UINT64_MAX);
+        gpu_bloom_flush();
     }
     dump_images(present_count);
     if (getenv("YW4_COMPUTE_TRACE")) {
