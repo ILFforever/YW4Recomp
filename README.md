@@ -214,10 +214,12 @@ With ANTI-ALIASING set to FSR or DLSS, the UPSCALING row draws the 3D world smal
 upscaler rebuilds a full-size picture from it and the frames before, using the motion the game writes. The menus
 and text are drawn afterwards at full size. **AMD FSR 3.1** runs on any GPU; **NVIDIA DLSS** (NVIDIA RTX GPUs, the
 DLSS MODEL row picks the fast or the newest model) keeps fine patterns cleaner and costs less on this GPU. Bamboo
-forest at 4K 21:9 on an RTX 4070 laptop (native with TAA: ~59 frames/s):
+forest at 4K 21:9 on an RTX 4070 laptop, frames/s:
 
 | Mode | World drawn at | DLSS (fast model) | FSR |
 |---|---|---|---|
+| native, TAA (no DLSS or FSR) | 5120×2160 | ~59 | ~59 |
+| native, UPSCALING off (DLSS / FSR as anti-aliasing only) | 5120×2160 | ~53 (DLAA) | ~46 |
 | quality | 3413×1440 | ~81 | ~75 |
 | balanced | 3013×1271 | ~93 | ~86 |
 | performance | 2560×1080 | ~112 | ~104 |
