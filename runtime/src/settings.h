@@ -6,7 +6,7 @@
 #ifndef YW4_SETTINGS_H
 #define YW4_SETTINGS_H
 
-enum { SETTINGS_MAX_OPTIONS = 5 };
+enum { SETTINGS_MAX_OPTIONS = 6 };
 
 typedef struct {
     const char *category;  /* the group it is listed under */

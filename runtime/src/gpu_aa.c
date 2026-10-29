@@ -11,12 +11,14 @@
  * G-buffer's first target, noted by gpu_taa_note_targets); runtime/shaders/taa_resolve.frag.
  * FSR (mode 4, gpu_fsr.c): AMD's upscaler in place of TAA's blend, from the same jitter, motion and the scene's
  * depth; at the scene's own size for now (native anti-aliasing), falling back to TAA when FSR can't run.
- * YW4_AA=0 off / 1 FXAA / 2 SMAA / 3 TAA / 4 FSR at start; the settings panel (F1) cycles it. */
+ * DLSS (mode 5, gpu_dlss.c): NVIDIA's upscaler in the same place, on NVIDIA RTX GPUs; FSR, then TAA, when it can't.
+ * YW4_AA=0 off / 1 FXAA / 2 SMAA / 3 TAA / 4 FSR / 5 DLSS at start; the settings panel (F1) cycles it. */
 #include <inttypes.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
+#include "gpu_dlss.h"
 #include "gpu_fsr.h"
 #include "gpu_internal.h"
 #include "../../third_party/smaa/AreaTex.h"
@@ -29,17 +31,17 @@ int gpu_aa(void) {
     if (m < 0) {
         const char *e = getenv("YW4_AA");
         m = e ? atoi(e) : 0;
-        if (m < 0 || m > 4) m = 0;
+        if (m < 0 || m > 5) m = 0;
         __atomic_store_n(&aa_mode, m, __ATOMIC_RELEASE);
     }
     return m;
 }
 
 void gpu_aa_cycle(void) {
-    int m = (gpu_aa() + 1) % 5;
+    int m = (gpu_aa() + 1) % 6;
     __atomic_store_n(&aa_mode, m, __ATOMIC_RELEASE);
     fprintf(stderr, "yw4: gpu: anti-aliasing %s\n",
-            m == 4 ? "FSR" : m == 3 ? "TAA" : m == 2 ? "SMAA" : m == 1 ? "FXAA" : "off");
+            m == 5 ? "DLSS" : m == 4 ? "FSR" : m == 3 ? "TAA" : m == 2 ? "SMAA" : m == 1 ? "FXAA" : "off");
 }
 
 VkShaderModule gpu_native_shader(const char *name) {
@@ -166,7 +168,8 @@ static void working_images(VkCommandBuffer cb, uint32_t w, uint32_t h) {
 static void output_image(VkCommandBuffer cb, uint32_t w, uint32_t h) {
     if (fsr_out.image && fsr_out.w == w && fsr_out.h == h) return;
     if (fsr_out.image) gpu_wait(gpu_submitted(), UINT64_MAX), image_free(&fsr_out);
-    image_make(&fsr_out, VK_FORMAT_R16G16B16A16_SFLOAT, w, h, VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_STORAGE_BIT);
+    image_make(&fsr_out, VK_FORMAT_R16G16B16A16_SFLOAT, w, h,
+               VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT);  /* DLSS clears it */
     to_general(cb, fsr_out.image);
 }
 
@@ -353,6 +356,8 @@ static float halton(int i, int base) {
     return r;
 }
 
+static void dlss_jitter(uint32_t w, uint32_t ow, uint64_t n, float *jx, float *jy);  /* below */
+
 /* The shift, in pixels, for a 3D draw into a w x h target this frame: TAA on and the target the scene's
  * size (the caller leaves out what follows the composite); else none (0). 8 positions (Halton 2, 3),
  * one per frame. */
@@ -368,6 +373,10 @@ int gpu_taa_jitter(uint32_t w, uint32_t h, float *jx, float *jy) {
     nshift++;
     if (gpu_aa() == 4 && gpu_fsr_available() == 1) {  /* FSR's own sequence */
         gpu_fsr_jitter(w, scene_ow ? scene_ow : w, gpu_frames(), jx, jy);
+        return 1;
+    }
+    if (gpu_aa() == 5) {  /* DLSS: Halton 2, 3, as many positions as NVIDIA suggests: 8 x the upscale ratio squared */
+        dlss_jitter(w, scene_ow ? scene_ow : w, gpu_frames(), jx, jy);
         return 1;
     }
     int i = (int)(gpu_frames() % 8) + 1;
@@ -435,6 +444,13 @@ static void taa(VkCommandBuffer cb, VkImageView target, VkFormat fmt, uint32_t w
     taa_cur = next, history_valid = 1;
 }
 
+static void dlss_jitter(uint32_t w, uint32_t ow, uint64_t n, float *jx, float *jy) {
+    float r = w ? (float)ow / (float)w : 1.0f;
+    int phases = (int)(8.0f * r * r + 0.5f);
+    int i = (int)(n % (uint64_t)(phases > 0 ? phases : 8)) + 1;
+    *jx = halton(i, 2) - 0.5f, *jy = halton(i, 3) - 0.5f;
+}
+
 /* FSR in place of TAA's blend: the encoded scene, the scene's depth and the game's motion in (w x h), FSR's
  * result out (ow x oh: larger when upscaling) through the curve's inverse (no extra sharpening: FSR has its
  * own). 0: FSR could not run. */
@@ -487,6 +503,41 @@ static int fsr(VkCommandBuffer cb, GpuImage *d, VkImageView target, VkFormat fmt
     return 1;
 }
 
+/* DLSS like FSR: the same inputs and output (gpu_dlss.c). 0: it could not run. */
+static int dlss(VkCommandBuffer cb, GpuImage *d, VkImageView depth_view, VkImageView target, VkFormat fmt, uint32_t w,
+                uint32_t h, uint32_t ow, uint32_t oh) {
+    uint64_t now = gpu_frames();
+    if (!motion.image || motion_frame + 1 < now || motion_frame > now + 1) return 0;
+    if (!d || d->width != w || d->height != h || motion.w != w || motion.h != h || !depth_view) return 0;
+    output_image(cb, ow, oh);
+    static uint64_t last = ~0ull;
+    static uint32_t last_ow;
+    static int64_t last_ns;
+    int64_t t = host_now_ns();
+    GpuDlssInputs in = {.color = encoded.image, .depth = d->image, .motion = motion.image, .output = fsr_out.image,
+                        .color_view = encoded.view, .depth_view = depth_view, .motion_view = motion.view,
+                        .output_view = fsr_out.view, .color_format = VK_FORMAT_R16G16B16A16_SFLOAT,
+                        .depth_format = d->format, .output_format = VK_FORMAT_R16G16B16A16_SFLOAT, .render_w = w,
+                        .render_h = h, .output_w = ow, .output_h = oh, .quality = gpu_upscale(),
+                        .reset = last + 1 != now || last_ow != ow,
+                        .frame_ms = last_ns ? (float)(t - last_ns) / 1e6f : 16.7f};
+    dlss_jitter(w, ow, now, &in.jitter[0], &in.jitter[1]);
+    float sy = nvn_window_origin == 1 ? -1.0f : 1.0f, mx = 1.0f, my = 1.0f, jsx = 1.0f, jsy = 1.0f;
+    const char *e = getenv("YW4_DLSS_MV_SIGN");  /* testing: "x,y" flips the motion */
+    if (e) sscanf(e, "%f,%f", &mx, &my);
+    e = getenv("YW4_DLSS_JITTER_SIGN");  /* testing: "x,y" flips the jitter told to DLSS */
+    if (e) sscanf(e, "%f,%f", &jsx, &jsy);
+    in.motion_scale[0] = -(float)w * mx, in.motion_scale[1] = -(float)h * sy * my;
+    in.jitter[0] *= jsx, in.jitter[1] *= jsy;
+    full_barrier(cb);
+    if (!gpu_dlss_dispatch(cb, &in)) return 0;
+    full_barrier(cb);
+    pass(cb, P_TAA_OUT, target, fmt, ow, oh, 0, fsr_out.view);
+    last = now, last_ow = ow, last_ns = t;
+    history_valid = 0;
+    return 1;
+}
+
 void gpu_aa_apply(VkCommandBuffer cb, GpuState *s) {
     int mode = gpu_aa(), up = gpu_upscale() != 0;
     NvnTexture *t = s->ncolor ? s->rt.color[0] : NULL;
@@ -535,12 +586,14 @@ void gpu_aa_apply(VkCommandBuffer cb, GpuState *s) {
      * of the scene, anti-aliased as usual */
     static int debug = -1;
     if (debug < 0) debug = getenv("YW4_AA_DEBUG") ? atoi(getenv("YW4_AA_DEBUG")) : 0;
-    static const char *const label[5] = {"upscaling (plain)", "anti-aliasing: FXAA", "anti-aliasing: SMAA",
-                                         "anti-aliasing: TAA", "anti-aliasing: FSR"};
+    static const char *const label[6] = {"upscaling (plain)", "anti-aliasing: FXAA", "anti-aliasing: SMAA",
+                                         "anti-aliasing: TAA", "anti-aliasing: FSR", "anti-aliasing: DLSS"};
     gpu_passes_other(cb, label[mode], 0);  /* its own line in the per-pass timer (F5) */
     pass(cb, debug == 3 ? P_TEST : P_ENCODE, encoded.view, VK_FORMAT_R16G16B16A16_SFLOAT, w, h, 0, scene);
-    if (mode == 4 && !debug && depth && fsr(cb, depth, out, fmt, w, h, ow, oh)) {
-        /* done: FSR wrote the output's size */
+    if (mode == 5 && !debug && depth && dlss(cb, depth, depth_in, out, fmt, w, h, ow, oh)) {
+        /* done: DLSS wrote the output's size */
+    } else if (mode >= 4 && !debug && depth && fsr(cb, depth, out, fmt, w, h, ow, oh)) {
+        /* done: FSR wrote the output's size (also when DLSS can't run) */
     } else {
         if (mode >= 3) {
             taa(cb, target, fmt, w, h, debug);

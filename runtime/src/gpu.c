@@ -783,7 +783,7 @@ int gpu_upscale_setting(void) {
 }
 
 /* Upscaling needs FSR to rebuild the detail; without it the choice is kept but not used (owner, 2026-10-29) */
-int gpu_upscale(void) { return gpu_aa() == 4 ? gpu_upscale_setting() : 0; }
+int gpu_upscale(void) { return gpu_aa() >= 4 ? gpu_upscale_setting() : 0; }  /* FSR or DLSS */
 
 void gpu_upscale_cycle(void) {
     int m = (gpu_upscale_setting() + 1) % 4;

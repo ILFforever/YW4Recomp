@@ -8,6 +8,7 @@
 
 #include "bindings.h"
 #include "framerate.h"
+#include "gpu_dlss.h"
 #include "post.h"
 #include "gbuffer.h"
 #include "gpu.h"
@@ -47,7 +48,8 @@ static int gbuffer_index(void) { return gbuffer_native(); }
 static int bloom_index(void) { return bloom_native(); }
 static int dof_pass_index(void) { return dof_native(); }
 static int blur_fast_index(void) { return blur_fast(); }
-static const char *upscale_disabled(void) { return gpu_aa() == 4 ? NULL : "NEEDS ANTI-ALIASING SET TO FSR"; }
+static const char *dlss_disabled(void) { return gpu_aa() == 5 ? NULL : "NEEDS ANTI-ALIASING SET TO DLSS"; }
+static const char *upscale_disabled(void) { return gpu_aa() >= 4 ? NULL : "NEEDS ANTI-ALIASING SET TO FSR OR DLSS"; }
 
 /* In the order shown; a row starts a new group when its category differs from the row before. The texts
  * use the HUD font's characters (hud.c): upper case, digits, . , : % / - ( ) ' ! ? */
@@ -66,17 +68,24 @@ static const Setting settings[] = {
      gpu_wide_cycle, "YW4_ASPECT", {"16:9", "16:10", "21:9", "32:9"}},
     {"PICTURE", "ANTI-ALIASING",
      "SMOOTHS THE JAGGED EDGES OF OBJECTS. APPLIED BEFORE THE MENUS ARE DRAWN, SO TEXT STAYS SHARP.",
-     {"OFF", "FXAA", "SMAA", "TAA", "FSR"},
+     {"OFF", "FXAA", "SMAA", "TAA", "FSR", "DLSS"},
      {"THE SWITCH'S DEFAULT: JAGGED EDGES", "SMOOTHEST, TEXTURES A LITTLE SOFTER", "CLEAN EDGES, TEXTURES STAY SHARP",
-      "STEADY EDGES: NO SHIMMER ON FENCES, LEAVES AND SHADOWS", "AMD FSR: STEADY EDGES, BEST WITH UPSCALING"}, 5, gpu_aa,
-     gpu_aa_cycle, "YW4_AA", {"0", "1", "2", "3", "4"}},
+      "STEADY EDGES: NO SHIMMER ON FENCES, LEAVES AND SHADOWS", "AMD FSR: STEADY EDGES, BEST WITH UPSCALING",
+      "NVIDIA DLSS: AI UPSCALING, NVIDIA RTX GPUS (ELSE FSR)"}, 6, gpu_aa,
+     gpu_aa_cycle, "YW4_AA", {"0", "1", "2", "3", "4", "5"}},
     {"PICTURE", "UPSCALING",
-     "DRAWS THE WORLD SMALLER THAN THE RESOLUTION, THEN AMD FSR REBUILDS IT AT FULL SIZE: MORE FRAMES. MENUS AND "
-     "TEXT STAY FULL SIZE. NEEDS ANTI-ALIASING SET TO FSR.",
+     "DRAWS THE WORLD SMALLER THAN THE RESOLUTION, THEN AMD FSR OR NVIDIA DLSS REBUILDS IT AT FULL SIZE: MORE "
+     "FRAMES. MENUS AND TEXT STAY FULL SIZE. NEEDS ANTI-ALIASING SET TO FSR OR DLSS.",
      {"OFF", "QUALITY", "BALANCED", "PERFORMANCE"},
      {"THE WORLD AT FULL RESOLUTION", "1.5X SMALLER: CLOSE TO FULL, FASTER", "1.7X SMALLER: FASTER STILL",
       "2X SMALLER: FASTEST, SOFTER"}, 4,
      gpu_upscale_setting, gpu_upscale_cycle, "YW4_UPSCALE", {"0", "1", "2", "3"}, upscale_disabled},
+    {"PICTURE", "DLSS MODEL",
+     "WHICH NVIDIA DLSS MODEL REBUILDS THE PICTURE. FAST IS THE OLDER MODEL: NEARLY AS CLEAN, ABOUT HALF THE GPU TIME. "
+     "BEST IS THE NEWEST: A LITTLE CLEANER, MORE GPU TIME.",
+     {"FAST", "BEST"},
+     {"OLDER MODEL (RECOMMENDED): MORE FRAMES", "NEWEST MODEL: CLEANEST, FEWER FRAMES"}, 2,
+     gpu_dlss_model, gpu_dlss_model_cycle, "YW4_DLSS_MODEL", {"0", "1"}, dlss_disabled},
     {"PICTURE", "TEXTURE FILTERING",
      "KEEPS GROUND, ROADS AND WALLS SHARP WHEN SEEN FROM AFAR OR AT AN ANGLE.",
      {"OFF", "X2", "X4", "X8", "X16"},

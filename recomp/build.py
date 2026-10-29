@@ -126,6 +126,17 @@ def main(argv: list[str] | None = None) -> int:
         # AMD FSR (decision 0039): headers to compile gpu_fsr.c against, DLLs copied next to yw4.exe below
         fsr = deps.fetch_fsr(cfg) / "Kits" / "FidelityFX"
         includes.append(f"-I{fsr / 'api' / 'include'}")
+        # NVIDIA DLSS (decision 0040): headers, the static NGX library (made for MSVC: runtime/src/msvc_shim.c
+        # supplies the few runtime pieces it needs, empty stand-ins satisfy its default-library requests), the DLL
+        dlss = deps.fetch_dlss(cfg)
+        includes += [f"-I{dlss / 'include'}", "-DYW4_DLSS=1"]
+        stub = dlss / "stub"
+        if not (stub / "libmsvcprt.a").is_file():
+            stub.mkdir(exist_ok=True)
+            ar = Path(cc).with_name("llvm-ar.exe")
+            for name in ("msvcprt", "OLDNAMES"):
+                subprocess.run([str(ar), "rc", str(stub / f"lib{name}.a")], check=True)
+        sdl_libs += [str(dlss / "lib" / "Windows_x86_64" / "x64" / "nvsdk_ngx_d.lib"), f"-L{stub}"]
     else:
         pc = lambda *a: subprocess.run(["pkg-config", *a, "sdl3"], capture_output=True, text=True, check=True).stdout.split()
         includes += pc("--cflags")
@@ -163,6 +174,7 @@ def main(argv: list[str] | None = None) -> int:
         shutil.copy2(sdl / "bin" / "SDL3.dll", exe.parent / "SDL3.dll")  # found next to yw4.exe
         for dll in deps.FSR_DLLS:  # amd_fidelityfx_loader_vk.dll loads the upscaler from its own folder
             shutil.copy2(fsr / "signedbin" / dll, exe.parent / dll)
+        shutil.copy2(dlss / "lib" / "Windows_x86_64" / "rel" / "nvngx_dlss.dll", exe.parent / "nvngx_dlss.dll")
     link = subprocess.run([cc, "-o", str(exe), *map(str, objs), *libs], capture_output=True, text=True)
     if link.returncode != 0:
         print(f"link failed:\n{link.stderr[-3000:]}", file=sys.stderr)

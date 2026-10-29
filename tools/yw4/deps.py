@@ -7,6 +7,9 @@ and SHA-256. Linux builds use the system's SDL3 (pkg-config sdl3) instead.
 AMD FSR (decision 0039): the FSR SDK's source archive, pinned the same way; only the MIT
 headers the runtime compiles against and the two signed Vulkan DLLs (loader and upscaler,
 MIT too, listed in its Kits/FidelityFX/docs/license.md) are taken out. Windows only.
+NVIDIA DLSS (decision 0040): single files of NVIDIA's DLSS SDK repository at a pinned tag, each
+checked against its SHA-256: the headers, the static NGX library and nvngx_dlss.dll. They are
+under NVIDIA's own licence (LICENSE.txt, fetched with them), never committed. Windows only.
 Nothing here is committed: each archive is checked against its pinned hash and unpacked
 into its own folder.
 """
@@ -97,6 +100,43 @@ def fetch_fsr(cfg: config.Config) -> Path:
     return out
 
 
+DLSS_VERSION = "310.9.16"
+DLSS_URL = f"https://raw.githubusercontent.com/NVIDIA/DLSS/v{DLSS_VERSION}/"
+DLSS_FILES = {
+    "LICENSE.txt": "d4216e39ebef5f9b50a6712ebb37beeb5379862a67733a9999c651f21592aaf0",
+    "include/nvsdk_ngx.h": "dc38e7467cf415379c9d12ae1b6e4a494c453ed92720fb53e92aecb523e7b848",
+    "include/nvsdk_ngx_defs.h": "ea23f33497cd274860d1c25a97644fce807dcb0037c594547203343103fad03e",
+    "include/nvsdk_ngx_defs_vk.h": "0a24d0861ace7d6b9362a67b7f08bea1b33ea123c5ce730b19133de8a891d031",
+    "include/nvsdk_ngx_params.h": "943bc8cc5cdae03b6303016fbad3183636f2335ae27a2d18776798c3b4efabbc",
+    "include/nvsdk_ngx_helpers_vk.h": "c192bff72138f12f770db48e12c1d8f712dfc81ea0e8e055ebb27d8dd1b31623",
+    "include/nvsdk_ngx_vk.h": "2d364ce7132881eb669e9498fd570d74cba563b1fbebc82c235f8e1ad2dd8b6d",
+    "lib/Windows_x86_64/x64/nvsdk_ngx_d.lib": "bc43df9ec032004fde681d3e3afd01cde239e03a0125b822e88674c84287f99c",
+    "lib/Windows_x86_64/rel/nvngx_dlss.dll": "d00b5b0ab29c3ca101b70c3a5ecb3a01b7ef33766a3383a28a18623083e6123e",
+}
+
+
+def dlss_dir(cfg: config.Config) -> Path:
+    """The DLSS files at their repository paths: include/, lib/Windows_x86_64/..., LICENSE.txt."""
+    return cfg.work_dir / "deps" / f"dlss-{DLSS_VERSION}"
+
+
+def fetch_dlss(cfg: config.Config) -> Path:
+    out = dlss_dir(cfg)
+    for rel, want in DLSS_FILES.items():
+        dst = out / rel
+        if dst.is_file() and hashlib.sha256(dst.read_bytes()).hexdigest() == want:
+            continue
+        dst.parent.mkdir(parents=True, exist_ok=True)
+        print(f"downloading {DLSS_URL}{rel}")
+        with urllib.request.urlopen(DLSS_URL + rel) as r, open(dst, "wb") as f:
+            shutil.copyfileobj(r, f)
+        digest = hashlib.sha256(dst.read_bytes()).hexdigest()
+        if digest != want:
+            dst.unlink()
+            raise RuntimeError(f"{rel}: SHA-256 {digest}, expected {want}")
+    return out
+
+
 def main() -> int:
     try:
         cfg = config.load()
@@ -105,6 +145,7 @@ def main() -> int:
             return 0
         print(f"SDL3 {SDL_VERSION}: {fetch_sdl(cfg)}")
         print(f"FSR SDK {FSR_VERSION}: {fetch_fsr(cfg)}")
+        print(f"DLSS SDK {DLSS_VERSION}: {fetch_dlss(cfg)}")
     except (config.ConfigError, RuntimeError, OSError) as e:
         print(f"error: {e}", file=sys.stderr)
         return 1

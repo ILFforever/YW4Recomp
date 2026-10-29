@@ -29,6 +29,7 @@
 #include "host.h"
 #include "bindings.h"
 #include "framerate.h"
+#include "gpu_dlss.h"
 #include "gbuffer.h"
 #include "gpu.h"
 #include "hud.h"
@@ -250,8 +251,19 @@ static int vk_init(void) {
         fprintf(stderr, "yw4: window: the draw path needs Vulkan 1.3 (decision 0021)\n");
         return -1;
     }
-    const char *dexts[2] = {VK_KHR_SWAPCHAIN_EXTENSION_NAME};
+    const char *dexts[16] = {VK_KHR_SWAPCHAIN_EXTENSION_NAME};
     uint32_t ndexts = 1;
+    /* NVIDIA DLSS's device extensions (gpu_dlss.c, decision 0040), those the GPU has */
+    const char **dlss_exts;
+    unsigned ndlss = 0;
+    gpu_dlss_device_extensions(props.vendorID, &dlss_exts, &ndlss);
+    VkPhysicalDeviceVulkan12Features q12 = {.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES};
+    VkPhysicalDeviceFeatures2 q = {.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2, .pNext = &q12};
+    vkGetPhysicalDeviceFeatures2(vk.gpu, &q);
+    int core_bda = q12.bufferDeviceAddress;
+    /* DLSS lists the old VK_EXT_buffer_device_address, but allocates with the core feature's flag (validation,
+     * 2026-10-29): the core feature is kept where the GPU has it (Vulkan 1.2), the EXT only without it */
+    int bda_ext = 0;
     {
         uint32_t n = 0;
         vkEnumerateDeviceExtensionProperties(vk.gpu, NULL, &n, NULL);
@@ -259,6 +271,15 @@ static int vk_init(void) {
         vkEnumerateDeviceExtensionProperties(vk.gpu, NULL, &n, e);
         for (uint32_t i = 0; i < n; i++)
             if (!strcmp(e[i].extensionName, VK_EXT_EXTERNAL_MEMORY_HOST_EXTENSION_NAME)) vk.host_import = 1;
+        for (unsigned k = 0; k < ndlss && ndexts < 14; k++)
+            for (uint32_t i = 0; i < n; i++)
+                if (!strcmp(e[i].extensionName, dlss_exts[k])) {
+                    int bda = !strcmp(dlss_exts[k], "VK_EXT_buffer_device_address");
+                    if (bda && core_bda) break;
+                    dexts[ndexts++] = dlss_exts[k];
+                    bda_ext |= bda;
+                    break;
+                }
         free(e);
     }
     if (vk.host_import) {
@@ -284,7 +305,9 @@ static int vk_init(void) {
                                             .dynamicRendering = f13.dynamicRendering,
                                             .synchronization2 = f13.synchronization2,
                                             .subgroupSizeControl = f13.subgroupSizeControl,
-                                            .computeFullSubgroups = f13.computeFullSubgroups};
+                                            .computeFullSubgroups = f13.computeFullSubgroups,
+                                            /* shaders compiled for Vulkan 1.3 turn discard into demote */
+                                            .shaderDemoteToHelperInvocation = f13.shaderDemoteToHelperInvocation};
     VkPhysicalDeviceVulkan12Features e12 = {.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES, .pNext = &e13,
                                             .timelineSemaphore = f12.timelineSemaphore,
                                             .shaderFloat16 = f12.shaderFloat16, .shaderInt8 = f12.shaderInt8,
@@ -293,8 +316,14 @@ static int vk_init(void) {
                                             .shaderDrawParameters = f11.shaderDrawParameters,
                                             .storageBuffer16BitAccess = f11.storageBuffer16BitAccess,
                                             .uniformAndStorageBuffer16BitAccess = f11.uniformAndStorageBuffer16BitAccess};
+    /* the old EXT buffer-address extension (DLSS asks for it) may not be enabled alongside the core feature: its own
+     * feature struct then */
+    VkPhysicalDeviceBufferDeviceAddressFeaturesEXT ebda = {
+        .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_BUFFER_DEVICE_ADDRESS_FEATURES_EXT, .pNext = &e11,
+        .bufferDeviceAddress = VK_TRUE};
+    if (bda_ext) e12.bufferDeviceAddress = VK_FALSE;
     VkPhysicalDeviceFeatures2 enable = {
-        .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2, .pNext = &e11,
+        .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2, .pNext = bda_ext ? (void *)&ebda : (void *)&e11,
         .features = {.geometryShader = h->geometryShader, .independentBlend = h->independentBlend,
                      .depthClamp = h->depthClamp, .depthBiasClamp = h->depthBiasClamp,
                      .fillModeNonSolid = h->fillModeNonSolid, .samplerAnisotropy = h->samplerAnisotropy,
