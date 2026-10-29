@@ -327,6 +327,7 @@ static _Thread_local struct {
     uint64_t object, geometry, submesh;
     uint64_t sp, ret;  /* the model renderer's stack and which of its two call sites */
     float world[12];   /* the renderer's world for this draw ([sp+0x30]+0x40), read at the hook */
+    uint64_t world_rec;  /* the model's submesh record table: the key of its world history (last_world) */
     float world_row3[4];  /* ... its bottom row as the game stores it (0 0 0 1, sometimes with -0), +0x70 */
     /* check mode: what a takeover draw would use, captured at the hook (before the engine's commit) */
     float hook_object[GBUFFER_OBJECT_FLOATS];  /* constants 2 */
@@ -1090,6 +1091,24 @@ static int takeover(const CPUState *ctx) {
         uint64_t pal, prev;
         uint32_t size;
         if (!bone_palette(cur.item, &pal, &size) || !bone_palette_previous(cur.item, &prev)) return TK_BONES;
+        static int bone_log = -1;  /* YW4_BONES_MOTION_LOG: how often last frame's bones equal this frame's */
+        if (bone_log < 0) bone_log = getenv("YW4_BONES_MOTION_LOG") != NULL;
+        if (bone_log) {
+            extern uint64_t gpu_frames(void);  /* gpu.c: frames presented so far */
+            /* per submesh record (a small table by address): did its newest palette change since the last frame
+             * it was drawn in? */
+            static struct { uint64_t rec, pal, frame; } seen[4096];
+            static long n, same, consecutive, advanced;
+            uint64_t key = U64(U64(cur.item + 8) + 0xc8), frame = gpu_frames();
+            key ^= cur.submesh;
+            unsigned h = (unsigned)((key * 0x9E3779B97F4A7C15ull) >> 52);
+            n++, same += !memcmp((const void *)(uintptr_t)pal, (const void *)(uintptr_t)prev, size);
+            if (seen[h].rec == key && seen[h].frame + 1 == frame) consecutive++, advanced += seen[h].pal != pal;
+            if (seen[h].rec != key || seen[h].frame != frame) seen[h].rec = key, seen[h].pal = pal, seen[h].frame = frame;
+            if (n % 20000 == 0)
+                fprintf(stderr, "yw4: gbuffer: skinned draws %ld: last bones equal this frame's on %ld; drawn again the "
+                                "next frame %ld, the newest palette changed on %ld\n", n, same, consecutive, advanced);
+        }
         for (int sl = 4; sl <= 5; sl++) {
             if (!((cv | cf) >> sl & 1)) continue;
             memcpy(buf + at, (const void *)(uintptr_t)(sl == 4 ? pal : prev), size);
@@ -1146,9 +1165,13 @@ int gbuffer_submesh(const CPUState *ctx) {
     cur.object = U64(ctx->sp + 0x390), cur.geometry = ctx->x[1], cur.submesh = ctx->x[2];
     cur.sp = ctx->sp, cur.ret = ret;
     cur.have_world = gbuffer_hook_world(ctx, cur.world);
+    cur.world_rec = 0;  /* set below from the draw item */
     if (cur.have_world)
         memcpy(cur.world_row3, (const void *)(uintptr_t)(U64(ctx->sp + 0x30) + 0x70), sizeof cur.world_row3);
     cur.item = find_item(ctx->sp, ret == 0xa4c2d0);
+    /* the model's per-submesh record table (model record +0xc8, where its bone palettes live) lasts from frame to
+     * frame; the object, its draw items and the world's record are made again each frame */
+    if (cur.have_world && cur.item && guest_ptr(U64(cur.item + 8))) cur.world_rec = U64(U64(cur.item + 8) + 0xc8);
     /* the layer's render state: the model renderer saved the block (the newest of its 0x21-byte
      * copies at device+0xefb, byte device+0x4630 of them) before this first submesh's material
      * changed it; the shadow and material layers have pushed one of their own before that */
@@ -1622,6 +1645,8 @@ static void note_other(const NvnProgram *p) {
     if (i < 24) nat.other[i].vs = vs, nat.other[i].fs = fs, nat.other[i].n++;
 }
 
+static long motion_objects, motion_moved;  /* draws with a last-frame world, how many of them moved (last_world) */
+
 static void native_summary(void) {
     static _Thread_local uint64_t last;
     uint64_t frame = __atomic_load_n(&yw4_frames_presented, __ATOMIC_RELAXED);
@@ -1633,6 +1658,10 @@ static void native_summary(void) {
     for (int i = 0; i < 24 && nat.other[i].n; i++)
         fprintf(stderr, "yw4: %s:   the game's: vs %016" PRIx64 " fs %016" PRIx64 ": %ld draws\n", pass_name,
                 nat.other[i].vs, nat.other[i].fs, nat.other[i].n);
+    if (motion_objects)
+        fprintf(stderr, "yw4: %s: motion: %ld draws with last frame's world, %ld of them moved\n", pass_name,
+                motion_objects, motion_moved);
+    motion_objects = motion_moved = 0;
     memset(&nat, 0, sizeof nat);
 }
 
@@ -1641,11 +1670,53 @@ static void native_summary(void) {
  * walking characters too: they move through their bones), with the record's own bottom row (-0
  * where the game has it); last frame's view x world is the renderer's record's +0x240, which the
  * engine writes at the commit (after our hook): read when the draw is recorded. */
+/* Each object's world last frame, for motion vectors: the game puts this frame's world in "last frame's" rows, so
+ * objects moved by their world (not their bones) had only the camera's motion. Keyed by the record the world is
+ * read from ([sp+0x30] at the hook: the object pointer in sp+0x390 is shared by many draws); its submeshes share
+ * one entry. Without a world from the frame before (first frame seen, or not drawn then), this frame's.
+ * YW4_OBJECT_MOTION=1 turns it on (off by default until checked: objects sharing a model may share the key). */
+enum { HISTORY = 1 << 13 };
+static struct {
+    uint64_t object, frame;
+    float world[16], last[16];  /* 3x4 rows and the stored bottom row */
+} history[HISTORY];
+static HostLock history_lock = HOST_LOCK_INIT;
+
+static void last_world(const float now[16], float last[16]) {
+    static int off = -1;
+    if (off < 0) off = !(getenv("YW4_OBJECT_MOTION") && *getenv("YW4_OBJECT_MOTION") == '1');  /* off until checked */
+    memcpy(last, now, 16 * sizeof(float));
+    if (off || !cur.world_rec) return;
+    uint64_t frame = __atomic_load_n(&yw4_frames_presented, __ATOMIC_RELAXED);
+    uint32_t h = (uint32_t)((cur.world_rec * 0x9E3779B97F4A7C15ull) >> 51);
+    host_lock(&history_lock);
+    for (uint32_t i = 0; i < 8; i++, h = (h + 1) & (HISTORY - 1)) {
+        if (history[h].object && history[h].object != cur.world_rec && history[h].frame + 2 >= frame) continue;
+        if (history[h].object == cur.world_rec && history[h].frame == frame) {  /* another submesh this frame */
+            memcpy(last, history[h].last, 16 * sizeof(float));
+        } else {
+            if (history[h].object == cur.world_rec && history[h].frame + 1 == frame) {
+                memcpy(last, history[h].world, 16 * sizeof(float));
+                motion_objects++, motion_moved += memcmp(last, now, 12 * sizeof(float)) != 0;
+            }
+            history[h].object = cur.world_rec, history[h].frame = frame;
+            memcpy(history[h].world, now, 16 * sizeof(float));
+            memcpy(history[h].last, last, 16 * sizeof(float));
+        }
+        break;
+    }
+    host_unlock(&history_lock);
+}
+
 static void object_constants(const float *game, float out[GBUFFER_OBJECT_FLOATS]) {
     (void)game;
     Mat4 w = {{0}};
     memcpy(w.m, cur.world, sizeof cur.world);
     w.m[15] = 1;
+    float now[16], last[16];
+    memcpy(now, cur.world, sizeof cur.world);
+    memcpy(now + 12, cur.world_row3, sizeof cur.world_row3);
+    last_world(now, last);
     /* view x world, then projection x that: each summed in order without fused multiply-adds, the
      * game's order, bit-identical on every draw checked ((P x V) x W or fused sums are off by a last
      * bit on 2-60% of draws) */
@@ -1654,13 +1725,13 @@ static void object_constants(const float *game, float out[GBUFFER_OBJECT_FLOATS]
     memcpy(out, w.m, sizeof w.m);
     memcpy(out + 16, vw.m, sizeof vw.m);
     memcpy(out + 32, wvp.m, sizeof wvp.m);
-    memcpy(out + 48, cur.world, sizeof cur.world);
-    memcpy(out + 60, cur.world_row3, sizeof cur.world_row3);
+    memcpy(out + 48, last, 16 * sizeof(float));  /* last frame's world */
     /* last frame's view x world: the device's derived matrix 10 (f_977680, computed at the commit
      * into the matrix cache at [device+0xe90] - 0x180, our record's +0x240): last frame's view (the
-     * device's matrix 4, +0x380) times last frame's world (matrix 6: this frame's, with its bottom row) */
-    Mat4 w6 = w, oldview = mat4_load(cur.device + 0x380);
-    memcpy(w6.m + 12, cur.world_row3, sizeof cur.world_row3);
+     * device's matrix 4, +0x380) times last frame's world (the game's matrix 6 is this frame's; ours the object's
+     * history), with its bottom row */
+    Mat4 w6, oldview = mat4_load(cur.device + 0x380);
+    memcpy(w6.m, last, sizeof w6.m);
     Mat4 ovw = mat4_mul(&oldview, &w6);
     memcpy(out + 64, ovw.m, sizeof ovw.m);
 }
