@@ -12,7 +12,7 @@
   <img alt="Phase 4: renderer" src="https://img.shields.io/badge/phase-4%20·%20renderer-6f42c1">
   <img alt="Platform: Windows, Linux planned" src="https://img.shields.io/badge/platform-Windows%20(Linux%20planned)-informational">
   <img alt="Graphics" src="https://img.shields.io/badge/graphics-Vulkan-ac162c">
-  <img alt="Status: playable" src="https://img.shields.io/badge/status-playable-success">
+  <img alt="Status: work in progress" src="https://img.shields.io/badge/status-work%20in%20progress-yellow">
 </p>
 
 <p align="center">
