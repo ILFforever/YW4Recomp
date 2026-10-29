@@ -249,10 +249,10 @@ keeps a clean pattern.
 
 ![The perforated fence in native, FSR performance and DLSS performance](docs/screenshots/65-dlss-vs-fsr-fence.jpg)
 
-The schoolyard's far goal net at performance: native, FSR, DLSS. Both lose some of the net this far away: FSR
-keeps more of it but noisy, DLSS draws it clean but fainter.
+The schoolyard's far goal net at balanced (the world drawn at 3013×1271): native, FSR, DLSS. Both keep the net
+at this mode; DLSS's mesh is the more even.
 
-![Goal net in native, FSR performance and DLSS performance](docs/screenshots/68-dlss-vs-fsr-goal-net.jpg)
+![Goal net in native, FSR balanced and DLSS balanced](docs/screenshots/68-dlss-vs-fsr-goal-net-balanced.jpg)
 
 A running character at quality, then at performance: native, FSR, DLSS. No trail behind the moving leg in either.
 
