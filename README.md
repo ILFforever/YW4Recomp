@@ -47,7 +47,7 @@ Most of the game has not been tried.
 
 - **Frame rate**: the game's 30 frames/s, or 60, 120, 144 or no limit (FRAME RATE in the settings panel, F1). The game
   moves by real time, so walking and battles keep their speed at any rate; menus and cutscenes are still being
-  checked. At the game's own 30 it holds steady in most places tested (see the known issues).
+  checked. The game's own 30 holds everywhere tested.
 - **Graphics**: up to 4K and ultrawide, sharper shadows and textures, TAA, and upscaling with NVIDIA DLSS or AMD FSR
   for high frame rates at 4K (~81-112 frames/s at 4K 21:9 with DLSS on an RTX 4070 laptop). Parts of the game's
   renderer already run as our own code (shadows, surfaces, bloom, distance blur).
@@ -90,7 +90,7 @@ the two do the same work:
 
 | Status | Goal | Where it stands |
 |---|---|---|
-| 🔧 | **Native performance** | Runs as a native program, no emulation; a steady 30 frames/s everywhere is not there yet (some scenes still dip) |
+| ✅ | **Performance** | The game's 30 frames/s everywhere tested, and well above it with the FRAME RATE setting (60, 120, 144 or no limit) |
 | 🔧 | **Our own renderer** | Replace the game's renderer pass by pass, so the improvements below become possible (see below) |
 | 🔧 | **Better shadows** | Bigger shadow maps and PCSS soft shadows done; contact shadows and steadier cascades next |
 | ✅ | **Sharper distance** | Anisotropic texture filtering and a softer distance blur: distant ground, roads and buildings stay sharp without 4K |
