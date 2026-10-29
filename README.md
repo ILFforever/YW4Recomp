@@ -68,7 +68,8 @@ characters' shadows keep their shape, and the tree shade on the pavement is soft
 | ![Stock shadows: blurry character shadows, hard tree shade](docs/screenshots/20-shadows-stock.jpg) | ![Improved shadows: defined character shadows, soft tree shade](docs/screenshots/21-shadows-improved.jpg) |
 
 It is also lighter to run. The same busy street on the same laptop ([docs/baseline.md](docs/baseline.md),
-2026-10-22):
+2026-10-22), both at the game's own settings (1600×900, 30 frames/s, every improvement of this project off), so
+the two do the same work:
 
 | | Emulator (Eden) | This project |
 |---|---|---|
