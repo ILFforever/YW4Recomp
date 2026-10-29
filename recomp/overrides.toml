@@ -191,3 +191,18 @@ module = "main"
 offset = "0x897d90"
 native = "yw4_hook_battle_blur"
 why = "the battles' blur, a render job with its own rounds: BATTLE BLUR fast hands it a job with a quarter of the rounds (runtime/src/dof.c)"
+
+[[hook]]
+module = "main"
+offset = "0xa8c3f0"
+native = "yw4_hook_gaiji_render"
+why = "draws one icon sheet's button icons in text: swaps Switch button names for the bound key's or the connected controller's icon (runtime/src/bindings.c, decision 0042)"
+
+# A hook with `at` runs just before that instruction inside the function, also when a branch lands
+# there; its result is ignored (decision 0042).
+[[hook]]
+module = "main"
+offset = "0x846260"
+at = "0x846bac"
+native = "yw4_hook_mouse_look"
+why = "the field camera's left-over PC mouse path reads a mouse movement here that the Switch build never writes: we write the window's (runtime/src/bindings.c)"

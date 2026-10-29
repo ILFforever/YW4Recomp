@@ -198,16 +198,19 @@ static void card(const Canvas *cv, int pw, int ph, int page) {
     fill(cv, 2, 2, pw - 4, ph - 4, CREAM);
     fill(cv, 2, 2, pw - 4, CARD_HEADER - 2, PURPLE);
     for (int x = 2; x < pw - 2; x += 4) put(cv, x, CARD_HEADER - 1, PURPLE2);
-    text2(cv, CARD_PAD + 2, 6, page ? "CONTROLS" : "SETTINGS", WHITE2);
-    text(cv, pw - CARD_PAD - 13 * CELL_W, 10, page ? "F2 / B: CLOSE" : "F1 / B: CLOSE", ROWSEL);
+    /* page: 0 the settings, 1 the controls, 2 the settings' developer page */
+    static const char *const titles[] = {"SETTINGS", "CONTROLS", "DEVELOPER"},
+                             *const keys[] = {"F1 / B: CLOSE", "F2 / B: CLOSE", "ESC / B: BACK"};
+    text2(cv, CARD_PAD + 2, 6, titles[page], WHITE2);
+    text(cv, pw - CARD_PAD - (int)strlen(keys[page]) * CELL_W, 10, keys[page], ROWSEL);
 }
 
 static void hint(const Canvas *cv, int pw, int y, const char *s) {
     text(cv, (pw - (int)strlen(s) * CELL_W) / 2, y + 2, s, MUTED);
 }
 
-void panel_render(uint8_t *rgba, int w, int h, const SettingRow *rows, int n, int selected, int *used_w,
-                  int *used_h) {
+void panel_render(uint8_t *rgba, int w, int h, const SettingRow *rows, int n, int selected, int developer,
+                  int *used_w, int *used_h) {
     enum { PAD = 10, ROW_H = 13, NAME_COLS = 21, GAP = 3, HEADER = 26, DESC_LINES = 5 };
     /* the width: the widest row (name and all its options) */
     int cols = 0;
@@ -229,8 +232,14 @@ void panel_render(uint8_t *rgba, int w, int h, const SettingRow *rows, int n, in
     }
     int desc_h = (help_lines + 2) * 10 + 10;
     int ph = HEADER + 8 + (n + groups) * ROW_H + 6 + desc_h + 6 + 14;
+    /* the developer page (opened from the settings page) keeps the settings page's size: it doesn't jump and its
+     * texts fit */
+    static int settings_w, settings_h;
+    if (!developer) settings_w = pw, settings_h = ph;
+    if (pw < settings_w) pw = settings_w, text_cols = (pw - 2 * PAD - 12) / CELL_W;
+    if (ph < settings_h) ph = settings_h;
     Canvas cv = {rgba, w, h, pw < w ? pw : w, ph < h ? ph : h};
-    card(&cv, pw, ph, 0);
+    card(&cv, pw, ph, developer ? 2 : 0);
     /* rows */
     int y = HEADER + 8;
     int optx = PAD + (2 + NAME_COLS) * CELL_W;
@@ -245,6 +254,17 @@ void panel_render(uint8_t *rgba, int w, int h, const SettingRow *rows, int n, in
         if (sel) box(&cv, PAD - 4, y - 1, pw - 2 * PAD + 8, ROW_H, 4, ROWSEL, NULL);
         int off = rows[i].disabled != NULL;  /* greyed out: can't be changed now */
         text(&cv, PAD + 2 * CELL_W, y + 2, rows[i].name, off ? MUTED : INK);
+        if (rows[i].link) {  /* opens a page: "OPEN >" on a chip when chosen */
+            if (sel) {
+                text(&cv, PAD + 2, y + 2, ">", PINK);
+                box(&cv, optx - 3, y, 6 * CELL_W + 5, ROW_H - 2, 3, ORANGE, NULL);
+                text(&cv, optx, y + 2, "OPEN >", WHITE2);
+            } else {
+                text(&cv, optx, y + 2, "OPEN >", MUTED);
+            }
+            y += ROW_H;
+            continue;
+        }
         if (sel && !off) text(&cv, PAD + 2, y + 2, ">", PINK), text(&cv, optx - 2 * CELL_W, y + 2, "<", PINK);
         int x = optx;
         for (int k = 0; k < rows[i].noptions; k++) {
@@ -260,7 +280,8 @@ void panel_render(uint8_t *rgba, int w, int h, const SettingRow *rows, int n, in
         if (sel && !off) text(&cv, x - (GAP - 1) * CELL_W, y + 2, ">", PINK);
         y += ROW_H;
     }
-    /* the chosen setting explained: its name, what it does, what the current option means */
+    /* the chosen setting explained: its name, what it does, what the current option means; at the bottom */
+    y = ph - desc_h - 26;
     y += 6;
     const SettingRow *r = selected >= 0 && selected < n ? &rows[selected] : NULL;
     box(&cv, PAD - 4, y, pw - 2 * PAD + 8, desc_h, 5, DESC, TEAL);
@@ -272,12 +293,14 @@ void panel_render(uint8_t *rgba, int w, int h, const SettingRow *rows, int n, in
         int k = wrap(r->help, text_cols, l, DESC_LINES);
         for (int j = 0; j < k; j++, ty += 10) text(&cv, PAD + 2, ty, l[j], INK);
         char note[128];
-        if (r->disabled) snprintf(note, sizeof note, "OFF FOR NOW: %s", r->disabled);
+        if (r->link) snprintf(note, sizeof note, "ENTER OR A: OPEN. ESCAPE OR B THERE: BACK");
+        else if (r->disabled) snprintf(note, sizeof note, "OFF FOR NOW: %s", r->disabled);
         else snprintf(note, sizeof note, "%s: %s", r->options[r->current], r->notes[r->current] ? r->notes[r->current] : "");
         text(&cv, PAD + 2, y + desc_h - 14, note, r->disabled ? MUTED : PINK);
     }
     y += desc_h + 6;
-    hint(&cv, pw, y, "UP/DOWN: CHOOSE   LEFT/RIGHT: CHANGE   F2, L/R: CONTROLS");
+    hint(&cv, pw, y, developer ? "UP/DOWN: CHOOSE   LEFT/RIGHT: CHANGE   ESC/B: BACK"
+                               : "UP/DOWN: CHOOSE   LEFT/RIGHT: CHANGE   F2, L/R: CONTROLS");
     *used_w = cv.bw, *used_h = cv.bh;
 }
 
@@ -331,6 +354,17 @@ void controls_render(uint8_t *rgba, int w, int h, const BindRow *rows, int n, in
         if (sel) text(&cv, PAD + 2, y + 2, ">", PINK);
         text(&cv, PAD + 2 * CELL_W, y + 2, rows[i].name, INK);
         if (!rows[i].group) continue;
+        if (rows[i].value) {  /* a setting: its value between arrows, on a chip when chosen */
+            char s[CELL_COLS + 8];
+            snprintf(s, sizeof s, "< %s >", rows[i].cells[0]);
+            if (sel) {
+                box(&cv, cellx - 3, y, (int)strlen(s) * CELL_W + 5, ROW_H - 2, 3, PINK, NULL);
+                text(&cv, cellx, y + 2, s, WHITE2);
+            } else {
+                text(&cv, cellx, y + 2, s, INK);
+            }
+            continue;
+        }
         for (int c = 0; c < BIND_COLS; c++) {
             char s[CELL_COLS];
             snprintf(s, sizeof s, "%s", sel && c == col && capturing ? (c < BIND_KEYS ? "PRESS A KEY" : "PRESS INPUT")

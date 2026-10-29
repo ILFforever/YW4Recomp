@@ -17,6 +17,7 @@ typedef struct {
     int noptions;
     int current;  /* index into options */
     const char *disabled;  /* not NULL: greyed out, cannot be changed, and why (shown in the description) */
+    int link;              /* opens a page (DEVELOPER OPTIONS) instead of having options: Enter or Right */
 } SettingRow;
 
 enum { SETTINGS_UP, SETTINGS_DOWN, SETTINGS_LEFT, SETTINGS_RIGHT, SETTINGS_CLOSE, SETTINGS_ACCEPT, SETTINGS_CLEAR,
@@ -39,5 +40,7 @@ void settings_save(void);
 void settings_action(int action);
 /* The rows as they are now, and the selected one; returns the count. */
 int settings_rows(SettingRow *rows, int max, int *selected);
+/* The settings page shows its developer page (DEVELOPER OPTIONS, the last row's; Escape or B goes back). */
+int settings_developer(void);
 
 #endif

@@ -12,34 +12,51 @@
 
 enum { BIND_KEYS = 2, BIND_COLS = BIND_KEYS + 1, BIND_NAME = 24 };
 
+/* Pseudo-scancodes for mouse buttons and wheel directions */
+enum {
+    MOUSE_BIND_NONE = 0,
+    MOUSE_BIND_LEFT = 1001,
+    MOUSE_BIND_RIGHT = 1002,
+    MOUSE_BIND_MIDDLE = 1003,
+    MOUSE_BIND_X1 = 1004,
+    MOUSE_BIND_X2 = 1005,
+    MOUSE_BIND_WHEEL_UP = 1006,
+    MOUSE_BIND_WHEEL_DOWN = 1007,
+};
+
 typedef struct {
     const char *group;  /* BUTTONS, D-PAD, LEFT STICK, RIGHT STICK; NULL: the reset row */
     const char *name;
     char cells[BIND_COLS][BIND_NAME];  /* the two keys, then the gamepad input; "-" for none */
     int conflict[BIND_COLS];           /* the cell's key or input also presses another Switch input */
+    int value;                         /* a setting, not an input: its value in cells[0], LEFT/RIGHT change it */
 } BindRow;
 
 /* The Switch buttons (bits as in svc_hid) and sticks (left x, left y, right x, right y; up and right
- * positive) for the keyboard state (SDL's, by scancode) and gamepad (an SDL_Gamepad, or NULL). */
+ * positive) for keyboard state, mouse buttons/wheel, and gamepad. */
 struct SDL_Gamepad;
-void bindings_read(const bool *keyboard, struct SDL_Gamepad *gamepad, uint64_t *buttons, int32_t sticks[4]);
+void bindings_read(const bool *keyboard, uint32_t mouse_buttons, int wheel_up, int wheel_down,
+                   struct SDL_Gamepad *gamepad, uint64_t *buttons, int32_t sticks[4]);
 
 /* The connected controller is a Nintendo one (its A is on the right, B at the bottom; others the other way). */
 int bindings_pad_nintendo(void);
 
 /* The panel page: settings.h's actions (UP, DOWN, LEFT, RIGHT, ACCEPT, CLEAR) while it shows. */
 void bindings_action(int action);
-/* Waiting for a key or gamepad input to bind: the window passes presses here instead of to the panel.
+/* Waiting for a key, mouse, or gamepad input to bind: the window passes presses here instead of to the panel.
  * Each returns 1 if it took the press. Five seconds without one, or closing the panel, cancels. */
 int bindings_capturing(void);
 int bindings_capture_key(int scancode);
+int bindings_capture_mouse(int button);
+int bindings_capture_wheel(int y);
 int bindings_capture_button(int button);
 int bindings_capture_axis(int axis, int value);
 void bindings_cancel(void);
 /* The rows as they are now, the chosen row and column, and the text for the explanation box. */
 int bindings_rows(BindRow *rows, int max, int *row, int *col, char *help, int help_size);
 
-/* The settings file's lines (settings.c): one KEY1_/KEY2_/PAD_<input>=<name> line each. */
+
+/* The settings file's lines (settings.c): one KEY1_/KEY2_/PAD_<input>=<name> line each, and YW4_MOUSE_SENS. */
 int bindings_load_line(const char *name, const char *value);
 void bindings_save(FILE *f);
 

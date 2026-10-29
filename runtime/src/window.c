@@ -564,9 +564,9 @@ static void panel_draw(VkImage dst, int32_t x0, int32_t y0, uint32_t bw, uint32_
         int row, col, n = bindings_rows(rows, 32, &row, &col, help, sizeof help);
         controls_render(panel.ptr, (int)panel.w, (int)panel.h, rows, n, row, col, bindings_capturing(), help, &w, &h);
     } else {
-        SettingRow rows[16];
-        int sel, n = settings_rows(rows, 16, &sel);
-        panel_render(panel.ptr, (int)panel.w, (int)panel.h, rows, n, sel, &w, &h);
+        SettingRow rows[32];
+        int sel, n = settings_rows(rows, 32, &sel);
+        panel_render(panel.ptr, (int)panel.w, (int)panel.h, rows, n, sel, settings_developer(), &w, &h);
     }
     panel_shown_w = w, panel_shown_h = h;
     /* scaled up by whole steps (the pixel font stays crisp) to about two thirds of the picture's height */
@@ -791,12 +791,27 @@ void window_present_image(VkImage image, VkFormat format, VkRect2D rect, uint64_
     host_unlock(&present_lock);
 }
 
-/* ---- input: the keyboard and the first gamepad, as a Switch controller (window_input) */
+/* ---- input: the keyboard, mouse, and the first gamepad, as a Switch controller (window_input) */
 
 static SDL_Gamepad *gamepad;
 static uint64_t input_buttons;
 static int32_t input_sticks[4];
 static HostLock input_lock = HOST_LOCK_INIT;
+
+static HostLock mouse_lock = HOST_LOCK_INIT;
+static float mouse_accum_x;
+static float mouse_accum_y;
+static int mouse_wheel_pulses[2];  /* [0] wheel up, [1] wheel down */
+static int mouse_held_off;         /* the click that gave the game the mouse: no press until it is let go */
+
+void window_mouse_motion(float *dx, float *dy) {
+    host_lock(&mouse_lock);
+    *dx = mouse_accum_x;
+    *dy = mouse_accum_y;
+    mouse_accum_x = 0.0f;
+    mouse_accum_y = 0.0f;
+    host_unlock(&mouse_lock);
+}
 
 void window_input(uint64_t *buttons, int32_t sticks[4]) {
     host_lock(&input_lock);
@@ -805,15 +820,36 @@ void window_input(uint64_t *buttons, int32_t sticks[4]) {
     host_unlock(&input_lock);
 }
 
-/* The keyboard and the gamepad through the controls (bindings.c; the settings panel's second page). */
+/* The keyboard, mouse, and the gamepad through the controls (bindings.c; the settings panel's second page). */
 static void update_input(void) {
     uint64_t b;
     int32_t s[4];
-    bindings_read(SDL_GetKeyboardState(NULL), gamepad, &b, s);
-    /* The settings panel takes the keyboard and the gamepad while it is open, and after it closes until
+    float mx, my;
+    uint32_t mb = SDL_GetMouseState(&mx, &my);
+    if (mouse_held_off && !mb) mouse_held_off = 0;
+    /* clicks are buttons only while the game has the mouse */
+    if (mouse_held_off || !window || !SDL_GetWindowRelativeMouseMode(window)) mb = 0;
+    int wup = 0, wdwn = 0;
+    host_lock(&mouse_lock);
+    if (mouse_wheel_pulses[0] > 0) { wup = 1; mouse_wheel_pulses[0]--; }
+    if (mouse_wheel_pulses[1] > 0) { wdwn = 1; mouse_wheel_pulses[1]--; }
+    host_unlock(&mouse_lock);
+
+    bindings_read(SDL_GetKeyboardState(NULL), mb, wup, wdwn, gamepad, &b, s);
+    /* The settings panel takes the keyboard, mouse, and the gamepad while it is open, and after it closes until
      * everything is let go, so the button that closed it (B, Escape) doesn't reach the game as well. */
     static int withheld;
-    if (settings_open()) withheld = 1;
+    static int was_open;
+    int is_open = settings_open();
+    if (is_open) {
+        withheld = 1;
+        if (window && SDL_GetWindowRelativeMouseMode(window))
+            SDL_SetWindowRelativeMouseMode(window, false);
+    } else if (was_open) {
+        if (window && (SDL_GetWindowFlags(window) & SDL_WINDOW_INPUT_FOCUS))
+            SDL_SetWindowRelativeMouseMode(window, true);
+    }
+    was_open = is_open;
     if (withheld) {
         if (!b && !s[0] && !s[1] && !s[2] && !s[3] && !settings_open()) withheld = 0;
         b = 0, memset(s, 0, sizeof s);
@@ -925,6 +961,7 @@ void window_run(void (*guest)(void *), void *arg) {
         } else {
             have_vulkan = 1;
             gpu_init();
+            SDL_SetWindowRelativeMouseMode(window, true);
         }
     }
     if (!window) {
@@ -962,10 +999,47 @@ void window_run(void (*guest)(void *), void *arg) {
                 !bindings_capture_axis(e.gaxis.axis, e.gaxis.value))
                 panel_pad_stick(), panel_pad_triggers();
             break;
+        case SDL_EVENT_MOUSE_MOTION:
+            if (window && SDL_GetWindowRelativeMouseMode(window)) {
+                host_lock(&mouse_lock);
+                mouse_accum_x += e.motion.xrel;
+                mouse_accum_y += e.motion.yrel;
+                host_unlock(&mouse_lock);
+            }
+            break;
+        case SDL_EVENT_MOUSE_BUTTON_DOWN:
+            if (settings_open()) {
+                if (bindings_capturing()) bindings_capture_mouse(e.button.button);
+            } else if (window && !SDL_GetWindowRelativeMouseMode(window)) {
+                SDL_SetWindowRelativeMouseMode(window, true);
+                mouse_held_off = 1;
+            }
+            break;
+        case SDL_EVENT_MOUSE_WHEEL:
+            if (settings_open()) {
+                if (bindings_capturing()) bindings_capture_wheel(e.wheel.y > 0 ? 1 : -1);
+            } else {
+                host_lock(&mouse_lock);
+                if (e.wheel.y > 0) mouse_wheel_pulses[0] = 3;
+                else if (e.wheel.y < 0) mouse_wheel_pulses[1] = 3;
+                host_unlock(&mouse_lock);
+            }
+            break;
+        case SDL_EVENT_WINDOW_FOCUS_LOST:
+            if (window && SDL_GetWindowRelativeMouseMode(window)) {
+                SDL_SetWindowRelativeMouseMode(window, false);
+            }
+            break;
         case SDL_EVENT_QUIT:
             fprintf(stderr, "yw4: window closed\n");
             exit(0);
         case SDL_EVENT_KEY_DOWN:
+            if ((e.key.key == SDLK_LALT || e.key.key == SDLK_RALT) && !settings_open()) {
+                if (window) {
+                    bool rel = SDL_GetWindowRelativeMouseMode(window);
+                    SDL_SetWindowRelativeMouseMode(window, !rel);
+                }
+            }
             if (e.key.key == SDLK_F12) __atomic_store_n(&screenshot_requested, screenshot_burst(), __ATOMIC_RELEASE), yw4_hid_note_key("F12");
             if (e.key.key == SDLK_F11) gpu_request_trace(450), yw4_hid_note_key("F11");  /* the draws of the next frame, in the log */
             if (e.key.key == SDLK_F10) gpu_request_dump(), yw4_hid_note_key("F10");      /* shadow maps etc.: work/dump/ */
@@ -974,8 +1048,14 @@ void window_run(void (*guest)(void *), void *arg) {
             /* the settings live in the panel only (F1); its keys are recorded like the F keys, so a replay
              * of a recording changes the same settings at the same ticks. While the controls page waits for
              * a key, any key but F1..F12 is the new binding. */
-            if (e.key.key == SDLK_F1) settings_show(0), yw4_hid_note_key("F1");  /* the settings */
-            if (e.key.key == SDLK_F2) settings_show(1), yw4_hid_note_key("F2");  /* the controls */
+            if (e.key.key == SDLK_F1) {
+                if (window && SDL_GetWindowRelativeMouseMode(window)) SDL_SetWindowRelativeMouseMode(window, false);
+                settings_show(0), yw4_hid_note_key("F1");  /* the settings */
+            }
+            if (e.key.key == SDLK_F2) {
+                if (window && SDL_GetWindowRelativeMouseMode(window)) SDL_SetWindowRelativeMouseMode(window, false);
+                settings_show(1), yw4_hid_note_key("F2");  /* the controls */
+            }
             if (settings_open() && !e.key.repeat &&
                 !((e.key.scancode < SDL_SCANCODE_F1 || e.key.scancode > SDL_SCANCODE_F12) &&
                   bindings_capture_key(e.key.scancode))) {
