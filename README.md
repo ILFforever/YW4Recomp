@@ -49,8 +49,9 @@ Most of the game has not been tried.
   moves by real time, so walking and battles keep their speed at any rate; menus and cutscenes are still being
   checked. The game's own 30 holds everywhere tested.
 - **Graphics**: up to 4K and ultrawide, sharper shadows and textures, TAA, and upscaling with NVIDIA DLSS or AMD FSR
-  for high frame rates at 4K (~81-112 frames/s at 4K 21:9 with DLSS on an RTX 4070 laptop). Parts of the game's
-  renderer already run as our own code (shadows, surfaces, bloom, distance blur).
+  for high frame rates at 4K (~81-112 frames/s at 4K 21:9 with DLSS on an RTX 4070 laptop), and frame generation
+  with NVIDIA DLSS or AMD FSR (about twice as many frames on screen). Parts of the game's renderer already run as our
+  own code (shadows, surfaces, bloom, distance blur).
 
 Expect missing effects and crashes in places nobody has reached yet.
 
@@ -66,8 +67,8 @@ An emulator can't do most of this. It imitates the console and plays the game's 
 game still decides its shadow quality, its 16:9 UI, its 30 frames/s and its effects. Here the game's renderer is
 being replaced with our own, so those become ours to change: higher resolution, sharper textures, bigger and soft
 shadows, anti-aliasing that leaves the UI sharp (TAA included) and ultrawide are already in, as are 60 frames/s and
-above and upscaling with NVIDIA DLSS or AMD FSR (the world drawn smaller and rebuilt at full size, the menus kept
-sharp).
+above, upscaling with NVIDIA DLSS or AMD FSR (the world drawn smaller and rebuilt at full size, the menus kept
+sharp) and frame generation with either (a frame made between each two of the game's).
 
 A town street, same spot: the game's shadows (1024 map, no PCSS) against ours (4096 map, PCSS ×2). The
 characters' shadows keep their shape, and the tree shade on the pavement is soft:
@@ -96,8 +97,9 @@ the two do the same work:
 | ✅ | **Sharper distance** | Anisotropic texture filtering and a softer distance blur: distant ground, roads and buildings stay sharp without 4K |
 | ✅ | **Higher resolution** | The 3D view at 1080p, 1440p or 4K instead of the game's 1600×900 (30 frames/s at 4K on an RTX 4070 laptop) |
 | ✅ | **Ultrawide and other aspect ratios** | 16:10, 21:9 and 32:9 in the panel: a wider view of the world with the UI kept 16:9 in the middle; exploring, battles and cutscenes work; dialog dimming and the loading screen cover the full width |
-| 🔧 | **Higher frame rates** | 30, 60, 120, 144 or no limit, switchable while playing (FRAME RATE in the panel): the game already moves by the real time between frames, so walking and battles keep their speed (~140 frames/s at 1600×900). At 4K the GPU is the limit; upscaling (next row) lifts it. Menus and cutscenes are being checked. Later frame generation (AMD FSR 3, open source, any GPU) on top |
+| 🔧 | **Higher frame rates** | 30, 60, 120, 144 or no limit, switchable while playing (FRAME RATE in the panel): the game already moves by the real time between frames, so walking and battles keep their speed (~140 frames/s at 1600×900). At 4K the GPU is the limit; upscaling (next row) lifts it, frame generation (the row after) doubles what is shown. Menus and cutscenes are being checked |
 | ✅ | **Upscaling (NVIDIA DLSS, AMD FSR)** | The world drawn smaller and rebuilt at full size, menus and text kept full size. **On NVIDIA RTX GPUs use DLSS: sharper and cheaper than FSR.** At 4K 21:9 on an RTX 4070 laptop, instead of ~59 frames/s: DLSS ~81 / ~93 / ~112 (quality / balanced / performance), FSR ~75 / ~86 / ~104 (any GPU). DLSS keeps fine patterns (far nets, perforated fences) clean where FSR gets grainy ([decisions 0039](docs/decisions/0039-fsr-upscaling.md), [0040](docs/decisions/0040-dlss-upscaling.md)) |
+| ✅ | **Frame generation (NVIDIA DLSS, AMD FSR)** | A frame made between each two of the game's: about twice as many on screen, the menus kept still. **On RTX 40 and newer use DLSS**: more game frames left and cleaner moving characters. In a busy town at 4K 21:9 on an RTX 4070 laptop, instead of ~70 frames/s: DLSS ~150 shown (~75 game), FSR ~126 shown (~63 game, any GPU). NVIDIA Reflex in the panel too ([decision 0041](docs/decisions/0041-frame-generation.md)) |
 | 🔧 | **Better anti-aliasing** | FXAA, SMAA and now TAA (steady thin edges: fences, nets, leaves) on the 3D scene before the UI is drawn, so text stays crisp; per-object motion for TAA next |
 | 🗓️ | **Mod support** | Load replaced game files from a mod folder without touching your dump (first use: the English translation mod) |
 | 🔧 | **Input remapping** | Keyboard and controller bindings on the panel's CONTROLS page, saved, with your controller's own button names; tested with a DualSense. Mouse and matching on-screen button hints next |
@@ -284,6 +286,59 @@ by the build and are not part of this repository. AMD FSR is AMD's, under the MI
 </details>
 
 <details>
+<summary><b>Frame generation (NVIDIA DLSS, AMD FSR)</b>: a frame made between each two of the game's, the menus kept still</summary>
+
+With ANTI-ALIASING set to TAA, FSR or DLSS, the FRAME GENERATION row makes one frame between each two the game
+draws, from the motion the game writes and the depth, and shows it in between: about twice as many frames on screen.
+It switches while playing. The menus, our HUD and the settings panel stay still and sharp: frame generation is given
+the picture from before the menus are drawn, so it can tell them from the world.
+
+**Which to use: on an NVIDIA RTX 40 or newer, choose DLSS.** It leaves the game more frames of its own and keeps
+moving characters cleaner. **On other GPUs, use FSR** (DLSS frame generation needs RTX 40 or newer; the row skips it
+elsewhere).
+
+Busy late-game town at 4K 21:9 on an RTX 4070 laptop (DLSS performance upscaling, FRAME RATE unlimited). Without
+frame generation: **~70 frames/s**. With it:
+
+| Frame generation | Game frames/s | Frames on screen/s |
+|---|---|---|
+| off | ~70 | ~70 |
+| FSR | ~63 | ~126 |
+| DLSS | **~75** | **~150** |
+
+The game draws fewer frames of its own with FSR because its frame generation runs on the same GPU (~7 ms per frame
+at 5120×2160); DLSS's runs on the RTX's own hardware for it. The HUD (F3) shows both numbers: FPS counts the game's
+frames, SHOWN the frames on screen.
+
+Things to know:
+
+- It adds about half a frame of input delay, so it feels best where the game already runs at 60 or more.
+- FRAME RATE limits the game's own frames; what is shown is about twice that.
+- DLSS frame generation pauses while the game window isn't the focused window (NVIDIA's rule).
+- With DLSS frame generation, NVIDIA Reflex is on (NVIDIA requires it). The REFLEX row sets it otherwise: it lowers
+  input delay most when the GPU limits the frame rate; where the CPU does, it costs some frames (~14% in a busy town).
+
+FSR, Nate running across the schoolyard: the game's frame before, the frame FSR made, the game's frame after. The
+minimap, clock and buttons stay sharp. Fast arms and legs, and Whisper's edge, come out blended in the made frame:
+FSR's weak spot with thin things that move on their own (the thin dark line at the right edge is FSR's too).
+
+![FSR frame generation: the game's frame before, FSR's frame and the frame after](docs/screenshots/71-fg-fsr-schoolyard.jpg)
+
+DLSS, by the school's windows: a frame DLSS made. DLSS makes its frames after ours are presented, so they can only
+be captured from the screen (here a 3440×1369 window with only DLSS's frames shown); the crops are 1:1 of that
+capture. The HUD, minimap and characters come out clean.
+
+![A frame made by DLSS frame generation, with the HUD and the minimap](docs/screenshots/72-fg-dlss-generated.jpg)
+
+How they work and what was measured: [decision 0041](docs/decisions/0041-frame-generation.md).
+
+NVIDIA DLSS Frame Generation, Reflex and Streamline are NVIDIA Corporation's (Streamline under the MIT licence, the
+DLSS and Reflex files under NVIDIA's RTX SDK licence), downloaded by the build and not part of this repository. AMD
+FSR is AMD's, under the MIT licence.
+
+</details>
+
+<details>
 <summary><b>Texture filtering</b>: anisotropic up to ×16, sharp ground into the distance</summary>
 
 The Switch version uses none, so the ground blurs a short way ahead of the camera. Anisotropic
@@ -334,8 +389,11 @@ battles included, and with the controls page.
 | Soft shadows (PCSS) | Off (the Switch's), ×1, ×2, ×4. Default ×2 |
 | Shadow pass | The game's or our custom renderer draws the shadow casters; the same picture, ours slightly faster |
 | G-buffer | The game's or our custom renderer draws the world's surfaces; the same picture |
+| Frame generation | Off (default), FSR (any GPU) or DLSS (NVIDIA RTX 40 and newer): a frame made between each two of the game's, about twice as many on screen. Needs anti-aliasing set to TAA, FSR or DLSS |
+| Reflex | NVIDIA GPUs: off (default), on or on + boost: less input delay, most where the GPU limits the frame rate. On while frame generation is DLSS |
 
-F3 shows a performance HUD in the window's corner: frame time, CPU and GPU cost and memory.
+F3 shows a performance HUD in the window's corner: frame time, CPU and GPU cost and memory; with frame generation on,
+also the frames on screen (SHOWN).
 
 The game starts at the Switch's 1600×900 and 16:9 with a 4096 shadow map, PCSS ×2, ×16 texture filtering, half
 distance blur, half-size effects and no anti-aliasing. For the game's original look, set every setting to its first choice in the
