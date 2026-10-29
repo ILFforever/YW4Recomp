@@ -56,8 +56,9 @@ Switch emulators already run *Yo-kai Watch 4++* at full speed on a good PC. This
 An emulator can't do most of this. It imitates the console and plays the game's GPU commands as they are, so the
 game still decides its shadow quality, its 16:9 UI, its 30 frames/s and its effects. Here the game's renderer is
 being replaced with our own, so those become ours to change: higher resolution, sharper textures, bigger and soft
-shadows, anti-aliasing that leaves the UI sharp (TAA included) and ultrawide are already in; 60 frames/s and above
-are in.
+shadows, anti-aliasing that leaves the UI sharp (TAA included) and ultrawide are already in, as are 60 frames/s and
+above and upscaling with AMD FSR or NVIDIA DLSS (the world drawn smaller and rebuilt at full size, the menus kept
+sharp).
 
 A town street, same spot: the game's shadows (1024 map, no PCSS) against ours (4096 map, PCSS ×2). The
 characters' shadows keep their shape, and the tree shade on the pavement is soft:
