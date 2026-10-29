@@ -441,12 +441,20 @@ def cache_registers(stmts: list[str]) -> tuple[list[str], list[str]] | None:
 
 def emit_function(code: Code, fn: Function, entries: set[int], subgroup=None,
                   stats: EmitStats | None = None, setjmps: frozenset[int] = frozenset(),
-                  hook: str | None = None) -> str:
+                  hook: str | None = None, at_hooks: dict[int, str] | None = None) -> str:
     """setjmps: entries that are setjmp (or a stub that jumps to it). A call to one is a
     host setjmp in this function's frame, registered so that the guest longjmp's jump back
     to the return address can return here (decision 0018).
     hook: a native `int hook(CPUState *)` that runs first; nonzero means it did the
-    function's work and set its results, so the body is skipped (decision 0024)."""
+    function's work and set its results, so the body is skipped (decision 0024).
+    at_hooks: instruction offset -> a native `int hook(CPUState *)` that runs just before that
+    instruction, also when a branch lands there; it may change registers and memory, its
+    result is ignored (decision 0042)."""
+    at_hooks = at_hooks or {}
+    missing = set(at_hooks) - set(fn.body)
+    if missing:
+        raise ValueError(f"{fname(fn.entry, code.prefix)}: hook offsets outside the function: "
+                         f"{sorted(map(hex, missing))}")
     order = sorted(fn.body)
     body = fn.body
     labels: set[int] = set()
@@ -513,6 +521,8 @@ def emit_function(code: Code, fn: Function, entries: set[int], subgroup=None,
             stmt, falls_through = "return;", False
         else:
             stmt, falls_through = f"yw4_guest_trap(ctx, {pc}, {enc:#010x}u);", False
+        if off in at_hooks:
+            stmt = f"{at_hooks[off]}(ctx); {stmt}"
         lines.append((off, stmt))
         if falls_through:
             nxt = off + 4
@@ -531,8 +541,11 @@ def emit_function(code: Code, fn: Function, entries: set[int], subgroup=None,
     if hook:
         out.insert(0, f"int {hook}(CPUState *ctx);  /* hook (recomp/overrides.toml) */")
         out.append(f"    if ({hook}(ctx)) return;")
+    for h in sorted(set(at_hooks.values())):
+        out.insert(0, f"int {h}(CPUState *ctx);  /* hook (recomp/overrides.toml) */")
     # registers in locals (decision 0035); not with setjmp (a longjmp back would find stale locals)
-    cached = None if njb or not CACHE_REGISTERS else cache_registers([s for _, s in lines])
+    # and not with a hook inside the body (it reads and writes ctx)
+    cached = None if njb or at_hooks or not CACHE_REGISTERS else cache_registers([s for _, s in lines])
     if cached is not None:
         decls, stmts = cached
         out += [f"    {d}" for d in decls]

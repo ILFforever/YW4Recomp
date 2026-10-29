@@ -72,6 +72,21 @@ class DiscoverTest(unittest.TestCase):
         body = [l for l in lines[2:] if "yw4_probe" not in l]
         self.assertEqual(body[0], "if (my_hook(ctx)) return;")
 
+    def test_hook_inside_the_body_runs_at_its_label(self):
+        # 0: cbz x0, 8 ; 4: ret ; 8: ret (the hook here also runs when the branch lands)
+        c = code(0xB4000040, 0xD65F03C0, 0xD65F03C0)
+        fn = function.discover(c, 0, {0})
+        lines = [l.strip() for l in function.emit_function(c, fn, {0}, at_hooks={8: "my_hook"}).split("\n")]
+        self.assertEqual(lines[0], "int my_hook(CPUState *ctx);  /* hook (recomp/overrides.toml) */")
+        i = lines.index("L_8:")
+        self.assertEqual(lines[i + 1], "my_hook(ctx); return;")
+
+    def test_hook_outside_the_body_is_an_error(self):
+        c = code(0xD65F03C0)
+        fn = function.discover(c, 0, {0})
+        with self.assertRaises(ValueError):
+            function.emit_function(c, fn, {0}, at_hooks={4: "my_hook"})
+
 
 if __name__ == "__main__":
     unittest.main()

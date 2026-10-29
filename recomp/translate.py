@@ -104,15 +104,21 @@ def load_overrides(modules: list[Module]) -> dict[str, dict[int, str]]:
     return out
 
 
-def load_hooks(modules: list[Module]) -> dict[str, dict[int, str]]:
-    """Per module: function offset -> the native hook that runs before its body (decision 0024).
-    Hooks name game functions by offset (game code has no symbols); only the offset is stored."""
-    out: dict[str, dict[int, str]] = {m.name: {} for m in modules}
+def load_hooks(modules: list[Module]) -> tuple[dict[str, dict[int, str]], dict[str, dict[int, dict[int, str]]]]:
+    """Per module: function offset -> the native hook that runs before its body (decision 0024),
+    and function offset -> {instruction offset -> hook} for hooks with an `at` inside the body
+    (decision 0042). Hooks name game functions by offset (game code has no symbols)."""
+    entry: dict[str, dict[int, str]] = {m.name: {} for m in modules}
+    inside: dict[str, dict[int, dict[int, str]]] = {m.name: {} for m in modules}
     for h in tomllib.loads(OVERRIDES.read_text()).get("hook", []):
-        if h["module"] not in out:
+        if h["module"] not in entry:
             raise RuntimeError(f"overrides.toml: no module {h['module']!r}")
-        out[h["module"]][int(h["offset"], 16)] = h["native"]
-    return out
+        fn = int(h["offset"], 16)
+        if "at" in h:
+            inside[h["module"]].setdefault(fn, {})[int(h["at"], 16)] = h["native"]
+        else:
+            entry[h["module"]][fn] = h["native"]
+    return entry, inside
 
 
 def guest_symbols(modules: list[Module]) -> list[tuple[str, int, int]]:
@@ -242,7 +248,8 @@ def setjmp_entries(modules: list[Module], symbolic: list[list], entries: list[se
 
 
 def translate(cfg: config.Config, m: Module, overrides: dict[int, str], entries: set[int],
-              setjmps: frozenset[int], hooks: dict[int, str]) -> tuple[list[function.Function], list[str]]:
+              setjmps: frozenset[int], hooks: dict[int, str],
+              at_hooks: dict[int, dict[int, str]]) -> tuple[list[function.Function], list[str]]:
     code = m.code
     funcs = [function.discover(code, e, entries) for e in sorted(entries)]
     stats = function.EmitStats()
@@ -255,8 +262,8 @@ def translate(cfg: config.Config, m: Module, overrides: dict[int, str], entries:
                            f"void {name}(CPUState *ctx) {{ {native}(ctx); }}")
         else:
             sources.append(function.emit_function(code, fn, entries, coverage.subgroup, stats, setjmps,
-                                                  hooks.get(fn.entry)))
-    missing = (set(overrides) | set(hooks)) - {fn.entry for fn in funcs}
+                                                  hooks.get(fn.entry), at_hooks.get(fn.entry)))
+    missing = (set(overrides) | set(hooks) | set(at_hooks)) - {fn.entry for fn in funcs}
     if missing:
         raise RuntimeError(f"{m.name}: overridden or hooked functions not found: {sorted(map(hex, missing))}")
 
@@ -298,11 +305,11 @@ def main(argv: list[str] | None = None) -> int:
         return 1
 
     overrides = load_overrides(modules)
-    hooks = load_hooks(modules)
+    hooks, at_hooks = load_hooks(modules)
     relative, symbolic, unresolved = resolve_relocations(modules)
     entries = [entry_points(cfg, m) for m in modules]
     setjmps = setjmp_entries(modules, symbolic, entries)
-    results = [translate(cfg, m, overrides[m.name], entries[i], setjmps[i], hooks[m.name])
+    results = [translate(cfg, m, overrides[m.name], entries[i], setjmps[i], hooks[m.name], at_hooks[m.name])
                for i, m in enumerate(modules)]
     print(f"== relocations: " + ", ".join(f"{m.name} {len(relative[i]):,} relative + {len(symbolic[i]):,} symbolic"
                                           for i, m in enumerate(modules)))
