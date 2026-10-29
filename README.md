@@ -219,11 +219,11 @@ every mode, and fine patterns (perforated fences, leaves) stay clean where FSR t
 row picks FAST (the default, NVIDIA's older model: nearly as clean, about half the GPU time) or BEST (the newest).
 **On other GPUs, use FSR** (DLSS needs NVIDIA RTX; choosing it elsewhere falls back to FSR).
 
-Bamboo forest at 4K 21:9 on an RTX 4070 laptop, frames/s:
+Bamboo forest at 4K 21:9 on an RTX 4070 laptop. For comparison, without DLSS or FSR (native 5120×2160 with TAA):
+**~59 frames/s**. With them, frames/s:
 
 | Mode | World drawn at | DLSS (fast model) | FSR |
 |---|---|---|---|
-| native, TAA (no DLSS or FSR) | 5120×2160 | ~59 | ~59 |
 | native, UPSCALING off (DLSS / FSR as anti-aliasing only) | 5120×2160 | ~53 (DLAA) | ~46 |
 | quality | 3413×1440 | **~81** | ~75 |
 | balanced | 3013×1271 | **~93** | ~86 |
