@@ -28,6 +28,7 @@
 
 #include "host.h"
 #include "bindings.h"
+#include "framerate.h"
 #include "gbuffer.h"
 #include "gpu.h"
 #include "hud.h"
@@ -63,6 +64,12 @@ static VkImage swap_images[8];
 static VkSemaphore rendered[8];  /* one per swapchain image: reused only after that image is presented */
 static uint32_t nswap;
 static int swapchain_stale = 1;  /* (re)create before the next present: first use, resize */
+static int swap_free;            /* the swapchain doesn't wait for the monitor (MAILBOX / IMMEDIATE wanted) */
+
+static int free_running(void) {
+    int hz = framerate_hz();
+    return !hz || hz > 60;
+}
 
 static VkBuffer staging;
 static VkDeviceMemory staging_mem, frame_mem;
@@ -123,11 +130,11 @@ static int create_swapchain(void) {
         if (fmts[i].format == VK_FORMAT_B8G8R8A8_UNORM || fmts[i].format == VK_FORMAT_R8G8B8A8_UNORM) fmt = fmts[i];
     uint32_t count = caps.minImageCount + 1;
     if (caps.maxImageCount && count > caps.maxImageCount) count = caps.maxImageCount;
-    /* FIFO waits for the monitor's refresh. YW4_FRAME_VSYNCS=0 (no frame limit, framerate.c) takes MAILBOX,
-     * else IMMEDIATE, when the driver has them, so the frame rate isn't capped at the refresh rate. */
+    /* FIFO waits for the monitor's refresh. Above 60 frames/s or with no limit (framerate.c) MAILBOX, else
+     * IMMEDIATE, when the driver has them, so the frame rate isn't capped at the refresh rate. */
     VkPresentModeKHR mode = VK_PRESENT_MODE_FIFO_KHR;
-    const char *fv = getenv("YW4_FRAME_VSYNCS");
-    if (fv && !strcmp(fv, "0")) {
+    swap_free = free_running();
+    if (swap_free) {
         uint32_t nmodes = 0;
         VkPresentModeKHR modes[16];
         vkGetPhysicalDeviceSurfacePresentModesKHR(vk.gpu, surface, &nmodes, NULL);
@@ -619,6 +626,7 @@ void window_present_rgba(const uint8_t *rgba, uint32_t w, uint32_t h, uint64_t n
     if (screenshot_wanted(n)) save_screenshot(rgba, w, h, n);
     if (!have_vulkan || !w || !h) return;
     host_lock(&present_lock);
+    if (swap_free != free_running()) swapchain_stale = 1;  /* the panel moved the frame rate across 60 */
     if (!(swapchain_stale && create_swapchain()) && !frame_resources(w, h)) {
         vkWaitForFences(vk.device, 1, &fence, VK_TRUE, UINT64_MAX);  /* the staging buffer is free */
         memcpy(staging_ptr, rgba, (size_t)w * h * 4);
@@ -637,6 +645,7 @@ void window_present_image(VkImage image, VkFormat format, VkRect2D rect, uint64_
         shot = 0;
     }
     host_lock(&present_lock);
+    if (swap_free != free_running()) swapchain_stale = 1;
     if (!(swapchain_stale && create_swapchain()) && !frame_resources(w, h) &&
         !present_image(image, VK_IMAGE_LAYOUT_GENERAL, rect, shot) && shot) {
         /* One bulk copy out of the staging memory: it is uncached, and per-byte reads of it took ~1.7 s. */

@@ -7,6 +7,7 @@
 #include <SDL3/SDL_filesystem.h>
 
 #include "bindings.h"
+#include "framerate.h"
 #include "post.h"
 #include "gbuffer.h"
 #include "gpu.h"
@@ -110,6 +111,12 @@ static const Setting settings[] = {
      {"GAME", "CUSTOM"},
      {"THE GAME'S RENDERER", "OUR CUSTOM RENDERER (RECOMMENDED)"}, 2, dof_pass_index, dof_toggle, "YW4_DOF_PASS",
      {"game", "native"}},
+    {"PERFORMANCE", "FRAME RATE",
+     "HOW MANY PICTURES A SECOND. THE GAME MOVES BY REAL TIME, SO IT PLAYS AT THE SAME SPEED AT ANY RATE. HIGHER "
+     "COSTS MORE GPU AND CPU TIME.",
+     {"30", "60", "120", "144", "UNLIMITED"},
+     {"THE SWITCH'S DEFAULT", "SMOOTH", "FOR 120 HZ MONITORS", "FOR 144 HZ MONITORS", "AS FAST AS THE PC CAN"}, 5,
+     framerate_index, framerate_cycle, "YW4_FPS", {"30", "60", "120", "144", "0"}},
     {"PERFORMANCE", "BATTLE BLUR",
      "THE BLUR IN BATTLES IS UP TO 12 SMALL BLURS IN A ROW. FAST GETS THE SAME WIDTH WITH A QUARTER AS MANY, WIDER "
      "ONES: LESS GPU TIME IN BATTLES, A NEARLY IDENTICAL PICTURE.",

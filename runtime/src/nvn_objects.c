@@ -12,6 +12,7 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "framerate.h"
 #include "gpu.h"
 #include "host.h"
 #include "kernel.h"
@@ -184,11 +185,13 @@ NVN(nvnQueuePresentTexture) {  /* (queue, window, texture index) */
     if (index >= 0 && index < w->num) show(HOST(NvnTexture, w->textures[index]), frames + 1, w->crop);
     int64_t perf_shown = host_now_ns();
     yw4_vsync_start();
-    if (w->interval > 0) {  /* 0: no frame limit (YW4_FRAME_VSYNCS=0, framerate.c) */
+    if (w->interval > 0) {  /* the game's own pacing (YW4_FRAME_VSYNCS) */
         uint64_t now = yw4_vsync_count();
         if (next_flip < now + 1) next_flip = now + 1;
         yw4_wait_vsync(next_flip);
         next_flip += (uint64_t)w->interval;
+    } else {
+        framerate_wait();  /* interval 0: the panel's frame rate (framerate.c) */
     }
     static int64_t last_log;  /* host time of the last logged frame, for the rate since then */
     static uint64_t last_frames;
