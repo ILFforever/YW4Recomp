@@ -42,8 +42,16 @@
 
 Playable. The game runs from boot through a new game (logos, title menu, name entry, the opening
 cutscenes, the Amano house and town, the Yo-kai Pad menus, the diary and autosave) and from late-game saves: towns at
-night, the bamboo forest, the Yo-kai World. It holds the game's 30 frames/s in most places tested (see the known issues). Expect missing
-effects and crashes in places nobody has reached yet.
+night, the bamboo forest, the Yo-kai World, and battles.
+
+- **Frame rate**: the game's 30 frames/s, or 60, 120, 144 or no limit (FRAME RATE in the settings panel, F1). The game
+  moves by real time, so walking and battles keep their speed at any rate; menus and cutscenes are still being
+  checked. At the game's own 30 it holds steady in most places tested (see the known issues).
+- **Graphics**: up to 4K and ultrawide, sharper shadows and textures, TAA, and upscaling with NVIDIA DLSS or AMD FSR
+  for high frame rates at 4K (~81-112 frames/s at 4K 21:9 with DLSS on an RTX 4070 laptop). Parts of the game's
+  renderer already run as our own code (shadows, surfaces, bloom, distance blur).
+
+Expect missing effects and crashes in places nobody has reached yet.
 
 - How it got here, step by step: [docs/progress.md](docs/progress.md)
 - What is known to be missing or wrong: [docs/known-issues.md](docs/known-issues.md)
