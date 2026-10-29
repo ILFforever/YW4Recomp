@@ -102,7 +102,7 @@ the two do the same work:
 | ✅ | **Frame generation (NVIDIA DLSS, AMD FSR)** | A frame made between each two of the game's: about twice as many on screen, the menus kept still. **On RTX 40 and newer use DLSS**: more game frames left and cleaner moving characters. In a busy town at 4K 21:9 on an RTX 4070 laptop, instead of ~70 frames/s: DLSS ~150 shown (~75 game), FSR ~126 shown (~63 game, any GPU). NVIDIA Reflex in the panel too ([decision 0041](docs/decisions/0041-frame-generation.md)) |
 | 🔧 | **Better anti-aliasing** | FXAA, SMAA and now TAA (steady thin edges: fences, nets, leaves) on the 3D scene before the UI is drawn, so text stays crisp; per-object motion for TAA next |
 | 🗓️ | **Mod support** | Load replaced game files from a mod folder without touching your dump (first use: the English translation mod) |
-| 🔧 | **Input remapping** | Keyboard and controller bindings on the panel's CONTROLS page, saved, with your controller's own button names; tested with a DualSense. Mouse and matching on-screen button hints next |
+| 🔧 | **Keyboard, mouse and controllers** | Bindings on the panel's CONTROLS page, saved, with your controller's own button names; tested with a DualSense. On-screen button icons follow what you play with and your bindings (keyboard, Xbox, PlayStation or Nintendo, [decision 0042](docs/decisions/0042-button-icons-and-mouse.md)). The mouse turns the camera through the game's own unused mouse code; being tested |
 | 🗓️ | **Linux** | The runtime is written to be portable; not built or tested there yet |
 
 ✅ = Done, 🔧 = In progress, 🗓️ = Planned
@@ -357,40 +357,67 @@ The same spot zoomed in 2×: the crosswalk far ahead, the pavement on the right 
 </details>
 
 Press **F1** in game for the settings panel: every option with all its choices, and what each one does (arrow keys or
-D-pad to choose and change). **F2** opens the **CONTROLS** page: two keys and one gamepad button for every Switch
-button and stick direction, changed by pressing the new one. On a gamepad the DualSense's **mic button** (Share on
+D-pad to choose and change). Its last row, **DEVELOPER OPTIONS**, opens the switches players don't need: which parts
+of the picture the game draws and which our own renderer does (the picture is the same), and speed-ups that look the
+same. **F2** opens the **CONTROLS** page: two keys or mouse buttons and one gamepad button for every Switch
+button and stick direction, changed by pressing the new one, and at the top the mouse's camera sensitivity, left-right and up-down. On a gamepad the DualSense's **mic button** (Share on
 Xbox pads) opens the settings and **Create + Options** (Minus + Plus) the controls; L/R or the triggers switch
 pages. The DualSense's **touchpad** shows the performance HUD (F3). Your choices are saved in
 `settings.ini` next to `yw4.exe` and kept for the next start. Settings are only in the panel; the other function keys
 are debugging tools ([docs/debugging.md](docs/debugging.md)).
 
-**Settings (F1)**
-
-![The settings panel](docs/screenshots/22-settings-panel.png)
+| Settings (F1) | Developer options |
+|---|---|
+| ![The settings panel: display, anti-aliasing and upscaling, frame generation and latency, detail, shadows](docs/screenshots/73-settings-panel.png) | ![The developer options: shadow pass, G-buffer, bloom, distance blur pass, battle blur](docs/screenshots/74-settings-developer.png) |
 
 **Controls (F2)**, with a DualSense
 
-![The controls page with a DualSense: cross, circle, square, triangle, L1 to R3](docs/screenshots/28-controls-dualsense.png)
+![The controls page with a DualSense: the mouse's sensitivities at the top, then cross, circle, square, triangle, L1 to R3](docs/screenshots/75-controls-mouse-dualsense.png)
 
 **Controllers:** Xbox, PlayStation and Joy-Cons work, and the controls page names the buttons as printed on
 yours (A B X Y and LB/RT on Xbox; × ○ □ △ and L1-R3 on PlayStation; ZL/ZR on Nintendo). By default the game's
 confirm is your controller's own confirm: × on a DualSense, A on Xbox. Tested by playing with a **DualSense (PS5)**,
 battles included, and with the controls page.
 
+**Button icons** in the HUD and in text follow what you last pressed, a key or a controller, and your bindings.
+The game's files still hold keyboard, Xbox and PlayStation icon sets that the Switch version never shows; we
+show those instead of the Switch buttons. Below, the shortcut wheel and the minimap's search button with each:
+
+| | |
+|---|---|
+| Switch (the game's) | ![Switch icons: ZL, ZR and R](docs/screenshots/76-button-icons-switch.png) |
+| Keyboard | ![Keyboard icons: the bound keys 1, 3 and E](docs/screenshots/77-button-icons-keyboard.png) |
+| Xbox | ![Xbox icons: LT, RT and RB](docs/screenshots/78-button-icons-xbox.png) |
+| PlayStation | ![PlayStation icons: L2, R2 and R1](docs/screenshots/79-button-icons-playstation.png) |
+
+**Mouse:** the game's code still has a mouse camera that the Switch version never feeds; we feed it, so the mouse
+turns the camera. A click in the
+window gives the mouse to the game, Alt or opening the panel gives it back. Mouse buttons and the wheel can be bound
+on the CONTROLS page; none are by default.
+
 | Setting | What it does |
 |---|---|
+| **Display** | |
 | Resolution | 1600×900 (the Switch's), 1920×1080, 2560×1440 or 3840×2160; the UI is drawn at the same size |
 | Aspect ratio | 16:9 (the Switch's), 16:10, 21:9 or 32:9: the world shows more at the sides, the UI stays 16:9 in the middle |
-| Anti-aliasing | Off (default), FXAA, SMAA or TAA, applied to the 3D scene before the UI is drawn, so text stays sharp. TAA also steadies thin things that shimmer: fences, nets, leaves |
-| Texture filtering | Off (the Switch's) or anisotropic ×2 to ×16: distant and slanted ground, roads and walls stay sharp. Default ×16 |
-| Distance blur | Full (the Switch's), half or off: the game blurs everything far away. Default half |
-| Effects resolution | Half (the Switch's) or full: the shadow mask, lamp lights and ambient occlusion at the 3D view's size, for sharper shadow edges. Costs ~2 ms of GPU at 1600×900 |
-| Shadow map | 1024 (the Switch's), 2048 or 4096: sharper shadow edges. Default 4096 |
-| Soft shadows (PCSS) | Off (the Switch's), ×1, ×2, ×4. Default ×2 |
-| Shadow pass | The game's or our custom renderer draws the shadow casters; the same picture, ours slightly faster |
-| G-buffer | The game's or our custom renderer draws the world's surfaces; the same picture |
+| Frame rate | 30 (the Switch's), 60, 120, 144 or unlimited; the game keeps its speed at any rate |
+| **Anti-aliasing and upscaling** | |
+| Anti-aliasing | Off (default), FXAA, SMAA, TAA, FSR or DLSS, applied to the 3D scene before the UI is drawn, so text stays sharp. TAA, FSR and DLSS also steady thin things that shimmer: fences, nets, leaves |
+| Upscaling | Off (default), quality, balanced or performance: the world drawn smaller and rebuilt at full size by FSR or DLSS. Needs anti-aliasing set to FSR or DLSS |
+| DLSS model | Fast (default, the older model) or best (the newest, more GPU time) |
+| **Frame generation and latency** | |
 | Frame generation | Off (default), FSR (any GPU) or DLSS (NVIDIA RTX 40 and newer): a frame made between each two of the game's, about twice as many on screen. Needs anti-aliasing set to TAA, FSR or DLSS |
 | Reflex | NVIDIA GPUs: off (default), on or on + boost: less input delay, most where the GPU limits the frame rate. On while frame generation is DLSS |
+| **Detail** | |
+| Texture filtering | Off (the Switch's) or anisotropic ×2 to ×16: distant and slanted ground, roads and walls stay sharp. Default ×16 |
+| Effects resolution | Half (the Switch's) or full: the shadow mask, lamp lights and ambient occlusion at the 3D view's size, for sharper shadow edges. Costs ~2 ms of GPU at 1600×900 |
+| Distance blur | Full (the Switch's), half or off: the game blurs everything far away. Default half |
+| **Shadows** | |
+| Shadow map | 1024 (the Switch's), 2048 or 4096: sharper shadow edges. Default 4096 |
+| Soft shadows (PCSS) | Off (the Switch's), ×1, ×2, ×4. Default ×2 |
+| **Developer options** | |
+| Shadow pass, G-buffer, bloom, distance blur pass | The game's renderer or ours draws that part of the picture; the same picture. Ours by default |
+| Battle blur | The game's or fast (default): the blur as a battle starts with a quarter of the rounds, the same look, ~3 ms less GPU time |
 
 F3 shows a performance HUD in the window's corner: frame time, CPU and GPU cost and memory; with frame generation on,
 also the frames on screen (SHOWN).

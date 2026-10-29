@@ -29,18 +29,20 @@ def c_strings(text: str) -> list[str]:
 
 def settings() -> list[dict]:
     src = (ROOT / "runtime/src/settings.c").read_text(encoding="utf-8")
-    body = src[src.index("static const Setting settings[] = {"):src.index("enum { NSETTINGS")]
-    body = body[body.index("{") + 1:]
-    entries, depth, start = [], 0, None
-    for i, ch in enumerate(body):  # the top-level { ... } of each setting
-        if ch == "{":
-            if depth == 0:
-                start = i
-            depth += 1
-        elif ch == "}":
-            depth -= 1
-            if depth == 0 and start is not None:
-                entries.append(body[start + 1:i])
+    entries = []
+    for var, end in (("player", "/* The developer page"), ("developer", "enum { NPLAYER")):
+        body = src[src.index(f"static const Setting {var}[] = {{"):src.index(end)]
+        body = body[body.index("{") + 1:]
+        depth, start = 0, None
+        for i, ch in enumerate(body):  # the top-level { ... } of each setting
+            if ch == "{":
+                if depth == 0:
+                    start = i
+                depth += 1
+            elif ch == "}":
+                depth -= 1
+                if depth == 0 and start is not None:
+                    entries.append(body[start + 1:i])
     out = []
     for e in entries:
         lists = re.findall(r"\{([^{}]*)\}", e)

@@ -56,7 +56,9 @@ static const Input inputs[] = {
     {"RIGHT STICK", "LEFT", "RS_LEFT", -1, 2, -1, {SDL_SCANCODE_J}, AXIS(SDL_GAMEPAD_AXIS_RIGHTX, 0)},
     {"RIGHT STICK", "RIGHT", "RS_RIGHT", -1, 2, 1, {SDL_SCANCODE_L}, AXIS(SDL_GAMEPAD_AXIS_RIGHTX, 1)},
 };
-enum { NINPUTS = sizeof inputs / sizeof *inputs, SENS_ROW = NINPUTS, RESET_ROW, NROWS };
+/* The controls page's rows: the mouse's two sensitivities, the inputs, the reset row. */
+enum { NINPUTS = sizeof inputs / sizeof *inputs, NMOUSE = 2, FIRST_INPUT = NMOUSE, RESET_ROW = NMOUSE + NINPUTS,
+       NROWS };
 
 static struct {
     int keys[BIND_KEYS];  /* SDL_Scancode or MOUSE_BIND_*, 0 for none */
@@ -75,11 +77,13 @@ static void ready(void) {
     if (!bound_ready) reset();
 }
 
-/* ---- mouse sensitivity: a row of the controls page, saved as YW4_MOUSE_SENS (the environment wins) */
+/* ---- mouse sensitivity, left-right and up-down: the controls page's first rows, saved as YW4_MOUSE_SENS_X and
+ * YW4_MOUSE_SENS_Y (the environment wins; YW4_MOUSE_SENS, the older single one, sets both) */
 
 static const char *const sens_values[] = {"0.5", "0.75", "1.0", "1.25", "1.5", "2.0", "3.0"};
 enum { NSENS = sizeof sens_values / sizeof *sens_values, SENS_DEFAULT = 2 };
-static int sens_choice = SENS_DEFAULT, sens_env_read;
+static const char *const sens_env[2] = {"YW4_MOUSE_SENS_X", "YW4_MOUSE_SENS_Y"};
+static int sens_choice[2] = {SENS_DEFAULT, SENS_DEFAULT}, sens_env_read;
 
 /* The nearest choice to a value. */
 static int sens_from(const char *value) {
@@ -92,16 +96,21 @@ static int sens_from(const char *value) {
     return best;
 }
 
-static int sens_index(void) {
+/* axis: 0 left-right, 1 up-down */
+static int sens_index(int axis) {
     if (!sens_env_read) {
         sens_env_read = 1;
-        const char *e = getenv("YW4_MOUSE_SENS");
-        if (e && *e) sens_choice = sens_from(e);
+        const char *both = getenv("YW4_MOUSE_SENS");
+        for (int a = 0; a < 2; a++) {
+            const char *e = getenv(sens_env[a]);
+            if (e && *e) sens_choice[a] = sens_from(e);
+            else if (both && *both) sens_choice[a] = sens_from(both);
+        }
     }
-    return sens_choice;
+    return sens_choice[axis];
 }
 
-static float mouse_sens(void) { return 0.02f * (float)atof(sens_values[sens_index()]); }
+static float mouse_sens(int axis) { return 0.02f * (float)atof(sens_values[sens_index(axis)]); }
 
 /* ---- gamepad inputs by name, for the settings file: the face buttons by position (south is B on a Switch
  * controller, A on an Xbox one), so a binding means the same button on any pad. The panel shows the
@@ -319,9 +328,8 @@ int yw4_hook_mouse_look(CPUState *ctx) {
     window_mouse_motion(&dx, &dy);
     if (!cam) return 0;
     if (ld8(cam + 0x4ba) | ld8(cam + 0x4bb)) dx = dy = 0.0f;
-    float sens = mouse_sens();
-    st32(cam + 0xcc, bits_f32(dx * sens));
-    st32(cam + 0xd0, bits_f32(-dy * sens));  /* the window's y grows downwards */
+    st32(cam + 0xcc, bits_f32(dx * mouse_sens(0)));
+    st32(cam + 0xd0, bits_f32(-dy * mouse_sens(1)));  /* the window's y grows downwards */
     if (dx != 0.0f || dy != 0.0f) {
         st8(cam + 0x48a, 1);  /* what the game sets when the right stick moves the camera */
         st8(cam + 0x48b, 1);
@@ -671,22 +679,22 @@ void bindings_action(int action) {
     case SETTINGS_UP: row = (row + NROWS - 1) % NROWS; break;
     case SETTINGS_DOWN: row = (row + 1) % NROWS; break;
     case SETTINGS_LEFT:
-        if (row == SENS_ROW) {
-            if (sens_index() > 0) sens_choice--, settings_save();
+        if (row < NMOUSE) {
+            if (sens_index(row) > 0) sens_choice[row]--, settings_save();
         } else {
             col = (col + BIND_COLS - 1) % BIND_COLS;
         }
         break;
     case SETTINGS_RIGHT:
-        if (row == SENS_ROW) {
-            if (sens_index() < NSENS - 1) sens_choice++, settings_save();
+        if (row < NMOUSE) {
+            if (sens_index(row) < NSENS - 1) sens_choice[row]++, settings_save();
         } else {
             col = (col + 1) % BIND_COLS;
         }
         break;
     case SETTINGS_ACCEPT:
-        if (row == SENS_ROW) {
-            sens_choice = (sens_index() + 1) % NSENS, settings_save();
+        if (row < NMOUSE) {
+            sens_choice[row] = (sens_index(row) + 1) % NSENS, settings_save();
         } else if (row == RESET_ROW) {
             reset(), settings_save();
         } else {
@@ -694,10 +702,10 @@ void bindings_action(int action) {
         }
         break;
     case SETTINGS_CLEAR:
-        if (row == SENS_ROW) sens_choice = SENS_DEFAULT, settings_save();
-        if (row >= NINPUTS) break;
-        if (col < BIND_KEYS) bound[row].keys[col] = 0;
-        else bound[row].pad = PAD_NONE;
+        if (row < NMOUSE) sens_choice[row] = SENS_DEFAULT, settings_save();
+        if (row < FIRST_INPUT || row == RESET_ROW) break;
+        if (col < BIND_KEYS) bound[row - FIRST_INPUT].keys[col] = 0;
+        else bound[row - FIRST_INPUT].pad = PAD_NONE;
         settings_save();
         break;
     }
@@ -708,8 +716,8 @@ int bindings_capture_key(int scancode) {
     capturing = 0;
     if (col < BIND_KEYS) {  /* a key for a key column; the other key of the row cleared if it is the same */
         for (int k = 0; k < BIND_KEYS; k++)
-            if (bound[row].keys[k] == scancode) bound[row].keys[k] = 0;
-        bound[row].keys[col] = scancode;
+            if (bound[row - FIRST_INPUT].keys[k] == scancode) bound[row - FIRST_INPUT].keys[k] = 0;
+        bound[row - FIRST_INPUT].keys[col] = scancode;
         using_pad = 0;
         settings_save();
     }  /* a key while waiting for a gamepad input cancels */
@@ -730,8 +738,8 @@ int bindings_capture_mouse(int button) {
     if (!code) return 0;
     capturing = 0;
     for (int k = 0; k < BIND_KEYS; k++)
-        if (bound[row].keys[k] == code) bound[row].keys[k] = 0;
-    bound[row].keys[col] = code;
+        if (bound[row - FIRST_INPUT].keys[k] == code) bound[row - FIRST_INPUT].keys[k] = 0;
+    bound[row - FIRST_INPUT].keys[col] = code;
     using_pad = 0;
     settings_save();
     return 1;
@@ -743,8 +751,8 @@ int bindings_capture_wheel(int y) {
     capturing = 0;
     int code = y > 0 ? MOUSE_BIND_WHEEL_UP : MOUSE_BIND_WHEEL_DOWN;
     for (int k = 0; k < BIND_KEYS; k++)
-        if (bound[row].keys[k] == code) bound[row].keys[k] = 0;
-    bound[row].keys[col] = code;
+        if (bound[row - FIRST_INPUT].keys[k] == code) bound[row - FIRST_INPUT].keys[k] = 0;
+    bound[row - FIRST_INPUT].keys[col] = code;
     using_pad = 0;
     settings_save();
     return 1;
@@ -753,14 +761,14 @@ int bindings_capture_wheel(int y) {
 int bindings_capture_button(int button) {
     if (!bindings_capturing()) return 0;
     capturing = 0;
-    if (col == BIND_KEYS) bound[row].pad = button, using_pad = 1, settings_save();
+    if (col == BIND_KEYS) bound[row - FIRST_INPUT].pad = button, using_pad = 1, settings_save();
     return 1;
 }
 
 int bindings_capture_axis(int axis, int value) {
     if (!bindings_capturing() || col != BIND_KEYS || (value < 24000 && value > -24000)) return 0;
     capturing = 0;
-    bound[row].pad = AXIS(axis, value > 0);
+    bound[row - FIRST_INPUT].pad = AXIS(axis, value > 0);
     using_pad = 1;
     settings_save();
     return 1;
@@ -785,6 +793,13 @@ static void input_title(int i, char *s, size_t n) {
 int bindings_rows(BindRow *rows, int max, int *sel_row, int *sel_col, char *help, int help_size) {
     ready();
     int n = 0;
+    static const char *const sens_names[NMOUSE] = {"HORIZONTAL", "VERTICAL"};
+    for (int a = 0; a < NMOUSE && n < max; a++) {
+        BindRow *r = &rows[n++];
+        memset(r, 0, sizeof *r);
+        r->group = "MOUSE", r->name = sens_names[a], r->value = 1;
+        snprintf(r->cells[0], BIND_NAME, "%sX", sens_values[sens_index(a)]);
+    }
     for (int i = 0; i < NINPUTS && n < max; i++, n++) {
         BindRow *r = &rows[n];
         r->group = inputs[i].group, r->name = inputs[i].name;
@@ -798,30 +813,25 @@ int bindings_rows(BindRow *rows, int max, int *sel_row, int *sel_col, char *help
     if (n < max) {
         BindRow *r = &rows[n++];
         memset(r, 0, sizeof *r);
-        r->group = "MOUSE", r->name = "SENSITIVITY", r->value = 1;
-        snprintf(r->cells[0], BIND_NAME, "%sX", sens_values[sens_index()]);
-    }
-    if (n < max) {
-        BindRow *r = &rows[n++];
-        memset(r, 0, sizeof *r);
         r->name = "RESET ALL TO THE STARTING KEYS";
     }
     *sel_row = row, *sel_col = col;
     char title[48], other[48];
-    if (row == SENS_ROW) {
+    if (row < NMOUSE) {
         snprintf(help, (size_t)help_size,
-                 "HOW FAST THE CAMERA TURNS WITH THE MOUSE: %sX (1.0X TO START). LEFT/RIGHT: CHANGE. DELETE OR X: "
+                 "HOW FAST THE CAMERA TURNS %s WITH THE MOUSE: %sX (1.0X TO START). LEFT/RIGHT: CHANGE. DELETE OR X: "
                  "BACK TO 1.0X. A CLICK IN THE WINDOW GIVES THE MOUSE TO THE GAME, ALT TAKES IT BACK.",
-                 sens_values[sens_index()]);
+                 row ? "UP AND DOWN" : "LEFT AND RIGHT", sens_values[sens_index(row)]);
         return n;
     }
     if (row == RESET_ROW) {
         snprintf(help, (size_t)help_size, "PUTS EVERY KEY AND GAMEPAD BUTTON BACK TO HOW IT STARTED. ENTER OR A: RESET.");
         return n;
     }
-    input_title(row, title, sizeof title);
-    int key = col < BIND_KEYS ? bound[row].keys[col] : 0, pad = col == BIND_KEYS ? bound[row].pad : PAD_NONE;
-    int o = also_used(row, key, pad);
+    int in = row - FIRST_INPUT;
+    input_title(in, title, sizeof title);
+    int key = col < BIND_KEYS ? bound[in].keys[col] : 0, pad = col == BIND_KEYS ? bound[in].pad : PAD_NONE;
+    int o = also_used(in, key, pad);
     if (o >= 0) input_title(o, other, sizeof other);
     if (bindings_capturing())
         snprintf(help, (size_t)help_size,
@@ -842,8 +852,14 @@ int bindings_rows(BindRow *rows, int max, int *sel_row, int *sel_col, char *help
 /* ---- the settings file */
 
 int bindings_load_line(const char *name, const char *value) {
-    if (!strcmp(name, "YW4_MOUSE_SENS")) {
-        if (!getenv(name)) sens_choice = sens_from(value);
+    for (int a = 0; a < NMOUSE; a++)
+        if (!strcmp(name, sens_env[a])) {
+            if (!getenv(name)) sens_choice[a] = sens_from(value);
+            return 1;
+        }
+    if (!strcmp(name, "YW4_MOUSE_SENS")) {  /* the older single setting: both, unless set on their own */
+        if (!getenv(name) && !getenv(sens_env[0])) sens_choice[0] = sens_from(value);
+        if (!getenv(name) && !getenv(sens_env[1])) sens_choice[1] = sens_from(value);
         return 1;
     }
     ready();
@@ -876,5 +892,5 @@ void bindings_save(FILE *f) {
         for (int k = 0; k < BIND_KEYS; k++) fprintf(f, "KEY%d_%s=%s\n", k + 1, inputs[i].id, key_save_name(bound[i].keys[k]));
         fprintf(f, "PAD_%s=%s\n", inputs[i].id, pad_name(bound[i].pad));
     }
-    fprintf(f, "YW4_MOUSE_SENS=%s\n", sens_values[sens_index()]);
+    for (int a = 0; a < NMOUSE; a++) fprintf(f, "%s=%s\n", sens_env[a], sens_values[sens_index(a)]);
 }
