@@ -34,6 +34,13 @@ void gpu_fg_prepare(VkCommandBuffer cb, const GpuFgPrepare *p);
  * if this frame was prepared, makes the frame between the last one and it. Returns the slot to give to
  * gpu_fg_show after the submit, or -1: present as usual. */
 int gpu_fg_record(VkCommandBuffer cb, VkImage image, VkFormat format, uint32_t w, uint32_t h);
+/* Every present (gpu.c): the presented image's format and size, and the part of it the window shows. */
+void gpu_fg_note_present(VkFormat format, uint32_t w, uint32_t h, VkRect2D rect);
+/* The HUD-less copy: the picture before the UI in the presented format, at its place in the presented image
+ * (made after the anti-aliasing, for FSR's and DLSS's frame generation). gpu_fg_hudless: it, when made for the
+ * present now happening, else VK_NULL_HANDLE. */
+void gpu_fg_hudless_copy(VkCommandBuffer cb, const GpuFgPrepare *p);
+VkImage gpu_fg_hudless(void);
 /* Hands the slot's frames to the pacing thread, which presents the generated one, then the game's half a
  * frame later. */
 void gpu_fg_show(int slot, VkRect2D rect, uint64_t frame);

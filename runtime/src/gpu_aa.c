@@ -569,7 +569,7 @@ static void fg_prepare(VkCommandBuffer cb, GpuImage *d, VkImageView dv, uint32_t
     }
     float sy = nvn_window_origin == 1 ? -1.0f : 1.0f;
     p.motion_scale[0] = -(float)w, p.motion_scale[1] = -(float)h * sy;
-    if (dlssg) dlssg_tag(cb, &p, ow, oh);
+    if (dlssg) gpu_fg_hudless_copy(cb, &p), dlssg_tag(cb, &p, ow, oh);
     else gpu_fg_prepare(cb, &p);
 }
 

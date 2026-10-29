@@ -1745,6 +1745,7 @@ void gpu_present(NvnTexture *t, uint64_t frame, const int crop[4]) {
     uint32_t ch = gpu_scaled(crop[3] > 0 ? (uint32_t)crop[3] : 0, g->scale_num, g->scale_den);
     if (crop[2] > 0 && crop[3] > 0 && crop[0] >= 0 && crop[1] >= 0 && cx + cw <= g->width && cy + ch <= g->height)
         r = (VkRect2D){{(int32_t)cx, (int32_t)cy}, {cw, ch}};
+    gpu_fg_note_present(g->format, g->width, g->height, r);
     if (fg_slot >= 0) {
         gpu_fg_show(fg_slot, r, frame);
         return;

@@ -34,6 +34,9 @@ void dlssg_tag(VkCommandBuffer cb, const GpuFgPrepare *p, uint32_t output_w, uin
  * setting says DLSS and this frame was tagged), the present-start marker. */
 void dlssg_present_begin(int32_t x, int32_t y, uint32_t w, uint32_t h, VkFormat format, uint32_t images);
 void dlssg_present_end(void);
+/* Before dlssg_present_begin (window.c): this present's HUD-less copy at the window image's size, the picture before
+ * the UI scaled into the game's rectangle; VK_NULL_HANDLE: none this frame. */
+void dlssg_hudless(VkImage image, VkImageView view, VkFormat format, uint32_t w, uint32_t h);
 /* Frames on screen per game frame while DLSS frame generation runs (2: one generated each), else 0. */
 float dlssg_shown_per_frame(void);
 /* 1 while frame generation is switched on in Streamline (the window doesn't wait for the monitor then). */

@@ -200,25 +200,42 @@ static VkFormat raw_format(VkFormat f);
  * copy into the window image makes), so FSR can tell the UI from the 3D and keep it still. */
 static FgImage hudless;
 static VkFormat hudless_fmt, presented_fmt;
-static uint32_t hudless_w, hudless_h;
+static uint32_t hudless_w, hudless_h, presented_w, presented_h;
 static int hudless_ok;  /* made this frame */
+static uint64_t hudless_frame;  /* gpu_frames() when it was made: valid for the present that follows */
 static VkRect2D shown_rect;  /* the part of the presented image the window shows (the game's crop), last frame */
 
-static void hudless_copy(VkCommandBuffer cb, const GpuFgPrepare *p) {
+void gpu_fg_note_present(VkFormat format, uint32_t w, uint32_t h, VkRect2D rect) {
+    presented_fmt = format, presented_w = w, presented_h = h;
+    if (rect.offset.x != shown_rect.offset.x || rect.offset.y != shown_rect.offset.y ||
+        rect.extent.width != shown_rect.extent.width || rect.extent.height != shown_rect.extent.height) {
+        if (gpu_fg())
+            fprintf(stderr, "yw4: fg: the window shows %ux%u at %d,%d of the presented image\n", rect.extent.width,
+                    rect.extent.height, rect.offset.x, rect.offset.y);
+        shown_rect = rect;
+    }
+}
+
+VkImage gpu_fg_hudless(void) {
+    return hudless_ok && hudless_frame + 1 == gpu_frames() ? hudless.image : VK_NULL_HANDLE;
+}
+
+void gpu_fg_hudless_copy(VkCommandBuffer cb, const GpuFgPrepare *p) {
     hudless_ok = 0;
     /* the presented image is the window texture: the picture sits in it where the crop takes it from */
     VkRect2D r = shown_rect;
+    uint32_t pw = presented_w, ph = presented_h;
     if (!p->scene || !presented_fmt || p->scene_w != r.extent.width || p->scene_h != r.extent.height ||
-        r.offset.x < 0 || r.offset.y < 0 || r.offset.x + r.extent.width > ctx_dw || r.offset.y + r.extent.height > ctx_dh)
+        r.offset.x < 0 || r.offset.y < 0 || r.offset.x + r.extent.width > pw || r.offset.y + r.extent.height > ph)
         return;
     static int off = -1;
     if (off < 0) off = getenv("YW4_FG_HUDLESS") && *getenv("YW4_FG_HUDLESS") == '0';
     if (off) return;
-    if (!hudless.image || hudless_fmt != presented_fmt || hudless_w != ctx_dw || hudless_h != ctx_dh) {
+    if (!hudless.image || hudless_fmt != presented_fmt || hudless_w != pw || hudless_h != ph) {
         if (hudless.image) gpu_wait(gpu_submitted(), UINT64_MAX), image_free(&hudless);
-        image_make(&hudless, presented_fmt, ctx_dw, ctx_dh);
+        image_make(&hudless, presented_fmt, pw, ph);
         to_general(cb, hudless.image);
-        hudless_fmt = presented_fmt, hudless_w = ctx_dw, hudless_h = ctx_dh;
+        hudless_fmt = presented_fmt, hudless_w = pw, hudless_h = ph;
     }
     full_barrier(cb);
     int32_t x = r.offset.x, y = r.offset.y;
@@ -228,7 +245,7 @@ static void hudless_copy(VkCommandBuffer cb, const GpuFgPrepare *p) {
                      .dstOffsets = {{x, y, 0}, {x + (int32_t)p->scene_w, y + (int32_t)p->scene_h, 1}}};
     vkCmdBlitImage(cb, p->scene, VK_IMAGE_LAYOUT_GENERAL, hudless.image, VK_IMAGE_LAYOUT_GENERAL, 1, &b, VK_FILTER_NEAREST);
     full_barrier(cb);
-    hudless_ok = 1;
+    hudless_ok = 1, hudless_frame = gpu_frames();
 }
 
 static int configure(uint64_t id, uint32_t w, uint32_t h) {
@@ -248,7 +265,7 @@ void gpu_fg_prepare(VkCommandBuffer cb, const GpuFgPrepare *p) {
     want_rw = p->render_w, want_rh = p->render_h;
     if (!ctx || ctx_rw != p->render_w || ctx_rh != p->render_h) return;  /* made at the next present */
     uint64_t id = next_id;
-    hudless_copy(cb, p);
+    gpu_fg_hudless_copy(cb, p);
     if (!configure(id, ctx_dw, ctx_dh)) return;
     struct ffxDispatchDescFrameGenerationPrepareV2 d = {.header = {.type = FFX_API_DISPATCH_DESC_TYPE_FRAMEGENERATION_PREPARE_V2}};
     d.frameID = id, d.flags = debug_flags(), d.commandList = cb;
@@ -428,7 +445,6 @@ int gpu_fg_record(VkCommandBuffer cb, VkImage image, VkFormat format, uint32_t w
         pacer_started = 1;
     }
     /* the context follows the presented size and the 3D's: made here, used from the next frame's prepare */
-    presented_fmt = format;
     if (want_rw && want_rh && create(w, h, want_rw, want_rh, raw_format(format)) == 0) return -1;
     int k = next_slot;
     next_slot ^= 1;
@@ -484,12 +500,6 @@ void gpu_fg_show(int k, VkRect2D rect, uint64_t frame) {
     host_lock(&plock);
     while (queued >= 0) host_cond_wait(&pcond, &plock, -1);
     queued = k, queued_rect = rect, queued_frame = frame, queued_ns = host_now_ns();
-    if (rect.offset.x != shown_rect.offset.x || rect.offset.y != shown_rect.offset.y ||
-        rect.extent.width != shown_rect.extent.width || rect.extent.height != shown_rect.extent.height) {
-        fprintf(stderr, "yw4: fg: the window shows %ux%u at %d,%d of the presented image\n", rect.extent.width,
-                rect.extent.height, rect.offset.x, rect.offset.y);
-        shown_rect = rect;
-    }
     host_cond_broadcast(&pcond);
     host_unlock(&plock);
 }
@@ -505,6 +515,9 @@ void gpu_fg_drain(void) {
 
 int gpu_fg_active(void) { return 0; }
 float gpu_fg_shown_per_frame(void) { return 0.0f; }
+void gpu_fg_note_present(VkFormat format, uint32_t w, uint32_t h, VkRect2D rect) { (void)format, (void)w, (void)h, (void)rect; }
+VkImage gpu_fg_hudless(void) { return VK_NULL_HANDLE; }
+void gpu_fg_hudless_copy(VkCommandBuffer cb, const GpuFgPrepare *p) { (void)cb, (void)p; }
 void gpu_fg_prepare(VkCommandBuffer cb, const GpuFgPrepare *p) { (void)cb, (void)p; }
 int gpu_fg_record(VkCommandBuffer cb, VkImage image, VkFormat format, uint32_t w, uint32_t h) {
     (void)cb, (void)image, (void)format, (void)w, (void)h;

@@ -606,6 +606,44 @@ static void hud_onto(uint8_t *rgba, uint32_t w, uint32_t h) {
               (h - (uint32_t)panel_shown_h * s) / 2, s);
 }
 
+/* DLSS frame generation's HUD-less copy at the window's size and format (made again when either changes). */
+static struct {
+    VkImage image;
+    VkDeviceMemory mem;
+    VkImageView view;
+    uint32_t w, h;
+    VkFormat format;
+} hlw;
+
+static int hudless_window_image(uint32_t w, uint32_t h) {
+    if (hlw.image && hlw.w == w && hlw.h == h && hlw.format == swap_format) return 1;
+    if (hlw.image) {
+        vkDeviceWaitIdle(vk.device);
+        vkDestroyImageView(vk.device, hlw.view, NULL);
+        vkDestroyImage(vk.device, hlw.image, NULL);
+        vkFreeMemory(vk.device, hlw.mem, NULL);
+        memset(&hlw, 0, sizeof hlw);
+    }
+    VkImageCreateInfo ici = {.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO, .imageType = VK_IMAGE_TYPE_2D,
+                             .format = swap_format, .extent = {w, h, 1}, .mipLevels = 1, .arrayLayers = 1,
+                             .samples = VK_SAMPLE_COUNT_1_BIT, .tiling = VK_IMAGE_TILING_OPTIMAL,
+                             .usage = VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT |
+                                      VK_IMAGE_USAGE_SAMPLED_BIT};
+    if (vkCreateImage(vk.device, &ici, NULL, &hlw.image) != VK_SUCCESS) return hlw.image = VK_NULL_HANDLE, 0;
+    VkMemoryRequirements mr;
+    vkGetImageMemoryRequirements(vk.device, hlw.image, &mr);
+    VkMemoryAllocateInfo mai = {.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO, .allocationSize = mr.size,
+                                .memoryTypeIndex = vk_memory_type(mr.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT)};
+    vkAllocateMemory(vk.device, &mai, NULL, &hlw.mem);
+    vkBindImageMemory(vk.device, hlw.image, hlw.mem, 0);
+    VkImageViewCreateInfo vci = {.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO, .image = hlw.image,
+                                 .viewType = VK_IMAGE_VIEW_TYPE_2D, .format = swap_format,
+                                 .subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1}};
+    vkCreateImageView(vk.device, &vci, NULL, &hlw.view);
+    hlw.w = w, hlw.h = h, hlw.format = swap_format;
+    return 1;
+}
+
 /* Scales src (w x h colour texels) into the next swapchain image and presents it.
  * layout UNDEFINED: src is `frame`, filled from the staging buffer (the CPU path).
  * Otherwise src is the draw path's image in that layout (GENERAL, decision 0021); with
@@ -657,6 +695,23 @@ static int present_image(VkImage src, VkImageLayout layout, VkRect2D r0, int rea
                         .dstSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1},
                         .dstOffsets = {{x0, y0, 0}, {x0 + (int32_t)bw, y0 + (int32_t)bh, 1}}};
     vkCmdBlitImage(cmd, src, layout, dst, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &blit, VK_FILTER_LINEAR);
+    /* DLSS frame generation works on this window image: its HUD-less copy the same, the picture before the UI
+     * (gpu_fg.c) scaled into the same place, so DLSS-G keeps the menus, our HUD and the panel still */
+    VkImage hl = layout == VK_IMAGE_LAYOUT_GENERAL && dlssg_on() ? gpu_fg_hudless() : VK_NULL_HANDLE;
+    if (hl && hudless_window_image(ww, wh)) {
+        barrier(hl, VK_IMAGE_LAYOUT_GENERAL, VK_IMAGE_LAYOUT_GENERAL, VK_ACCESS_MEMORY_WRITE_BIT, VK_ACCESS_TRANSFER_READ_BIT);
+        barrier(hlw.image, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 0, VK_ACCESS_TRANSFER_WRITE_BIT);
+        vkCmdClearColorImage(cmd, hlw.image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, &black, 1, &all);
+        barrier(hlw.image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+                VK_ACCESS_TRANSFER_WRITE_BIT, VK_ACCESS_TRANSFER_WRITE_BIT);
+        vkCmdBlitImage(cmd, hl, VK_IMAGE_LAYOUT_GENERAL, hlw.image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &blit,
+                       VK_FILTER_LINEAR);
+        barrier(hlw.image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_GENERAL, VK_ACCESS_TRANSFER_WRITE_BIT,
+                VK_ACCESS_MEMORY_READ_BIT);
+        dlssg_hudless(hlw.image, hlw.view, swap_format, ww, wh);
+    } else {
+        dlssg_hudless(VK_NULL_HANDLE, VK_NULL_HANDLE, swap_format, 0, 0);
+    }
     hud_draw(dst, x0, y0);
     panel_draw(dst, x0, y0, bw, bh);
     barrier(dst, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR, VK_ACCESS_TRANSFER_WRITE_BIT, 0);

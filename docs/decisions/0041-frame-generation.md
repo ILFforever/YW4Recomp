@@ -67,6 +67,12 @@ letterboxed into the window there.
      camera motion taken as part of the game's motion vectors (it is).
    - The swapchain is made again whenever DLSS-G switches on or off (NVIDIA's guidance), and its image list is
      read in two calls (count, then images): Streamline's version returned bad handles for one call with room for 8.
+   - Its HUD-less copy: DLSS-G works on the window image (the game's picture scaled into it, black bars, our HUD
+     and panel on top), so the HUD-less copy is made the same way: the picture before the UI blitted into a
+     window-sized image at the same rectangle with the same filter, in the present's own submission, tagged with
+     the backbuffer's rectangle. Walking through town (only generated frames shown,
+     `YW4_DLSSG_SHOW_GENERATED=1`, captured from the screen): the HUD, minimap and text stay sharp, and running
+     characters keep clean arms and legs.
    - DLSS-G stops generating while the window isn't focused (Streamline's own rule): background test runs need
      the window brought to the front.
 
@@ -91,7 +97,6 @@ this is where FSR blends instead of moving the pixels.
 
 ## Not done yet
 
-- A HUD-less copy for DLSS-G (window-sized, at the game's rectangle): its menus still move with the 3D.
 - Objects moved by their world matrix (not bones) have only the camera's motion; a history of each object's world
   is in `gbuffer.c` (`YW4_OBJECT_MOTION=1`), off until objects sharing a model get keys of their own.
 - The game's real camera matrices for DLSS-G (from the G-buffer pass's constant buffers).

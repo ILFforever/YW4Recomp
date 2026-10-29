@@ -228,6 +228,14 @@ static sl::FrameToken *token;
 static uint32_t frame_index;
 static int tagged, mode_on = -1;
 static float shown_per_frame;  /* frames on screen per game frame, from DLSS-G's state; 0 while it is off */
+static VkImage hudless_image;  /* this present's HUD-less copy at the window's size (window.c), or none */
+static VkImageView hudless_view;
+static VkFormat hudless_format;
+static uint32_t hudless_w, hudless_h;
+
+extern "C" void dlssg_hudless(VkImage image, VkImageView view, VkFormat format, uint32_t w, uint32_t h) {
+    hudless_image = image, hudless_view = view, hudless_format = format, hudless_w = w, hudless_h = h;
+}
 
 static int ready(void) { return started == 1 && reflex_ok == 1; }  /* the frame tokens and markers */
 
@@ -338,6 +346,8 @@ extern "C" void dlssg_present_begin(int32_t x, int32_t y, uint32_t w, uint32_t h
         sl::DLSSGOptions o{};
         o.mode = want ? sl::DLSSGMode::eOn : sl::DLSSGMode::eOff;
         o.numFramesToGenerate = 1;
+        if (getenv("YW4_DLSSG_SHOW_GENERATED"))  /* tests: only the generated frames on screen (for screen captures) */
+            o.flags = sl::DLSSGFlags::eShowOnlyInterpolatedFrame;
         o.numBackBuffers = images;
         o.colorBufferFormat = (uint32_t)format;
         sl::Result r = slDLSSGSetOptions(viewport, o);
@@ -346,8 +356,18 @@ extern "C" void dlssg_present_begin(int32_t x, int32_t y, uint32_t w, uint32_t h
     }
     if (want) {
         sl::Extent sub{(uint32_t)y, (uint32_t)x, w, h};
-        sl::ResourceTag bb(nullptr, sl::kBufferTypeBackbuffer, sl::ResourceLifecycle::eValidUntilPresent, &sub);
-        slSetTagForFrame(*token, viewport, &bb, 1, nullptr);
+        sl::ResourceTag tags[2] = {
+            sl::ResourceTag(nullptr, sl::kBufferTypeBackbuffer, sl::ResourceLifecycle::eValidUntilPresent, &sub),
+            sl::ResourceTag(nullptr, sl::kBufferTypeHUDLessColor, sl::ResourceLifecycle::eValidUntilPresent, &sub)};
+        /* the HUD-less copy at the window image's size (window.c), the same rectangle as the backbuffer's; without
+         * it a null tag, so Streamline doesn't use an old one */
+        sl::Resource hl(sl::ResourceType::eTex2d, (void *)hudless_image, nullptr, (void *)hudless_view,
+                        VK_IMAGE_LAYOUT_GENERAL);
+        hl.width = hudless_w, hl.height = hudless_h, hl.nativeFormat = (uint32_t)hudless_format;
+        hl.mipLevels = 1, hl.arrayLayers = 1, hl.flags = 0;
+        hl.usage = VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_SAMPLED_BIT;
+        if (hudless_image) tags[1].resource = &hl;
+        slSetTagForFrame(*token, viewport, tags, 2, nullptr);
     }
     slPCLSetMarker(sl::PCLMarker::ePresentStart, *token);
 }
@@ -392,6 +412,9 @@ extern "C" void dlssg_present_begin(int32_t x, int32_t y, uint32_t w, uint32_t h
 }
 extern "C" void dlssg_present_end(void) {}
 extern "C" float dlssg_shown_per_frame(void) { return 0.0f; }
+extern "C" void dlssg_hudless(VkImage i, VkImageView v, VkFormat f, uint32_t w, uint32_t h) {
+    (void)i, (void)v, (void)f, (void)w, (void)h;
+}
 extern "C" int dlssg_on(void) { return 0; }
 
 #endif
