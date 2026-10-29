@@ -57,7 +57,7 @@ An emulator can't do most of this. It imitates the console and plays the game's 
 game still decides its shadow quality, its 16:9 UI, its 30 frames/s and its effects. Here the game's renderer is
 being replaced with our own, so those become ours to change: higher resolution, sharper textures, bigger and soft
 shadows, anti-aliasing that leaves the UI sharp (TAA included) and ultrawide are already in, as are 60 frames/s and
-above and upscaling with AMD FSR or NVIDIA DLSS (the world drawn smaller and rebuilt at full size, the menus kept
+above and upscaling with NVIDIA DLSS or AMD FSR (the world drawn smaller and rebuilt at full size, the menus kept
 sharp).
 
 A town street, same spot: the game's shadows (1024 map, no PCSS) against ours (4096 map, PCSS ×2). The
@@ -87,7 +87,7 @@ It is also lighter to run. The same busy street on the same laptop ([docs/baseli
 | ✅ | **Higher resolution** | The 3D view at 1080p, 1440p or 4K instead of the game's 1600×900 (30 frames/s at 4K on an RTX 4070 laptop) |
 | ✅ | **Ultrawide and other aspect ratios** | 16:10, 21:9 and 32:9 in the panel: a wider view of the world with the UI kept 16:9 in the middle; exploring, battles and cutscenes work; dialog dimming and the loading screen cover the full width |
 | 🔧 | **Higher frame rates** | 30, 60, 120, 144 or no limit, switchable while playing (FRAME RATE in the panel): the game already moves by the real time between frames, so walking and battles keep their speed (~140 frames/s at 1600×900). At 4K the GPU is the limit; upscaling (next row) lifts it. Menus and cutscenes are being checked. Later frame generation (AMD FSR 3, open source, any GPU) on top |
-| ✅ | **Upscaling (AMD FSR, NVIDIA DLSS)** | The world drawn smaller and rebuilt at full size, menus and text kept full size. At 4K 21:9 on an RTX 4070 laptop, instead of ~59 frames/s: NVIDIA DLSS ~81 / ~93 / ~112 (quality / balanced / performance), AMD FSR ~75 / ~86 / ~104 (any GPU). DLSS keeps fine patterns (far nets, perforated fences) clean where FSR gets grainy ([decisions 0039](docs/decisions/0039-fsr-upscaling.md), [0040](docs/decisions/0040-dlss-upscaling.md)) |
+| ✅ | **Upscaling (NVIDIA DLSS, AMD FSR)** | The world drawn smaller and rebuilt at full size, menus and text kept full size. **On NVIDIA RTX GPUs use DLSS: sharper and cheaper than FSR.** At 4K 21:9 on an RTX 4070 laptop, instead of ~59 frames/s: DLSS ~81 / ~93 / ~112 (quality / balanced / performance), FSR ~75 / ~86 / ~104 (any GPU). DLSS keeps fine patterns (far nets, perforated fences) clean where FSR gets grainy ([decisions 0039](docs/decisions/0039-fsr-upscaling.md), [0040](docs/decisions/0040-dlss-upscaling.md)) |
 | 🔧 | **Better anti-aliasing** | FXAA, SMAA and now TAA (steady thin edges: fences, nets, leaves) on the 3D scene before the UI is drawn, so text stays crisp; per-object motion for TAA next |
 | 🗓️ | **Mod support** | Load replaced game files from a mod folder without touching your dump (first use: the English translation mod) |
 | 🔧 | **Input remapping** | Keyboard and controller bindings on the panel's CONTROLS page, saved, with your controller's own button names; tested with a DualSense. Mouse and matching on-screen button hints next |
@@ -208,63 +208,65 @@ The same frame zoomed in 3×: the red railing, the fence by the lamp post and th
 </details>
 
 <details>
-<summary><b>Upscaling (AMD FSR, NVIDIA DLSS)</b>: the world drawn smaller, rebuilt at full size, menus kept sharp</summary>
+<summary><b>Upscaling (NVIDIA DLSS, AMD FSR)</b>: the world drawn smaller, rebuilt at full size, menus kept sharp</summary>
 
-With ANTI-ALIASING set to FSR or DLSS, the UPSCALING row draws the 3D world smaller than the resolution and the
+With ANTI-ALIASING set to DLSS or FSR, the UPSCALING row draws the 3D world smaller than the resolution and the
 upscaler rebuilds a full-size picture from it and the frames before, using the motion the game writes. The menus
-and text are drawn afterwards at full size. **AMD FSR 3.1** runs on any GPU; **NVIDIA DLSS** (NVIDIA RTX GPUs, the
-DLSS MODEL row picks the fast or the newest model) keeps fine patterns cleaner and costs less on this GPU. Bamboo
-forest at 4K 21:9 on an RTX 4070 laptop, frames/s:
+and text are drawn afterwards at full size.
+
+**Which to use: on an NVIDIA RTX GPU, choose DLSS.** It is both sharper and cheaper than FSR here: more frames in
+every mode, and fine patterns (perforated fences, leaves) stay clean where FSR turns them to grain. Its DLSS MODEL
+row picks FAST (the default, NVIDIA's older model: nearly as clean, about half the GPU time) or BEST (the newest).
+**On other GPUs, use FSR** (DLSS needs NVIDIA RTX; choosing it elsewhere falls back to FSR).
+
+Bamboo forest at 4K 21:9 on an RTX 4070 laptop, frames/s:
 
 | Mode | World drawn at | DLSS (fast model) | FSR |
 |---|---|---|---|
 | native, TAA (no DLSS or FSR) | 5120×2160 | ~59 | ~59 |
 | native, UPSCALING off (DLSS / FSR as anti-aliasing only) | 5120×2160 | ~53 (DLAA) | ~46 |
-| quality | 3413×1440 | ~81 | ~75 |
-| balanced | 3013×1271 | ~93 | ~86 |
-| performance | 2560×1080 | ~112 | ~104 |
+| quality | 3413×1440 | **~81** | ~75 |
+| balanced | 3013×1271 | **~93** | ~86 |
+| performance | 2560×1080 | **~112** | ~104 |
 
-Native with TAA (left) against FSR quality from 3413×1440 (right), 1:1 crops: the quest text stays as sharp, the
-bamboo and the lantern nearly so.
+DLSS's own work costs ~2.6 ms of GPU time per frame at this output size, FSR's 3.7-4.5 ms.
 
-![Native against FSR quality, 1:1 crops](docs/screenshots/63-fsr-quality-vs-native.jpg)
+Each image below: on top the whole native frame with the cropped areas in yellow, underneath the 1:1 crops, each
+labelled with its mode (DLSS: fast model).
 
-A running character, 1:1: native with TAA, FSR quality, FSR performance. No trail behind the moving leg.
+Quality (the world drawn at 3413×1440): native, FSR, DLSS. The quest text is as sharp in all three (the UI is
+drawn at full size); DLSS keeps the bamboo and the lantern closest to native.
 
-![Running character in native, FSR quality and performance](docs/screenshots/64-fsr-running.jpg)
+![Bamboo forest in native, FSR quality and DLSS quality](docs/screenshots/63-fsr-dlss-quality-vs-native.jpg)
 
-With FSR, very fine patterns smaller than a pixel of the smaller picture (far nets, perforated fences) come out
-grainy at performance, a limit of its hand-written method; DLSS's trained model keeps them as a clean pattern
-([decisions 0039](docs/decisions/0039-fsr-upscaling.md), [0040](docs/decisions/0040-dlss-upscaling.md)).
-
-The schoolyard's perforated high fence, 1:1: native with TAA, FSR performance, DLSS performance (fast model).
-
-![The perforated fence in native, FSR performance and DLSS performance](docs/screenshots/65-dlss-vs-fsr-fence.jpg)
-
-**More DLSS comparisons** (fast model, the same settings, 1:1 crops unless noted):
-
-Native with TAA (left) against DLSS quality from 3413×1440 (right): the quest text, the bamboo and the lantern.
-
-![Native against DLSS quality, 1:1 crops](docs/screenshots/66-dlss-quality-vs-native.jpg)
-
-The same spot at performance (the world drawn at 2560×1080): native, FSR performance, DLSS performance. DLSS keeps
-the bamboo and the leaves crisper.
+Performance (the world drawn at 2560×1080, a quarter of the pixels): native, FSR, DLSS. DLSS keeps the bamboo and
+the leaves crisper.
 
 ![Bamboo forest in native, FSR performance and DLSS performance](docs/screenshots/67-dlss-vs-fsr-performance-forest.jpg)
 
-The schoolyard's far goal net: native, FSR performance, DLSS performance. Both lose some of the net this far away
-at a quarter of the pixels: FSR keeps more of it but noisy, DLSS draws it clean but fainter.
+The schoolyard's perforated high fence at performance: native, FSR, DLSS. FSR turns the holes into grain, DLSS
+keeps a clean pattern.
+
+![The perforated fence in native, FSR performance and DLSS performance](docs/screenshots/65-dlss-vs-fsr-fence.jpg)
+
+The schoolyard's far goal net at performance: native, FSR, DLSS. Both lose some of the net this far away: FSR
+keeps more of it but noisy, DLSS draws it clean but fainter.
 
 ![Goal net in native, FSR performance and DLSS performance](docs/screenshots/68-dlss-vs-fsr-goal-net.jpg)
 
-A running character: native, DLSS quality, DLSS performance. No trail behind the moving leg.
+A running character at quality, then at performance: native, FSR, DLSS. No trail behind the moving leg in either.
 
-![Running character in native, DLSS quality and DLSS performance](docs/screenshots/69-dlss-running.jpg)
+![Running character in native, FSR quality and DLSS quality](docs/screenshots/64-fsr-dlss-running-quality.jpg)
+
+![Running character in native, FSR performance and DLSS performance](docs/screenshots/69-fsr-dlss-running-performance.jpg)
 
 A whole frame in DLSS performance, the world drawn at 2560×1080 and shown at 5120×2160 (scaled down here), ~112
 frames/s on the laptop:
 
 ![A town street in DLSS performance](docs/screenshots/70-dlss-performance-town.jpg)
+
+How they work and what was measured: [decisions 0039 (FSR)](docs/decisions/0039-fsr-upscaling.md) and
+[0040 (DLSS)](docs/decisions/0040-dlss-upscaling.md).
 
 NVIDIA DLSS is a technology of NVIDIA Corporation, used under NVIDIA's RTX SDK licence; its files are downloaded
 by the build and are not part of this repository. AMD FSR is AMD's, under the MIT licence.
