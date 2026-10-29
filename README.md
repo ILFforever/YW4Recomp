@@ -239,6 +239,31 @@ The schoolyard's perforated high fence, 1:1: native with TAA, FSR performance, D
 
 ![The perforated fence in native, FSR performance and DLSS performance](docs/screenshots/65-dlss-vs-fsr-fence.jpg)
 
+**More DLSS comparisons** (fast model, the same settings, 1:1 crops unless noted):
+
+Native with TAA (left) against DLSS quality from 3413×1440 (right): the quest text, the bamboo and the lantern.
+
+![Native against DLSS quality, 1:1 crops](docs/screenshots/66-dlss-quality-vs-native.jpg)
+
+The same spot at performance (the world drawn at 2560×1080): native, FSR performance, DLSS performance. DLSS keeps
+the bamboo and the leaves crisper.
+
+![Bamboo forest in native, FSR performance and DLSS performance](docs/screenshots/67-dlss-vs-fsr-performance-forest.jpg)
+
+The schoolyard's far goal net: native, FSR performance, DLSS performance. Both lose some of the net this far away
+at a quarter of the pixels: FSR keeps more of it but noisy, DLSS draws it clean but fainter.
+
+![Goal net in native, FSR performance and DLSS performance](docs/screenshots/68-dlss-vs-fsr-goal-net.jpg)
+
+A running character: native, DLSS quality, DLSS performance. No trail behind the moving leg.
+
+![Running character in native, DLSS quality and DLSS performance](docs/screenshots/69-dlss-running.jpg)
+
+A whole frame in DLSS performance, the world drawn at 2560×1080 and shown at 5120×2160 (scaled down here), ~112
+frames/s on the laptop:
+
+![A town street in DLSS performance](docs/screenshots/70-dlss-performance-town.jpg)
+
 NVIDIA DLSS is a technology of NVIDIA Corporation, used under NVIDIA's RTX SDK licence; its files are downloaded
 by the build and are not part of this repository. AMD FSR is AMD's, under the MIT licence.
 
