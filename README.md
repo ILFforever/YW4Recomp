@@ -40,9 +40,10 @@
 
 ## Status
 
-Playable. The game runs from boot through a new game (logos, title menu, name entry, the opening
-cutscenes, the Amano house and town, the Yo-kai Pad menus, the diary and autosave) and from late-game saves: towns at
-night, the bamboo forest, the Yo-kai World, and battles.
+Work in progress: not playable from start to finish yet. What runs so far: from boot through the start of a new
+game (logos, title menu, name entry, the opening cutscenes, the Amano house and town, the Yo-kai Pad menus, the
+diary and autosave), and from late-game saves: towns at night, the bamboo forest, the Yo-kai World, and battles.
+Most of the game has not been tried.
 
 - **Frame rate**: the game's 30 frames/s, or 60, 120, 144 or no limit (FRAME RATE in the settings panel, F1). The game
   moves by real time, so walking and battles keep their speed at any rate; menus and cutscenes are still being
