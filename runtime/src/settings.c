@@ -25,6 +25,7 @@ typedef struct {
     void (*next)(void);    /* one step forward, wrapping */
     const char *env;       /* the environment variable it starts from, and its value per option */
     const char *values[SETTINGS_MAX_OPTIONS];
+    const char *(*disabled)(void);  /* NULL, or why it can't be used now (greyed out) */
 } Setting;
 
 static int res_index(void) {
@@ -46,6 +47,7 @@ static int gbuffer_index(void) { return gbuffer_native(); }
 static int bloom_index(void) { return bloom_native(); }
 static int dof_pass_index(void) { return dof_native(); }
 static int blur_fast_index(void) { return blur_fast(); }
+static const char *upscale_disabled(void) { return gpu_aa() == 4 ? NULL : "NEEDS ANTI-ALIASING SET TO FSR"; }
 
 /* In the order shown; a row starts a new group when its category differs from the row before. The texts
  * use the HUD font's characters (hud.c): upper case, digits, . , : % / - ( ) ' ! ? */
@@ -64,10 +66,17 @@ static const Setting settings[] = {
      gpu_wide_cycle, "YW4_ASPECT", {"16:9", "16:10", "21:9", "32:9"}},
     {"PICTURE", "ANTI-ALIASING",
      "SMOOTHS THE JAGGED EDGES OF OBJECTS. APPLIED BEFORE THE MENUS ARE DRAWN, SO TEXT STAYS SHARP.",
-     {"OFF", "FXAA", "SMAA", "TAA"},
+     {"OFF", "FXAA", "SMAA", "TAA", "FSR"},
      {"THE SWITCH'S DEFAULT: JAGGED EDGES", "SMOOTHEST, TEXTURES A LITTLE SOFTER", "CLEAN EDGES, TEXTURES STAY SHARP",
-      "STEADY EDGES: NO SHIMMER ON FENCES, LEAVES AND SHADOWS"}, 4, gpu_aa,
-     gpu_aa_cycle, "YW4_AA", {"0", "1", "2", "3"}},
+      "STEADY EDGES: NO SHIMMER ON FENCES, LEAVES AND SHADOWS", "AMD FSR: STEADY EDGES, BEST WITH UPSCALING"}, 5, gpu_aa,
+     gpu_aa_cycle, "YW4_AA", {"0", "1", "2", "3", "4"}},
+    {"PICTURE", "UPSCALING",
+     "DRAWS THE WORLD SMALLER THAN THE RESOLUTION, THEN AMD FSR REBUILDS IT AT FULL SIZE: MORE FRAMES. MENUS AND "
+     "TEXT STAY FULL SIZE. NEEDS ANTI-ALIASING SET TO FSR.",
+     {"OFF", "QUALITY", "BALANCED", "PERFORMANCE"},
+     {"THE WORLD AT FULL RESOLUTION", "1.5X SMALLER: CLOSE TO FULL, FASTER", "1.7X SMALLER: FASTER STILL",
+      "2X SMALLER: FASTEST, SOFTER"}, 4,
+     gpu_upscale_setting, gpu_upscale_cycle, "YW4_UPSCALE", {"0", "1", "2", "3"}, upscale_disabled},
     {"PICTURE", "TEXTURE FILTERING",
      "KEEPS GROUND, ROADS AND WALLS SHARP WHEN SEEN FROM AFAR OR AT AN ANGLE.",
      {"OFF", "X2", "X4", "X8", "X16"},
@@ -218,6 +227,7 @@ void settings_action(int action) {
         return;
     }
     const Setting *s = &settings[selected];
+    if ((action == SETTINGS_LEFT || action == SETTINGS_RIGHT) && s->disabled && s->disabled()) return;  /* greyed out */
     switch (action) {
     case SETTINGS_UP: selected = (selected + NSETTINGS - 1) % NSETTINGS; break;
     case SETTINGS_DOWN: selected = (selected + 1) % NSETTINGS; break;
@@ -237,6 +247,7 @@ int settings_rows(SettingRow *rows, int max, int *sel) {
         memcpy(rows[i].notes, settings[i].notes, sizeof rows[i].notes);
         rows[i].noptions = settings[i].noptions;
         rows[i].current = settings[i].current();
+        rows[i].disabled = settings[i].disabled ? settings[i].disabled() : NULL;
     }
     *sel = selected;
     return n;

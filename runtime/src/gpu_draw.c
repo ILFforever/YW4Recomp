@@ -749,7 +749,9 @@ static int begin_rendering(VkCommandBuffer cb, GpuState *s, VkFormat color[8], V
         if (th < ah) ah = th;
     }
     *depth = VK_FORMAT_UNDEFINED;
-    if (s->rt.depth) {
+    /* upscaling: the UI draws into the output-sized scene image; its depth is output-sized too (gpu_aa.c
+     * stretches the 3D's into it). Should it not be, a smaller depth would shrink the render area: left out */
+    if (s->rt.depth && !(n && gpu_upscaled(s->rt.color[0]) && !gpu_upscaled(s->rt.depth))) {
         uint32_t tw, th;
         da.sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO;
         da.imageView = gpu_render_view(cb, s->rt.depth, &s->rt.depth_view, s->rt.has_depth_view, &tw, &th);
@@ -895,7 +897,7 @@ static uint8_t *ring_alloc(VkDeviceSize size, VkBuffer *buf, VkDeviceSize *offse
  * coordinates: x, y of the full size, x, y of the third) scaled by 900 / height, and the x ones also by the
  * picture's width factor (widescreen.c), so the taps stay as many pixels apart as the game's. */
 static int cb8_scaled_copy(uint64_t addr, VkDeviceSize range, const Shader *sh, VkBuffer *buf, VkDeviceSize *offset) {
-    int res = gpu_shadow_res(), h = gpu_res_height();
+    int res = gpu_shadow_res(), h = gpu_render_height();  /* the lit pass reads the 3D's images */
     uint32_t wn, wd;
     gpu_wide_factor(&wn, &wd);
     int pcf = sh->pcf_float >= 0 && res != 1024 && (VkDeviceSize)(sh->pcf_float + 2) * 4 <= range;
@@ -1804,7 +1806,7 @@ static void draw(VkCommandBuffer cb, GpuState *s, const CmdRec *r) {
     if (g->sh[ST_FRAG] && g->sh[ST_FRAG]->key == COMPOSITE_SHADER) {
         gpu_bloom_after_composite(cb, s);  /* YW4_BLOOM=check: the game's results, before anti-aliasing */
         s->after_composite = 1;
-        if (gpu_aa()) gpu_aa_apply(cb, s);
+        if (gpu_aa() || gpu_upscale()) gpu_aa_apply(cb, s);
     }
 }
 

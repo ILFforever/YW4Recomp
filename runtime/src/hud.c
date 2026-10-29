@@ -138,7 +138,8 @@ void hud_render(uint8_t *rgba, int w, int h, const HudContent *c, int *used_w, i
 static const uint8_t CREAM[3] = {252, 246, 232}, OUTLINE[3] = {64, 40, 82}, PURPLE[3] = {104, 54, 150},
                      PURPLE2[3] = {136, 78, 186}, TEAL[3] = {22, 146, 158}, ROWSEL[3] = {255, 229, 120},
                      INK[3] = {58, 44, 72}, MUTED[3] = {165, 154, 172}, PINK[3] = {226, 66, 136},
-                     ORANGE[3] = {240, 140, 24}, DESC[3] = {226, 244, 240}, WHITE2[3] = {255, 255, 255};
+                     ORANGE[3] = {240, 140, 24}, DESC[3] = {226, 244, 240}, WHITE2[3] = {255, 255, 255},
+                     LOCKED[3] = {196, 190, 202};  /* a greyed-out row's chosen option */
 
 static void fill(const Canvas *cv, int x, int y, int w, int h, const uint8_t col[3]) {
     for (int j = y; j < y + h; j++)
@@ -242,20 +243,21 @@ void panel_render(uint8_t *rgba, int w, int h, const SettingRow *rows, int n, in
         }
         int sel = i == selected;
         if (sel) box(&cv, PAD - 4, y - 1, pw - 2 * PAD + 8, ROW_H, 4, ROWSEL, NULL);
-        text(&cv, PAD + 2 * CELL_W, y + 2, rows[i].name, INK);
-        if (sel) text(&cv, PAD + 2, y + 2, ">", PINK), text(&cv, optx - 2 * CELL_W, y + 2, "<", PINK);
+        int off = rows[i].disabled != NULL;  /* greyed out: can't be changed now */
+        text(&cv, PAD + 2 * CELL_W, y + 2, rows[i].name, off ? MUTED : INK);
+        if (sel && !off) text(&cv, PAD + 2, y + 2, ">", PINK), text(&cv, optx - 2 * CELL_W, y + 2, "<", PINK);
         int x = optx;
         for (int k = 0; k < rows[i].noptions; k++) {
             int len = (int)strlen(rows[i].options[k]);
             if (k == rows[i].current) {
-                box(&cv, x - 3, y, len * CELL_W + 5, ROW_H - 2, 3, sel ? ORANGE : PINK, NULL);
+                box(&cv, x - 3, y, len * CELL_W + 5, ROW_H - 2, 3, off ? LOCKED : sel ? ORANGE : PINK, NULL);
                 text(&cv, x, y + 2, rows[i].options[k], WHITE2);
             } else {
-                text(&cv, x, y + 2, rows[i].options[k], sel ? INK : MUTED);
+                text(&cv, x, y + 2, rows[i].options[k], sel && !off ? INK : MUTED);
             }
             x += (len + GAP) * CELL_W;
         }
-        if (sel) text(&cv, x - (GAP - 1) * CELL_W, y + 2, ">", PINK);
+        if (sel && !off) text(&cv, x - (GAP - 1) * CELL_W, y + 2, ">", PINK);
         y += ROW_H;
     }
     /* the chosen setting explained: its name, what it does, what the current option means */
@@ -270,8 +272,9 @@ void panel_render(uint8_t *rgba, int w, int h, const SettingRow *rows, int n, in
         int k = wrap(r->help, text_cols, l, DESC_LINES);
         for (int j = 0; j < k; j++, ty += 10) text(&cv, PAD + 2, ty, l[j], INK);
         char note[128];
-        snprintf(note, sizeof note, "%s: %s", r->options[r->current], r->notes[r->current] ? r->notes[r->current] : "");
-        text(&cv, PAD + 2, y + desc_h - 14, note, PINK);
+        if (r->disabled) snprintf(note, sizeof note, "OFF FOR NOW: %s", r->disabled);
+        else snprintf(note, sizeof note, "%s: %s", r->options[r->current], r->notes[r->current] ? r->notes[r->current] : "");
+        text(&cv, PAD + 2, y + desc_h - 14, note, r->disabled ? MUTED : PINK);
     }
     y += desc_h + 6;
     hint(&cv, pw, y, "UP/DOWN: CHOOSE   LEFT/RIGHT: CHANGE   F2, L/R: CONTROLS");

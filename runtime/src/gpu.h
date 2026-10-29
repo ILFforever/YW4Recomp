@@ -24,6 +24,12 @@ void gpu_shadow_res_cycle(void);
  * YW4_RES at start), and the panel's cycle 900 -> 1080 -> 1440 -> 2160 -> 900. */
 int gpu_res_height(void);
 void gpu_res_cycle(void);
+/* Upscaling (decision 0039): the 3D drawn smaller than the output, made full size at the anti-aliasing point.
+ * 0 off, 1 quality (1.5x), 2 balanced (1.7x), 3 performance (2x); YW4_UPSCALE, the settings panel. */
+int gpu_upscale(void);          /* in effect: the choice when the anti-aliasing is FSR, else 0 */
+int gpu_upscale_setting(void);  /* the choice (the panel shows it greyed out without FSR) */
+void gpu_upscale_cycle(void);
+int gpu_render_height(void);  /* the 3D images' height in the game's 900-line terms (= gpu_res_height() when off) */
 /* Texture filtering: 0 the game's, else blending between mip levels and anisotropic filtering with up
  * to this many taps (16 by default; YW4_ANISO at start), and the panel's cycle 0 -> 2 -> 4 -> 8 -> 16 -> 0. */
 int gpu_aniso(void);

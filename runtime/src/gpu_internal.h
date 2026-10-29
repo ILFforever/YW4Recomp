@@ -168,6 +168,10 @@ int gpu_taa_jitter(uint32_t w, uint32_t h, float *jx, float *jy);  /* not for th
 void gpu_taa_note_targets(const GpuState *s);
 /* One of the textures presented lately (the window's images; gpu.c). */
 int gpu_is_presented(uint64_t addr);
+/* Upscaling: from the anti-aliasing point until the frame is shown, the scene image's address names a second,
+ * output-sized image (the UI and the copy into the window image draw there); gpu_present ends it. */
+void gpu_upscale_begin(uint64_t color, uint64_t depth);  /* the scene's colour and depth images; 0, 0 ends it */
+int gpu_upscaled(const NvnTexture *t);
 void gpu_taa_targets_end(VkCommandBuffer cb);
 /* gpu_shadow.c: the first draw into s's targets since they were set; depth-only ones are
  * remembered with the state the game draws with, so a shadow pass can draw into its layer after

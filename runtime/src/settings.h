@@ -16,6 +16,7 @@ typedef struct {
     const char *notes[SETTINGS_MAX_OPTIONS];  /* a few words per option */
     int noptions;
     int current;  /* index into options */
+    const char *disabled;  /* not NULL: greyed out, cannot be changed, and why (shown in the description) */
 } SettingRow;
 
 enum { SETTINGS_UP, SETTINGS_DOWN, SETTINGS_LEFT, SETTINGS_RIGHT, SETTINGS_CLOSE, SETTINGS_ACCEPT, SETTINGS_CLEAR,

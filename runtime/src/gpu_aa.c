@@ -9,12 +9,15 @@
  * TAA: the 3D draws shifted by a fraction of a pixel per frame (gpu_taa_jitter, applied to the viewport in
  * gpu_dynamic_state), each frame blended into a history moved by the game's own motion vectors (the
  * G-buffer's first target, noted by gpu_taa_note_targets); runtime/shaders/taa_resolve.frag.
- * YW4_AA=0 off / 1 FXAA / 2 SMAA / 3 TAA at start; the settings panel (F1) cycles it. */
+ * FSR (mode 4, gpu_fsr.c): AMD's upscaler in place of TAA's blend, from the same jitter, motion and the scene's
+ * depth; at the scene's own size for now (native anti-aliasing), falling back to TAA when FSR can't run.
+ * YW4_AA=0 off / 1 FXAA / 2 SMAA / 3 TAA / 4 FSR at start; the settings panel (F1) cycles it. */
 #include <inttypes.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
+#include "gpu_fsr.h"
 #include "gpu_internal.h"
 #include "../../third_party/smaa/AreaTex.h"
 #include "../../third_party/smaa/SearchTex.h"
@@ -26,16 +29,17 @@ int gpu_aa(void) {
     if (m < 0) {
         const char *e = getenv("YW4_AA");
         m = e ? atoi(e) : 0;
-        if (m < 0 || m > 3) m = 0;
+        if (m < 0 || m > 4) m = 0;
         __atomic_store_n(&aa_mode, m, __ATOMIC_RELEASE);
     }
     return m;
 }
 
 void gpu_aa_cycle(void) {
-    int m = (gpu_aa() + 1) % 4;
+    int m = (gpu_aa() + 1) % 5;
     __atomic_store_n(&aa_mode, m, __ATOMIC_RELEASE);
-    fprintf(stderr, "yw4: gpu: anti-aliasing %s\n", m == 3 ? "TAA" : m == 2 ? "SMAA" : m == 1 ? "FXAA" : "off");
+    fprintf(stderr, "yw4: gpu: anti-aliasing %s\n",
+            m == 4 ? "FSR" : m == 3 ? "TAA" : m == 2 ? "SMAA" : m == 1 ? "FXAA" : "off");
 }
 
 VkShaderModule gpu_native_shader(const char *name) {
@@ -103,7 +107,7 @@ static void to_general(VkCommandBuffer cb, VkImage image) {
                          &b);
 }
 
-static AaImage encoded, edges, weights, area, search, history[2];
+static AaImage encoded, edges, weights, area, search, history[2], fsr_out;
 static int history_valid;  /* history[taa_cur] holds last frame's result */
 
 /* The SMAA lookup textures, uploaded once (in cb, outside rendering). */
@@ -158,9 +162,17 @@ static void working_images(VkCommandBuffer cb, uint32_t w, uint32_t h) {
     to_general(cb, history[0].image), to_general(cb, history[1].image);
 }
 
+/* FSR's result at the output's size (made again when it changes). */
+static void output_image(VkCommandBuffer cb, uint32_t w, uint32_t h) {
+    if (fsr_out.image && fsr_out.w == w && fsr_out.h == h) return;
+    if (fsr_out.image) gpu_wait(gpu_submitted(), UINT64_MAX), image_free(&fsr_out);
+    image_make(&fsr_out, VK_FORMAT_R16G16B16A16_SFLOAT, w, h, VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_STORAGE_BIT);
+    to_general(cb, fsr_out.image);
+}
+
 /* ---- pipelines: one layout (5 sampled images, the size as a push constant), one pipeline per pass */
 
-enum { P_ENCODE, P_FXAA, P_EDGE, P_WEIGHT, P_BLEND, P_SHOW_EDGES, P_SHOW_WEIGHTS, P_TEST, P_TAA, P_TAA_OUT, PASSES };
+enum { P_ENCODE, P_FXAA, P_EDGE, P_WEIGHT, P_BLEND, P_SHOW_EDGES, P_SHOW_WEIGHTS, P_TEST, P_TAA, P_TAA_OUT, P_UPSCALE, P_DEPTH, PASSES };
 
 static VkDescriptorSetLayout set_layout;
 static VkPipelineLayout pipe_layout;
@@ -198,11 +210,11 @@ static VkPipeline pipeline(int pass, VkFormat out) {
     static const char *const vs_name[PASSES] = {"aa_fullscreen.vert", "aa_fullscreen.vert", "smaa_edge.vert",
                                                 "smaa_weight.vert",   "smaa_blend.vert",    "aa_fullscreen.vert",
                                                 "aa_fullscreen.vert", "aa_fullscreen.vert", "aa_fullscreen.vert",
-                                                "aa_fullscreen.vert"};
+                                                "aa_fullscreen.vert", "aa_fullscreen.vert", "aa_fullscreen.vert"};
     static const char *const fs_name[PASSES] = {"aa_encode.frag",   "fxaa.frag",           "smaa_edge.frag",
                                                 "smaa_weight.frag", "smaa_blend.frag",     "aa_show_edges.frag",
                                                 "aa_show_weights.frag", "aa_test.frag", "taa_resolve.frag",
-                                                "taa_output.frag"};
+                                                "taa_output.frag", "aa_upscale.frag", "aa_depth_upscale.frag"};
     static VkShaderModule vs[PASSES], fs[PASSES];
     if (!vs[pass]) vs[pass] = gpu_native_shader(vs_name[pass]), fs[pass] = gpu_native_shader(fs_name[pass]);
     VkPipelineShaderStageCreateInfo st[2] = {
@@ -220,15 +232,22 @@ static VkPipeline pipeline(int pass, VkFormat out) {
                                                  .lineWidth = 1.0f};
     VkPipelineMultisampleStateCreateInfo ms = {.sType = VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO,
                                                .rasterizationSamples = VK_SAMPLE_COUNT_1_BIT};
-    VkPipelineDepthStencilStateCreateInfo ds = {.sType = VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO};
+    int depth = pass == P_DEPTH;  /* `out` is then a depth format: no colour, depth always written */
+    VkPipelineDepthStencilStateCreateInfo ds = {.sType = VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO,
+                                                .depthTestEnable = depth, .depthWriteEnable = depth,
+                                                .depthCompareOp = VK_COMPARE_OP_ALWAYS};
     VkPipelineColorBlendAttachmentState cba = {.colorWriteMask = 0xF};
     VkPipelineColorBlendStateCreateInfo cbs = {.sType = VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO,
-                                               .attachmentCount = 1, .pAttachments = &cba};
+                                               .attachmentCount = depth ? 0 : 1, .pAttachments = &cba};
     static const VkDynamicState dyn[] = {VK_DYNAMIC_STATE_VIEWPORT, VK_DYNAMIC_STATE_SCISSOR};
     VkPipelineDynamicStateCreateInfo dy = {.sType = VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO,
                                            .dynamicStateCount = 2, .pDynamicStates = dyn};
     VkPipelineRenderingCreateInfo ri = {.sType = VK_STRUCTURE_TYPE_PIPELINE_RENDERING_CREATE_INFO,
-                                        .colorAttachmentCount = 1, .pColorAttachmentFormats = &out};
+                                        .colorAttachmentCount = depth ? 0 : 1, .pColorAttachmentFormats = &out};
+    if (depth) {
+        ri.depthAttachmentFormat = out;
+        if (out == VK_FORMAT_D24_UNORM_S8_UINT || out == VK_FORMAT_D32_SFLOAT_S8_UINT) ri.stencilAttachmentFormat = out;
+    }
     VkGraphicsPipelineCreateInfo pci = {
         .sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO, .pNext = &ri, .stageCount = 2, .pStages = st,
         .pVertexInputState = &vi, .pInputAssemblyState = &ia, .pViewportState = &vp, .pRasterizationState = &rs,
@@ -283,9 +302,44 @@ static void pass(VkCommandBuffer cb, int p, VkImageView view, VkFormat out, uint
     pass_with(cb, p, view, out, w, h, clear, scene_in, NULL, NULL);
 }
 
+/* Upscaling: the 3D's depth (sampled through `src`) stretched into the output-sized depth image `view`. The
+ * stencil starts at 0 (the UI makes its own). */
+static void depth_pass(VkCommandBuffer cb, VkImageView view, VkFormat fmt, uint32_t w, uint32_t h, VkImageView src) {
+    VkDescriptorSet set = gpu_alloc_set(set_layout);
+    VkDescriptorImageInfo ii[5];
+    VkWriteDescriptorSet wr[5];
+    VkImageView in[5] = {src, src, src, src, src};  /* only binding 0 is read; the others must be valid views */
+    for (int i = 0; i < 5; i++) {
+        ii[i] = (VkDescriptorImageInfo){point, in[i], VK_IMAGE_LAYOUT_GENERAL};
+        wr[i] = (VkWriteDescriptorSet){.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET, .dstSet = set,
+                                       .dstBinding = (uint32_t)i, .descriptorCount = 1,
+                                       .descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, .pImageInfo = &ii[i]};
+    }
+    vkUpdateDescriptorSets(vk.device, 5, wr, 0, NULL);
+    int stencil = fmt == VK_FORMAT_D24_UNORM_S8_UINT || fmt == VK_FORMAT_D32_SFLOAT_S8_UINT;
+    VkRenderingAttachmentInfo da = {.sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO, .imageView = view,
+                                    .imageLayout = VK_IMAGE_LAYOUT_GENERAL, .loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR,
+                                    .storeOp = VK_ATTACHMENT_STORE_OP_STORE};
+    VkRenderingInfo ri = {.sType = VK_STRUCTURE_TYPE_RENDERING_INFO, .renderArea = {{0, 0}, {w, h}}, .layerCount = 1,
+                          .pDepthAttachment = &da, .pStencilAttachment = stencil ? &da : NULL};
+    vkCmdBeginRendering(cb, &ri);
+    vkCmdBindPipeline(cb, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline(P_DEPTH, fmt));
+    vkCmdBindDescriptorSets(cb, VK_PIPELINE_BIND_POINT_GRAPHICS, pipe_layout, 0, 1, &set, 0, NULL);
+    VkViewport vpt = {0, 0, (float)w, (float)h, 0, 1};
+    VkRect2D sc = {{0, 0}, {w, h}};
+    vkCmdSetViewport(cb, 0, 1, &vpt);
+    vkCmdSetScissor(cb, 0, 1, &sc);
+    float push[8] = {1.0f / (float)w, 1.0f / (float)h, (float)w, (float)h, 0, 0, 0, 0};
+    vkCmdPushConstants(cb, pipe_layout, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, 32, push);
+    vkCmdDraw(cb, 3, 1, 0, 0);
+    vkCmdEndRendering(cb);
+    full_barrier(cb);
+}
+
 /* ---- TAA: the jitter and the game's motion target */
 
 static uint32_t scene_w, scene_h;  /* the scene's size at the last anti-aliasing (0: none yet) */
+static uint32_t scene_ow;          /* ... and the output's width (upscaling: larger) */
 /* The game's motion target is used for other things later in the frame, so it is copied into our own image
  * as soon as the G-buffer pass ends (gpu_taa_targets_end). */
 static NvnTexture *gbuffer_motion;  /* the open G-buffer pass's motion target (NULL: none open) */
@@ -303,7 +357,7 @@ static float halton(int i, int base) {
  * size (the caller leaves out what follows the composite); else none (0). 8 positions (Halton 2, 3),
  * one per frame. */
 int gpu_taa_jitter(uint32_t w, uint32_t h, float *jx, float *jy) {
-    if (gpu_aa() != 3 || !scene_w || w != scene_w || h != scene_h) return 0;
+    if (gpu_aa() < 3 || !scene_w || w != scene_w || h != scene_h) return 0;
     static int nshift;  /* YW4_TAA_LOG: counted per frame, logged every 300 */
     static uint64_t counted = ~0ull;
     if (counted != gpu_frames()) {
@@ -312,6 +366,10 @@ int gpu_taa_jitter(uint32_t w, uint32_t h, float *jx, float *jy) {
         counted = gpu_frames(), nshift = 0;
     }
     nshift++;
+    if (gpu_aa() == 4 && gpu_fsr_available() == 1) {  /* FSR's own sequence */
+        gpu_fsr_jitter(w, scene_ow ? scene_ow : w, gpu_frames(), jx, jy);
+        return 1;
+    }
     int i = (int)(gpu_frames() % 8) + 1;
     *jx = halton(i, 2) - 0.5f, *jy = halton(i, 3) - 0.5f;
     return 1;
@@ -319,7 +377,7 @@ int gpu_taa_jitter(uint32_t w, uint32_t h, float *jx, float *jy) {
 
 /* A draw's targets: the G-buffer's (3 colour targets, the first RG16F: the game's motion) is noted. */
 void gpu_taa_note_targets(const GpuState *s) {
-    if (gpu_aa() != 3 || s->ncolor != 3 || !s->rt.color[0]) return;
+    if (gpu_aa() < 3 || s->ncolor != 3 || !s->rt.color[0]) return;
     const GpuImage *g = image_find(s->rt.color[0]);
     if (g && g->format == VK_FORMAT_R16G16_SFLOAT) gbuffer_motion = s->rt.color[0];
 }
@@ -377,10 +435,62 @@ static void taa(VkCommandBuffer cb, VkImageView target, VkFormat fmt, uint32_t w
     taa_cur = next, history_valid = 1;
 }
 
+/* FSR in place of TAA's blend: the encoded scene, the scene's depth and the game's motion in (w x h), FSR's
+ * result out (ow x oh: larger when upscaling) through the curve's inverse (no extra sharpening: FSR has its
+ * own). 0: FSR could not run. */
+static int fsr(VkCommandBuffer cb, GpuImage *d, VkImageView target, VkFormat fmt, uint32_t w, uint32_t h, uint32_t ow,
+               uint32_t oh) {
+    uint64_t now = gpu_frames();
+    if (!motion.image || motion_frame + 1 < now || motion_frame > now + 1) return 0;
+    if (!d || d->width != w || d->height != h || motion.w != w || motion.h != h) return 0;
+    output_image(cb, ow, oh);
+    static uint64_t last = ~0ull;
+    static uint32_t last_ow;
+    static int64_t last_ns;
+    int64_t t = host_now_ns();
+    GpuFsrInputs in = {.color = encoded.image, .depth = d->image, .motion = motion.image, .output = fsr_out.image,
+                       .color_format = VK_FORMAT_R16G16B16A16_SFLOAT, .depth_format = d->format,
+                       .output_format = VK_FORMAT_R16G16B16A16_SFLOAT, .render_w = w, .render_h = h, .output_w = ow,
+                       .output_h = oh, .reset = last + 1 != now || last_ow != ow,
+                       .frame_ms = last_ns ? (float)(t - last_ns) / 1e6f : 16.7f};
+    /* the jitter as it was applied (gpu_taa_jitter); the motion from this frame's position to last frame's in
+     * render pixels: TAA reads last frame at uv - motion x (1, sy) */
+    gpu_fsr_jitter(w, ow, now, &in.jitter[0], &in.jitter[1]);
+    float sy = nvn_window_origin == 1 ? -1.0f : 1.0f, mx = 1.0f, my = 1.0f, jsx = 1.0f, jsy = 1.0f;
+    const char *e = getenv("YW4_FSR_MV_SIGN");  /* testing: "x,y" flips the motion */
+    if (e) sscanf(e, "%f,%f", &mx, &my);
+    e = getenv("YW4_FSR_JITTER_SIGN");  /* testing: "x,y" flips the jitter told to FSR */
+    if (e) sscanf(e, "%f,%f", &jsx, &jsy);
+    in.motion_scale[0] = -(float)w * mx, in.motion_scale[1] = -(float)h * sy * my;
+    in.jitter[0] *= jsx, in.jitter[1] *= jsy;
+    static float sharp = -1.0f, cnear = -1.0f, cfar = -1.0f;
+    if (sharp < 0.0f) {
+        sharp = getenv("YW4_FSR_SHARPNESS") ? (float)atof(getenv("YW4_FSR_SHARPNESS")) : 0.5f;
+        cnear = getenv("YW4_FSR_NEAR") ? (float)atof(getenv("YW4_FSR_NEAR")) : 0.1f;
+        cfar = getenv("YW4_FSR_FAR") ? (float)atof(getenv("YW4_FSR_FAR")) : 1000.0f;
+    }
+    in.sharpness = sharp, in.cam_near = cnear, in.cam_far = cfar, in.fov_y = 0.785398f;  /* 45 degrees, town's */
+    {   /* YW4_FSR_LOG: every 300 frames, how often FSR was asked and how often it started over */
+        static int calls, resets, on = -1;
+        if (on < 0) on = getenv("YW4_FSR_LOG") != NULL;
+        calls++, resets += in.reset;
+        if (on && calls % 300 == 0)
+            fprintf(stderr, "yw4: fsr: %d calls, %d resets; frame %llu jitter %.3f %.3f\n", calls, resets,
+                    (unsigned long long)now, in.jitter[0], in.jitter[1]);
+    }
+    full_barrier(cb);
+    if (!gpu_fsr_dispatch(cb, &in)) return 0;
+    full_barrier(cb);
+    pass(cb, P_TAA_OUT, target, fmt, ow, oh, 0, fsr_out.view);  /* sharpen 0 (pass_params cleared) */
+    last = now, last_ow = ow, last_ns = t;
+    history_valid = 0;  /* TAA's history is stale when it takes over again */
+    return 1;
+}
+
 void gpu_aa_apply(VkCommandBuffer cb, GpuState *s) {
-    int mode = gpu_aa();
+    int mode = gpu_aa(), up = gpu_upscale() != 0;
     NvnTexture *t = s->ncolor ? s->rt.color[0] : NULL;
-    if (!mode || !t) return;
+    if ((!mode && !up) || !t || gpu_upscaled(t)) return;
     gpu_end_rendering(cb, s);
     GpuImage *g = image_of(cb, t);
     uint32_t w, h;
@@ -389,24 +499,63 @@ void gpu_aa_apply(VkCommandBuffer cb, GpuState *s) {
     if (!target || !scene || !w || !h) return;
     const NvnTextureView *v = &s->rt.views[0];  /* the format the view renders in (as begin_rendering) */
     VkFormat fmt = s->rt.has_view[0] && v->setmask & 4 ? gpu_format(v->format) : g->format;
+    /* upscaling: from here to the present the scene image's address names the output-sized image (gpu.c);
+     * `target` and `scene` stay the 3D's */
+    /* the 3D's depth, for FSR and for the stretched copy (fetched before the redirect names another image) */
+    NvnTexture *dt = s->rt.depth;
+    GpuImage *depth = dt ? image_of(cb, dt) : NULL;
+    VkImageView depth_in = depth && depth->width == w && depth->height == h
+                               ? gpu_sample_view(cb, dt, &s->rt.depth_view, s->rt.has_depth_view, VK_IMAGE_VIEW_TYPE_2D)
+                               : NULL;
+    if (!depth_in) depth = NULL;
+    VkImageView out = target;
+    uint32_t ow = w, oh = h;
+    if (up) {
+        gpu_upscale_begin(t->addr, depth ? dt->addr : 0);
+        image_of(cb, t);
+        out = gpu_render_view(cb, t, &s->rt.views[0], s->rt.has_view[0], &ow, &oh);
+        if (!out || !ow || !oh) {
+            gpu_upscale_begin(0, 0);
+            out = target, ow = w, oh = h;
+        } else if (depth) {  /* the output-sized depth: the 3D's stretched into it */
+            GpuImage *od = image_of(cb, dt);
+            uint32_t dw, dh;
+            VkImageView dv = gpu_render_view(cb, dt, &s->rt.depth_view, s->rt.has_depth_view, &dw, &dh);
+            layouts();
+            full_barrier(cb);
+            if (od && dv && dw == ow && dh == oh) depth_pass(cb, dv, od->format, ow, oh, depth_in);
+        }
+    }
     layouts();
     lookup_textures(cb);
     working_images(cb, w, h);
-    scene_w = w, scene_h = h;
+    scene_w = w, scene_h = h, scene_ow = ow;
     full_barrier(cb);
     /* YW4_AA_DEBUG=1 / 2: SMAA's edges / blend weights in place of the picture; 3: a test pattern in place
      * of the scene, anti-aliased as usual */
     static int debug = -1;
     if (debug < 0) debug = getenv("YW4_AA_DEBUG") ? atoi(getenv("YW4_AA_DEBUG")) : 0;
+    static const char *const label[5] = {"upscaling (plain)", "anti-aliasing: FXAA", "anti-aliasing: SMAA",
+                                         "anti-aliasing: TAA", "anti-aliasing: FSR"};
+    gpu_passes_other(cb, label[mode], 0);  /* its own line in the per-pass timer (F5) */
     pass(cb, debug == 3 ? P_TEST : P_ENCODE, encoded.view, VK_FORMAT_R16G16B16A16_SFLOAT, w, h, 0, scene);
-    if (mode == 3) {
-        taa(cb, target, fmt, w, h, debug);
-    } else if (mode == 1) {
-        pass(cb, P_FXAA, target, fmt, w, h, 0, NULL);
+    if (mode == 4 && !debug && depth && fsr(cb, depth, out, fmt, w, h, ow, oh)) {
+        /* done: FSR wrote the output's size */
     } else {
-        pass(cb, P_EDGE, edges.view, VK_FORMAT_R8G8_UNORM, w, h, 1, NULL);
-        pass(cb, P_WEIGHT, weights.view, VK_FORMAT_R8G8B8A8_UNORM, w, h, 1, NULL);
-        pass(cb, debug == 1 ? P_SHOW_EDGES : debug == 2 ? P_SHOW_WEIGHTS : P_BLEND, target, fmt, w, h, 0, NULL);
+        if (mode >= 3) {
+            taa(cb, target, fmt, w, h, debug);
+        } else if (mode == 1) {
+            pass(cb, P_FXAA, target, fmt, w, h, 0, NULL);
+        } else if (mode == 2) {
+            pass(cb, P_EDGE, edges.view, VK_FORMAT_R8G8_UNORM, w, h, 1, NULL);
+            pass(cb, P_WEIGHT, weights.view, VK_FORMAT_R8G8B8A8_UNORM, w, h, 1, NULL);
+            pass(cb, debug == 1 ? P_SHOW_EDGES : debug == 2 ? P_SHOW_WEIGHTS : P_BLEND, target, fmt, w, h, 0, NULL);
+        }
+        if (out != target) {  /* upscaling without FSR: the anti-aliased 3D stretched to the output's size */
+            pass(cb, P_ENCODE, encoded.view, VK_FORMAT_R16G16B16A16_SFLOAT, w, h, 0, scene);
+            pass(cb, P_UPSCALE, out, fmt, ow, oh, 0, encoded.view);  /* bilinear over the whole image */
+        }
     }
     gpu_dynamic_forget();  /* our pipelines set viewport and scissor: the game's next draw sets its own again */
+    gpu_passes_other(cb, "after anti-aliasing (the UI)", 0);
 }

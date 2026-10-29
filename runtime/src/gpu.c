@@ -762,6 +762,51 @@ void gpu_res_cycle(void) {
     fprintf(stderr, "yw4: gpu: 3D view %dx%d\n", r * 16 / 9, r);
 }
 
+/* Upscaling (decision 0039): the screen-sized targets of the 3D get the render height, output / ratio; the
+ * window images (presented) and, from the anti-aliasing point to the present, the scene image the UI is drawn
+ * into get the output height. The anti-aliasing point (gpu_aa.c) makes the full-size picture: FSR when that is
+ * the anti-aliasing, else the chosen anti-aliasing at the render size and a plain stretch. */
+static int upscale_mode = -1;
+static const float upscale_ratio[4] = {1.0f, 1.5f, 1.7f, 2.0f};
+static uint64_t upscaled_scene, upscaled_depth;  /* the scene's colour and depth images' addresses while they
+                                                  * name output-sized images (GPU thread) */
+
+int gpu_upscale_setting(void) {
+    int m = __atomic_load_n(&upscale_mode, __ATOMIC_ACQUIRE);
+    if (m < 0) {
+        const char *e = getenv("YW4_UPSCALE");
+        m = e ? atoi(e) : 0;
+        if (m < 0 || m > 3) m = 0;
+        __atomic_store_n(&upscale_mode, m, __ATOMIC_RELEASE);
+    }
+    return m;
+}
+
+/* Upscaling needs FSR to rebuild the detail; without it the choice is kept but not used (owner, 2026-10-29) */
+int gpu_upscale(void) { return gpu_aa() == 4 ? gpu_upscale_setting() : 0; }
+
+void gpu_upscale_cycle(void) {
+    int m = (gpu_upscale_setting() + 1) % 4;
+    __atomic_store_n(&upscale_mode, m, __ATOMIC_RELEASE);
+    static const char *const names[4] = {"off", "quality (1.5x)", "balanced (1.7x)", "performance (2x)"};
+    fprintf(stderr, "yw4: gpu: upscaling %s: the 3D at %d lines\n", names[m], gpu_render_height());
+}
+
+int gpu_render_height(void) {
+    int h = gpu_res_height(), m = gpu_upscale();
+    return m ? (int)((float)h / upscale_ratio[m] + 0.5f) : h;
+}
+
+void gpu_upscale_begin(uint64_t color, uint64_t depth) {
+    __atomic_store_n(&upscaled_depth, depth, __ATOMIC_RELEASE);
+    __atomic_store_n(&upscaled_scene, color, __ATOMIC_RELEASE);
+}
+
+int gpu_upscaled(const NvnTexture *t) {
+    uint64_t a = __atomic_load_n(&upscaled_scene, __ATOMIC_ACQUIRE), d = __atomic_load_n(&upscaled_depth, __ATOMIC_ACQUIRE);
+    return t && t->addr && (t->addr == a || t->addr == d);
+}
+
 /* The screen-sized targets: GPU-only 2D images of one of these sizes. The window image (1920x1080)
  * too: the game copies the 3D view into its top-left 1600x900 and presents that crop (gpu_present
  * scales the crop with it). The engine can also render the scene at 1920x1080 (it makes its targets
@@ -862,7 +907,8 @@ static int half_sized(const NvnTexture *t) {
 
 static void image_scale(const NvnTexture *t, uint32_t *num, uint32_t *den) {
     *num = *den = 0;
-    int res = gpu_shadow_res(), h = gpu_res_height();
+    int res = gpu_shadow_res(), h = gpu_render_height();
+    if (gpu_upscale() && (gpu_is_presented(t->addr) || gpu_upscaled(t))) h = gpu_res_height();  /* output-sized */
     if (res != 1024 && t->layout.width == 1024 && t->layout.height == 1024 && t->layout.layers == 3 &&
         t->layout.levels <= 1 && t->pool_flags & POOL_CPU_NO_ACCESS &&
         aspect_of(gpu_format(t->format)) & VK_IMAGE_ASPECT_DEPTH_BIT)
@@ -1198,17 +1244,33 @@ void gpu_aniso_cycle(void) {
                                                                  : "the game's");
 }
 
+/* Upscaling's texture bias (decision 0039): drawn smaller, the 3D would pick smaller mip levels, where fine
+ * patterns (nets, perforated fences) average out to a flat colour that FSR has nothing to rebuild from (seen
+ * 2026-10-29: the schoolyard's goal net gone, the high fence's panels empty at performance). So the 3D's
+ * mipmapped textures are read as at the output's size, and one level finer as AMD recommends: log2(render /
+ * output) - 1 (quality -1.58, balanced -1.77, performance -2). Not for the draws after the anti-aliasing point
+ * (the UI, drawn at the output's size). YW4_FSR_MIP_BIAS=<x> replaces the -1. */
+static float upscale_lod_bias(void) {
+    int m = gpu_upscale();
+    if (!m || __atomic_load_n(&upscaled_scene, __ATOMIC_ACQUIRE)) return 0.0f;
+    static float extra = 1.0f;  /* 1.0: not read yet */
+    if (extra > 0.5f) extra = getenv("YW4_FSR_MIP_BIAS") ? (float)atof(getenv("YW4_FSR_MIP_BIAS")) : -1.0f;
+    return log2f(upscale_ratio[m] > 0.0f ? 1.0f / upscale_ratio[m] : 1.0f) + extra;
+}
+
 VkSampler gpu_sampler(const NvnSamplerDesc *d) {
     enum { MAX_SAMPLERS = 1024 };
     static struct {
         NvnSamplerDesc desc;
-        int aniso;  /* gpu_aniso() it was made with */
+        int aniso;   /* gpu_aniso() it was made with */
+        float bias;  /* ... and upscale_lod_bias() */
         VkSampler s;
     } cache[MAX_SAMPLERS];
     static int n;
     int af = gpu_aniso();
+    float ub = upscale_lod_bias();
     for (int i = 0; i < n; i++)
-        if (cache[i].aniso == af && !memcmp(&cache[i].desc, d, sizeof *d)) return cache[i].s;
+        if (cache[i].aniso == af && cache[i].bias == ub && !memcmp(&cache[i].desc, d, sizeof *d)) return cache[i].s;
     if (n == MAX_SAMPLERS) gpu_stop("more than %d different samplers", MAX_SAMPLERS);
     VkSamplerCreateInfo si = {.sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO};
     si.magFilter = d->mag_filter == 1 ? VK_FILTER_LINEAR : VK_FILTER_NEAREST;
@@ -1237,6 +1299,7 @@ VkSampler gpu_sampler(const NvnSamplerDesc *d) {
         if (si.minFilter == VK_FILTER_LINEAR && (float)af > d->max_aniso)
             si.anisotropyEnable = VK_TRUE, si.maxAnisotropy = fminf((float)af, vk.props.limits.maxSamplerAnisotropy);
     }
+    if (ub != 0.0f && mf >= 2 && !d->compare_mode && si.maxLod > si.minLod + 0.25f) si.mipLodBias += ub;  /* above */
     if (d->compare_mode) si.compareEnable = VK_TRUE, si.compareOp = compare_op(d->compare_func);
     if (border) {  /* nearest standard border colour (custom colours: to do) */
         const float *c = d->border;
@@ -1250,7 +1313,7 @@ VkSampler gpu_sampler(const NvnSamplerDesc *d) {
         fprintf(stderr, "yw4: sampler %d: min %u mag %u wrap %u,%u lod %g..%g bias %g aniso %g compare %u\n", n,
                 d->min_filter, d->mag_filter, d->wrap[0], d->wrap[1], d->lod_min, d->lod_max, d->lod_bias, d->max_aniso,
                 d->compare_mode);
-    cache[n].desc = *d, cache[n].aniso = af;
+    cache[n].desc = *d, cache[n].aniso = af, cache[n].bias = ub;
     CHECK(vkCreateSampler(vk.device, &si, NULL, &cache[n].s));
     return cache[n++].s;
 }
@@ -1616,6 +1679,7 @@ int gpu_is_presented(uint64_t addr) {
 void gpu_present(NvnTexture *t, uint64_t frame, const int crop[4]) {
     host_lock(&gpu_lock);
     present_count++;
+    gpu_upscale_begin(0, 0);  /* the scene's images are the 3D's again (upscaling) */
     scan_writes();
     if (present_count % 300 == 0) evict_images();
     if (!gpu_is_presented(t->addr)) {

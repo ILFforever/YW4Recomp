@@ -279,13 +279,20 @@ static int vk_init(void) {
     vkGetPhysicalDeviceFeatures2(vk.gpu, &have);
     const VkPhysicalDeviceFeatures *h = &have.features;
     vk.sampler_anisotropy = h->samplerAnisotropy;
+    /* 16-bit floats and subgroup sizes: not ours, AMD FSR's fast shader variants (gpu_fsr.c, decision 0039) */
     VkPhysicalDeviceVulkan13Features e13 = {.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_3_FEATURES,
                                             .dynamicRendering = f13.dynamicRendering,
-                                            .synchronization2 = f13.synchronization2};
+                                            .synchronization2 = f13.synchronization2,
+                                            .subgroupSizeControl = f13.subgroupSizeControl,
+                                            .computeFullSubgroups = f13.computeFullSubgroups};
     VkPhysicalDeviceVulkan12Features e12 = {.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES, .pNext = &e13,
-                                            .timelineSemaphore = f12.timelineSemaphore};
+                                            .timelineSemaphore = f12.timelineSemaphore,
+                                            .shaderFloat16 = f12.shaderFloat16, .shaderInt8 = f12.shaderInt8,
+                                            .bufferDeviceAddress = f12.bufferDeviceAddress};
     VkPhysicalDeviceVulkan11Features e11 = {.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_1_FEATURES, .pNext = &e12,
-                                            .shaderDrawParameters = f11.shaderDrawParameters};
+                                            .shaderDrawParameters = f11.shaderDrawParameters,
+                                            .storageBuffer16BitAccess = f11.storageBuffer16BitAccess,
+                                            .uniformAndStorageBuffer16BitAccess = f11.uniformAndStorageBuffer16BitAccess};
     VkPhysicalDeviceFeatures2 enable = {
         .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2, .pNext = &e11,
         .features = {.geometryShader = h->geometryShader, .independentBlend = h->independentBlend,

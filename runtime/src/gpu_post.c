@@ -404,7 +404,7 @@ void gpu_bloom_pass(void *vk_cb, void *gpu_state, const void *data, uint32_t siz
         return;
     }
     s->after_composite = 1;
-    if (gpu_aa()) gpu_aa_apply(cb, s);
+    if (gpu_aa() || gpu_upscale()) gpu_aa_apply(cb, s);
 }
 
 void gpu_bloom_after_composite(void *vk_cb, void *gpu_state) {

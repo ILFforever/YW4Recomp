@@ -123,6 +123,9 @@ def main(argv: list[str] | None = None) -> int:
         sdl = deps.fetch_sdl(cfg)
         includes.append(f"-I{sdl / 'include'}")
         sdl_libs = [str(sdl / "lib" / "libSDL3.dll.a")]
+        # AMD FSR (decision 0039): headers to compile gpu_fsr.c against, DLLs copied next to yw4.exe below
+        fsr = deps.fetch_fsr(cfg) / "Kits" / "FidelityFX"
+        includes.append(f"-I{fsr / 'api' / 'include'}")
     else:
         pc = lambda *a: subprocess.run(["pkg-config", *a, "sdl3"], capture_output=True, text=True, check=True).stdout.split()
         includes += pc("--cflags")
@@ -158,6 +161,8 @@ def main(argv: list[str] | None = None) -> int:
     libs = [*sdl_libs, "-pthread"] + (["-lwinmm", "-lpsapi"] if sys.platform == "win32" else [])  # winmm: timeBeginPeriod
     if sys.platform == "win32":
         shutil.copy2(sdl / "bin" / "SDL3.dll", exe.parent / "SDL3.dll")  # found next to yw4.exe
+        for dll in deps.FSR_DLLS:  # amd_fidelityfx_loader_vk.dll loads the upscaler from its own folder
+            shutil.copy2(fsr / "signedbin" / dll, exe.parent / dll)
     link = subprocess.run([cc, "-o", str(exe), *map(str, objs), *libs], capture_output=True, text=True)
     if link.returncode != 0:
         print(f"link failed:\n{link.stderr[-3000:]}", file=sys.stderr)

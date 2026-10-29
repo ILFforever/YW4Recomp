@@ -2,9 +2,12 @@
 
     python -m tools.yw4.deps
 
-Only SDL3 so far (zlib licence): on Windows the official MinGW development release, pinned
-by version and SHA-256. Linux builds use the system's SDL3 (pkg-config sdl3) instead.
-Nothing here is committed: the archive is checked against the pinned hash and unpacked
+SDL3 (zlib licence): on Windows the official MinGW development release, pinned by version
+and SHA-256. Linux builds use the system's SDL3 (pkg-config sdl3) instead.
+AMD FSR (decision 0039): the FSR SDK's source archive, pinned the same way; only the MIT
+headers the runtime compiles against and the two signed Vulkan DLLs (loader and upscaler,
+MIT too, listed in its Kits/FidelityFX/docs/license.md) are taken out. Windows only.
+Nothing here is committed: each archive is checked against its pinned hash and unpacked
 into its own folder.
 """
 
@@ -14,6 +17,7 @@ import hashlib
 import shutil
 import sys
 import tarfile
+import zipfile
 import urllib.request
 from pathlib import Path
 
@@ -51,6 +55,48 @@ def fetch_sdl(cfg: config.Config) -> Path:
     return out
 
 
+FSR_VERSION = "2.4.0"
+FSR_URL = f"https://github.com/GPUOpen-LibrariesAndSDKs/FidelityFX-SDK/archive/refs/tags/v{FSR_VERSION}.zip"
+FSR_SHA256 = "27120e3bbe0d0b30213825ad40f19077563f04f04572e252109a392d5fb522cb"
+FSR_DLLS = ("amd_fidelityfx_loader_vk.dll", "amd_fidelityfx_upscaler_vk.dll")
+FSR_TAKE = ("Kits/FidelityFX/api/include/", "Kits/FidelityFX/upscalers/include/", "Kits/FidelityFX/docs/license.md",
+            *(f"Kits/FidelityFX/signedbin/{d}" for d in FSR_DLLS))
+
+
+def fsr_dir(cfg: config.Config) -> Path:
+    """The FSR files: Kits/FidelityFX/api/include, .../upscalers/include, .../signedbin/*.dll, the licence."""
+    return cfg.work_dir / "deps" / f"fsr-{FSR_VERSION}"
+
+
+def fetch_fsr(cfg: config.Config) -> Path:
+    out = fsr_dir(cfg)
+    dlls = [out / "Kits" / "FidelityFX" / "signedbin" / d for d in FSR_DLLS]
+    if all(d.is_file() for d in dlls) and (out / "Kits" / "FidelityFX" / "api" / "include" / "ffx_api.h").is_file():
+        return out
+    deps = cfg.work_dir / "deps" / f"fsr-{FSR_VERSION}-dl"  # the archive alone in its own folder
+    deps.mkdir(parents=True, exist_ok=True)
+    archive = deps / f"FidelityFX-SDK-v{FSR_VERSION}.zip"
+    if not archive.is_file():
+        print(f"downloading {FSR_URL} (~250 MB)")
+        with urllib.request.urlopen(FSR_URL) as r, open(archive, "wb") as f:
+            shutil.copyfileobj(r, f)
+    digest = hashlib.sha256(archive.read_bytes()).hexdigest()
+    if digest != FSR_SHA256:
+        archive.unlink()
+        raise RuntimeError(f"{archive.name}: SHA-256 {digest}, expected {FSR_SHA256}")
+    with zipfile.ZipFile(archive) as z:
+        for name in z.namelist():
+            rel = name.split("/", 1)[1] if "/" in name else ""
+            if name.endswith("/") or not any(rel.startswith(t) for t in FSR_TAKE) or ".." in rel:
+                continue
+            dst = out / rel
+            dst.parent.mkdir(parents=True, exist_ok=True)
+            dst.write_bytes(z.read(name))
+    if not all(d.is_file() for d in dlls):
+        raise RuntimeError(f"{archive.name} unpacked without the FSR Vulkan DLLs")
+    return out
+
+
 def main() -> int:
     try:
         cfg = config.load()
@@ -58,6 +104,7 @@ def main() -> int:
             print("not Windows: use the system's SDL3 (pkg-config sdl3)")
             return 0
         print(f"SDL3 {SDL_VERSION}: {fetch_sdl(cfg)}")
+        print(f"FSR SDK {FSR_VERSION}: {fetch_fsr(cfg)}")
     except (config.ConfigError, RuntimeError, OSError) as e:
         print(f"error: {e}", file=sys.stderr)
         return 1
