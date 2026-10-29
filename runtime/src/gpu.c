@@ -967,16 +967,17 @@ int gpu_needs_transfer(const NvnTexture *t) {
 
 static void image_destroy(GpuImage *g);  /* below, after GpuView */
 
-/* Frees images no texture has used for a while (resolution changes leave old render
- * targets behind) once the GPU is done with them. gpu_lock held. */
-static void evict_images(void) {
-    enum { UNUSED_FRAMES = 300 };
+/* Frees images no texture has used for `unused_frames` (resolution changes leave old render
+ * targets behind) once the GPU is done with them; `scaled_only`: only the screen-sized ones made at
+ * the 3D's scale or the aspect ratio's width. gpu_lock held. */
+static void evict_images(uint64_t unused_frames, int scaled_only) {
     uint64_t done = completed();
     int freed = 0;
     for (int b = 0; b < IMAGE_BUCKETS; b++)
         for (GpuImage **pp = &images[b]; *pp;) {
             GpuImage *g = *pp;
-            if (g->last_frame + UNUSED_FRAMES < present_count && g->last_seq <= done) {
+            if (g->last_frame + unused_frames < present_count && g->last_seq <= done &&
+                (!scaled_only || g->key.scale_den || g->key.wide_den)) {
                 *pp = g->next;
                 image_destroy(g);
                 freed++;
@@ -1681,7 +1682,21 @@ void gpu_present(NvnTexture *t, uint64_t frame, const int crop[4]) {
     present_count++;
     gpu_upscale_begin(0, 0);  /* the scene's images are the 3D's again (upscaling) */
     scan_writes();
-    if (present_count % 300 == 0) evict_images();
+    if (present_count % 300 == 0) evict_images(300, 0);
+    /* A size setting changed (resolution, upscaling, aspect ratio): the old size's screen-sized targets go
+     * a few frames later, not after 300 unused frames. Cycling through the aspect ratios kept every size's
+     * set (7680x2160 at 32:9) and overflowed video memory: ~400 ms frames until they went (2026-10-29). */
+    static int last_sizes = -1;
+    static uint64_t quick_evict_at;
+    int sizes = gpu_res_height() << 8 | gpu_upscale() << 4 | gpu_wide();
+    if (sizes != last_sizes) {
+        if (last_sizes >= 0) quick_evict_at = present_count + 8;
+        last_sizes = sizes;
+    }
+    if (quick_evict_at && present_count >= quick_evict_at) {
+        quick_evict_at = 0;
+        evict_images(4, 1);
+    }
     if (!gpu_is_presented(t->addr)) {
         static int next;
         __atomic_store_n(&presented[next++ % 4], t->addr, __ATOMIC_RELAXED);
