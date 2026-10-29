@@ -17,6 +17,7 @@
  * As with bloom (bloom.c), the engine's record of what is bound is left as it was; what it changes that is not
  * a binding is done here (skipped_effects).
  */
+#include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -152,9 +153,7 @@ int yw4_hook_dof(CPUState *ctx) {
  * these rounds when it is ours), main+0x7f1bf0, main+0x804570, main+0x80a0a0. YW4_BLUR_PASS=native: ours; check:
  * ours into copies, then the game's, compared (gpu_post.c); default: the game's.
  * NOT the battles' blur (2026-10-29, probes in a battle): f_7f1bf0 and this function never run there. The battle's
- * 12 rounds at 960x540 are a loop of their own in the render job main+0x897d90 (w22 < [sp+0x14], draws at
- * main+0x8988b0 and main+0x898e1c), queued by main+0x89ac00 from main+0x311f40. So BATTLE BLUR (fast) does
- * nothing in battles yet. */
+ * 12 rounds at 960x540 are a loop of their own in the render job main+0x897d90 (below). */
 
 static int blur_mode(void) {
     int m = __atomic_load_n(&blur_mode_v, __ATOMIC_ACQUIRE);
@@ -174,7 +173,8 @@ static int fast_v = -1;
 int blur_fast(void) {
     int f = __atomic_load_n(&fast_v, __ATOMIC_ACQUIRE);
     if (f < 0) {
-        f = getenv("YW4_BLUR_FAST") && atoi(getenv("YW4_BLUR_FAST")) ? 1 : 0;
+        const char *e = getenv("YW4_BLUR_FAST");  /* on unless 0: the owner saw no difference (2026-10-29) */
+        f = !(e && *e && !atoi(e));
         __atomic_store_n(&fast_v, f, __ATOMIC_RELEASE);
     }
     return f;
@@ -184,6 +184,41 @@ void blur_fast_toggle(void) {
     int f = !blur_fast();
     __atomic_store_n(&fast_v, f, __ATOMIC_RELEASE);
     fprintf(stderr, "yw4: blur rounds: %s (settings panel)\n", f ? "fast" : "the game's");
+}
+
+/* ---- the battles' blur: the render job main+0x897d90(device x0, job x1), queued by main+0x89ac00 from
+ * main+0x311f40. It copies into target job+0 (attachment 2), then n rounds: across into target job+2 attachment 4,
+ * down into its attachment 2, with the Gaussian weights of the shared rounds (radius job+0x10); then back into
+ * target job+0. The job (work/ghidra/897d90.c): u16 +0 target a, u16 +2 target b, f32 +4 strength, f32 +8 / +0xc
+ * spread across / down, f32 +0x10 radius, i32 +0x14 rounds at most; n = (uint)(strength * (max - 1) + 1) (12 in
+ * the battles seen), each step spread * strength / the image's size.
+ * BATTLE BLUR fast: the game draws it from a copy of the job with m = ceil(n / 4) rounds, strength 1 and the
+ * spreads times strength * sqrt(n / m): the same total width (a Gaussian's width grows with the square root of
+ * the rounds) for a quarter of the passes. Guest addresses are host addresses, so the copy can live here. */
+int yw4_hook_battle_blur(CPUState *ctx) {
+    static _Thread_local uint8_t copy[0x20] __attribute__((aligned(16)));
+    uint64_t job = ctx->x[1];
+    if (!job) return 0;
+    float strength = F32(job + 4);
+    int32_t max = (int32_t)U32(job + 0x14);
+    uint32_t n = (uint32_t)(strength * (float)(max - 1) + 1.0f);
+    int fast = blur_fast() && n >= 2;
+    uint32_t m = fast ? (n + 3) / 4 : n;
+    {   /* what it blurs and how, when that changes, the first 64 times */
+        static uint32_t last_n, last_m, changes;
+        if ((n != last_n || m != last_m) && changes++ < 64)
+            fprintf(stderr, "yw4: battle blur: %u rounds (strength %g of %d) drawn as %u%s, radius %g, spread %g %g\n", n,
+                    strength, max, m, fast ? " (fast)" : "", F32(job + 0x10), F32(job + 8), F32(job + 0xc));
+        last_n = n, last_m = m;
+    }
+    if (!fast) return 0;
+    float k = strength * sqrtf((float)n / (float)m);
+    memcpy(copy, (const void *)(uintptr_t)job, sizeof copy);
+    float one = 1.0f, sx = F32(job + 8) * k, sy = F32(job + 0xc) * k;
+    int32_t mm = (int32_t)m;
+    memcpy(copy + 4, &one, 4), memcpy(copy + 8, &sx, 4), memcpy(copy + 0xc, &sy, 4), memcpy(copy + 0x14, &mm, 4);
+    ctx->x[1] = (uint64_t)(uintptr_t)copy;
+    return 0;  /* the game's job draws from the copy */
 }
 
 /* A record pointer's texture (the record's +0x10 view, its first word + 0x18), copied; 0 if none. */

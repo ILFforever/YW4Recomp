@@ -118,10 +118,10 @@ static const Setting settings[] = {
      {"THE SWITCH'S DEFAULT", "SMOOTH", "FOR 120 HZ MONITORS", "FOR 144 HZ MONITORS", "AS FAST AS THE PC CAN"}, 5,
      framerate_index, framerate_cycle, "YW4_FPS", {"30", "60", "120", "144", "0"}},
     {"PERFORMANCE", "BATTLE BLUR",
-     "THE BLUR IN BATTLES IS UP TO 12 SMALL BLURS IN A ROW. FAST GETS THE SAME WIDTH WITH A QUARTER AS MANY, WIDER "
-     "ONES: LESS GPU TIME IN BATTLES, A NEARLY IDENTICAL PICTURE.",
+     "AS A BATTLE STARTS THE GAME BLURS THE PICTURE WITH UP TO 17 SMALL BLURS IN A ROW. FAST GETS THE SAME WIDTH "
+     "WITH A QUARTER AS MANY, WIDER ONES: ABOUT 3 MS LESS GPU TIME THEN, THE SAME LOOK.",
      {"GAME'S", "FAST"},
-     {"THE GAME'S 12 PASSES", "3 WIDER PASSES"}, 2, blur_fast_index, blur_fast_toggle, "YW4_BLUR_FAST", {"0", "1"}},
+     {"THE GAME'S ROUNDS", "A QUARTER OF THE ROUNDS (RECOMMENDED)"}, 2, blur_fast_index, blur_fast_toggle, "YW4_BLUR_FAST", {"0", "1"}},
 };
 enum { NSETTINGS = sizeof settings / sizeof *settings };
 

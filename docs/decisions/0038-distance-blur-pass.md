@@ -44,5 +44,23 @@ school save at the game's full setting: 0. The +0x2c70 variant did not come up.
 ## Open
 
 - The +0x2c70 variant, when it shows up.
-- Then the improvements this makes possible: fewer, wider rounds in battles at 4K (the 10 passes are the cost),
-  as an option.
+- ~~Fewer, wider rounds in battles~~: done, see below.
+
+## Addendum 2026-10-29: the battle blur, and BATTLE BLUR fast (on by default)
+
+The blur that costs GPU time in battles is not this pass and not the shared rounds `f_7f3620` (an earlier
+commit assumed so: probes in a battle showed `f_7f1bf0`, `f_7f3620` and `f_7f3900` never run there). It is a
+render job of its own, `main+0x897d90(device, job)`, queued by `main+0x89ac00` from `main+0x311f40`, with its own
+loop: a copy into target `job+0`, then n rounds (across into target `job+2` attachment 4, down into its attachment
+2, the same Gaussian weights, radius `job+0x10`), then back. Job: u16 `+0` / `+2` targets, f32 `+4` strength,
+`+8` / `+0xc` spread across / down, `+0x10` radius, i32 `+0x14` rounds at most; n = (uint)(strength x (max - 1) + 1),
+each step spread x strength / the image's size. It plays as a battle starts: strength ramps from 0.06 to ~1.5 in
+about a second (1 to 17 rounds, radius 2, max 12), then the pass stops.
+
+BATTLE BLUR fast (`YW4_BLUR_FAST`, panel PERFORMANCE): the hook hands the game's job a copy with m = ceil(n / 4)
+rounds, strength 1 and the spreads times strength x sqrt(n / m). Blurs add up by their widths squared, so the
+total width stays the same for a quarter of the passes; the game still draws it with its own shaders. Measured
+in battles: ~0.16 ms per pass either way, so at 12 rounds 24 passes (~3.8 ms) become 6 (~1.0 ms). Not identical
+texel for texel (the 8-tap kernel's ends fall differently), so it was judged by eye: the owner saw no difference
+at battle start, and it is on by default (`YW4_BLUR_FAST=0` for the game's rounds). The same option also gives
+`f_7f3620`'s rounds (our executor, `YW4_BLUR_PASS`) a quarter of the passes when they have more than two.

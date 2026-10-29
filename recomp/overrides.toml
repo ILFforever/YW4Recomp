@@ -185,3 +185,9 @@ module = "main"
 offset = "0x94ecc0"
 native = "yw4_hook_nnmain"
 why = "nnMain's start: YW4_FRAME_VSYNCS sets the game's vsyncs per frame before it reads them (runtime/src/framerate.c)"
+
+[[hook]]
+module = "main"
+offset = "0x897d90"
+native = "yw4_hook_battle_blur"
+why = "the battles' blur, a render job with its own rounds: BATTLE BLUR fast hands it a job with a quarter of the rounds (runtime/src/dof.c)"
