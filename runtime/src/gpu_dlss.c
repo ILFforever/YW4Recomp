@@ -15,6 +15,7 @@
 
 #include "gpu.h"
 #include "gpu_dlss.h"
+#include "gpu_dlssg.h"
 #include "host.h"
 
 #ifdef YW4_DLSS
@@ -63,7 +64,8 @@ int gpu_dlss_available(void) {
     if (state >= 0) return state;
     state = 0;
     if (vk.props.vendorID != 0x10de) return 0;
-    PFN_vkGetInstanceProcAddr gipa = (PFN_vkGetInstanceProcAddr)SDL_Vulkan_GetVkGetInstanceProcAddr();
+    PFN_vkGetInstanceProcAddr gipa = dlssg_loader();  /* Streamline's while it runs (DLSS frame generation) */
+    if (!gipa) gipa = (PFN_vkGetInstanceProcAddr)SDL_Vulkan_GetVkGetInstanceProcAddr();
     NVSDK_NGX_Result r = NVSDK_NGX_VULKAN_Init_with_ProjectID(
         "4f6c2e1a-8b3d-4c7e-9a52-1d0e7b6c3f88", NVSDK_NGX_ENGINE_TYPE_CUSTOM, "1.0", L".", vk.instance, vk.gpu,
         vk.device, gipa, vkGetDeviceProcAddr, NULL, NVSDK_NGX_Version_API);

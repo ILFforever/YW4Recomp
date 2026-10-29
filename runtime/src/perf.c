@@ -35,6 +35,7 @@
 #endif
 
 #include "host.h"
+#include "gpu_fg.h"
 #include "hud.h"
 #include "kernel.h"
 #include "nvn.h"
@@ -235,6 +236,10 @@ void yw4_perf_hud(HudContent *c) {
         double p99 = percentile(recent, 0, m, 99), p999 = percentile(recent, 0, m, 99.9);
         LINE("FPS %4.1f  1%% %4.1f  0.1%% %4.1f", interval > 0 ? 1000.0 / interval : 0.0, p99 > 0 ? 1000.0 / p99 : 0.0,
              p999 > 0 ? 1000.0 / p999 : 0.0);
+        /* frame generation: the frames on screen (the lines above count the game's) */
+        float shown = gpu_fg_shown_per_frame();
+        if (shown > 0.0f && interval > 0)
+            LINE("SHOWN %4.1f  FRAME GEN %s", 1000.0 / interval * shown, gpu_fg() == 2 ? "DLSS" : "FSR");
         LINE("FRAME %4.1f  MIN %4.1f  MAX %5.1f MS", interval, lo, hi);
         size_t g = ngpu < 30 ? ngpu : 30;  /* GPU times arrive PERF_DELAY frames late */
         double busy = 0;

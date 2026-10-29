@@ -27,6 +27,8 @@ from . import check
 
 RUNTIME = check.REPO / "runtime"
 CFLAGS = ["-std=c11", "-O2", "-ffp-contract=off", "-Wall", "-Wno-unused-label"]
+# The runtime's few C++ files (NVIDIA Streamline's headers are C++): no exceptions or RTTI, so no C++ runtime library
+CXXFLAGS = ["-std=c++17", "-O2", "-ffp-contract=off", "-Wall", "-fno-exceptions", "-fno-rtti"]
 target_flags = check.target_flags  # the host CPU (decision 0034); musl keeps its verified flags
 
 # musl 1.1.19's math (third_party/musl, decision 0013). These are the flags its results were
@@ -43,7 +45,8 @@ def musl_sources() -> list[Path]:
 
 def sources(cfg: config.Config) -> list[Path]:
     gen = cfg.work_dir / "recomp"
-    return sorted(gen.glob("*.c")) + sorted((RUNTIME / "src").glob("*.c")) + musl_sources()
+    return (sorted(gen.glob("*.c")) + sorted((RUNTIME / "src").glob("*.c")) + sorted((RUNTIME / "src").glob("*.cpp"))
+            + musl_sources())
 
 
 def newest_header(cfg: config.Config) -> float:
@@ -63,7 +66,8 @@ def generated_header(cfg: config.Config, src: Path) -> float:
 
 
 def compile_one(cc: str, src: Path, obj: Path, includes: list[str]) -> str | None:
-    flags = MUSL_CFLAGS if MUSL in src.parents else [*CFLAGS, *target_flags(), *includes]
+    flags = (MUSL_CFLAGS if MUSL in src.parents else
+             [*(CXXFLAGS if src.suffix == ".cpp" else CFLAGS), *target_flags(), *includes])
     proc = subprocess.run([cc, *flags, "-c", str(src), "-o", str(obj)], capture_output=True, text=True)
     if proc.returncode != 0:
         return f"{src.name}:\n{proc.stderr[-2000:]}"
@@ -137,6 +141,9 @@ def main(argv: list[str] | None = None) -> int:
             for name in ("msvcprt", "OLDNAMES"):
                 subprocess.run([str(ar), "rc", str(stub / f"lib{name}.a")], check=True)
         sdl_libs += [str(dlss / "lib" / "Windows_x86_64" / "x64" / "nvsdk_ngx_d.lib"), f"-L{stub}"]
+        # NVIDIA Streamline (DLSS frame generation and Reflex): headers; its DLLs are loaded at run time, copied below
+        sl = deps.fetch_streamline(cfg)
+        includes.append(f"-I{sl / 'include'}")
     else:
         pc = lambda *a: subprocess.run(["pkg-config", *a, "sdl3"], capture_output=True, text=True, check=True).stdout.split()
         includes += pc("--cflags")
@@ -175,6 +182,8 @@ def main(argv: list[str] | None = None) -> int:
         for dll in deps.FSR_DLLS:  # amd_fidelityfx_loader_vk.dll loads the upscaler from its own folder
             shutil.copy2(fsr / "signedbin" / dll, exe.parent / dll)
         shutil.copy2(dlss / "lib" / "Windows_x86_64" / "rel" / "nvngx_dlss.dll", exe.parent / "nvngx_dlss.dll")
+        for dll in deps.SL_DLLS:  # Streamline finds its plugins next to yw4.exe
+            shutil.copy2(sl / "bin" / "x64" / dll, exe.parent / dll)
     link = subprocess.run([cc, "-o", str(exe), *map(str, objs), *libs], capture_output=True, text=True)
     if link.returncode != 0:
         print(f"link failed:\n{link.stderr[-3000:]}", file=sys.stderr)

@@ -24,6 +24,8 @@
 #include <string.h>
 
 #include "gbuffer.h"
+#include "gpu_dlssg.h"
+#include "gpu_fg.h"
 #include "post.h"
 #include "gpu_internal.h"
 #include "host.h"
@@ -1725,6 +1727,13 @@ void gpu_present(NvnTexture *t, uint64_t frame, const int crop[4]) {
         gpu_wait(gpu_submitted(), UINT64_MAX);
         gpu_compute_trace(present_count);
     }
+    gpu_fg_test_switch(present_count);
+    int fg_slot = -1;  /* frame generation (gpu_fg.c): the frames go to its pacing thread */
+    if (gpu_fg()) {
+        VkCommandBuffer cb = begin();
+        fg_slot = gpu_fg_record(cb, g->image, g->format, g->width, g->height);
+        submit(cb);
+    }
     host_unlock(&gpu_lock);
     VkRect2D r = {{0, 0}, {g->width, g->height}};
     /* the crop, in the game's pixels: scaled with the window image (YW4_RES) */
@@ -1736,5 +1745,11 @@ void gpu_present(NvnTexture *t, uint64_t frame, const int crop[4]) {
     uint32_t ch = gpu_scaled(crop[3] > 0 ? (uint32_t)crop[3] : 0, g->scale_num, g->scale_den);
     if (crop[2] > 0 && crop[3] > 0 && crop[0] >= 0 && crop[1] >= 0 && cx + cw <= g->width && cy + ch <= g->height)
         r = (VkRect2D){{(int32_t)cx, (int32_t)cy}, {cw, ch}};
+    if (fg_slot >= 0) {
+        gpu_fg_show(fg_slot, r, frame);
+        return;
+    }
+    gpu_fg_drain();  /* frames it still has go first */
     window_present_image(g->image, g->format, r, frame);
+    dlssg_frame_begin();  /* DLSS frame generation: the next frame starts (Reflex's sleep) */
 }

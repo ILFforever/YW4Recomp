@@ -20,6 +20,8 @@ void window_present_rgba(const uint8_t *rgba, uint32_t w, uint32_t h, uint64_t f
  * colour image in layout GENERAL, written by earlier submissions on the queue, scaled to the
  * window. Screenshots (of the rectangle) need an RGBA8 or BGRA8 format. */
 void window_present_image(VkImage image, VkFormat format, VkRect2D rect, uint64_t frame);
+/* Added to screenshot file names after the frame number until set back to "" (frame_N_gen.bmp). */
+void window_screenshot_suffix(const char *suffix);
 
 /* The controller as the window sees it now, from the keyboard and any gamepad: Switch
  * button bits (HidNpadButton: A 0, B 1, X 2, Y 3, L-stick 4, R-stick 5, L 6, R 7, ZL 8,

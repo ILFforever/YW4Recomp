@@ -13,6 +13,12 @@ the decompressed `main`).
   step and the validation layer for debugging.
 - SDL3 for the window: `recomp.build` fetches it on Windows (`python -m tools.yw4.deps`, pinned and hash-checked);
   on Linux install it from your distribution (`pkg-config sdl3`).
+- On Windows the first build also downloads AMD FSR (upscaling, frame generation), NVIDIA DLSS and NVIDIA
+  Streamline (DLSS frame generation, Reflex): about 550 MB in all, once, each checked against a pinned SHA-256
+  and kept in `work/deps/`. Later builds are offline. Without internet, download the archive yourself and put it
+  where the build looks for it, for example `work/deps/fsr-2.4.0-dl/FidelityFX-SDK-v2.4.0.zip` or
+  `work/deps/streamline-2.14.16-dl/streamline-sdk-v2.14.16.zip` (URLs and hashes in `tools/yw4/deps.py`); the
+  hash is checked either way. NVIDIA's files are under NVIDIA's own licence, so they are never committed.
 
 ## One-time setup
 

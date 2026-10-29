@@ -19,6 +19,8 @@
 #include <string.h>
 
 #include "gpu_dlss.h"
+#include "gpu_dlssg.h"
+#include "gpu_fg.h"
 #include "gpu_fsr.h"
 #include "gpu_internal.h"
 #include "../../third_party/smaa/AreaTex.h"
@@ -538,6 +540,39 @@ static int dlss(VkCommandBuffer cb, GpuImage *d, VkImageView depth_view, VkImage
     return 1;
 }
 
+/* Frame generation's prepare pass (gpu_fg.c): the 3D's depth and the game's motion, with the jitter this frame
+ * was drawn with (as gpu_taa_jitter chose it) and the motion's scale as FSR's upscaler gets them. */
+static void fg_prepare(VkCommandBuffer cb, GpuImage *d, VkImageView dv, uint32_t w, uint32_t h, uint32_t ow,
+                       uint32_t oh, GpuImage *scene) {
+    int dlssg = gpu_fg() == 2 && dlssg_available();  /* DLSS's: tagged for Streamline instead */
+    if (!gpu_fg_active() && !dlssg) return;
+    uint64_t now = gpu_frames();
+    if (!motion.image || motion_frame + 1 < now || motion_frame > now + 1) return;
+    if (!d || d->width != w || d->height != h || motion.w != w || motion.h != h) return;
+    static int64_t last_ns;
+    int64_t t = host_now_ns();
+    GpuFgPrepare p = {.depth = d->image, .motion = motion.image, .depth_view = dv, .motion_view = motion.view,
+                      .scene = scene ? scene->image : VK_NULL_HANDLE, .scene_format = scene ? scene->format : 0,
+                      .scene_w = scene ? scene->width : 0, .scene_h = scene ? scene->height : 0,
+                      .depth_format = d->format, .render_w = w,
+                      .render_h = h, .frame_ms = last_ns ? (float)(t - last_ns) / 1e6f : 16.7f, .cam_near = 0.1f,
+                      .cam_far = 1000.0f, .fov_y = 0.785398f};
+    last_ns = t;
+    int mode = gpu_aa();
+    if (mode == 4 && gpu_fsr_available() == 1) {
+        gpu_fsr_jitter(w, ow, now, &p.jitter[0], &p.jitter[1]);
+    } else if (mode == 5) {
+        dlss_jitter(w, ow, now, &p.jitter[0], &p.jitter[1]);
+    } else {
+        int i = (int)(now % 8) + 1;
+        p.jitter[0] = halton(i, 2) - 0.5f, p.jitter[1] = halton(i, 3) - 0.5f;
+    }
+    float sy = nvn_window_origin == 1 ? -1.0f : 1.0f;
+    p.motion_scale[0] = -(float)w, p.motion_scale[1] = -(float)h * sy;
+    if (dlssg) dlssg_tag(cb, &p, ow, oh);
+    else gpu_fg_prepare(cb, &p);
+}
+
 void gpu_aa_apply(VkCommandBuffer cb, GpuState *s) {
     int mode = gpu_aa(), up = gpu_upscale() != 0;
     NvnTexture *t = s->ncolor ? s->rt.color[0] : NULL;
@@ -608,6 +643,10 @@ void gpu_aa_apply(VkCommandBuffer cb, GpuState *s) {
             pass(cb, P_ENCODE, encoded.view, VK_FORMAT_R16G16B16A16_SFLOAT, w, h, 0, scene);
             pass(cb, P_UPSCALE, out, fmt, ow, oh, 0, encoded.view);  /* bilinear over the whole image */
         }
+    }
+    if (mode >= 3 && !debug) {
+        GpuImage *sc = image_of(cb, t);  /* the scene image now: output-sized when upscaling */
+        fg_prepare(cb, depth, depth_in, w, h, ow, oh, sc);
     }
     gpu_dynamic_forget();  /* our pipelines set viewport and scissor: the game's next draw sets its own again */
     gpu_passes_other(cb, "after anti-aliasing (the UI)", 0);

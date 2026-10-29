@@ -9,6 +9,8 @@
 #include "bindings.h"
 #include "framerate.h"
 #include "gpu_dlss.h"
+#include "gpu_dlssg.h"
+#include "gpu_fg.h"
 #include "post.h"
 #include "gbuffer.h"
 #include "gpu.h"
@@ -49,6 +51,12 @@ static int bloom_index(void) { return bloom_native(); }
 static int dof_pass_index(void) { return dof_native(); }
 static int blur_fast_index(void) { return blur_fast(); }
 static const char *dlss_disabled(void) { return gpu_aa() == 5 ? NULL : "NEEDS ANTI-ALIASING SET TO DLSS"; }
+static int reflex_index(void) { return dlssg_reflex(); }  /* what runs: on while DLSS frame generation is */
+static const char *reflex_disabled(void) {
+    if (!dlssg_reflex_available()) return "NEEDS AN NVIDIA GPU";
+    return gpu_fg() == 2 && dlssg_available() ? "ON WHILE FRAME GENERATION IS DLSS: NVIDIA REQUIRES IT" : NULL;
+}
+static const char *fg_disabled(void) { return gpu_aa() >= 3 ? NULL : "NEEDS ANTI-ALIASING SET TO TAA, FSR OR DLSS"; }
 static const char *upscale_disabled(void) { return gpu_aa() >= 4 ? NULL : "NEEDS ANTI-ALIASING SET TO FSR OR DLSS"; }
 
 /* In the order shown; a row starts a new group when its category differs from the row before. The texts
@@ -135,6 +143,21 @@ static const Setting settings[] = {
      {"30", "60", "120", "144", "UNLIMITED"},
      {"THE SWITCH'S DEFAULT", "SMOOTH", "FOR 120 HZ MONITORS", "FOR 144 HZ MONITORS", "AS FAST AS THE PC CAN"}, 5,
      framerate_index, framerate_cycle, "YW4_FPS", {"30", "60", "120", "144", "0"}},
+    {"PERFORMANCE", "FRAME GENERATION",
+     "MAKES A PICTURE BETWEEN EACH TWO OF THE GAME'S: ABOUT TWICE AS MANY SHOWN. ADDS A LITTLE INPUT DELAY: BEST "
+     "WHEN THE GAME ALREADY RUNS AT 60 OR MORE. FRAME RATE STILL LIMITS THE GAME'S OWN PICTURES. NEEDS "
+     "ANTI-ALIASING SET TO TAA, FSR OR DLSS.",
+     {"OFF", "FSR", "DLSS"},
+     {"ONE PICTURE PER GAME FRAME", "AMD FSR: TWICE THE PICTURES SHOWN, ANY GPU",
+      "NVIDIA DLSS: RTX 40 AND NEWER, TURNS REFLEX ON"}, 3, gpu_fg, gpu_fg_cycle,
+     "YW4_FG", {"0", "1", "2"}, fg_disabled},
+    {"PERFORMANCE", "REFLEX",
+     "NVIDIA REFLEX: THE GAME WAITS SO EACH FRAME STARTS AS LATE AS IT CAN, SO WHAT YOU PRESS SHOWS SOONER. HELPS "
+     "MOST WHEN THE GPU LIMITS THE FRAME RATE; WHERE THE CPU DOES IT COSTS FRAMES (ABOUT 14% IN A BUSY TOWN). "
+     "NVIDIA GPUS.",
+     {"OFF", "ON", "ON + BOOST"},
+     {"THE GAME'S OWN TIMING", "LESS INPUT DELAY", "LESS DELAY STILL: THE GPU KEPT AT HIGH CLOCKS, MORE POWER"}, 3,
+     reflex_index, dlssg_reflex_cycle, "YW4_REFLEX", {"0", "1", "2"}, reflex_disabled},
     {"PERFORMANCE", "BATTLE BLUR",
      "AS A BATTLE STARTS THE GAME BLURS THE PICTURE WITH UP TO 17 SMALL BLURS IN A ROW. FAST GETS THE SAME WIDTH "
      "WITH A QUARTER AS MANY, WIDER ONES: ABOUT 3 MS LESS GPU TIME THEN, THE SAME LOOK.",

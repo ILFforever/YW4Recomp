@@ -30,6 +30,8 @@
 #include "bindings.h"
 #include "framerate.h"
 #include "gpu_dlss.h"
+#include "gpu_dlssg.h"
+#include "gpu_fg.h"
 #include "gbuffer.h"
 #include "gpu.h"
 #include "hud.h"
@@ -64,12 +66,14 @@ static VkExtent2D swap_extent;
 static VkImage swap_images[8];
 static VkSemaphore rendered[8];  /* one per swapchain image: reused only after that image is presented */
 static uint32_t nswap;
+static VkFormat swap_format;
 static int swapchain_stale = 1;  /* (re)create before the next present: first use, resize */
 static int swap_free;            /* the swapchain doesn't wait for the monitor (MAILBOX / IMMEDIATE wanted) */
+static int swap_dlssg;           /* made while DLSS frame generation was on (NVIDIA: make it again on a switch) */
 
 static int free_running(void) {
     int hz = framerate_hz();
-    return !hz || hz > 60;
+    return !hz || hz > 60 || gpu_fg_active() || dlssg_on();  /* frame generation paces its frames itself */
 }
 
 static VkBuffer staging;
@@ -135,6 +139,7 @@ static int create_swapchain(void) {
      * IMMEDIATE, when the driver has them, so the frame rate isn't capped at the refresh rate. */
     VkPresentModeKHR mode = VK_PRESENT_MODE_FIFO_KHR;
     swap_free = free_running();
+    swap_dlssg = dlssg_on();
     if (swap_free) {
         uint32_t nmodes = 0;
         VkPresentModeKHR modes[16];
@@ -169,7 +174,10 @@ static int create_swapchain(void) {
         swapchain = VK_NULL_HANDLE;
         return vk_fail("vkCreateSwapchainKHR", r);
     }
-    nswap = 8;
+    /* the count first, then the images (Streamline's version, DLSS frame generation, wants it this way) */
+    nswap = 0;
+    vkGetSwapchainImagesKHR(vk.device, swapchain, &nswap, NULL);
+    if (nswap > 8) nswap = 8;
     vkGetSwapchainImagesKHR(vk.device, swapchain, &nswap, swap_images);
     for (uint32_t i = 0; i < nswap; i++) {
         if (rendered[i]) vkDestroySemaphore(vk.device, rendered[i], NULL);
@@ -177,12 +185,16 @@ static int create_swapchain(void) {
         vkCreateSemaphore(vk.device, &si, NULL, &rendered[i]);
     }
     swap_extent = extent;
+    swap_format = fmt.format;
     swapchain_stale = 0;
     return 0;
 }
 
 static int vk_init(void) {
-    PFN_vkGetInstanceProcAddr gipa = (PFN_vkGetInstanceProcAddr)SDL_Vulkan_GetVkGetInstanceProcAddr();
+    /* DLSS frame generation (gpu_dlssg.cpp): Vulkan through Streamline, which adds what it needs */
+    int sl = dlssg_start();
+    PFN_vkGetInstanceProcAddr gipa =
+        sl ? dlssg_loader() : (PFN_vkGetInstanceProcAddr)SDL_Vulkan_GetVkGetInstanceProcAddr();
     if (!gipa) {
         fprintf(stderr, "yw4: window: no Vulkan loader (%s)\n", SDL_GetError());
         return -1;
@@ -213,7 +225,10 @@ static int vk_init(void) {
     if (r != VK_SUCCESS) return vk_fail("vkCreateInstance", r);
 #define LOAD_INSTANCE(f) f = (PFN_##f)gipa(vk.instance, #f);
     VK_INSTANCE_FNS(LOAD_INSTANCE)
-    if (!SDL_Vulkan_CreateSurface(window, vk.instance, NULL, &surface)) {
+    if (sl)  /* the surface through Streamline too (SDL would make it with its own loader) */
+        surface = dlssg_create_surface(
+            SDL_GetPointerProperty(SDL_GetWindowProperties(window), SDL_PROP_WINDOW_WIN32_HWND_POINTER, NULL));
+    if (!surface && !SDL_Vulkan_CreateSurface(window, vk.instance, NULL, &surface)) {
         fprintf(stderr, "yw4: window: SDL_Vulkan_CreateSurface: %s\n", SDL_GetError());
         return -1;
     }
@@ -347,6 +362,7 @@ static int vk_init(void) {
 #define LOAD_DEVICE(f) f = (PFN_##f)vkGetDeviceProcAddr(vk.device, #f);
     VK_DEVICE_FNS(LOAD_DEVICE)
     vkGetDeviceQueue(vk.device, vk.queue_family, 0, &vk.queue);
+    if (sl) dlssg_available();  /* checked and logged once, Reflex set up */
 
     VkCommandPoolCreateInfo pci = {.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO,
                                    .flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT,
@@ -403,6 +419,8 @@ static void barrier(VkImage image, VkImageLayout from, VkImageLayout to, VkAcces
                          &b);
 }
 
+static const char *shot_suffix = "";  /* in the file name after the frame number (frame generation's "_gen") */
+
 static void save_screenshot(const uint8_t *rgba, uint32_t w, uint32_t h, uint64_t n) {
     char path[600];
     snprintf(path, sizeof path, "%s", screenshot_dir);  /* make the folder (and its parents) if missing */
@@ -414,7 +432,7 @@ static void save_screenshot(const uint8_t *rgba, uint32_t w, uint32_t h, uint64_
             *p = c;
         }
     MKDIR(path);
-    snprintf(path, sizeof path, "%s/frame_%06" PRIu64 ".bmp", screenshot_dir, n);
+    snprintf(path, sizeof path, "%s/frame_%06" PRIu64 "%s.bmp", screenshot_dir, n, shot_suffix);
     SDL_Surface *s = SDL_CreateSurfaceFrom((int)w, (int)h, SDL_PIXELFORMAT_ABGR8888, (void *)rgba, (int)w * 4);
     if (s && SDL_SaveBMP(s, path)) fprintf(stderr, "yw4: screenshot %s\n", path);
     else fprintf(stderr, "yw4: screenshot %s failed: %s\n", path, SDL_GetError());
@@ -427,6 +445,8 @@ static int screenshot_burst(void) {
     int n = s ? atoi(s) : 1;
     return n > 0 ? n : 1;
 }
+
+void window_screenshot_suffix(const char *suffix) { shot_suffix = suffix ? suffix : ""; }
 
 static int screenshot_wanted(uint64_t n) {
     int left = __atomic_load_n(&screenshot_requested, __ATOMIC_ACQUIRE);
@@ -651,7 +671,9 @@ static int present_image(VkImage src, VkImageLayout layout, VkRect2D r0, int rea
                            .pImageIndices = &index};
     host_lock(&vk.queue_lock);
     vkQueueSubmit(vk.queue, 1, &si, fence);
+    dlssg_present_begin(x0, y0, bw, bh, swap_format, nswap);  /* DLSS frame generation: the game's rectangle */
     r = vkQueuePresentKHR(vk.queue, &pi);
+    dlssg_present_end();
     host_unlock(&vk.queue_lock);
     if (r == VK_ERROR_OUT_OF_DATE_KHR || r == VK_SUBOPTIMAL_KHR) swapchain_stale = 1;
     if (readback) vkWaitForFences(vk.device, 1, &fence, VK_TRUE, UINT64_MAX);
@@ -662,7 +684,7 @@ void window_present_rgba(const uint8_t *rgba, uint32_t w, uint32_t h, uint64_t n
     if (screenshot_wanted(n)) save_screenshot(rgba, w, h, n);
     if (!have_vulkan || !w || !h) return;
     host_lock(&present_lock);
-    if (swap_free != free_running()) swapchain_stale = 1;  /* the panel moved the frame rate across 60 */
+    if (swap_free != free_running() || swap_dlssg != dlssg_on()) swapchain_stale = 1;  /* frame rate across 60 */
     if (!(swapchain_stale && create_swapchain()) && !frame_resources(w, h)) {
         vkWaitForFences(vk.device, 1, &fence, VK_TRUE, UINT64_MAX);  /* the staging buffer is free */
         memcpy(staging_ptr, rgba, (size_t)w * h * 4);
@@ -681,7 +703,7 @@ void window_present_image(VkImage image, VkFormat format, VkRect2D rect, uint64_
         shot = 0;
     }
     host_lock(&present_lock);
-    if (swap_free != free_running()) swapchain_stale = 1;
+    if (swap_free != free_running() || swap_dlssg != dlssg_on()) swapchain_stale = 1;
     if (!(swapchain_stale && create_swapchain()) && !frame_resources(w, h) &&
         !present_image(image, VK_IMAGE_LAYOUT_GENERAL, rect, shot) && shot) {
         /* One bulk copy out of the staging memory: it is uncached, and per-byte reads of it took ~1.7 s. */

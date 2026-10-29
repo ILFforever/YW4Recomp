@@ -5,11 +5,15 @@
 SDL3 (zlib licence): on Windows the official MinGW development release, pinned by version
 and SHA-256. Linux builds use the system's SDL3 (pkg-config sdl3) instead.
 AMD FSR (decision 0039): the FSR SDK's source archive, pinned the same way; only the MIT
-headers the runtime compiles against and the two signed Vulkan DLLs (loader and upscaler,
-MIT too, listed in its Kits/FidelityFX/docs/license.md) are taken out. Windows only.
+headers the runtime compiles against and the three signed Vulkan DLLs (loader, upscaler and
+frame generation, MIT too, listed in its Kits/FidelityFX/docs/license.md) are taken out. Windows only.
 NVIDIA DLSS (decision 0040): single files of NVIDIA's DLSS SDK repository at a pinned tag, each
 checked against its SHA-256: the headers, the static NGX library and nvngx_dlss.dll. They are
 under NVIDIA's own licence (LICENSE.txt, fetched with them), never committed. Windows only.
+NVIDIA Streamline (DLSS frame generation, with Reflex): the SDK's release archive, pinned the same
+way; the headers, the docs we follow and the release DLLs it needs are taken out. Streamline itself
+is MIT (license.txt); nvngx_dlssg.dll and the Reflex DLL are under NVIDIA's RTX SDK licence like DLSS
+(bin/x64/*.license.txt, fetched with them), so never committed. Windows only.
 Nothing here is committed: each archive is checked against its pinned hash and unpacked
 into its own folder.
 """
@@ -61,13 +65,15 @@ def fetch_sdl(cfg: config.Config) -> Path:
 FSR_VERSION = "2.4.0"
 FSR_URL = f"https://github.com/GPUOpen-LibrariesAndSDKs/FidelityFX-SDK/archive/refs/tags/v{FSR_VERSION}.zip"
 FSR_SHA256 = "27120e3bbe0d0b30213825ad40f19077563f04f04572e252109a392d5fb522cb"
-FSR_DLLS = ("amd_fidelityfx_loader_vk.dll", "amd_fidelityfx_upscaler_vk.dll")
-FSR_TAKE = ("Kits/FidelityFX/api/include/", "Kits/FidelityFX/upscalers/include/", "Kits/FidelityFX/docs/license.md",
+FSR_DLLS = ("amd_fidelityfx_loader_vk.dll", "amd_fidelityfx_upscaler_vk.dll", "amd_fidelityfx_framegeneration_vk.dll")
+FSR_TAKE = ("Kits/FidelityFX/api/include/", "Kits/FidelityFX/upscalers/include/",
+            "Kits/FidelityFX/framegeneration/include/", "Kits/FidelityFX/docs/license.md",
             *(f"Kits/FidelityFX/signedbin/{d}" for d in FSR_DLLS))
 
 
 def fsr_dir(cfg: config.Config) -> Path:
-    """The FSR files: Kits/FidelityFX/api/include, .../upscalers/include, .../signedbin/*.dll, the licence."""
+    """The FSR files: Kits/FidelityFX/api/include, .../upscalers/include, .../framegeneration/include,
+    .../signedbin/*.dll, the licence."""
     return cfg.work_dir / "deps" / f"fsr-{FSR_VERSION}"
 
 
@@ -137,6 +143,52 @@ def fetch_dlss(cfg: config.Config) -> Path:
     return out
 
 
+SL_VERSION = "2.14.16"
+SL_URL = f"https://github.com/NVIDIA-RTX/Streamline/releases/download/v{SL_VERSION}/streamline-sdk-v{SL_VERSION}.zip"
+SL_SHA256 = "32041e51db0cab709a271b72a352281b690c2abbd669a827809401a5dd23956b"
+# DLSS frame generation through Streamline: the interposer and its common module, the frame generation
+# plugin and NVIDIA's model, and Reflex (required with frame generation) with its latency markers (PCL)
+SL_DLLS = ("sl.interposer.dll", "sl.common.dll", "sl.dlss_g.dll", "nvngx_dlssg.dll", "sl.reflex.dll", "sl.pcl.dll",
+           "NvLowLatencyVk.dll")
+SL_TAKE = ("include/", "license.txt", "bin/x64/nvngx_dlss.license.txt", "bin/x64/reflex.license.txt",
+           "docs/ProgrammingGuide.md", "docs/ProgrammingGuideDLSS_G.md", "docs/ProgrammingGuideReflex.md",
+           "docs/ProgrammingGuidePCL.md", "docs/ProgrammingGuideManualHooking.md",
+           *(f"bin/x64/{d}" for d in SL_DLLS))
+
+
+def streamline_dir(cfg: config.Config) -> Path:
+    """The Streamline files at their archive paths: include/, bin/x64/*.dll, docs/, the licences."""
+    return cfg.work_dir / "deps" / f"streamline-{SL_VERSION}"
+
+
+def fetch_streamline(cfg: config.Config) -> Path:
+    out = streamline_dir(cfg)
+    dlls = [out / "bin" / "x64" / d for d in SL_DLLS]
+    if all(d.is_file() for d in dlls) and (out / "include" / "sl.h").is_file():
+        return out
+    deps = cfg.work_dir / "deps" / f"streamline-{SL_VERSION}-dl"  # the archive alone in its own folder
+    deps.mkdir(parents=True, exist_ok=True)
+    archive = deps / Path(SL_URL).name
+    if not archive.is_file():
+        print(f"downloading {SL_URL} (~280 MB)")
+        with urllib.request.urlopen(SL_URL) as r, open(archive, "wb") as f:
+            shutil.copyfileobj(r, f)
+    digest = hashlib.sha256(archive.read_bytes()).hexdigest()
+    if digest != SL_SHA256:
+        archive.unlink()
+        raise RuntimeError(f"{archive.name}: SHA-256 {digest}, expected {SL_SHA256}")
+    with zipfile.ZipFile(archive) as z:
+        for name in z.namelist():
+            if name.endswith("/") or not any(name.startswith(t) for t in SL_TAKE) or ".." in name:
+                continue
+            dst = out / name
+            dst.parent.mkdir(parents=True, exist_ok=True)
+            dst.write_bytes(z.read(name))
+    if not all(d.is_file() for d in dlls):
+        raise RuntimeError(f"{archive.name} unpacked without the Streamline DLLs")
+    return out
+
+
 def main() -> int:
     try:
         cfg = config.load()
@@ -146,6 +198,7 @@ def main() -> int:
         print(f"SDL3 {SDL_VERSION}: {fetch_sdl(cfg)}")
         print(f"FSR SDK {FSR_VERSION}: {fetch_fsr(cfg)}")
         print(f"DLSS SDK {DLSS_VERSION}: {fetch_dlss(cfg)}")
+        print(f"Streamline SDK {SL_VERSION}: {fetch_streamline(cfg)}")
     except (config.ConfigError, RuntimeError, OSError) as e:
         print(f"error: {e}", file=sys.stderr)
         return 1
