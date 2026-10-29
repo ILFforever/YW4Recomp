@@ -1005,12 +1005,13 @@ static void end_layer(Layer *k, const CPUState *ctx) {
     k->pass = NULL;
 }
 
-/* ---- the mode: YW4_SHADOWS at start, the settings panel (or a replay's "k <tick> F9") switches
- * between the game's shadows and ours while the game runs */
+/* ---- the mode: YW4_SHADOWS at start (default ours since 2026-10-29: about 10 frames/s more with everything else
+ * maxed, owner; "game" for the game's), the settings panel (or a replay's "k <tick> F9") switches between the game's
+ * shadows and ours while the game runs */
 
 static void init_mode(void) {
     const char *s = getenv("YW4_SHADOWS");
-    int m = s && !strcmp(s, "native") ? MODE_NATIVE : s && !strcmp(s, "check") ? MODE_CHECK : MODE_GAME;
+    int m = s && !strcmp(s, "game") ? MODE_GAME : s && !strcmp(s, "check") ? MODE_CHECK : MODE_NATIVE;
     int unset = -1;
     if (!__atomic_compare_exchange_n(&mode, &unset, m, 0, __ATOMIC_ACQ_REL, __ATOMIC_ACQUIRE)) return;
     __atomic_store_n(&shadow_checking, m != MODE_GAME, __ATOMIC_RELEASE);

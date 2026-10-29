@@ -275,13 +275,15 @@ static int skipped(const NvnProgram *p) {
     return 0;
 }
 
+/* YW4_GBUFFER: default ours since 2026-10-29 (with the shadow pass about 10 frames/s more with everything else
+ * maxed, owner); "game" for the game's own draws */
 static void init_mode(void) {
     const char *e = getenv("YW4_GBUFFER");
-    int m = !e                        ? MODE_GAME
+    int m = !e                        ? MODE_NATIVE
             : !strcmp(e, "check")    ? MODE_CHECK
             : !strcmp(e, "programs") ? MODE_PROGRAMS
-            : !strcmp(e, "native")   ? MODE_NATIVE
-                                     : MODE_GAME;
+            : !strcmp(e, "game")     ? MODE_GAME
+                                     : MODE_NATIVE;
     gbuffer_checking = m == MODE_CHECK;
     __atomic_store_n(&mode, m, __ATOMIC_RELEASE);
 }

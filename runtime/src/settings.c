@@ -112,12 +112,12 @@ static const Setting settings[] = {
     {"RENDERER", "SHADOW PASS",
      "WHO DRAWS WHAT CASTS SHADOWS: THE GAME OR OUR OWN RENDERER. THE PICTURE IS THE SAME.",
      {"GAME", "CUSTOM"},
-     {"THE GAME'S RENDERER", "OUR CUSTOM RENDERER, A LITTLE FASTER"}, 2, shadow_pass_index, shadow_toggle, "YW4_SHADOWS", {"game", "native"}},
+     {"THE GAME'S RENDERER", "OUR CUSTOM RENDERER, FASTER (RECOMMENDED)"}, 2, shadow_pass_index, shadow_toggle, "YW4_SHADOWS", {"game", "native"}},
     {"RENDERER", "G-BUFFER",
      "WHO DRAWS THE WORLD'S SURFACES: THE GAME OR OUR OWN RENDERER. THE PICTURE IS THE SAME. OURS LETS FUTURE "
      "UPGRADES IN.",
      {"GAME", "CUSTOM"},
-     {"THE GAME'S RENDERER", "OUR CUSTOM RENDERER"}, 2, gbuffer_index, gbuffer_toggle, "YW4_GBUFFER", {"game", "native"}},
+     {"THE GAME'S RENDERER", "OUR CUSTOM RENDERER, FASTER (RECOMMENDED)"}, 2, gbuffer_index, gbuffer_toggle, "YW4_GBUFFER", {"game", "native"}},
     {"RENDERER", "BLOOM",
      "WHO DRAWS THE GLOW AROUND BRIGHT THINGS: THE GAME OR OUR OWN RENDERER. THE PICTURE IS THE SAME. OURS LETS "
      "FUTURE UPGRADES IN.",

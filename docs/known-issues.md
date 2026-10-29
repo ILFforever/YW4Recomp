@@ -37,10 +37,10 @@ What is known to be missing or wrong, roughly in the order it is likely to matte
 - **The "4++" logo variant** does not show (add-on ownership).
 - GPU time is about 1-2× Eden's: full barriers between passes, one general image layout, textures re-uploaded, no
   pipeline cache. The Vulkan validation layer reports barriers recorded inside dynamic rendering.
-- **Frame rate drops to about 25 frames/s on the bridge in the snowy past-world town** (late game; only on that
-  bridge). The GPU is the limit: about 40 ms of GPU work per frame against the 33 ms budget, with about 1,450 draws
-  (the town is about 300); the game's own CPU work is about 17 ms. Not the shadow pass (no change when switching it). Which
-  pass is heavy is not measured yet: needs per-pass GPU timing.
+- **The bridge in the snowy past-world town is a heavy scene** (late game). It used to drop to about 25 frames/s
+  (2026-10-25: about 1,450 draws against the town's 300). Since the later GPU work it holds the game's 30
+  (owner, 2026-10-29), but above 30 (the FRAME RATE setting) looking at the bridge costs about 10 frames/s: the
+  game's own content is that heavy there, not a fault of the port.
 
 ## Game and system
 
