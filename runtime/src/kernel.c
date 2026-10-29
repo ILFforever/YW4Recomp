@@ -1048,11 +1048,75 @@ static void svc(CPUState *ctx, uint32_t imm) {
     }
 }
 
+/* YW4_WAITPROF=1: where the main thread blocks (SleepThread, WaitSynchronization, ArbitrateLock,
+ * WaitProcessWideKeyAtomic, WaitForAddress), per guest call stack: time and count, reported
+ * with the performance summary every 600 frames. Only the main thread writes and reads the table. */
+#define WAITPROF_SLOTS 256
+#define WAITPROF_DEPTH 8
+typedef struct {
+    uint64_t stack[WAITPROF_DEPTH];
+    int depth;
+    uint32_t imm;
+    uint64_t count;
+    int64_t ns;
+} WaitSite;
+static WaitSite wait_sites[WAITPROF_SLOTS];
+static int waitprof = -1;
+
+static void waitprof_add(uint32_t imm, const uint64_t *st, int k, int64_t ns) {
+    uint64_t h = imm;
+    for (int i = 0; i < k; i++) h = (h ^ st[i]) * 0x100000001B3ull;
+    for (uint64_t i = h % WAITPROF_SLOTS, n = 0; n < WAITPROF_SLOTS; i = (i + 1) % WAITPROF_SLOTS, n++) {
+        WaitSite *w = &wait_sites[i];
+        if (w->count && (w->imm != imm || w->depth != k || memcmp(w->stack, st, (size_t)k * 8))) continue;
+        if (!w->count) memcpy(w->stack, st, (size_t)k * 8), w->depth = k, w->imm = imm;
+        w->count++, w->ns += ns;
+        return;
+    }
+}
+
+void yw4_wait_report(FILE *f, int frames) {
+    if (waitprof <= 0 || frames <= 0) return;
+    static const char *const names[] = {[0x0B] = "SleepThread", [0x18] = "WaitSynchronization",
+                                        [0x1A] = "ArbitrateLock", [0x1C] = "WaitProcessWideKey", [0x34] = "WaitForAddress"};
+    int64_t total = 0;
+    for (int i = 0; i < WAITPROF_SLOTS; i++) total += wait_sites[i].ns;
+    fprintf(f, "  main thread waits, last %d frames: %.2f ms/frame\n", frames, (double)total / 1e6 / frames);
+    for (int shown = 0; shown < 8; shown++) {
+        WaitSite *best = NULL;
+        for (int i = 0; i < WAITPROF_SLOTS; i++)
+            if (wait_sites[i].count && (!best || wait_sites[i].ns > best->ns)) best = &wait_sites[i];
+        if (!best || best->ns * 100 < total) break;  /* under 1% of the waiting */
+        char where[48];
+        fprintf(f, "    %.2f ms/frame, %.1f calls/frame, %s:", (double)best->ns / 1e6 / frames,
+                (double)best->count / frames, names[best->imm]);
+        for (int i = 0; i < best->depth; i++) fprintf(f, " %s", yw4_describe(best->stack[i] - 4, where));
+        fprintf(f, "\n");
+        best->count = 0, best->ns = 0;  /* taken out of the search; cleared below */
+    }
+    memset(wait_sites, 0, sizeof wait_sites);
+}
+
 void yw4_svc(CPUState *ctx, uint32_t imm) {
     static int trace = -1;
     if (trace < 0) {
         const char *t = getenv("YW4_TRACE_SVC");
         trace = t && *t && *t != '0';
+    }
+    if (waitprof < 0) {
+        const char *t = getenv("YW4_WAITPROF");
+        waitprof = t && *t && *t != '0';
+    }
+    if (waitprof && cur == &main_thread &&
+        (imm == 0x0B || imm == 0x18 || imm == 0x1A || imm == 0x1C || imm == 0x34)) {
+        uint64_t st[WAITPROF_DEPTH];
+        int k = yw4_call_stack(ctx, st, WAITPROF_DEPTH);
+        int64_t t0 = host_now_ns();
+        host_lock(&klock);
+        svc(ctx, imm);
+        host_unlock(&klock);
+        waitprof_add(imm, st, k, host_now_ns() - t0);
+        return;
     }
     uint64_t in[4] = {ctx->x[0], ctx->x[1], ctx->x[2], ctx->x[3]};
     host_lock(&klock);

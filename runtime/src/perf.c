@@ -294,6 +294,7 @@ void yw4_perf_frame(uint64_t frame, int64_t enter, int64_t shown, int64_t exit_,
         static int64_t last_threads;  /* host time of the last per-thread report */
         if (last_threads) fprintf(stderr, "  threads, last 600 frames:\n");
         yw4_thread_cpu_report(stderr, last_threads ? exit_ - last_threads : 0);  /* 0: only takes the start values */
+        yw4_wait_report(stderr, (int)(frame - last_summary_frame));
         last_threads = exit_;
         /* so a killed or crashed run leaves numbers (every frame is in the CSV too) */
         write_summary(nrows > 600 ? nrows - 600 : 0, "last 600 frames (the whole run is written at exit)");

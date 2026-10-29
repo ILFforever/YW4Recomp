@@ -84,6 +84,20 @@ void host_sleep_ns(int64_t ns) {
     static _Thread_local HANDLE timer;
     static _Thread_local int tried;
     if (ns <= 0) return;
+    /* The timer can't wait less than ~0.5 ms, but the game polls its job counters with
+     * nn::os::SleepThread(1 us) on the main thread: each poll overslept ~500x. Short sleeps
+     * give the core away and check the clock instead (YW4_SHORT_SLEEP=0: the timer, as before). */
+    static int short_sleep = -1;
+    if (short_sleep < 0) {
+        const char *e = getenv("YW4_SHORT_SLEEP");
+        short_sleep = !(e && *e == '0');
+    }
+    if (short_sleep && ns < 200000) {
+        int64_t end = host_now_ns() + ns;
+        do SwitchToThread();
+        while (host_now_ns() < end);
+        return;
+    }
     if (!tried) {
         tried = 1;
         timer = CreateWaitableTimerExW(NULL, NULL, CREATE_WAITABLE_TIMER_HIGH_RESOLUTION, TIMER_ALL_ACCESS);

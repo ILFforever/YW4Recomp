@@ -5,6 +5,23 @@ What is known to be missing or wrong, roughly in the order it is likely to matte
 
 ## Graphics
 
+- **CPU limit at ~70 frames/s in busy scenes; optimize the CPU further** (owner, 2026-10-29). With FRAME RATE
+  unlimited, upscaling (DLSS/FSR) no longer helps there: the GPU is idle part of each frame. Busy late-game spot
+  (`save_base_busy`, ~410 draws), DLSS Performance: game work 12.9 ms per frame, GPU 4.6 ms. The short-sleep fix
+  (`YW4_SHORT_SLEEP`, 61 → 77 frames/s) took most of the main thread's waiting away; left: ~1.8 ms per frame of
+  waits (`YW4_WAITPROF=1`: an SDK mutex taken ~140 times per frame from `main+0x97ae14`, WaitForAddress) and the
+  game code itself. The mutex is the game's job queue (`main+0x97ad10`: lock, take the next job, unlock, run it;
+  the main thread helps the two worker threads while it waits for them). Spinning 5 us before sleeping in
+  ArbitrateLock cut its wait 0.35 → 0.07 ms per frame but gave no frames (70 → 70 frames/s, 2 runs each): the main
+  thread then waits for the same jobs elsewhere, so it was removed. The limit is the jobs' and the main thread's
+  game code: next, profile both in `save_base_busy` (`YW4_PROFILE=1`, and the workers, threads 6 and 7).
+- **Lag after switching ASPECT RATIO from ultra-ultrawide back to 21:9** (owner, 2026-10-29, late-game save): ~7
+  frames/s with the GPU busy ~400 ms per frame for a while, then it recovered. Likely cause: each aspect ratio's set
+  of screen-sized targets (7680×2160 at 32:9) stayed in video memory until 300 frames unused, so cycling through all
+  of them overflowed it. Fix in testing: the old size's targets are freed 8 frames after a size setting changes.
+- **Crash (GPU device lost) after switching the upscaling mode several times in a row** (owner, 2026-10-29, DLSS,
+  4K 21:9, right after the aspect-ratio cycling above): `vkWaitSemaphores failed (VkResult -4)`. Memory peaked at
+  5.0 GB against ~3.3 GB normally, so video memory running out is a suspect. Not reproduced yet.
 - **Stutters at 4K ultrawide; to optimize** (owner, 2026-10-28; 4K height at 21:9 = 5120×2160, TAA, full-size effects). From the
   owner's session logs: bamboo forest (late-game save) GPU 23.2 ms per frame on average, 36.4 ms at the 99th
   percentile (budget 33.3), 419 of 27,382 frames over 50 ms; school save GPU 18.2 / 27.6 ms, 134 of 5,620 over

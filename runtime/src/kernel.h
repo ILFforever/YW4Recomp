@@ -14,6 +14,8 @@ void yw4_thread_role(int role);
 /* The guest thread id of the calling thread (the performance report's "thread N"); 0 if none. */
 uint64_t yw4_thread_id(void);
 void yw4_thread_cpu_report(FILE *f, int64_t interval_ns);
+/* YW4_WAITPROF=1: where the main thread blocked over the last `frames` frames (then cleared). */
+void yw4_wait_report(FILE *f, int frames);
 
 /* Horizon memory types and permissions, as svcQueryMemory reports them. */
 enum {
