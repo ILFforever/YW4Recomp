@@ -52,7 +52,9 @@ What is known to be missing or wrong, roughly in the order it is likely to matte
 
 - `tests/test_kernel.py::test_threads` fails now and then with "cannot reserve the heap and thread-local
   regions" (seen once on 2026-10-22, then 4 passes in a row): the test program reserves fixed addresses, which
-  something else in the process can occasionally occupy first. Rerun before suspecting a change.
+  something else in the process can occasionally occupy first. Rerun before suspecting a change. The game itself
+  failed the same way once at start (2026-10-29, the run straight after worked): it reserves the guest's fixed
+  addresses too.
 
 - `YW4_REPLAY` routes can drift: about one run in three ends somewhere else (for example stuck on the save-load
   screen). Check the screenshot before trusting a run. Since 2026-10-25 the town walk replay drifts every time,

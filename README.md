@@ -85,7 +85,8 @@ It is also lighter to run. The same busy street on the same laptop ([docs/baseli
 | ✅ | **Sharper distance** | Anisotropic texture filtering and a softer distance blur: distant ground, roads and buildings stay sharp without 4K |
 | ✅ | **Higher resolution** | The 3D view at 1080p, 1440p or 4K instead of the game's 1600×900 (30 frames/s at 4K on an RTX 4070 laptop) |
 | ✅ | **Ultrawide and other aspect ratios** | 16:10, 21:9 and 32:9 in the panel: a wider view of the world with the UI kept 16:9 in the middle; exploring, battles and cutscenes work; dialog dimming and the loading screen cover the full width |
-| 🔧 | **Higher frame rates** | 30, 60, 120, 144 or no limit, switchable while playing (FRAME RATE in the panel): the game already moves by the real time between frames, so walking and battles keep their speed (~140 frames/s at 1600×900, ~55 at 4K 21:9 where the GPU is the limit). Menus and cutscenes are being checked. Later frame generation (AMD FSR 3, open source, any GPU) on top |
+| 🔧 | **Higher frame rates** | 30, 60, 120, 144 or no limit, switchable while playing (FRAME RATE in the panel): the game already moves by the real time between frames, so walking and battles keep their speed (~140 frames/s at 1600×900). At 4K the GPU is the limit; upscaling (next row) lifts it. Menus and cutscenes are being checked. Later frame generation (AMD FSR 3, open source, any GPU) on top |
+| ✅ | **Upscaling (AMD FSR)** | The world drawn smaller and rebuilt at full size by AMD FSR, menus and text kept full size: at 4K 21:9 on an RTX 4070 laptop ~75 (quality), ~86 (balanced) and ~104 frames/s (performance) instead of ~59. Very fine patterns (far nets, perforated fences) get grainy at performance ([decision 0039](docs/decisions/0039-fsr-upscaling.md)) |
 | 🔧 | **Better anti-aliasing** | FXAA, SMAA and now TAA (steady thin edges: fences, nets, leaves) on the 3D scene before the UI is drawn, so text stays crisp; per-object motion for TAA next |
 | 🗓️ | **Mod support** | Load replaced game files from a mod folder without touching your dump (first use: the English translation mod) |
 | 🔧 | **Input remapping** | Keyboard and controller bindings on the panel's CONTROLS page, saved, with your controller's own button names; tested with a DualSense. Mouse and matching on-screen button hints next |
@@ -202,6 +203,34 @@ The same frame zoomed in 3×: the red railing, the fence by the lamp post and th
 | ![Railing, no AA: stair-stepped edges](docs/screenshots/30-aa-rail-off.png) | ![Railing, SMAA](docs/screenshots/31-aa-rail-smaa.png) | ![Railing, TAA: smooth edges](docs/screenshots/32-aa-rail-taa.png) |
 | ![Fence, no AA: sparkling bars](docs/screenshots/33-aa-fence-off.png) | ![Fence, SMAA](docs/screenshots/34-aa-fence-smaa.png) | ![Fence, TAA: steady bars](docs/screenshots/35-aa-fence-taa.png) |
 | ![Road line, no AA](docs/screenshots/36-aa-road-off.png) | ![Road line, SMAA](docs/screenshots/37-aa-road-smaa.png) | ![Road line, TAA](docs/screenshots/38-aa-road-taa.png) |
+
+</details>
+
+<details>
+<summary><b>Upscaling (AMD FSR)</b>: the world drawn smaller, rebuilt at full size, menus kept sharp</summary>
+
+With ANTI-ALIASING set to FSR, the UPSCALING row draws the 3D world smaller than the resolution and AMD FSR 3.1
+rebuilds a full-size picture from it and the frames before, using the motion the game writes. The menus and text
+are drawn afterwards at full size. Bamboo forest at 4K 21:9 on an RTX 4070 laptop:
+
+| Mode | World drawn at | frames/s |
+|---|---|---|
+| Native + TAA | 5120×2160 | ~59 |
+| FSR quality | 3413×1440 | ~75 |
+| FSR balanced | 3013×1271 | ~86 |
+| FSR performance | 2560×1080 | ~104 |
+
+Native with TAA (left) against FSR quality from 3413×1440 (right), 1:1 crops: the quest text stays as sharp, the
+bamboo and the lantern nearly so.
+
+![Native against FSR quality, 1:1 crops](docs/screenshots/63-fsr-quality-vs-native.jpg)
+
+A running character, 1:1: native with TAA, FSR quality, FSR performance. No trail behind the moving leg.
+
+![Running character in native, FSR quality and performance](docs/screenshots/64-fsr-running.jpg)
+
+Very fine patterns smaller than a pixel of the smaller picture (far nets, perforated fences) come out grainy at
+performance, a limit of FSR's hand-written method ([decision 0039](docs/decisions/0039-fsr-upscaling.md)).
 
 </details>
 
