@@ -365,8 +365,7 @@ static uint32_t gaiji_crc(const char *s) {
     return ~c;
 }
 
-/* The icon in gaiji_key.g4tx for a key or mouse binding, or NULL. The sheet also has punctuation and numpad
- * operator icons (gaiji_symbol00.., gaiji_num_eu..), but which key each one shows is not known yet. */
+/* The icon in gaiji_key.g4tx for a key or mouse binding, or NULL. */
 static const char *key_gaiji(int sc) {
     switch (sc) {
     case MOUSE_BIND_LEFT: return "gaiji_mouse_l";
@@ -429,6 +428,22 @@ static const char *key_gaiji(int sc) {
     case SDL_SCANCODE_PAUSE: return "gaiji_pause";
     case SDL_SCANCODE_SCROLLLOCK: return "gaiji_scrolllock";
     case SDL_SCANCODE_NUMLOCKCLEAR: return "gaiji_numlock";
+    case SDL_SCANCODE_MINUS: return "gaiji_symbol00";
+    case SDL_SCANCODE_EQUALS: return "gaiji_eu01";
+    case SDL_SCANCODE_LEFTBRACKET: return "gaiji_symbol04";
+    case SDL_SCANCODE_RIGHTBRACKET: return "gaiji_symbol07";
+    case SDL_SCANCODE_BACKSLASH: return "gaiji_symbol11";
+    case SDL_SCANCODE_SEMICOLON: return "gaiji_symbol05";
+    case SDL_SCANCODE_APOSTROPHE: return "gaiji_eu02";
+    case SDL_SCANCODE_GRAVE: return "gaiji_eu09";
+    case SDL_SCANCODE_COMMA: return "gaiji_symbol08";
+    case SDL_SCANCODE_PERIOD: return "gaiji_symbol09";
+    case SDL_SCANCODE_SLASH: return "gaiji_symbol10";
+    case SDL_SCANCODE_KP_DIVIDE: return "gaiji_num_symbol10";
+    case SDL_SCANCODE_KP_MULTIPLY: return "gaiji_num_eu06";
+    case SDL_SCANCODE_KP_MINUS: return "gaiji_num_symbol00";
+    case SDL_SCANCODE_KP_PLUS: return "gaiji_num_eu10";
+    case SDL_SCANCODE_KP_PERIOD: return "gaiji_num_symbol09";
     default: return NULL;
     }
 }
