@@ -30,7 +30,8 @@ layout(location = 3) in vec4 v_uv;
 layout(location = 0) out vec4 o_mask;
 
 // yw4_shadow: one shadow map compare, soft (PCSS) or the game's. The same text recomp/shader.py
-// (PCSS_COMMON, pcss_helper("SHADOWARRAY2D")) puts into the translated program: keep the two alike.
+// (PCSS_COMMON, pcss_helper("SHADOWARRAY2D")) puts into the translated program: keep the two alike. Ours only:
+// mode.y bit 1 searches with every other tap (the panel's SOFT SHADOW SEARCH).
 const vec2 YW4_DISK[16] = vec2[16](
     vec2(-0.94201624, -0.39906216), vec2(0.94558609, -0.76890725), vec2(-0.09418410, -0.92938870),
     vec2(0.34495938, 0.29387760), vec2(-0.91588581, 0.45771432), vec2(-0.81544232, -0.87912464),
@@ -70,12 +71,13 @@ float yw4_shadow(sampler2DArrayShadow s, sampler2DArray d, vec4 c) {
         r = yw4_search_r;
     } else {
         float gaps = 0.0, casters = 0.0;
-        for (int i = 0; i < 16; i++) {
+        int step = (int(yw4_pcss.mode.y) & 2) != 0 ? 2 : 1;  // ours, faster: every other tap
+        for (int i = 0; i < 16; i += step) {
             float z = textureLod(d, vec3(c.xy + rot * YW4_DISK[i] * yw4_pcss.mode.z, c.z), 0.0).r;
             float gap = c.w - z;
             if (gap > yw4_pcss.tune.x) { gaps += gap; casters += 1.0; }
         }
-        if (yw4_pcss.tune.y == 1.0) return casters * (1.0 / 16.0);
+        if (yw4_pcss.tune.y == 1.0) return casters * (float(step) / 16.0);
         yw4_search_layer = c.z, yw4_search_r = -1.0;
         if (casters == 0.0) return yw4_pcss_remember(c.zw, texture(s, vec4(c.xy, c.z, c.w)));
         r = clamp(gaps / casters * yw4_pcss.scale[min(int(c.z + 0.5), 3)], yw4_pcss.mode.w, yw4_pcss.mode.z);
@@ -180,27 +182,33 @@ void main() {
         vec2 spread = view.d[31].zw * sun.d[4 + c].xy;
         int sx = sign_of(ln.x * -spread.x), sy = sign_of(ln.y * -spread.y);
 
-        vec3 right = onto_plane(at + vec3(spread.x, 0.0, 0.0), at, ln, float(-sx));
-        vec3 left = onto_plane(at + vec3(-spread.x, 0.0, 0.0), at, ln, float(sx));
-        vec3 up = onto_plane(at + vec3(0.0, spread.y, 0.0), at, ln, float(-sy));
-        vec3 down = onto_plane(fma(vec3(0.0, spread.y, 0.0), vec3(1.0, -1.0, 1.0), at), at, ln, float(sy));
-        vec3 right_map = to_map(vec4(right, 1.0), c);
         vec3 centre = to_grid(p, c);
-        vec3 left_map = to_map(vec4(left, 1.0), c);
-        vec3 up_map = to_map(vec4(up, 1.0), c);
-        vec3 down_map = to_map(vec4(down, 1.0), c);
-
         float inv_sin = inversesqrt(abs(fma(-n_dot_l, n_dot_l, 1.0)));
         float bias = bias_of(texel_offset(centre.xy) / inv_sin, n_dot_l);
+        float shadow;
+        if (yw4_pcss.mode.x >= 0.5 && (int(yw4_pcss.mode.y) & 1) != 0) {
+            // ours, faster: with soft shadows on, one soft lookup at the centre. Its 16 taps spread far wider
+            // than the game's five points (less than a texel apart), so the five only cost four more filters.
+            shadow = max(yw4_shadow(shadow_maps, shadow_depth, vec4(centre.xy, layer, centre.z + -bias)), facing_away);
+        } else {
+            vec3 right = onto_plane(at + vec3(spread.x, 0.0, 0.0), at, ln, float(-sx));
+            vec3 left = onto_plane(at + vec3(-spread.x, 0.0, 0.0), at, ln, float(sx));
+            vec3 up = onto_plane(at + vec3(0.0, spread.y, 0.0), at, ln, float(-sy));
+            vec3 down = onto_plane(fma(vec3(0.0, spread.y, 0.0), vec3(1.0, -1.0, 1.0), at), at, ln, float(sy));
+            vec3 right_map = to_map(vec4(right, 1.0), c);
+            vec3 left_map = to_map(vec4(left, 1.0), c);
+            vec3 up_map = to_map(vec4(up, 1.0), c);
+            vec3 down_map = to_map(vec4(down, 1.0), c);
 
-        // in the game's order: the soft shadows remember earlier lookups of this pixel
-        float lit_left = yw4_shadow(shadow_maps, shadow_depth, vec4(left_map.xy, layer, left_map.z + -bias));
-        float lit_right = yw4_shadow(shadow_maps, shadow_depth, vec4(right_map.xy, layer, right_map.z + -bias));
-        float lit_centre = yw4_shadow(shadow_maps, shadow_depth, vec4(centre.xy, layer, centre.z + -bias));
-        float lit_up = yw4_shadow(shadow_maps, shadow_depth, vec4(up_map.xy, layer, up_map.z + -bias));
-        float lit_down = yw4_shadow(shadow_maps, shadow_depth, vec4(down_map.xy, layer, down_map.z + -bias));
-        float sum = lit_down + (lit_up + (lit_left + (lit_right + lit_centre)));
-        float shadow = max(sum * 0.199951172, facing_away);  // the average (0.2 in half precision)
+            // in the game's order: the soft shadows remember earlier lookups of this pixel
+            float lit_left = yw4_shadow(shadow_maps, shadow_depth, vec4(left_map.xy, layer, left_map.z + -bias));
+            float lit_right = yw4_shadow(shadow_maps, shadow_depth, vec4(right_map.xy, layer, right_map.z + -bias));
+            float lit_centre = yw4_shadow(shadow_maps, shadow_depth, vec4(centre.xy, layer, centre.z + -bias));
+            float lit_up = yw4_shadow(shadow_maps, shadow_depth, vec4(up_map.xy, layer, up_map.z + -bias));
+            float lit_down = yw4_shadow(shadow_maps, shadow_depth, vec4(down_map.xy, layer, down_map.z + -bias));
+            float sum = lit_down + (lit_up + (lit_left + (lit_right + lit_centre)));
+            shadow = max(sum * 0.199951172, facing_away);  // the average (0.2 in half precision)
+        }
 
         // 5. Toward the next cascade: one centre lookup there, mixed in by the blend weight.
         if (next > 0) {

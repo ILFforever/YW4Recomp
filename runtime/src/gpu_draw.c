@@ -961,12 +961,50 @@ void gpu_pcss_cycle(void) {
     fprintf(stderr, "yw4: gpu: PCSS %s\n", l ? (l == 1 ? "x1" : l == 2 ? "x2" : "x4") : "off");
 }
 
+/* Speed-ups of our shadow mask's soft shadows (shadow_mask.frag; the panel's SPEED-UPS rows):
+ * - filter once: one soft lookup at the centre instead of at each of the game's five points (YW4_MASK_FILTER=once)
+ * - search 8: the blocker search with every other one of its 16 taps (YW4_PCSS_SEARCH_TAPS=8)
+ * Both go to the program in mode.y: bit 0 filter once, bit 1 search 8. */
+static int mask_once = -1, search8 = -1;
+
+int gpu_mask_filter_once(void) {
+    int v = __atomic_load_n(&mask_once, __ATOMIC_ACQUIRE);
+    if (v < 0) {
+        const char *e = getenv("YW4_MASK_FILTER");
+        v = e && !strcmp(e, "once");
+        __atomic_store_n(&mask_once, v, __ATOMIC_RELEASE);
+    }
+    return v;
+}
+
+void gpu_mask_filter_toggle(void) {
+    int v = !gpu_mask_filter_once();
+    __atomic_store_n(&mask_once, v, __ATOMIC_RELEASE);
+    fprintf(stderr, "yw4: gpu: shadow mask soft filter %s\n", v ?"once per pixel" : "at the game's five points");
+}
+
+int gpu_pcss_search8(void) {
+    int v = __atomic_load_n(&search8, __ATOMIC_ACQUIRE);
+    if (v < 0) {
+        const char *e = getenv("YW4_PCSS_SEARCH_TAPS");
+        v = e && atoi(e) == 8;
+        __atomic_store_n(&search8, v, __ATOMIC_RELEASE);
+    }
+    return v;
+}
+
+void gpu_pcss_search8_toggle(void) {
+    int v = !gpu_pcss_search8();
+    __atomic_store_n(&search8, v, __ATOMIC_RELEASE);
+    fprintf(stderr, "yw4: gpu: soft shadow search %d taps\n", v ? 8 : 16);
+}
+
 static int pcss_settings(VkBuffer *buf, VkDeviceSize *offset) {
     float *f = (float *)ring_alloc(48, buf, offset);
     if (!f) return 0;
     int l = gpu_pcss_level();
     float k = (float)(1 << (l ? l - 1 : 0));
-    f[0] = l ? 1.0f : 0.0f, f[1] = 0.0f, f[2] = pcss_max, f[3] = 0.5f / (float)gpu_shadow_res();
+    f[0] = l ? 1.0f : 0.0f, f[1] = (float)(gpu_mask_filter_once() | gpu_pcss_search8() << 1), f[2] = pcss_max, f[3] = 0.5f / (float)gpu_shadow_res();
     for (int i = 0; i < 4; i++) f[4 + i] = pcss_scale[i] * k;
     f[8] = pcss_eps, f[9] = (float)pcss_debug;
     int once = pcss_search_once;

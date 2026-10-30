@@ -43,6 +43,18 @@ them, unlike the earlier passes, which are exact.
 The same as the game's: at the late-game save the mask took 2.54 ms per frame against the game's 2.62 (300-frame
 averages of `YW4_GPU_PASSES`), with the frame's GPU time 12.4 ms either way.
 
+## Speed-ups (2026-10-30)
+
+Two switches in the panel's SPEED-UPS rows, off by default until the owner has compared the look in game:
+
+- SOFT SHADOW FILTER (`YW4_MASK_FILTER=once`): with soft shadows on, the game's five lookups (points less than a
+  texel apart) are each a 16-tap filter; one lookup at the centre covers the same ground.
+- SOFT SHADOW SEARCH (`YW4_PCSS_SEARCH_TAPS=8`): the blocker search with every other tap of its disk.
+
+The mask at the late-game save, 4K 21:9, soft shadows x2, 4096 maps (300-frame averages): the game's program
+2.62 ms, ours as the game does it 2.54, filter once 1.48, filter once and search 8 1.23. Both depart from the
+game's result, so the A/B no longer applies with them on.
+
 ## Next
 
 Owning the program lets the shadow mask improve: contact shadows for small details the 1024-texel cascades miss,

@@ -56,6 +56,12 @@ void gpu_pcss_cycle(void);
 /* The shadow mask (shadow_mask.c): our program in place of the game's (YW4_SHADOW_MASK, the panel)? */
 int shadow_mask_native(void);
 void shadow_mask_toggle(void);
+/* Its soft shadows' speed-ups (gpu_draw.c): one filter per pixel (YW4_MASK_FILTER=once), an 8-tap blocker
+ * search (YW4_PCSS_SEARCH_TAPS=8). The panel switches them. */
+int gpu_mask_filter_once(void);
+void gpu_mask_filter_toggle(void);
+int gpu_pcss_search8(void);
+void gpu_pcss_search8_toggle(void);
 
 void gpu_pool_init(NvnPool *p);  /* imports the pool's memory into Vulkan */
 void gpu_pool_finalize(NvnPool *p);

@@ -52,6 +52,10 @@ static int bloom_index(void) { return bloom_native(); }
 static int shadow_mask_index(void) { return shadow_mask_native(); }
 static int dof_pass_index(void) { return dof_native(); }
 static int blur_fast_index(void) { return blur_fast(); }
+static const char *mask_speedup_disabled(void) {
+    if (!shadow_mask_native()) return "NEEDS SHADOW MASK SET TO CUSTOM";
+    return gpu_pcss_level() ? NULL : "NEEDS SOFT SHADOWS";
+}
 static const char *dlss_disabled(void) {
     if (!gpu_dlss_built()) return "NOT IN THIS BUILD";
     return gpu_aa() == 5 ? NULL : "NEEDS ANTI-ALIASING SET TO DLSS";
@@ -187,6 +191,18 @@ static const Setting developer[] = {
      "WITH A QUARTER AS MANY, WIDER ONES: ABOUT 3 MS LESS GPU TIME THEN, THE SAME LOOK.",
      {"GAME'S", "FAST"},
      {"THE GAME'S ROUNDS", "A QUARTER OF THE ROUNDS (RECOMMENDED)"}, 2, blur_fast_index, blur_fast_toggle, "YW4_BLUR_FAST", {"0", "1"}},
+    {"SPEED-UPS", "SOFT SHADOW FILTER",
+     "THE GAME LOOKS UP EACH PIXEL'S SHADOW AT FIVE POINTS CLOSE TOGETHER. WITH SOFT SHADOWS EACH LOOKUP IS A WIDE "
+     "16-SAMPLE FILTER, SO ONE AT THE CENTRE COVERS THE SAME GROUND: ABOUT 1 MS LESS GPU TIME AT 4K.",
+     {"GAME'S", "FAST"},
+     {"FIVE FILTERED LOOKUPS PER PIXEL", "ONE FILTERED LOOKUP PER PIXEL"}, 2, gpu_mask_filter_once,
+     gpu_mask_filter_toggle, "YW4_MASK_FILTER", {"five", "once"}, mask_speedup_disabled},
+    {"SPEED-UPS", "SOFT SHADOW SEARCH",
+     "HOW MANY SAMPLES SOFT SHADOWS TAKE TO FIND WHAT CASTS THE SHADOW, WHICH SETS HOW SOFT ITS EDGE IS. 8 IS "
+     "ABOUT 0.25 MS FASTER AT 4K; EDGES MAY GET GRAINIER.",
+     {"16", "8"},
+     {"16 SAMPLES", "8 SAMPLES"}, 2, gpu_pcss_search8, gpu_pcss_search8_toggle, "YW4_PCSS_SEARCH_TAPS", {"16", "8"},
+     mask_speedup_disabled},
 };
 enum { NPLAYER = sizeof player / sizeof *player, NDEVELOPER = sizeof developer / sizeof *developer,
        NSETTINGS = NPLAYER + NDEVELOPER, LINK_ROW = NPLAYER };
