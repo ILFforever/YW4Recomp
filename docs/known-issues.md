@@ -53,12 +53,7 @@ What is known to be missing or wrong, roughly in the order it is likely to matte
 - **Occlusion queries always report 0 samples.** The game issues them in pairs from the house onward; answering
   "visible" changed nothing on screen so far, but the answer is wrong.
 - **Compute shaders that use storage images are skipped** (log line "uses storage images").
-- **Alpha test is ignored** (log line "alpha test ... ignored").
-- **Indirect and transform-feedback draws are skipped.**
-- **Streaks in movies.**
 - **The "4++" logo variant** does not show (add-on ownership).
-- GPU time is about 1-2× Eden's: full barriers between passes, one general image layout, textures re-uploaded, no
-  pipeline cache. The Vulkan validation layer reports barriers recorded inside dynamic rendering.
 - **The bridge in the snowy past-world town is a heavy scene** (late game). It used to drop to about 25 frames/s
   (2026-10-25: about 1,450 draws against the town's 300). Since the later GPU work it holds the game's 30
   (owner, 2026-10-29), but above 30 (the FRAME RATE setting) looking at the bridge costs about 10 frames/s: the
