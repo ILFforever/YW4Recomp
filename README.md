@@ -352,8 +352,8 @@ show those instead of the Switch buttons. Below, the shortcut wheel and the mini
 Put a mod in `work/mods`, in the layout a modded Switch uses: `work/mods/contents/010086c00af7c000/<mod name>/romfs/...`
 (or simply `work/mods/<mod name>/romfs/...`). At start its files replace the game's at the same paths and its new
 files are added, as on a Switch; your dump is not changed. The log names each mod it loaded. `YW4_MODS` points to
-another folder, `YW4_MODS=none` turns mods off. The fan **English translation patch** works this way (not included:
-bring your own copy):
+another folder, `YW4_MODS=none` turns mods off. The fan **English translation patch** works this way (not included,
+get yours from [GameBanana](https://gamebanana.com/mods/480884)):
 
 ![The warning before the title: The copyright warning in English; The town: "Head to Mt. Wildwood!": The town with the quest marker in English: Head to Mt. Wildwood!](docs/screenshots/90-english-patch.jpg)
 
