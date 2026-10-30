@@ -47,6 +47,14 @@ python -m recomp.build --run    # build <work_dir>/build/yw4.exe and run it
 A full build after `translate` takes a few minutes; later builds only recompile what changed (seconds). The build
 cannot relink while `yw4.exe` is running. Details on the recompiler are in [recomp/README.md](../recomp/README.md).
 
+### Build options
+
+On Windows, `python -m recomp.build` takes `--no-fsr` and `--no-dlss` to leave out the upscaling and frame
+generation libraries. `--no-fsr` leaves out AMD FSR (upscaling and frame generation); `--no-dlss` leaves out NVIDIA
+DLSS (upscaling) and NVIDIA Streamline (DLSS frame generation and Reflex). The build then skips their download, leaves
+their DLLs out of `work/build/`, and the settings panel greys out what needs them ("NOT IN THIS BUILD"). Switching
+the flags recompiles only the runtime's own files.
+
 Run from the repo root: shaders are looked up under `work/shaders/`. Directly:
 
 ```

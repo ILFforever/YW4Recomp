@@ -107,6 +107,8 @@ def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--run", action="store_true", help="run the result on work/exefs/")
     ap.add_argument("--jobs", type=int, default=os.cpu_count() or 4)
+    ap.add_argument("--no-fsr", action="store_true", help="leave out AMD FSR (decision 0039)")
+    ap.add_argument("--no-dlss", action="store_true", help="leave out NVIDIA DLSS and Streamline (decision 0040)")
     args = ap.parse_args(argv)
     try:
         cfg = config.load()
@@ -123,31 +125,38 @@ def main(argv: list[str] | None = None) -> int:
     includes = [f"-I{RUNTIME / 'include'}", f"-I{cfg.work_dir / 'recomp'}"]
     # The window (decision 0019): SDL3 (fetched on Windows, the system's elsewhere), Vulkan headers
     includes.append(f"-I{check.REPO / 'third_party' / 'vulkan' / 'include'}")
+    feature_defs: list[str] = []
     if sys.platform == "win32":
         sdl = deps.fetch_sdl(cfg)
         includes.append(f"-I{sdl / 'include'}")
         sdl_libs = [str(sdl / "lib" / "libSDL3.dll.a")]
         # AMD FSR (decision 0039): headers to compile gpu_fsr.c against, DLLs copied next to yw4.exe below
-        fsr = deps.fetch_fsr(cfg) / "Kits" / "FidelityFX"
-        includes.append(f"-I{fsr / 'api' / 'include'}")
+        if not args.no_fsr:
+            fsr = deps.fetch_fsr(cfg) / "Kits" / "FidelityFX"
+            includes.append(f"-I{fsr / 'api' / 'include'}")
+            feature_defs.append("-DYW4_FSR=1")
         # NVIDIA DLSS (decision 0040): headers, the static NGX library (made for MSVC: runtime/src/msvc_shim.c
         # supplies the few runtime pieces it needs, empty stand-ins satisfy its default-library requests), the DLL
-        dlss = deps.fetch_dlss(cfg)
-        includes += [f"-I{dlss / 'include'}", "-DYW4_DLSS=1"]
-        stub = dlss / "stub"
-        if not (stub / "libmsvcprt.a").is_file():
-            stub.mkdir(exist_ok=True)
-            ar = Path(cc).with_name("llvm-ar.exe")
-            for name in ("msvcprt", "OLDNAMES"):
-                subprocess.run([str(ar), "rc", str(stub / f"lib{name}.a")], check=True)
-        sdl_libs += [str(dlss / "lib" / "Windows_x86_64" / "x64" / "nvsdk_ngx_d.lib"), f"-L{stub}"]
-        # NVIDIA Streamline (DLSS frame generation and Reflex): headers; its DLLs are loaded at run time, copied below
-        sl = deps.fetch_streamline(cfg)
-        includes.append(f"-I{sl / 'include'}")
+        if not args.no_dlss:
+            dlss = deps.fetch_dlss(cfg)
+            includes.append(f"-I{dlss / 'include'}")
+            feature_defs.append("-DYW4_DLSS=1")
+            stub = dlss / "stub"
+            if not (stub / "libmsvcprt.a").is_file():
+                stub.mkdir(exist_ok=True)
+                ar = Path(cc).with_name("llvm-ar.exe")
+                for name in ("msvcprt", "OLDNAMES"):
+                    subprocess.run([str(ar), "rc", str(stub / f"lib{name}.a")], check=True)
+            sdl_libs += [str(dlss / "lib" / "Windows_x86_64" / "x64" / "nvsdk_ngx_d.lib"), f"-L{stub}"]
+            # NVIDIA Streamline (DLSS frame generation and Reflex): headers; its DLLs are loaded at run time, copied below
+            sl = deps.fetch_streamline(cfg)
+            includes.append(f"-I{sl / 'include'}")
+            feature_defs.append("-DYW4_STREAMLINE=1")
     else:
         pc = lambda *a: subprocess.run(["pkg-config", *a, "sdl3"], capture_output=True, text=True, check=True).stdout.split()
         includes += pc("--cflags")
         sdl_libs = pc("--libs")
+    includes += feature_defs
     hdr = newest_header(cfg)
     # runtime/src/*.h are private to the runtime: changing one doesn't rebuild generated code
     rt_hdr = max([hdr, *(h.stat().st_mtime for h in (RUNTIME / "src").glob("*.h"))])
@@ -156,6 +165,10 @@ def main(argv: list[str] | None = None) -> int:
     stamp = objdir / "flags.txt"
     flags_now = " ".join([*CFLAGS, *target_flags()])
     stale_flags = not stamp.exists() or stamp.read_text().strip() != flags_now
+    # another set of --no-fsr / --no-dlss: only the runtime's own files read those defines
+    feature_stamp = objdir / "features.txt"
+    features_now = " ".join(feature_defs)
+    stale_features = not feature_stamp.exists() or feature_stamp.read_text().strip() != features_now
     todo, objs = [], []
     for src in sources(cfg):
         rt = src.parent == RUNTIME / "src"
@@ -163,7 +176,7 @@ def main(argv: list[str] | None = None) -> int:
         obj = objdir / (("rt_" if rt else "musl_" if musl else "") + src.stem + ".o")
         objs.append(obj)
         dep = musl_hdr if musl else rt_hdr if rt else generated_header(cfg, src)
-        if not obj.exists() or obj.stat().st_mtime < max(src.stat().st_mtime, dep) or (stale_flags and not musl):
+        if not obj.exists() or obj.stat().st_mtime < max(src.stat().st_mtime, dep) or (stale_flags and not musl) or (stale_features and rt):
             todo.append((src, obj))
 
     t0 = time.time()
@@ -175,15 +188,25 @@ def main(argv: list[str] | None = None) -> int:
         print(f"{len(errors)} file(s) failed", file=sys.stderr)
         return 1
     stamp.write_text(flags_now + "\n")
+    feature_stamp.write_text(features_now + "\n")
     exe = cfg.work_dir / "build" / "yw4.exe"
     libs = [*sdl_libs, "-pthread"] + (["-lwinmm", "-lpsapi"] if sys.platform == "win32" else [])  # winmm: timeBeginPeriod
     if sys.platform == "win32":
         shutil.copy2(sdl / "bin" / "SDL3.dll", exe.parent / "SDL3.dll")  # found next to yw4.exe
-        for dll in deps.FSR_DLLS:  # amd_fidelityfx_loader_vk.dll loads the upscaler from its own folder
-            shutil.copy2(fsr / "signedbin" / dll, exe.parent / dll)
-        shutil.copy2(dlss / "lib" / "Windows_x86_64" / "rel" / "nvngx_dlss.dll", exe.parent / "nvngx_dlss.dll")
-        for dll in deps.SL_DLLS:  # Streamline finds its plugins next to yw4.exe
-            shutil.copy2(sl / "bin" / "x64" / dll, exe.parent / dll)
+        if not args.no_fsr:
+            for dll in deps.FSR_DLLS:  # amd_fidelityfx_loader_vk.dll loads the upscaler from its own folder
+                shutil.copy2(fsr / "signedbin" / dll, exe.parent / dll)
+        else:
+            for dll in deps.FSR_DLLS:
+                (exe.parent / dll).unlink(missing_ok=True)
+        if not args.no_dlss:
+            shutil.copy2(dlss / "lib" / "Windows_x86_64" / "rel" / "nvngx_dlss.dll", exe.parent / "nvngx_dlss.dll")
+            for dll in deps.SL_DLLS:  # Streamline finds its plugins next to yw4.exe
+                shutil.copy2(sl / "bin" / "x64" / dll, exe.parent / dll)
+        else:
+            (exe.parent / "nvngx_dlss.dll").unlink(missing_ok=True)
+            for dll in deps.SL_DLLS:
+                (exe.parent / dll).unlink(missing_ok=True)
     link = subprocess.run([cc, "-o", str(exe), *map(str, objs), *libs], capture_output=True, text=True)
     if link.returncode != 0:
         print(f"link failed:\n{link.stderr[-3000:]}", file=sys.stderr)

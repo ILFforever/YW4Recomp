@@ -24,6 +24,8 @@
 #include "nvsdk_ngx_helpers_vk.h"
 #include "nvsdk_ngx_vk.h"
 
+int gpu_dlss_built(void) { return 1; }
+
 int gpu_dlss_device_extensions(uint32_t vendor, const char ***exts, unsigned *count) {
     *exts = NULL, *count = 0;
     if (vendor != 0x10de) return 0;  /* NVIDIA */
@@ -171,8 +173,9 @@ int gpu_dlss_dispatch(VkCommandBuffer cb, const GpuDlssInputs *in) {
     return 1;
 }
 
-#else  /* no DLSS SDK in this build (not Windows) */
+#else  /* no DLSS in this build */
 
+int gpu_dlss_built(void) { return 0; }
 int gpu_dlss_device_extensions(uint32_t vendor, const char ***exts, unsigned *count) {
     (void)vendor;
     *exts = NULL, *count = 0;

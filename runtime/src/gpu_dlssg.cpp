@@ -16,7 +16,7 @@
  * (the game's matrices aren't known: a projection from the field of view, the camera motion taken as part of the
  * motion vectors); before the present the game's rectangle in the window image tagged as the backbuffer's
  * subrect (the black bars stay as they are), the options and the present markers. */
-#ifdef _WIN32
+#ifdef YW4_STREAMLINE
 #include <windows.h>
 #include <dxgi.h>
 
@@ -392,7 +392,7 @@ extern "C" float dlssg_shown_per_frame(void) { return shown_per_frame; }
 
 extern "C" int dlssg_on(void) { return ready() && mode_on == 1; }
 
-#else  /* not Windows: no Streamline */
+#else  /* no Streamline in this build */
 
 extern "C" {
 #include "gpu_dlssg.h"

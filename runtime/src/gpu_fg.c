@@ -16,6 +16,7 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "gpu_dlss.h"
 #include "gpu_dlssg.h"
 #include "gpu_fg.h"
 #include "gpu_fsr.h"
@@ -31,6 +32,14 @@ int gpu_fg(void) {
         const char *e = getenv("YW4_FG");
         m = e ? atoi(e) : 0;
         if (m < 0 || m > 2) m = 0;
+        if (m == 2 && !gpu_dlss_built()) {
+            m = gpu_fsr_built() ? 1 : 0;
+            fprintf(stderr, "yw4: fg: DLSS is not in this build: %s instead\n", m == 1 ? "FSR" : "off");
+        }
+        if (m == 1 && !gpu_fsr_built()) {
+            m = 0;
+            fprintf(stderr, "yw4: fg: FSR is not in this build: off instead\n");
+        }
         __atomic_store_n(&fg_mode, m, __ATOMIC_RELEASE);
     }
     return m;
@@ -55,12 +64,13 @@ void gpu_fg_test_switch(uint64_t frame) {
 
 void gpu_fg_cycle(void) {
     int m = (gpu_fg() + 1) % 3;
-    if (m == 2 && !dlssg_available()) m = 0;  /* DLSS's needs an RTX 40 or newer (gpu_dlssg.cpp) */
+    while ((m == 2 && (!gpu_dlss_built() || !dlssg_available())) || (m == 1 && !gpu_fsr_built()))
+        m = (m + 1) % 3;
     __atomic_store_n(&fg_mode, m, __ATOMIC_RELEASE);
     fprintf(stderr, "yw4: gpu: frame generation %s\n", m == 2 ? "DLSS" : m == 1 ? "FSR" : "off");
 }
 
-#ifdef _WIN32
+#ifdef YW4_FSR
 #include <windows.h>
 #ifndef _WINDOWS
 #define _WINDOWS  /* ffx_api_loader.h looks for MSBuild's name for Windows (as gpu_fsr.c) */
@@ -511,7 +521,7 @@ void gpu_fg_drain(void) {
     host_unlock(&plock);
 }
 
-#else  /* not Windows: no FSR DLLs yet */
+#else  /* no FSR in this build */
 
 int gpu_fg_active(void) { return 0; }
 float gpu_fg_shown_per_frame(void) { return 0.0f; }

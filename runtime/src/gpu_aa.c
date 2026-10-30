@@ -34,6 +34,14 @@ int gpu_aa(void) {
         const char *e = getenv("YW4_AA");
         m = e ? atoi(e) : 0;
         if (m < 0 || m > 5) m = 0;
+        if (m == 5 && !gpu_dlss_built()) {
+            m = gpu_fsr_built() ? 4 : 3;
+            fprintf(stderr, "yw4: aa: DLSS is not in this build: %s instead\n", m == 4 ? "FSR" : "TAA");
+        }
+        if (m == 4 && !gpu_fsr_built()) {
+            m = 3;
+            fprintf(stderr, "yw4: aa: FSR is not in this build: TAA instead\n");
+        }
         __atomic_store_n(&aa_mode, m, __ATOMIC_RELEASE);
     }
     return m;
@@ -41,6 +49,8 @@ int gpu_aa(void) {
 
 void gpu_aa_cycle(void) {
     int m = (gpu_aa() + 1) % 6;
+    while ((m == 5 && !gpu_dlss_built()) || (m == 4 && !gpu_fsr_built()))
+        m = (m + 1) % 6;
     __atomic_store_n(&aa_mode, m, __ATOMIC_RELEASE);
     fprintf(stderr, "yw4: gpu: anti-aliasing %s\n",
             m == 5 ? "DLSS" : m == 4 ? "FSR" : m == 3 ? "TAA" : m == 2 ? "SMAA" : m == 1 ? "FXAA" : "off");

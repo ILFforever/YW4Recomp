@@ -17,6 +17,8 @@ typedef struct {
     float frame_ms;
 } GpuDlssInputs;
 
+/* 1: built with DLSS headers and libraries. */
+int gpu_dlss_built(void);
 /* The device extensions DLSS needs (NVIDIA GPUs only: vendor id 0x10de), for window.c to enable; 0 if none. */
 int gpu_dlss_device_extensions(uint32_t vendor, const char ***exts, unsigned *count);
 /* The DLSS model (panel DLSS MODEL, YW4_DLSS_MODEL): 0 fast (the CNN, preset E), 1 best (the transformers, DLSS's

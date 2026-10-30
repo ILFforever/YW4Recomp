@@ -67,10 +67,6 @@ What is known to be missing or wrong, roughly in the order it is likely to matte
 
 ## Tools
 
-- **To do: a build option with or without FSR / DLSS** (owner, 2026-10-29). The Windows build always downloads and
-  links AMD FSR, NVIDIA DLSS and Streamline (`tools/yw4/deps.py`). Later, a flag to leave out one or both (no
-  download, the settings hidden), for builds shipped without NVIDIA's files or built without internet.
-
 - `tests/test_kernel.py::test_threads` fails now and then with "cannot reserve the heap and thread-local
   regions" (seen once on 2026-10-22, then 4 passes in a row): the test program reserves fixed addresses, which
   something else in the process can occasionally occupy first. Rerun before suspecting a change. The game itself

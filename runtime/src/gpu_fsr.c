@@ -16,7 +16,7 @@
 #include "gpu_fsr.h"
 #include "host.h"
 
-#ifdef _WIN32
+#ifdef YW4_FSR
 #include <windows.h>
 #ifndef _WINDOWS
 #define _WINDOWS  /* ffx_api_loader.h looks for MSBuild's name for Windows; without it ffxLoadFunctions is empty */
@@ -37,6 +37,8 @@ static int ctx_failed;   /* creation failed for this size: don't retry every fra
 static void message(uint32_t type, const wchar_t *text) {
     fprintf(stderr, "yw4: fsr: %s: %ls\n", type == FFX_API_MESSAGE_TYPE_ERROR ? "error" : "warning", text);
 }
+
+int gpu_fsr_built(void) { return 1; }
 
 int gpu_fsr_available(void) {
     if (loaded >= 0) return loaded;
@@ -178,8 +180,9 @@ int gpu_fsr_dispatch(VkCommandBuffer cb, const GpuFsrInputs *in) {
     return 1;
 }
 
-#else  /* not Windows: no FSR DLLs yet */
+#else  /* no FSR in this build */
 
+int gpu_fsr_built(void) { return 0; }
 int gpu_fsr_available(void) { return 0; }
 void gpu_fsr_jitter(uint32_t w, uint32_t ow, uint64_t n, float *jx, float *jy) {
     (void)w, (void)ow, (void)n;

@@ -11,6 +11,7 @@
 #include "gpu_dlss.h"
 #include "gpu_dlssg.h"
 #include "gpu_fg.h"
+#include "gpu_fsr.h"
 #include "post.h"
 #include "gbuffer.h"
 #include "gpu.h"
@@ -50,14 +51,24 @@ static int gbuffer_index(void) { return gbuffer_native(); }
 static int bloom_index(void) { return bloom_native(); }
 static int dof_pass_index(void) { return dof_native(); }
 static int blur_fast_index(void) { return blur_fast(); }
-static const char *dlss_disabled(void) { return gpu_aa() == 5 ? NULL : "NEEDS ANTI-ALIASING SET TO DLSS"; }
+static const char *dlss_disabled(void) {
+    if (!gpu_dlss_built()) return "NOT IN THIS BUILD";
+    return gpu_aa() == 5 ? NULL : "NEEDS ANTI-ALIASING SET TO DLSS";
+}
 static int reflex_index(void) { return dlssg_reflex(); }  /* what runs: on while DLSS frame generation is */
 static const char *reflex_disabled(void) {
+    if (!gpu_dlss_built()) return "NOT IN THIS BUILD";
     if (!dlssg_reflex_available()) return "NEEDS AN NVIDIA GPU";
     return gpu_fg() == 2 && dlssg_available() ? "ON WHILE FRAME GENERATION IS DLSS: NVIDIA REQUIRES IT" : NULL;
 }
-static const char *fg_disabled(void) { return gpu_aa() >= 3 ? NULL : "NEEDS ANTI-ALIASING SET TO TAA, FSR OR DLSS"; }
-static const char *upscale_disabled(void) { return gpu_aa() >= 4 ? NULL : "NEEDS ANTI-ALIASING SET TO FSR OR DLSS"; }
+static const char *fg_disabled(void) {
+    if (!gpu_fsr_built() && !gpu_dlss_built()) return "NOT IN THIS BUILD";
+    return gpu_aa() >= 3 ? NULL : "NEEDS ANTI-ALIASING SET TO TAA, FSR OR DLSS";
+}
+static const char *upscale_disabled(void) {
+    if (!gpu_fsr_built() && !gpu_dlss_built()) return "NOT IN THIS BUILD";
+    return gpu_aa() >= 4 ? NULL : "NEEDS ANTI-ALIASING SET TO FSR OR DLSS";
+}
 
 /* The player's settings, in the order shown; a row starts a new group when its category differs from the row
  * before. The last row opens the developer page. The texts use the HUD font's characters (hud.c): upper case,

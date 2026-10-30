@@ -15,6 +15,8 @@ typedef struct {
     float frame_ms, sharpness, cam_near, cam_far, fov_y;
 } GpuFsrInputs;
 
+/* 1: built with FSR headers and libraries. */
+int gpu_fsr_built(void);
 /* 1: the DLLs are there and FSR runs on this device (checked once). */
 int gpu_fsr_available(void);
 /* The shift for frame n of FSR's jitter sequence (render w against output ow), in pixels. */
