@@ -21,10 +21,9 @@ typedef struct {
 int gpu_dlss_built(void);
 /* The device extensions DLSS needs (NVIDIA GPUs only: vendor id 0x10de), for window.c to enable; 0 if none. */
 int gpu_dlss_device_extensions(uint32_t vendor, const char ***exts, unsigned *count);
-/* The DLSS model (panel DLSS MODEL, YW4_DLSS_MODEL): 0 fast (the CNN, preset E), 1 best (the transformers, DLSS's
- * own defaults). */
+/* The DLSS model: 1 the transformers (DLSS's own defaults), always; 0 the CNN (preset E), with YW4_DLSS_MODEL=0
+ * for tests only (it makes shadow edges flicker). */
 int gpu_dlss_model(void);
-void gpu_dlss_model_cycle(void);
 /* 1: NGX started and DLSS is available on this GPU (checked once, after the device exists). */
 int gpu_dlss_available(void);
 /* Records DLSS into cb (outside rendering). 0 if it could not run. */

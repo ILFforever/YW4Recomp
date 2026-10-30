@@ -354,6 +354,18 @@ static void depth_pass(VkCommandBuffer cb, VkImageView view, VkFormat fmt, uint3
 /* ---- TAA: the jitter and the game's motion target */
 
 static uint32_t scene_w, scene_h;  /* the scene's size at the last anti-aliasing (0: none yet) */
+static uint64_t scene_frame;       /* the GPU frame of the last 3D object's draw (gpu_draw.c) */
+
+void gpu_note_model_draw(void) { __atomic_store_n(&scene_frame, gpu_frames(), __ATOMIC_RELAXED); }
+
+/* A 3D object was drawn in the last 30 GPU frames. Without one (the title menu, videos, loading screens: 2D,
+ * though the title still runs the lighting and post passes) FSR frame generation steps aside (gpu_fg_active),
+ * so the frames are paced by FRAME RATE, VSYNC included; the margin keeps it from switching on and off around a
+ * loading screen's odd 3D frame. */
+int gpu_scene_recent(void) {
+    uint64_t f = __atomic_load_n(&scene_frame, __ATOMIC_RELAXED);
+    return f && gpu_frames() - f < 30;
+}
 static uint32_t scene_ow;          /* ... and the output's width (upscaling: larger) */
 /* The game's motion target is used for other things later in the frame, so it is copied into our own image
  * as soon as the G-buffer pass ends (gpu_taa_targets_end). */
@@ -393,6 +405,35 @@ int gpu_taa_jitter(uint32_t w, uint32_t h, float *jx, float *jy) {
     }
     int i = (int)(gpu_frames() % 8) + 1;
     *jx = halton(i, 2) - 0.5f, *jy = halton(i, 3) - 0.5f;
+    return 1;
+}
+
+/* This frame's 3D shift as an offset in the game's clip space (x right, y up; 2 = the scene's width / height),
+ * for the full-screen passes that work out positions from the depth with the camera's unshifted inverse
+ * projection (gpu_draw.c): without it their results (the shadow mask) stay where an unshifted picture would
+ * have them, and the upscaler, taking the shift out of everything, moves them back and forth (shadows
+ * vibrating sideways with DLSS's fast model, owner 2026-10-30). 0: no shift this frame. YW4_UNJITTER=0: off;
+ * YW4_UNJITTER_SIGN=x,y (testing) flips the axes. */
+int gpu_taa_clip_jitter(float *cx, float *cy) {
+    static int on = -1;
+    static float sx = 1.0f, sy = 1.0f;
+    if (on < 0) {
+        const char *e = getenv("YW4_UNJITTER");
+        on = !e || atoi(e);
+        if ((e = getenv("YW4_UNJITTER_SIGN")) != NULL) sscanf(e, "%f,%f", &sx, &sy);
+    }
+    if (!on || gpu_aa() < 3 || !scene_w || !scene_h) return 0;
+    float jx, jy;
+    if (gpu_aa() == 4 && gpu_fsr_available() == 1) {
+        gpu_fsr_jitter(scene_w, scene_ow ? scene_ow : scene_w, gpu_frames(), &jx, &jy);
+    } else if (gpu_aa() == 5) {
+        dlss_jitter(scene_w, scene_ow ? scene_ow : scene_w, gpu_frames(), &jx, &jy);
+    } else {
+        int i = (int)(gpu_frames() % 8) + 1;
+        jx = halton(i, 2) - 0.5f, jy = halton(i, 3) - 0.5f;
+    }
+    /* the viewport moved the 3D right by jx and down by jy pixels */
+    *cx = sx * 2.0f * jx / (float)scene_w, *cy = sy * -2.0f * jy / (float)scene_h;
     return 1;
 }
 

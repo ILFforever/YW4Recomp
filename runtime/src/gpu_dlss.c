@@ -36,24 +36,14 @@ int gpu_dlss_device_extensions(uint32_t vendor, const char ***exts, unsigned *co
 }
 
 /* Models (2026-10-29, 4K 21:9 output, RTX 4070 laptop, performance mode): DLSS's defaults, the transformers K
- * (quality, balanced) and M (performance), cost 5.3 / 7.4 ms; the CNN preset E 2.6 ms (FSR 3.7) and looks nearly
- * as clean on the fine patterns FSR turns to grain. So fast (E) is the default, best (the transformers) a choice. */
-static int model_v = -1;
-
+ * (quality, balanced) and M (performance), cost 5.3 / 7.4 ms; the CNN preset E 2.6 ms (FSR 3.7). The CNN was the
+ * default until 2026-10-31, when it turned out to make shadow edges flicker (the character's shadow, standing
+ * still: 4-6% of its edge pixels over 16 frames, the transformers 0%; the same in the build that brought DLSS in).
+ * So the transformers only, no panel row; YW4_DLSS_MODEL=0 still picks the CNN for tests. */
 int gpu_dlss_model(void) {
-    int m = __atomic_load_n(&model_v, __ATOMIC_ACQUIRE);
-    if (m < 0) {
-        const char *e = getenv("YW4_DLSS_MODEL");
-        m = e && atoi(e) == 1;
-        __atomic_store_n(&model_v, m, __ATOMIC_RELEASE);
-    }
+    static int m = -1;
+    if (m < 0) m = !(getenv("YW4_DLSS_MODEL") && atoi(getenv("YW4_DLSS_MODEL")) == 0);
     return m;
-}
-
-void gpu_dlss_model_cycle(void) {
-    int m = !gpu_dlss_model();
-    __atomic_store_n(&model_v, m, __ATOMIC_RELEASE);
-    fprintf(stderr, "yw4: dlss: model %s (settings panel)\n", m ? "best (transformer)" : "fast (CNN)");
 }
 
 static int state = -1;  /* -1 not tried, 0 unavailable, 1 ready */
@@ -182,8 +172,7 @@ int gpu_dlss_device_extensions(uint32_t vendor, const char ***exts, unsigned *co
     return 0;
 }
 int gpu_dlss_available(void) { return 0; }
-int gpu_dlss_model(void) { return 0; }
-void gpu_dlss_model_cycle(void) {}
+int gpu_dlss_model(void) { return 1; }
 int gpu_dlss_dispatch(VkCommandBuffer cb, const GpuDlssInputs *in) {
     (void)cb, (void)in;
     return 0;

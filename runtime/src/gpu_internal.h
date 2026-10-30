@@ -165,6 +165,9 @@ VkShaderModule gpu_native_shader(const char *name);
 /* TAA (gpu_aa.c): the shift in pixels for a 3D draw into a w x h target (0: none), and the draws' targets
  * (the G-buffer's motion target is noted, and copied when its targets change). */
 int gpu_taa_jitter(uint32_t w, uint32_t h, float *jx, float *jy);  /* not for the UI: the caller checks */
+int gpu_taa_clip_jitter(float *cx, float *cy);  /* the same shift in clip space, for passes rebuilding positions */
+int gpu_scene_recent(void);  /* a 3D object drawn in the last 30 GPU frames (FSR frame generation steps aside without) */
+void gpu_note_model_draw(void);  /* gpu_draw.c: a 3D object's draw, this frame */
 void gpu_taa_note_targets(const GpuState *s);
 /* One of the textures presented lately (the window's images; gpu.c). */
 int gpu_is_presented(uint64_t addr);

@@ -107,7 +107,9 @@ static int available(void) {
     return loaded = 1;
 }
 
-int gpu_fg_active(void) { return gpu_fg() == 1 && gpu_aa() >= 3 && available() == 1; }
+/* On, and a 3D scene drawn lately (gpu_scene_recent): 2D screens such as the title menu's video bypass it, as DLSS
+ * frame generation does on frames without its tags (gpu_dlssg.cpp). */
+int gpu_fg_active(void) { return gpu_fg() == 1 && gpu_aa() >= 3 && available() == 1 && gpu_scene_recent(); }
 
 static uint32_t surface_format(VkFormat f) {
     switch (f) {

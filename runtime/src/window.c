@@ -73,7 +73,7 @@ static int swap_dlssg;           /* made while DLSS frame generation was on (NVI
 
 static int free_running(void) {
     int hz = framerate_hz();
-    return !hz || hz > 60 || gpu_fg_active() || dlssg_on();  /* frame generation paces its frames itself */
+    return !hz || hz > 60 || gpu_fg_active() || dlssg_on();  /* frame generation paces its frames itself; vsync (-1): FIFO */
 }
 
 static VkBuffer staging;
@@ -187,6 +187,10 @@ static int create_swapchain(void) {
     swap_extent = extent;
     swap_format = fmt.format;
     swapchain_stale = 0;
+    fprintf(stderr, "yw4: window: swapchain %ux%u, %u images, %s%s\n", extent.width, extent.height, nswap,
+            mode == VK_PRESENT_MODE_FIFO_KHR ? "FIFO (waits for the refresh)" : mode == VK_PRESENT_MODE_MAILBOX_KHR ? "MAILBOX"
+                                                                                                        : "IMMEDIATE",
+            old ? " (made again)" : "");
     return 0;
 }
 
@@ -752,6 +756,13 @@ void window_present_image(VkImage image, VkFormat format, VkRect2D rect, uint64_
     uint32_t w = rect.extent.width, h = rect.extent.height;
     if (!have_vulkan || !w || !h) return;
     int shot = screenshot_wanted(n);
+    if (shot && getenv("YW4_DT_LOG")) {  /* testing frame pacing: the game's time step with each screenshot */
+        static int64_t last;
+        int64_t now = host_now_ns();
+        fprintf(stderr, "yw4: dt: frame %" PRIu64 ": game step %.3f ms, %.3f ms since the last screenshot\n", n,
+                framerate_game_dt() * 1000.0f, last ? (double)(now - last) / 1e6 : 0.0);
+        last = now;
+    }
     int bgra = format == VK_FORMAT_B8G8R8A8_UNORM || format == VK_FORMAT_B8G8R8A8_SRGB;
     if (shot && !bgra && format != VK_FORMAT_R8G8B8A8_UNORM && format != VK_FORMAT_R8G8B8A8_SRGB) {
         fprintf(stderr, "yw4: screenshot of Vulkan format %d not supported yet\n", (int)format);

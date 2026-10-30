@@ -1,4 +1,4 @@
-/* The frame rate: 30 (the game's), 60, 120, 144 or no limit, switchable while playing (YW4_FPS, panel FRAME RATE).
+/* The frame rate: 30 (the game's), 60, 120, 144, the display's refresh (vsync) or no limit, switchable while playing (YW4_FPS, panel FRAME RATE).
  *
  * nnMain paces itself. A static constructor sets the byte at main+0x56b82e8 to 2 (vsyncs per frame, n) and
  * main+0x56b82e9 to 1 (limiter on). nnMain reads n once at start:
@@ -19,6 +19,15 @@
  * game's own interval did), 120 and 144 sleep to a timer, unlimited doesn't wait. Above 60 the window
  * presents with MAILBOX or IMMEDIATE (window.c), so the monitor's refresh doesn't cap it.
  *
+ * Vsync (YW4_FPS=vsync): no wait here; the swapchain presents with FIFO, so each frame waits for the display's
+ * refresh and the rate locks to it (120 on a 120 Hz screen). Running free at about the refresh rate shows the
+ * frames at uneven refreshes: the menus' scrolling background stuttered (owner, 2026-10-30, 120 Hz screen;
+ * smooth at 30, an even divisor). Known gap: chosen at start it locks (frame intervals 8.3 ms, 95% within 8.6 on
+ * the owner's 120 Hz laptop screen); switched to while playing, the swapchain is made again with FIFO, yet the
+ * intervals stay loose (95% within 11 ms) on that hybrid-GPU laptop, so the panel says it applies after a restart.
+ * A wait on the display's own refresh (DwmFlush) may fix it. While frame generation runs it paces the frames itself
+ * (MAILBOX), so this applies only without it (2D screens drop it: gpu_fg.c, gpu_dlssg.cpp).
+ *
  * YW4_FRAME_VSYNCS=<n>: the old way, the game's own pacing with that n (2 = the game's original), fixed for
  * the run; the panel row then does nothing. */
 #include <stdio.h>
@@ -31,7 +40,7 @@
 #include "yw4load.h"
 #include "yw4rt.h"
 
-static const int rates[] = {30, 60, 120, 144, 0};
+static const int rates[] = {30, 60, 120, 144, -1, 0};  /* -1: the display's refresh (vsync) */
 enum { NRATES = sizeof rates / sizeof *rates };
 
 static int index_v = -1;
@@ -41,7 +50,7 @@ int framerate_index(void) {
     int i = __atomic_load_n(&index_v, __ATOMIC_ACQUIRE);
     if (i >= 0) return i;
     const char *e = getenv("YW4_FPS");
-    int want = e && *e ? atoi(e) : 30;
+    int want = e && !strcmp(e, "vsync") ? -1 : e && *e ? atoi(e) : 30;
     i = 0;
     for (int k = 0; k < NRATES; k++)
         if (rates[k] == want) i = k;
@@ -52,7 +61,8 @@ int framerate_index(void) {
 void framerate_cycle(void) {
     int i = (framerate_index() + 1) % NRATES;
     __atomic_store_n(&index_v, i, __ATOMIC_RELEASE);
-    if (rates[i]) fprintf(stderr, "yw4: frame rate: %d frames/s (settings panel)\n", rates[i]);
+    if (rates[i] < 0) fprintf(stderr, "yw4: frame rate: the display's refresh (settings panel)\n");
+    else if (rates[i]) fprintf(stderr, "yw4: frame rate: %d frames/s (settings panel)\n", rates[i]);
     else fprintf(stderr, "yw4: frame rate: no limit (settings panel)\n");
 }
 
@@ -73,12 +83,17 @@ void framerate_wait(void) {
         return;
     }
     next_flip = 0;
-    if (!hz) return;
+    if (hz <= 0) return;  /* no limit, or vsync: the swapchain's FIFO waits */
     int64_t period = 1000000000ll / hz, now = host_now_ns();
     if (!due || now - due > 3 * period) due = now;  /* first frame, or fell far behind: don't burst to catch up */
     if (due - now > 1000000) host_sleep_ns(due - now - 1000000);  /* the timer is good to ~1 ms: spin the rest */
     while (host_now_ns() < due) {}
     due += period;
+}
+
+/* The game's time step of its latest frame, seconds (main+0x586527c, nnMain stores it each frame). */
+float framerate_game_dt(void) {
+    return *(const float *)(uintptr_t)(*yw4_modules[YW4_MAIN].base + 0x586527c);
 }
 
 int yw4_hook_nnmain(CPUState *ctx) {
@@ -89,6 +104,7 @@ int yw4_hook_nnmain(CPUState *ctx) {
     int v = game_paces ? atoi(e) : 0;
     game_n = v;
     if (game_paces) fprintf(stderr, "yw4: frame rate: the game's own pacing, %d vsyncs per frame (game's %d)\n", v, *n);
+    else if (framerate_hz() < 0) fprintf(stderr, "yw4: frame rate: the display's refresh, ours (the game's limiter off)\n");
     else if (framerate_hz()) fprintf(stderr, "yw4: frame rate: %d frames/s, ours (the game's limiter off)\n", framerate_hz());
     else fprintf(stderr, "yw4: frame rate: no limit, ours (the game's limiter off)\n");
     *n = (uint8_t)v;

@@ -41,6 +41,11 @@ Two questions before building: the licence, and whether NVIDIA's library links w
    SDK but working in the pinned DLL) costs 2.6 ms, less than FSR (3.7-4.5), and looks nearly as clean on the
    fine patterns. So a panel row DLSS MODEL: FAST (preset E, default) or BEST (the transformers);
    `YW4_DLSS_PRESET=<letter>` forces one for tests.
+   **Changed 2026-10-31: the transformers only, the row removed.** The CNN makes shadow edges flicker: the
+   character's shadow, standing still in the forest, has 4-6% of its edge pixels flickering over 16 frames with
+   it and 0% with the transformers; the same in the build that brought DLSS in (02120ba), so not a regression.
+   The owner saw it too and chose the clean picture over the CNN's speed. `YW4_DLSS_MODEL=0` keeps the CNN for
+   tests.
 
 ## Results (bamboo forest, 5120×2160 21:9, owner's settings, one run switching modes)
 

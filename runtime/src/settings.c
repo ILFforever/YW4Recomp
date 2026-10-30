@@ -56,10 +56,6 @@ static const char *mask_speedup_disabled(void) {
     if (!shadow_mask_native()) return "NEEDS SHADOW MASK SET TO CUSTOM";
     return gpu_pcss_level() ? NULL : "NEEDS SOFT SHADOWS";
 }
-static const char *dlss_disabled(void) {
-    if (!gpu_dlss_built()) return "NOT IN THIS BUILD";
-    return gpu_aa() == 5 ? NULL : "NEEDS ANTI-ALIASING SET TO DLSS";
-}
 static int reflex_index(void) { return dlssg_reflex(); }  /* what runs: on while DLSS frame generation is */
 static const char *reflex_disabled(void) {
     if (!gpu_dlss_built()) return "NOT IN THIS BUILD";
@@ -94,9 +90,10 @@ static const Setting player[] = {
     {"DISPLAY", "FRAME RATE",
      "HOW MANY PICTURES A SECOND. THE GAME MOVES BY REAL TIME, SO IT PLAYS AT THE SAME SPEED AT ANY RATE. HIGHER "
      "COSTS MORE GPU AND CPU TIME.",
-     {"30", "60", "120", "144", "UNLIMITED"},
-     {"THE SWITCH'S DEFAULT", "SMOOTH", "FOR 120 HZ MONITORS", "FOR 144 HZ MONITORS", "AS FAST AS THE PC CAN"}, 5,
-     framerate_index, framerate_cycle, "YW4_FPS", {"30", "60", "120", "144", "0"}},
+     {"30", "60", "120", "144", "VSYNC", "UNLIMITED"},
+     {"THE SWITCH'S DEFAULT", "SMOOTH", "FOR 120 HZ MONITORS", "FOR 144 HZ MONITORS",
+      "THE MONITOR'S OWN REFRESH RATE, SMOOTHEST (APPLIES AFTER A RESTART)", "AS FAST AS THE PC CAN: MOTION CAN JUDDER"}, 6,
+     framerate_index, framerate_cycle, "YW4_FPS", {"30", "60", "120", "144", "vsync", "0"}},
     {"ANTI-ALIASING AND UPSCALING", "ANTI-ALIASING",
      "SMOOTHS THE JAGGED EDGES OF OBJECTS. APPLIED BEFORE THE MENUS ARE DRAWN, SO TEXT STAYS SHARP.",
      {"OFF", "FXAA", "SMAA", "TAA", "FSR", "DLSS"},
@@ -111,12 +108,6 @@ static const Setting player[] = {
      {"THE WORLD AT FULL RESOLUTION", "1.5X SMALLER: CLOSE TO FULL, FASTER", "1.7X SMALLER: FASTER STILL",
       "2X SMALLER: FASTEST, SOFTER"}, 4,
      gpu_upscale_setting, gpu_upscale_cycle, "YW4_UPSCALE", {"0", "1", "2", "3"}, upscale_disabled},
-    {"ANTI-ALIASING AND UPSCALING", "DLSS MODEL",
-     "WHICH NVIDIA DLSS MODEL REBUILDS THE PICTURE. FAST IS THE OLDER MODEL: NEARLY AS CLEAN, ABOUT HALF THE GPU TIME. "
-     "BEST IS THE NEWEST: A LITTLE CLEANER, MORE GPU TIME.",
-     {"FAST", "BEST"},
-     {"OLDER MODEL (RECOMMENDED): MORE FRAMES", "NEWEST MODEL: CLEANEST, FEWER FRAMES"}, 2,
-     gpu_dlss_model, gpu_dlss_model_cycle, "YW4_DLSS_MODEL", {"0", "1"}, dlss_disabled},
     {"FRAME GENERATION AND LATENCY", "FRAME GENERATION",
      "MAKES A PICTURE BETWEEN EACH TWO OF THE GAME'S: ABOUT TWICE AS MANY SHOWN. ADDS A LITTLE INPUT DELAY: BEST "
      "WHEN THE GAME ALREADY RUNS AT 60 OR MORE. FRAME RATE STILL LIMITS THE GAME'S OWN PICTURES. NEEDS "

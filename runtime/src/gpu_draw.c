@@ -61,6 +61,7 @@ typedef struct Shader {
     VkShaderModule ours;  /* our readable program with the same interface, if we have one (0: none) */
     int pcf_float;  /* samples a shadow map: the float in cbuf 8 where its filter spread starts (2), else -1 */
     int screen_taps;  /* reads cbuf 8 row 32 (tap offsets in the screen-sized targets) */
+    int inv_proj;     /* a fragment program reading cbuf 8 rows 20-23 (the inverse projection): positions from depth */
     int dof;          /* the distance blur's composite (gpu_dof) */
     uint32_t cb8_bytes;  /* how much of cbuf 8 it reads (with pcf_float or screen_taps) */
     int model;  /* a vertex program with the engine's local-matrix block in slot 2: it draws 3D objects */
@@ -243,7 +244,7 @@ static Shader *load_shader(uint64_t key, int stage) {
      * - row 32 = 1.5/1600, 1.5/900, 0.75/533, 0.75/300: tap offsets in the screen-sized targets
      *   (resolution of the 3D view, F4; docs/frame.md).
      * Found in the GLSL. */
-    s->pcf_float = -1, s->screen_taps = 0;
+    s->pcf_float = -1, s->screen_taps = 0, s->inv_proj = 0;
     s->dof = stage == ST_FRAG && key == DOF_SHADER;
     int has_cb8 = 0, has_shadow = 0;
     for (int i = 0; i < s->nb; i++) {
@@ -258,6 +259,7 @@ static Shader *load_shader(uint64_t key, int stage) {
                 if (has_shadow)
                     s->pcf_float = strstr(glsl, "cb8.d[31].zw") ? 31 * 4 + 2 : strstr(glsl, "cb8.d[8].zw") ? 8 * 4 + 2 : -1;
                 s->screen_taps = strstr(glsl, "cb8.d[32]") != NULL;
+                s->inv_proj = stage == ST_FRAG && strstr(glsl, "cb8.d[20]") && strstr(glsl, "cb8.d[23]");
                 /* the copy only needs what the shader reads: up to its highest constant index
                  * (any computed index: all of it) */
                 s->cb8_bytes = 0;
@@ -901,13 +903,21 @@ static uint8_t *ring_alloc(VkDeviceSize size, VkBuffer *buf, VkDeviceSize *offse
 /* The same for the screen-sized targets (YW4_RES, F4): cbuf 8 row 32 (tap offsets in them, 0..1
  * coordinates: x, y of the full size, x, y of the third) scaled by 900 / height, and the x ones also by the
  * picture's width factor (widescreen.c), so the taps stay as many pixels apart as the game's. */
+/* And with the anti-aliasing's shift (gpu_taa_clip_jitter): a full-screen pass before the composite that works
+ * out positions from the depth (rows 20-23, the inverse projection, dotted with the pixel's clip position) gets
+ * them with this frame's shift taken out, as if from clip - shift: row.w -= row.x * shift.x + row.y * shift.y.
+ * Its result then sits where the shifted 3D does. */
+static int bind_unjitter;  /* the draw being bound is such a pass (draw(), before bind_sets) */
+
 static int cb8_scaled_copy(uint64_t addr, VkDeviceSize range, const Shader *sh, VkBuffer *buf, VkDeviceSize *offset) {
     int res = gpu_shadow_res(), h = gpu_render_height();  /* the lit pass reads the 3D's images */
     uint32_t wn, wd;
     gpu_wide_factor(&wn, &wd);
     int pcf = sh->pcf_float >= 0 && res != 1024 && (VkDeviceSize)(sh->pcf_float + 2) * 4 <= range;
     int taps = sh->screen_taps && (h != 900 || wn != wd) && 33 * 16 <= range;
-    if (!(pcf || taps) || range > 65536) return 0;
+    float cx = 0, cy = 0;
+    int unjitter = sh->inv_proj && bind_unjitter && 24 * 16 <= range && gpu_taa_clip_jitter(&cx, &cy);
+    if (!(pcf || taps || unjitter) || range > 65536) return 0;
     uint8_t *p = ring_alloc(range, buf, offset);
     if (!p) return 0;
     memcpy(p, (const void *)(uintptr_t)addr, (size_t)range);
@@ -917,6 +927,11 @@ static int cb8_scaled_copy(uint64_t addr, VkDeviceSize range, const Shader *sh, 
     }
     if (taps)
         for (int i = 0; i < 4; i++) ((float *)p)[32 * 4 + i] *= 900.0f / (float)h * (i & 1 ? 1.0f : (float)wd / (float)wn);
+    if (unjitter)
+        for (int row = 20; row < 24; row++) {
+            float *m = (float *)p + row * 4;
+            m[3] -= m[0] * cx + m[1] * cy;
+        }
     return 1;
 }
 
@@ -1057,7 +1072,8 @@ static int bind_stage_set(VkCommandBuffer cb, const GpuState *s, const Shader *s
                     range = range < 32 ? range : 32;
                     memcpy(p6, (const void *)(uintptr_t)r.addr, (size_t)range);
                     ((float *)p6)[3] *= 0.5f;
-                } else if (b->kind == 'c' && b->slot == 8 && (sh->pcf_float >= 0 || sh->screen_taps) && r.size &&
+                } else if (b->kind == 'c' && b->slot == 8 && (sh->pcf_float >= 0 || sh->screen_taps || sh->inv_proj) &&
+                           r.size &&
                     cb8_scaled_copy(r.addr, range < sh->cb8_bytes ? range : sh->cb8_bytes, sh, &bi[i].buffer,
                                     &bi[i].offset)) {
                     /* a copy with the shadow filter spread and the screen tap offsets scaled to the targets' sizes */
@@ -1668,7 +1684,28 @@ static void draw(VkCommandBuffer cb, GpuState *s, const CmdRec *r) {
     }
 
     vkCmdBindPipeline(cb, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline(g, &k));
+    bind_unjitter = !(g->sh[ST_VERT] && g->sh[ST_VERT]->model) && !s->after_composite;
     bind_sets(cb, s, g);
+
+    /* YW4_MOVIE_LOG=1 (testing video pacing): when the movie program's luma texture shows a new picture (a
+     * fingerprint of its memory changes), the GPU frame, the host time and how many frames the last one stayed */
+    if (g->sh[ST_FRAG] && g->sh[ST_FRAG]->key == 0x2e2b3b7ac92f7848ull && getenv("YW4_MOVIE_LOG")) {
+        NvnTexEntry *e = tex_entry(s, s->tex[nvn_stage[ST_FRAG]][0]);
+        if (e && e->tex->addr) {
+            static uint64_t last_hash, last_frame;
+            static int64_t last_ns;
+            const uint8_t *y = (const uint8_t *)(uintptr_t)e->tex->addr;
+            uint64_t hash = 1469598103934665603ull;
+            for (size_t i = 0; i < 1920 * 1080; i += 997) hash = (hash ^ y[i]) * 1099511628211ull;
+            if (hash != last_hash) {
+                int64_t now = host_now_ns();
+                fprintf(stderr, "yw4: movie: frame %" PRIu64 " new picture at %#" PRIx64 ", %.1f ms and %" PRIu64
+                        " frames after the last\n", gpu_frames(), e->tex->addr, last_ns ? (double)(now - last_ns) / 1e6 : 0.0,
+                        gpu_frames() - last_frame);
+                last_hash = hash, last_frame = gpu_frames(), last_ns = now;
+            }
+        }
+    }
 
     /* YW4_GPU_TRACE=<n>: describe n draws, from frame YW4_GPU_TRACE_AT (default 0) on */
     static long trace = -1, trace_at;
@@ -1784,6 +1821,7 @@ static void draw(VkCommandBuffer cb, GpuState *s, const CmdRec *r) {
 
     gpu_taa_note_targets(s);
     dyn_model = g->sh[ST_VERT] && g->sh[ST_VERT]->model;
+    if (dyn_model && !s->after_composite) gpu_note_model_draw();
     /* A layer over the whole screen (widescreen), by the textures it samples:
      * - a 16:9 texture from the game's files, a picture made for the screen (the map's backdrop 960x540,
      *   the copyright notice 1920x1080, movies: 1920x1080 and 960x540 planes): kept 16:9 in the middle

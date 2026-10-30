@@ -133,8 +133,26 @@ NVN(nvnQueueFinalize) { (void)c; }
 static uint64_t frames;
 extern uint64_t yw4_frames_presented;  /* dispatch.c (YW4_TRACE_RENDER_JOBS) */
 
+/* YW4_PRESENT_LOG=<frame>,<count> (testing frame order): the queue calls of those frames, with the calling
+ * thread (numbered as first seen) and the queue. */
+static void plog(const char *what, uint64_t queue, uint64_t arg) {
+    static long long from = -2, count;
+    if (from == -2) {
+        const char *e = getenv("YW4_PRESENT_LOG");
+        from = -1;
+        if (e) sscanf(e, "%lld,%lld", &from, &count);
+    }
+    if (from < 0 || (long long)frames < from || (long long)frames >= from + count) return;
+    static int next_id;
+    static _Thread_local int id;
+    if (!id) id = __atomic_add_fetch(&next_id, 1, __ATOMIC_RELAXED);
+    fprintf(stderr, "yw4: plog: frame %" PRIu64 " thread %d queue %#" PRIx64 " %s %#" PRIx64 " (jobs %" PRIu64 ")\n",
+            frames, id, queue, what, arg, gpu_queue_fence());
+}
+
 NVN(nvnQueueSubmitCommands) {  /* (queue, count, const NVNcommandHandle*) */
     int n = (int)A(1);
+    plog("submit", A(0), (uint64_t)n);
     const uint64_t *handles = AP(2);
     int64_t t = host_now_ns();
     yw4_thread_role(YW4_ROLE_SUBMIT);
@@ -178,6 +196,7 @@ static void show(NvnTexture *t, uint64_t frame, const int crop[4]) {
 NVN(nvnQueuePresentTexture) {  /* (queue, window, texture index) */
     NvnWindow *w = HOST(NvnWindow, A(1));
     int index = (int)A(2);
+    plog("present texture", A(0), (uint64_t)index);
     yw4_perf_presenter = 1;
     yw4_thread_role(YW4_ROLE_PRESENT);
     yw4_profile_thread(YW4_ROLE_PRESENT, frames);
@@ -213,12 +232,19 @@ NVN(nvnQueuePresentTexture) {  /* (queue, window, texture index) */
  * waits for (gpu.c, decision 0021). Fencing takes the latest submission. Headless, GPU work
  * is done the moment it is submitted and every sync is signalled. One queue: the GPU never
  * has to wait for another queue (QueueWaitSync). */
-NVN(nvnQueueFenceSync) { G(uint64_t, A(1), 0) = gpu_queue_fence(); }  /* (queue, sync, condition, flags) */
-NVN(nvnQueueWaitSync) { RET(1); }  /* (queue, sync) */
+NVN(nvnQueueFenceSync) {  /* (queue, sync, condition, flags) */
+    G(uint64_t, A(1), 0) = gpu_queue_fence();
+    plog("fence sync", A(0), A(1));
+}
+NVN(nvnQueueWaitSync) {  /* (queue, sync) */
+    plog("wait sync", A(0), A(1));
+    RET(1);
+}
 NVN(nvnSyncInitialize) { G(uint64_t, A(0), 0) = 0; RET(1); }
 NVN(nvnSyncFinalize) { (void)c; }
 /* (sync, timeout ns) -> ALREADY_SIGNALED 0, CONDITION_SATISFIED 1, TIMEOUT_EXPIRED 2 */
 NVN(nvnSyncWait) {
+    plog("cpu wait sync", 0, A(0));
     int64_t t = host_now_ns();
     int r = gpu_queue_wait(G(uint64_t, A(0), 0), A(1));
     yw4_perf_add(PERF_SYNC, host_now_ns() - t);
@@ -609,6 +635,7 @@ NVN(nvnWindowAcquireTexture) {  /* (window, sync signalled when it's free, int *
     NvnWindow *w = HOST(NvnWindow, A(0));
     if (A(1)) G(uint64_t, A(1), 0) = gpu_queue_fence();  /* free once what was submitted has run */
     *(int32_t *)AP(2) = w->next;
+    plog("acquire texture", 0, (uint64_t)w->next);
     w->next = (w->next + 1) % w->active;
     RET(0);  /* NVN_WINDOW_ACQUIRE_TEXTURE_RESULT_SUCCESS */
 }
