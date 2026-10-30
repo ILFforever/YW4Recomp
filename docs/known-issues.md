@@ -66,7 +66,6 @@ What is known to be missing or wrong, roughly in the order it is likely to matte
 
 ## Game and system
 
-- **The English translation mod** (LayeredFS) is not supported yet (Phase 5).
 - **C++ exceptions are not supported**: nothing in `main` throws ([decision 0012](decisions/0012-musl-startup-tls-exceptions-libc.md)).
 - Two character-following lights have zero colour in the kitchen; probably intended, not confirmed.
 

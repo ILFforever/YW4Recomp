@@ -97,6 +97,102 @@ static Dir *scan(const char *path, const char *name, Dir *parent, int depth) {
     return dir;
 }
 
+/* ---- mods (LayeredFS, decision 0043): a mod's romfs/ folder laid over the game's, as Atmosphere does on a
+ * Switch: a file at the same path replaces the game's, a new path is added. The English patch replaces whole
+ * .cpk archives and data/cpk_list.cfg.bin and adds loose files that the new list sends the game to. */
+
+static int mod_replaced, mod_added;
+
+static int count_files(const Dir *d) {
+    int n = d->nfiles;
+    for (int i = 0; i < d->ndirs; i++) n += count_files(d->dirs[i]);
+    return n;
+}
+
+static void overlay(Dir *dst, const char *path, int depth) {
+    DIR *d = depth < 32 ? opendir(path) : NULL;
+    if (!d) return;
+    struct dirent *e;
+    while ((e = readdir(d))) {
+        if (e->d_name[0] == '.') continue;
+        size_t n = strlen(path) + strlen(e->d_name) + 2;
+        char *p = malloc(n);
+        if (!p) exit(3);
+        snprintf(p, n, "%s/%s", path, e->d_name);
+        int is_dir = 0;
+        int64_t size = file_size(p, &is_dir);
+        if (size < 0) {
+            free(p);
+        } else if (is_dir) {
+            Dir *c = NULL;
+            for (int i = 0; i < dst->ndirs && !c; i++)
+                if (!strcmp(dst->dirs[i]->name, e->d_name)) c = dst->dirs[i];
+            if (c) {
+                overlay(c, p, depth + 1);
+            } else if ((c = scan(p, e->d_name, dst, depth + 1))) {
+                dst->dirs = realloc(dst->dirs, sizeof *dst->dirs * (size_t)(dst->ndirs + 1));
+                dst->dirs[dst->ndirs++] = c;
+                mod_added += count_files(c);
+            }
+            free(p);
+        } else {
+            File *f = NULL;
+            for (int i = 0; i < dst->nfiles && !f; i++)
+                if (!strcmp(dst->files[i]->name, e->d_name)) f = dst->files[i];
+            if (f) {
+                free(f->path);
+                mod_replaced++;
+            } else {
+                if (!(f = calloc(1, sizeof *f))) exit(3);
+                f->name = dup_str(e->d_name), f->parent = dst;
+                dst->files = realloc(dst->files, sizeof *dst->files * (size_t)(dst->nfiles + 1));
+                dst->files[dst->nfiles++] = f;
+                mod_added++;
+            }
+            f->path = p, f->size = (uint64_t)size;
+        }
+    }
+    closedir(d);
+    if (dst->ndirs) qsort(dst->dirs, (size_t)dst->ndirs, sizeof *dst->dirs, by_dir_name);
+    if (dst->nfiles) qsort(dst->files, (size_t)dst->nfiles, sizeof *dst->files, by_file_name);
+}
+
+static int by_string(const void *a, const void *b) { return strcmp(*(char *const *)a, *(char *const *)b); }
+
+/* Every mod in YW4_MODS (default work/mods; "none": no mods), in name order (a later one wins): the folders with a
+ * romfs/ inside, in Atmosphere's layout contents/010086c00af7c000/<mod>/romfs or simply <mod>/romfs. */
+static void apply_mods(Dir *root) {
+    const char *env = getenv("YW4_MODS"), *base = env && *env ? env : "work/mods";
+    if (!strcmp(base, "none")) return;
+    char dir[1024];
+    snprintf(dir, sizeof dir, "%s/contents/010086c00af7c000", base);
+    DIR *d = opendir(dir);
+    if (!d) snprintf(dir, sizeof dir, "%s", base), d = opendir(dir);
+    if (!d) {
+        if (env && *env) fprintf(stderr, "yw4: mods: cannot read %s\n", base);
+        return;
+    }
+    char *names[256];
+    int n = 0;
+    struct dirent *e;
+    while ((e = readdir(d)) && n < 256)
+        if (e->d_name[0] != '.') names[n++] = dup_str(e->d_name);
+    closedir(d);
+    qsort(names, (size_t)n, sizeof *names, by_string);
+    for (int i = 0; i < n; i++) {
+        char romfs[1200];
+        int is_dir = 0;
+        snprintf(romfs, sizeof romfs, "%s/%s/romfs", dir, names[i]);
+        if (file_size(romfs, &is_dir) >= 0 && is_dir) {
+            mod_replaced = mod_added = 0;
+            overlay(root, romfs, 0);
+            fprintf(stderr, "yw4: mods: %s: %d files replaced, %d added (%s)\n", names[i], mod_replaced, mod_added,
+                    romfs);
+        }
+        free(names[i]);
+    }
+}
+
 /* Table order: a directory's files, then its subdirectories, then each subdirectory's. */
 static Dir **dirs;
 static File **files;
@@ -143,6 +239,7 @@ int romfs_open(const char *dir) {
         fprintf(stderr, "yw4: cannot read the RomFS folder %s\n", dir);
         return -1;
     }
+    apply_mods(root);
     dirs = realloc(dirs, sizeof *dirs * (size_t)(cap_dirs = 64));
     dirs[ndirs++] = root;
     flatten(root);

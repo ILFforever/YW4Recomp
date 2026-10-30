@@ -101,7 +101,7 @@ the two do the same work:
 | ✅ | **Upscaling (NVIDIA DLSS, AMD FSR)** | The world drawn smaller and rebuilt at full size, menus and text kept full size. **On NVIDIA RTX GPUs use DLSS: sharper and cheaper than FSR.** At 4K 21:9 on an RTX 4070 laptop, instead of ~59 frames/s: DLSS ~81 / ~93 / ~112 (quality / balanced / performance), FSR ~75 / ~86 / ~104 (any GPU). DLSS keeps fine patterns (far nets, perforated fences) clean where FSR gets grainy ([decisions 0039](docs/decisions/0039-fsr-upscaling.md), [0040](docs/decisions/0040-dlss-upscaling.md)) |
 | ✅ | **Frame generation (NVIDIA DLSS, AMD FSR)** | A frame made between each two of the game's: about twice as many on screen, the menus kept still. **On RTX 40 and newer use DLSS**: more game frames left and cleaner moving characters. In a busy town at 4K 21:9 on an RTX 4070 laptop, instead of ~70 frames/s: DLSS ~150 shown (~75 game), FSR ~126 shown (~63 game, any GPU). NVIDIA Reflex in the panel too ([decision 0041](docs/decisions/0041-frame-generation.md)) |
 | 🔧 | **Better anti-aliasing** | FXAA, SMAA and now TAA (steady thin edges: fences, nets, leaves) on the 3D scene before the UI is drawn, so text stays crisp; per-object motion for TAA next |
-| 🗓️ | **Mod support** | Load replaced game files from a mod folder without touching your dump (first use: the English translation mod) |
+| ✅ | **Mod support** | Mods in the Switch's layout are laid over your game files at start, as on a modded Switch, without touching your dump: the English translation patch runs (see [Mods](#mods), [decision 0043](docs/decisions/0043-mods-layeredfs.md)) |
 | 🔧 | **Keyboard, mouse and controllers** | Bindings on the panel's CONTROLS page, saved, with your controller's own button names; tested with a DualSense. On-screen button icons follow what you play with and your bindings (keyboard, Xbox, PlayStation or Nintendo, [decision 0042](docs/decisions/0042-button-icons-and-mouse.md)). The mouse turns the camera through the game's own unused mouse code; being tested |
 | 🗓️ | **Linux** | The runtime is written to be portable; not built or tested there yet |
 
@@ -480,6 +480,19 @@ Runtime options are environment variables, for example `YW4_SHADOW_RES=1024`: in
 
 Runtime options, capture keys, input replay and the frame-inspection tools are in
 [docs/debugging.md](docs/debugging.md).
+
+### Mods
+
+Put a mod in `work/mods`, in the layout a modded Switch uses: `work/mods/contents/010086c00af7c000/<mod name>/romfs/...`
+(or simply `work/mods/<mod name>/romfs/...`). At start its files replace the game's at the same paths and its new
+files are added, as on a Switch; your dump is not changed. The log names each mod it loaded. `YW4_MODS` points to
+another folder, `YW4_MODS=none` turns mods off. The fan **English translation patch** works this way (not included:
+bring your own copy):
+
+| | |
+|---|---|
+| ![The copyright warning in English](docs/screenshots/81-english-patch-warning.jpg) | ![The town with the quest marker in English: Head to Mt. Wildwood!](docs/screenshots/80-english-patch-town.jpg) |
+| The warning before the title | The town: "Head to Mt. Wildwood!" |
 
 ## Project layout
 

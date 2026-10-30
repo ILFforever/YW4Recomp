@@ -3,8 +3,8 @@
  * The game reads its data as one raw RomFS image (fsp-srv OpenDataStorageByCurrentProcess)
  * and the sdk parses the RomFS tables itself. The owner has an extracted romfs/ folder, so
  * the runtime builds the tables from it and serves reads from the file-data area straight
- * from the files on disk: no 8.5 GB second copy. Later, a mod folder (LayeredFS) can
- * replace files in the same build. */
+ * from the files on disk: no 8.5 GB second copy. Mods (YW4_MODS, default work/mods) are laid
+ * over it in the same build, as LayeredFS does on a Switch (decision 0043). */
 #ifndef ROMFS_H
 #define ROMFS_H
 
