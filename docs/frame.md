@@ -418,6 +418,46 @@ bounding boxes), never as a swap at a distance. So these maps don't use model LO
 setting has nothing to act on there. What looked like distance drop-off was the distance blur and the texture
 filtering (decision 0031 and the settings panel). Battles and other maps are not checked.
 
+## Lighting stage (measured 2026-10-30)
+
+Late-game save, bamboo forest, 4K 21:9 (5120×2160, so "half" = 2560×1080), one frame (`YW4_GPU_TRACE` +
+`YW4_TRACE_DRAW_CALLERS`, `tools.yw4.mainview`) and per-pass GPU time over 300 frames (`YW4_GPU_PASSES=1`; 12.5 ms
+of GPU time per frame in all). Between the G-buffer and the lit material pass:
+
+| Pass | Size | Program (vs/fs) | GPU ms | What |
+|---|---|---|---|---|
+| depth copy | half | `98c09b`/`95ea1b` | ~0.3 | the G-buffer's depth shrunk (`f_80d270`, `f_8050d0`) |
+| | ⅓ | `98c09b`/`95ea1b`, `198f41`/`42759b` | ~0.4 | the same at a third, and one more draw (to identify) |
+| **shadow mask** | half | `98c09b`/`06d03ad7` | **2.57** | `f_7f3e90`: the screen-space shadow, our PCSS inside (decision 0025): the most expensive pass of the frame |
+| | half, 2 targets (0x29) | `98c09b`/`790774` | 0.16 | `f_7f4c90`, likely the lamp lights |
+
+The shadow mask is ~2.6 of the stage's ~3.5 ms, so it is the first piece of the stage to become ours. Its shader
+(`work/shaders/glsl/06d03ad703b4bee5.frag`, 725 lines with the PCSS helper) reads cb8 (camera: rows 20-23, 31),
+cb12 (rows 0, 2, 3 and indexed rows: the cascades), `tex1` (sampled first: the half-size depth), `tex0` and the
+shadow-map array (`tex15`), with up to six shadow lookups in cascade loops.
+
+What the shadow mask computes, per half-size pixel (decoded from its NV assembly,
+`work/shaders/asm/06d03ad703b4bee5.frag.asm`; cb rows are byte offsets / 16; `buf14` holds the texture handles):
+
+1. **Position.** Depth from `buf14[8]` (the half-size depth) at the pixel; clip = (2u − 1, 1 − 2v, depth, 1); the
+   view-space position is cb8 rows 20, 21, 22 dotted with clip, over row 23 (the inverse projection).
+2. **Cascade.** For c = 0, 1, 2: the first whose cb12 row 7+c .x reaches −z (view depth) is used; for c < 2 a
+   blend weight toward cascade c+1 from rows 7+c and 8+c. No cascade: the output is (0, 1, 0, 0).
+3. **Normal.** The G-buffer normal from `buf14[0]` (rgb × 2 − 1, normalized); N·L with cb12 row 0 (the light
+   direction). N·L ≤ 1e-4 (facing away) counts as lit: the mask is max(shadow, that flag).
+4. **Five lookups.** cb12 rows 10+4c..12+4c take the position and normal into the cascade's light view. Four
+   taps sit ± an offset (cb8 row 31 .zw × cb12 row 4+c .xy) along the light's x and y, slid along the light
+   depth so they stay on the receiving surface's plane; each tap and the centre are projected with rows 22+4c..25+4c.
+   Bias: the centre's position in the 1024 texel grid (rows 34+4c..37+4c) gives a sub-texel distance; bias =
+   min(row 2 .x + row 2 .y × saturate(distance / tan-like(N·L)), row 2 .z), subtracted from the depth compared.
+   The five shadow compares are averaged (× 0.2). This is where our PCSS replaces each compare (decision 0025).
+5. **Blend.** With a next cascade: one compare there (same bias), mixed in by the blend weight.
+6. **Fade and output.** cb12 row 3 .xy (near, far) linearize the depth: lin = near / (far − depth × (far −
+   near)); x = shadow × (1 − saturate(lin)²), y = z = lin, w = 0.
+
+After the lit pass: a full-size
+depth-only draw (`98c09b`/`6b4575`, 0.30 ms) and full-size draws `53e413`/`ace8e4`, `ff262a`/`4893be` (to identify).
+
 ## Open
 
 - ~~Which job draws into which target in the main view~~: measured, see "Main view: the passes". Still open: which
