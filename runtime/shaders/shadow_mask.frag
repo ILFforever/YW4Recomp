@@ -163,65 +163,71 @@ void main() {
     if (cascade < 0) {
         o_mask = vec4(0.0, 1.0, 0.0, 0.0);
     } else {
-
         // 3. Normal and N·L; a surface facing away from the sun counts as lit.
         vec3 n = fma(textureLod(gbuffer_normal, uv, 0.0).xyz, vec3(2.0), vec3(-1.0));
         n = inversesqrt(abs(dot(n, n))) * n;
         float n_dot_l = dot(n, sun.d[0].xyz);
         float facing_away = -n_dot_l >= -9.999999750e-05 ? 1.0 : 0.0;
 
-        // 4. Five lookups in the cascade: four taps beside the surface along the light's x and y,
-        // kept on its plane, and the centre.
-        int c = cascade;
-        float layer = float(c);
-        vec4 p = vec4(pos, 1.0);
-        vec4 r10 = sun.d[10 + 4 * c], r11 = sun.d[11 + 4 * c], r12 = sun.d[12 + 4 * c];
-        vec3 at = vec3(dot(p, r10), dot(p, r11), dot(p, r12));  // the surface in light view
-        vec3 ln = vec3(dot(n, r10.xyz), dot(n, r11.xyz), dot(r12.xyz, n));
-        ln = inversesqrt(abs(dot(ln, ln))) * ln;  // its normal in light view
-        vec2 spread = view.d[31].zw * sun.d[4 + c].xy;
-        int sx = sign_of(ln.x * -spread.x), sy = sign_of(ln.y * -spread.y);
-
-        vec3 centre = to_grid(p, c);
-        float inv_sin = inversesqrt(abs(fma(-n_dot_l, n_dot_l, 1.0)));
-        float bias = bias_of(texel_offset(centre.xy) / inv_sin, n_dot_l);
-        float shadow;
-        if (yw4_pcss.mode.x >= 0.5 && (int(yw4_pcss.mode.y) & 1) != 0) {
-            // ours, faster: with soft shadows on, one soft lookup at the centre. Its 16 taps spread far wider
-            // than the game's five points (less than a texel apart), so the five only cost four more filters.
-            shadow = max(yw4_shadow(shadow_maps, shadow_depth, vec4(centre.xy, layer, centre.z + -bias)), facing_away);
-        } else {
-            vec3 right = onto_plane(at + vec3(spread.x, 0.0, 0.0), at, ln, float(-sx));
-            vec3 left = onto_plane(at + vec3(-spread.x, 0.0, 0.0), at, ln, float(sx));
-            vec3 up = onto_plane(at + vec3(0.0, spread.y, 0.0), at, ln, float(-sy));
-            vec3 down = onto_plane(fma(vec3(0.0, spread.y, 0.0), vec3(1.0, -1.0, 1.0), at), at, ln, float(sy));
-            vec3 right_map = to_map(vec4(right, 1.0), c);
-            vec3 left_map = to_map(vec4(left, 1.0), c);
-            vec3 up_map = to_map(vec4(up, 1.0), c);
-            vec3 down_map = to_map(vec4(down, 1.0), c);
-
-            // in the game's order: the soft shadows remember earlier lookups of this pixel
-            float lit_left = yw4_shadow(shadow_maps, shadow_depth, vec4(left_map.xy, layer, left_map.z + -bias));
-            float lit_right = yw4_shadow(shadow_maps, shadow_depth, vec4(right_map.xy, layer, right_map.z + -bias));
-            float lit_centre = yw4_shadow(shadow_maps, shadow_depth, vec4(centre.xy, layer, centre.z + -bias));
-            float lit_up = yw4_shadow(shadow_maps, shadow_depth, vec4(up_map.xy, layer, up_map.z + -bias));
-            float lit_down = yw4_shadow(shadow_maps, shadow_depth, vec4(down_map.xy, layer, down_map.z + -bias));
-            float sum = lit_down + (lit_up + (lit_left + (lit_right + lit_centre)));
-            shadow = max(sum * 0.199951172, facing_away);  // the average (0.2 in half precision)
-        }
-
-        // 5. Toward the next cascade: one centre lookup there, mixed in by the blend weight.
-        if (next > 0) {
-            vec3 g = to_grid(p, next);
-            float b = bias_of((1.0 / inv_sin) * texel_offset(g.xy), n_dot_l);
-            float lit_next = max(yw4_shadow(shadow_maps, shadow_depth, vec4(g.xy, float(next), g.z + -b)), facing_away);
-            shadow = fma(blend, -shadow + lit_next, shadow);
-        }
-
-        // 6. Fade out toward the far end, by the linear depth.
+        // The fade of step 6 (by the linear depth toward the far end), worked out first: see below.
         vec2 range = sun.d[3].xy;
         float lin = range.x / fma(-depth, -range.x + range.y, range.y);
         float s = clamp(lin, 0.0, 1.0);
+
+        // Ours, faster, the same result: a surface facing away from the sun ends up lit (1) whatever the lookups
+        // find, and a fully faded one ends up 0 (1 - s² = 0): neither needs them.
+        float shadow = 1.0;
+        if (facing_away == 0.0 && s < 1.0) {
+            // 4. Five lookups in the cascade: four taps beside the surface along the light's x and y,
+            // kept on its plane, and the centre.
+            int c = cascade;
+            float layer = float(c);
+            vec4 p = vec4(pos, 1.0);
+            vec4 r10 = sun.d[10 + 4 * c], r11 = sun.d[11 + 4 * c], r12 = sun.d[12 + 4 * c];
+            vec3 at = vec3(dot(p, r10), dot(p, r11), dot(p, r12));  // the surface in light view
+            vec3 ln = vec3(dot(n, r10.xyz), dot(n, r11.xyz), dot(r12.xyz, n));
+            ln = inversesqrt(abs(dot(ln, ln))) * ln;  // its normal in light view
+            vec2 spread = view.d[31].zw * sun.d[4 + c].xy;
+            int sx = sign_of(ln.x * -spread.x), sy = sign_of(ln.y * -spread.y);
+
+            vec3 centre = to_grid(p, c);
+            float inv_sin = inversesqrt(abs(fma(-n_dot_l, n_dot_l, 1.0)));
+            float bias = bias_of(texel_offset(centre.xy) / inv_sin, n_dot_l);
+
+            if (yw4_pcss.mode.x >= 0.5 && (int(yw4_pcss.mode.y) & 1) != 0) {
+                // ours, faster: with soft shadows on, one soft lookup at the centre. Its 16 taps spread far wider
+                // than the game's five points (less than a texel apart), so the five only cost four more filters.
+                shadow = max(yw4_shadow(shadow_maps, shadow_depth, vec4(centre.xy, layer, centre.z + -bias)), facing_away);
+            } else {
+                vec3 right = onto_plane(at + vec3(spread.x, 0.0, 0.0), at, ln, float(-sx));
+                vec3 left = onto_plane(at + vec3(-spread.x, 0.0, 0.0), at, ln, float(sx));
+                vec3 up = onto_plane(at + vec3(0.0, spread.y, 0.0), at, ln, float(-sy));
+                vec3 down = onto_plane(fma(vec3(0.0, spread.y, 0.0), vec3(1.0, -1.0, 1.0), at), at, ln, float(sy));
+                vec3 right_map = to_map(vec4(right, 1.0), c);
+                vec3 left_map = to_map(vec4(left, 1.0), c);
+                vec3 up_map = to_map(vec4(up, 1.0), c);
+                vec3 down_map = to_map(vec4(down, 1.0), c);
+
+                // in the game's order: the soft shadows remember earlier lookups of this pixel
+                float lit_left = yw4_shadow(shadow_maps, shadow_depth, vec4(left_map.xy, layer, left_map.z + -bias));
+                float lit_right = yw4_shadow(shadow_maps, shadow_depth, vec4(right_map.xy, layer, right_map.z + -bias));
+                float lit_centre = yw4_shadow(shadow_maps, shadow_depth, vec4(centre.xy, layer, centre.z + -bias));
+                float lit_up = yw4_shadow(shadow_maps, shadow_depth, vec4(up_map.xy, layer, up_map.z + -bias));
+                float lit_down = yw4_shadow(shadow_maps, shadow_depth, vec4(down_map.xy, layer, down_map.z + -bias));
+                float sum = lit_down + (lit_up + (lit_left + (lit_right + lit_centre)));
+                shadow = max(sum * 0.199951172, facing_away);  // the average (0.2 in half precision)
+            }
+
+            // 5. Toward the next cascade: one centre lookup there, mixed in by the blend weight.
+            if (next > 0) {
+                vec3 g = to_grid(p, next);
+                float b = bias_of((1.0 / inv_sin) * texel_offset(g.xy), n_dot_l);
+                float lit_next = max(yw4_shadow(shadow_maps, shadow_depth, vec4(g.xy, float(next), g.z + -b)), facing_away);
+                shadow = fma(blend, -shadow + lit_next, shadow);
+            }
+        }
+
+        // 6. Fade out toward the far end.
         o_mask = vec4(fma(-s * s, shadow, shadow), lin, lin, 0.0);
     }
 }

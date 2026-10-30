@@ -55,6 +55,11 @@ The mask at the late-game save, 4K 21:9, soft shadows x2, 4096 maps (300-frame a
 2.62 ms, ours as the game does it 2.54, filter once 1.48, filter once and search 8 1.23. Both depart from the
 game's result, so the A/B no longer applies with them on.
 
+Also, always on: pixels facing away from the sun (the result is 1 whatever the lookups find) and fully faded ones
+(the result is 0) skip the lookups. The same result (the A/B against the game's program unchanged: 125-128
+texels), ~0.1 ms less: ours 2.45 ms, with both speed-ups 1.09. Less than hoped: few pixels face away at the
+late-game save, and a group of pixels the GPU runs together only saves when all of them skip.
+
 ## Next
 
 Owning the program lets the shadow mask improve: contact shadows for small details the 1024-texel cascades miss,
