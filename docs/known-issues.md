@@ -21,7 +21,12 @@ What is known to be missing or wrong, roughly in the order it is likely to matte
   of them overflowed it. Fix in testing: the old size's targets are freed 8 frames after a size setting changes.
 - **Crash (GPU device lost) after switching the upscaling mode several times in a row** (owner, 2026-10-29, DLSS,
   4K 21:9, right after the aspect-ratio cycling above): `vkWaitSemaphores failed (VkResult -4)`. Memory peaked at
-  5.0 GB against ~3.3 GB normally, so video memory running out is a suspect. Not reproduced yet.
+  5.0 GB against ~3.3 GB normally, so video memory running out is a suspect. Not reproduced since the 8-frame freeing
+  (45b83d3), 2026-10-30, RTX 4070 laptop (8 GB), late-game save at 4K 21:9: 40 upscaling switches with DLSS and with
+  FSR, and 20 aspect-ratio then 20 upscaling switches, all without a crash; no leak (DLSS and FSR contexts are freed
+  after the GPU is done, memory returns to normal). Worst case: changing the aspect ratio every 2-6 frames keeps
+  every size in use at once, ~7.3-7.4 GB of 8 GB, gone once the changes stop. A sturdy fix if it comes back: apply a
+  size change only once the setting has rested a few frames, so the sizes passed over are never made.
 - **Stutters at 4K ultrawide; to optimize** (owner, 2026-10-28; 4K height at 21:9 = 5120×2160, TAA, full-size effects). From the
   owner's session logs: bamboo forest (late-game save) GPU 23.2 ms per frame on average, 36.4 ms at the 99th
   percentile (budget 33.3), 419 of 27,382 frames over 50 ms; school save GPU 18.2 / 27.6 ms, 134 of 5,620 over
