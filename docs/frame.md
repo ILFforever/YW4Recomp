@@ -431,7 +431,9 @@ of GPU time per frame in all). Between the G-buffer and the lit material pass:
 | **shadow mask** | half | `98c09b`/`06d03ad7` | **2.57** | `f_7f3e90`: the screen-space shadow, our PCSS inside (decision 0025): the most expensive pass of the frame |
 | | half, 2 targets (0x29) | `98c09b`/`790774` | 0.16 | `f_7f4c90`, likely the lamp lights |
 
-The shadow mask is ~2.6 of the stage's ~3.5 ms, so it is the first piece of the stage to become ours. Its shader
+The shadow mask is ~2.6 of the stage's ~3.5 ms, so it is the first piece of the stage to become ours: its program
+is ours since 2026-10-30 ([decision 0044](decisions/0044-shadow-mask-pass.md), not bit-exact: a few texels differ by
+one bit). Its shader
 (`work/shaders/glsl/06d03ad703b4bee5.frag`, 725 lines with the PCSS helper) reads cb8 (camera: rows 20-23, 31),
 cb12 (rows 0, 2, 3 and indexed rows: the cascades), `tex1` (sampled first: the half-size depth), `tex0` and the
 shadow-map array (`tex15`), with up to six shadow lookups in cascade loops.

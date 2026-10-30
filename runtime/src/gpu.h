@@ -53,6 +53,9 @@ void gpu_passes_toggle(void);
 /* Soft shadows (PCSS): 0 off (the game's filter), 1..3 on with stronger softening; the panel cycles. */
 int gpu_pcss_level(void);
 void gpu_pcss_cycle(void);
+/* The shadow mask (shadow_mask.c): our program in place of the game's (YW4_SHADOW_MASK, the panel)? */
+int shadow_mask_native(void);
+void shadow_mask_toggle(void);
 
 void gpu_pool_init(NvnPool *p);  /* imports the pool's memory into Vulkan */
 void gpu_pool_finalize(NvnPool *p);

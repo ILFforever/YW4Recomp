@@ -133,6 +133,9 @@ static VkImageViewType view_type(const char *dim, int *shadow) {
     gpu_stop("texture target %s", dim);
 }
 
+/* The shadow mask's fragment program (docs/frame.md "Lighting stage"). */
+#define SHADOW_MASK_FS 0x06d03ad703b4bee5ull
+
 /* Our replacements for game programs (decision 0026): readable GLSL in runtime/shaders with the
  * translated program's interface, used in its place when the G-buffer pass is on (settings panel). */
 static const struct {
@@ -150,6 +153,7 @@ static const struct {
     {0x046b2a15a631058full, ST_VERT, "material_main.vert"},
     {0x5eb3b2cacbdb9824ull, ST_FRAG, "material_main.frag"},
     {0xb0aa5d810b96a62eull, ST_FRAG, "gbuffer_skinned.frag"},
+    {SHADOW_MASK_FS, ST_FRAG, "shadow_mask.frag"},  /* its own switch (shadow_mask.c) */
 };
 
 static VkShaderModule replacement(uint64_t key, int stage) {
@@ -690,6 +694,7 @@ static void prebuild_thread(void *arg) {
         k.attr[2] = (VkVertexInputAttributeDescription){2, 2, VK_FORMAT_R32G32_SFLOAT, 16};
         for (uint32_t b = 0; b < 3; b++) k.bind[b] = (VkVertexInputBindingDescription){b, 40, VK_VERTEX_INPUT_RATE_VERTEX};
         pipeline(&g, &k);  /* kept, like every pipeline: a few small objects, once */
+        if (g.sh[ST_FRAG]->ours) k.ours = 1, pipeline(&g, &k);  /* and with our program (the shadow mask's) */
         fprintf(stderr, "yw4: gpu: prebuilt pipeline (frag %016" PRIx64 ") in %lld ms\n", prebuilt[i].frag,
                 (long long)((host_now_ns() - t0) / 1000000));
     }
@@ -1570,9 +1575,12 @@ static void draw(VkCommandBuffer cb, GpuState *s, const CmdRec *r) {
         return;
     }
     k.ncolor = (uint8_t)s->ncolor;
-    /* our G-buffer programs in place of the game's (decision 0026; F6) */
-    k.ours = (own || gbuffer_native_frame(gpu_frames())) &&
-             ((g->sh[ST_VERT] && g->sh[ST_VERT]->ours) || (g->sh[ST_FRAG] && g->sh[ST_FRAG]->ours));
+    /* our G-buffer programs in place of the game's (decision 0026; F6); the shadow mask's has its own switch */
+    if (g->sh[ST_FRAG] && g->sh[ST_FRAG]->key == SHADOW_MASK_FS)
+        k.ours = g->sh[ST_FRAG]->ours && shadow_mask_native() && !gpu_ab_game;
+    else
+        k.ours = (own || gbuffer_native_frame(gpu_frames())) &&
+                 ((g->sh[ST_VERT] && g->sh[ST_VERT]->ours) || (g->sh[ST_FRAG] && g->sh[ST_FRAG]->ours));
     memcpy(k.blend, s->blend, sizeof k.blend);
     for (int i = 0; i < 8; i++) k.blend[i][0] = 0;
     memcpy(k.color_state, s->color, 4);

@@ -232,6 +232,17 @@ void gpu_ab_flush(void) {
                     t->g->height, (int)t->g->format, differ, t->g->width * t->g->height * t->g->layers);
             if (first >= 0) fprintf(stderr, " (first at %ld, %ld)", first % t->g->width, first / t->g->width);
             fprintf(stderr, "\n");
+            /* YW4_AB_SHOW=<n>: the first n differing texels, ours and the game's (raw, up to 8 bytes) */
+            long show = getenv("YW4_AB_SHOW") ? atol(getenv("YW4_AB_SHOW")) : 0;
+            for (uint32_t k = (uint32_t)(first < 0 ? 0 : first); first >= 0 && show > 0 && k < t->bytes / t->bpt; k++) {
+                uint64_t va = 0, vb = 0;
+                memcpy(&va, a + (size_t)k * t->bpt, t->bpt < 8 ? t->bpt : 8);
+                memcpy(&vb, b + (size_t)k * t->bpt, t->bpt < 8 ? t->bpt : 8);
+                if (va == vb) continue;
+                fprintf(stderr, "yw4: ab:   (%u, %u): ours %#" PRIx64 ", the game's %#" PRIx64 "\n", k % t->g->width,
+                        k / t->g->width, va, vb);
+                show--;
+            }
             vkUnmapMemory(vk.device, t->out_mem[0]), vkUnmapMemory(vk.device, t->out_mem[1]);
         }
         for (int k = 0; k < 2; k++) vkDestroyBuffer(vk.device, t->out[k], NULL), vkFreeMemory(vk.device, t->out_mem[k], NULL);

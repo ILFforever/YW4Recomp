@@ -182,6 +182,12 @@ why = "the engine's shared blur rounds (the battle effects' 12 rounds among them
 
 [[hook]]
 module = "main"
+offset = "0x7f3e90"
+native = "yw4_hook_shadow_mask"
+why = "the engine's shadow mask (device, renderer): YW4_AB_PASS=shadowmask runs it twice, ours and the game's program, to compare (runtime/src/shadow_mask.c)"
+
+[[hook]]
+module = "main"
 offset = "0x94ecc0"
 native = "yw4_hook_nnmain"
 why = "nnMain's start: YW4_FRAME_VSYNCS sets the game's vsyncs per frame before it reads them (runtime/src/framerate.c)"

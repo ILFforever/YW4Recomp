@@ -49,6 +49,7 @@ static int pcss_index(void) { return gpu_pcss_level() & 3; }
 static int shadow_pass_index(void) { return !strcmp(shadow_mode_name(), "CUSTOM"); }
 static int gbuffer_index(void) { return gbuffer_native(); }
 static int bloom_index(void) { return bloom_native(); }
+static int shadow_mask_index(void) { return shadow_mask_native(); }
 static int dof_pass_index(void) { return dof_native(); }
 static int blur_fast_index(void) { return blur_fast(); }
 static const char *dlss_disabled(void) {
@@ -175,6 +176,12 @@ static const Setting developer[] = {
      {"GAME", "CUSTOM"},
      {"THE GAME'S RENDERER", "OUR CUSTOM RENDERER (RECOMMENDED)"}, 2, dof_pass_index, dof_toggle, "YW4_DOF_PASS",
      {"game", "native"}},
+    {"RENDERER", "SHADOW MASK",
+     "WHO WORKS OUT WHERE THE SUN'S SHADOWS FALL ON SCREEN: THE GAME OR OUR OWN RENDERER. THE PICTURE IS THE "
+     "SAME. OURS LETS FUTURE UPGRADES IN.",
+     {"GAME", "CUSTOM"},
+     {"THE GAME'S RENDERER", "OUR CUSTOM RENDERER (RECOMMENDED)"}, 2, shadow_mask_index, shadow_mask_toggle,
+     "YW4_SHADOW_MASK", {"game", "native"}},
     {"SPEED-UPS", "BATTLE BLUR",
      "AS A BATTLE STARTS THE GAME BLURS THE PICTURE WITH UP TO 17 SMALL BLURS IN A ROW. FAST GETS THE SAME WIDTH "
      "WITH A QUARTER AS MANY, WIDER ONES: ABOUT 3 MS LESS GPU TIME THEN, THE SAME LOOK.",
