@@ -73,9 +73,7 @@ sharp) and frame generation with either (a frame made between each two of the ga
 A town street, same spot: the game's shadows (1024 map, no PCSS) against ours (4096 map, PCSS ×2). The
 characters' shadows keep their shape, and the tree shade on the pavement is soft:
 
-| Stock (the game's) | Improved (ours) |
-|---|---|
-| ![Stock shadows: blurry character shadows, hard tree shade](docs/screenshots/20-shadows-stock.jpg) | ![Improved shadows: defined character shadows, soft tree shade](docs/screenshots/21-shadows-improved.jpg) |
+![Stock (the game's): Stock shadows: blurry character shadows, hard tree shade; Improved (ours): Improved shadows: defined character shadows, soft tree shade](docs/screenshots/82-shadows-stock-vs-improved.jpg)
 
 It is also lighter to run. The same busy street on the same laptop ([docs/baseline.md](docs/baseline.md),
 2026-10-22), both at the game's own settings (1600×900, 30 frames/s, every improvement of this project off), so
@@ -110,11 +108,7 @@ the sides; the minimap and button hints stay where they are on the Switch.
 
 Exploring, cutscenes and battles all work at the wider ratios. 21:9 at 4K height (5120×2160), from play:
 
-| Town | Mansion |
-|---|---|
-| ![21:9 town street](docs/screenshots/24-ultrawide-town.jpg) | ![21:9 mansion hall](docs/screenshots/25-ultrawide-mansion.jpg) |
-| **Cutscene: arriving at Mount Oomori** | **Cutscene: dialogue** |
-| ![21:9 cutscene with the location title](docs/screenshots/26-ultrawide-cutscene-title.jpg) | ![21:9 cutscene with Jibanyan and Whisper](docs/screenshots/27-ultrawide-cutscene-dialogue.jpg) |
+![Town: 21:9 town street; Mansion: 21:9 mansion hall; Cutscene: arriving at Mount Oomori: 21:9 cutscene with the location title; Cutscene: dialogue: 21:9 cutscene with Jibanyan and Whisper](docs/screenshots/83-ultrawide-play.jpg)
 
 Layers over the whole screen, like the dimming behind a dialog and the loading screen's black, cover the full
 width; pictures made for 16:9 (the copyright notice, movies, the dungeon map's backdrop) stay 16:9 in the middle
@@ -123,15 +117,7 @@ occasional stutters in heavy scenes; more optimization is planned ([known issues
 
 Menus, maps and battles at 21:9 (the dialog at 2133×900, the rest at 5120×2160):
 
-| Yo-kai Pad | Fast-travel map: more of the town at the sides |
-|---|---|
-| ![21:9 Yo-kai Pad menu](docs/screenshots/55-ultrawide-yokai-pad.jpg) | ![21:9 town fast-travel map reaching the edges](docs/screenshots/56-ultrawide-town-map.jpg) |
-| **Dungeon map: a 16:9 picture with black bars** | **Dialog: the dimming covers the full width** |
-| ![21:9 bamboo forest map with black side bars](docs/screenshots/57-ultrawide-dungeon-map.jpg) | ![21:9 dialog with the whole screen dimmed](docs/screenshots/58-ultrawide-dialog.jpg) |
-| **Into a battle** | **Battle start** |
-| ![21:9 swirl into a battle](docs/screenshots/59-ultrawide-battle-swirl.jpg) | ![21:9 battle start with the enemy yo-kai](docs/screenshots/60-ultrawide-battle-start.jpg) |
-| **Battle** | **Battle results** |
-| ![21:9 battle with the command wheel](docs/screenshots/61-ultrawide-battle.jpg) | ![21:9 battle results over the blurred field](docs/screenshots/62-ultrawide-battle-results.jpg) |
+![Yo-kai Pad: 21:9 Yo-kai Pad menu; Fast-travel map: more of the town at the sides: 21:9 town fast-travel map reaching the edges; Dungeon map: a 16:9 picture with black bars: 21:9 bamboo forest map with black side bars; Dialog: the dimming covers the full width: 21:9 dialog with the whole screen dimmed; Into a battle: 21:9 swirl into a battle; Battle start: 21:9 battle start with the enemy yo-kai; Battle: 21:9 battle with the command wheel; Battle results: 21:9 battle results over the blurred field](docs/screenshots/84-ultrawide-menus-battles.jpg)
 
 </details>
 
@@ -141,9 +127,7 @@ Menus, maps and battles at 21:9 (the dialog at 2133×900, the rest at 5120×2160
 A bigger shadow map gives sharper, more detailed shadow edges, most visibly on shadows far from
 the camera. The bamboo forest, PCSS off:
 
-| 1024 (the game's) | 2048 | 4096 (recommended) |
-|---|---|---|
-| ![1024 shadow map](docs/screenshots/12-shadow-map-1024.jpg) | ![2048 shadow map](docs/screenshots/13-shadow-map-2048.jpg) | ![4096 shadow map](docs/screenshots/14-shadow-map-4096.jpg) |
+![1024 (the game's): 1024 shadow map; 2048 shadow map; 4096 (recommended): 4096 shadow map](docs/screenshots/85-shadow-map-sizes.jpg)
 
 </details>
 
@@ -158,9 +142,7 @@ PCSS (percentage-closer soft shadows) makes shadows behave more like real ones:
 - **Less shimmering**: hard edges flicker as the camera moves; softer ones spread that out, so distant shadows
   shimmer much less.
 
-| PCSS off | PCSS ×2 (recommended) |
-|---|---|
-| ![PCSS off: hard, speckled leaf shadows](docs/screenshots/16-pcss-off.jpg) | ![PCSS x2](docs/screenshots/18-pcss-x2.jpg) |
+![PCSS off: hard, speckled leaf shadows; PCSS ×2 (recommended): PCSS x2](docs/screenshots/86-pcss-off-vs-x2.jpg)
 
 </details>
 
@@ -184,11 +166,7 @@ Yo-kai World with TAA, 21:9 at 4K height (5120×2160):
 
 The same frame zoomed in 3×: the red railing, the fence by the lamp post and the road line.
 
-| Off | SMAA | TAA |
-|---|---|---|
-| ![Railing, no AA: stair-stepped edges](docs/screenshots/30-aa-rail-off.png) | ![Railing, SMAA](docs/screenshots/31-aa-rail-smaa.png) | ![Railing, TAA: smooth edges](docs/screenshots/32-aa-rail-taa.png) |
-| ![Fence, no AA: sparkling bars](docs/screenshots/33-aa-fence-off.png) | ![Fence, SMAA](docs/screenshots/34-aa-fence-smaa.png) | ![Fence, TAA: steady bars](docs/screenshots/35-aa-fence-taa.png) |
-| ![Road line, no AA](docs/screenshots/36-aa-road-off.png) | ![Road line, SMAA](docs/screenshots/37-aa-road-smaa.png) | ![Road line, TAA](docs/screenshots/38-aa-road-taa.png) |
+![Railing · Off: Railing, no AA: stair-stepped edges; SMAA: Railing, SMAA; TAA: Railing, TAA: smooth edges; Fence · Off: Fence, no AA: sparkling bars; SMAA: Fence, SMAA; TAA: Fence, TAA: steady bars; Road line · Off: Road line, no AA; SMAA: Road line, SMAA; TAA: Road line, TAA](docs/screenshots/87-aa-zoomed.png)
 
 </details>
 
@@ -202,11 +180,7 @@ filtering keeps the road, pavement and walls sharp into the distance, even at a 
 
 The same spot zoomed in 2×: the crosswalk far ahead, the pavement on the right and the road surface.
 
-| Off (the Switch's) | ×2 | ×4 | ×8 | ×16 |
-|---|---|---|---|---|
-| ![Crosswalk, off: faded, blurred stripes](docs/screenshots/40-filtering-crosswalk-off.png) | ![Crosswalk, x2](docs/screenshots/41-filtering-crosswalk-x2.png) | ![Crosswalk, x4](docs/screenshots/42-filtering-crosswalk-x4.png) | ![Crosswalk, x8](docs/screenshots/43-filtering-crosswalk-x8.png) | ![Crosswalk, x16: crisp white stripes](docs/screenshots/44-filtering-crosswalk-x16.png) |
-| ![Pavement, off: smooth blur](docs/screenshots/45-filtering-pavement-off.png) | ![Pavement, x2](docs/screenshots/46-filtering-pavement-x2.png) | ![Pavement, x4](docs/screenshots/47-filtering-pavement-x4.png) | ![Pavement, x8](docs/screenshots/48-filtering-pavement-x8.png) | ![Pavement, x16: brick pattern visible](docs/screenshots/49-filtering-pavement-x16.png) |
-| ![Road, off: smeared](docs/screenshots/50-filtering-road-off.png) | ![Road, x2](docs/screenshots/51-filtering-road-x2.png) | ![Road, x4](docs/screenshots/52-filtering-road-x4.png) | ![Road, x8](docs/screenshots/53-filtering-road-x8.png) | ![Road, x16: grainy asphalt](docs/screenshots/54-filtering-road-x16.png) |
+![Crosswalk · Off (the Switch's): Crosswalk, off: faded, blurred stripes; ×2: Crosswalk, x2; ×4: Crosswalk, x4; ×8: Crosswalk, x8; ×16: Crosswalk, x16: crisp white stripes; Pavement · Off (the Switch's): Pavement, off: smooth blur; ×2: Pavement, x2; ×4: Pavement, x4; ×8: Pavement, x8; ×16: Pavement, x16: brick pattern visible; Road · Off (the Switch's): Road, off: smeared; ×2: Road, x2; ×4: Road, x4; ×8: Road, x8; ×16: Road, x16: grainy asphalt](docs/screenshots/88-filtering-zoomed.png)
 
 </details>
 
@@ -366,12 +340,7 @@ on the CONTROLS page; none are by default.
 The game's files still hold keyboard, Xbox and PlayStation icon sets that the Switch version never shows; we
 show those instead of the Switch buttons. Below, the shortcut wheel and the minimap's search button with each:
 
-| | |
-|---|---|
-| Switch (the game's) | ![Switch icons: ZL, ZR and R](docs/screenshots/76-button-icons-switch.png) |
-| Keyboard | ![Keyboard icons: the bound keys 1, 3 and E](docs/screenshots/77-button-icons-keyboard.png) |
-| Xbox | ![Xbox icons: LT, RT and RB](docs/screenshots/78-button-icons-xbox.png) |
-| PlayStation | ![PlayStation icons: L2, R2 and R1](docs/screenshots/79-button-icons-playstation.png) |
+![Switch (the game's): Switch icons: ZL, ZR and R; Keyboard icons: the bound keys 1, 3 and E; Xbox icons: LT, RT and RB; PlayStation icons: L2, R2 and R1](docs/screenshots/89-button-icons.png)
 
 </details>
 
@@ -386,10 +355,7 @@ files are added, as on a Switch; your dump is not changed. The log names each mo
 another folder, `YW4_MODS=none` turns mods off. The fan **English translation patch** works this way (not included:
 bring your own copy):
 
-| | |
-|---|---|
-| ![The copyright warning in English](docs/screenshots/81-english-patch-warning.jpg) | ![The town with the quest marker in English: Head to Mt. Wildwood!](docs/screenshots/80-english-patch-town.jpg) |
-| The warning before the title | The town: "Head to Mt. Wildwood!" |
+![The warning before the title: The copyright warning in English; The town: "Head to Mt. Wildwood!": The town with the quest marker in English: Head to Mt. Wildwood!](docs/screenshots/90-english-patch.jpg)
 
 </details>
 
@@ -408,9 +374,7 @@ pages. The DualSense's **touchpad** shows the performance HUD (F3). Your choices
 `settings.ini` next to `yw4.exe` and kept for the next start. Settings are only in the panel; the other function keys
 are debugging tools ([docs/debugging.md](docs/debugging.md)).
 
-| Settings (F1) | Developer options |
-|---|---|
-| ![The settings panel: display, anti-aliasing and upscaling, frame generation and latency, detail, shadows](docs/screenshots/73-settings-panel.png) | ![The developer options: shadow pass, G-buffer, bloom, distance blur pass, battle blur](docs/screenshots/74-settings-developer.png) |
+![Settings (F1): The settings panel: display, anti-aliasing and upscaling, frame generation and latency, detail, shadows; Developer options: The developer options: shadow pass, G-buffer, bloom, distance blur pass, battle blur](docs/screenshots/91-settings-panels.png)
 
 | Setting | What it does |
 |---|---|
@@ -449,12 +413,7 @@ panel.
 
 All captured from the recompiled build on Windows.
 
-| | |
-|---|---|
-| ![Amano house kitchen](docs/screenshots/07-kitchen.jpg) | ![Opening scene](docs/screenshots/06-opening-scene.jpg) |
-| The Amano house kitchen | Opening scene |
-| ![LEVEL-5 logo](docs/screenshots/02-level5-logo.jpg) | ![Opening movie](docs/screenshots/04-opening-movie.jpg) |
-| LEVEL-5 logo | Opening movie |
+![The Amano house kitchen: Amano house kitchen; Opening scene; LEVEL-5 logo; Opening movie](docs/screenshots/92-screenshots.jpg)
 
 In town with the performance HUD on (F3). The game is a native Windows program: the frame takes about 10 ms of
 work on the CPU and under one core of a 16-core laptop, against the 33 ms the game's 30 frames/s allow; the
