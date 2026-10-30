@@ -147,6 +147,7 @@ static RecState *replay_states;
 static RecKey *replay_keys;
 static size_t n_states, n_keys, next_key;
 static int replay_loaded;
+int yw4_replay_done;  /* the replay has handed over to the player (its last line): kernel.c's frame clock stops */
 
 static void replay_load(void) {
     replay_loaded = 1;
@@ -174,6 +175,7 @@ static void replay_load(void) {
     }
     fclose(f);
     fprintf(stderr, "yw4: replay: %zu input states and %zu key presses from %s\n", n_states, n_keys, path);
+    if (!n_states && !n_keys) __atomic_store_n(&yw4_replay_done, 1, __ATOMIC_RELEASE);  /* an empty file: nothing to time */
 }
 
 /* The state a replay gives at `tick`; 0 if there is no replay. */
@@ -185,6 +187,7 @@ static int replay_state(uint64_t tick, uint64_t *buttons, int32_t sticks[4]) {
         static int handed_over;
         if (!handed_over) {
             handed_over = 1;
+            __atomic_store_n(&yw4_replay_done, 1, __ATOMIC_RELEASE);
             fprintf(stderr, "yw4: replay: finished at tick %llu, input is live\n", (unsigned long long)tick);
             /* YW4_REPLAY_EXIT=1: a test run ends with its replay instead of idling */
             const char *e = getenv("YW4_REPLAY_EXIT");

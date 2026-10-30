@@ -32,9 +32,17 @@ with what the game binds, on every draw, and logs a summary (`YW4_SHADOWS=check`
 the owner plays for a while in that mode: variety a scripted replay never has (moving NPCs, many areas). An hour
 of play gave 4.9 million checked G-buffer draws (decision 0026).
 
-**Compare within one run, not across runs.** Replays drift: two runs of the same settings already differ on
-hundreds of thousands of pixels. To show that a change is exact, switch it on and off on alternating frames of
-one run and dump the images:
+**Replays repeat themselves.** While a replay plays, the game's main loop runs on a clock of exactly 1/60 s per
+frame and the replay goes by frame (since 2026-10-31), so the same replay ends in the same place every run, however
+slow a loading screen or shader build was (the town walk: 0.1% of pixels differ between runs, swaying trees).
+The price: during the replay the game's time follows its frames, not the wall, so don't time things in a replay.
+When the replay's last line has passed, real time again. Test runs also leave the mouse alone (`YW4_MOUSE=0`, set
+by `tools.dev.run`), so the PC can be used meanwhile. A replay can be made longer by adding a line
+`s <tick> 0 0 0 0 0` at the end.
+
+**Compare within one run when it must be exact.** Across runs, things the replay doesn't drive (other threads'
+timing, particles) still differ a little. To show that a change is exact, switch it on and off on alternating
+frames of one run and dump the images:
 
     python -m tools.dev.run --save work/testsaves/save_school --seconds 150 \
         YW4_GBUFFER_ALTERNATE=1800 YW4_DUMP_IMAGE=7268f13000,7269783000 \

@@ -804,10 +804,18 @@ static float mouse_accum_y;
 static int mouse_wheel_pulses[2];  /* [0] wheel up, [1] wheel down */
 static int mouse_held_off;         /* the click that gave the game the mouse: no press until it is let go */
 
+/* YW4_MOUSE=0: the game never takes the mouse (no capture, no camera, no clicks or wheel): for test runs, so the
+ * person at the PC can go on using it (tools.dev.run sets it). */
+static int mouse_off(void) {
+    static int off = -1;
+    if (off < 0) off = getenv("YW4_MOUSE") && !strcmp(getenv("YW4_MOUSE"), "0");
+    return off;
+}
+
 void window_mouse_motion(float *dx, float *dy) {
     host_lock(&mouse_lock);
-    *dx = mouse_accum_x;
-    *dy = mouse_accum_y;
+    *dx = mouse_off() ? 0.0f : mouse_accum_x;
+    *dy = mouse_off() ? 0.0f : mouse_accum_y;
     mouse_accum_x = 0.0f;
     mouse_accum_y = 0.0f;
     host_unlock(&mouse_lock);
@@ -828,9 +836,10 @@ static void update_input(void) {
     uint32_t mb = SDL_GetMouseState(&mx, &my);
     if (mouse_held_off && !mb) mouse_held_off = 0;
     /* clicks are buttons only while the game has the mouse */
-    if (mouse_held_off || !window || !SDL_GetWindowRelativeMouseMode(window)) mb = 0;
+    if (mouse_held_off || !window || !SDL_GetWindowRelativeMouseMode(window) || mouse_off()) mb = 0;
     int wup = 0, wdwn = 0;
     host_lock(&mouse_lock);
+    if (mouse_off()) mouse_wheel_pulses[0] = mouse_wheel_pulses[1] = 0;
     if (mouse_wheel_pulses[0] > 0) { wup = 1; mouse_wheel_pulses[0]--; }
     if (mouse_wheel_pulses[1] > 0) { wdwn = 1; mouse_wheel_pulses[1]--; }
     host_unlock(&mouse_lock);
@@ -961,7 +970,7 @@ void window_run(void (*guest)(void *), void *arg) {
         } else {
             have_vulkan = 1;
             gpu_init();
-            SDL_SetWindowRelativeMouseMode(window, true);
+            if (!mouse_off()) SDL_SetWindowRelativeMouseMode(window, true);
         }
     }
     if (!window) {
@@ -1010,7 +1019,7 @@ void window_run(void (*guest)(void *), void *arg) {
         case SDL_EVENT_MOUSE_BUTTON_DOWN:
             if (settings_open()) {
                 if (bindings_capturing()) bindings_capture_mouse(e.button.button);
-            } else if (window && !SDL_GetWindowRelativeMouseMode(window)) {
+            } else if (window && !SDL_GetWindowRelativeMouseMode(window) && !mouse_off()) {
                 SDL_SetWindowRelativeMouseMode(window, true);
                 mouse_held_off = 1;
             }
@@ -1034,7 +1043,7 @@ void window_run(void (*guest)(void *), void *arg) {
             fprintf(stderr, "yw4: window closed\n");
             exit(0);
         case SDL_EVENT_KEY_DOWN:
-            if ((e.key.key == SDLK_LALT || e.key.key == SDLK_RALT) && !settings_open()) {
+            if ((e.key.key == SDLK_LALT || e.key.key == SDLK_RALT) && !settings_open() && !mouse_off()) {
                 if (window) {
                     bool rel = SDL_GetWindowRelativeMouseMode(window);
                     SDL_SetWindowRelativeMouseMode(window, !rel);

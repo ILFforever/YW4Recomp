@@ -50,6 +50,7 @@ def run(cfg: config.Config, save: Path | None, replay: Path | None, seconds: int
     env = dict(os.environ)
     env.setdefault("YW4_AUDIO", "0")
     env.setdefault("YW4_SETTINGS_FILE", "none")  # the owner's settings.ini stays out of test runs, and unchanged
+    env.setdefault("YW4_MOUSE", "0")  # the game doesn't take the mouse: the owner can use the PC meanwhile
     if replay:
         env["YW4_REPLAY"] = str(replay)
     if exit_at_end:

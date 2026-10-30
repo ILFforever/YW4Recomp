@@ -100,7 +100,9 @@ Saved screenshots get the same sRGB decode as the window, so their colours match
 | Variable | What it does |
 |---|---|
 | `YW4_RECORD=0` | Every input change and capture key is recorded in `work/inputs/rec_<time>.txt` (on by default); this turns it off |
-| `YW4_REPLAY=<file>` | Feed a recording back at the same ticks, so a route can be run without a person. When the replay ends, the keyboard and gamepad work again, so a short recording can just load the save. Long routes can drift (about one run in three ends somewhere else, e.g. stuck on the save-load screen); check the screenshot |
+| `YW4_REPLAY=<file>` | Feed a recording back, so a route can be run without a person. While it plays, the game's main loop runs on a clock of exactly 1/60 s per frame and the recording's ticks are taken as frames, so a route ends in the same place every run (`runtime/src/kernel.c` `yw4_replay_frame_clock`); the game's time then follows its frames, not the wall. When the replay ends, real time again, and the keyboard and gamepad work again, so a short recording can just load the save |
+| `YW4_REPLAY_CLOCK=real` | The replay on the wall clock instead (before 2026-10-31): routes drift with loading and shader-build times |
+| `YW4_MOUSE=0` | The game never takes the mouse: no capture, camera, clicks or wheel (`tools.dev.run` sets it, so the PC can be used during test runs) |
 | `YW4_INPUT=2400:1:10` | Scripted presses, `tick:buttons(hex):length`, comma separated; `1` is A |
 
 ## Looking inside a frame

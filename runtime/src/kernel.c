@@ -1127,8 +1127,44 @@ void yw4_svc(CPUState *ctx, uint32_t imm) {
     host_unlock(&klock);
 }
 
+extern uint64_t yw4_frames_presented;  /* dispatch.c */
+
+extern int yw4_replay_done;  /* svc_hid.c */
+
+/* Replays that don't drift: while a replay (YW4_REPLAY) gives the input, the thread that presents (the game's main
+ * loop) reads a counter that moves exactly 1/60 s per presented frame, so the game's time step (nnMain measures it
+ * with this counter) is a fixed 1/60; plus one count per read so a wait on it can't stand still. Other threads keep
+ * real time. svc_hid.c plays the replay by presented frame (vi.c). A slow loading screen or shader build then no
+ * longer shifts what happens after it: the town walk ended in the same place 3 runs of 3 (2026-10-31), against 3
+ * different places on the wall clock. The game's time then follows its frames, not the wall: right for tests, not
+ * for timing. When the replay hands over (its last line), real time again, never going back.
+ * YW4_REPLAY_CLOCK=real: the replay on the wall clock as before. */
+int yw4_replay_frame_clock(void) {
+    static int on = -1;
+    if (on < 0) on = getenv("YW4_REPLAY") && !(getenv("YW4_REPLAY_CLOCK") && !strcmp(getenv("YW4_REPLAY_CLOCK"), "real"));
+    /* from the start (the boot logos too, or the title comes up on a different frame each run) to the hand-over */
+    return on && !__atomic_load_n(&yw4_replay_done, __ATOMIC_ACQUIRE);
+}
+
+static uint64_t real_cntpct(void);
+
 /* CNTPCT_EL0 counts at 19.2 MHz from boot on the Switch: here, from the first call. */
 uint64_t yw4_cntpct(void) {
+    if (!cur || !(cur->roles & YW4_ROLE_PRESENT)) return real_cntpct();
+    static uint64_t base, base_frame, last, offset;  /* the main loop's thread only */
+    if (yw4_replay_frame_clock()) {
+        uint64_t f = __atomic_load_n(&yw4_frames_presented, __ATOMIC_RELAXED);
+        if (!base) base = real_cntpct(), base_frame = f;
+        uint64_t v = base + (f - base_frame) * 320000u;  /* 19.2 MHz / 60 */
+        last = v > last ? v : last + 1;
+        return last;
+    }
+    uint64_t r = real_cntpct();
+    if (r + offset <= last) offset = last + 1 - r;  /* after a frame-clock replay: real time on from where it was */
+    return last = r + offset;
+}
+
+static uint64_t real_cntpct(void) {
     static int64_t start;
     int64_t now = host_now_ns();
     int64_t s = __atomic_load_n(&start, __ATOMIC_RELAXED);

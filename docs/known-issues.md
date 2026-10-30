@@ -71,7 +71,9 @@ What is known to be missing or wrong, roughly in the order it is likely to matte
   failed the same way once at start (2026-10-29, the run straight after worked): it reserves the guest's fixed
   addresses too.
 
-- `YW4_REPLAY` routes can drift: about one run in three ends somewhere else (for example stuck on the save-load
-  screen). Check the screenshot before trusting a run. Since 2026-10-25 the town walk replay drifts every time,
-  even between two runs of the game's own shadows, so replay screenshots can't be compared.
+- ~~`YW4_REPLAY` routes drift~~: fixed 2026-10-31. Replays went by the wall clock while the game moves by its own
+  frames, so a slow loading screen or shader build shifted everything after it (the town walk ended in a
+  different place every run). Now, while a replay plays, the game's main loop gets a clock of exactly 1/60 s per
+  frame and the replay goes by frame (kernel.c `yw4_replay_frame_clock`): the town walk ends in the same place
+  every run (3 of 3, 0.1% of pixels differ: swaying trees). `YW4_REPLAY_CLOCK=real` is the old way.
 - The baseline benchmark against Eden ([baseline.md](baseline.md)) still lacks the opening-scene frame-time spread.

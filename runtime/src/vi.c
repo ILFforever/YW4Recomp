@@ -13,6 +13,9 @@
 #include "kernel.h"
 #include "yw4load.h"
 
+extern uint64_t yw4_frames_presented;  /* dispatch.c */
+int yw4_replay_frame_clock(void);      /* kernel.c */
+
 #define VSYNC_PERIOD_NS 16666667  /* 60 Hz */
 
 static void *token(void) {
@@ -71,7 +74,8 @@ static void vsync_thread(void *arg) {
         else if (now - next > 3 * VSYNC_PERIOD_NS) next = now;  /* fell far behind: don't burst to catch up */
         __atomic_store_n(&vsync_time, host_now_ns(), __ATOMIC_RELEASE);
         uint64_t tick = __atomic_add_fetch(&vsync_count, 1, __ATOMIC_RELEASE);
-        yw4_hid_update(tick);
+        /* YW4_REPLAY_CLOCK=frame (kernel.c): the replay and the recording go by presented frame instead */
+        yw4_hid_update(yw4_replay_frame_clock() ? __atomic_load_n(&yw4_frames_presented, __ATOMIC_RELAXED) + 1 : tick);
         KEvent *e = __atomic_load_n(&vsync, __ATOMIC_ACQUIRE);
         if (e) yw4_event_signal_from_host(e);
     }
