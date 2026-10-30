@@ -87,45 +87,18 @@ the two do the same work:
 | Memory | 15.7 GB | 3.9 GB |
 | GPU | 30% | 33% |
 
-## Goals
+## Features
 
-| Status | Goal | Where it stands |
-|---|---|---|
-| ✅ | **Performance** | The game's 30 frames/s everywhere tested, and well above it with the FRAME RATE setting (60, 120, 144 or no limit) |
-| 🔧 | **Our own renderer** | Replace the game's renderer pass by pass, so the improvements below become possible (see below) |
-| 🔧 | **Better shadows** | Bigger shadow maps and PCSS soft shadows done; contact shadows and steadier cascades next |
-| ✅ | **Sharper distance** | Anisotropic texture filtering and a softer distance blur: distant ground, roads and buildings stay sharp without 4K |
-| ✅ | **Higher resolution** | The 3D view at 1080p, 1440p or 4K instead of the game's 1600×900 (30 frames/s at 4K on an RTX 4070 laptop) |
-| ✅ | **Ultrawide and other aspect ratios** | 16:10, 21:9 and 32:9 in the panel: a wider view of the world with the UI kept 16:9 in the middle; exploring, battles and cutscenes work; dialog dimming and the loading screen cover the full width |
-| 🔧 | **Higher frame rates** | 30, 60, 120, 144 or no limit, switchable while playing (FRAME RATE in the panel): the game already moves by the real time between frames, so walking and battles keep their speed (~140 frames/s at 1600×900). At 4K the GPU is the limit; upscaling (next row) lifts it, frame generation (the row after) doubles what is shown. Menus and cutscenes are being checked |
-| ✅ | **Upscaling (NVIDIA DLSS, AMD FSR)** | The world drawn smaller and rebuilt at full size, menus and text kept full size. **On NVIDIA RTX GPUs use DLSS: sharper and cheaper than FSR.** At 4K 21:9 on an RTX 4070 laptop, instead of ~59 frames/s: DLSS ~81 / ~93 / ~112 (quality / balanced / performance), FSR ~75 / ~86 / ~104 (any GPU). DLSS keeps fine patterns (far nets, perforated fences) clean where FSR gets grainy ([decisions 0039](docs/decisions/0039-fsr-upscaling.md), [0040](docs/decisions/0040-dlss-upscaling.md)) |
-| ✅ | **Frame generation (NVIDIA DLSS, AMD FSR)** | A frame made between each two of the game's: about twice as many on screen, the menus kept still. **On RTX 40 and newer use DLSS**: more game frames left and cleaner moving characters. In a busy town at 4K 21:9 on an RTX 4070 laptop, instead of ~70 frames/s: DLSS ~150 shown (~75 game), FSR ~126 shown (~63 game, any GPU). NVIDIA Reflex in the panel too ([decision 0041](docs/decisions/0041-frame-generation.md)) |
-| 🔧 | **Better anti-aliasing** | FXAA, SMAA and now TAA (steady thin edges: fences, nets, leaves) on the 3D scene before the UI is drawn, so text stays crisp; per-object motion for TAA next |
-| ✅ | **Mod support** | Mods in the Switch's layout are laid over your game files at start, as on a modded Switch, without touching your dump: the English translation patch runs (see [Mods](#mods), [decision 0043](docs/decisions/0043-mods-layeredfs.md)) |
-| 🔧 | **Keyboard, mouse and controllers** | Bindings on the panel's CONTROLS page, saved, with your controller's own button names; tested with a DualSense. On-screen button icons follow what you play with and your bindings (keyboard, Xbox, PlayStation or Nintendo, [decision 0042](docs/decisions/0042-button-icons-and-mouse.md)). The mouse turns the camera through the game's own unused mouse code; being tested |
-| 🗓️ | **Linux** | The runtime is written to be portable; not built or tested there yet |
+What the PC version adds to the Switch game. Open an entry for details, pictures and measurements; more in [docs/graphics.md](docs/graphics.md).
 
-✅ = Done, 🔧 = In progress, 🗓️ = Planned
+**Graphics**
 
-### Our own renderer
+<details>
+<summary><b>Resolution</b>: up to 4K, menus and text at the same size</summary>
 
-Replaying the game's draw calls ties every frame to the Switch's choices: its resolution, its 16:9 layout, its
-shadow settings. A renderer of our own draws the same scene from the game's data, so those choices become ours to
-change ([decision 0023](docs/decisions/0023-custom-renderer-plan.md)). 
+The 3D world at 1600×900 (the Switch's), 1920×1080, 2560×1440 or 3840×2160; the menus and text are drawn at the same size on top. About 30 frames/s at 4K on an RTX 4070 laptop without upscaling; with upscaling (under Performance) well above.
 
-| Status | Pass | Where it stands |
-|---|---|---|
-| Done, off by default (panel: SHADOW PASS) | Shadow maps | Our own pass ([decision 0024](docs/decisions/0024-shadow-pass.md)) |
-| Done, off by default (panel: G-BUFFER) | G-buffer | Our draws, our shaders for the main surfaces and characters, identical to the game's ([decision 0026](docs/decisions/0026-gbuffer-pass.md)) |
-| In progress (`YW4_TAKEOVER=1`) | Lit material pass | With the takeover, 85-93% of the G-buffer's and the lit pass's draws are made from the game's data by us, skipping the engine's own draw setup ([decision 0030](docs/decisions/0030-takeover.md)) |
-| Partly ours | Post-processing | Bloom is ours, identical to the game's ([decision 0037](docs/decisions/0037-bloom-pass.md)); the distance blur is ours too ([decision 0038](docs/decisions/0038-distance-blur-pass.md)); anti-aliasing ours between the 3D scene and the UI |
-| Planned | UI | The game's |
-
-Still the game's: the choice of what to draw (which objects, in which order) and the engine's own draw walk.
-
-## Current Graphical Improvements
-
-Improvements over the original game. Details, comparisons and measurements: [docs/graphics.md](docs/graphics.md).
+</details>
 
 <details>
 <summary><b>Aspect ratio</b>: 16:10, 21:9 and 32:9, the UI kept 16:9 in the middle</summary>
@@ -216,6 +189,33 @@ The same frame zoomed in 3×: the red railing, the fence by the lamp post and th
 | ![Railing, no AA: stair-stepped edges](docs/screenshots/30-aa-rail-off.png) | ![Railing, SMAA](docs/screenshots/31-aa-rail-smaa.png) | ![Railing, TAA: smooth edges](docs/screenshots/32-aa-rail-taa.png) |
 | ![Fence, no AA: sparkling bars](docs/screenshots/33-aa-fence-off.png) | ![Fence, SMAA](docs/screenshots/34-aa-fence-smaa.png) | ![Fence, TAA: steady bars](docs/screenshots/35-aa-fence-taa.png) |
 | ![Road line, no AA](docs/screenshots/36-aa-road-off.png) | ![Road line, SMAA](docs/screenshots/37-aa-road-smaa.png) | ![Road line, TAA](docs/screenshots/38-aa-road-taa.png) |
+
+</details>
+
+<details>
+<summary><b>Texture filtering</b>: anisotropic up to ×16, sharp ground into the distance</summary>
+
+The Switch version uses none, so the ground blurs a short way ahead of the camera. Anisotropic
+filtering keeps the road, pavement and walls sharp into the distance, even at a low angle. Yo-kai World with ×16:
+
+![Yo-kai World street with ×16 texture filtering](docs/screenshots/39-filtering-x16-yokai-world.jpg)
+
+The same spot zoomed in 2×: the crosswalk far ahead, the pavement on the right and the road surface.
+
+| Off (the Switch's) | ×2 | ×4 | ×8 | ×16 |
+|---|---|---|---|---|
+| ![Crosswalk, off: faded, blurred stripes](docs/screenshots/40-filtering-crosswalk-off.png) | ![Crosswalk, x2](docs/screenshots/41-filtering-crosswalk-x2.png) | ![Crosswalk, x4](docs/screenshots/42-filtering-crosswalk-x4.png) | ![Crosswalk, x8](docs/screenshots/43-filtering-crosswalk-x8.png) | ![Crosswalk, x16: crisp white stripes](docs/screenshots/44-filtering-crosswalk-x16.png) |
+| ![Pavement, off: smooth blur](docs/screenshots/45-filtering-pavement-off.png) | ![Pavement, x2](docs/screenshots/46-filtering-pavement-x2.png) | ![Pavement, x4](docs/screenshots/47-filtering-pavement-x4.png) | ![Pavement, x8](docs/screenshots/48-filtering-pavement-x8.png) | ![Pavement, x16: brick pattern visible](docs/screenshots/49-filtering-pavement-x16.png) |
+| ![Road, off: smeared](docs/screenshots/50-filtering-road-off.png) | ![Road, x2](docs/screenshots/51-filtering-road-x2.png) | ![Road, x4](docs/screenshots/52-filtering-road-x4.png) | ![Road, x8](docs/screenshots/53-filtering-road-x8.png) | ![Road, x16: grainy asphalt](docs/screenshots/54-filtering-road-x16.png) |
+
+</details>
+
+**Performance**
+
+<details>
+<summary><b>Frame rate</b>: 30, 60, 120, 144 or no limit, switchable while playing</summary>
+
+FRAME RATE in the settings panel: the game's 30 frames/s, or 60, 120, 144 or no limit. The game already moves by the real time between frames, so walking and battles keep their speed at any rate (~140 frames/s at 1600×900). Menus and cutscenes are still being checked. At 4K the GPU is the limit: upscaling lifts it, frame generation doubles what is shown.
 
 </details>
 
@@ -338,23 +338,65 @@ FSR is AMD's, under the MIT licence.
 
 </details>
 
+**Controls**
+
 <details>
-<summary><b>Texture filtering</b>: anisotropic up to ×16, sharp ground into the distance</summary>
+<summary><b>Keyboard, mouse and controllers</b>: rebind everything, the mouse turns the camera</summary>
 
-The Switch version uses none, so the ground blurs a short way ahead of the camera. Anisotropic
-filtering keeps the road, pavement and walls sharp into the distance, even at a low angle. Yo-kai World with ×16:
+**Controls (F2)**, with a DualSense
 
-![Yo-kai World street with ×16 texture filtering](docs/screenshots/39-filtering-x16-yokai-world.jpg)
+![The controls page with a DualSense: the mouse's sensitivities at the top, then cross, circle, square, triangle, L1 to R3](docs/screenshots/75-controls-mouse-dualsense.png)
 
-The same spot zoomed in 2×: the crosswalk far ahead, the pavement on the right and the road surface.
+**Controllers:** Xbox, PlayStation and Joy-Cons work, and the controls page names the buttons as printed on
+yours (A B X Y and LB/RT on Xbox; × ○ □ △ and L1-R3 on PlayStation; ZL/ZR on Nintendo). By default the game's
+confirm is your controller's own confirm: × on a DualSense, A on Xbox. Tested by playing with a **DualSense (PS5)**,
+battles included, and with the controls page.
 
-| Off (the Switch's) | ×2 | ×4 | ×8 | ×16 |
-|---|---|---|---|---|
-| ![Crosswalk, off: faded, blurred stripes](docs/screenshots/40-filtering-crosswalk-off.png) | ![Crosswalk, x2](docs/screenshots/41-filtering-crosswalk-x2.png) | ![Crosswalk, x4](docs/screenshots/42-filtering-crosswalk-x4.png) | ![Crosswalk, x8](docs/screenshots/43-filtering-crosswalk-x8.png) | ![Crosswalk, x16: crisp white stripes](docs/screenshots/44-filtering-crosswalk-x16.png) |
-| ![Pavement, off: smooth blur](docs/screenshots/45-filtering-pavement-off.png) | ![Pavement, x2](docs/screenshots/46-filtering-pavement-x2.png) | ![Pavement, x4](docs/screenshots/47-filtering-pavement-x4.png) | ![Pavement, x8](docs/screenshots/48-filtering-pavement-x8.png) | ![Pavement, x16: brick pattern visible](docs/screenshots/49-filtering-pavement-x16.png) |
-| ![Road, off: smeared](docs/screenshots/50-filtering-road-off.png) | ![Road, x2](docs/screenshots/51-filtering-road-x2.png) | ![Road, x4](docs/screenshots/52-filtering-road-x4.png) | ![Road, x8](docs/screenshots/53-filtering-road-x8.png) | ![Road, x16: grainy asphalt](docs/screenshots/54-filtering-road-x16.png) |
+**Mouse:** the game's code still has a mouse camera that the Switch version never feeds; we feed it, so the mouse
+turns the camera. A click in the
+window gives the mouse to the game, Alt or opening the panel gives it back. Mouse buttons and the wheel can be bound
+on the CONTROLS page; none are by default.
 
 </details>
+
+<details>
+<summary><b>Button icons</b>: the keys or buttons you actually use, in the HUD and in text</summary>
+
+**Button icons** in the HUD and in text follow what you last pressed, a key or a controller, and your bindings.
+The game's files still hold keyboard, Xbox and PlayStation icon sets that the Switch version never shows; we
+show those instead of the Switch buttons. Below, the shortcut wheel and the minimap's search button with each:
+
+| | |
+|---|---|
+| Switch (the game's) | ![Switch icons: ZL, ZR and R](docs/screenshots/76-button-icons-switch.png) |
+| Keyboard | ![Keyboard icons: the bound keys 1, 3 and E](docs/screenshots/77-button-icons-keyboard.png) |
+| Xbox | ![Xbox icons: LT, RT and RB](docs/screenshots/78-button-icons-xbox.png) |
+| PlayStation | ![PlayStation icons: L2, R2 and R1](docs/screenshots/79-button-icons-playstation.png) |
+
+</details>
+
+**Mods**
+
+<details>
+<summary><b>Mods</b>: the English translation patch and other Switch mods, without touching your dump</summary>
+
+Put a mod in `work/mods`, in the layout a modded Switch uses: `work/mods/contents/010086c00af7c000/<mod name>/romfs/...`
+(or simply `work/mods/<mod name>/romfs/...`). At start its files replace the game's at the same paths and its new
+files are added, as on a Switch; your dump is not changed. The log names each mod it loaded. `YW4_MODS` points to
+another folder, `YW4_MODS=none` turns mods off. The fan **English translation patch** works this way (not included:
+bring your own copy):
+
+| | |
+|---|---|
+| ![The copyright warning in English](docs/screenshots/81-english-patch-warning.jpg) | ![The town with the quest marker in English: Head to Mt. Wildwood!](docs/screenshots/80-english-patch-town.jpg) |
+| The warning before the title | The town: "Head to Mt. Wildwood!" |
+
+</details>
+
+**Settings**
+
+<details>
+<summary><b>Settings panel</b>: every option in game (F1), the controls on F2</summary>
 
 Press **F1** in game for the settings panel: every option with all its choices, and what each one does (arrow keys or
 D-pad to choose and change). Its last row, **DEVELOPER OPTIONS**, opens the switches players don't need: which parts
@@ -369,31 +411,6 @@ are debugging tools ([docs/debugging.md](docs/debugging.md)).
 | Settings (F1) | Developer options |
 |---|---|
 | ![The settings panel: display, anti-aliasing and upscaling, frame generation and latency, detail, shadows](docs/screenshots/73-settings-panel.png) | ![The developer options: shadow pass, G-buffer, bloom, distance blur pass, battle blur](docs/screenshots/74-settings-developer.png) |
-
-**Controls (F2)**, with a DualSense
-
-![The controls page with a DualSense: the mouse's sensitivities at the top, then cross, circle, square, triangle, L1 to R3](docs/screenshots/75-controls-mouse-dualsense.png)
-
-**Controllers:** Xbox, PlayStation and Joy-Cons work, and the controls page names the buttons as printed on
-yours (A B X Y and LB/RT on Xbox; × ○ □ △ and L1-R3 on PlayStation; ZL/ZR on Nintendo). By default the game's
-confirm is your controller's own confirm: × on a DualSense, A on Xbox. Tested by playing with a **DualSense (PS5)**,
-battles included, and with the controls page.
-
-**Button icons** in the HUD and in text follow what you last pressed, a key or a controller, and your bindings.
-The game's files still hold keyboard, Xbox and PlayStation icon sets that the Switch version never shows; we
-show those instead of the Switch buttons. Below, the shortcut wheel and the minimap's search button with each:
-
-| | |
-|---|---|
-| Switch (the game's) | ![Switch icons: ZL, ZR and R](docs/screenshots/76-button-icons-switch.png) |
-| Keyboard | ![Keyboard icons: the bound keys 1, 3 and E](docs/screenshots/77-button-icons-keyboard.png) |
-| Xbox | ![Xbox icons: LT, RT and RB](docs/screenshots/78-button-icons-xbox.png) |
-| PlayStation | ![PlayStation icons: L2, R2 and R1](docs/screenshots/79-button-icons-playstation.png) |
-
-**Mouse:** the game's code still has a mouse camera that the Switch version never feeds; we feed it, so the mouse
-turns the camera. A click in the
-window gives the mouse to the game, Alt or opening the panel gives it back. Mouse buttons and the wheel can be bound
-on the CONTROLS page; none are by default.
 
 | Setting | What it does |
 |---|---|
@@ -426,6 +443,8 @@ The game starts at the Switch's 1600×900 and 16:9 with a 4096 shadow map, PCSS 
 distance blur, half-size effects and no anti-aliasing. For the game's original look, set every setting to its first choice in the
 panel.
 
+</details>
+
 ## Screenshots
 
 All captured from the recompiled build on Windows.
@@ -445,7 +464,44 @@ shadows here are our own pass with no graphical improvements applied (SHADOW PAS
   <img src="docs/screenshots/11-hud-in-town.jpg" alt="In town with the performance HUD: frame time, work, GPU, CPU, memory and a frame-time graph" width="820">
 </p>
 
+## Goals
 
+<details>
+<summary><b>Planned</b> (1)</summary>
+
+| Goal | Where it stands |
+|---|---|
+| **Linux** | The runtime is written to be portable; not built or tested there yet |
+
+</details>
+
+<details>
+<summary><b>Ongoing</b> (5)</summary>
+
+| Goal | Where it stands |
+|---|---|
+| **Our own renderer** | Replace the game's renderer pass by pass: the base for the graphics features above; shadows, surfaces, bloom and distance blur are ours already |
+| **Better shadows** | Bigger shadow maps and PCSS soft shadows done; contact shadows and steadier cascades next |
+| **Higher frame rates** | 30, 60, 120, 144 or no limit, switchable while playing (FRAME RATE in the panel): the game already moves by the real time between frames, so walking and battles keep their speed (~140 frames/s at 1600×900). At 4K the GPU is the limit; upscaling lifts it, frame generation doubles what is shown. Menus and cutscenes are being checked |
+| **Better anti-aliasing** | FXAA, SMAA and now TAA (steady thin edges: fences, nets, leaves) on the 3D scene before the UI is drawn, so text stays crisp; per-object motion for TAA next |
+| **Keyboard, mouse and controllers** | Bindings on the panel's CONTROLS page, saved, with your controller's own button names; tested with a DualSense. On-screen button icons follow what you play with and your bindings (keyboard, Xbox, PlayStation or Nintendo, [decision 0042](docs/decisions/0042-button-icons-and-mouse.md)). The mouse turns the camera through the game's own unused mouse code; being tested |
+
+</details>
+
+<details>
+<summary><b>Finished</b> (7)</summary>
+
+| Goal | Where it stands |
+|---|---|
+| **Performance** | The game's 30 frames/s everywhere tested, and well above it with the FRAME RATE setting (60, 120, 144 or no limit) |
+| **Sharper distance** | Anisotropic texture filtering and a softer distance blur: distant ground, roads and buildings stay sharp without 4K |
+| **Higher resolution** | The 3D view at 1080p, 1440p or 4K instead of the game's 1600×900 (30 frames/s at 4K on an RTX 4070 laptop) |
+| **Ultrawide and other aspect ratios** | 16:10, 21:9 and 32:9 in the panel: a wider view of the world with the UI kept 16:9 in the middle; exploring, battles and cutscenes work; dialog dimming and the loading screen cover the full width |
+| **Upscaling (NVIDIA DLSS, AMD FSR)** | The world drawn smaller and rebuilt at full size, menus and text kept full size. **On NVIDIA RTX GPUs use DLSS: sharper and cheaper than FSR.** At 4K 21:9 on an RTX 4070 laptop, instead of ~59 frames/s: DLSS ~81 / ~93 / ~112 (quality / balanced / performance), FSR ~75 / ~86 / ~104 (any GPU). DLSS keeps fine patterns (far nets, perforated fences) clean where FSR gets grainy ([decisions 0039](docs/decisions/0039-fsr-upscaling.md), [0040](docs/decisions/0040-dlss-upscaling.md)) |
+| **Frame generation (NVIDIA DLSS, AMD FSR)** | A frame made between each two of the game's: about twice as many on screen, the menus kept still. **On RTX 40 and newer use DLSS**: more game frames left and cleaner moving characters. In a busy town at 4K 21:9 on an RTX 4070 laptop, instead of ~70 frames/s: DLSS ~150 shown (~75 game), FSR ~126 shown (~63 game, any GPU). NVIDIA Reflex in the panel too ([decision 0041](docs/decisions/0041-frame-generation.md)) |
+| **Mod support** | Mods in the Switch's layout are laid over your game files at start, as on a modded Switch, without touching your dump: the English translation patch runs (see [Features](#features), [decision 0043](docs/decisions/0043-mods-layeredfs.md)) |
+
+</details>
 
 ## Behind the scenes
 
@@ -480,19 +536,6 @@ Runtime options are environment variables, for example `YW4_SHADOW_RES=1024`: in
 
 Runtime options, capture keys, input replay and the frame-inspection tools are in
 [docs/debugging.md](docs/debugging.md).
-
-### Mods
-
-Put a mod in `work/mods`, in the layout a modded Switch uses: `work/mods/contents/010086c00af7c000/<mod name>/romfs/...`
-(or simply `work/mods/<mod name>/romfs/...`). At start its files replace the game's at the same paths and its new
-files are added, as on a Switch; your dump is not changed. The log names each mod it loaded. `YW4_MODS` points to
-another folder, `YW4_MODS=none` turns mods off. The fan **English translation patch** works this way (not included:
-bring your own copy):
-
-| | |
-|---|---|
-| ![The copyright warning in English](docs/screenshots/81-english-patch-warning.jpg) | ![The town with the quest marker in English: Head to Mt. Wildwood!](docs/screenshots/80-english-patch-town.jpg) |
-| The warning before the title | The town: "Head to Mt. Wildwood!" |
 
 ## Project layout
 
