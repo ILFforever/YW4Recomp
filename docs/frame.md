@@ -446,7 +446,7 @@ What the shadow mask computes, per half-size pixel (decoded from its NV assembly
 2. **Cascade.** For c = 0, 1, 2: the first whose cb12 row 7+c .x reaches −z (view depth) is used; for c < 2 a
    blend weight toward cascade c+1 from rows 7+c and 8+c. No cascade: the output is (0, 1, 0, 0).
 3. **Normal.** The G-buffer normal from `buf14[0]` (rgb × 2 − 1, normalized); N·L with cb12 row 0 (the light
-   direction). N·L ≤ 1e-4 (facing away) counts as lit: the mask is max(shadow, that flag).
+   direction). N·L ≤ 1e-4 (facing away) counts as in shadow: the mask is max(shadow, that flag) (the mask is how much is in shadow: 1 in shadow, 0 lit).
 4. **Five lookups.** cb12 rows 10+4c..12+4c take the position and normal into the cascade's light view. Four
    taps sit ± an offset (cb8 row 31 .zw × cb12 row 4+c .xy) along the light's x and y, slid along the light
    depth so they stay on the receiving surface's plane; each tap and the centre are projected with rows 22+4c..25+4c.
