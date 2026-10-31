@@ -49,7 +49,7 @@ Most of the game has not been tried.
   moves by real time, so walking and battles keep their speed at any rate; menus and cutscenes are still being
   checked. The game's own 30 holds everywhere tested.
 - **Graphics**: up to 4K and ultrawide, sharper shadows and textures, TAA, and upscaling with NVIDIA DLSS or AMD FSR
-  for high frame rates at 4K (~81-112 frames/s at 4K 21:9 with DLSS on an RTX 4070 laptop), and frame generation
+  for high frame rates at 4K (~85-118 frames/s at 4K 21:9 with DLSS or FSR on an RTX 4070 laptop), and frame generation
   with NVIDIA DLSS or AMD FSR (about twice as many frames on screen). Parts of the game's renderer already run as our
   own code (shadows, surfaces, bloom, distance blur).
 
@@ -200,25 +200,29 @@ With ANTI-ALIASING set to DLSS or FSR, the UPSCALING row draws the 3D world smal
 upscaler rebuilds a full-size picture from it and the frames before, using the motion the game writes. The menus
 and text are drawn afterwards at full size.
 
-**Which to use: on an NVIDIA RTX GPU, choose DLSS.** It is both sharper and cheaper than FSR here: more frames in
-every mode, and fine patterns (perforated fences, leaves) stay clean where FSR turns them to grain. Its DLSS MODEL
-row picks FAST (the default, NVIDIA's older model: nearly as clean, about half the GPU time) or BEST (the newest).
-**On other GPUs, use FSR** (DLSS needs NVIDIA RTX; choosing it elsewhere falls back to FSR).
+**Which to use: DLSS for the cleanest picture, FSR for the most frames.** On an NVIDIA RTX GPU, DLSS keeps fine
+patterns (perforated fences, leaves) clean where FSR turns them to grain, and shadow edges still. It uses NVIDIA's
+newest model, which costs more GPU time than FSR; with it, **balanced is the fastest DLSS mode** (its performance
+mode uses a heavier model). FSR runs on any GPU and gives more frames in every mode. DLSS needs NVIDIA RTX;
+choosing it elsewhere falls back to FSR.
 
-Bamboo forest at 4K 21:9 on an RTX 4070 laptop. For comparison, without DLSS or FSR (native 5120×2160 with TAA):
-**~59 frames/s**. With them, frames/s:
+Bamboo forest at 4K 21:9 on an RTX 4070 laptop, frames/s (for comparison, native 5120×2160 with TAA: **~81**):
 
-| Mode | World drawn at | DLSS (fast model) | FSR |
+| Mode | World drawn at | DLSS | FSR |
 |---|---|---|---|
-| native, UPSCALING off (DLSS / FSR as anti-aliasing only) | 5120×2160 | ~53 (DLAA) | ~46 |
-| quality | 3413×1440 | **~81** | ~75 |
-| balanced | 3013×1271 | **~93** | ~86 |
-| performance | 2560×1080 | **~112** | ~104 |
+| native, UPSCALING off (DLSS / FSR as anti-aliasing only) | 5120×2160 | ~61 (DLAA) | ~58 |
+| quality | 3413×1440 | ~85 | **~94** |
+| balanced | 3013×1271 | ~92 | **~106** |
+| performance | 2560×1080 | ~82 | **~118** |
 
-DLSS's own work costs ~2.6 ms of GPU time per frame at this output size, FSR's 3.7-4.5 ms.
+DLSS's own work costs 5.2-5.7 ms of GPU time per frame at this output size (7.4 ms in performance mode), FSR's
+3.6-4.3 ms (6.3 at native). Measured 2026-10-31, standing still on the late-game save, FRAME RATE unlimited, frame
+generation and Reflex off; the other settings at their defaults: EFFECTS RESOLUTION half, SHADOW MAP 4096, SOFT
+SHADOWS x2, TEXTURE FILTERING x16, DISTANCE BLUR half, and our own renderer's passes on.
 
 Each image below: on top the whole native frame with the cropped areas in yellow, underneath the 1:1 crops, each
-labelled with its mode (DLSS: fast model).
+labelled with its mode. The DLSS images were taken with its older, faster model, removed since because it made
+shadow edges flicker; they haven't been retaken with the newest model yet.
 
 Quality (the world drawn at 3413×1440): native, FSR, DLSS. The quest text is as sharp in all three (the UI is
 drawn at full size); DLSS keeps the bamboo and the lantern closest to native.
@@ -381,11 +385,10 @@ are debugging tools ([docs/debugging.md](docs/debugging.md)).
 | **Display** | |
 | Resolution | 1600×900 (the Switch's), 1920×1080, 2560×1440 or 3840×2160; the UI is drawn at the same size |
 | Aspect ratio | 16:9 (the Switch's), 16:10, 21:9 or 32:9: the world shows more at the sides, the UI stays 16:9 in the middle |
-| Frame rate | 30 (the Switch's), 60, 120, 144 or unlimited; the game keeps its speed at any rate |
+| Frame rate | 30 (the Switch's), 60, 120, 144, VSYNC (the monitor's refresh rate, smoothest; applies after a restart) or unlimited; the game keeps its speed at any rate |
 | **Anti-aliasing and upscaling** | |
 | Anti-aliasing | Off (default), FXAA, SMAA, TAA, FSR or DLSS, applied to the 3D scene before the UI is drawn, so text stays sharp. TAA, FSR and DLSS also steady thin things that shimmer: fences, nets, leaves |
 | Upscaling | Off (default), quality, balanced or performance: the world drawn smaller and rebuilt at full size by FSR or DLSS. Needs anti-aliasing set to FSR or DLSS |
-| DLSS model | Fast (default, the older model) or best (the newest, more GPU time) |
 | **Frame generation and latency** | |
 | Frame generation | Off (default), FSR (any GPU) or DLSS (NVIDIA RTX 40 and newer): a frame made between each two of the game's, about twice as many on screen. Needs anti-aliasing set to TAA, FSR or DLSS |
 | Reflex | NVIDIA GPUs: off (default), on or on + boost: less input delay, most where the GPU limits the frame rate. On while frame generation is DLSS |
@@ -456,7 +459,7 @@ shadows here are our own pass with no graphical improvements applied (SHADOW PAS
 | **Sharper distance** | Anisotropic texture filtering and a softer distance blur: distant ground, roads and buildings stay sharp without 4K |
 | **Higher resolution** | The 3D view at 1080p, 1440p or 4K instead of the game's 1600×900 (30 frames/s at 4K on an RTX 4070 laptop) |
 | **Ultrawide and other aspect ratios** | 16:10, 21:9 and 32:9 in the panel: a wider view of the world with the UI kept 16:9 in the middle; exploring, battles and cutscenes work; dialog dimming and the loading screen cover the full width |
-| **Upscaling (NVIDIA DLSS, AMD FSR)** | The world drawn smaller and rebuilt at full size, menus and text kept full size. **On NVIDIA RTX GPUs use DLSS: sharper and cheaper than FSR.** At 4K 21:9 on an RTX 4070 laptop, instead of ~59 frames/s: DLSS ~81 / ~93 / ~112 (quality / balanced / performance), FSR ~75 / ~86 / ~104 (any GPU). DLSS keeps fine patterns (far nets, perforated fences) clean where FSR gets grainy ([decisions 0039](docs/decisions/0039-fsr-upscaling.md), [0040](docs/decisions/0040-dlss-upscaling.md)) |
+| **Upscaling (NVIDIA DLSS, AMD FSR)** | The world drawn smaller and rebuilt at full size, menus and text kept full size. **DLSS for the cleanest picture (NVIDIA RTX), FSR for the most frames (any GPU).** At 4K 21:9 on an RTX 4070 laptop, instead of ~81 frames/s with TAA: DLSS ~85 / ~92 / ~82 (quality / balanced / performance), FSR ~94 / ~106 / ~118. DLSS keeps fine patterns (far nets, perforated fences) clean where FSR gets grainy ([decisions 0039](docs/decisions/0039-fsr-upscaling.md), [0040](docs/decisions/0040-dlss-upscaling.md)) |
 | **Frame generation (NVIDIA DLSS, AMD FSR)** | A frame made between each two of the game's: about twice as many on screen, the menus kept still. **On RTX 40 and newer use DLSS**: more game frames left and cleaner moving characters. In a busy town at 4K 21:9 on an RTX 4070 laptop, instead of ~70 frames/s: DLSS ~150 shown (~75 game), FSR ~126 shown (~63 game, any GPU). NVIDIA Reflex in the panel too ([decision 0041](docs/decisions/0041-frame-generation.md)) |
 | **Mod support** | Mods in the Switch's layout are laid over your game files at start, as on a modded Switch, without touching your dump: the English translation patch runs (see [Features](#features), [decision 0043](docs/decisions/0043-mods-layeredfs.md)) |
 
