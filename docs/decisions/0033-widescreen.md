@@ -61,6 +61,14 @@ draw copies that into one of **two** window images (1920×1080) that it presents
    against the memory pools (`gpu_buffer_at`): checking them with `host_readable` (`VirtualQuery`) stopped the
    game at the title screen in every test run, though only reads were added. The cause was not found.
 
+   **Widened 2026-10-31 (the diary):** the save diary's background stayed 16:9 with black sides while other
+   menus stretched: its base layer is four quads in one draw (24 vertices) and its bars at the top and bottom span
+   the width only. `covers_screen` now takes draws of up to 24 vertices and tells the whole screen (2) from the
+   whole width (1); a draw across the whole width is stretched like one over the whole screen, unless it samples a
+   16:9 picture (which still gets black bars only when it fills the screen; a band of one stays 16:9 in the middle).
+   Checked at 21:9: the diary fills the width with its card and text undistorted; the copyright notice, title
+   screen and loading screen unchanged.
+
 6. **The battle's zoom** (added 2026-10-28): at a battle's start the game grows the 3D view in steps of 32×18
    from 1600×900 (1632×918 … 1888×1062, with copies at ½, ⅓, ¼ and ⅛). Those sizes were not screen-sized, so
    they stayed 16:9 and the swirl before the battle stayed at the sides for a few seconds. `zoom_chain` (`gpu.c`)

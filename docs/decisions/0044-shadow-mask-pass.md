@@ -60,6 +60,10 @@ Also, always on: pixels facing away from the sun (the result is 1 whatever the l
 texels), ~0.1 ms less: ours 2.45 ms, with both speed-ups 1.09. Less than hoped: few pixels face away at the
 late-game save, and a group of pixels the GPU runs together only saves when all of them skip.
 
+Owner's verdict in game (2026-10-31): SOFT SHADOW FILTER FAST looks the same, so it is now on by default
+(`YW4_MASK_FILTER=five` for the game's); SOFT SHADOW SEARCH 8 looked the same but put small shadow blobs on some
+objects (a thin caster missed by the halved search gives a pixel a different softness), so it stays off.
+
 ## Next
 
 Owning the program lets the shadow mask improve: contact shadows for small details the 1024-texel cascades miss,

@@ -977,7 +977,8 @@ void gpu_pcss_cycle(void) {
 }
 
 /* Speed-ups of our shadow mask's soft shadows (shadow_mask.frag; the panel's SPEED-UPS rows):
- * - filter once: one soft lookup at the centre instead of at each of the game's five points (YW4_MASK_FILTER=once)
+ * - filter once: one soft lookup at the centre instead of at each of the game's five points (default;
+ *   YW4_MASK_FILTER=five for the game's)
  * - search 8: the blocker search with every other one of its 16 taps (YW4_PCSS_SEARCH_TAPS=8)
  * Both go to the program in mode.y: bit 0 filter once, bit 1 search 8. */
 static int mask_once = -1, search8 = -1;
@@ -986,7 +987,7 @@ int gpu_mask_filter_once(void) {
     int v = __atomic_load_n(&mask_once, __ATOMIC_ACQUIRE);
     if (v < 0) {
         const char *e = getenv("YW4_MASK_FILTER");
-        v = e && !strcmp(e, "once");
+        v = !(e && !strcmp(e, "five"));  /* once by default: the owner saw no difference (2026-10-31) */
         __atomic_store_n(&mask_once, v, __ATOMIC_RELEASE);
     }
     return v;
@@ -1385,18 +1386,19 @@ void gpu_cull(VkCommandBuffer cb, uint8_t cull_mode, uint8_t front_face) {
     if (cb == dyn_cb) dyn_last.cull = cull, dyn_last.front = front;
 }
 
-/* Widescreen: does this draw cover the game's whole screen? The UI's full-screen layers (the dimming
- * behind a dialog, the loading screen's black) are one quad whose corners reach the edges of clip
- * space; with the program's position matrix (Shader.pos_cbuf) and vertex input 0 they are computed
- * here (the loading screen's black: input 0 is the position, Shader.pos_input). Only small draws (a
- * quad: 4 or 6 vertices) and float positions; anything else: no.
+/* Widescreen: does this draw cover the game's whole screen (2) or its whole width (1)? The UI's full-screen
+ * layers (the dimming behind a dialog, the loading screen's black) are one quad whose corners reach the edges of
+ * clip space; the diary's background is four quads in one draw, its bars at the top and bottom span the width
+ * only. With the program's position matrix (Shader.pos_cbuf) and vertex input 0 the corners are computed here
+ * (the loading screen's black: input 0 is the position, Shader.pos_input). Only small draws (up to 4 quads: 24
+ * vertices) and float positions; anything else: no.
  * The reads are checked against the memory pools (gpu_buffer_at), not with host_readable: calling
  * host_readable (VirtualQuery) on these vertex and index addresses every frame stopped the game at
  * the title screen in every test run (2026-10-28; cause not found). */
 static int covers_screen(const GpuState *s, const Shader *vs, const CmdRec *r) {
     if (!vs || !(vs->pos_cbuf || vs->pos_input) || !s->nattribs || !(s->attribs[0] & 0xFF)) return 0;
     uint32_t count = (uint32_t)r->x[2];
-    if (count < 3 || count > 6) return 0;
+    if (count < 3 || count > 24) return 0;
     VkBuffer pb;
     VkDeviceSize po;
     static const float identity[16] = {1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1};
@@ -1444,7 +1446,8 @@ static int covers_screen(const GpuState *s, const Shader *vs, const CmdRec *r) {
             lo[c] = q < lo[c] ? q : lo[c], hi[c] = q > hi[c] ? q : hi[c];
         }
     }
-    return lo[0] <= -0.99f && hi[0] >= 0.99f && lo[1] <= -0.99f && hi[1] >= 0.99f;
+    if (!(lo[0] <= -0.99f && hi[0] >= 0.99f)) return 0;
+    return lo[1] <= -0.99f && hi[1] >= 0.99f ? 2 : 1;
 }
 
 /* Widescreen: the draw's viewport spans the game's whole width of t (none set: all of it). */
@@ -1842,15 +1845,17 @@ static void draw(VkCommandBuffer cb, GpuState *s, const CmdRec *r) {
             else picture = 1;
         }
     }
-    int full = s->after_composite && gpu_wide() && !dyn_reads_screen && !layer && covers_screen(s, vs, r);
-    dyn_full_screen = full && !picture && !(vs->pos_input && samples);
+    int cover = s->after_composite && gpu_wide() && !dyn_reads_screen && !layer ? covers_screen(s, vs, r) : 0;
+    int full = cover == 2;  /* a 16:9 picture gets bars only when it fills the screen; a band of one stays 16:9 */
+    dyn_full_screen = cover && !picture && !(vs->pos_input && samples);
     const GpuImage *ti = s->ncolor && s->rt.color[0] ? image_find(s->rt.color[0]) : NULL;
     int bars = full && picture && ti && whole_width(s, ti) && !gpu_is_presented(ti->key.addr);
     if (dyn_full_screen || bars) {
         static int logged;
         if (logged++ < 8)
-            fprintf(stderr, "yw4: gpu: widescreen: UI layer over the whole screen %s (vs %016" PRIx64 " fs %016" PRIx64
-                            ", frame %" PRIu64 ")\n", bars ? "kept 16:9 with black bars" : "stretched", vs->key,
+            fprintf(stderr, "yw4: gpu: widescreen: UI layer over the whole %s %s (vs %016" PRIx64 " fs %016" PRIx64
+                            ", frame %" PRIu64 ")\n", full ? "screen" : "width",
+                    bars ? "kept 16:9 with black bars" : "stretched", vs->key,
                     g->sh[ST_FRAG] ? g->sh[ST_FRAG]->key : 0, gpu_frames());
     }
     gpu_dynamic_state(cb, s, k.depth, w, h);
