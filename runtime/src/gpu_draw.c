@@ -1847,9 +1847,13 @@ static void draw(VkCommandBuffer cb, GpuState *s, const CmdRec *r) {
     }
     int cover = s->after_composite && gpu_wide() && !dyn_reads_screen && !layer ? covers_screen(s, vs, r) : 0;
     int full = cover == 2;  /* a 16:9 picture gets bars only when it fills the screen; a band of one stays 16:9 */
-    dyn_full_screen = cover && !picture && !(vs->pos_input && samples);
+    /* a band across the width stays 16:9 in a frame whose picture got black bars (the map's bar at the bottom) */
+    static uint64_t bars_frame = UINT64_MAX;
+    int barred = __atomic_load_n(&bars_frame, __ATOMIC_RELAXED) == gpu_frames();
+    dyn_full_screen = (full || (cover && !barred)) && !picture && !(vs->pos_input && samples);
     const GpuImage *ti = s->ncolor && s->rt.color[0] ? image_find(s->rt.color[0]) : NULL;
     int bars = full && picture && ti && whole_width(s, ti) && !gpu_is_presented(ti->key.addr);
+    if (bars) __atomic_store_n(&bars_frame, gpu_frames(), __ATOMIC_RELAXED);
     if (dyn_full_screen || bars) {
         static int logged;
         if (logged++ < 8)

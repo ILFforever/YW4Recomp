@@ -67,7 +67,9 @@ draw copies that into one of **two** window images (1920×1080) that it presents
    whole width (1); a draw across the whole width is stretched like one over the whole screen, unless it samples a
    16:9 picture (which still gets black bars only when it fills the screen; a band of one stays 16:9 in the middle).
    Checked at 21:9: the diary fills the width with its card and text undistorted; the copyright notice, title
-   screen and loading screen unchanged.
+   screen and loading screen unchanged. In a frame whose 16:9 picture got black bars (the map's backdrop), later
+   bands across the width stay 16:9 too: the map's bottom bar stuck out into the right bar otherwise. Checked: the
+   in-game save diary (D-pad right in town) fills the width, the map keeps its bars with the bar inside them.
 
 6. **The battle's zoom** (added 2026-10-28): at a battle's start the game grows the 3D view in steps of 32×18
    from 1600×900 (1632×918 … 1888×1062, with copies at ½, ⅓, ¼ and ⅛). Those sizes were not screen-sized, so
