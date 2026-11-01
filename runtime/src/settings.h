@@ -18,6 +18,9 @@ typedef struct {
     int current;  /* index into options */
     const char *disabled;  /* not NULL: greyed out, cannot be changed, and why (shown in the description) */
     int link;              /* opens a page (DEVELOPER OPTIONS) instead of having options: Enter or Right */
+    int slider;            /* a slider instead of options: frac (0..1) its position, value its text */
+    float frac;
+    char value[16];
 } SettingRow;
 
 enum { SETTINGS_UP, SETTINGS_DOWN, SETTINGS_LEFT, SETTINGS_RIGHT, SETTINGS_CLOSE, SETTINGS_ACCEPT, SETTINGS_CLEAR,

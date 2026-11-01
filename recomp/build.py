@@ -125,6 +125,7 @@ def main(argv: list[str] | None = None) -> int:
     includes = [f"-I{RUNTIME / 'include'}", f"-I{cfg.work_dir / 'recomp'}"]
     # The window (decision 0019): SDL3 (fetched on Windows, the system's elsewhere), Vulkan headers
     includes.append(f"-I{check.REPO / 'third_party' / 'vulkan' / 'include'}")
+    includes.append(f"-I{check.REPO / 'third_party' / 'stb'}")  # stb_truetype: the HUD's font (hud.c)
     feature_defs: list[str] = []
     if sys.platform == "win32":
         sdl = deps.fetch_sdl(cfg)

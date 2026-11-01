@@ -1,7 +1,15 @@
-/* The HUD (hud.h) drawn into an RGBA image: its lines in a 5x7 font of the characters they use
- * (lower case drawn as upper case, characters without a glyph as blanks), then the frame-time graph. */
+/* The HUD (hud.h) drawn into an RGBA image: its lines, then the frame-time graph. The lines are drawn at the
+ * HUD's size with a monospaced font of the system (Consolas on Windows, DejaVu Sans Mono elsewhere; YW4_HUD_FONT
+ * names another .ttf) through stb_truetype, so they stay sharp at any scale; without one, in a 5x7 font of the
+ * characters they use (lower case drawn as upper case, characters without a glyph as blanks). The settings panel
+ * keeps the 5x7 font. */
+#include <math.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
+
+#define STB_TRUETYPE_IMPLEMENTATION
+#include "stb_truetype.h"
 
 #include "hud.h"
 
@@ -80,10 +88,94 @@ static void text(const Canvas *cv, int x0, int y0, const char *s, const uint8_t 
     }
 }
 
+/* ---- the HUD at a scale: x, y and sizes in the 1x layout's units, drawn s times larger */
+
+/* A filled rectangle of the 1x layout (x, y, w, h) at scale s, edges rounded to whole pixels. */
+static void rect_s(const Canvas *cv, float s, float x, float y, float w, float h, const uint8_t col[3]) {
+    int x0 = (int)floorf(x * s + 0.5f), y0 = (int)floorf(y * s + 0.5f);
+    int x1 = (int)floorf((x + w) * s + 0.5f), y1 = (int)floorf((y + h) * s + 0.5f);
+    if (x1 <= x0) x1 = x0 + 1;
+    if (y1 <= y0) y1 = y0 + 1;
+    for (int j = y0; j < y1; j++)
+        for (int i = x0; i < x1; i++) put(cv, i, j, col);
+}
+
+static stbtt_fontinfo font;  /* its file stays loaded: stb_truetype reads it in place */
+static int font_state;  /* 0 not tried, 1 loaded, -1 none */
+
+static int font_ready(void) {
+    if (font_state) return font_state > 0;
+    font_state = -1;
+    const char *paths[] = {getenv("YW4_HUD_FONT"), "C:/Windows/Fonts/consolab.ttf", "C:/Windows/Fonts/consola.ttf",
+                           "C:/Windows/Fonts/CascadiaMono.ttf", "/usr/share/fonts/truetype/dejavu/DejaVuSansMono-Bold.ttf",
+                           "/usr/share/fonts/TTF/DejaVuSansMono-Bold.ttf", "/usr/share/fonts/dejavu/DejaVuSansMono-Bold.ttf",
+                           "/usr/share/fonts/truetype/dejavu/DejaVuSansMono.ttf"};
+    for (size_t i = 0; i < sizeof paths / sizeof *paths; i++) {
+        if (!paths[i] || !*paths[i]) continue;
+        FILE *f = fopen(paths[i], "rb");
+        if (!f) continue;
+        fseek(f, 0, SEEK_END);
+        long n = ftell(f);
+        fseek(f, 0, SEEK_SET);
+        unsigned char *d = n > 0 ? malloc((size_t)n) : NULL;
+        int ok = d && fread(d, 1, (size_t)n, f) == (size_t)n;
+        fclose(f);
+        if (ok && stbtt_InitFont(&font, d, stbtt_GetFontOffsetForIndex(d, 0))) {
+            font_state = 1;
+            fprintf(stderr, "yw4: hud: font %s\n", paths[i]);
+            return 1;
+        }
+        free(d);
+    }
+    fprintf(stderr, "yw4: hud: no system font found: the pixel font\n");
+    return 0;
+}
+
+/* A line of text with its top-left at the 1x layout's (x, y), each character one cell wide, at scale s: with the
+ * system font, sized so a digit fills the cell's width; else the 5x7 font's pixels as rectangles. Blended over the
+ * box's colour (the HUD's text sits on it). */
+static void text_s(const Canvas *cv, float s, float x, float y, const char *str, const uint8_t col[3],
+                   const uint8_t bg[3]) {
+    if (!font_ready()) {
+        for (int k = 0; str[k]; k++) {
+            const uint8_t *g = glyph(str[k]);
+            if (!g) continue;
+            for (int r = 0; r < 7; r++)
+                for (int c = 0; c < 5; c++)
+                    if (g[r] >> (4 - c) & 1) rect_s(cv, s, x + k * CELL_W + c, y + r, 1, 1, col);
+        }
+        return;
+    }
+    int adv, lsb;
+    stbtt_GetCodepointHMetrics(&font, '0', &adv, &lsb);
+    float cell = CELL_W * s, fs = cell / (float)adv;  /* a digit's advance = one cell */
+    float base = y * s + 7.0f * s;                      /* the 5x7 font's baseline: its bottom row */
+    for (int k = 0; str[k]; k++) {
+        unsigned char ch = (unsigned char)str[k];
+        if (ch < 32) continue;
+        float px = x * s + k * cell;
+        int x0, y0, x1, y1;
+        stbtt_GetCodepointBitmapBoxSubpixel(&font, ch, fs, fs, px - floorf(px), 0, &x0, &y0, &x1, &y1);
+        int gw = x1 - x0, gh = y1 - y0;
+        if (gw <= 0 || gh <= 0 || gw > 256 || gh > 256) continue;
+        unsigned char bm[256 * 256];
+        stbtt_MakeCodepointBitmapSubpixel(&font, bm, gw, gh, gw, fs, fs, px - floorf(px), 0, ch);
+        int ox = (int)floorf(px) + x0, oy = (int)floorf(base + 0.5f) + y0;
+        for (int j = 0; j < gh; j++)
+            for (int i = 0; i < gw; i++) {
+                int a = bm[j * gw + i];
+                if (!a) continue;
+                uint8_t c[3];
+                for (int q = 0; q < 3; q++) c[q] = (uint8_t)((col[q] * a + bg[q] * (255 - a)) / 255);
+                put(cv, ox + i, oy + j, c);
+            }
+    }
+}
+
 static const uint8_t WHITE[3] = {235, 235, 235}, GREY[3] = {90, 90, 100}, GREEN[3] = {80, 230, 110},
                      YELLOW[3] = {230, 190, 60}, BOX[3] = {16, 16, 20}, PLOT[3] = {28, 28, 34};
 
-void hud_render(uint8_t *rgba, int w, int h, const HudContent *c, int *used_w, int *used_h) {
+void hud_render(uint8_t *rgba, int w, int h, const HudContent *c, float s, int *used_w, int *used_h) {
     int cols = 0;
     for (int i = 0; i < c->nlines; i++) {
         int len = (int)strnlen(c->lines[i], HUD_COLS);
@@ -91,41 +183,46 @@ void hud_render(uint8_t *rgba, int w, int h, const HudContent *c, int *used_w, i
     }
     int graph = c->npoints > 1;
     int tw = cols * CELL_W - 1, gw = graph ? HUD_POINTS : 0;
-    Canvas cv = {rgba, w, h, 2 * MARGIN + (tw > gw ? tw : gw), 0};
-    cv.bh = 2 * MARGIN + c->nlines * CELL_H - 2 + (graph ? 3 + GRAPH_H + 3 + CELL_H - 2 : 0);
+    /* the 1x layout's box, then drawn s times larger */
+    int bw1 = 2 * MARGIN + (tw > gw ? tw : gw);
+    int bh1 = 2 * MARGIN + c->nlines * CELL_H - 2 + (graph ? 3 + GRAPH_H + 3 + CELL_H - 2 : 0);
+    Canvas cv = {rgba, w, h, (int)ceilf(bw1 * s), (int)ceilf(bh1 * s)};
     if (cv.bw > w) cv.bw = w;
     if (cv.bh > h) cv.bh = h;
     for (int y = 0; y < cv.bh; y++)
         for (int x = 0; x < cv.bw; x++) put(&cv, x, y, BOX);
-    for (int i = 0; i < c->nlines; i++) text(&cv, MARGIN, MARGIN + i * CELL_H, c->lines[i], WHITE);
+    for (int i = 0; i < c->nlines; i++) text_s(&cv, s, MARGIN, MARGIN + i * CELL_H, c->lines[i], WHITE, BOX);
     if (graph) {
         /* frame time (green line) over the game's work (yellow columns), newest on the right; the top is
          * the next 25 ms step above the slowest frame shown, at least 50 ms; a grey line at the target */
-        int gx = MARGIN, gy = MARGIN + c->nlines * CELL_H - 2 + 3;
+        float gx = MARGIN, gy = MARGIN + c->nlines * CELL_H - 2 + 3;
         float top = 50;
         for (int i = 0; i < c->npoints; i++)
             while (c->frame_ms[i] > top || c->work_ms[i] > top) top += 25;
-        for (int y = 0; y < GRAPH_H; y++)
-            for (int x = 0; x < HUD_POINTS; x++) put(&cv, gx + x, gy + y, PLOT);
-        int x0 = gx + HUD_POINTS - c->npoints, last = -1;
-#define Y(ms) (gy + GRAPH_H - 1 - (int)((ms) / top * (float)(GRAPH_H - 1) + 0.5f))
-        for (int i = 0; i < c->npoints; i++)
-            for (int y = Y(c->work_ms[i]); y < gy + GRAPH_H; y++) put(&cv, x0 + i, y, YELLOW);
+        rect_s(&cv, s, gx, gy, HUD_POINTS, GRAPH_H, PLOT);
+        float x0 = gx + HUD_POINTS - c->npoints, last = -1;
+#define Y(ms) (GRAPH_H - (ms) / top * (float)GRAPH_H)
+        for (int i = 0; i < c->npoints; i++) {
+            float yw = Y(c->work_ms[i]);
+            if (yw < 0) yw = 0;
+            rect_s(&cv, s, x0 + i, gy + yw, 1, GRAPH_H - yw, YELLOW);
+        }
         if (c->target_ms > 0)
-            for (int x = 0; x < HUD_POINTS; x += 2) put(&cv, gx + x, Y(c->target_ms), GREY);
+            for (int x = 0; x < HUD_POINTS; x += 2) rect_s(&cv, s, gx + x, gy + Y(c->target_ms) - 0.5f, 1, 1, GREY);
         for (int i = 0; i < c->npoints; i++) {  /* joined to the previous point, so spikes show as lines */
-            int y = Y(c->frame_ms[i]);
-            int a = last < 0 ? y : last < y ? last : y, b = last < 0 ? y : last < y ? y : last;
-            for (int k = a; k <= b; k++) put(&cv, x0 + i, k, GREEN);
+            float y = Y(c->frame_ms[i]);
+            if (y < 0) y = 0;
+            float a = last < 0 ? y : last < y ? last : y, b = last < 0 ? y : last < y ? y : last;
+            rect_s(&cv, s, x0 + i, gy + a - 0.5f, 1, b - a + 1, GREEN);
             last = y;
         }
 #undef Y
-        int ly = gy + GRAPH_H + 3;
-        char s[24];
-        text(&cv, gx, ly, "FRAME", GREEN);
-        text(&cv, gx + 6 * CELL_W, ly, "WORK", YELLOW);
-        snprintf(s, sizeof s, "TOP %.0f MS", top);
-        text(&cv, gx + 11 * CELL_W, ly, s, GREY);
+        float ly = gy + GRAPH_H + 3;
+        char str[24];
+        text_s(&cv, s, gx, ly, "FRAME", GREEN, BOX);
+        text_s(&cv, s, gx + 6 * CELL_W, ly, "WORK", YELLOW, BOX);
+        snprintf(str, sizeof str, "TOP %.0f MS", top);
+        text_s(&cv, s, gx + 11 * CELL_W, ly, str, GREY, BOX);
     }
     *used_w = cv.bw, *used_h = cv.bh;
 }
@@ -211,12 +308,13 @@ static void hint(const Canvas *cv, int pw, int y, const char *s) {
 
 void panel_render(uint8_t *rgba, int w, int h, const SettingRow *rows, int n, int selected, int developer,
                   int *used_w, int *used_h) {
-    enum { PAD = 10, ROW_H = 13, NAME_COLS = 21, GAP = 3, HEADER = 26, DESC_LINES = 5 };
+    enum { PAD = 10, ROW_H = 13, NAME_COLS = 21, GAP = 3, HEADER = 26, DESC_LINES = 5, SLIDER_COLS = 22 };
     /* the width: the widest row (name and all its options) */
     int cols = 0;
     for (int i = 0; i < n; i++) {
         int c = 2 + NAME_COLS + 2;
         for (int k = 0; k < rows[i].noptions; k++) c += (int)strlen(rows[i].options[k]) + GAP;
+        if (rows[i].slider) c += SLIDER_COLS + 8;
         if (c > cols) cols = c;
     }
     int pw = 2 * PAD + cols * CELL_W, text_cols = (pw - 2 * PAD - 12) / CELL_W;
@@ -266,6 +364,19 @@ void panel_render(uint8_t *rgba, int w, int h, const SettingRow *rows, int n, in
             continue;
         }
         if (sel && !off) text(&cv, PAD + 2, y + 2, ">", PINK), text(&cv, optx - 2 * CELL_W, y + 2, "<", PINK);
+        if (rows[i].slider) {  /* a track with a knob at the value, then the value on a chip */
+            int tw = SLIDER_COLS * CELL_W, ty = y + ROW_H / 2 - 1;
+            float f = rows[i].frac < 0 ? 0 : rows[i].frac > 1 ? 1 : rows[i].frac;
+            fill(&cv, optx, ty, tw, 2, MUTED);
+            fill(&cv, optx, ty, (int)(tw * f), 2, off ? LOCKED : sel ? ORANGE : PINK);
+            box(&cv, optx + (int)(tw * f) - 2, y + 1, 5, ROW_H - 4, 2, off ? LOCKED : sel ? ORANGE : PINK, NULL);
+            int vx = optx + tw + 3 * CELL_W, len = (int)strlen(rows[i].value);
+            box(&cv, vx - 3, y, len * CELL_W + 5, ROW_H - 2, 3, off ? LOCKED : sel ? ORANGE : PINK, NULL);
+            text(&cv, vx, y + 2, rows[i].value, WHITE2);
+            if (sel && !off) text(&cv, vx + (len + 1) * CELL_W, y + 2, ">", PINK);
+            y += ROW_H;
+            continue;
+        }
         int x = optx;
         for (int k = 0; k < rows[i].noptions; k++) {
             int len = (int)strlen(rows[i].options[k]);

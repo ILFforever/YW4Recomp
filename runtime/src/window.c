@@ -91,7 +91,7 @@ typedef struct {
     VkDeviceMemory image_mem, buffer_mem;
     void *ptr;
 } Overlay;
-enum { HUD_W = 256, HUD_H = 128 };
+enum { HUD_W = 256 * 4, HUD_H = 128 * 4 };  /* the HUD drawn at its scale: up to 4x its 1x size */
 static Overlay hud = {HUD_W, HUD_H}, panel = {480, 480};
 static int hud_on = -1;
 
@@ -515,8 +515,8 @@ static int overlay_resources(Overlay *o) {
 static int hud_shown_w, hud_shown_h;  /* the part of hud.ptr drawn at the last present (0: none) */
 
 /* Records copying an overlay's drawn w x h part onto dst (in TRANSFER_DST layout) with its top-left at
- * (x, y), each texel s x s window pixels. */
-static void overlay_show(Overlay *o, VkImage dst, int w, int h, int32_t x, int32_t y, int32_t s) {
+ * (x, y), each texel s x s window pixels: whole steps stay sharp, between them it is filtered. */
+static void overlay_show(Overlay *o, VkImage dst, int w, int h, int32_t x, int32_t y, float s) {
     barrier(o->image, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 0, VK_ACCESS_TRANSFER_WRITE_BIT);
     VkBufferImageCopy copy = {.bufferRowLength = o->w, .imageSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1},
                               .imageExtent = {(uint32_t)w, (uint32_t)h, 1}};
@@ -527,41 +527,40 @@ static void overlay_show(Overlay *o, VkImage dst, int w, int h, int32_t x, int32
             VK_ACCESS_TRANSFER_WRITE_BIT, VK_ACCESS_TRANSFER_WRITE_BIT);
     if (x < 0) x = 0;
     if (y < 0) y = 0;
-    int32_t xe = x + w * s, ye = y + h * s;  /* clipped to the window */
+    int32_t xe = x + (int32_t)(w * s), ye = y + (int32_t)(h * s);  /* clipped to the window */
     if (xe > (int32_t)swap_extent.width) xe = (int32_t)swap_extent.width;
     if (ye > (int32_t)swap_extent.height) ye = (int32_t)swap_extent.height;
     if (xe <= x || ye <= y) return;
+    int32_t sw = (int32_t)((xe - x) / s), sh = (int32_t)((ye - y) / s);  /* the overlay's texels that fit */
+    if (sw <= 0 || sh <= 0) return;
     VkImageBlit blit = {.srcSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1},
-                        .srcOffsets = {{0, 0, 0}, {(xe - x) / s, (ye - y) / s, 1}},
+                        .srcOffsets = {{0, 0, 0}, {sw, sh, 1}},
                         .dstSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1},
-                        .dstOffsets = {{x, y, 0}, {x + (xe - x) / s * s, y + (ye - y) / s * s, 1}}};
+                        .dstOffsets = {{x, y, 0}, {x + (int32_t)(sw * s), y + (int32_t)(sh * s), 1}}};
     vkCmdBlitImage(cmd, o->image, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, dst, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1,
-                   &blit, VK_FILTER_NEAREST);
+                   &blit, s == (float)(int32_t)s ? VK_FILTER_NEAREST : VK_FILTER_LINEAR);
 }
 
-/* The HUD's size (the settings panel's HUD SIZE, YW4_HUD_SIZE=small|medium|large): 0 small, 1 medium (as before),
- * 2 large. */
-static int hud_size = -1;
+/* The HUD's scale (the settings panel's HUD SCALE slider, YW4_HUD_SCALE=auto or a number): 0 is AUTO, which grows
+ * with the window in whole steps (1 per 720 lines from 1440, else 1); anything else is that scale. */
+static float hud_scale = -1.0f;
 
-int hud_size_index(void) {
-    int v = __atomic_load_n(&hud_size, __ATOMIC_ACQUIRE);
+float hud_scale_get(void) {
+    float v = __atomic_load_n(&hud_scale, __ATOMIC_ACQUIRE);
     if (v < 0) {
-        const char *e = getenv("YW4_HUD_SIZE");
-        v = e && !strcmp(e, "small") ? 0 : e && !strcmp(e, "large") ? 2 : 1;
-        __atomic_store_n(&hud_size, v, __ATOMIC_RELEASE);
+        const char *e = getenv("YW4_HUD_SCALE");
+        v = e && *e && strcmp(e, "auto") ? (float)atof(e) : 0.0f;
+        if (v < 0) v = 0;
+        __atomic_store_n(&hud_scale, v, __ATOMIC_RELEASE);
     }
     return v;
 }
 
-void hud_size_cycle(void) { __atomic_store_n(&hud_size, (hud_size_index() + 1) % 3, __ATOMIC_RELEASE); }
+void hud_scale_set(float v) { __atomic_store_n(&hud_scale, v, __ATOMIC_RELEASE); }
 
-/* The HUD's whole-step scale for a picture h pixels high (the 5x7 font stays crisp): medium 1 per 720, small 1 per
- * 1080, large 1 per 480 (at least 2) */
-static int32_t overlay_scale(uint32_t h) {
-    int32_t s = hud_size_index() == 0 ? (int32_t)(h / 1080) : hud_size_index() == 2 ? (int32_t)(h / 480)
-              : h >= 1440 ? (int32_t)(h / 720) : 1;
-    if (hud_size_index() == 2 && s < 2) s = 2;
-    return s > 0 ? s : 1;
+static float overlay_scale(uint32_t h) {
+    float s = hud_scale_get();
+    return s > 0 ? s : h >= 1440 ? (float)(h / 720) : 1.0f;
 }
 
 static void hud_draw(VkImage dst, int32_t x0, int32_t y0) {
@@ -570,10 +569,10 @@ static void hud_draw(VkImage dst, int32_t x0, int32_t y0) {
     static HudContent content;
     int w, h;
     yw4_perf_hud(&content);
-    hud_render(hud.ptr, HUD_W, HUD_H, &content, &w, &h);
+    float s = overlay_scale(swap_extent.height);
+    hud_render(hud.ptr, HUD_W, HUD_H, &content, s, &w, &h);  /* drawn at its size: shown 1:1 */
     hud_shown_w = w, hud_shown_h = h;
-    int32_t s = overlay_scale(swap_extent.height);
-    overlay_show(&hud, dst, w, h, x0 + 6 * s, y0 + 6 * s, s);
+    overlay_show(&hud, dst, w, h, x0 + (int32_t)(6 * s), y0 + (int32_t)(6 * s), 1.0f);
 }
 
 /* The settings panel (F1), in the middle of the picture (bw x bh at x0, y0). */
@@ -597,19 +596,20 @@ static void panel_draw(VkImage dst, int32_t x0, int32_t y0, uint32_t bw, uint32_
     panel_shown_w = w, panel_shown_h = h;
     /* scaled up by whole steps (the pixel font stays crisp) to about two thirds of the picture's height */
     int32_t s = (int32_t)panel_scale(bw, bh);
-    overlay_show(&panel, dst, w, h, x0 + ((int32_t)bw - w * s) / 2, y0 + ((int32_t)bh - h * s) / 2, s);
+    overlay_show(&panel, dst, w, h, x0 + ((int32_t)bw - w * s) / 2, y0 + ((int32_t)bh - h * s) / 2, (float)s);
 }
 
 /* An overlay's drawn cw x ch part pasted 1:1 into rgba (the w x h frame) at (x, y), clipped. */
 static void paste(uint8_t *rgba, uint32_t w, uint32_t h, const Overlay *o, int cw, int ch, uint32_t x, uint32_t y,
-                  uint32_t scale) {
+                  float scale) {
     if (!cw || !o->ptr || x >= w || y >= h) return;
-    uint32_t pw = (uint32_t)cw * scale < w - x ? (uint32_t)cw * scale : w - x;
-    uint32_t ph = (uint32_t)ch * scale < h - y ? (uint32_t)ch * scale : h - y;
+    uint32_t sw = (uint32_t)(cw * scale), sh = (uint32_t)(ch * scale);
+    uint32_t pw = sw < w - x ? sw : w - x;
+    uint32_t ph = sh < h - y ? sh : h - y;
     for (uint32_t r = 0; r < ph; r++) {
         const uint8_t *src = (const uint8_t *)o->ptr + (size_t)(r / scale) * o->w * 4;
         uint8_t *dst = rgba + ((size_t)(y + r) * w + x) * 4;
-        for (uint32_t c = 0; c < pw; c++) memcpy(dst + c * 4, src + (c / scale) * 4, 4);
+        for (uint32_t c = 0; c < pw; c++) memcpy(dst + c * 4, src + (size_t)(c / scale) * 4, 4);
     }
 }
 
@@ -624,12 +624,12 @@ static uint32_t panel_scale(uint32_t bw, uint32_t bh) {
  * present, the HUD at the top-left corner, scaled as overlay_scale says for its height, and the panel in its middle at the window's scale
  * for a picture of this size (rgba: the w x h frame, colours as the window shows). */
 static void hud_onto(uint8_t *rgba, uint32_t w, uint32_t h) {
-    uint32_t hs = (uint32_t)overlay_scale(h);
-    paste(rgba, w, h, &hud, hud_shown_w, hud_shown_h, 6 * hs, 6 * hs, hs);
+    float hs = overlay_scale(h);
+    paste(rgba, w, h, &hud, hud_shown_w, hud_shown_h, (uint32_t)(6 * hs), (uint32_t)(6 * hs), 1.0f);
     uint32_t s = panel_scale(w, h);
     if (panel_shown_w && (uint32_t)panel_shown_w * s <= w && (uint32_t)panel_shown_h * s <= h)
         paste(rgba, w, h, &panel, panel_shown_w, panel_shown_h, (w - (uint32_t)panel_shown_w * s) / 2,
-              (h - (uint32_t)panel_shown_h * s) / 2, s);
+              (h - (uint32_t)panel_shown_h * s) / 2, (float)s);
 }
 
 /* DLSS frame generation's HUD-less copy at the window's size and format (made again when either changes). */

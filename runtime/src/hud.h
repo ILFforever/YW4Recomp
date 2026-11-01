@@ -35,12 +35,13 @@ int gpu_pcss_level(void);
 /* gbuffer.c: our G-buffer programs on. */
 int gbuffer_native(void);
 
-/* window.c: the HUD's size, 0 small, 1 medium, 2 large (the settings panel's HUD SIZE). */
-int hud_size_index(void);
-void hud_size_cycle(void);
+/* window.c: the HUD's scale, the settings panel's HUD SCALE slider: 0 auto (grows with the window), else the scale. */
+float hud_scale_get(void);
+void hud_scale_set(float v);
 
-/* Draws c into rgba (w x h texels, 4 bytes each, rows of w); *used_w and *used_h: the part drawn. */
-void hud_render(uint8_t *rgba, int w, int h, const HudContent *c, int *used_w, int *used_h);
+/* Draws c into rgba (w x h texels, 4 bytes each, rows of w) at scale s (the text in the system's font at that
+ * size); *used_w and *used_h: the part drawn. */
+void hud_render(uint8_t *rgba, int w, int h, const HudContent *c, float s, int *used_w, int *used_h);
 /* The settings panel (settings.h) the same way: every row with all its options, the current one boxed. */
 void panel_render(uint8_t *rgba, int w, int h, const SettingRow *rows, int n, int selected, int developer,
                   int *used_w, int *used_h);

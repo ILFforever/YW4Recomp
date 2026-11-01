@@ -31,7 +31,35 @@ typedef struct {
     const char *env;       /* the environment variable it starts from, and its value per option */
     const char *values[SETTINGS_MAX_OPTIONS];
     const char *(*disabled)(void);  /* NULL, or why it can't be used now (greyed out) */
+    /* a slider (noptions 0): get/set the value, lo..hi in steps; 0 below lo is AUTO (auto_note says what it does) */
+    float (*get)(void);
+    void (*set)(float);
+    float lo, hi, step;
+    const char *auto_note;
 } Setting;
+
+/* A slider's value as shown and as saved. */
+static void slider_text(const Setting *s, char *shown, size_t n1, char *saved, size_t n2) {
+    float v = s->get();
+    if (v <= 0) {
+        if (shown) snprintf(shown, n1, "AUTO");
+        if (saved) snprintf(saved, n2, "auto");
+    } else {
+        if (shown) snprintf(shown, n1, "%.2fX", v);
+        if (saved) snprintf(saved, n2, "%.2f", v);
+    }
+}
+static void slider_step(const Setting *s, int dir) {
+    float v = s->get();
+    if (v <= 0) v = dir > 0 ? s->lo : 0;
+    else {
+        v += dir * s->step;
+        v = (float)(int)(v / s->step + 0.5f) * s->step;  /* on the steps */
+        if (v < s->lo - s->step * 0.5f) v = 0;          /* below the lowest: AUTO */
+        if (v > s->hi) v = s->hi;
+    }
+    s->set(v);
+}
 
 static int res_index(void) {
     int h = gpu_res_height();
@@ -96,11 +124,11 @@ static const Setting player[] = {
      {"THE SWITCH'S DEFAULT", "SMOOTH", "FOR 120 HZ MONITORS", "FOR 144 HZ MONITORS",
       "THE MONITOR'S OWN REFRESH RATE, SMOOTHEST (APPLIES AFTER A RESTART)", "AS FAST AS THE PC CAN: MOTION CAN JUDDER"}, 6,
      framerate_index, framerate_cycle, "YW4_FPS", {"30", "60", "120", "144", "vsync", "0"}},
-    {"DISPLAY", "HUD SIZE",
-     "HOW BIG THE PERFORMANCE HUD (F3) IS IN THE WINDOW'S CORNER.",
-     {"SMALL", "MEDIUM", "LARGE"},
-     {"THE LEAST IN THE WAY", "THE DEFAULT", "EASIEST TO READ"}, 3, hud_size_index, hud_size_cycle, "YW4_HUD_SIZE",
-     {"small", "medium", "large"}},
+    {"DISPLAY", "HUD SCALE",
+     "HOW BIG THE PERFORMANCE HUD (F3) IS IN THE WINDOW'S CORNER, IN STEPS OF 0.05. WHOLE NUMBERS KEEP ITS PIXEL FONT "
+     "SHARPEST. ALL THE WAY LEFT: AUTO.",
+     {NULL}, {NULL}, 0, NULL, NULL, "YW4_HUD_SCALE", {NULL}, NULL, hud_scale_get, hud_scale_set, 0.75f, 3.0f, 0.05f,
+     "GROWS WITH THE WINDOW"},
     {"ANTI-ALIASING AND UPSCALING", "ANTI-ALIASING",
      "SMOOTHS THE JAGGED EDGES OF OBJECTS. APPLIED BEFORE THE MENUS ARE DRAWN, SO TEXT STAYS SHARP.",
      {"OFF", "FXAA", "SMAA", "TAA", "FSR", "DLSS"},
@@ -270,6 +298,12 @@ void settings_save(void) {
                "# name wins over its line here.\n");
     for (int i = 0; i < NSETTINGS; i++) {
         const Setting *t = setting(i);
+        if (!t->noptions) {
+            char v[16];
+            slider_text(t, NULL, 0, v, sizeof v);
+            fprintf(f, "%s=%s\n", t->env, v);
+            continue;
+        }
         int c = t->current();
         if (c >= 0 && c < t->noptions) fprintf(f, "%s=%s\n", t->env, t->values[c]);
     }
@@ -330,6 +364,10 @@ void settings_action(int action) {
     if (!developer_page && *sel == LINK_ROW) return;
     const Setting *s = developer_page ? &developer[*sel] : &player[*sel];
     if ((action == SETTINGS_LEFT || action == SETTINGS_RIGHT) && s->disabled && s->disabled()) return;  /* greyed out */
+    if (!s->noptions) {  /* a slider */
+        if (action == SETTINGS_LEFT || action == SETTINGS_RIGHT) slider_step(s, action == SETTINGS_RIGHT ? 1 : -1), settings_save();
+        return;
+    }
     switch (action) {
     case SETTINGS_RIGHT: s->next(), settings_save(); break;
     case SETTINGS_LEFT:  /* one step back: the cycle goes forward only */
@@ -351,7 +389,17 @@ int settings_rows(SettingRow *rows, int max, int *sel) {
         memcpy(rows[i].options, list[i].options, sizeof rows[i].options);
         memcpy(rows[i].notes, list[i].notes, sizeof rows[i].notes);
         rows[i].noptions = list[i].noptions;
-        rows[i].current = list[i].current();
+        if (!list[i].noptions) {  /* a slider: its text, its position, and one note for the description */
+            float v = list[i].get();
+            rows[i].slider = 1;
+            rows[i].frac = v <= 0 ? 0.0f : (v - list[i].lo) / (list[i].hi - list[i].lo);
+            slider_text(&list[i], rows[i].value, sizeof rows[i].value, NULL, 0);
+            rows[i].options[0] = rows[i].value;
+            rows[i].notes[0] = v <= 0 ? list[i].auto_note : "";
+            rows[i].current = 0;
+        } else {
+            rows[i].current = list[i].current();
+        }
         rows[i].disabled = list[i].disabled ? list[i].disabled() : NULL;
     }
     if (!developer_page && n < max) {
