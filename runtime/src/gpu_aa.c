@@ -676,9 +676,13 @@ void gpu_aa_apply(VkCommandBuffer cb, GpuState *s) {
                                          "anti-aliasing: TAA", "anti-aliasing: FSR", "anti-aliasing: DLSS"};
     gpu_passes_other(cb, label[mode], 0);  /* its own line in the per-pass timer (F5) */
     pass(cb, debug == 3 ? P_TEST : P_ENCODE, encoded.view, VK_FORMAT_R16G16B16A16_SFLOAT, w, h, 0, scene);
-    if (mode == 5 && !debug && depth && dlss(cb, depth, depth_in, out, fmt, w, h, ow, oh)) {
+    /* The swirl into a battle grows the view in nine steps of 32 x 18 (gpu.c zoom_chain), each a new size: DLSS and
+     * FSR are made again for every size (~33 ms each, a stutter at every battle's start), so during those ~1 s our
+     * TAA stands in; it only resizes its images. The settled battle view is DLSS's / FSR's again. */
+    int zoom = g && gpu_zoom_step(g->key.width, g->key.height);
+    if (mode == 5 && !debug && !zoom && depth && dlss(cb, depth, depth_in, out, fmt, w, h, ow, oh)) {
         /* done: DLSS wrote the output's size */
-    } else if (mode >= 4 && !debug && depth && fsr(cb, depth, out, fmt, w, h, ow, oh)) {
+    } else if (mode >= 4 && !debug && !zoom && depth && fsr(cb, depth, out, fmt, w, h, ow, oh)) {
         /* done: FSR wrote the output's size (also when DLSS can't run) */
     } else {
         if (mode >= 3) {

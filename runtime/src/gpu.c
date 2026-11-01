@@ -827,6 +827,9 @@ static int zoom_chain(uint32_t w, uint32_t h) {
     return 0;
 }
 
+/* Is a game-sized w x h one of the battle zoom's in-between sizes (gpu_aa.c: no DLSS/FSR during them)? */
+int gpu_zoom_step(uint32_t w, uint32_t h) { return zoom_chain(w, h) != 0; }
+
 static int screen_sized(const NvnTexture *t) {
     static const uint16_t sizes[][2] = {{1600, 900}, {800, 450}, {533, 300}, {400, 225}, {200, 112}, {120, 67},
                                         {1920, 1080}, {960, 540}, {639, 359}, {480, 270}};
