@@ -66,5 +66,5 @@ objects (a thin caster missed by the halved search gives a pixel a different sof
 
 ## Next
 
-Owning the program lets the shadow mask improve: contact shadows for small details the 1024-texel cascades miss,
+Owning the program lets the shadow mask improve: contact shadows for small details the cascades miss (done: decision 0045),
 and the mask at full size instead of half.

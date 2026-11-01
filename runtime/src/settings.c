@@ -56,6 +56,7 @@ static const char *mask_speedup_disabled(void) {
     if (!shadow_mask_native()) return "NEEDS SHADOW MASK SET TO CUSTOM";
     return gpu_pcss_level() ? NULL : "NEEDS SOFT SHADOWS";
 }
+static const char *contact_disabled(void) { return shadow_mask_native() ? NULL : "NEEDS SHADOW MASK SET TO CUSTOM"; }
 static int reflex_index(void) { return dlssg_reflex(); }  /* what runs: on while DLSS frame generation is */
 static const char *reflex_disabled(void) {
     if (!gpu_dlss_built()) return "NOT IN THIS BUILD";
@@ -146,6 +147,12 @@ static const Setting player[] = {
      "SHIMMERING.",
      {"OFF", "X1", "X2", "X4"},
      {"THE SWITCH'S DEFAULT: HARD SHADOWS", "SLIGHTLY SOFT", "SOFT (RECOMMENDED)", "VERY SOFT"}, 4, pcss_index, gpu_pcss_cycle, "YW4_PCSS", {"0", "1", "2", "3"}},
+    {"SHADOWS", "CONTACT SHADOWS",
+     "SMALL SHADOWS THE SHADOW MAP IS TOO COARSE FOR: INSIDE BUSHES AND TREES, UNDER LEDGES, EAVES AND RAILINGS. "
+     "WORKED OUT FROM THE PICTURE, SO THEY ONLY COME FROM WHAT IS ON SCREEN.",
+     {"OFF", "ON"},
+     {"THE SWITCH'S DEFAULT", "MORE DEPTH IN LEAVES AND UNDER EDGES, ALMOST NO COST"}, 2, gpu_contact,
+     gpu_contact_toggle, "YW4_CONTACT", {"0", "1"}, contact_disabled},
 };
 /* The developer page (DEVELOPER OPTIONS): behind-the-scenes switches for testing the port, which the picture
  * doesn't show: who draws each part of it, and speed-ups that look the same. The defaults are the recommended

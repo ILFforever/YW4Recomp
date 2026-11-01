@@ -60,6 +60,8 @@ void shadow_mask_toggle(void);
  * search (YW4_PCSS_SEARCH_TAPS=8). The panel switches them. */
 int gpu_mask_filter_once(void);
 void gpu_mask_filter_toggle(void);
+int gpu_contact(void);
+void gpu_contact_toggle(void);
 int gpu_pcss_search8(void);
 void gpu_pcss_search8_toggle(void);
 

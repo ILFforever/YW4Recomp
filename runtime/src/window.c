@@ -1065,6 +1065,7 @@ void window_run(void (*guest)(void *), void *arg) {
             if (e.key.key == SDLK_F10) gpu_request_dump(), yw4_hid_note_key("F10");      /* shadow maps etc.: work/dump/ */
             if (e.key.key == SDLK_F3) __atomic_store_n(&hud_on, hud_enabled() ? 0 : 1, __ATOMIC_RELEASE);  /* the HUD */
             if (e.key.key == SDLK_F5) gpu_passes_toggle();  /* per-pass GPU timing in the log */
+            if (e.key.key == SDLK_F7 && !e.key.repeat) gpu_contact_toggle();  /* contact shadows, to compare quickly */
             /* the settings live in the panel only (F1); its keys are recorded like the F keys, so a replay
              * of a recording changes the same settings at the same ticks. While the controls page waits for
              * a key, any key but F1..F12 is the new binding. */

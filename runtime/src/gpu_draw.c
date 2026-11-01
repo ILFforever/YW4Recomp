@@ -1015,8 +1015,48 @@ void gpu_pcss_search8_toggle(void) {
     fprintf(stderr, "yw4: gpu: soft shadow search %d taps\n", v ? 8 : 16);
 }
 
+/* Contact shadows in our shadow mask (shadow_mask.frag contact_shadow): a short march toward the sun across the
+ * half-size depth, for the small shading the shadow maps are too coarse for (inside bushes, under ledges and
+ * eaves). The settings panel's CONTACT SHADOWS row switches them while playing. YW4_CONTACT=0 / 1 at start (on
+ * by default), or YW4_CONTACT=<steps>,<length>,<thickness>[,<debug>] to try other values (length and thickness in
+ * view units, about metres; debug 1 shows the contact shadows alone). Decision 0045.
+ * YW4_CONTACT_ALTERNATE=1: off on even GPU frames, to compare both in one run (the sun follows the time of day,
+ * so two runs differ anyway). */
+static float contact[4] = {12, 0.3f, 0.07f, 0};  /* steps x4 in effect (shared in 2x2 blocks); thickness widened for slanted faces */
+static int contact_on = -1, contact_alternate;
+
+int gpu_contact(void) {
+    int v = __atomic_load_n(&contact_on, __ATOMIC_ACQUIRE);
+    if (v < 0) {
+        const char *e = getenv("YW4_CONTACT");
+        v = 1;
+        if (e && strchr(e, ',')) {
+            sscanf(e, "%f,%f,%f,%f", &contact[0], &contact[1], &contact[2], &contact[3]);
+            v = contact[0] > 0;
+        } else if (e) {
+            v = atoi(e) != 0;
+        }
+        contact_alternate = (e = getenv("YW4_CONTACT_ALTERNATE")) != NULL && atoi(e);
+        fprintf(stderr, "yw4: gpu: contact shadows %s: %g steps, length %g, thickness %g%s\n", v ? "on" : "off",
+                contact[0], contact[1], contact[2], contact[3] == 1 ? ", shown alone" : "");
+        __atomic_store_n(&contact_on, v, __ATOMIC_RELEASE);
+    }
+    return v;
+}
+
+void gpu_contact_toggle(void) {
+    int v = !gpu_contact();
+    __atomic_store_n(&contact_on, v, __ATOMIC_RELEASE);
+    fprintf(stderr, "yw4: gpu: contact shadows %s (settings panel)\n", v ? "on" : "off");
+}
+
+static void contact_settings(float *f) {
+    memcpy(f, contact, sizeof contact);
+    if (!gpu_contact() || (contact_alternate && !(gpu_frames() & 1))) f[0] = 0;
+}
+
 static int pcss_settings(VkBuffer *buf, VkDeviceSize *offset) {
-    float *f = (float *)ring_alloc(48, buf, offset);
+    float *f = (float *)ring_alloc(64, buf, offset);
     if (!f) return 0;
     int l = gpu_pcss_level();
     float k = (float)(1 << (l ? l - 1 : 0));
@@ -1027,6 +1067,7 @@ static int pcss_settings(VkBuffer *buf, VkDeviceSize *offset) {
     uint64_t fr = gpu_frames();
     if (pcss_alternate >= 0 && fr >= (uint64_t)pcss_alternate && fr < (uint64_t)pcss_alternate + 16) once = !(fr & 1);
     f[10] = (float)once, f[11] = pcss_block;
+    contact_settings(f + 12);
     return 1;
 }
 
@@ -1098,7 +1139,7 @@ static int bind_stage_set(VkCommandBuffer cb, const GpuState *s, const Shader *s
             } else if (b->kind == 'p') {  /* the soft shadow settings */
                 if (!pcss_settings(&bi[i].buffer, &bi[i].offset))
                     bi[i].buffer = dummy_buffer(), bi[i].offset = 0;
-                bi[i].range = 48;
+                bi[i].range = 64;
                 w[i].dstBinding = 95;
                 w[i].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
                 w[i].pBufferInfo = &bi[i];

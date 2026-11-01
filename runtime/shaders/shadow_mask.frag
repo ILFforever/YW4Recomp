@@ -1,4 +1,5 @@
 #version 460
+#extension GL_KHR_shader_subgroup_quad : require
 // Our version of the shadow mask's fragment program 06d03ad7 (docs/frame.md "Lighting stage"): per
 // half-size pixel, how much of the sun reaches the surface there, from the cascaded shadow maps.
 // Same interface as the game's program (with the soft shadows of decision 0025 in it, as the
@@ -14,8 +15,9 @@
 //   centre lookup and the texel grid)
 //   textures: 0 the G-buffer normal (rgb × 2 − 1), 1 the half-size depth, 15 the cascades' shadow
 //   maps (a depth compare; its raw depth for the soft shadows' blocker search)
-// Output: x lit (1) or in shadow (0), faded out toward the far end; y and z the linear depth; w 0.
-// With no cascade at this depth: (0, 1, 0, 0).
+// Output: x how much is in shadow (1 in shadow, 0 lit: the map compare gives 1 where something is nearer the
+// sun), faded out toward the far end; y and z the linear depth; w 0. With no cascade at this depth: (0, 1, 0, 0),
+// no shadow.
 
 layout(set = 1, binding = 8, std140) uniform View { vec4 d[4096]; } view;
 layout(set = 1, binding = 12, std140) uniform Sun { vec4 d[4096]; } sun;
@@ -23,7 +25,8 @@ layout(set = 1, binding = 16) uniform sampler2D gbuffer_normal;
 layout(set = 1, binding = 17) uniform sampler2D half_depth;
 layout(set = 1, binding = 31) uniform sampler2DArrayShadow shadow_maps;
 layout(set = 1, binding = 111) uniform sampler2DArray shadow_depth;  // the same maps' raw depth
-layout(set = 1, binding = 95, std140) uniform YW4PCSS { vec4 mode; vec4 scale; vec4 tune; } yw4_pcss;
+// contact (ours, only this program reads it): steps (0 off), ray length and thickness in view units, debug
+layout(set = 1, binding = 95, std140) uniform YW4PCSS { vec4 mode; vec4 scale; vec4 tune; vec4 contact; } yw4_pcss;
 
 layout(location = 3) in vec4 v_uv;
 
@@ -130,6 +133,73 @@ float bias_of(float slope_distance, float n_dot_l) {
     return min(fma(b.y, clamp(slope_distance / n_dot_l, 0.0, 1.0), b.x), b.z);
 }
 
+// Ours: contact shadows. Small details the cascades are too coarse for (feet on the ground, props on a table):
+// a short march from the surface toward the sun across the half-size depth; where the picture is in front of the
+// ray by less than the thickness, something on screen sits between the surface and the sun. The projection is
+// the inverse of rows 20-23, which carry this frame's AA shift (cb8_scaled_copy), so the march lines up with the
+// shifted depth. Returns how much is in shadow: a hit near the start 1, one toward the end of the ray less.
+// `jitter` (0..1) moves the steps along the ray (contact_smoothed spreads it over each 2x2 block of pixels).
+float contact_shadow(vec3 pos, vec3 n, vec3 l, float jitter) {
+    mat4 proj = inverse(transpose(mat4(view.d[20], view.d[21], view.d[22], view.d[23])));
+    int steps = int(yw4_pcss.contact.x);
+    float len = yw4_pcss.contact.y, thick = yw4_pcss.contact.z;
+    float dist = -pos.z;
+    // off the surface a little, more with distance (the depth is coarser there), so it doesn't shadow itself
+    vec3 start = pos + n * (dist * 0.002);
+    for (int i = 0; i < steps; i++) {
+        float t = (float(i) + jitter) / float(steps);
+        vec3 p = start + l * (len * t);
+        vec4 c = proj * vec4(p, 1.0);
+        if (c.w <= 0.0) break;
+        vec2 ndc = c.xy / c.w;
+        vec2 suv = vec2(ndc.x * 0.5 + 0.5, 0.5 - ndc.y * 0.5);
+        if (any(lessThan(suv, vec2(0.0))) || any(greaterThan(suv, vec2(1.0)))) break;
+        // the texel itself, not a blend: at an outline (a pole against the ground) a filtered read is a depth
+        // between the two that nothing has, and it looked like a blocker beside thin things
+        ivec2 texel = min(ivec2(suv * vec2(textureSize(half_depth, 0))), textureSize(half_depth, 0) - 1);
+        vec4 sc = vec4(ndc, texelFetch(half_depth, texel, 0).x, 1.0);
+        float scene_z = dot(view.d[22], sc) / dot(view.d[23], sc);
+        float gap = scene_z - p.z;  // > 0: the picture there is nearer the camera than the ray
+        // (hits right beside the pixel count: skipping them, for the hairline beside posts, also dropped the thin
+        // line under a wall's cap or an eave once it was only a texel or two tall, so it faded with distance)
+        if (gap > dist * 0.001) {
+            // How squarely the blocker faces the camera there: seen edge-on (a post's outline, |n.v| near 0) its
+            // depth says nothing about how thick it is behind, and rays passing behind a post's side drew a line
+            // on the ground beside it, so those don't count. A face seen at a slant (a wall's cap looking along
+            // the wall) still counts, with the thickness widened by the slant: its depth there spreads over more
+            // of the view, and at 0.07 the line under the cap faded out as the view turned.
+            // (Asking whether the ray comes out in front again can't tell a post from a wall's thin cap: the ray
+            // under a cap comes out over its top, and the cap's line went too.)
+            vec3 hn = normalize(fma(textureLod(gbuffer_normal, suv, 0.0).xyz, vec3(2.0), vec3(-1.0)));
+            vec3 hp = vec3(dot(view.d[20], sc), dot(view.d[21], sc), dot(view.d[22], sc)) / dot(view.d[23], sc);
+            float facing = abs(dot(hn, normalize(hp)));
+            if (facing > 0.15 && gap < thick / max(facing, 0.25)) return 1.0 - t * t;
+        }
+    }
+    return 0.0;
+}
+
+// Contact shadows smoothed: the four pixels of a 2x2 block march with the steps a quarter step apart, then
+// share their results (the GPU runs a block together, so the swaps are nearly free): where they agree the
+// result is that of a ray with four times the steps; a random start per pixel instead left dots (a bush's
+// shade on a wall). Only neighbours at about the same depth count, so nothing bleeds across an outline.
+// Called by every pixel of the block (uniform control flow): the swaps need all four. Pixels that don't use the
+// result (the sky and anything past the last cascade, surfaces facing away from the sun: the mask is 0 or 1
+// there whatever it finds) skip the march and are left out of their neighbours' average.
+float contact_smoothed(vec3 pos, vec3 n) {
+    uvec2 q = uvec2(gl_FragCoord.xy) & 1u;
+    float jitter = (float(q.x + 2u * q.y) + 0.5) * 0.25;
+    vec3 l = normalize(sun.d[0].xyz);
+    float used = -pos.z <= sun.d[9].y && dot(n, l) > 1e-4 ? 1.0 : 0.0;
+    float c = used > 0.0 ? contact_shadow(pos, n, l, jitter) : 0.0;
+    float z = pos.z, near = -z * 0.02;
+    vec3 cs = vec3(subgroupQuadSwapHorizontal(c), subgroupQuadSwapVertical(c), subgroupQuadSwapDiagonal(c));
+    vec3 zs = vec3(subgroupQuadSwapHorizontal(z), subgroupQuadSwapVertical(z), subgroupQuadSwapDiagonal(z));
+    vec3 us = vec3(subgroupQuadSwapHorizontal(used), subgroupQuadSwapVertical(used), subgroupQuadSwapDiagonal(used));
+    vec3 wt = vec3(lessThan(abs(zs - z), vec3(near))) * us;
+    return (c + dot(cs, wt)) / (1.0 + wt.x + wt.y + wt.z);
+}
+
 void main() {
     vec2 uv = v_uv.xy;
 
@@ -141,6 +211,13 @@ void main() {
     float w = dot(clip, view.d[23]);
     float x = dot(clip, view.d[20]);
     vec3 pos = vec3(x, y, z) / w;
+
+    // Ours: contact shadows, here for every pixel (their smoothing swaps results within 2x2 blocks; see below)
+    float contact = 0.0;
+    if (yw4_pcss.contact.x > 0.5) {
+        vec3 cn = normalize(fma(textureLod(gbuffer_normal, uv, 0.0).xyz, vec3(2.0), vec3(-1.0)));
+        contact = contact_smoothed(pos, cn);
+    }
 
     // 2. Cascade: the first whose range reaches this depth; toward the end of cascades 0 and 1 a
     // blend weight toward the next one.
@@ -163,7 +240,7 @@ void main() {
     if (cascade < 0) {
         o_mask = vec4(0.0, 1.0, 0.0, 0.0);
     } else {
-        // 3. Normal and N·L; a surface facing away from the sun counts as lit.
+        // 3. Normal and N·L; a surface facing away from the sun counts as in shadow.
         vec3 n = fma(textureLod(gbuffer_normal, uv, 0.0).xyz, vec3(2.0), vec3(-1.0));
         n = inversesqrt(abs(dot(n, n))) * n;
         float n_dot_l = dot(n, sun.d[0].xyz);
@@ -174,8 +251,8 @@ void main() {
         float lin = range.x / fma(-depth, -range.x + range.y, range.y);
         float s = clamp(lin, 0.0, 1.0);
 
-        // Ours, faster, the same result: a surface facing away from the sun ends up lit (1) whatever the lookups
-        // find, and a fully faded one ends up 0 (1 - s² = 0): neither needs them.
+        // Ours, faster, the same result: a surface facing away from the sun ends up in shadow (1) whatever the
+        // lookups find, and a fully faded one ends up 0 (1 - s² = 0): neither needs them.
         float shadow = 1.0;
         if (facing_away == 0.0 && s < 1.0) {
             // 4. Five lookups in the cascade: four taps beside the surface along the light's x and y,
@@ -224,6 +301,10 @@ void main() {
                 float b = bias_of((1.0 / inv_sin) * texel_offset(g.xy), n_dot_l);
                 float lit_next = max(yw4_shadow(shadow_maps, shadow_depth, vec4(g.xy, float(next), g.z + -b)), facing_away);
                 shadow = fma(blend, -shadow + lit_next, shadow);
+            }
+
+            if (yw4_pcss.contact.x > 0.5) {
+                shadow = yw4_pcss.contact.w == 1.0 ? contact : max(shadow, contact);  // debug 1: contact alone
             }
         }
 

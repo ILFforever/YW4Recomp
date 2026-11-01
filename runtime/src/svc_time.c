@@ -5,6 +5,7 @@
  * Time on the Switch: the steady clock counts seconds since boot (here: since the runtime
  * started, from CNTPCT); a system clock is "steady clock + offset", so its context stores
  * the offset and the steady time point it was taken at. */
+#include <stdlib.h>
 #include <string.h>
 #include <time.h>
 
@@ -15,10 +16,23 @@ static const uint8_t clock_source[16] = {'y', 'w', '4', 'r', 'e', 'c', 'o', 'm',
 
 static int64_t steady_seconds(void) { return (int64_t)(yw4_cntpct() / 19200000u); }
 
+/* The date and time the game is told. YW4_CLOCK=<POSIX seconds> holds it still at that moment (tests: the sun
+ * follows the time of day, so two runs of one replay only match on a held clock). */
+static int64_t now_seconds(void) {
+    static int read;
+    static int64_t held = -1;
+    if (!read) {
+        const char *e = getenv("YW4_CLOCK");
+        if (e && *e) held = atoll(e);
+        read = 1;
+    }
+    return held >= 0 ? held : (int64_t)time(NULL);
+}
+
 /* SystemClockContext (0x20): offset, then SteadyClockTimePoint {seconds, source}. */
 static void system_clock_context(uint8_t *p) {
     int64_t steady = steady_seconds();
-    int64_t offset = (int64_t)time(NULL) - steady;
+    int64_t offset = now_seconds() - steady;
     memcpy(p, &offset, 8);
     memcpy(p + 8, &steady, 8);
     memcpy(p + 0x10, clock_source, 16);
@@ -84,7 +98,7 @@ static void clock_snapshot(uint8_t *p, uint8_t type) {
     memset(p, 0, 0xD0);
     system_clock_context(p + 0x00);
     system_clock_context(p + 0x20);
-    int64_t now = (int64_t)time(NULL);
+    int64_t now = now_seconds();
     memcpy(p + 0x40, &now, 8);
     memcpy(p + 0x48, &now, 8);
     calendar((time_t)now, p + 0x50, p + 0x60);

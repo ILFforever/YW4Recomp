@@ -147,6 +147,33 @@ PCSS (percentage-closer soft shadows) makes shadows behave more like real ones:
 </details>
 
 <details>
+<summary><b>Contact shadows</b>: the small shadows the shadow map is too coarse for</summary>
+
+The shadow map can't see small, close detail. Contact shadows fill it in from the picture itself: a short ray from
+each point toward the sun finds what's in the way.
+
+- **Small objects cast their shadow**: the taps over the schoolyard sink now shade the sink below them.
+- **Bushes, trees and flower beds get depth**: the leaves shade each other, so they are no longer flat green.
+- **Under ledges and eaves**: a thin dark line where a wall's cap, a roof edge or a planter sticks out.
+- **Cheap**: about 0.25 ms per frame at 4K in a sunny town, less in the shade.
+
+They only come from what's on screen, so something just outside the picture casts none. Darkness under benches
+and in corners is a different effect (ambient occlusion), not this one. In the panel (F1, SHADOWS, CONTACT
+SHADOWS) and on F7 to compare.
+
+Off and on, same spot:
+
+![Taps · contact shadows off: no shadow under the taps; on: each tap shades the sink below it](docs/screenshots/93-contact-shadows-taps.jpg)
+
+![Balconies · contact shadows off; on: lines under the balconies](docs/screenshots/94-contact-shadows-balconies.jpg)
+
+![Awning · contact shadows off; on: shade under the window's awning](docs/screenshots/95-contact-shadows-awning.jpg)
+
+![Hedges · contact shadows off; on: depth in the hedges](docs/screenshots/96-contact-shadows-hedges.jpg)
+
+</details>
+
+<details>
 <summary><b>Anti-aliasing</b>: FXAA, SMAA and TAA, with the UI kept sharp</summary>
 
 The Switch version has none. Three kinds are in, all applied to the 3D scene before the UI is
