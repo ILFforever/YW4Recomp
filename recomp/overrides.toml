@@ -212,3 +212,9 @@ offset = "0x846260"
 at = "0x846bac"
 native = "yw4_hook_mouse_look"
 why = "the field camera's left-over PC mouse path reads a mouse movement here that the Switch build never writes: we write the window's (runtime/src/bindings.c)"
+
+[[hook]]
+module = "main"
+offset = "0x812e90"
+native = "yw4_hook_battle_frame"
+why = "yw::CSceneBattle's own vtable function (main+0x14cbcf0 slot 8) that runs once every battle frame and never outside one: tells the controls which set of keys to use (runtime/src/battle.c)"

@@ -8,6 +8,7 @@
 
 #include <SDL3/SDL.h>
 
+#include "battle.h"
 #include "bindings.h"
 #include "settings.h"
 #include "window.h"
@@ -56,25 +57,42 @@ static const Input inputs[] = {
     {"RIGHT STICK", "LEFT", "RS_LEFT", -1, 2, -1, {SDL_SCANCODE_J}, AXIS(SDL_GAMEPAD_AXIS_RIGHTX, 0)},
     {"RIGHT STICK", "RIGHT", "RS_RIGHT", -1, 2, 1, {SDL_SCANCODE_L}, AXIS(SDL_GAMEPAD_AXIS_RIGHTX, 1)},
 };
-/* The controls page's rows: the mouse's two sensitivities, the inputs, the reset row. */
-enum { NINPUTS = sizeof inputs / sizeof *inputs, NMOUSE = 2, FIRST_INPUT = NMOUSE, RESET_ROW = NMOUSE + NINPUTS,
-       NROWS };
+/* The controls page's rows: which set is shown, the mouse's two sensitivities, the inputs, the reset row. */
+enum { NINPUTS = sizeof inputs / sizeof *inputs, NMOUSE = 2, SET_ROW = 0, SENS_ROW = 1, FIRST_INPUT = SENS_ROW + NMOUSE,
+       RESET_ROW = FIRST_INPUT + NINPUTS, NROWS };
 
-static struct {
+/* Two sets of keys: one while exploring, one in battles (battle.c says which), so a key can do one thing on the
+ * field and another in a battle. The battle set starts as a copy of the exploring one; saved with a BATTLE_ prefix. */
+enum { SET_FIELD, SET_BATTLE, NSETS };
+typedef struct {
     int keys[BIND_KEYS];  /* SDL_Scancode or MOUSE_BIND_*, 0 for none */
     int pad;
-} bound[NINPUTS];
-static int bound_ready;
+} Bound;
+static Bound sets[NSETS][NINPUTS];
+static int edit_set;  /* the set the controls page shows and changes */
+#define bound (sets[edit_set])
+static int bound_ready, battle_set_known;  /* the battle set was read from the settings file or copied */
 
-static void reset(void) {
+static void reset_set(int set) {
     for (int i = 0; i < NINPUTS; i++) {
-        for (int k = 0; k < BIND_KEYS; k++) bound[i].keys[k] = inputs[i].keys[k];
-        bound[i].pad = inputs[i].pad;
+        for (int k = 0; k < BIND_KEYS; k++) sets[set][i].keys[k] = inputs[i].keys[k];
+        sets[set][i].pad = inputs[i].pad;
     }
+}
+static void reset(void) {
+    for (int s = 0; s < NSETS; s++) reset_set(s);
     bound_ready = 1;
 }
 static void ready(void) {
     if (!bound_ready) reset();
+}
+/* After the settings file: a battle set it didn't have starts as the exploring set. */
+static void sets_ready(void) {
+    ready();
+    if (!battle_set_known) {
+        memcpy(sets[SET_BATTLE], sets[SET_FIELD], sizeof sets[SET_FIELD]);
+        battle_set_known = 1;
+    }
 }
 
 /* ---- mouse sensitivity, left-right and up-down: the controls page's first rows, saved as YW4_MOUSE_SENS_X and
@@ -255,7 +273,8 @@ static int32_t pad_amount(SDL_Gamepad *g, int pad) {
 
 void bindings_read(const bool *keyboard, uint32_t mouse_buttons, int wheel_up, int wheel_down,
                    struct SDL_Gamepad *gamepad, uint64_t *buttons, int32_t sticks[4]) {
-    ready();
+    sets_ready();
+    const Bound *use = sets[battle_active() ? SET_BATTLE : SET_FIELD];
     if (gamepad) {
         SDL_GamepadType t = SDL_GetGamepadType(gamepad);
         pad_style = t == SDL_GAMEPAD_TYPE_PS3 || t == SDL_GAMEPAD_TYPE_PS4 || t == SDL_GAMEPAD_TYPE_PS5 ? STYLE_PLAYSTATION
@@ -272,7 +291,7 @@ void bindings_read(const bool *keyboard, uint32_t mouse_buttons, int wheel_up, i
     for (int i = 0; i < NINPUTS; i++) {
         int key = 0;
         for (int k = 0; k < BIND_KEYS; k++) {
-            int sc = bound[i].keys[k];
+            int sc = use[i].keys[k];
             if (!sc) continue;
             if (sc == MOUSE_BIND_LEFT) key |= (mouse_buttons & SDL_BUTTON_LMASK) != 0;
             else if (sc == MOUSE_BIND_RIGHT) key |= (mouse_buttons & SDL_BUTTON_RMASK) != 0;
@@ -284,10 +303,10 @@ void bindings_read(const bool *keyboard, uint32_t mouse_buttons, int wheel_up, i
             else if (keyboard && sc < SDL_SCANCODE_COUNT) key |= keyboard[sc];
         }
         any_key |= key;
-        int32_t amount = pad_amount(gamepad, bound[i].pad);
+        int32_t amount = pad_amount(gamepad, use[i].pad);
         if (inputs[i].bit >= 0) {
             /* a stick or trigger counts as a button pushed past half way */
-            int pressed = amount > (bound[i].pad >= PAD_AXIS ? 16000 : 0);
+            int pressed = amount > (use[i].pad >= PAD_AXIS ? 16000 : 0);
             any_pad |= pressed;
             if (key || pressed) b |= 1ull << inputs[i].bit;
         } else {
@@ -580,18 +599,20 @@ static uint32_t gaiji_swap(uint32_t crc, int *sheet) {
     while (i < n_nx_names && nx_names[i].crc != crc) i++;
     if (i == n_nx_names) return 0;  /* not a button: one of the game's own icons */
     int g = nx_names[i].glyph, style = nx_names[i].style, row = glyphs[g].row;
+    sets_ready();
+    const Bound *use = sets[battle_active() ? SET_BATTLE : SET_FIELD];  /* the keys in use now */
     if (!using_pad) {
         /* the row's first key or mouse button that has an icon; groups (a stick, the whole D-pad) keep the
          * Switch icon: the keyboard sheet has none for a set of keys */
         for (int k = 0; row >= 0 && k < BIND_KEYS; k++) {
-            const char *name = bound[row].keys[k] ? key_gaiji(bound[row].keys[k]) : NULL;
+            const char *name = use[row].keys[k] ? key_gaiji(use[row].keys[k]) : NULL;
             if (name) return *sheet = SHEET_KEY, gaiji_crc(name);
         }
         return 0;
     }
     int shown = g;
     if (row >= 0) {
-        int p = glyph_for_pad(resolve(bound[row].pad));
+        int p = glyph_for_pad(resolve(use[row].pad));
         if (p >= 0) shown = p;
     }
     if (pad_style != STYLE_NINTENDO) return *sheet = SHEET_PAD, pad_crc[shown];
@@ -689,35 +710,38 @@ int bindings_capturing(void) {
 void bindings_cancel(void) { capturing = 0; }
 
 void bindings_action(int action) {
-    ready();
+    sets_ready();
+    int sens = row - SENS_ROW;  /* the sensitivity rows' axis */
     switch (action) {
     case SETTINGS_UP: row = (row + NROWS - 1) % NROWS; break;
     case SETTINGS_DOWN: row = (row + 1) % NROWS; break;
     case SETTINGS_LEFT:
-        if (row < NMOUSE) {
-            if (sens_index(row) > 0) sens_choice[row]--, settings_save();
-        } else {
-            col = (col + BIND_COLS - 1) % BIND_COLS;
-        }
-        break;
     case SETTINGS_RIGHT:
-        if (row < NMOUSE) {
-            if (sens_index(row) < NSENS - 1) sens_choice[row]++, settings_save();
+        if (row == SET_ROW) {
+            edit_set = !edit_set;
+        } else if (row < FIRST_INPUT) {
+            if (action == SETTINGS_LEFT && sens_index(sens) > 0) sens_choice[sens]--, settings_save();
+            if (action == SETTINGS_RIGHT && sens_index(sens) < NSENS - 1) sens_choice[sens]++, settings_save();
         } else {
-            col = (col + 1) % BIND_COLS;
+            col = (col + (action == SETTINGS_LEFT ? BIND_COLS - 1 : 1)) % BIND_COLS;
         }
         break;
     case SETTINGS_ACCEPT:
-        if (row < NMOUSE) {
-            sens_choice[row] = (sens_index(row) + 1) % NSENS, settings_save();
+        if (row == SET_ROW) {
+            edit_set = !edit_set;
+        } else if (row < FIRST_INPUT) {
+            sens_choice[sens] = (sens_index(sens) + 1) % NSENS, settings_save();
         } else if (row == RESET_ROW) {
-            reset(), settings_save();
+            /* the exploring set back to the starting keys; the battle set to a copy of the exploring set */
+            if (edit_set == SET_BATTLE) memcpy(sets[SET_BATTLE], sets[SET_FIELD], sizeof sets[SET_FIELD]);
+            else reset_set(SET_FIELD);
+            settings_save();
         } else {
             capturing = 1, capture_since = SDL_GetTicks();
         }
         break;
     case SETTINGS_CLEAR:
-        if (row < NMOUSE) sens_choice[row] = SENS_DEFAULT, settings_save();
+        if (row >= SENS_ROW && row < FIRST_INPUT) sens_choice[sens] = SENS_DEFAULT, settings_save();
         if (row < FIRST_INPUT || row == RESET_ROW) break;
         if (col < BIND_KEYS) bound[row - FIRST_INPUT].keys[col] = 0;
         else bound[row - FIRST_INPUT].pad = PAD_NONE;
@@ -806,8 +830,14 @@ static void input_title(int i, char *s, size_t n) {
 }
 
 int bindings_rows(BindRow *rows, int max, int *sel_row, int *sel_col, char *help, int help_size) {
-    ready();
+    sets_ready();
     int n = 0;
+    if (n < max) {
+        BindRow *r = &rows[n++];
+        memset(r, 0, sizeof *r);
+        r->group = "KEYS FOR", r->name = "SET", r->value = 1;
+        snprintf(r->cells[0], BIND_NAME, "%s", edit_set ? "BATTLES" : "EXPLORING");
+    }
     static const char *const sens_names[NMOUSE] = {"HORIZONTAL", "VERTICAL"};
     for (int a = 0; a < NMOUSE && n < max; a++) {
         BindRow *r = &rows[n++];
@@ -828,19 +858,29 @@ int bindings_rows(BindRow *rows, int max, int *sel_row, int *sel_col, char *help
     if (n < max) {
         BindRow *r = &rows[n++];
         memset(r, 0, sizeof *r);
-        r->name = "RESET ALL TO THE STARTING KEYS";
+        r->name = edit_set ? "COPY THE EXPLORING KEYS" : "RESET ALL TO THE STARTING KEYS";
     }
     *sel_row = row, *sel_col = col;
     char title[48], other[48];
-    if (row < NMOUSE) {
+    if (row == SET_ROW) {
         snprintf(help, (size_t)help_size,
-                 "HOW FAST THE CAMERA TURNS %s WITH THE MOUSE: %sX (1.0X TO START). LEFT/RIGHT: CHANGE. DELETE OR X: "
-                 "BACK TO 1.0X. A CLICK IN THE WINDOW GIVES THE MOUSE TO THE GAME, ALT TAKES IT BACK.",
-                 row ? "UP AND DOWN" : "LEFT AND RIGHT", sens_values[sens_index(row)]);
+                 "WHICH KEYS THIS PAGE SHOWS AND CHANGES: THE ONES FOR EXPLORING OR THE ONES FOR BATTLES. THE GAME "
+                 "USES EACH SET BY ITSELF, SO A KEY CAN DO ONE THING ON THE FIELD AND ANOTHER IN A BATTLE. "
+                 "LEFT/RIGHT: SWITCH.%s",
+                 battle_active() ? " A BATTLE IS ON NOW." : "");
+        return n;
+    }
+    if (row < FIRST_INPUT) {
+        int a = row - SENS_ROW;
+        snprintf(help, (size_t)help_size,
+                 "HOW FAST THE CAMERA TURNS %s WITH THE MOUSE: %sX (1.0X TO START), IN BOTH SETS. LEFT/RIGHT: CHANGE. "
+                 "DELETE OR X: BACK TO 1.0X. A CLICK IN THE WINDOW GIVES THE MOUSE TO THE GAME, ALT TAKES IT BACK.",
+                 a ? "UP AND DOWN" : "LEFT AND RIGHT", sens_values[sens_index(a)]);
         return n;
     }
     if (row == RESET_ROW) {
-        snprintf(help, (size_t)help_size, "PUTS EVERY KEY AND GAMEPAD BUTTON BACK TO HOW IT STARTED. ENTER OR A: RESET.");
+        snprintf(help, (size_t)help_size, edit_set ? "MAKES THE BATTLE KEYS THE SAME AS THE EXPLORING KEYS. ENTER OR A: COPY."
+                                                   : "PUTS EVERY KEY AND GAMEPAD BUTTON BACK TO HOW IT STARTED. ENTER OR A: RESET.");
         return n;
     }
     int in = row - FIRST_INPUT;
@@ -878,22 +918,28 @@ int bindings_load_line(const char *name, const char *value) {
         return 1;
     }
     ready();
+    int set = SET_FIELD;
+    if (!strncmp(name, "BATTLE_", 7)) {
+        if (!battle_set_known) memcpy(sets[SET_BATTLE], sets[SET_FIELD], sizeof sets[SET_FIELD]), battle_set_known = 1;
+        set = SET_BATTLE, name += 7;
+    }
+    Bound *b = sets[set];
     for (int i = 0; i < NINPUTS; i++) {
         char want[32];
         for (int k = 0; k < BIND_KEYS; k++) {
             snprintf(want, sizeof want, "KEY%d_%s", k + 1, inputs[i].id);
             if (!strcmp(name, want)) {
-                bound[i].keys[k] = key_from_name(value);
+                b[i].keys[k] = key_from_name(value);
                 return 1;
             }
         }
         snprintf(want, sizeof want, "PAD_%s", inputs[i].id);
         if (!strcmp(name, want)) {
-            bound[i].pad = pad_from_name(value);
+            b[i].pad = pad_from_name(value);
             /* the first defaults went by the Switch's positions (A on the right button): those become the
              * controller's own A, B, X, Y */
             static const char *const old[4] = {"EAST", "SOUTH", "NORTH", "WEST"};
-            if (i < 4 && !strcmp(value, old[i])) bound[i].pad = PAD_FACE + i;
+            if (i < 4 && !strcmp(value, old[i])) b[i].pad = PAD_FACE + i;
             return 1;
         }
     }
@@ -901,11 +947,15 @@ int bindings_load_line(const char *name, const char *value) {
 }
 
 void bindings_save(FILE *f) {
-    ready();
-    fprintf(f, "# Controls: two keys (SDL key names or MOUSE_LEFT/RIGHT/MID/4/5/WHEEL_UP/DOWN) and one gamepad input per Switch input; - for none.\n");
-    for (int i = 0; i < NINPUTS; i++) {
-        for (int k = 0; k < BIND_KEYS; k++) fprintf(f, "KEY%d_%s=%s\n", k + 1, inputs[i].id, key_save_name(bound[i].keys[k]));
-        fprintf(f, "PAD_%s=%s\n", inputs[i].id, pad_name(bound[i].pad));
-    }
+    sets_ready();
+    fprintf(f, "# Controls: two keys (SDL key names or MOUSE_LEFT/RIGHT/MID/4/5/WHEEL_UP/DOWN) and one gamepad input per Switch input; - for none.\n"
+               "# BATTLE_...: the same for battles.\n");
+    for (int s = 0; s < NSETS; s++)
+        for (int i = 0; i < NINPUTS; i++) {
+            const char *pre = s == SET_BATTLE ? "BATTLE_" : "";
+            for (int k = 0; k < BIND_KEYS; k++)
+                fprintf(f, "%sKEY%d_%s=%s\n", pre, k + 1, inputs[i].id, key_save_name(sets[s][i].keys[k]));
+            fprintf(f, "%sPAD_%s=%s\n", pre, inputs[i].id, pad_name(sets[s][i].pad));
+        }
     for (int a = 0; a < NMOUSE; a++) fprintf(f, "%s=%s\n", sens_env[a], sens_values[sens_index(a)]);
 }
