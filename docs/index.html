@@ -1,0 +1,188 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>YW4 Recomp</title>
+<meta name="description" content="YW4 Recomp: a fan static recompilation of Yo-kai Watch 4++ for PC. 4K, ultrawide, better shadows, anti-aliasing, DLSS and FSR.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=M+PLUS+Rounded+1c:wght@500;700;800&family=Zen+Kaku+Gothic+New:wght@400;500;700&display=swap" rel="stylesheet">
+<style>
+/* Same look as compare/index.html: the game's menus (Yo-kai Pad lilac and violet, results-screen cream and gold). */
+:root {
+  --lilac-0: oklch(97.5% 0.012 305); --lilac-1: oklch(94% 0.025 305); --lilac-2: oklch(89% 0.04 305); --lilac-3: oklch(80% 0.06 305);
+  --violet: oklch(36% 0.11 295); --violet-deep: oklch(27% 0.09 295); --violet-soft: oklch(50% 0.11 300);
+  --ink: oklch(25% 0.04 295); --ink-2: oklch(45% 0.04 295);
+  --gold: oklch(80% 0.12 85); --gold-deep: oklch(62% 0.12 75); --cream: oklch(96.5% 0.03 90);
+  --cyan: oklch(76% 0.11 215); --white: oklch(99.2% 0.004 305);
+  --r: 14px;
+  --display: "M PLUS Rounded 1c", "Hiragino Maru Gothic ProN", sans-serif;
+  --body: "Zen Kaku Gothic New", "Hiragino Sans", sans-serif;
+  --ease: cubic-bezier(.22, 1, .36, 1);
+}
+* { box-sizing: border-box; }
+body { margin: 0; overflow-x: hidden; color: var(--ink); font: 400 clamp(.98rem, .95rem + .15vw, 1.05rem)/1.7 var(--body);
+  font-variant-numeric: tabular-nums; background-color: var(--lilac-1);
+  background-image: conic-gradient(var(--lilac-0) 25%, transparent 0 50%, var(--lilac-0) 0 75%, transparent 0); background-size: 64px 64px; }
+a { color: var(--violet-soft); text-decoration-thickness: 1.5px; text-underline-offset: 3px; }
+a:hover { color: var(--violet); }
+:focus-visible { outline: 2px solid var(--gold-deep); outline-offset: 3px; }
+
+.hero { color: var(--white); background-color: var(--violet-deep); position: relative; overflow: hidden; border-bottom: 3px solid var(--gold); }
+.hero::before { content: ""; position: absolute; inset: 0; opacity: .12; pointer-events: none;
+  background-image: radial-gradient(circle at 50% 100%, transparent 38%, var(--gold) 39% 42%, transparent 43% 55%, var(--gold) 56% 59%, transparent 60%);
+  background-size: 56px 28px; }
+.hero-inner { position: relative; max-width: 1180px; margin: 0 auto; padding: clamp(36px, 6vw, 72px) 20px clamp(36px, 5vw, 60px);
+  display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.2fr); gap: clamp(24px, 4vw, 56px); align-items: center; }
+.eyebrow { font: 700 .82rem/1 var(--display); letter-spacing: .16em; text-transform: uppercase; color: var(--gold); }
+h1 { font: 800 clamp(2.4rem, 1.6rem + 3.4vw, 4.2rem)/1.04 var(--display); margin: 12px 0 14px; letter-spacing: -.01em; }
+.hero p { margin: 0 0 22px; color: oklch(88% 0.03 300); max-width: 44ch; font-size: 1.08rem; }
+.chips { display: flex; flex-wrap: wrap; gap: 6px; margin: 0 0 24px; padding: 0; list-style: none; }
+.chips li { font: 700 .8rem/1 var(--display); padding: 7px 11px; border-radius: 999px; background: oklch(31% 0.1 295);
+  border: 1px solid oklch(50% 0.08 295); color: oklch(92% 0.02 300); }
+.links { display: flex; flex-wrap: wrap; gap: 10px; }
+.btn { font: 700 .95rem/1 var(--display); text-decoration: none; border-radius: 999px; padding: 12px 20px; border: 1.5px solid var(--gold);
+  color: var(--violet-deep); background: var(--gold); transition: background .2s var(--ease); }
+.btn:hover { color: var(--violet-deep); background: oklch(85% 0.12 85); }
+.btn.ghost { background: transparent; color: var(--gold); }
+.btn.ghost:hover { color: var(--gold); background: oklch(80% 0.12 85 / .12); }
+.shot { background: var(--white); border-radius: var(--r); padding: 8px; box-shadow: 0 18px 40px oklch(15% 0.08 295 / .5); margin: 0; }
+.shot img { display: block; width: 100%; height: auto; border-radius: 8px; }
+.shot figcaption { color: var(--ink-2); font-size: .8rem; margin: 8px 6px 2px; }
+
+main { max-width: 1180px; margin: 0 auto; padding: 40px 20px 64px; display: grid; gap: 28px; }
+.panel { background: var(--white); border-radius: var(--r); border: 1px solid var(--lilac-3); overflow: hidden; }
+.bar { display: flex; align-items: center; gap: 12px; padding: 12px 20px; background: var(--violet); color: var(--white); }
+.bar h2 { margin: 0; font: 800 clamp(1.25rem, 1.15rem + .5vw, 1.6rem)/1.2 var(--display); }
+.bar .q { flex: none; width: 28px; height: 28px; border-radius: 50%; background: var(--cyan); display: grid; place-items: center;
+  font: 800 .95rem/1 var(--display); color: var(--violet-deep); box-shadow: inset 0 0 0 2px var(--white); }
+.in { padding: 20px; }
+.in p { margin: 0 0 12px; max-width: 72ch; }
+.in p:last-child { margin-bottom: 0; }
+
+.two { display: grid; grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr); gap: 28px; }
+.features { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 250px), 1fr)); gap: 0; margin: 0; padding: 0; list-style: none; }
+.features li { padding: 14px 20px; border-bottom: 1px solid var(--lilac-2); }
+.features b { display: block; font: 700 1rem/1.3 var(--display); color: var(--violet); }
+.features span { font-size: .9rem; color: var(--ink-2); }
+.facts { margin: 0; display: grid; grid-template-columns: auto minmax(0, 1fr); background: var(--cream); border-top: 3px solid var(--gold); }
+.facts dt, .facts dd { margin: 0; padding: 10px 0; border-bottom: 1px solid oklch(88% 0.04 85); font-size: .92rem; }
+.facts dt { color: var(--ink-2); padding-left: 20px; padding-right: 16px; }
+.facts dd { font-weight: 700; padding-right: 20px; }
+.facts dt:last-of-type, .facts dd:last-of-type { border-bottom: 0; }
+.go { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 240px), 1fr)); gap: 12px; padding: 20px; }
+.go a { display: block; text-decoration: none; color: var(--ink); background: var(--lilac-0); border: 1px solid var(--lilac-3);
+  border-radius: 12px; padding: 14px 16px; transition: border-color .2s var(--ease), background .2s var(--ease); }
+.go a:hover { border-color: var(--violet-soft); background: var(--white); }
+.go b { display: block; font: 700 1rem/1.3 var(--display); color: var(--violet); }
+.go span { font-size: .88rem; color: var(--ink-2); }
+.note { border-left: 3px solid var(--gold); background: var(--cream); padding: 12px 16px; border-radius: 0 10px 10px 0; font-size: .95rem; }
+
+footer { background: var(--violet-deep); color: oklch(84% 0.03 300); border-top: 3px solid var(--gold); }
+footer .in2 { max-width: 1180px; margin: 0 auto; padding: 24px 20px 32px; font-size: .85rem; display: grid; gap: 6px; }
+footer a { color: var(--gold); }
+@media (max-width: 900px) { .hero-inner, .two { grid-template-columns: minmax(0, 1fr); } }
+</style>
+</head>
+<body>
+
+<header class="hero">
+  <div class="hero-inner">
+    <div>
+      <span class="eyebrow">Fan static recompilation · work in progress</span>
+      <h1>YW4 Recomp</h1>
+      <p><i>Yo-kai Watch 4++</i> for the Nintendo Switch, translated into a native Windows program, with a renderer
+        that is gradually becoming its own.</p>
+      <ul class="chips">
+        <li>Up to 4K</li><li>21:9 and 32:9</li><li>Soft and contact shadows</li><li>TAA · SMAA</li>
+        <li>DLSS · FSR</li><li>Frame generation</li><li>60 to 144 fps</li>
+      </ul>
+      <div class="links">
+        <a class="btn" href="compare/">See the comparisons</a>
+        <a class="btn ghost" href="https://github.com/ILFforever/YW4Recomp">Project on GitHub</a>
+      </div>
+    </div>
+    <figure class="shot">
+      <img src="compare/img/res-4k.jpg" alt="A town street in Yo-kai Watch 4++, running in the recompiled port at 3840×2160">
+      <figcaption>A town street, recompiled and running natively at 3840×2160.</figcaption>
+    </figure>
+  </div>
+</header>
+
+<main>
+  <section class="two">
+    <div class="panel">
+      <div class="bar"><span class="q">!</span><h2>What it is</h2></div>
+      <div class="in">
+        <p>A static recompiler in the style of <a href="https://github.com/N64Recomp/N64Recomp">N64Recomp</a>: the
+          game's ARM code is translated to C ahead of time and built into a Windows program, with the Switch's
+          system services and its graphics API reimplemented on the PC (Vulkan).</p>
+        <p>Unlike an emulator, which replays the game's GPU commands as they are, the port can replace the game's
+          renderer piece by piece. That is what makes higher resolutions, wider screens, better shadows and modern
+          upscalers possible.</p>
+        <p class="note"><b>Bring your own game.</b> Nothing from the game is in the project. You need files from your
+          own copy with the last update, 2.2.0.</p>
+      </div>
+    </div>
+    <div class="panel">
+      <div class="bar"><span class="q">!</span><h2>At a glance</h2></div>
+      <dl class="facts">
+        <dt>Status</dt><dd>Work in progress, not playable end to end</dd>
+        <dt>Platforms</dt><dd>Windows x86-64 (Linux planned)</dd>
+        <dt>Graphics</dt><dd>Vulkan</dd>
+        <dt>Game version</dt><dd>Update 2.2.0</dd>
+        <dt>CPU, busy street</dt><dd>111% of a core (emulator: 210%)</dd>
+        <dt>Memory</dt><dd>3.9 GB (emulator: 15.7 GB)</dd>
+        <dt>Licence</dt><dd>MIT</dd>
+      </dl>
+    </div>
+  </section>
+
+  <section class="panel">
+    <div class="bar"><span class="q">!</span><h2>What the PC version adds</h2></div>
+    <ul class="features">
+      <li><b>Resolution</b><span>1600×900 (the Switch's) up to 3840×2160, menus kept the same size</span></li>
+      <li><b>Aspect ratio</b><span>16:10, 21:9 and 32:9, the menus kept 16:9 in the middle</span></li>
+      <li><b>Shadows</b><span>Maps up to 4096, soft shadows (PCSS), contact shadows</span></li>
+      <li><b>Anti-aliasing</b><span>FXAA, SMAA and TAA, applied before the menus are drawn</span></li>
+      <li><b>Texture filtering</b><span>Anisotropic up to ×16</span></li>
+      <li><b>Frame rate</b><span>30, 60, 120, 144 or unlimited, switchable while playing</span></li>
+      <li><b>Upscaling</b><span>NVIDIA DLSS and AMD FSR, menus kept sharp</span></li>
+      <li><b>Frame generation</b><span>NVIDIA DLSS and AMD FSR</span></li>
+      <li><b>Controls</b><span>Keyboard and mouse, Xbox, PlayStation and Joy-Cons, all rebindable</span></li>
+      <li><b>Mods</b><span>The English translation patch and other Switch mods, without touching your dump</span></li>
+    </ul>
+  </section>
+
+  <section class="panel">
+    <div class="bar"><span class="q">!</span><h2>Read more</h2></div>
+    <div class="go">
+      <a href="compare/"><b>Comparisons</b><span>Before and after sliders for each improvement</span></a>
+      <a href="https://github.com/ILFforever/YW4Recomp#features"><b>Features</b><span>Every setting in detail, with measurements</span></a>
+      <a href="https://github.com/ILFforever/YW4Recomp#building-from-source"><b>Building from source</b><span>What you need and how to build</span></a>
+      <a href="https://github.com/ILFforever/YW4Recomp/blob/master/docs/known-issues.md"><b>Known issues</b><span>What is missing or wrong</span></a>
+      <a href="https://github.com/ILFforever/YW4Recomp/blob/master/docs/progress.md"><b>Progress</b><span>How it got here, step by step</span></a>
+      <a href="https://github.com/ILFforever/YW4Recomp/tree/master/docs/decisions"><b>Decision records</b><span>Why each part works the way it does</span></a>
+    </div>
+  </section>
+
+  <section class="panel">
+    <div class="bar"><span class="q">!</span><h2>Built with AI</h2></div>
+    <div class="in">
+      <p>Claude (Anthropic's model, used through Claude Code) wrote most of this project: the recompiler, the runtime,
+        the reverse engineering notes and the docs. A person decides what to work on, plays and tests every build,
+        compares it against the real game and reviews the changes.</p>
+    </div>
+  </section>
+</main>
+
+<footer>
+  <div class="in2">
+    <span>A fan project. Not affiliated with or endorsed by LEVEL-5 or Nintendo; <i>Yo-kai Watch</i> belongs to its owners.
+      Screenshots are from the maintainer's own copy of the game, running in the recompiled port.</span>
+    <span><a href="https://github.com/ILFforever/YW4Recomp">github.com/ILFforever/YW4Recomp</a></span>
+  </div>
+</footer>
+</body>
+</html>
