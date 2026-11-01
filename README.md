@@ -89,12 +89,14 @@ the two do the same work:
 
 What the PC version adds to the Switch game. Open an entry for details, pictures and measurements; more in [docs/graphics.md](docs/graphics.md).
 
+**[Compare them with before/after sliders →](https://ilfforever.github.io/YW4Recomp/compare/)** (the project's site: [ilfforever.github.io/YW4Recomp](https://ilfforever.github.io/YW4Recomp/))
+
 **Graphics**
 
 <details>
 <summary><b>Resolution</b>: up to 4K, menus and text at the same size</summary>
 
-The 3D world at 1600×900 (the Switch's), 1920×1080, 2560×1440 or 3840×2160; the menus and text are drawn at the same size on top. About 30 frames/s at 4K on an RTX 4070 laptop without upscaling; with upscaling (under Performance) well above.
+The 3D world at 1600×900 (the Switch's), 1920×1080, 2560×1440 or 3840×2160; the menus and text are drawn at the same size on top. About 90+ frames/s at 4K on an RTX 4070 laptop with the other features off; with upscaling (under Performance) higher.
 
 </details>
 
