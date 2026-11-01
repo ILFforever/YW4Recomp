@@ -1,6 +1,6 @@
 # 0045 — Contact shadows
 
-Status: accepted, on by default (2026-11-01); the settings panel's SHADOWS > CONTACT SHADOWS row and F7 switch
+Status: accepted, on by default (2026-11-01); the settings panel's SHADOWS > CONTACT SHADOWS row switches
 them while playing, `YW4_CONTACT=0` at start.
 
 ## Context

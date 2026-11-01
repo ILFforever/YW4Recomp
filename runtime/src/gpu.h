@@ -56,6 +56,9 @@ void gpu_pcss_cycle(void);
 /* The shadow mask (shadow_mask.c): our program in place of the game's (YW4_SHADOW_MASK, the panel)? */
 int shadow_mask_native(void);
 void shadow_mask_toggle(void);
+/* The screen passes (gpu_draw.c, decision 0046): our programs in the engine's draws (YW4_SCREEN_PASSES, the panel)? */
+int screen_passes_native(void);
+void screen_passes_toggle(void);
 /* Its soft shadows' speed-ups (gpu_draw.c): one filter per pixel (YW4_MASK_FILTER=once), an 8-tap blocker
  * search (YW4_PCSS_SEARCH_TAPS=8). The panel switches them. */
 int gpu_mask_filter_once(void);

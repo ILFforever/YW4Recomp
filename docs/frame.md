@@ -426,10 +426,10 @@ of GPU time per frame in all). Between the G-buffer and the lit material pass:
 
 | Pass | Size | Program (vs/fs) | GPU ms | What |
 |---|---|---|---|---|
-| depth copy | half | `98c09b`/`95ea1b` | ~0.3 | the G-buffer's depth shrunk (`f_80d270`, `f_8050d0`) |
-| | ⅓ | `98c09b`/`95ea1b`, `198f41`/`42759b` | ~0.4 | the same at a third, and one more draw (to identify) |
+| depth copy | half | `98c09b`/`95ea1b` | ~0.3 | the G-buffer's colour and depth shrunk (`f_80d270`, `f_8050d0`) |
+| | ⅓ | `98c09b`/`95ea1b`, `198f41`/`42759b` | ~0.4 | the same at a third (`main+0x80f988`, `f_8050d0`), then the lamp lights (`f_8050d0`) |
 | **shadow mask** | half | `98c09b`/`06d03ad7` | **2.57** | `f_7f3e90`: the screen-space shadow, our PCSS inside (decision 0025): the most expensive pass of the frame |
-| | half, 2 targets (0x29) | `98c09b`/`790774` | 0.16 | `f_7f4c90`, likely the lamp lights |
+| | half, 2 targets (0x29) | `98c09b`/`790774` | 0.16 | `f_7f4c90`: the lighting inputs (not the lamp lights, as first thought) |
 
 The shadow mask is ~2.6 of the stage's ~3.5 ms, so it is the first piece of the stage to become ours: its program
 is ours since 2026-10-30 ([decision 0044](decisions/0044-shadow-mask-pass.md), not bit-exact: a few texels differ by
@@ -459,6 +459,30 @@ What the shadow mask computes, per half-size pixel (decoded from its NV assembly
 
 After the lit pass: a full-size
 depth-only draw (`98c09b`/`6b4575`, 0.30 ms) and full-size draws `53e413`/`ace8e4`, `ff262a`/`4893be` (to identify).
+
+### The screen passes (decoded 2026-11-02; ours: decision 0046)
+
+The town save's frame (1600×900), in order, with what each program does (our readable version in
+`runtime/shaders` in brackets). The renderer's image records (`renderer +0x2e28`, 0x28 bytes each) they use:
+0 the lit scene, 4 the G-buffer colour read by the copy, 9-14 half-size images (14: the half G-buffer colour), 15-18
+third size, 19-24 the bloom levels, 33-35 half-size (format 0x29), 42 the G-buffer depth, 43 a second full-size
+depth, 44 half depth, 45 third depth, 49-51 1×1 textures. The half-size copy binds its images through a command
+chunk the engine records once (the target description at `renderer +0x3720` points into it), not the records' first
+words, and afterwards leaves record 44 bound to fragment texture 13 for later passes.
+
+| Program | What |
+|---|---|
+| `95ea1b` | colour × the quad's colour and the depth texture as the depth, shrunk: the half-size copy before the shadow mask, the third-size one, and after the lit pass the lit scene into a half-size image (`depth_copy`) |
+| `790774` | the lighting inputs: target 0 = (shadow, texture 1, texture 2, linear depth), target 1 = (normal × 2 − 1, linear depth); textures 1 and 2 are 1×1 in the town by day (`lighting_inputs`) |
+| `42759b` | the lamp lights: point-light volumes (804 vertices in the town) at a third of the size, added: the position from the depth through the inverse projection (camera rows 20-23), falloff saturate((distance − radius) / −radius)² × the light's colour, × saturate(N·L) (`lamp_light`) |
+| `627287` | sky and aerial perspective, at the far plane with the depth test: a camera ray from the field of view (pass constant x, as sin / cos), aspect and the camera's axes (rows 1, 2); a gradient by the ray's height (rows 34-38 below the horizon, 40-42 above, horizon row 47); a fog image (texture 14 .z) looked up edge-aware through a small depth (texture 13) like `3c94bd`; height fog exp2(−(height − row 45.x) × row 45.y × log2 e); Rayleigh (3 / 16π (1 + cos²) × 12) and Mie (Henyey-Greenstein-like, g = row 44.x, 3 / 8π) phases toward the sun (light row 2); extinction 1 − exp2(−distance × rows 43, 45, 46); desaturation by rows 39, 43.w, 46.y (`sky_fog`) |
+| `6b4575` | depth only: texture 1 as the depth (the full-size depth copy after the lit pass) (`depth_only_copy`) |
+| `22d015` | tone mapping: max(scene, 0), luminance with F16 weights, extended Reinhard L(1 + L / white²) / (1 + L) with L = luminance × exposure / adapted brightness (a storage buffer, eased toward a target), blended in by a strength that bit 0 of a G-buffer channel (texture 2 .z × 255) changes (`tonemap`) |
+| `2571d0` | copy with negatives raised to 0 (`clamp_copy`) |
+| `3c94bd` | edge-aware upsample: per axis, where the small depth's neighbours differ, the sample moves (2f − 1) texels toward the side whose depth is like the full-size depth's (`edge_upsample`) |
+| `2d68c8` | copy × the quad's colour (`tinted_copy`) |
+| `3f9fc9` | the game's own FXAA, the console FXAA 3: four corner lumas, blurs of 2 and 4 samples along the edge, the 4-sample one unless it leaves the lumas' range (`game_fxaa`) |
+| `d2aaa3` | fill with the quad's colour (`vertex_colour`) |
 
 ## Open
 

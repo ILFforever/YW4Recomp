@@ -1472,12 +1472,23 @@ void gpu_execute(uint64_t handle) {
             full_barrier(cb);
             break;
         }
-        case CMD_DRAW_ARRAYS: case CMD_DRAW_ELEMENTS:
+        case CMD_DRAW_ARRAYS: case CMD_DRAW_ELEMENTS: {
+            /* same-frame A/B of one screen-pass draw (YW4_AB_PASS=screen): a range of just this draw, run
+             * again from the draw itself */
+            int ab_draw = gpu_screen_ab_draw(&s);
+            char ab_name[16];  /* 'b' or 'e', then the pass's name for the log: the program */
+            if (ab_draw) {
+                snprintf(ab_name, sizeof ab_name, "bfs %06" PRIx64, s.program->stages[1].key >> 40);
+                gpu_ab_marker(cb, &s, ab_name, (uint32_t)strlen(ab_name), exec, at, &at);
+                ab_name[0] = 'e';
+            }
             if (!s.targets_noted) gpu_shadow_note_targets(&s), s.targets_noted = 1;
             /* (primitive, type, count, ...) / (primitive, first, count, ...): count, and the instances */
             gpu_passes_draw(s.program, r->x[2] * (r->op == CMD_DRAW_ELEMENTS ? (r->x[6] ? r->x[6] : 1) : (r->x[4] ? r->x[4] : 1)));
             gpu_draw(cb, &s, r);
+            if (ab_draw && gpu_ab_marker(cb, &s, ab_name, (uint32_t)strlen(ab_name), exec, at + r->size, &at)) continue;
             break;
+        }
         case CMD_DRAW_ARRAYS_INDIRECT: case CMD_DRAW_ELEMENTS_INDIRECT: case CMD_DRAW_TRANSFORM_FEEDBACK: {
             static int logged;
             if (!logged++) fprintf(stderr, "yw4: gpu: indirect / transform feedback draws skipped for now\n");

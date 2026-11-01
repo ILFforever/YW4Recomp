@@ -137,6 +137,73 @@ static VkImageViewType view_type(const char *dim, int *shadow) {
 /* The shadow mask's fragment program (docs/frame.md "Lighting stage"). */
 #define SHADOW_MASK_FS 0x06d03ad703b4bee5ull
 
+/* The screen passes: the game's full-screen programs between the G-buffer and the UI that ours replace in
+ * the engine's own draws (the shadow mask's way, decision 0044): same inputs, targets and state.
+ * YW4_SCREEN_PASSES=game: the game's. */
+static const uint64_t screen_fs[] = {
+    0x95ea1b3181bdf579ull,  /* colour and depth copy (depth_copy.frag) */
+    0x6b4575fb57b97548ull,  /* depth-only copy */
+    0xd2aaa383b27842ecull,  /* fill with the quad's colour */
+    0x2571d0a66582ab9bull,  /* copy, negatives to 0 */
+    0x2d68c875031cfe11ull,  /* copy times the quad's colour */
+    0x79077436c58013f9ull,  /* the lighting inputs (f_7f4c90) */
+    0x3c94bd209d61eddcull,  /* edge-aware upsample */
+    0x22d01556d2366ea7ull,  /* tone mapping */
+    0x42759b97412ca8acull,  /* lamp lights (a light volume per lamp, not a quad) */
+    0x3f9fc96541a9bd43ull,  /* the game's own FXAA */
+    0x627287ec450d41fdull,  /* sky and aerial perspective */
+};
+
+static int is_screen_fs(uint64_t key) {
+    for (size_t i = 0; i < sizeof screen_fs / sizeof *screen_fs; i++)
+        if (screen_fs[i] == key) return 1;
+    return 0;
+}
+
+static int screen_on = -1;
+
+static int screen_native(void) {
+    int on = __atomic_load_n(&screen_on, __ATOMIC_ACQUIRE);
+    if (on < 0) {
+        on = !(getenv("YW4_SCREEN_PASSES") && !strcmp(getenv("YW4_SCREEN_PASSES"), "game"));
+        __atomic_store_n(&screen_on, on, __ATOMIC_RELEASE);
+    }
+    return on;
+}
+
+int screen_passes_native(void) { return screen_native(); }
+
+/* the settings panel (DEVELOPER OPTIONS, SCREEN PASSES) */
+void screen_passes_toggle(void) {
+    int on = !screen_native();
+    __atomic_store_n(&screen_on, on, __ATOMIC_RELEASE);
+    fprintf(stderr, "yw4: screen passes: %s (settings panel)\n", on ? "ours" : "the game's");
+}
+
+/* gpu.c, at each draw: YW4_AB_PASS=screen compares this draw, ours against the game's, when its fragment
+ * program starts with YW4_AB_FS (hex) and it is one of the screen passes (YW4_AB_AT picks the frame), and
+ * it is the frame's YW4_AB_DRAW-th such draw (default 1). YW4_AB_FS=all: any screen pass, the frame's
+ * (frame % 32 + 1)-th, so 32 frames in a row in YW4_AB_AT compare each of a frame's screen draws in turn.
+ * The second run of the draw is not counted. */
+int gpu_screen_ab_draw(const GpuState *s) {
+    static int wanted = -1, all;
+    static uint64_t prefix, frame;
+    static int digits, nth, seen;
+    if (wanted < 0) {
+        const char *e = getenv("YW4_AB_FS");
+        wanted = gpu_ab_wanted("screen") && e && *e;
+        all = wanted && !strcmp(e, "all");
+        if (wanted && !all) prefix = strtoull(e, NULL, 16), digits = (int)strlen(e);
+        nth = getenv("YW4_AB_DRAW") ? atoi(getenv("YW4_AB_DRAW")) : 1;
+    }
+    if (!wanted || !s->program || (!all && (digits < 1 || digits > 16))) return 0;
+    uint64_t fs = s->program->stages[1].key;
+    if (!is_screen_fs(fs) || (!all && fs >> (64 - 4 * digits) != prefix)) return 0;
+    if (gpu_ab_game) return 1;  /* the draw again, the game's: the range's end follows it */
+    if (frame != gpu_frames()) frame = gpu_frames(), seen = 0;
+    return ++seen == (all ? (int)(frame % 32) + 1 : nth);
+}
+
 /* Our replacements for game programs (decision 0026): readable GLSL in runtime/shaders with the
  * translated program's interface, used in its place when the G-buffer pass is on (settings panel). */
 static const struct {
@@ -155,6 +222,18 @@ static const struct {
     {0x5eb3b2cacbdb9824ull, ST_FRAG, "material_main.frag"},
     {0xb0aa5d810b96a62eull, ST_FRAG, "gbuffer_skinned.frag"},
     {SHADOW_MASK_FS, ST_FRAG, "shadow_mask.frag"},  /* its own switch (shadow_mask.c) */
+    /* the screen passes' (screen_native) */
+    {0x95ea1b3181bdf579ull, ST_FRAG, "depth_copy.frag"},
+    {0x6b4575fb57b97548ull, ST_FRAG, "depth_only_copy.frag"},
+    {0xd2aaa383b27842ecull, ST_FRAG, "vertex_colour.frag"},
+    {0x2571d0a66582ab9bull, ST_FRAG, "clamp_copy.frag"},
+    {0x2d68c875031cfe11ull, ST_FRAG, "tinted_copy.frag"},
+    {0x79077436c58013f9ull, ST_FRAG, "lighting_inputs.frag"},
+    {0x3c94bd209d61eddcull, ST_FRAG, "edge_upsample.frag"},
+    {0x22d01556d2366ea7ull, ST_FRAG, "tonemap.frag"},
+    {0x42759b97412ca8acull, ST_FRAG, "lamp_light.frag"},
+    {0x3f9fc96541a9bd43ull, ST_FRAG, "game_fxaa.frag"},
+    {0x627287ec450d41fdull, ST_FRAG, "sky_fog.frag"},
 };
 
 static VkShaderModule replacement(uint64_t key, int stage) {
@@ -1676,6 +1755,8 @@ static void draw(VkCommandBuffer cb, GpuState *s, const CmdRec *r) {
     /* our G-buffer programs in place of the game's (decision 0026; F6); the shadow mask's has its own switch */
     if (g->sh[ST_FRAG] && g->sh[ST_FRAG]->key == SHADOW_MASK_FS)
         k.ours = g->sh[ST_FRAG]->ours && shadow_mask_native() && !gpu_ab_game;
+    else if (g->sh[ST_FRAG] && is_screen_fs(g->sh[ST_FRAG]->key))
+        k.ours = g->sh[ST_FRAG]->ours && screen_native() && !gpu_ab_game;
     else
         k.ours = (own || gbuffer_native_frame(gpu_frames())) &&
                  ((g->sh[ST_VERT] && g->sh[ST_VERT]->ours) || (g->sh[ST_FRAG] && g->sh[ST_FRAG]->ours));
