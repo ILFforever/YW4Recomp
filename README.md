@@ -161,7 +161,7 @@ each point toward the sun finds what's in the way.
 
 They only come from what's on screen, so something just outside the picture casts none. Darkness under benches
 and in corners is a different effect (ambient occlusion), not this one. In the panel (F1, SHADOWS, CONTACT
-SHADOWS) and on F7 to compare.
+SHADOWS) to compare.
 
 Off and on, same spot:
 
