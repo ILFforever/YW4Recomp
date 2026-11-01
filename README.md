@@ -395,7 +395,7 @@ get yours from [GameBanana](https://gamebanana.com/mods/480884)):
 **Settings**
 
 <details>
-<summary><b>Settings panel</b>: every option in game (F1), the controls on F2</summary>
+<summary><b>Settings panel</b>: every option in game (F1), the controls on F2, the performance HUD on F3</summary>
 
 Press **F1** in game for the settings panel: every option with all its choices, and what each one does (arrow keys or
 D-pad to choose and change). Its last row, **DEVELOPER OPTIONS**, opens the switches players don't need: which parts
@@ -415,6 +415,7 @@ are debugging tools ([docs/debugging.md](docs/debugging.md)).
 | Resolution | 1600×900 (the Switch's), 1920×1080, 2560×1440 or 3840×2160; the UI is drawn at the same size |
 | Aspect ratio | 16:9 (the Switch's), 16:10, 21:9 or 32:9: the world shows more at the sides, the UI stays 16:9 in the middle |
 | Frame rate | 30 (the Switch's), 60, 120, 144, VSYNC (the monitor's refresh rate, smoothest; applies after a restart) or unlimited; the game keeps its speed at any rate |
+| HUD scale | A slider: auto (default, grows with the window) or 0.75× to 3× in steps of 0.05: the performance HUD (F3) in the window's corner |
 | **Anti-aliasing and upscaling** | |
 | Anti-aliasing | Off (default), FXAA, SMAA, TAA, FSR or DLSS, applied to the 3D scene before the UI is drawn, so text stays sharp. TAA, FSR and DLSS also steady thin things that shimmer: fences, nets, leaves |
 | Upscaling | Off (default), quality, balanced or performance: the world drawn smaller and rebuilt at full size by FSR or DLSS. Needs anti-aliasing set to FSR or DLSS |
@@ -433,7 +434,7 @@ are debugging tools ([docs/debugging.md](docs/debugging.md)).
 | Battle blur | The game's or fast (default): the blur as a battle starts with a quarter of the rounds, the same look, ~3 ms less GPU time |
 
 F3 shows a performance HUD in the window's corner: frame time, CPU and GPU cost and memory; with frame generation on,
-also the frames on screen (SHOWN).
+also the frames on screen (SHOWN). Its size is HUD SCALE in the panel.
 
 The game starts at the Switch's 1600×900 and 16:9 with a 4096 shadow map, PCSS ×2, ×16 texture filtering, half
 distance blur, half-size effects and no anti-aliasing. For the game's original look, set every setting to its first choice in the
