@@ -1,0 +1,568 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>YW4 Recomp · Comparisons</title>
+<meta name="description" content="Before and after comparisons for YW4 Recomp, the fan PC port of Yo-kai Watch 4++: shadows, anti-aliasing, texture filtering, upscaling and ultrawide, with settings and costs.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=M+PLUS+Rounded+1c:wght@500;700;800&family=Zen+Kaku+Gothic+New:wght@400;500;700&display=swap" rel="stylesheet">
+<style>
+/* Palette from the game's own menus (Yo-kai Pad: lilac panels on a soft checkerboard, deep violet bars; battle
+   results: cream and gold washi with a wave pattern), kept calm: this is a technical showcase. No game logos or art. */
+:root {
+  --lilac-0: oklch(97.5% 0.012 305);
+  --lilac-1: oklch(94% 0.025 305);
+  --lilac-2: oklch(89% 0.04 305);
+  --lilac-3: oklch(80% 0.06 305);
+  --violet: oklch(36% 0.11 295);
+  --violet-deep: oklch(27% 0.09 295);
+  --violet-soft: oklch(50% 0.11 300);
+  --ink: oklch(25% 0.04 295);
+  --ink-2: oklch(45% 0.04 295);
+  --gold: oklch(80% 0.12 85);
+  --gold-deep: oklch(62% 0.12 75);
+  --cream: oklch(96.5% 0.03 90);
+  --cyan: oklch(76% 0.11 215);
+  --white: oklch(99.2% 0.004 305);
+  --r: 14px;
+  --display: "M PLUS Rounded 1c", "Hiragino Maru Gothic ProN", sans-serif;
+  --body: "Zen Kaku Gothic New", "Hiragino Sans", sans-serif;
+  --step--1: clamp(.8rem, .78rem + .1vw, .88rem);
+  --step-0: clamp(.98rem, .95rem + .15vw, 1.05rem);
+  --step-1: clamp(1.15rem, 1.08rem + .35vw, 1.35rem);
+  --step-2: clamp(1.3rem, 1.18rem + .6vw, 1.7rem);
+  --step-3: clamp(2rem, 1.5rem + 2.4vw, 3.3rem);
+  --ease: cubic-bezier(.22, 1, .36, 1);
+}
+* { box-sizing: border-box; }
+html { scroll-behavior: smooth; scroll-padding-top: 16px; }
+body {
+  margin: 0; overflow-x: hidden; color: var(--ink); font: 400 var(--step-0)/1.7 var(--body);
+  font-variant-numeric: tabular-nums; background-color: var(--lilac-1);
+  background-image: conic-gradient(var(--lilac-0) 25%, transparent 0 50%, var(--lilac-0) 0 75%, transparent 0);
+  background-size: 64px 64px;
+}
+a { color: var(--violet-soft); text-decoration-thickness: 1.5px; text-underline-offset: 3px; }
+a:hover { color: var(--violet); }
+:focus-visible { outline: 2px solid var(--gold-deep); outline-offset: 3px; }
+
+/* header: a deep violet bar like the Pad's, a gold rule, a faint wave pattern */
+.hero { color: var(--white); background-color: var(--violet-deep); position: relative; overflow: hidden; border-bottom: 3px solid var(--gold); }
+.hero::before {
+  content: ""; position: absolute; inset: 0; opacity: .12; pointer-events: none;
+  background-image: radial-gradient(circle at 50% 100%, transparent 38%, var(--gold) 39% 42%, transparent 43% 55%, var(--gold) 56% 59%, transparent 60%);
+  background-size: 56px 28px;
+}
+.hero-inner {
+  position: relative; max-width: 1280px; margin: 0 auto; padding: clamp(28px, 5vw, 56px) 20px clamp(28px, 4vw, 44px);
+  display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.35fr); gap: clamp(24px, 4vw, 56px); align-items: center;
+}
+.eyebrow { font: 700 var(--step--1)/1 var(--display); letter-spacing: .16em; text-transform: uppercase; color: var(--gold); }
+.hero h1 { font: 800 var(--step-3)/1.08 var(--display); margin: 12px 0 14px; letter-spacing: -.01em; }
+.hero p { margin: 0 0 22px; color: oklch(88% 0.03 300); max-width: 46ch; }
+.stats { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); border: 1px solid oklch(50% 0.08 295); border-radius: 12px; overflow: hidden; margin: 0 0 22px; }
+.stat { padding: 12px 14px; background: oklch(31% 0.1 295); }
+.stat + .stat { border-left: 1px solid oklch(50% 0.08 295); }
+.stat b { display: block; font: 800 var(--step-1)/1.1 var(--display); color: var(--gold); }
+.stat span { font-size: .78rem; color: oklch(82% 0.03 300); line-height: 1.35; display: block; margin-top: 4px; }
+.links { display: flex; flex-wrap: wrap; gap: 10px; }
+.btn { font: 700 .92rem/1 var(--display); text-decoration: none; border-radius: 999px; padding: 11px 18px; border: 1.5px solid var(--gold);
+  color: var(--violet-deep); background: var(--gold); transition: background .2s var(--ease); }
+.btn:hover { color: var(--violet-deep); background: oklch(85% 0.12 85); }
+.btn.ghost { background: transparent; color: var(--gold); }
+.btn.ghost:hover { color: var(--gold); background: oklch(80% 0.12 85 / .12); }
+.demo { background: var(--white); border-radius: var(--r); padding: 8px; box-shadow: 0 18px 40px oklch(15% 0.08 295 / .5); }
+.demo .hint { margin: 8px 6px 2px; color: var(--ink-2); }
+
+/* layout */
+.shell { max-width: 1280px; margin: 0 auto; padding: 40px 20px 72px; display: grid; grid-template-columns: 236px minmax(0, 1fr); gap: 40px; align-items: start; }
+.shell > * { min-width: 0; }
+.pad { position: sticky; top: 16px; background: var(--white); border-radius: var(--r); overflow: hidden; border: 1px solid var(--lilac-3); }
+.pad h2 { margin: 0; padding: 11px 16px; background: var(--violet); color: var(--white); font: 700 .78rem/1 var(--display); letter-spacing: .14em; text-transform: uppercase; }
+.pad ol { list-style: none; margin: 0; padding: 8px; display: grid; gap: 2px; }
+.pad .grp { font: 700 .7rem/1 var(--display); letter-spacing: .14em; text-transform: uppercase; color: var(--ink-2); margin: 12px 10px 6px; }
+.pad .grp:first-child { margin-top: 6px; }
+.pad a { display: flex; gap: 10px; align-items: baseline; text-decoration: none; color: var(--ink); font: 500 .92rem/1.3 var(--body); padding: 7px 10px; border-radius: 8px; }
+.pad a .n { font: 700 .75rem/1 var(--display); color: var(--ink-2); min-width: 1.3em; }
+.pad a:hover { background: var(--lilac-1); }
+.pad a.here { background: var(--lilac-2); font-weight: 700; }
+.pad a.here .n { color: var(--violet); }
+
+/* a feature: a white panel under a violet bar, like a Pad page */
+article { background: var(--white); border-radius: var(--r); border: 1px solid var(--lilac-3); margin: 0 0 32px; overflow: hidden; }
+.bar { display: flex; align-items: center; gap: 12px; padding: 12px 20px; background: var(--violet); color: var(--white); }
+.bar h2 { margin: 0; font: 800 var(--step-2)/1.2 var(--display); flex: 1; }
+.bar .cat { font: 700 .7rem/1 var(--display); letter-spacing: .14em; text-transform: uppercase; color: var(--gold);
+  border: 1px solid oklch(80% 0.12 85 / .5); border-radius: 999px; padding: 6px 10px; white-space: nowrap; }
+.bar .q { flex: none; width: 28px; height: 28px; border-radius: 50%; background: var(--cyan); display: grid; place-items: center;
+  font: 800 .95rem/1 var(--display); color: var(--violet-deep); box-shadow: inset 0 0 0 2px var(--white); }
+.body { padding: 20px 20px 22px; }
+.top { display: grid; grid-template-columns: minmax(0, 1.5fr) minmax(220px, 1fr); gap: 24px; margin: 0 0 6px; }
+.prose p { margin: 0 0 10px; max-width: 66ch; }
+.prose ul { margin: 8px 0 0; padding-left: 1.1em; }
+.prose li { margin: 0 0 6px; }
+.prose li::marker { color: var(--gold-deep); }
+/* the spec sheet: cream washi with a gold rule, like the results screen */
+.spec { background: var(--cream); border-radius: 10px; border-top: 3px solid var(--gold); padding: 4px 14px; font-size: var(--step--1); align-self: start; }
+.spec dl { margin: 0; display: grid; grid-template-columns: auto minmax(0, 1fr); }
+.spec dt, .spec dd { padding: 7px 0; border-bottom: 1px solid oklch(88% 0.04 85); margin: 0; }
+.spec dt { color: var(--ink-2); padding-right: 14px; }
+.spec dd { font-weight: 700; }
+.spec dt:last-of-type, .spec dd:last-of-type { border-bottom: 0; }
+kbd { font: 700 .82em/1 var(--display); background: var(--white); border: 1px solid var(--lilac-3); border-bottom-width: 2px; border-radius: 5px; padding: 1px 5px; }
+
+/* comparison */
+figure { margin: 0 0 16px; }
+.row-name { font: 700 var(--step-0)/1.2 var(--display); margin: 22px 0 8px; color: var(--violet); }
+.picks { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 8px 16px; margin: 0 0 8px; }
+.picks .side { display: flex; flex-wrap: wrap; gap: 4px; align-items: center; }
+.picks .who { font: 700 .7rem/1 var(--display); letter-spacing: .12em; text-transform: uppercase; color: var(--ink-2); margin-right: 4px; }
+.chip { font: 600 .84rem/1 var(--display); color: var(--ink); background: var(--lilac-0); border: 1px solid var(--lilac-3); border-radius: 999px; padding: 6px 11px; cursor: pointer; }
+.chip:hover { border-color: var(--violet-soft); }
+.chip[aria-pressed="true"] { background: var(--violet); border-color: var(--violet); color: var(--white); }
+.side.b .chip[aria-pressed="true"] { background: var(--gold); border-color: var(--gold-deep); color: var(--violet-deep); }
+.cmp { position: relative; overflow: hidden; border-radius: 10px; background: var(--violet-deep); cursor: ew-resize;
+  user-select: none; touch-action: pan-y; container-type: inline-size; aspect-ratio: 16 / 9; }
+.cmp img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: fill; pointer-events: none; }
+.cmp.pixel img { image-rendering: pixelated; }
+.cmp .rule { position: absolute; top: 0; bottom: 0; left: 50%; width: 2px; margin-left: -1px; background: var(--white); box-shadow: 0 0 6px oklch(15% 0.08 295 / .6); pointer-events: none; }
+/* the handle: a white lens in a gold ring */
+.cmp .knob { position: absolute; top: 50%; left: 50%; width: 44px; height: 44px; transform: translate(-50%, -50%); border-radius: 50%;
+  background: var(--white); border: 4px solid var(--gold); box-shadow: 0 0 0 2px var(--violet-deep), 0 4px 14px oklch(15% 0.08 295 / .5);
+  pointer-events: none; transition: transform .2s var(--ease); }
+.cmp .knob::before, .cmp .knob::after { content: ""; position: absolute; top: 50%; border: 6px solid transparent; margin-top: -6px; }
+.cmp .knob::before { left: 1px; border-right-color: var(--violet); }
+.cmp .knob::after { right: 1px; border-left-color: var(--violet); }
+.cmp:active .knob, .cmp:focus-visible .knob { transform: translate(-50%, -50%) scale(1.08); }
+.cmp .tag { position: absolute; bottom: 10px; font: 700 .8rem/1 var(--display); padding: 6px 10px; border-radius: 6px; pointer-events: none;
+  max-width: 45%; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; background: oklch(27% 0.09 295 / .85); color: var(--white); }
+.cmp .tag.l { left: 10px; }
+.cmp .tag.r { right: 10px; background: oklch(80% 0.12 85 / .94); color: var(--violet-deep); }
+@container (max-width: 520px) { .cmp .tag { font-size: .7rem; padding: 4px 7px; } .cmp .knob { width: 36px; height: 36px; } }
+.hint { font-size: .8rem; color: var(--ink-2); }
+/* plain pictures: click (or the corner button) for full screen */
+.zoom { position: relative; display: block; cursor: zoom-in; border-radius: 10px; overflow: hidden; }
+.zoom img { display: block; width: 100%; height: auto; }
+.zoom .fs { opacity: 0; }
+.zoom:hover .fs, .zoom:focus-within .fs { opacity: .85; }
+.zoom:fullscreen { cursor: zoom-out; border-radius: 0; background: var(--violet-deep); display: grid; place-items: center; }
+.zoom:fullscreen img { width: 100%; height: 100%; object-fit: contain; border-radius: 0; }
+.zoom:fullscreen .fs { opacity: .85; }
+.zoom:fullscreen .fs .in { display: none; }
+.zoom:fullscreen .fs .out { display: block; }
+.whole { margin: 4px 0 4px; }
+.whole img { display: block; width: 100%; height: auto; border-radius: 10px; }
+.whole figcaption { margin: 6px 2px 0; font-size: var(--step--1); color: var(--ink-2); }
+/* full screen: the button in a picture's corner; the figure fills the screen, the picture as big as fits */
+.fs { position: absolute; top: 10px; right: 10px; width: 36px; height: 36px; border-radius: 8px; border: 0; cursor: pointer;
+  background: oklch(27% 0.09 295 / .8); color: var(--white); display: grid; place-items: center; opacity: .85;
+  transition: opacity .2s var(--ease), background .2s var(--ease); }
+.fs:hover, .fs:focus-visible { opacity: 1; background: var(--violet); }
+.fs svg { width: 18px; height: 18px; }
+.fs .out { display: none; }
+figure:fullscreen { margin: 0; padding: 16px; background: var(--violet-deep); display: flex; flex-direction: column;
+  align-items: center; justify-content: center; gap: 10px; }
+figure:fullscreen .picks { width: min(100%, calc((100vh - 120px) * var(--ar, 1.78))); }
+figure:fullscreen .who { color: oklch(84% 0.03 300); }
+figure:fullscreen .cmp { width: min(100%, calc((100vh - 120px) * var(--ar, 1.78))); flex: none; }
+figure:fullscreen .fs .in { display: none; }
+figure:fullscreen .fs .out { display: block; }
+
+.gallery { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 320px), 1fr)); gap: 14px; margin-top: 8px; }
+.gallery figure { margin: 0; }
+.gallery img { display: block; width: 100%; height: auto; border-radius: 8px; background: var(--lilac-1); }
+.gallery figcaption { margin: 6px 2px 0; font-size: var(--step--1); color: var(--ink-2); }
+table { width: 100%; border-collapse: collapse; margin: 14px 0 6px; font-size: var(--step--1); }
+th, td { padding: 8px 12px; text-align: left; border-bottom: 1px solid var(--lilac-2); }
+th { font: 700 .72rem/1.2 var(--display); text-transform: uppercase; letter-spacing: .08em; color: var(--ink-2); }
+.num { text-align: right; }
+td b { color: var(--violet); }
+
+footer { background: var(--violet-deep); color: oklch(84% 0.03 300); border-top: 3px solid var(--gold); }
+footer .in { max-width: 1280px; margin: 0 auto; padding: 24px 20px 32px; font-size: var(--step--1); display: grid; gap: 6px; }
+footer a { color: var(--gold); }
+
+.reveal { opacity: 0; transform: translateY(12px); transition: opacity .6s var(--ease), transform .6s var(--ease); }
+.reveal.in { opacity: 1; transform: none; }
+@media (prefers-reduced-motion: reduce) { .reveal { opacity: 1; transform: none; transition: none; } html { scroll-behavior: auto; } }
+@media (max-width: 960px) {
+  .hero-inner { grid-template-columns: minmax(0, 1fr); }
+  .shell { grid-template-columns: minmax(0, 1fr); gap: 20px; padding-top: 0; }
+  .pad { top: 0; z-index: 5; border-radius: 0 0 12px 12px; margin: 0 -20px; border-top: 0; }
+  .pad h2, .pad .grp { display: none; }
+  .pad ol { display: flex; overflow-x: auto; scrollbar-width: none; padding: 6px; }
+  .pad a { white-space: nowrap; }
+  .top { grid-template-columns: minmax(0, 1fr); }
+}
+@media (max-width: 560px) { .stats { grid-template-columns: minmax(0, 1fr); } .stat + .stat { border-left: 0; border-top: 1px solid oklch(50% 0.08 295); } .bar .cat { display: none; } }
+</style>
+</head>
+<body>
+
+<header class="hero">
+  <div class="hero-inner">
+    <div>
+      <span class="eyebrow">YW4 Recomp · fan PC port</span>
+      <h1>Comparisons</h1>
+      <p>What the PC version of <i>Yo-kai Watch 4++</i> changes, the same spot before and after, with the setting
+        that does it and what it costs. Drag the line across a picture to compare.</p>
+      <div class="stats">
+        <div class="stat"><b>111%</b><span>CPU of one core, against 210% in an emulator</span></div>
+        <div class="stat"><b>3.9 GB</b><span>memory, against 15.7 GB in an emulator</span></div>
+        <div class="stat"><b>~118</b><span>frames/s at 4K 21:9 with FSR performance</span></div>
+      </div>
+      <div class="links">
+        <a class="btn" href="#resolution">See the improvements</a>
+        <a class="btn ghost" href="https://github.com/ILFforever/YW4Recomp">Project on GitHub</a>
+      </div>
+    </div>
+    <div class="demo" data-hero="shadows"></div>
+  </div>
+</header>
+
+<div class="shell">
+  <nav class="pad" aria-label="Comparisons">
+    <h2>Contents</h2>
+    <ol id="toc"></ol>
+  </nav>
+
+  <main>
+    <article id="resolution" data-cat="Graphics">
+      <div class="bar"><span class="q">!</span><h2>Resolution: the Switch and 4K</h2><span class="cat">Graphics</span></div>
+      <div class="body">
+        <div class="top">
+          <div class="prose"><p>The Switch draws the world at 1600×900; here it can go up to 3840×2160, 5.8 times the
+            pixels. The menus and text are drawn at the same size on top. Same moment, only the resolution changed
+            (anti-aliasing off in both); the 1600×900 shot is stretched to 4K the way a 4K screen would show it.</p></div>
+          <div class="spec"><dl>
+            <dt>Setting</dt><dd><kbd>F1</kbd> Display › Resolution</dd>
+            <dt>Switch</dt><dd>1600×900</dd>
+            <dt>Options</dt><dd>1080p, 1440p, 4K</dd>
+            <dt>4K speed</dt><dd>90+ frames/s on an RTX 4070 laptop with the other features off; more with upscaling</dd>
+            <dt>Record</dt><dd><a href="https://github.com/ILFforever/YW4Recomp/blob/master/docs/decisions/0031-resolution-scaling.md">decision 0031</a></dd>
+          </dl></div>
+        </div>
+        <div data-cmp="resolution"></div>
+      </div>
+    </article>
+
+    <article id="ultrawide" data-cat="Graphics">
+      <div class="bar"><span class="q">!</span><h2>Aspect ratio: ultrawide</h2><span class="cat">Graphics</span></div>
+      <div class="body">
+        <div class="top">
+          <div class="prose"><p>The world goes on at the sides while the menus stay 16:9 in the middle, where they are
+            on the Switch. Full-screen layers reach the edges; pictures made for 16:9 keep black bars. 21:9 at 4K
+            height (5120×2160).</p></div>
+          <div class="spec"><dl>
+            <dt>Setting</dt><dd><kbd>F1</kbd> Display › Aspect ratio</dd>
+            <dt>Options</dt><dd>16:9, 16:10, 21:9, 32:9</dd>
+            <dt>Record</dt><dd><a href="https://github.com/ILFforever/YW4Recomp/blob/master/docs/decisions/0033-widescreen.md">decision 0033</a></dd>
+          </dl></div>
+        </div>
+        <div class="gallery" id="uw"></div>
+      </div>
+    </article>
+
+    <article id="shadowmap" data-cat="Graphics">
+      <div class="bar"><span class="q">!</span><h2>Shadow map size</h2><span class="cat">Graphics</span></div>
+      <div class="body">
+        <div class="top">
+          <div class="prose"><p>A bigger shadow map gives sharper, more detailed shadow edges, most visibly far from the
+            camera. The bamboo forest with soft shadows off, so only the map size changes.</p>
+            <p><b>Meant to be used with soft shadows (PCSS):</b> a sharp 4096 map alone shows every leaf as a hard dot; soft shadows on top keep the detail and soften it with distance, as in the next section.</p></div>
+          <div class="spec"><dl>
+            <dt>Setting</dt><dd><kbd>F1</kbd> Shadows › Shadow map</dd>
+            <dt>Switch</dt><dd>1024</dd>
+            <dt>Recommended</dt><dd>4096 with soft shadows ×2</dd>
+          </dl></div>
+        </div>
+        <div data-cmp="shadowmap"></div>
+      </div>
+    </article>
+
+    <article id="pcss" data-cat="Graphics">
+      <div class="bar"><span class="q">!</span><h2>Soft shadows (PCSS)</h2><span class="cat">Graphics</span></div>
+      <div class="body">
+        <div class="top">
+          <div class="prose">
+            <p>Percentage-closer soft shadows behave more like real ones. Shown with the shadow map at 4096.</p>
+            <ul>
+              <li><b>Sharp at the contact</b>: feet, poles, the base of a wall.</li>
+              <li><b>Softer farther away</b>: tree canopies become dappled shade, not hard dots.</li>
+              <li><b>Less shimmer</b> on distant shadows while the camera moves.</li>
+            </ul>
+          </div>
+          <div class="spec"><dl>
+            <dt>Setting</dt><dd><kbd>F1</kbd> Shadows › Soft shadows</dd>
+            <dt>Shown with</dt><dd>Shadow map 4096</dd>
+            <dt>Recommended</dt><dd>×2</dd>
+            <dt>Record</dt><dd><a href="https://github.com/ILFforever/YW4Recomp/blob/master/docs/decisions/0025-pcss-soft-shadows.md">decision 0025</a></dd>
+          </dl></div>
+        </div>
+        <div data-cmp="pcss"></div>
+      </div>
+    </article>
+
+    <article id="contact" data-cat="Graphics">
+      <div class="bar"><span class="q">!</span><h2>Contact shadows</h2><span class="cat">Graphics</span></div>
+      <div class="body">
+        <div class="top">
+          <div class="prose">
+            <p>The shadow map can't see small, close detail. Contact shadows fill it in from the picture itself: a short
+              ray from each point toward the sun finds what's in the way.</p>
+            <ul>
+              <li><b>Small objects cast their shadow</b>: the taps over the schoolyard sink.</li>
+              <li><b>Depth in foliage</b>: hedge and flower-bed leaves shade each other.</li>
+              <li><b>Thin lines under ledges</b>: balconies, a window's awning, a wall's cap.</li>
+            </ul>
+          </div>
+          <div class="spec"><dl>
+            <dt>Setting</dt><dd><kbd>F1</kbd> Shadows › Contact shadows</dd>
+            <dt>Quick flip</dt><dd><kbd>F7</kbd></dd>
+            <dt>Default</dt><dd>On</dd>
+            <dt>GPU cost, 4K</dt><dd>+0.04 to 0.25 ms</dd>
+            <dt>Limit</dt><dd>only what's on screen casts</dd>
+            <dt>Record</dt><dd><a href="https://github.com/ILFforever/YW4Recomp/blob/master/docs/decisions/0045-contact-shadows.md">decision 0045</a></dd>
+          </dl></div>
+        </div>
+        <div data-cmp="contact"></div>
+      </div>
+    </article>
+
+    <article id="aa" data-cat="Graphics">
+      <div class="bar"><span class="q">!</span><h2>Anti-aliasing</h2><span class="cat">Graphics</span></div>
+      <div class="body">
+        <div class="top">
+          <div class="prose"><p>Applied to the 3D scene before the menus are drawn, so text stays sharp. TAA also stops
+            thin things (fences, nets, wires) from shimmering while the camera moves. Yo-kai World, zoomed in 3×.</p></div>
+          <div class="spec"><dl>
+            <dt>Setting</dt><dd><kbd>F1</kbd> Anti-aliasing</dd>
+            <dt>Switch</dt><dd>None</dd>
+            <dt>Options</dt><dd>FXAA, SMAA, TAA, FSR, DLSS</dd>
+            <dt>Record</dt><dd><a href="https://github.com/ILFforever/YW4Recomp/blob/master/docs/decisions/0032-taa.md">decision 0032</a></dd>
+          </dl></div>
+        </div>
+        <figure class="whole"><img loading="lazy" src="img/aa-whole.jpg" alt="Yo-kai World street with TAA, the whole frame, the close-ups marked in red"><figcaption>The whole frame, TAA; the red boxes are the close-ups below.</figcaption></figure>
+        <div data-cmp="aa"></div>
+      </div>
+    </article>
+
+    <article id="filtering" data-cat="Graphics">
+      <div class="bar"><span class="q">!</span><h2>Texture filtering</h2><span class="cat">Graphics</span></div>
+      <div class="body">
+        <div class="top">
+          <div class="prose"><p>Without it the ground blurs a short way ahead. Anisotropic filtering keeps the road,
+            pavement and walls sharp into the distance, even at a low angle. Yo-kai World, zoomed in 2×.</p></div>
+          <div class="spec"><dl>
+            <dt>Setting</dt><dd><kbd>F1</kbd> Detail › Texture filtering</dd>
+            <dt>Switch</dt><dd>Off</dd>
+            <dt>Recommended</dt><dd>×16, almost no cost</dd>
+          </dl></div>
+        </div>
+        <figure class="whole"><img loading="lazy" src="img/filtering-whole.jpg" alt="Yo-kai World street with ×16 texture filtering, the whole frame, the close-ups marked in red"><figcaption>The whole frame, ×16; the red boxes are the close-ups below.</figcaption></figure>
+        <div data-cmp="filtering"></div>
+      </div>
+    </article>
+
+    <article id="upscaling" data-cat="Performance">
+      <div class="bar"><span class="q">!</span><h2>Upscaling: DLSS and FSR</h2><span class="cat">Performance</span></div>
+      <div class="body">
+        <div class="top">
+          <div class="prose"><p>The world is drawn smaller than the resolution and rebuilt at full size from the frames
+            before; the menus are drawn afterwards at full size. <b>DLSS for the cleanest picture, FSR for the most
+            frames.</b> Each image: the whole native frame on top, the 1:1 crops underneath.</p></div>
+          <div class="spec"><dl>
+            <dt>Setting</dt><dd><kbd>F1</kbd> Anti-aliasing › Upscaling</dd>
+            <dt>DLSS</dt><dd>NVIDIA RTX, else FSR</dd>
+            <dt>FSR</dt><dd>any GPU</dd>
+          </dl></div>
+        </div>
+        <table>
+          <thead><tr><th>Mode · 4K 21:9 · RTX 4070 laptop</th><th>World drawn at</th><th class="num">DLSS</th><th class="num">FSR</th></tr></thead>
+          <tbody>
+            <tr><td>Native, TAA</td><td>5120×2160</td><td class="num" colspan="2">~81 frames/s</td></tr>
+            <tr><td>Quality</td><td>3413×1440</td><td class="num">~85</td><td class="num"><b>~94</b></td></tr>
+            <tr><td>Balanced</td><td>3013×1271</td><td class="num">~92</td><td class="num"><b>~106</b></td></tr>
+            <tr><td>Performance</td><td>2560×1080</td><td class="num">~82</td><td class="num"><b>~118</b></td></tr>
+          </tbody>
+        </table>
+        <div class="gallery">
+          <figure><img loading="lazy" src="../screenshots/63-fsr-dlss-quality-vs-native.jpg" alt="Bamboo forest in native, FSR quality and DLSS quality">
+            <figcaption>Quality: DLSS keeps the bamboo and the lantern closest to native.</figcaption></figure>
+          <figure><img loading="lazy" src="../screenshots/67-dlss-vs-fsr-performance-forest.jpg" alt="Bamboo forest in native, FSR performance and DLSS performance">
+            <figcaption>Performance: DLSS keeps the bamboo and leaves crisper.</figcaption></figure>
+          <figure><img loading="lazy" src="../screenshots/65-dlss-vs-fsr-fence.jpg" alt="The perforated fence in native, FSR performance and DLSS performance">
+            <figcaption>A perforated fence: FSR turns the holes to grain, DLSS keeps the pattern.</figcaption></figure>
+          <figure><img loading="lazy" src="../screenshots/68-dlss-vs-fsr-goal-net-balanced.jpg" alt="Goal net in native, FSR balanced and DLSS balanced">
+            <figcaption>The far goal net at balanced: DLSS's mesh is more even.</figcaption></figure>
+        </div>
+      </div>
+    </article>
+  </main>
+</div>
+
+<footer>
+  <div class="in">
+    <span>A fan project. Screenshots are from the maintainer's own copy of the game, running in the recompiled port.
+      Not affiliated with or endorsed by LEVEL-5 or Nintendo; <i>Yo-kai Watch</i> belongs to its owners.</span>
+    <span>NVIDIA DLSS is NVIDIA's; AMD FSR is AMD's. Measurements and how each part works: the
+      <a href="https://github.com/ILFforever/YW4Recomp#features">README</a> and
+      <a href="https://github.com/ILFforever/YW4Recomp/tree/master/docs/decisions">docs/decisions</a>.</span>
+  </div>
+</footer>
+
+<script>
+// Comparisons: rows of settings, each [label, image]. The first and the last setting of a row are shown at first;
+// rows with more than two get pickers. `pixel` keeps enlarged close-ups sharp. All images of a row share one size.
+const IMG = 'img/';
+const OFF = "Off (the game's)";
+const CMP = {
+  resolution: { rows: [
+    { name: 'Whole frame', set: [['1600×900 (the Switch)', 'res-switch.jpg'], ['3840×2160', 'res-4k.jpg']] },
+    { name: 'Shop front, 1:1 at 4K', pixel: true, set: [['1600×900 (the Switch)', 'res-switch-shop.png'], ['3840×2160', 'res-4k-shop.png']] }] },
+  contact: { rows: [
+    { name: 'Taps', set: [[OFF, 'contact-taps-off.jpg'], ['On', 'contact-taps-on.jpg']] },
+    { name: 'Balconies', set: [[OFF, 'contact-balconies-off.jpg'], ['On', 'contact-balconies-on.jpg']] },
+    { name: 'Awning', set: [[OFF, 'contact-awning-off.jpg'], ['On', 'contact-awning-on.jpg']] },
+    { name: 'Hedges', set: [[OFF, 'contact-hedges-off.jpg'], ['On', 'contact-hedges-on.jpg']] }] },
+  shadows: { rows: [{ set: [["Switch (the game's)", '20-shadows-stock.jpg'], ['Ours', '21-shadows-improved.jpg']] }] },
+  shadowmap: { rows: [{ set: [["1024 (the game's)", '12-shadow-map-1024.jpg'], ['2048', '13-shadow-map-2048.jpg'],
+    ['4096', '14-shadow-map-4096.jpg']] }] },
+  pcss: { rows: [{ set: [['Off', '16-pcss-off.jpg'], ['×1', '17-pcss-x1.jpg'], ['×2', '18-pcss-x2.jpg'], ['×4', '19-pcss-x4.jpg']] }] },
+  aa: { pixel: true, rows: ['rail', 'fence', 'road'].map((n, i) => ({ name: ['Railing', 'Fence', 'Road line'][i],
+    set: [[OFF, `${30 + 3 * i}-aa-${n}-off.png`], ['SMAA', `${31 + 3 * i}-aa-${n}-smaa.png`], ['TAA', `${32 + 3 * i}-aa-${n}-taa.png`]] })) },
+  filtering: { pixel: true, rows: ['crosswalk', 'pavement', 'road'].map((n, i) => ({ name: ['Crosswalk', 'Pavement', 'Road'][i],
+    set: ['off', 'x2', 'x4', 'x8', 'x16'].map((s, k) => [s === 'off' ? OFF : '×' + s.slice(1), `${40 + 5 * i + k}-filtering-${n}-${s}.png`]) })) },
+};
+const ULTRAWIDE = [
+  ['24-ultrawide-town.jpg', 'Town street'], ['25-ultrawide-mansion.jpg', 'Mansion hall'],
+  ['26-ultrawide-cutscene-title.jpg', 'Cutscene: arriving at Mount Oomori'], ['27-ultrawide-cutscene-dialogue.jpg', 'Cutscene: dialogue'],
+  ['55-ultrawide-yokai-pad.jpg', 'Yo-kai Pad'], ['56-ultrawide-town-map.jpg', 'Fast-travel map: more town at the sides'],
+  ['57-ultrawide-dungeon-map.jpg', 'Dungeon map: a 16:9 picture with bars'], ['58-ultrawide-dialog.jpg', 'Dialog: the dimming covers the width'],
+  ['59-ultrawide-battle-swirl.jpg', 'Into a battle'], ['60-ultrawide-battle-start.jpg', 'Battle start'],
+  ['61-ultrawide-battle.jpg', 'Battle'], ['62-ultrawide-battle-results.jpg', 'Battle results'],
+];
+
+// One comparison: both images fill the same box (its shape taken from the first image), the left one clipped at
+// the line. The box takes pointer drags and the arrow keys.
+function comparison(row, pixel, eager) {
+  const fig = document.createElement('figure');
+  const box = document.createElement('div'); box.className = 'cmp' + (pixel ? ' pixel' : '');
+  box.tabIndex = 0; box.setAttribute('role', 'slider'); box.setAttribute('aria-valuemin', '0'); box.setAttribute('aria-valuemax', '100');
+  const b = new Image(), a = new Image();
+  if (!eager) b.loading = a.loading = 'lazy';
+  b.decoding = a.decoding = 'async';
+  b.addEventListener('load', () => { if (!b.naturalWidth) return;
+    box.style.aspectRatio = `${b.naturalWidth} / ${b.naturalHeight}`; fig.style.setProperty('--ar', b.naturalWidth / b.naturalHeight); });
+  const rule = document.createElement('div'); rule.className = 'rule';
+  const knob = document.createElement('div'); knob.className = 'knob';
+  const tl = document.createElement('span'); tl.className = 'tag l';
+  const tr = document.createElement('span'); tr.className = 'tag r';
+  box.append(b, a, rule, knob, tl, tr);
+  if (fig.requestFullscreen) {
+    const fs = document.createElement('button'); fs.type = 'button'; fs.className = 'fs';
+    fs.setAttribute('aria-label', 'Full screen'); fs.title = 'Full screen (F)';
+    fs.innerHTML = '<svg class="in" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/></svg>' +
+      '<svg class="out" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M9 4v5H4M15 4v5h5M9 20v-5H4M15 20v-5h5"/></svg>';
+    fs.addEventListener('pointerdown', e => e.stopPropagation());
+    const toggle = () => document.fullscreenElement === fig ? document.exitFullscreen() : fig.requestFullscreen();
+    fs.addEventListener('click', toggle);
+    box.addEventListener('keydown', e => { if (e.key === 'f' || e.key === 'F') { toggle(); e.preventDefault(); } });
+    box.append(fs);
+  }
+  const place = p => { p = Math.min(100, Math.max(0, p)); box.dataset.p = p;
+    a.style.clipPath = `inset(0 ${100 - p}% 0 0)`; rule.style.left = knob.style.left = p + '%'; box.setAttribute('aria-valuenow', Math.round(p)); };
+  const at = e => { const r = box.getBoundingClientRect(); place((e.clientX - r.left) / r.width * 100); };
+  box.addEventListener('pointerdown', e => { box.setPointerCapture(e.pointerId); at(e); });
+  box.addEventListener('pointermove', e => { if (box.hasPointerCapture(e.pointerId)) at(e); });
+  box.addEventListener('keydown', e => {
+    const step = e.shiftKey ? 10 : 2, p = +box.dataset.p;
+    if (e.key === 'ArrowLeft') place(p - step); else if (e.key === 'ArrowRight') place(p + step);
+    else if (e.key === 'Home') place(0); else if (e.key === 'End') place(100); else return;
+    e.preventDefault();
+  });
+  place(50);
+
+  let ia = 0, ib = row.set.length - 1;
+  const picks = document.createElement('div'); picks.className = 'picks';
+  const show = () => {
+    a.src = IMG + row.set[ia][1]; a.alt = row.set[ia][0]; b.src = IMG + row.set[ib][1]; b.alt = row.set[ib][0];
+    tl.textContent = row.set[ia][0]; tr.textContent = row.set[ib][0];
+    box.setAttribute('aria-label', `Comparison: ${row.set[ia][0]} on the left, ${row.set[ib][0]} on the right`);
+    picks.querySelectorAll('.chip').forEach(c => c.setAttribute('aria-pressed', +c.dataset.k === (c.dataset.s === 'a' ? ia : ib)));
+  };
+  if (row.set.length > 2) {
+    for (const [s, who] of [['a', 'Left'], ['b', 'Right']]) {
+      const g = document.createElement('div'); g.className = 'side ' + s;
+      const w = document.createElement('span'); w.className = 'who'; w.textContent = who; g.append(w);
+      row.set.forEach(([name], k) => {
+        const c = document.createElement('button'); c.type = 'button'; c.className = 'chip'; c.textContent = name;
+        c.dataset.s = s; c.dataset.k = k; c.onclick = () => { if (s === 'a') ia = k; else ib = k; show(); };
+        g.append(c);
+      });
+      picks.append(g);
+    }
+    fig.append(picks);
+  }
+  fig.append(box); show();
+  return fig;
+}
+
+for (const el of document.querySelectorAll('[data-cmp]')) {
+  const c = CMP[el.dataset.cmp];
+  for (const row of c.rows) {
+    if (row.name) { const h = document.createElement('h3'); h.className = 'row-name'; h.textContent = row.name; el.append(h); }
+    el.append(comparison(row, row.pixel ?? c.pixel, false));
+  }
+}
+const hero = document.querySelector('[data-hero]');
+hero.append(comparison(CMP[hero.dataset.hero].rows[0], false, true));
+const hint = document.createElement('p'); hint.className = 'hint';
+hint.textContent = 'Drag the line (or use the arrow keys); the corner button or F shows it full screen. The Switch on the left, this project on the right.';
+hero.append(hint);
+
+const uw = document.getElementById('uw');
+for (const [f, cap] of ULTRAWIDE) {
+  const fig = document.createElement('figure');
+  const img = new Image(); img.loading = 'lazy'; img.src = IMG + f; img.alt = '21:9: ' + cap;
+  const fc = document.createElement('figcaption'); fc.textContent = cap;
+  fig.append(img, fc); uw.append(fig);
+}
+
+// plain pictures (galleries, whole frames): wrapped so a click or the corner button shows them full screen
+const FS_ICONS = '<svg class="in" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/></svg>' +
+  '<svg class="out" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M9 4v5H4M15 4v5h5M9 20v-5H4M15 20v-5h5"/></svg>';
+if (document.documentElement.requestFullscreen) {
+  for (const img of document.querySelectorAll('.gallery img, .whole img')) {
+    const wrap = document.createElement('div'); wrap.className = 'zoom';
+    img.replaceWith(wrap); wrap.append(img);
+    const fs = document.createElement('button'); fs.type = 'button'; fs.className = 'fs';
+    fs.setAttribute('aria-label', 'Full screen: ' + img.alt); fs.innerHTML = FS_ICONS;
+    wrap.append(fs);
+    const toggle = () => document.fullscreenElement === wrap ? document.exitFullscreen() : wrap.requestFullscreen();
+    wrap.addEventListener('click', toggle);
+  }
+}
+
+// contents: one entry per article, grouped by category, the one in view marked
+const toc = document.getElementById('toc');
+let group = '', n = 0;
+const links = [];
+for (const art of document.querySelectorAll('article')) {
+  if (art.dataset.cat !== group) { group = art.dataset.cat; const g = document.createElement('li'); g.className = 'grp'; g.textContent = group; toc.append(g); }
+  const li = document.createElement('li'), a = document.createElement('a'); a.href = '#' + art.id;
+  const num = document.createElement('span'); num.className = 'n'; num.textContent = String(++n).padStart(2, '0');
+  const t = document.createElement('span'); t.textContent = art.querySelector('h2').textContent;
+  a.append(num, t); li.append(a); toc.append(li); links.push([art, a]);
+}
+const spy = new IntersectionObserver(es => { for (const e of es) if (e.isIntersecting) for (const [art, a] of links) a.classList.toggle('here', art === e.target); },
+  { rootMargin: '-30% 0px -65% 0px' });
+links.forEach(([art]) => spy.observe(art));
+const rv = new IntersectionObserver(es => es.forEach(e => { if (e.isIntersecting) { e.target.classList.add('in'); rv.unobserve(e.target); } }),
+  { rootMargin: '0px 0px -8% 0px' });
+document.querySelectorAll('article').forEach(el => { el.classList.add('reveal'); rv.observe(el); });
+</script>
+</body>
+</html>
