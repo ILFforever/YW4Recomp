@@ -907,6 +907,16 @@ static int half_sized(const NvnTexture *t) {
     return 1;
 }
 
+/* The game's height a screen-sized target belongs to: battles draw the 3D at 1920x1080 (with 960x540, 639x359,
+ * 480x270 copies) instead of 1600x900, so those are made the chosen height from 1080, not 900; with 900 a 4K
+ * battle was drawn at 4608x2592 (44% more pixels than 4K: DLSS alone took 23 ms a frame, 2026-11-01). The
+ * window images (1920x1080 too) keep 900: the game copies the 1600x900 view into their top-left corner. */
+static uint32_t base_height(const NvnTexture *t) {
+    uint32_t w = t->layout.width, hh = t->layout.height;
+    int battle = (w == 1920 && hh == 1080) || (w == 960 && hh == 540) || (w == 639 && hh == 359) || (w == 480 && hh == 270);
+    return battle && !gpu_is_presented(t->addr) ? 1080u : 900u;
+}
+
 static void image_scale(const NvnTexture *t, uint32_t *num, uint32_t *den) {
     *num = *den = 0;
     int res = gpu_shadow_res(), h = gpu_render_height();
@@ -920,9 +930,9 @@ static void image_scale(const NvnTexture *t, uint32_t *num, uint32_t *den) {
     else if (zoom_chain(t->layout.width, t->layout.height))
         return;
     else if (screen_sized(t) && gpu_effects_full() && half_sized(t))
-        *num = 2 * (uint32_t)h, *den = 900;
-    else if (h != 900 && screen_sized(t))
-        *num = (uint32_t)h, *den = 900;
+        *num = 2 * (uint32_t)h, *den = base_height(t);
+    else if (screen_sized(t) && (uint32_t)h != base_height(t))
+        *num = (uint32_t)h, *den = base_height(t);
 }
 
 static ImageKey key_of(const NvnTexture *t) {

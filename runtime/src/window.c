@@ -539,8 +539,30 @@ static void overlay_show(Overlay *o, VkImage dst, int w, int h, int32_t x, int32
                    &blit, VK_FILTER_NEAREST);
 }
 
-/* The HUD's whole-step scale for a picture h pixels high: 1 per 720 (the 5x7 font stays crisp) */
-static int32_t overlay_scale(uint32_t h) { return h >= 1440 ? (int32_t)(h / 720) : 1; }
+/* The HUD's size (the settings panel's HUD SIZE, YW4_HUD_SIZE=small|medium|large): 0 small, 1 medium (as before),
+ * 2 large. */
+static int hud_size = -1;
+
+int hud_size_index(void) {
+    int v = __atomic_load_n(&hud_size, __ATOMIC_ACQUIRE);
+    if (v < 0) {
+        const char *e = getenv("YW4_HUD_SIZE");
+        v = e && !strcmp(e, "small") ? 0 : e && !strcmp(e, "large") ? 2 : 1;
+        __atomic_store_n(&hud_size, v, __ATOMIC_RELEASE);
+    }
+    return v;
+}
+
+void hud_size_cycle(void) { __atomic_store_n(&hud_size, (hud_size_index() + 1) % 3, __ATOMIC_RELEASE); }
+
+/* The HUD's whole-step scale for a picture h pixels high (the 5x7 font stays crisp): medium 1 per 720, small 1 per
+ * 1080, large 1 per 480 (at least 2) */
+static int32_t overlay_scale(uint32_t h) {
+    int32_t s = hud_size_index() == 0 ? (int32_t)(h / 1080) : hud_size_index() == 2 ? (int32_t)(h / 480)
+              : h >= 1440 ? (int32_t)(h / 720) : 1;
+    if (hud_size_index() == 2 && s < 2) s = 2;
+    return s > 0 ? s : 1;
+}
 
 static void hud_draw(VkImage dst, int32_t x0, int32_t y0) {
     hud_shown_w = hud_shown_h = 0;

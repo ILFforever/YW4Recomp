@@ -15,6 +15,7 @@
 #include "post.h"
 #include "gbuffer.h"
 #include "gpu.h"
+#include "hud.h"
 #include "settings.h"
 #include "shadow.h"
 
@@ -95,6 +96,11 @@ static const Setting player[] = {
      {"THE SWITCH'S DEFAULT", "SMOOTH", "FOR 120 HZ MONITORS", "FOR 144 HZ MONITORS",
       "THE MONITOR'S OWN REFRESH RATE, SMOOTHEST (APPLIES AFTER A RESTART)", "AS FAST AS THE PC CAN: MOTION CAN JUDDER"}, 6,
      framerate_index, framerate_cycle, "YW4_FPS", {"30", "60", "120", "144", "vsync", "0"}},
+    {"DISPLAY", "HUD SIZE",
+     "HOW BIG THE PERFORMANCE HUD (F3) IS IN THE WINDOW'S CORNER.",
+     {"SMALL", "MEDIUM", "LARGE"},
+     {"THE LEAST IN THE WAY", "THE DEFAULT", "EASIEST TO READ"}, 3, hud_size_index, hud_size_cycle, "YW4_HUD_SIZE",
+     {"small", "medium", "large"}},
     {"ANTI-ALIASING AND UPSCALING", "ANTI-ALIASING",
      "SMOOTHS THE JAGGED EDGES OF OBJECTS. APPLIED BEFORE THE MENUS ARE DRAWN, SO TEXT STAYS SHARP.",
      {"OFF", "FXAA", "SMAA", "TAA", "FSR", "DLSS"},
