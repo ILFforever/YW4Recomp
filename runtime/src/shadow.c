@@ -318,6 +318,9 @@ typedef struct {
      * stalks: one object, a world per part) */
     Mat4 world;
     int have_world;
+    /* YW4_SHADOW_RECHECK_LOG=1: the game's draws in this layer that were rechecks, a few of their objects */
+    int nrecheck;
+    uint64_t recheck_obj[4], recheck_sub[32];
 } Layer;
 
 static _Thread_local Layer *lay;
@@ -703,6 +706,23 @@ static int env_on(const char *name) {
     return s && atoi(s);
 }
 
+/* The last frame a cascade drew a second shadow layer: cutscenes do (two layers per cascade), play
+ * never did (town, bamboo forest, measured 2026-11-01). */
+static uint64_t two_layer_frame;
+
+/* In cutscenes the game draws all the casters: our cut-out casters leave the characters lit where the
+ * game's shade them, one frame in 32 dark (bamboo forest cutscene; not found why: matrix, buffers,
+ * texture, sampler, threshold and shader all equal the game's). The game's whole pass cost the same
+ * GPU time there (6.9 ms, ours 7.0; ours with the game's cut-outs 8.2). Until a second passes without
+ * a second layer. YW4_CUTSCENE_SHADOWS=ours keeps ours. */
+static int cutscene_game_shadows(void) {
+    static int keep = -1;
+    if (keep < 0) keep = getenv("YW4_CUTSCENE_SHADOWS") && !strcmp(getenv("YW4_CUTSCENE_SHADOWS"), "ours");
+    uint64_t f = __atomic_load_n(&yw4_frames_presented, __ATOMIC_RELAXED),
+             t = __atomic_load_n(&two_layer_frame, __ATOMIC_RELAXED);
+    return !keep && t && f - t < 60;
+}
+
 /* The game's draws left to it, for narrowing down a fault by elimination:
  * YW4_SHADOWS_NO_SKINNED=1 (characters), YW4_SHADOWS_NO_CUTOUT=1 (cut-out casters),
  * YW4_SHADOWS_NO_INSTANCED=1 (repeated props), YW4_SHADOWS_NO_WIND=1 (plants). */
@@ -766,8 +786,7 @@ static int ours(const Caster *c, const Mat4 *vp, uint64_t device, ShadowDraw *d,
     if (h == UINT32_MAX || leave_to_game(learned[h].vs, learned[h].fs) || !describe(c, vp, &one)) return -1;
     one.cull = learned[h].cull, one.front = learned[h].front;
     one.texture = learned[h].cut.texture, one.threshold = learned[h].cut.threshold;
-    one.uv_format = learned[h].cut.uv_format, one.uv_offset = learned[h].cut.uv_offset;
-    if (one.texture && one.uv_offset + 4 > one.stride) return -1;
+    one.uv_format = learned[h].cut.uv_format, one.uv_offset = learned[h].cut.uv_offset;    if (one.texture && one.uv_offset + 4 > one.stride) return -1;
     if (is_wind(learned[h].vs)) {
         one.wind_format = learned[h].cut.wind_format, one.wind_offset = learned[h].cut.wind_offset;
         if (one.wind_offset + 4 > one.stride) return -1;
@@ -992,6 +1011,27 @@ static void begin_pass(Layer *k) {
 static void end_layer(Layer *k, const CPUState *ctx) {
     if (!k->active) return;
     k->active = 0;
+    static int recheck_log = -1;
+    if (recheck_log < 0) recheck_log = env_on("YW4_SHADOW_RECHECK_LOG");
+    if (recheck_log && mode == MODE_NATIVE) {
+        uint64_t f = __atomic_load_n(&yw4_frames_presented, __ATOMIC_RELAXED);
+        fprintf(stderr, "yw4: recheck: frame %" PRIu64 " cascade %d target %#" PRIx64 "/%u: game drew %d (rechecks %d), ours %u%s",
+                f, k->cascade, k->pass ? k->pass->depth_addr : 0, k->pass ? k->pass->depth_layer : 0, k->ndrawn,
+                k->nrecheck, k->pass ? k->pass->n : 0, ctx ? "" : " (not queued)");
+        for (int i = 0; i < k->nrecheck && i < 4; i++) fprintf(stderr, " %#" PRIx64, k->recheck_obj[i]);
+        fprintf(stderr, "\n");
+        /* what was learned of the first rechecked object's submeshes (the game's draw just now) */
+        for (int i = 0; i < k->nrecheck && i < 32; i++) {
+            uint32_t h = learn_slot(k->recheck_obj[0], k->recheck_sub[i]);
+            if (h == UINT32_MAX || learned[h].obj != k->recheck_obj[0]) continue;
+            fprintf(stderr, "yw4: recheck:   submesh %#" PRIx64 ": vs %016" PRIx64 " fs %016" PRIx64 " ok %d cull %u front %u"
+                    " texture %#" PRIx64 " threshold %g uv format %#x at %u stride %u caster %d\n", k->recheck_sub[i],
+                    learned[h].vs, learned[h].fs, learned[h].ok, learned[h].cull, learned[h].front, learned[h].cut.texture,
+                    learned[h].cut.threshold, learned[h].cut.uv_format, learned[h].cut.uv_offset, U8(k->recheck_sub[i] + 0x3e),
+                    caster_of(k->recheck_obj[0], k->recheck_sub[i]) != NULL);
+        }
+    }
+    k->nrecheck = 0;
     __atomic_add_fetch(&layers_seen, 1, __ATOMIC_RELAXED);
     __atomic_add_fetch(&ours_total, k->ours.n, __ATOMIC_RELAXED);
     __atomic_add_fetch(&drawn_total, k->ndrawn, __ATOMIC_RELAXED);
@@ -1076,7 +1116,10 @@ int yw4_hook_model_renderer(CPUState *ctx) {
     if (lay && lay->active) {
         uint64_t v = U64(ctx->x[0] + 0x2780);
         int c = v && U8(v) >= 1 && U8(v) <= 3 ? U8(v) - 1 : -1;
-        end_layer(lay, lay->device == ctx->x[0] && c >= 0 && c == lay->cascade ? ctx : NULL);
+        int second = lay->device == ctx->x[0] && c >= 0 && c == lay->cascade;
+        if (second && ctx->x[2] && U8(ctx->x[2] + 8) == LAYER_SHADOW)
+            __atomic_store_n(&two_layer_frame, __atomic_load_n(&yw4_frames_presented, __ATOMIC_RELAXED), __ATOMIC_RELAXED);
+        end_layer(lay, second ? ctx : NULL);
     }
     if (__atomic_load_n(&mode, __ATOMIC_ACQUIRE) == MODE_GAME) return 0;
     uint64_t list = ctx->x[1], item = ctx->x[2];
@@ -1118,7 +1161,7 @@ int yw4_hook_submesh_draw(CPUState *ctx) {
     k->world.m[15] = 1;
     ShadowPass *p = k->pass;
     uint64_t frame = __atomic_load_n(&yw4_frames_presented, __ATOMIC_RELAXED);
-    if (mode == MODE_NATIVE && p && k->game_drew && ((frame + (obj >> 4)) & 31) != 0) {
+    if (mode == MODE_NATIVE && p && k->game_drew && ((frame + (obj >> 4)) & 31) != 0 && !cutscene_game_shadows()) {
         const Caster *c = caster_of(obj, sub);
         int n = c ? ours(c, &k->vp, k->device, &p->d[p->n], PASS_DRAWS - (int)p->n) : -1;
         if (n >= 0) {
@@ -1130,6 +1173,10 @@ int yw4_hook_submesh_draw(CPUState *ctx) {
             if (both < 0) both = env_on("YW4_SHADOWS_BOTH");
             if (!both) return gbuffer_disarm(), 1;  /* the game's draw is skipped */
         }
+    } else if (mode == MODE_NATIVE && p && k->game_drew) {  /* a recheck: the game draws it */
+        if (k->nrecheck < 4) k->recheck_obj[k->nrecheck] = obj;
+        if (k->nrecheck < 32) k->recheck_sub[k->nrecheck] = sub;
+        k->nrecheck++;
     }
     k->pending_copies_ok = pending_copies(k->device, &k->pending_copies, &k->pending_count);
     k->drawn[k->ndrawn][0] = obj;

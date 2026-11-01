@@ -20,6 +20,8 @@ game with them and compare results: [tools/dev](../tools/dev/README.md).
 | `YW4_AUDIO_DUMP=<file>` | Also save the sound as played: raw PCM16, 48 kHz, the game's channel count (6 = 5.1) |
 | `YW4_HEADLESS=1` | No window, no Vulkan (nothing is drawn) |
 | `YW4_VULKAN_VALIDATION=1` | Turn on the Vulkan validation layer |
+| `YW4_CUTSCENE_SHADOWS=ours` | Keep our shadow pass in cutscenes. By default the game draws all the shadow casters while a cutscene runs (detected by its second shadow layer per cascade, which play never draws), until a second after: our cut-out casters left the characters lit where the game's shade them, and once every 32 frames, when the game rechecked them, all characters flashed dark (bamboo forest cutscene; cause not found). Same GPU time there |
+| `YW4_SHADOW_RECHECK_LOG=1` | Our shadow pass: a line per shadow layer (cascade, target, the game's draws, how many were rechecks, ours) and what was learned of the first rechecked object's submeshes |
 | `YW4_SHADOWS=game` | The game's own shadow-caster draws; the default is our pass ([decision 0024](decisions/0024-shadow-pass.md), default since 2026-10-29: faster). The settings panel (F1, SHADOW PASS) switches while playing |
 | `YW4_BONES=game` / `check` | Skeleton matrices by the game's recompiled code instead of ours, for A/B timing; `check` runs both, compares every float and logs `yw4: bones:` summaries and any `MISMATCH` ([decision 0036](decisions/0036-native-bone-matrices.md)). Default: ours |
 | `YW4_GBUFFER=check` | Our G-buffer pass ([decision 0026](decisions/0026-gbuffer-pass.md)), step 1: compares what it would use with the game's G-buffer draws (buffers, matrices) and logs a summary every 300 frames; nothing is drawn |
