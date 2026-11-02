@@ -23,6 +23,9 @@
 #endif
 
 #include <SDL3/SDL_filesystem.h>
+#include <SDL3/SDL_messagebox.h>
+
+#include "game_ini.h"
 
 #include "kernel.h"
 #include "romfs.h"
@@ -112,6 +115,22 @@ int main(int argc, char **argv) {
         printf("YW4 Recomp %s (%s, built %s)\n", yw4_version, yw4_git_commit, yw4_build_date);
         return 0;
     }
+    /* No arguments (a double-click, a shortcut): the folders come from game.ini next to the exe (decision 0050) */
+    static char *ini_args[4];
+    int from_ini = 0;
+    if (argc == 1 && game_ini_load()) {
+        const char *e = getenv("YW4_EXEFS"), *r = getenv("YW4_ROMFS"), *s = getenv("YW4_SAVE");
+        if (e && r && s) {
+            ini_args[0] = argv[0], ini_args[1] = (char *)e, ini_args[2] = (char *)r, ini_args[3] = (char *)s;
+            argv = ini_args, argc = 4, from_ini = 1;
+        }
+    }
+    if (argc == 1) {
+        SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_INFORMATION, "YW4 Recomp",
+                                 "The game isn't set up yet.\n\nStart the YW4 Recomp launcher: it sets up the game "
+                                 "from your own copy and then starts it.", NULL);
+        return 1;
+    }
     static char paths[3][4096];
     for (int i = 1; i < argc && i <= 3; i++) absolute(&argv[i], paths[i - 1], sizeof paths[i - 1]);
     go_home();  /* before the log: its folder is a work/ path too */
@@ -125,6 +144,7 @@ int main(int argc, char **argv) {
         if (getcwd(cwd, sizeof cwd)) fprintf(stderr, "yw4: home %s\n", cwd);
 #endif
     }
+    if (from_ini) fprintf(stderr, "yw4: folders from game.ini\n");
     settings_load();
     if (argc != 4) {
         fprintf(stderr, "usage: yw4 <exefs work directory with main.bin and sdk.bin> <romfs folder> <save data folder>\n");

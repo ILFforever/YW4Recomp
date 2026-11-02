@@ -12,6 +12,11 @@ path is relative to its home folder, which it changes to at start (the log's `yw
 if set, else the folder above `work/` when `yw4.exe` is in `<home>/work/build/`. Relative paths in the variables
 below are relative to it too. The three folders on the command line are made absolute first.
 
+Started with no arguments (a double-click, a shortcut), the game reads `game.ini` next to `yw4.exe`
+([decision 0050](decisions/0050-launcher-and-install-layout.md)): one `YW4_...=value` per line, any variable on
+this page, plus `YW4_EXEFS`, `YW4_ROMFS` and `YW4_SAVE` for the three folders. Paths are relative to `game.ini`'s
+folder; a variable already in the environment wins. Without it a message says to run the launcher.
+
 ## Everyday options
 
 | Variable | What it does |
