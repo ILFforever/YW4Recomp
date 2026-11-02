@@ -15,3 +15,19 @@ build_id = "FCF93A41B08C5193A1410D262602DC621617C56F"
 # The application's title ID: add-on content (DLC) title IDs are this + 0x1000 + index.
 [title]
 application_id = "010086C00AF7C000"
+
+# Add-on content (DLC) the game unlocks when found on boot (decision 0049): index (title ID - application ID -
+# 0x1000) = SHA-256 of the add-on's content NCA. That file is the same for every owner (its name is the start of
+# this hash); the NSP's ticket is not, so the whole NSP is never hashed. The versions are the latest ones.
+[dlc]
+"3" = "9d025c2abeac23134c0e35efb3baaa3410a4ba2b49b12877ebc1b638a9996cf3"   # 010086C00AF7D003 v0
+"4" = "0f01cb004b33b3d726f07a499a6876094b3c734d66fbc41a774bd7ada3f4d313"   # 010086C00AF7D004 v0
+"5" = "d0eaf5510810ea614d9c93128cccea3785663314e2c0c9f85d115462ef8b415b"   # 010086C00AF7D005 v0
+"6" = "fdbd1761cdfc4191b4b9f6ad211e32373909d6828b4ac29fc2886461881a7421"   # 010086C00AF7D006 v0
+"7" = "9bd3a1cc4da808be914511140b89fcb1ccafb05362c4df57da1c8b0d87461b76"   # 010086C00AF7D007 v0
+"8" = "de5d10217a8e6e50ca9750136691af0c194ad453d1dbcf32cfb76c9358f6e4ac"   # 010086C00AF7D008 v0
+"10" = "c0f7f927156cef7357c94b72c09af6a88f2ec5f9b67336ef822efcd95187628c"  # 010086C00AF7D00A v0
+"11" = "a5ab0713fe2b8c8049546ab10b2bba9baf13d5cedb5d58b63f2b0119466a7e0f"  # 010086C00AF7D00B v65536
+"12" = "e15bec397a76be91bbd0337e54fa7eb642958e3640ad7821d6de15c18b6429ca"  # 010086C00AF7D00C v131072
+"13" = "d281d7f26b46f07427a855c0fba3e6301596c3a7aab48355696e306dcb6019f8"  # 010086C00AF7D00D v262144
+"14" = "6944fdb0fe9d5a5dfc19ccec087950530756141bf6307404967327b2516caab6"  # 010086C00AF7D00E v262144

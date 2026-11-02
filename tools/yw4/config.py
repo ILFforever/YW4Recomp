@@ -6,7 +6,6 @@ ever hardcoded (CLAUDE.md rule 2).
 
 from __future__ import annotations
 
-import re
 import sys
 import tomllib
 from dataclasses import dataclass
@@ -38,26 +37,10 @@ class Config:
     glslang: Path | None = None
     dlc_dir: Path | None = None
 
-    def dlc_indices(self, application_id: int) -> list[int]:
-        """Add-on content indices owned, from the title IDs in dlc_dir's NSP names. An
-        add-on's title ID is the application's + 0x1000 + index."""
-        if not self.dlc_dir or not self.dlc_dir.is_dir():
-            return []
-        base = application_id + 0x1000
-        out = set()
-        for p in self.dlc_dir.glob("*.nsp"):
-            for m in re.finditer(r"\[(0100[0-9A-Fa-f]{12})\]", p.name):
-                i = int(m.group(1), 16) - base
-                if 0 < i < 0x1000:
-                    out.add(i)
-        return sorted(out)
-
-    def aoc_env(self) -> str:
-        """The YW4_AOC value for the game (runtime/src/svc_misc.c): the owned add-ons' indices, comma
-        separated, for this game's application ID (target.toml); empty when there is no DLC. Every way of
-        starting the game passes it on, or the game sees no DLC."""
-        app_id = int(tomllib.loads((REPO_ROOT / "target.toml").read_text())["title"]["application_id"], 16)
-        return ",".join(map(str, self.dlc_indices(app_id)))
+    def dlc_env(self) -> dict[str, str]:
+        """Where the game looks for the owner's DLC on boot (decision 0049): YW4_DLC_DIR = [input] dlc_dir, when
+        set. The game checks each NSP itself (its content NCA's hash against target.toml [dlc])."""
+        return {"YW4_DLC_DIR": str(self.dlc_dir)} if self.dlc_dir and self.dlc_dir.is_dir() else {}
 
 
 def _resolve(value: str) -> Path:

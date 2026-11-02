@@ -13,7 +13,7 @@ romfs_dir = ""
 base_nsp = ""
 update_nsp = ""
 # Optional. Folder with your own add-on content (DLC) NSPs, e.g. the 4++ upgrade. The game
-# is told it owns the add-ons whose title IDs appear in the file names ([0100...]).
+# checks each NSP on boot (its content against target.toml's [dlc] hashes); file names don't matter.
 dlc_dir = ""
 
 [output]
