@@ -290,7 +290,16 @@ static HostLock targets_lock = HOST_LOCK_INIT;
 static Yw4Target **targets;
 static size_t targets_cap, targets_n;
 
+/* The records a thread has asked for, by target: a call site that calls more than one target (a virtual call on
+ * objects of several classes) misses its own one-record cache often, and every miss took the table's lock: with
+ * yw4_resolve, ~7% of the main thread in the busy street (2026-11-02, YW4_PROFILE). Records never move or go. */
+#define TARGET_CACHE 4096
+static _Thread_local const Yw4Target *target_cache[TARGET_CACHE];
+
 const Yw4Target *yw4_resolve_target(uint64_t target) {
+    unsigned slot = (unsigned)((target >> 2) ^ (target >> 14)) & (TARGET_CACHE - 1);
+    const Yw4Target *seen = target_cache[slot];
+    if (seen && seen->addr == target) return seen;  /* game functions only (below) */
     GuestFn fn = yw4_resolve(target);  /* traps, or longjmps to a setjmp point, if there's none */
     host_lock(&targets_lock);
     if (targets_n * 2 >= targets_cap) {  /* grow: rehash into twice the room */
@@ -316,6 +325,7 @@ const Yw4Target *yw4_resolve_target(uint64_t target) {
     }
     const Yw4Target *r = targets[j];
     host_unlock(&targets_lock);
+    if (!(yw4_lookup_hook && yw4_lookup_hook(target))) target_cache[slot] = r;  /* not a host callback */
     return r;
 }
 
@@ -329,9 +339,14 @@ static _Thread_local struct {
 
 GuestFn yw4_resolve(uint64_t target) {
     unsigned slot = (unsigned)((target >> 2) ^ (target >> 14)) & (RESOLVE_CACHE - 1);
-    if (resolve_cache[slot].target == target && !yw4_lookup_hook) return resolve_cache[slot].fn;
-    GuestFn fn = yw4_lookup(target);
-    if (fn && !yw4_lookup_hook) resolve_cache[slot].target = target, resolve_cache[slot].fn = fn;
+    if (target && resolve_cache[slot].target == target) return resolve_cache[slot].fn;  /* game functions only */
+    /* A host callback (the loader's hook): its lookup also sets the call's data, so it is never cached. The hook
+     * stays installed once the first callback is registered (at start-up): cached only while there was none, the
+     * cache was off for the whole game, every indirect call a binary search (2026-11-02). */
+    GuestFn fn = yw4_lookup_hook ? yw4_lookup_hook(target) : NULL;
+    if (fn) return fn;
+    fn = yw4_lookup(target);
+    if (fn) resolve_cache[slot].target = target, resolve_cache[slot].fn = fn;
     if (!fn) {
         yw4_setjmp_resume(target);  /* a longjmp back to a setjmp's return address? */
         char where[48];
