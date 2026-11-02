@@ -4,7 +4,7 @@ Environment variables and keys read by the runtime. The game runs fine with none
 game with them and compare results: [tools/dev](../tools/dev/README.md).
 
 Which build is running ([decision 0047](decisions/0047-versioning.md)): `yw4 --version` prints one line
-(`YW4 Recomp 0.1.0 (d42294d+dirty, built 2026-11-03)`) without starting the game; the log's first lines and the
+(`YW4 Recomp 0.7.0 (a8b8184, built 2026-11-03)`) without starting the game; the log's first lines and the
 window title say the same. The number is the repo's `VERSION` file; `+dirty` means uncommitted changes.
 
 ## Everyday options
