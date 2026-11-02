@@ -47,6 +47,7 @@ static decltype(&slSetConstants) p_slSetConstants;
 static decltype(&slGetFeatureFunction) p_slGetFeatureFunction;
 static decltype(&slGetNewFrameToken) p_slGetNewFrameToken;
 static decltype(&slGetFeatureRequirements) p_slGetFeatureRequirements;
+static decltype(&slFreeResources) p_slFreeResources;
 
 sl::Result slInit(const sl::Preferences &pref, uint64_t sdkVersion) { return p_slInit(pref, sdkVersion); }
 sl::Result slShutdown() { return p_slShutdown(); }
@@ -61,6 +62,9 @@ sl::Result slSetConstants(const sl::Constants &c, const sl::FrameToken &frame, c
 sl::Result slGetFeatureFunction(sl::Feature f, const char *name, void *&fn) { return p_slGetFeatureFunction(f, name, fn); }
 sl::Result slGetNewFrameToken(sl::FrameToken *&token, const uint32_t *index) { return p_slGetNewFrameToken(token, index); }
 sl::Result slGetFeatureRequirements(sl::Feature f, sl::FeatureRequirements &r) { return p_slGetFeatureRequirements(f, r); }
+sl::Result slFreeResources(sl::Feature f, const sl::ViewportHandle &v) {
+    return p_slFreeResources ? p_slFreeResources(f, v) : sl::Result::eErrorMissingOrInvalidAPI;
+}
 
 static HMODULE mod;
 static PFN_vkGetInstanceProcAddr sl_gipa;
@@ -110,7 +114,7 @@ extern "C" int dlssg_start(void) {
     }
 #define LOAD(f) p_##f = (decltype(p_##f))(void *)GetProcAddress(mod, #f);
     LOAD(slInit) LOAD(slShutdown) LOAD(slIsFeatureSupported) LOAD(slSetTagForFrame) LOAD(slSetConstants)
-    LOAD(slGetFeatureFunction) LOAD(slGetNewFrameToken) LOAD(slGetFeatureRequirements)
+    LOAD(slGetFeatureFunction) LOAD(slGetNewFrameToken) LOAD(slGetFeatureRequirements) LOAD(slFreeResources)
 #undef LOAD
     sl_gipa = (PFN_vkGetInstanceProcAddr)(void *)GetProcAddress(mod, "vkGetInstanceProcAddr");
     sl_gdpa = (PFN_vkGetDeviceProcAddr)(void *)GetProcAddress(mod, "vkGetDeviceProcAddr");
@@ -341,17 +345,28 @@ extern "C" void dlssg_tag(VkCommandBuffer cb, const GpuFgPrepare *p, uint32_t ow
 extern "C" void dlssg_present_begin(int32_t x, int32_t y, uint32_t w, uint32_t h, VkFormat format, uint32_t images) {
     if (!ready() || !token) return;
     slPCLSetMarker(sl::PCLMarker::eRenderSubmitEnd, *token);
-    int want = avail && gpu_fg() == 2 && tagged;
-    if (want != mode_on && (avail || mode_on == 1)) {
+    /* Off for a frame with no 3D (menus, loading): keep DLSS-G's memory (eRetainResourcesWhenOff), or switching it
+     * on again rebuilds everything inside the next present (~190 ms hitch, every menu closed). Off because the
+     * player chose another setting: give the memory back (slFreeResources), as NVIDIA's guide asks. */
+    static int retained;  /* off with its memory kept */
+    int chosen = avail && gpu_fg() == 2;
+    int want = chosen && tagged;
+    if ((want != mode_on || (retained && !chosen)) && (avail || mode_on == 1)) {
         sl::DLSSGOptions o{};
         o.mode = want ? sl::DLSSGMode::eOn : sl::DLSSGMode::eOff;
         o.numFramesToGenerate = 1;
+        if (chosen && !getenv("YW4_DLSSG_FREE_IN_MENUS")) o.flags = sl::DLSSGFlags::eRetainResourcesWhenOff;
         if (getenv("YW4_DLSSG_SHOW_GENERATED"))  /* tests: only the generated frames on screen (for screen captures) */
-            o.flags = sl::DLSSGFlags::eShowOnlyInterpolatedFrame;
+            o.flags |= sl::DLSSGFlags::eShowOnlyInterpolatedFrame;
         o.numBackBuffers = images;
         o.colorBufferFormat = (uint32_t)format;
+        int64_t t0 = host_now_ns();
         sl::Result r = slDLSSGSetOptions(viewport, o);
-        fprintf(stderr, "yw4: dlssg: frame generation %s%s\n", want ? "on" : "off", r == sl::Result::eOk ? "" : " (not taken)");
+        int freed = !chosen && (retained || mode_on == 1) && slFreeResources(sl::kFeatureDLSS_G, viewport) == sl::Result::eOk;
+        retained = !want && chosen && !getenv("YW4_DLSSG_FREE_IN_MENUS");
+        fprintf(stderr, "yw4: dlssg: frame generation %s%s%s, %.1f ms\n", want ? "on" : "off",
+                retained ? " (memory kept)" : freed ? " (memory freed)" : "", r == sl::Result::eOk ? "" : " (not taken)",
+                (double)(host_now_ns() - t0) / 1e6);
         mode_on = want;
     }
     if (want) {
@@ -391,6 +406,7 @@ extern "C" void dlssg_present_end(void) {
 extern "C" float dlssg_shown_per_frame(void) { return shown_per_frame; }
 
 extern "C" int dlssg_on(void) { return ready() && mode_on == 1; }
+extern "C" int dlssg_chosen(void) { return ready() && avail == 1 && gpu_fg() == 2; }
 
 #else  /* no Streamline in this build */
 
@@ -416,5 +432,6 @@ extern "C" void dlssg_hudless(VkImage i, VkImageView v, VkFormat f, uint32_t w, 
     (void)i, (void)v, (void)f, (void)w, (void)h;
 }
 extern "C" int dlssg_on(void) { return 0; }
+extern "C" int dlssg_chosen(void) { return 0; }
 
 #endif

@@ -41,6 +41,8 @@ void dlssg_hudless(VkImage image, VkImageView view, VkFormat format, uint32_t w,
 float dlssg_shown_per_frame(void);
 /* 1 while frame generation is switched on in Streamline (the window doesn't wait for the monitor then). */
 int dlssg_on(void);
+/* DLSS-G is the player's frame generation setting (on even while menus pause it): the swapchain follows this */
+int dlssg_chosen(void);
 
 #ifdef __cplusplus
 }

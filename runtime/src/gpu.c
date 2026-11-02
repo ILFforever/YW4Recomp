@@ -2198,6 +2198,12 @@ void gpu_present(NvnTexture *t, uint64_t frame, const int crop[4]) {
         return;
     }
     gpu_fg_drain();  /* frames it still has go first */
+    int64_t wt0 = host_now_ns();
     window_present_image(g->image, g->format, r, frame);
+    int64_t wt1 = host_now_ns();
     dlssg_frame_begin();  /* DLSS frame generation: the next frame starts (Reflex's sleep) */
+    int64_t wt2 = host_now_ns();
+    if (wt2 - wt0 > 30000000)  /* hitches outside the stall log: the window's present and Reflex's sleep */
+        fprintf(stderr, "yw4: stall: frame %" PRIu64 ": window present %.1f ms, Reflex sleep %.1f ms\n", present_count,
+                (double)(wt1 - wt0) / 1e6, (double)(wt2 - wt1) / 1e6);
 }

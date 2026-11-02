@@ -65,8 +65,15 @@ letterboxed into the window there.
      copied as they are).
    - The game's camera matrices aren't known: a projection from the 45° field of view the FSR code uses, the
      camera motion taken as part of the game's motion vectors (it is).
-   - The swapchain is made again whenever DLSS-G switches on or off (NVIDIA's guidance), and its image list is
-     read in two calls (count, then images): Streamline's version returned bad handles for one call with room for 8.
+   - The swapchain is made again when the player switches DLSS-G on or off (NVIDIA's guidance: without it the
+     frames still go through DLSS-G's off-screen copy while it's off), and its image list is read in two calls
+     (count, then images): Streamline's version returned bad handles for one call with room for 8.
+   - Menus and loading screens (no 3D tagged) pause DLSS-G with `eRetainResourcesWhenOff`: its memory stays and
+     the swapchain isn't made again. Until 2026-11-02 each pause freed everything and made the swapchain again;
+     switching back on then rebuilt DLSS-G inside the next `vkQueuePresentKHR`: a 185-230 ms hitch at every menu
+     closed (owner's 10-minute session: all 9 frames over 120 ms), ~57 ms more on opening one, plus 13-43 ms per
+     swapchain. Now the worst of those frames is ~50 ms (most 13-22 ms) and nothing in the session passes 80 ms.
+     When the player switches it off, `slFreeResources` gives the memory back, as NVIDIA's guide asks.
    - Its HUD-less copy: DLSS-G works on the window image (the game's picture scaled into it, black bars, our HUD
      and panel on top), so the HUD-less copy is made the same way: the picture before the UI blitted into a
      window-sized image at the same rectangle with the same filter, in the present's own submission, tagged with

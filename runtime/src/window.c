@@ -69,11 +69,12 @@ static uint32_t nswap;
 static VkFormat swap_format;
 static int swapchain_stale = 1;  /* (re)create before the next present: first use, resize */
 static int swap_free;            /* the swapchain doesn't wait for the monitor (MAILBOX / IMMEDIATE wanted) */
-static int swap_dlssg;           /* made while DLSS frame generation was on (NVIDIA: make it again on a switch) */
+static int swap_dlssg; /* made while DLSS frame generation was chosen: made again when the player switches it (NVIDIA),
+                       * not when a menu pauses it (that rebuild was a 13-43 ms hitch per menu) */
 
 static int free_running(void) {
     int hz = framerate_hz();
-    return !hz || hz > 60 || gpu_fg_active() || dlssg_on();  /* frame generation paces its frames itself; vsync (-1): FIFO */
+    return !hz || hz > 60 || gpu_fg_active() || dlssg_chosen();  /* frame generation paces its frames itself; vsync (-1): FIFO */
 }
 
 static VkBuffer staging;
@@ -114,7 +115,8 @@ uint32_t vk_memory_type(uint32_t bits, VkMemoryPropertyFlags want) {
     return UINT32_MAX;
 }
 
-static int create_swapchain(void) {
+static int create_swapchain(uint64_t frame) {  /* frame: the game frame being presented, for the log */
+    int64_t t0 = host_now_ns();
     vkDeviceWaitIdle(vk.device);
     VkSurfaceCapabilitiesKHR caps;
     vkGetPhysicalDeviceSurfaceCapabilitiesKHR(vk.gpu, surface, &caps);
@@ -139,7 +141,7 @@ static int create_swapchain(void) {
      * IMMEDIATE, when the driver has them, so the frame rate isn't capped at the refresh rate. */
     VkPresentModeKHR mode = VK_PRESENT_MODE_FIFO_KHR;
     swap_free = free_running();
-    swap_dlssg = dlssg_on();
+    swap_dlssg = dlssg_chosen();
     if (swap_free) {
         uint32_t nmodes = 0;
         VkPresentModeKHR modes[16];
@@ -187,10 +189,11 @@ static int create_swapchain(void) {
     swap_extent = extent;
     swap_format = fmt.format;
     swapchain_stale = 0;
-    fprintf(stderr, "yw4: window: swapchain %ux%u, %u images, %s%s\n", extent.width, extent.height, nswap,
+    fprintf(stderr, "yw4: window: swapchain %ux%u, %u images, %s%s, frame %" PRIu64 ", %.1f ms\n", extent.width,
+            extent.height, nswap,
             mode == VK_PRESENT_MODE_FIFO_KHR ? "FIFO (waits for the refresh)" : mode == VK_PRESENT_MODE_MAILBOX_KHR ? "MAILBOX"
                                                                                                         : "IMMEDIATE",
-            old ? " (made again)" : "");
+            old ? " (made again)" : "", frame, (double)(host_now_ns() - t0) / 1e6);
     return 0;
 }
 
@@ -383,7 +386,7 @@ static int vk_init(void) {
     vkCreateFence(vk.device, &fci, NULL, &fence);
     VkSemaphoreCreateInfo sci = {.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO};
     vkCreateSemaphore(vk.device, &sci, NULL, &acquired);
-    return create_swapchain();
+    return create_swapchain(0);
 }
 
 /* The staging buffer and the image a w x h frame goes through. */
@@ -756,9 +759,15 @@ static int present_image(VkImage src, VkImageLayout layout, VkRect2D r0, int rea
                            .pImageIndices = &index};
     host_lock(&vk.queue_lock);
     vkQueueSubmit(vk.queue, 1, &si, fence);
+    int64_t pt0 = host_now_ns();
     dlssg_present_begin(x0, y0, bw, bh, swap_format, nswap);  /* DLSS frame generation: the game's rectangle */
+    int64_t pt1 = host_now_ns();
     r = vkQueuePresentKHR(vk.queue, &pi);
+    int64_t pt2 = host_now_ns();
     dlssg_present_end();
+    if (host_now_ns() - pt0 > 30000000)  /* slow presents (hitches): which part */
+        fprintf(stderr, "yw4: window: slow present: before %.1f ms, vkQueuePresentKHR %.1f ms, after %.1f ms\n",
+                (double)(pt1 - pt0) / 1e6, (double)(pt2 - pt1) / 1e6, (double)(host_now_ns() - pt2) / 1e6);
     host_unlock(&vk.queue_lock);
     if (r == VK_ERROR_OUT_OF_DATE_KHR || r == VK_SUBOPTIMAL_KHR) swapchain_stale = 1;
     if (readback) vkWaitForFences(vk.device, 1, &fence, VK_TRUE, UINT64_MAX);
@@ -769,8 +778,8 @@ void window_present_rgba(const uint8_t *rgba, uint32_t w, uint32_t h, uint64_t n
     if (screenshot_wanted(n)) save_screenshot(rgba, w, h, n);
     if (!have_vulkan || !w || !h) return;
     host_lock(&present_lock);
-    if (swap_free != free_running() || swap_dlssg != dlssg_on()) swapchain_stale = 1;  /* frame rate across 60 */
-    if (!(swapchain_stale && create_swapchain()) && !frame_resources(w, h)) {
+    if (swap_free != free_running() || swap_dlssg != dlssg_chosen()) swapchain_stale = 1;  /* frame rate across 60 */
+    if (!(swapchain_stale && create_swapchain(n)) && !frame_resources(w, h)) {
         vkWaitForFences(vk.device, 1, &fence, VK_TRUE, UINT64_MAX);  /* the staging buffer is free */
         memcpy(staging_ptr, rgba, (size_t)w * h * 4);
         present_image(frame, VK_IMAGE_LAYOUT_UNDEFINED, (VkRect2D){{0, 0}, {w, h}}, 0);
@@ -795,8 +804,8 @@ void window_present_image(VkImage image, VkFormat format, VkRect2D rect, uint64_
         shot = 0;
     }
     host_lock(&present_lock);
-    if (swap_free != free_running() || swap_dlssg != dlssg_on()) swapchain_stale = 1;
-    if (!(swapchain_stale && create_swapchain()) && !frame_resources(w, h) &&
+    if (swap_free != free_running() || swap_dlssg != dlssg_chosen()) swapchain_stale = 1;
+    if (!(swapchain_stale && create_swapchain(n)) && !frame_resources(w, h) &&
         !present_image(image, VK_IMAGE_LAYOUT_GENERAL, rect, shot) && shot) {
         /* One bulk copy out of the staging memory: it is uncached, and per-byte reads of it took ~1.7 s. */
         uint8_t *px = malloc((size_t)w * h * 4);
