@@ -11,6 +11,12 @@ _Noreturn void gpu_fatal(const char *what, VkResult r);
 #define CHECK(x) do { VkResult r_ = (x); if (r_ != VK_SUCCESS) gpu_fatal(#x, r_); } while (0)
 _Noreturn void gpu_stop(const char *fmt, ...);  /* something the draw path can't do yet */
 
+/* ---- gpu.c: where a frame's time on the GPU thread went, logged when it is long (hitches; YW4_STALL_MS) */
+enum { STALL_EXEC, STALL_LOCK, STALL_BEGIN, STALL_PIPE, STALL_IMAGE, STALL_UPLOAD, STALL_PRESENT, STALL_SHADER, STALL_WAIT,
+       STALL_KINDS };
+void gpu_stall_add(int kind, int64_t ns);
+extern _Thread_local int gpu_in_work;  /* the GPU thread is executing or presenting: its gpu_waits are stalls */
+
 /* ---- gpu_ab.c: same-frame A/B of a pass (YW4_AB_AT) */
 typedef struct GpuState GpuState;
 int gpu_ab_marker(VkCommandBuffer cb, GpuState *s, const void *data, uint32_t size, uint64_t exec, uint64_t next,

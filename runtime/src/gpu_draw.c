@@ -362,7 +362,9 @@ static Shader *load_shader(uint64_t key, int stage) {
 static Shader *shader(uint64_t key, int stage) {
     for (Shader *s = shaders; s; s = s->next)
         if (s->key == key && s->stage == stage) return s;
+    int64_t t0 = host_now_ns();
     Shader *s = load_shader(key, stage);
+    gpu_stall_add(STALL_SHADER, host_now_ns() - t0);
     s->next = shaders;
     shaders = s;
     return s;
@@ -719,6 +721,7 @@ static VkPipeline pipeline(Program *g, const PipeKey *k) {
     int64_t t0 = host_now_ns();
     CHECK(vkCreateGraphicsPipelines(vk.device, VK_NULL_HANDLE, 1, &pci, NULL, &p->pipeline));
     int64_t took = host_now_ns() - t0;
+    gpu_stall_add(STALL_PIPE, took);
     if (took > 100000000)  /* a slow build stalls the frame: say which shaders */
         fprintf(stderr, "yw4: gpu: pipeline took %lld ms (vert %016" PRIx64 ", frag %016" PRIx64 ")\n",
                 (long long)(took / 1000000), g->sh[ST_VERT] ? g->sh[ST_VERT]->key : 0,

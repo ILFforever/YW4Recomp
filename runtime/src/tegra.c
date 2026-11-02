@@ -6,6 +6,8 @@
  *
  * Adapted from LAS Recomp (runtime/nvn/tegra.c, formats.c; MIT, see third_party/lasrecomp).
  */
+#include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 #include "tegra.h"
@@ -119,9 +121,53 @@ static uint64_t gob_offset(uint32_t xb, uint32_t y, uint32_t z, uint32_t width_g
     return off + (((xi >> 5) << 8) | ((yi >> 1) << 6) | (((xi >> 4) & 1) << 5) | ((yi & 1) << 4) | (xi & 15));
 }
 
-/* Copies a region between block-linear storage and tightly packed linear rows. */
+/* One GOB row's 64 bytes: its four 16-byte pieces lie at +0, +32, +256 and +288 from the row's start in the
+ * GOB (gob_offset with the byte offset inside the GOB 0, 16, 32, 48). */
+static void copy_gob_row(uint8_t *lin, uint8_t *b, int to_linear) {
+    if (to_linear) memcpy(lin, b, 16), memcpy(lin + 16, b + 32, 16), memcpy(lin + 32, b + 256, 16), memcpy(lin + 48, b + 288, 16);
+    else memcpy(b, lin, 16), memcpy(b + 32, lin + 16, 16), memcpy(b + 256, lin + 32, 16), memcpy(b + 288, lin + 48, 16);
+}
+
+static void copy_region_ref(const TexLayout *t, uint8_t *base, uint32_t level, uint32_t layer, uint32_t x, uint32_t y,
+                            uint32_t z, uint32_t w, uint32_t h, uint32_t d, uint8_t *linear, int to_linear);
+
+/* Copies a region between block-linear storage and tightly packed linear rows. Rows that start on a GOB
+ * take one address per 64 bytes (copy_gob_row): an area's few hundred new textures took ~0.24 ms each with
+ * one per 16 bytes (2026-11-02); anything else goes the general way (copy_region_ref). */
 static void copy_region(const TexLayout *t, uint8_t *base, uint32_t level, uint32_t layer, uint32_t x, uint32_t y,
                         uint32_t z, uint32_t w, uint32_t h, uint32_t d, uint8_t *linear, int to_linear) {
+    LevelLayout l = tegra_level(t, level);
+    uint32_t bpb = t->fmt->bpb, bw = t->fmt->bw, bh = t->fmt->bh;
+    uint32_t x0 = x / bw, y0 = y / bh, wb = div_up(w, bw), hb = div_up(h, bh);
+    if ((x0 * bpb) % 64 || 16 % bpb) {
+        copy_region_ref(t, base, level, layer, x, y, z, w, h, d, linear, to_linear);
+        return;
+    }
+    uint8_t *surface = base + (uint64_t)layer * tegra_layer_size(t) + l.offset;
+    uint32_t width_gobs = div_up(l.wb * bpb, 64);
+    uint64_t block_rows = div_up(l.hb, 8u << l.block_height_log2);
+    uint32_t row = wb * bpb, xs = x0 * bpb;
+    for (uint32_t k = 0; k < d; k++)
+        for (uint32_t j = 0; j < hb; j++) {
+            uint8_t *lin = linear + ((uint64_t)k * hb + j) * row;
+            uint32_t xb = 0;
+            for (; xb + 64 <= row; xb += 64)
+                copy_gob_row(lin + xb, surface + gob_offset(xs + xb, y0 + j, z + k, width_gobs, l.block_height_log2,
+                                                            l.block_depth_log2, block_rows), to_linear);
+            for (; xb < row; xb += 16) {  /* a last part of a GOB: 16 bytes at a time, as before */
+                uint8_t *b = surface + gob_offset(xs + xb, y0 + j, z + k, width_gobs, l.block_height_log2,
+                                                  l.block_depth_log2, block_rows);
+                size_t n = row - xb < 16 ? row - xb : 16;
+                if (to_linear) memcpy(lin + xb, b, n);
+                else memcpy(b, lin + xb, n);
+            }
+        }
+}
+
+/* The general copy: 16 bytes at a time where they are contiguous in both layouts, else a texel block at a
+ * time. Also the reference YW4_TEGRA_CHECK compares copy_region with. */
+static void copy_region_ref(const TexLayout *t, uint8_t *base, uint32_t level, uint32_t layer, uint32_t x, uint32_t y,
+                            uint32_t z, uint32_t w, uint32_t h, uint32_t d, uint8_t *linear, int to_linear) {
     LevelLayout l = tegra_level(t, level);
     uint8_t *surface = base + (uint64_t)layer * tegra_layer_size(t) + l.offset;
     uint32_t bpb = t->fmt->bpb, bw = t->fmt->bw, bh = t->fmt->bh;
@@ -161,6 +207,21 @@ void tegra_write_region(const TexLayout *t, uint8_t *base, uint32_t level, uint3
 void tegra_read_region(const TexLayout *t, const uint8_t *base, uint32_t level, uint32_t layer, uint32_t x, uint32_t y,
                        uint32_t z, uint32_t w, uint32_t h, uint32_t d, uint8_t *dst) {
     copy_region(t, (uint8_t *)base, level, layer, x, y, z, w, h, d, dst, 1);
+    /* YW4_TEGRA_CHECK=1: every read again the general way, compared */
+    static int check = -1;
+    if (check < 0) check = getenv("YW4_TEGRA_CHECK") && atoi(getenv("YW4_TEGRA_CHECK"));
+    if (!check) return;
+    static long reads, wrong;
+    size_t n = (size_t)div_up(w, t->fmt->bw) * div_up(h, t->fmt->bh) * d * t->fmt->bpb;
+    uint8_t *ref = malloc(n);
+    if (!ref) return;
+    copy_region_ref(t, (uint8_t *)base, level, layer, x, y, z, w, h, d, ref, 1);
+    int bad = memcmp(ref, dst, n) != 0;
+    free(ref);
+    reads++, wrong += bad;
+    if (bad || reads % 2000 == 0)
+        fprintf(stderr, "yw4: tegra check: %ld reads, %ld differ%s\n", reads, wrong,
+                bad ? " (this one: see the texture's layout)" : "");
 }
 
 void tegra_swizzle(const uint8_t *src, uint8_t *dst, uint32_t wb, uint32_t hb, uint32_t d, uint32_t bpb, uint32_t bh,

@@ -129,11 +129,15 @@ static uint64_t completed(void) {
     return v;
 }
 
+_Thread_local int gpu_in_work;
+
 int gpu_wait(uint64_t seq, uint64_t timeout_ns) {
     if (!ready || completed() >= seq) return 0;
     VkSemaphoreWaitInfo wi = {.sType = VK_STRUCTURE_TYPE_SEMAPHORE_WAIT_INFO, .semaphoreCount = 1,
                               .pSemaphores = &timeline, .pValues = &seq};
+    int64_t t0 = host_now_ns();
     VkResult r = vkWaitSemaphores(vk.device, &wi, timeout_ns);
+    if (gpu_in_work) gpu_stall_add(STALL_WAIT, host_now_ns() - t0);
     if (r == VK_TIMEOUT) return 2;
     if (r != VK_SUCCESS) gpu_fatal("vkWaitSemaphores", r);
     return 1;
@@ -633,7 +637,15 @@ static VkImageAspectFlags aspect_of(VkFormat f) {
 /* ================================================================== images */
 
 /* Copies t's texels from the game's memory into its image: every level and layer. */
+static void upload_texels(VkCommandBuffer cb, NvnTexture *t, GpuImage *g);
+
 static void upload(VkCommandBuffer cb, NvnTexture *t, GpuImage *g) {
+    int64_t t0 = host_now_ns();
+    upload_texels(cb, t, g);
+    gpu_stall_add(STALL_UPLOAD, host_now_ns() - t0);
+}
+
+static void upload_texels(VkCommandBuffer cb, NvnTexture *t, GpuImage *g) {
     gpu_passes_note(2);
     const TexLayout *L = &t->layout;
     const FormatInfo *f = L->fmt;
@@ -982,9 +994,16 @@ int gpu_needs_transfer(const NvnTexture *t) {
 
 static void image_destroy(GpuImage *g);  /* below, after GpuView */
 
-/* Frees images no texture has used for `unused_frames` (resolution changes leave old render
- * targets behind) once the GPU is done with them; `scaled_only`: only the screen-sized ones made at
- * the 3D's scale or the aspect ratio's width. gpu_lock held. */
+/* Images taken out of the table, the GPU done with them, waiting to be destroyed a few a frame:
+ * destroying a few hundred at once (an area's textures after leaving it) stalled one frame for
+ * 55-92 ms (2026-11-02, the owner's session). */
+static GpuImage *dying;
+enum { DESTROY_PER_FRAME = 8 };
+
+/* Takes out of the table the images no texture has used for `unused_frames` (resolution changes
+ * leave old render targets behind) once the GPU is done with them, to be destroyed over the next
+ * frames (destroy_some); `scaled_only`: only the screen-sized ones made at the 3D's scale or the
+ * aspect ratio's width. gpu_lock held. */
 static void evict_images(uint64_t unused_frames, int scaled_only) {
     uint64_t done = completed();
     int freed = 0;
@@ -994,13 +1013,24 @@ static void evict_images(uint64_t unused_frames, int scaled_only) {
             if (g->last_frame + unused_frames < present_count && g->last_seq <= done &&
                 (!scaled_only || g->key.scale_den || g->key.wide_den)) {
                 *pp = g->next;
-                image_destroy(g);
+                g->next = dying;
+                dying = g;
                 freed++;
             } else {
                 pp = &g->next;
             }
         }
-    if (freed && nvn_stats_enabled()) fprintf(stderr, "yw4: gpu: freed %d unused images\n", freed);
+    if (freed) image_epoch++;  /* textures' remembered images (NvnTexture.found) are looked up again */
+    if (freed && nvn_stats_enabled()) fprintf(stderr, "yw4: gpu: %d unused images to free\n", freed);
+}
+
+/* gpu_present: destroys a few of the images evict_images took out. gpu_lock held. */
+static void destroy_some(int n) {
+    while (dying && n-- > 0) {
+        GpuImage *g = dying;
+        dying = g->next;
+        image_destroy(g);
+    }
 }
 
 GpuImage *image_of(VkCommandBuffer cb, NvnTexture *t) {
@@ -1013,6 +1043,7 @@ GpuImage *image_of(VkCommandBuffer cb, NvnTexture *t) {
         }
         return g;
     }
+    int64_t made_at = host_now_ns();  /* a new image: timed for the stall report (its upload included) */
     VkFormat fmt = gpu_format(t->format);
     if (fmt == VK_FORMAT_UNDEFINED || t->target == TARGET_BUFFER || t->samples > 1)
         gpu_stop("texture format %#x target %u samples %u", t->format, t->target, t->samples);
@@ -1101,6 +1132,7 @@ GpuImage *image_of(VkCommandBuffer cb, NvnTexture *t) {
         }
         full_barrier(cb);
     }
+    gpu_stall_add(STALL_IMAGE, host_now_ns() - made_at);
     return g;
 }
 
@@ -1344,8 +1376,13 @@ static VkImageSubresourceRange target_range(const GpuImage *g, const NvnTextureV
 }
 
 void gpu_execute(uint64_t handle) {
+    int64_t t0 = host_now_ns();
     host_lock(&gpu_lock);
+    int64_t t1 = host_now_ns();
+    gpu_in_work = 1;
     VkCommandBuffer cb = begin();
+    gpu_stall_add(STALL_LOCK, t1 - t0);
+    gpu_stall_add(STALL_BEGIN, host_now_ns() - t1);
     full_barrier(cb);  /* after the previous submission, and the CPU's writes before it */
     /* GPU state belongs to the queue, not to a list: it carries over between submissions */
     static GpuState s;
@@ -1541,6 +1578,41 @@ void gpu_execute(uint64_t handle) {
     gpu_end_rendering(cb, &s);
     submit(cb);
     host_unlock(&gpu_lock);
+    gpu_in_work = 0;
+    gpu_stall_add(STALL_EXEC, host_now_ns() - t0);
+}
+
+/* ---- hitches: where a frame's time on the GPU thread went */
+
+static int64_t stall_ns[STALL_KINDS];
+static long stall_n[STALL_KINDS];
+
+void gpu_stall_add(int kind, int64_t ns) {
+    __atomic_add_fetch(&stall_ns[kind], ns, __ATOMIC_RELAXED);
+    __atomic_add_fetch(&stall_n[kind], 1, __ATOMIC_RELAXED);
+}
+
+/* gpu_present, at its end: a line when the frame's command lists and present took over YW4_STALL_MS (default
+ * 50; 0 = never), with the share of each thing that can stall them. */
+static void stall_report(uint64_t frame) {
+    static int64_t limit = -1;
+    if (limit < 0) limit = (getenv("YW4_STALL_MS") ? atoll(getenv("YW4_STALL_MS")) : 50) * 1000000;
+    int64_t ns[STALL_KINDS];
+    long n[STALL_KINDS];
+    for (int k = 0; k < STALL_KINDS; k++)
+        ns[k] = __atomic_exchange_n(&stall_ns[k], 0, __ATOMIC_RELAXED), n[k] = __atomic_exchange_n(&stall_n[k], 0, __ATOMIC_RELAXED);
+    if (!limit || ns[STALL_EXEC] + ns[STALL_PRESENT] < limit) return;
+    /* what the parts don't explain (a new image's upload is inside images made, so uploads aren't taken off: other
+     * includes re-uploads of changed textures; the command-buffer wait is one of the GPU waits) */
+    double other = (ns[STALL_EXEC] + ns[STALL_PRESENT] - ns[STALL_LOCK] - ns[STALL_PIPE] - ns[STALL_IMAGE] -
+                    ns[STALL_SHADER] - ns[STALL_WAIT]) / 1e6;
+    fprintf(stderr, "yw4: stall: frame %" PRIu64 ": %.1f ms of GPU-thread work: %ld command lists %.1f ms, present %.1f; in them: "
+            "waiting for the lock %.1f, waiting for the GPU %.1f (for a command buffer %.1f), %ld pipelines built %.1f, "
+            "%ld shaders loaded %.1f, %ld images made %.1f with their uploads (%ld texture uploads %.1f), other %.1f\n",
+            frame, (ns[STALL_EXEC] + ns[STALL_PRESENT]) / 1e6, n[STALL_EXEC], ns[STALL_EXEC] / 1e6,
+            ns[STALL_PRESENT] / 1e6, ns[STALL_LOCK] / 1e6, ns[STALL_WAIT] / 1e6, ns[STALL_BEGIN] / 1e6, n[STALL_PIPE],
+            ns[STALL_PIPE] / 1e6, n[STALL_SHADER], ns[STALL_SHADER] / 1e6, n[STALL_IMAGE], ns[STALL_IMAGE] / 1e6,
+            n[STALL_UPLOAD], ns[STALL_UPLOAD] / 1e6, other);
 }
 
 /* ================================================================== present */
@@ -1704,7 +1776,9 @@ int gpu_is_presented(uint64_t addr) {
 }
 
 void gpu_present(NvnTexture *t, uint64_t frame, const int crop[4]) {
+    int64_t present_t0 = host_now_ns();
     host_lock(&gpu_lock);
+    gpu_in_work = 1;
     present_count++;
     gpu_upscale_begin(0, 0);  /* the scene's images are the 3D's again (upscaling) */
     scan_writes();
@@ -1722,7 +1796,9 @@ void gpu_present(NvnTexture *t, uint64_t frame, const int crop[4]) {
     if (quick_evict_at && present_count >= quick_evict_at) {
         quick_evict_at = 0;
         evict_images(4, 1);
+        destroy_some(INT_MAX);  /* the old size's targets go at once: video memory (a setting changed anyway) */
     }
+    destroy_some(DESTROY_PER_FRAME);
     if (!gpu_is_presented(t->addr)) {
         static int next;
         __atomic_store_n(&presented[next++ % 4], t->addr, __ATOMIC_RELAXED);
@@ -1759,6 +1835,9 @@ void gpu_present(NvnTexture *t, uint64_t frame, const int crop[4]) {
         submit(cb);
     }
     host_unlock(&gpu_lock);
+    gpu_in_work = 0;
+    gpu_stall_add(STALL_PRESENT, host_now_ns() - present_t0);  /* not the window's wait for the display */
+    stall_report(present_count);
     VkRect2D r = {{0, 0}, {g->width, g->height}};
     /* the crop, in the game's pixels: scaled with the window image (YW4_RES) */
     uint32_t cx = gpu_scaled(gpu_scaled(crop[0] > 0 ? (uint32_t)crop[0] : 0, g->scale_num, g->scale_den), g->wide_num,
