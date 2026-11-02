@@ -174,12 +174,19 @@ static void collect_times(void) {
     }
 }
 
+/* The performance log's GPU times (perf.c, on the presenting thread). It never waits for the GPU lock: the GPU
+ * thread holds it while it turns a frame's commands into Vulkan's, and waiting for it here was 28% of the main
+ * thread's time in the busy street (2026-11-02, YW4_PROFILE). Without the lock, the times begin() collected. */
 int gpu_frame_time(uint64_t frame, double *busy_ms, double *span_ms) {
     if (!ready || !ts_period_ns) return 0;
-    host_lock(&gpu_lock);
-    collect_times();
-    FrameTime f = frame_times[frame % 32];
-    host_unlock(&gpu_lock);
+    FrameTime f;
+    if (host_trylock(&gpu_lock)) {
+        collect_times();
+        f = frame_times[frame % 32];
+        host_unlock(&gpu_lock);
+    } else {
+        f = frame_times[frame % 32];  /* may be mid-update: a log figure, checked by its frame below */
+    }
     if (!f.used || f.frame != frame) return 0;
     *busy_ms = (double)f.busy * ts_period_ns / 1e6;
     *span_ms = (double)(f.last - f.first) * ts_period_ns / 1e6;

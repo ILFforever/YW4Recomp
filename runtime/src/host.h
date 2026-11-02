@@ -22,6 +22,7 @@ typedef pthread_cond_t HostCond;
 
 void host_lock_init(HostLock *l);
 void host_lock(HostLock *l);
+int host_trylock(HostLock *l);  /* 1: taken; 0: someone holds it (doesn't wait) */
 void host_unlock(HostLock *l);
 
 void host_cond_init(HostCond *c);

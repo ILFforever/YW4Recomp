@@ -14,6 +14,7 @@
 
 void host_lock_init(HostLock *l) { InitializeSRWLock((PSRWLOCK)l); }
 void host_lock(HostLock *l) { AcquireSRWLockExclusive((PSRWLOCK)l); }
+int host_trylock(HostLock *l) { return TryAcquireSRWLockExclusive((PSRWLOCK)l) != 0; }
 void host_unlock(HostLock *l) { ReleaseSRWLockExclusive((PSRWLOCK)l); }
 
 void host_cond_init(HostCond *c) { InitializeConditionVariable((PCONDITION_VARIABLE)c); }
@@ -218,6 +219,7 @@ long host_written_pages(uint64_t addr, uint64_t size, void (*fn)(uint64_t page, 
 
 void host_lock_init(HostLock *l) { pthread_mutex_init(l, NULL); }
 void host_lock(HostLock *l) { pthread_mutex_lock(l); }
+int host_trylock(HostLock *l) { return pthread_mutex_trylock(l) == 0; }
 void host_unlock(HostLock *l) { pthread_mutex_unlock(l); }
 
 void host_cond_init(HostCond *c) {
