@@ -52,6 +52,13 @@ class Config:
                     out.add(i)
         return sorted(out)
 
+    def aoc_env(self) -> str:
+        """The YW4_AOC value for the game (runtime/src/svc_misc.c): the owned add-ons' indices, comma
+        separated, for this game's application ID (target.toml); empty when there is no DLC. Every way of
+        starting the game passes it on, or the game sees no DLC."""
+        app_id = int(tomllib.loads((REPO_ROOT / "target.toml").read_text())["title"]["application_id"], 16)
+        return ",".join(map(str, self.dlc_indices(app_id)))
+
 
 def _resolve(value: str) -> Path:
     p = Path(value).expanduser()
