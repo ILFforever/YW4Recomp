@@ -7,8 +7,9 @@
 exefs_dir = ""
 # Folder holding your already-extracted RomFS.
 romfs_dir = ""
-# Optional. Your own base-game and latest-update NSPs. If set, `python -m
+# Optional. Your own base game (NSP or XCI) and latest-update NSP. If set, `python -m
 # tools.yw4.extract` fills exefs_dir and romfs_dir from them (update applied).
+# Leave update_nsp empty if your XCI already holds the 2.2.0 update.
 base_nsp = ""
 update_nsp = ""
 # Optional. Folder with your own add-on content (DLC) NSPs, e.g. the 4++ upgrade. The game

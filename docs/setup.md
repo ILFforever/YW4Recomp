@@ -25,9 +25,11 @@ the decompressed `main`).
 0. Install the game-data guard as a pre-commit hook: `python -m tools.yw4.guard --install`.
 1. Copy `config.example.toml` to `config.local.toml` (gitignored).
 2. Fill in `exefs_dir` and `romfs_dir` with the folders of your already-extracted ExeFS and RomFS.
-   If you have your base and update NSPs instead, also set `base_nsp`, `update_nsp`, `hactool_exe`
+   If you have your base game and update as files instead, also set `base_nsp`, `update_nsp`, `hactool_exe`
    ([hactool](https://github.com/SciresM/hactool) 1.4.0) and `keys_dir`, point `exefs_dir`/`romfs_dir` at empty
-   folders, and run `python -m tools.yw4.extract`.
+   folders, and run `python -m tools.yw4.extract`. `base_nsp` may be an NSP or an XCI (a game-card image); leave
+   `update_nsp` empty when your XCI already holds the 2.2.0 update. An XCI alone needs only `prod.keys`; an NSP
+   also needs `title.keys`.
 3. Keep `work_dir` outside any cloud-synced folder.
 4. Check it: `python tools/yw4/config.py` prints the resolved paths, or a clear error saying what is missing.
 5. Decompress and verify the ExeFS modules: `python -m tools.yw4.ingest`. It refuses to continue unless `main`

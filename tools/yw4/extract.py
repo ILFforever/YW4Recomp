@@ -1,13 +1,21 @@
-"""Extract ExeFS + RomFS (update applied) from the user's own base and update NSPs.
+"""Extract ExeFS + RomFS (update applied) from the user's own base game (NSP or XCI) and update.
 
     python -m tools.yw4.extract
 
 Reads [input] base_nsp / update_nsp and [tools] hactool_exe / keys_dir from
-config.local.toml, writes into [input] exefs_dir / romfs_dir.
+config.local.toml, writes into [input] exefs_dir / romfs_dir. base_nsp may be an
+XCI (a game-card image); update_nsp may be left empty when that XCI already holds
+the 2.2.0 update.
 
 Why the steps look like this:
-- An NSP is a PFS0 archive of NCAs. We pull out the NCAs ourselves (pfs0.py)
-  into work/nca/ because hactool needs them as separate files.
+- An NSP is a PFS0 archive of NCAs, an XCI keeps them in its secure partition
+  (HFS0, xci.py). We pull out the NCAs ourselves into work/nca/ because hactool
+  needs them as separate files.
+- Which NCA is the base game's program and which the update's comes from what
+  hactool reports, not from the file it was in (a game card can hold both): both
+  carry the application's title ID (an update's program NCA does too, not the
+  update's + 0x800), and the update's has a "Patch RomFS" section, the base's a
+  plain RomFS.
 - The NCAs are ticket-encrypted. The base and the update have different
   rights IDs, so they need different title keys, but hactool's --titlekey
   takes only one. hactool also loads ~/.switch/title.keys on its own and
@@ -28,18 +36,24 @@ import sys
 import tempfile
 from pathlib import Path
 
-from . import config, pfs0
+import tomllib
+
+from . import config, pfs0, xci
+
+TARGET = Path(__file__).resolve().parents[2] / "target.toml"
 
 
 class ExtractError(Exception):
     pass
 
 
-def unpack_ncas(nsp: Path, out_dir: Path, tag: str) -> tuple[list[Path], set[str]]:
-    """Copy every content NCA out of an NSP. Returns NCA paths and the rights IDs of its tickets."""
+def unpack_ncas(path: Path, out_dir: Path, tag: str) -> tuple[list[Path], set[str]]:
+    """Copy every content NCA out of an NSP or XCI. Returns NCA paths and the rights IDs of its tickets
+    (a game card's NCAs have none: they need no title key)."""
     ncas, rights_ids = [], set()
-    with nsp.open("rb") as f:
-        for entry in pfs0.read_entries(f):
+    with path.open("rb") as f:
+        entries = xci.secure_entries(f) if xci.is_xci(f) else pfs0.read_entries(f)
+        for entry in entries:
             if entry.name.endswith(".tik"):
                 rights_ids.add(entry.name[:-4].lower())
             elif entry.name.endswith(".nca") and not entry.name.endswith(".cnmt.nca"):
@@ -54,6 +68,10 @@ def write_temp_keys(keys_dir: Path, rights_ids: set[str], home: Path) -> None:
     switch = home / ".switch"
     switch.mkdir()
     shutil.copyfile(keys_dir / "prod.keys", switch / "prod.keys")
+    if not rights_ids:  # game-card NCAs only: no title keys needed, title.keys may not exist
+        return
+    if not (keys_dir / "title.keys").is_file():
+        raise ExtractError("the NSP needs title keys, but keys_dir has no title.keys")
     # Only the keys we need, de-duplicated: hactool 1.4 aborts on repeated rights IDs.
     found: dict[str, str] = {}
     with (keys_dir / "title.keys").open(encoding="utf-8") as f:
@@ -78,12 +96,19 @@ def run_hactool(hactool: Path, home: Path, args: list[str]) -> str:
     return out
 
 
-def find_program_nca(hactool: Path, home: Path, ncas: list[Path]) -> Path:
-    programs = [n for n in ncas
-                if re.search(r"Content Type:\s+Program", run_hactool(hactool, home, ["-i", str(n)]))]
-    if len(programs) != 1:
-        raise ExtractError(f"expected one Program NCA, found {len(programs)}: {programs}")
-    return programs[0]
+def find_programs(hactool: Path, home: Path, ncas: list[Path], app_id: int) -> tuple[Path | None, Path | None]:
+    """The game's base Program NCA and its update's (a Patch RomFS), each or None."""
+    found: dict[str, Path] = {}
+    for n in ncas:
+        info = run_hactool(hactool, home, ["-i", str(n)])
+        m = re.search(r"Title ID:\s+([0-9a-fA-F]{16})", info)
+        if not re.search(r"Content Type:\s+Program", info) or not m or int(m.group(1), 16) != app_id:
+            continue
+        kind = "update" if re.search(r"Partition Type:\s+Patch RomFS", info) else "base"
+        if kind in found:
+            raise ExtractError(f"two {kind} Program NCAs: {found[kind].name}, {n.name}")
+        found[kind] = n
+    return found.get("base"), found.get("update")
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -93,9 +118,11 @@ def main(argv: list[str] | None = None) -> int:
 
     try:
         cfg = config.load(require_exefs=False)
-        for name in ("base_nsp", "update_nsp", "hactool_exe"):
+        for name in ("base_nsp", "hactool_exe"):
             if getattr(cfg, name) is None or not getattr(cfg, name).is_file():
                 raise config.ConfigError(f"{name} is not set or not a file")
+        if cfg.update_nsp is not None and not cfg.update_nsp.is_file():
+            raise config.ConfigError("update_nsp is set but not a file")
         if cfg.keys_dir is None or not (cfg.keys_dir / "prod.keys").is_file():
             raise config.ConfigError("keys_dir is not set or has no prod.keys")
     except config.ConfigError as e:
@@ -110,15 +137,22 @@ def main(argv: list[str] | None = None) -> int:
     nca_dir = cfg.work_dir / "nca"
     nca_dir.mkdir(parents=True, exist_ok=True)
     try:
-        print("unpacking NSPs ...")
-        base_ncas, base_rids = unpack_ncas(cfg.base_nsp, nca_dir, "base")
-        upd_ncas, upd_rids = unpack_ncas(cfg.update_nsp, nca_dir, "upd")
+        app_id = int(tomllib.loads(TARGET.read_text())["title"]["application_id"], 16)
+        print("unpacking the game's files ...")
+        ncas, rids = unpack_ncas(cfg.base_nsp, nca_dir, "base")
+        if cfg.update_nsp is not None:
+            upd_ncas, upd_rids = unpack_ncas(cfg.update_nsp, nca_dir, "upd")
+            ncas, rids = ncas + upd_ncas, rids | upd_rids
 
         with tempfile.TemporaryDirectory() as tmp:
             home = Path(tmp)
-            write_temp_keys(cfg.keys_dir, base_rids | upd_rids, home)
-            base_prog = find_program_nca(cfg.hactool_exe, home, base_ncas)
-            upd_prog = find_program_nca(cfg.hactool_exe, home, upd_ncas)
+            write_temp_keys(cfg.keys_dir, rids, home)
+            base_prog, upd_prog = find_programs(cfg.hactool_exe, home, ncas, app_id)
+            if base_prog is None:
+                raise ExtractError(f"no base game ({app_id:016X}) in base_nsp" +
+                                   (" or update_nsp" if cfg.update_nsp else ""))
+            if upd_prog is None:
+                raise ExtractError("no update for this game: set update_nsp to the 2.2.0 update")
             print(f"base program NCA:   {base_prog.name}\nupdate program NCA: {upd_prog.name}")
             print("extracting ExeFS + RomFS with update applied (takes a few minutes) ...")
             run_hactool(cfg.hactool_exe, home, [
@@ -127,7 +161,7 @@ def main(argv: list[str] | None = None) -> int:
                 f"--romfsdir={cfg.romfs_dir}",
                 str(upd_prog),
             ])
-    except (ExtractError, pfs0.Pfs0Error) as e:
+    except (ExtractError, pfs0.Pfs0Error, xci.XciError) as e:
         print(f"extract failed: {e}", file=sys.stderr)
         return 1
 
