@@ -36,6 +36,7 @@
 #include "gpu.h"
 #include "hud.h"
 #include "settings.h"
+#include "version.h"
 #include "vk.h"
 #include "window.h"
 
@@ -1005,11 +1006,12 @@ void window_run(void (*guest)(void *), void *arg) {
     const char *dir = getenv("YW4_SCREENSHOT_DIR");
     if (dir && *dir) snprintf(screenshot_dir, sizeof screenshot_dir, "%s", dir);
     const char *headless = getenv("YW4_HEADLESS");
+    char title[96];  /* the window's title, with the version (decision 0047) */
     if (!(headless && *headless && *headless != '0')) {
         if (!SDL_Init(SDL_INIT_VIDEO | SDL_INIT_GAMEPAD)) {
             fprintf(stderr, "yw4: window: SDL_Init: %s; running headless\n", SDL_GetError());
-        } else if (!(window = SDL_CreateWindow("Yo-kai Watch 4++ (recompiled)", 1280, 720,
-                                               SDL_WINDOW_VULKAN | SDL_WINDOW_RESIZABLE))) {
+        } else if (snprintf(title, sizeof title, "Yo-kai Watch 4++ (recompiled) · YW4 Recomp %s", yw4_version) < 0 ||
+                   !(window = SDL_CreateWindow(title, 1280, 720, SDL_WINDOW_VULKAN | SDL_WINDOW_RESIZABLE))) {
             fprintf(stderr, "yw4: window: SDL_CreateWindow: %s; running headless\n", SDL_GetError());
         } else if (vk_init()) {
             fprintf(stderr, "yw4: window: no Vulkan; the window stays empty\n");

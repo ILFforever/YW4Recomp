@@ -14,11 +14,13 @@
 #include <inttypes.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 
 #include "kernel.h"
 #include "romfs.h"
 #include "savefs.h"
 #include "settings.h"
+#include "version.h"
 #include "window.h"
 #include "yw4load.h"
 
@@ -55,7 +57,12 @@ static void start_guest(void *unused) {
 void yw4_log_start(void);  /* log.c */
 
 int main(int argc, char **argv) {
+    if (argc == 2 && !strcmp(argv[1], "--version")) {  /* for the launcher and bug reports: one line on stdout */
+        printf("YW4 Recomp %s (%s, built %s)\n", yw4_version, yw4_git_commit, yw4_build_date);
+        return 0;
+    }
     yw4_log_start();
+    fprintf(stderr, "yw4: YW4 Recomp %s (commit %s, built %s)\n", yw4_version, yw4_git_commit, yw4_build_date);
     settings_load();
     if (argc != 4) {
         fprintf(stderr, "usage: yw4 <exefs work directory with main.bin and sdk.bin> <romfs folder> <save data folder>\n");
