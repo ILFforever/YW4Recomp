@@ -1825,8 +1825,12 @@ void gpu_execute(uint64_t handle) {
             }
             if (!s.targets_noted) gpu_shadow_note_targets(&s), s.targets_noted = 1;
             /* (primitive, type, count, ...) / (primitive, first, count, ...): count, and the instances */
+            /* YW4_MASK_BREAKDOWN: the shadow mask's draw on a line of its own in the per-pass timer, by form */
+            const char *mask_form = gpu_mask_breakdown_label(&s);
+            if (mask_form) gpu_passes_other(cb, mask_form, 0);
             gpu_passes_draw(s.program, r->x[2] * (r->op == CMD_DRAW_ELEMENTS ? (r->x[6] ? r->x[6] : 1) : (r->x[4] ? r->x[4] : 1)));
             gpu_draw(cb, &s, r);
+            if (mask_form) gpu_passes_other(cb, "(after the shadow mask)", 0);
             if (ab_draw && gpu_ab_marker(cb, &s, ab_name, (uint32_t)strlen(ab_name), exec, at + r->size, &at)) continue;
             break;
         }

@@ -583,8 +583,10 @@ static int dlss(VkCommandBuffer cb, GpuImage *d, VkImageView depth_view, VkImage
     in.motion_scale[0] = -(float)w * mx, in.motion_scale[1] = -(float)h * sy * my;
     in.jitter[0] *= jsx, in.jitter[1] *= jsy;
     full_barrier(cb);
+    gpu_passes_other(cb, "DLSS itself", 0);  /* the per-pass timer (F5): DLSS apart from our passes around it */
     if (!gpu_dlss_dispatch(cb, &in)) return 0;
     full_barrier(cb);
+    gpu_passes_other(cb, "DLSS: its output written back", 0);
     pass(cb, P_TAA_OUT, target, fmt, ow, oh, 0, fsr_out.view);
     last = now, last_ow = ow, last_ns = t;
     history_valid = 0;
@@ -700,6 +702,7 @@ void gpu_aa_apply(VkCommandBuffer cb, GpuState *s) {
         }
     }
     if (mode >= 3 && !debug) {
+        gpu_passes_other(cb, "frame generation: prepare (HUD-less copy)", 0);
         GpuImage *sc = image_of(cb, t);  /* the scene image now: output-sized when upscaling */
         fg_prepare(cb, depth, depth_in, w, h, ow, oh, sc);
     }

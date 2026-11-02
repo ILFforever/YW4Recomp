@@ -1062,8 +1062,28 @@ void gpu_pcss_cycle(void) {
  * - filter once: one soft lookup at the centre instead of at each of the game's five points (default;
  *   YW4_MASK_FILTER=five for the game's)
  * - search 8: the blocker search with every other one of its 16 taps (YW4_PCSS_SEARCH_TAPS=8)
- * Both go to the program in mode.y: bit 0 filter once, bit 1 search 8. */
-static int mask_once = -1, search8 = -1;
+ * - filter 8: the soft filter with every other one of its 16 taps, the disk turned a golden angle each frame so
+ *   the anti-aliasing's frame blending (TAA, FSR, DLSS) averages the taps over frames
+ *   (YW4_PCSS_FILTER_TAPS=8)
+ * They go to the program in mode.y: bit 0 filter once, bit 1 search 8, bit 2 filter 8; bits 3 up the frame
+ * (mod 256) for the turn. */
+static int mask_once = -1, search8 = -1, filter8 = -1;
+
+int gpu_pcss_filter8(void) {
+    int v = __atomic_load_n(&filter8, __ATOMIC_ACQUIRE);
+    if (v < 0) {
+        const char *e = getenv("YW4_PCSS_FILTER_TAPS");
+        v = e && atoi(e) == 8;
+        __atomic_store_n(&filter8, v, __ATOMIC_RELEASE);
+    }
+    return v;
+}
+
+void gpu_pcss_filter8_toggle(void) {
+    int v = !gpu_pcss_filter8();
+    __atomic_store_n(&filter8, v, __ATOMIC_RELEASE);
+    fprintf(stderr, "yw4: gpu: soft shadow filter %d taps\n", v ? 8 : 16);
+}
 
 int gpu_mask_filter_once(void) {
     int v = __atomic_load_n(&mask_once, __ATOMIC_ACQUIRE);
@@ -1137,12 +1157,44 @@ static void contact_settings(float *f) {
     if (!gpu_contact() || (contact_alternate && !(gpu_frames() & 1))) f[0] = 0;
 }
 
+/* YW4_MASK_BREAKDOWN=1: what the shadow mask's parts cost, in one run. Frame by frame the mask takes turns
+ * in four forms (as set: soft shadows and contact shadows as chosen; no contact shadows; no soft shadows;
+ * neither), and the per-pass GPU timer (F5, YW4_GPU_PASSES) has a line for each (gpu.c marks around the
+ * draw): its ms divided by its passes per frame is that form's cost. The picture flickers meanwhile. */
+static const char *const mask_forms[4] = {"shadow mask: as set", "shadow mask: no contact shadows",
+                                          "shadow mask: no soft shadows", "shadow mask: neither"};
+
+static int mask_breakdown(void) {
+    static int on = -1;
+    if (on < 0) on = getenv("YW4_MASK_BREAKDOWN") && atoi(getenv("YW4_MASK_BREAKDOWN"));
+    return on;
+}
+
+/* gpu.c, at a draw: the timer's label for this one if it is the shadow mask in a breakdown, else NULL. */
+const char *gpu_mask_breakdown_label(const GpuState *s) {
+    if (!mask_breakdown() || !s->program || s->program->stages[1].key != SHADOW_MASK_FS) return NULL;
+    return mask_forms[gpu_frames() & 3];
+}
+
+static void pcss_settings_fill(float *f);
+
 static int pcss_settings(VkBuffer *buf, VkDeviceSize *offset) {
     float *f = (float *)ring_alloc(64, buf, offset);
     if (!f) return 0;
+    pcss_settings_fill(f);
+    if (mask_breakdown()) {  /* this frame's form: bit 0 no contact shadows, bit 1 no soft shadows */
+        int form = (int)(gpu_frames() & 3);
+        if (form & 1) f[12] = 0;
+        if (form & 2) f[0] = 0;
+    }
+    return 1;
+}
+
+static void pcss_settings_fill(float *f) {
     int l = gpu_pcss_level();
     float k = (float)(1 << (l ? l - 1 : 0));
-    f[0] = l ? 1.0f : 0.0f, f[1] = (float)(gpu_mask_filter_once() | gpu_pcss_search8() << 1), f[2] = pcss_max, f[3] = 0.5f / (float)gpu_shadow_res();
+    f[0] = l ? 1.0f : 0.0f, f[2] = pcss_max, f[3] = 0.5f / (float)gpu_shadow_res();
+    f[1] = (float)(gpu_mask_filter_once() | gpu_pcss_search8() << 1 | gpu_pcss_filter8() << 2 | (int)(gpu_frames() & 255) << 3);
     for (int i = 0; i < 4; i++) f[4 + i] = pcss_scale[i] * k;
     f[8] = pcss_eps, f[9] = (float)pcss_debug;
     int once = pcss_search_once;
@@ -1150,7 +1202,6 @@ static int pcss_settings(VkBuffer *buf, VkDeviceSize *offset) {
     if (pcss_alternate >= 0 && fr >= (uint64_t)pcss_alternate && fr < (uint64_t)pcss_alternate + 16) once = !(fr & 1);
     f[10] = (float)once, f[11] = pcss_block;
     contact_settings(f + 12);
-    return 1;
 }
 
 /* A draw of our G-buffer pass (gbuffer.h): its own vertex and index buffers and vertex constants 2

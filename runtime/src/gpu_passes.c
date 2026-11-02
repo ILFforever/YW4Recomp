@@ -144,12 +144,17 @@ static void report(void) {
         }
     fprintf(stderr, "yw4: gpu passes: %.2f ms of GPU time per frame over %" PRIu64 " frames; most expensive:\n",
             total / (double)frames, frames);
-    for (int i = 0; i < ngroups && i < SHOWN; i++)
-        fprintf(stderr, "yw4: gpu passes: %6.2f ms %5.1f passes %6.1f draws %6.1f restarts %6.1f uploads %7.0fk vertices  %-44s vs %016"
-                PRIx64 " fs %016" PRIx64 "\n", groups[i].ms / (double)frames, (double)groups[i].passes / (double)frames,
+    /* the most expensive, and every shadow mask form of YW4_MASK_BREAKDOWN (each a quarter of the frames: its ms per
+     * pass is that form's cost) */
+    for (int i = 0; i < ngroups; i++) {
+        if (i >= SHOWN && strncmp(groups[i].label, "shadow mask:", 12)) continue;
+        fprintf(stderr, "yw4: gpu passes: %6.2f ms %5.2f passes (%5.2f ms each) %6.1f draws %6.1f restarts %6.1f uploads "
+                "%7.0fk vertices  %-44s vs %016" PRIx64 " fs %016" PRIx64 "\n", groups[i].ms / (double)frames,
+                (double)groups[i].passes / (double)frames, groups[i].passes ? groups[i].ms / (double)groups[i].passes : 0.0,
                 (double)groups[i].draws / (double)frames, (double)groups[i].restarts / (double)frames,
                 (double)groups[i].uploads / (double)frames, (double)groups[i].vertices / (double)frames / 1000,
                 groups[i].label, groups[i].vs, groups[i].fs);
+    }
     ngroups = 0;
     report_from = gpu_frames();
 }

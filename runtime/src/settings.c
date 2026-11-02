@@ -241,6 +241,12 @@ static const Setting developer[] = {
      {"16", "8"},
      {"16 SAMPLES", "8 SAMPLES"}, 2, gpu_pcss_search8, gpu_pcss_search8_toggle, "YW4_PCSS_SEARCH_TAPS", {"16", "8"},
      mask_speedup_disabled},
+    {"SPEED-UPS", "SOFT SHADOW SAMPLES",
+     "HOW MANY SAMPLES MAKE EACH SOFT SHADOW EDGE. 8 TURNS THEM EACH FRAME SO THE ANTI-ALIASING (TAA, FSR, DLSS) "
+     "AVERAGES THEM OVER FRAMES: CHEAPER, MAY SHIMMER A LITTLE IN MOTION. WITHOUT THAT ANTI-ALIASING EDGES GET GRAINY.",
+     {"16", "8"},
+     {"16 SAMPLES", "8 SAMPLES, TURNED EACH FRAME"}, 2, gpu_pcss_filter8, gpu_pcss_filter8_toggle, "YW4_PCSS_FILTER_TAPS",
+     {"16", "8"}, mask_speedup_disabled},
 };
 enum { NPLAYER = sizeof player / sizeof *player, NDEVELOPER = sizeof developer / sizeof *developer,
        NSETTINGS = NPLAYER + NDEVELOPER, LINK_ROW = NPLAYER };

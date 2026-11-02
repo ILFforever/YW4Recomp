@@ -46,6 +46,10 @@ corners (light from the sky blocked, not the sun) needs SSAO, next on the list.
 The shadow mask pass at 4K 21:9: +0.04 ms at the late-game save (much in shade), +0.25 ms in the sunny schoolyard
 (1.08 → 1.34 ms, owner's run with F5).
 
+Measured again 2026-11-02 with full-size effects (the mask at 2560×1080, the owner's settings) in the bamboo forest:
+about 0.85 ms (`YW4_MASK_BREAKDOWN=1`: the mask 3.60 ms as set, 2.76 without contact shadows), well over the
+figures above, which were at half-size effects or in shade.
+
 ## How it was checked
 
 The owner played with F7 at the lamp post, a wall's cap from several angles, hedges and houses (screenshots in the

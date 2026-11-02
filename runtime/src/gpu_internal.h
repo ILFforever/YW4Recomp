@@ -22,6 +22,8 @@ typedef struct GpuState GpuState;
 int gpu_ab_marker(VkCommandBuffer cb, GpuState *s, const void *data, uint32_t size, uint64_t exec, uint64_t next,
                   uint64_t *resume);
 void gpu_ab_targets(VkCommandBuffer cb, GpuState *s);
+/* gpu_draw.c: the per-pass timer's label for this draw if it is the shadow mask in YW4_MASK_BREAKDOWN, else NULL */
+const char *gpu_mask_breakdown_label(const GpuState *s);
 /* gpu_draw.c: is this draw one of the screen passes to compare (YW4_AB_PASS=screen, YW4_AB_FS)? */
 int gpu_screen_ab_draw(const GpuState *s);
 int gpu_ab_pending(void);

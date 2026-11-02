@@ -67,6 +67,9 @@ int gpu_contact(void);
 void gpu_contact_toggle(void);
 int gpu_pcss_search8(void);
 void gpu_pcss_search8_toggle(void);
+/* ... and an 8-tap soft filter turned each frame (YW4_PCSS_FILTER_TAPS=8) */
+int gpu_pcss_filter8(void);
+void gpu_pcss_filter8_toggle(void);
 
 void gpu_pool_init(NvnPool *p);  /* imports the pool's memory into Vulkan */
 void gpu_pool_finalize(NvnPool *p);

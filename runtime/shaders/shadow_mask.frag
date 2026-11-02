@@ -34,7 +34,9 @@ layout(location = 0) out vec4 o_mask;
 
 // yw4_shadow: one shadow map compare, soft (PCSS) or the game's. The same text recomp/shader.py
 // (PCSS_COMMON, pcss_helper("SHADOWARRAY2D")) puts into the translated program: keep the two alike. Ours only:
-// mode.y bit 1 searches with every other tap (the panel's SOFT SHADOW SEARCH).
+// mode.y bit 1 searches with every other tap (the panel's SOFT SHADOW SEARCH); bit 2 filters with every other tap,
+// the disk turned a golden angle each frame (bits 3 up: the frame mod 256), for the anti-aliasing's frame
+// blending to average (SOFT SHADOW SAMPLES).
 const vec2 YW4_DISK[16] = vec2[16](
     vec2(-0.94201624, -0.39906216), vec2(0.94558609, -0.76890725), vec2(-0.09418410, -0.92938870),
     vec2(0.34495938, 0.29387760), vec2(-0.91588581, 0.45771432), vec2(-0.81544232, -0.87912464),
@@ -49,6 +51,8 @@ float yw4_search_layer = -1.0, yw4_search_r = -1.0;
 mat2 yw4_pcss_rotation() {
     vec2 cell = floor(gl_FragCoord.xy / max(yw4_pcss.tune.w, 1.0));
     float a = 6.2831853 * fract(52.9829189 * fract(dot(cell, vec2(0.06711056, 0.00583715))));
+    int m = int(yw4_pcss.mode.y);
+    if ((m & 4) != 0) a += 2.39996323 * float(m >> 3);  // ours: turned a golden angle each frame
     return mat2(cos(a), sin(a), -sin(a), cos(a));
 }
 float yw4_pcss_remember(vec2 key, float lit) {
@@ -88,9 +92,10 @@ float yw4_shadow(sampler2DArrayShadow s, sampler2DArray d, vec4 c) {
     }
     if (yw4_pcss.tune.y == 2.0) return r / yw4_pcss.mode.z;
     float lit = 0.0;
-    for (int i = 0; i < 16; i++)
+    int fstep = (int(yw4_pcss.mode.y) & 4) != 0 ? 2 : 1;  // ours, faster: every other tap, turned each frame
+    for (int i = 0; i < 16; i += fstep)
         lit += texture(s, vec4(c.xy + rot * YW4_DISK[i] * r, c.z, c.w));
-    return yw4_pcss_remember(c.zw, lit * (1.0 / 16.0));
+    return yw4_pcss_remember(c.zw, lit * (float(fstep) / 16.0));
 }
 
 // The sign of t as -1, 0 or 1, made the game's way (two compares as integers), so that 0 and -0 give +0.
