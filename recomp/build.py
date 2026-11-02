@@ -214,6 +214,21 @@ def main(argv: list[str] | None = None) -> int:
     objs.append(vobj)
     if not vobj.exists() or vobj.stat().st_mtime < vsrc.stat().st_mtime:
         todo.append((vsrc, vobj))
+    # The game's icon in the exe (decision 0048): only when tools.yw4.icon made it from the user's own files
+    ico = cfg.work_dir / "icon" / "yw4.ico"
+    res = objdir / "icon_res.o"
+    if sys.platform == "win32" and ico.is_file():
+        if not res.exists() or res.stat().st_mtime < ico.stat().st_mtime:
+            rc = objdir / "icon.rc"
+            rc.write_text(f'1 ICON "{ico.as_posix()}"\n')  # resource 1: Explorer's icon and the window's (window.c)
+            r = subprocess.run([str(Path(cc).with_name("llvm-windres.exe")), str(rc), "-O", "coff", "-o", str(res)],
+                               capture_output=True, text=True)
+            if r.returncode:
+                print(f"icon resource failed:\n{r.stderr[-1000:]}", file=sys.stderr)
+                return 1
+        objs.append(res)
+    else:
+        res.unlink(missing_ok=True)
 
     t0 = time.time()
     print(f"compiling {len(todo)} of {len(objs)} files with {Path(cc).name} ({args.jobs} jobs)")

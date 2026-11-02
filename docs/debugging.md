@@ -7,6 +7,11 @@ Which build is running ([decision 0047](decisions/0047-versioning.md)): `yw4 --v
 (`YW4 Recomp 0.7.0 (a8b8184, built 2026-11-03)`) without starting the game; the log's first lines and the
 window title say the same. The number is the repo's `VERSION` file; `+dirty` means uncommitted changes.
 
+Where the game looks for its own files ([decision 0048](decisions/0048-home-folder-and-icon.md)): every `work/...`
+path is relative to its home folder, which it changes to at start (the log's `yw4: home` line): `YW4_HOME=<folder>`
+if set, else the folder above `work/` when `yw4.exe` is in `<home>/work/build/`. Relative paths in the variables
+below are relative to it too. The three folders on the command line are made absolute first.
+
 ## Everyday options
 
 | Variable | What it does |

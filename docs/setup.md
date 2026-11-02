@@ -34,7 +34,9 @@ the decompressed `main`).
 4. Check it: `python tools/yw4/config.py` prints the resolved paths, or a clear error saying what is missing.
 5. Decompress and verify the ExeFS modules: `python -m tools.yw4.ingest`. It refuses to continue unless `main`
    matches the build pinned in `target.toml`. Outputs go to `<work_dir>/exefs/`.
-6. Optional: measure the binary and assets with `python -m tools.yw4.recon` (tables in `<work_dir>/recon/`, summary
+6. Optional, Windows: the game's icon for the exe, `python -m tools.yw4.icon` (needs `base_nsp` or `update_nsp`,
+   `hactool_exe` and `keys_dir`; `tools.yw4.extract` already does it). Extracted folders alone hold no icon.
+7. Optional: measure the binary and assets with `python -m tools.yw4.recon` (tables in `<work_dir>/recon/`, summary
    in [recon.md](recon.md)).
 
 ## Build and run

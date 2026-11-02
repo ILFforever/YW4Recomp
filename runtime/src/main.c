@@ -15,6 +15,14 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#ifdef _WIN32
+#include <direct.h>  /* _chdir, _getcwd */
+#else
+#include <limits.h>
+#include <unistd.h>
+#endif
+
+#include <SDL3/SDL_filesystem.h>
 
 #include "kernel.h"
 #include "romfs.h"
@@ -56,13 +64,67 @@ static void start_guest(void *unused) {
 
 void yw4_log_start(void);  /* log.c */
 
+/* The runtime's own files are found by paths starting work/ (shaders, mods, logs, screenshots...), relative to
+ * the current folder. So that the game works from wherever it is started (a double-click, a launcher), it first
+ * goes to its home folder (decision 0048): YW4_HOME if set, else the folder above work/ when yw4.exe sits in
+ * <home>/work/build/ (the layout recomp.build makes, for the owner and for an install), else it stays put. The
+ * paths it was given are made absolute first, so they still name the same folders. */
+static void absolute(char **arg, char *buf, size_t size) {
+#ifdef _WIN32
+    if (_fullpath(buf, *arg, size)) *arg = buf;
+#else
+    if (realpath(*arg, buf)) *arg = buf;  /* buf is PATH_MAX long */
+    (void)size;
+#endif
+}
+
+static void go_home(void) {
+    char home[1024] = "";
+    const char *env = getenv("YW4_HOME");
+    if (env && *env) {
+        snprintf(home, sizeof home, "%s", env);
+    } else {
+        const char *base = SDL_GetBasePath();  /* the exe's folder, ending in a separator */
+        if (!base) return;
+        char dir[1024];
+        snprintf(dir, sizeof dir, "%s", base);
+        size_t n = strlen(dir);
+        while (n && (dir[n - 1] == '/' || dir[n - 1] == '\\')) dir[--n] = 0;  /* .../work/build */
+        char *cut = strrchr(dir, '/'), *cut2 = strrchr(dir, '\\');
+        if (cut2 > cut) cut = cut2;
+        if (!cut) return;
+        *cut = 0;  /* .../work */
+        char *name = strrchr(dir, '/'), *name2 = strrchr(dir, '\\');
+        if (name2 > name) name = name2;
+        if (!name || strcmp(name + 1, "work") != 0) return;  /* not the <home>/work/build layout: stay */
+        *name = 0;
+        snprintf(home, sizeof home, "%s", dir);
+    }
+#ifdef _WIN32
+    if (_chdir(home) != 0) return;
+#else
+    if (chdir(home) != 0) return;
+#endif
+}
+
 int main(int argc, char **argv) {
     if (argc == 2 && !strcmp(argv[1], "--version")) {  /* for the launcher and bug reports: one line on stdout */
         printf("YW4 Recomp %s (%s, built %s)\n", yw4_version, yw4_git_commit, yw4_build_date);
         return 0;
     }
+    static char paths[3][4096];
+    for (int i = 1; i < argc && i <= 3; i++) absolute(&argv[i], paths[i - 1], sizeof paths[i - 1]);
+    go_home();  /* before the log: its folder is a work/ path too */
     yw4_log_start();
     fprintf(stderr, "yw4: YW4 Recomp %s (commit %s, built %s)\n", yw4_version, yw4_git_commit, yw4_build_date);
+    {
+        char cwd[1024];
+#ifdef _WIN32
+        if (_getcwd(cwd, sizeof cwd)) fprintf(stderr, "yw4: home %s\n", cwd);
+#else
+        if (getcwd(cwd, sizeof cwd)) fprintf(stderr, "yw4: home %s\n", cwd);
+#endif
+    }
     settings_load();
     if (argc != 4) {
         fprintf(stderr, "usage: yw4 <exefs work directory with main.bin and sdk.bin> <romfs folder> <save data folder>\n");

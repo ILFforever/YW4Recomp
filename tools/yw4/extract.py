@@ -161,6 +161,12 @@ def main(argv: list[str] | None = None) -> int:
                 f"--romfsdir={cfg.romfs_dir}",
                 str(upd_prog),
             ])
+            # The game's icon for the exe, from the NCAs already here (decision 0048); not having one is no error
+            from . import icon
+            try:
+                print(f"icon: {icon.make(cfg, home, sorted(ncas, key=lambda n: not n.name.startswith('upd-')))}")
+            except (icon.IconError, ExtractError) as e:
+                print(f"icon: none ({e})")
     except (ExtractError, pfs0.Pfs0Error, xci.XciError) as e:
         print(f"extract failed: {e}", file=sys.stderr)
         return 1

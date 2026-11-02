@@ -1008,6 +1008,9 @@ void window_run(void (*guest)(void *), void *arg) {
     const char *headless = getenv("YW4_HEADLESS");
     char title[96];  /* the window's title, with the version (decision 0047) */
     if (!(headless && *headless && *headless != '0')) {
+        /* the game's icon, resource 1 in the exe when the build had one (decision 0048); without it Windows' default */
+        SDL_SetHint(SDL_HINT_WINDOWS_INTRESOURCE_ICON, "1");
+        SDL_SetHint(SDL_HINT_WINDOWS_INTRESOURCE_ICON_SMALL, "1");
         if (!SDL_Init(SDL_INIT_VIDEO | SDL_INIT_GAMEPAD)) {
             fprintf(stderr, "yw4: window: SDL_Init: %s; running headless\n", SDL_GetError());
         } else if (snprintf(title, sizeof title, "Yo-kai Watch 4++ (recompiled) · YW4 Recomp %s", yw4_version) < 0 ||
