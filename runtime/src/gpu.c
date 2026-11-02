@@ -52,6 +52,13 @@ typedef struct {
         VkDeviceMemory mem;
     } staging[MAX_STAGING];
     int nstaging;
+    /* YW4_DETILE_CHECK=1: the GPU's de-tiled bytes and the CPU's for the same levels, compared when the slot
+     * comes round again (the GPU done) */
+    struct {
+        const uint8_t *gpu, *cpu;
+        VkDeviceSize n;
+    } checks[64];
+    int nchecks;
 } Slot;
 static Slot ring[RING];
 static int ring_next;
@@ -190,6 +197,14 @@ static VkCommandBuffer begin(void) {
     geo_reset_if_full();
     collect_times();  /* before the slot's queries are reset below */
     for (int i = 0; i < s->ndesc; i++) CHECK(vkResetDescriptorPool(vk.device, s->desc[i], 0));
+    for (int i = 0; i < s->nchecks; i++) {  /* YW4_DETILE_CHECK: before their staging buffers go */
+        static long checked, wrong;
+        int bad = memcmp(s->checks[i].gpu, s->checks[i].cpu, s->checks[i].n) != 0;
+        checked++, wrong += bad;
+        if (bad || checked % 500 == 0)
+            fprintf(stderr, "yw4: detile check: %ld textures, %ld differ%s\n", checked, wrong, bad ? " (this one)" : "");
+    }
+    s->nchecks = 0;
     for (int i = 0; i < s->nstaging; i++) {
         vkDestroyBuffer(vk.device, s->staging[i].buf, NULL);
         vkFreeMemory(vk.device, s->staging[i].mem, NULL);
@@ -639,6 +654,167 @@ static VkImageAspectFlags aspect_of(VkFormat f) {
 /* Copies t's texels from the game's memory into its image: every level and layer. */
 static void upload_texels(VkCommandBuffer cb, NvnTexture *t, GpuImage *g);
 
+/* ---- textures de-tiled on the GPU (runtime/shaders/detile.comp; YW4_GPU_DETILE=0: on the CPU, tegra.c):
+ * the GPU reads a level's block-linear bytes straight from the game's pool (imported as a buffer) and writes
+ * its rows in order into a ring in video memory, copied into the image after. An area's few hundred new
+ * textures took the CPU ~70 ms at once even with tegra.c's GOB rows (2026-11-02). Levels whose rows aren't
+ * whole 16-byte pieces (the smallest mips) stay on the CPU. */
+enum { DETILE_RING = 64u << 20 };
+static VkBuffer detile_ring;
+static VkDeviceMemory detile_ring_mem;
+static VkDeviceSize detile_head;
+static uint64_t detile_last_seq;  /* the last submission that used the ring */
+static VkPipeline detile_pipe;
+static VkPipelineLayout detile_layout;
+static VkDescriptorSetLayout detile_set_layout;
+static VkDeviceSize detile_align;  /* storage buffer offsets */
+static int detile_state = -1;      /* -1 not tried, 0 off, 1 ready */
+
+typedef struct {
+    uint32_t src_base, dst_base, row16, rows, slices, width_gobs, bh, bd, block_rows;
+} DetileLevel;
+
+static int detile_ready(void) {
+    if (detile_state >= 0) return detile_state;
+    detile_state = 0;
+    if ((getenv("YW4_GPU_DETILE") && !atoi(getenv("YW4_GPU_DETILE"))) || getenv("YW4_DUMP_UPLOAD")) return 0;
+    VkPhysicalDeviceProperties props;
+    vkGetPhysicalDeviceProperties(vk.gpu, &props);
+    detile_align = props.limits.minStorageBufferOffsetAlignment;
+    VkDescriptorSetLayoutBinding b[2] = {
+        {0, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1, VK_SHADER_STAGE_COMPUTE_BIT, NULL},
+        {1, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1, VK_SHADER_STAGE_COMPUTE_BIT, NULL}};
+    VkDescriptorSetLayoutCreateInfo sci = {.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO, .bindingCount = 2,
+                                           .pBindings = b};
+    CHECK(vkCreateDescriptorSetLayout(vk.device, &sci, NULL, &detile_set_layout));
+    VkPushConstantRange pr = {VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(DetileLevel)};
+    VkPipelineLayoutCreateInfo lci = {.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO, .setLayoutCount = 1,
+                                      .pSetLayouts = &detile_set_layout, .pushConstantRangeCount = 1,
+                                      .pPushConstantRanges = &pr};
+    CHECK(vkCreatePipelineLayout(vk.device, &lci, NULL, &detile_layout));
+    VkComputePipelineCreateInfo ci = {
+        .sType = VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO,
+        .stage = {.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO, .stage = VK_SHADER_STAGE_COMPUTE_BIT,
+                  .module = gpu_native_shader("detile.comp"), .pName = "main"},
+        .layout = detile_layout};
+    CHECK(vkCreateComputePipelines(vk.device, VK_NULL_HANDLE, 1, &ci, NULL, &detile_pipe));
+    VkBufferCreateInfo bci = {.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO, .size = DETILE_RING,
+                              .usage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_SRC_BIT};
+    CHECK(vkCreateBuffer(vk.device, &bci, NULL, &detile_ring));
+    VkMemoryRequirements mr;
+    vkGetBufferMemoryRequirements(vk.device, detile_ring, &mr);
+    VkMemoryAllocateInfo mai = {.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO, .allocationSize = mr.size,
+                                .memoryTypeIndex = vk_memory_type(mr.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT)};
+    CHECK(vkAllocateMemory(vk.device, &mai, NULL, &detile_ring_mem));
+    CHECK(vkBindBufferMemory(vk.device, detile_ring, detile_ring_mem, 0));
+    fprintf(stderr, "yw4: gpu: textures de-tiled on the GPU (%u MiB ring)\n", DETILE_RING >> 20);
+    return detile_state = 1;
+}
+
+/* Room for `size` bytes in the ring for the current submission; UINT64_MAX if there is none now (the CPU
+ * de-tiles then). It goes round only once the GPU has run the last submission that used it: waiting for that
+ * in a loading burst cost 83 ms in one frame (2026-11-02). */
+static VkDeviceSize detile_room(VkDeviceSize size) {
+    if (size > DETILE_RING) return UINT64_MAX;
+    if (detile_head + size > DETILE_RING) {
+        if (completed() < detile_last_seq) return UINT64_MAX;
+        detile_head = 0;
+    }
+    VkDeviceSize at = detile_head;
+    detile_head = (at + size + 255) & ~(VkDeviceSize)255;
+    detile_last_seq = cur->seq;
+    return at;
+}
+
+/* Records the GPU de-tiling and the copies into g of the levels of t it can take; the levels done, as a mask
+ * (the rest are the CPU's). Outside rendering. */
+static uint32_t detile(VkCommandBuffer cb, NvnTexture *t, GpuImage *g) {
+    const TexLayout *L = &t->layout;
+    const FormatInfo *f = L->fmt;
+    if (!detile_ready() || !f || !f->bpb || 16 % f->bpb) return 0;
+    NvnPool *p = pool_of(t->addr);
+    uint64_t span = tegra_total_size(L);
+    if (!p || !p->gpu || t->addr + span > p->storage + p->size) return 0;
+    uint64_t start = t->addr - p->storage, layer_size = tegra_layer_size(L);
+    uint32_t mask = 0;
+    VkDeviceSize size = 0;
+    for (uint32_t l = 0; l < g->levels && l < 16; l++) {
+        LevelLayout lv = tegra_level(L, l);
+        uint64_t row = (uint64_t)lv.wb * f->bpb;
+        int aligned = (start + lv.offset) % 16 == 0 && (g->layers < 2 || layer_size % 16 == 0);
+        if (row % 16 || !aligned) continue;
+        mask |= 1u << l;
+        size += row * lv.hb * lv.d * g->layers;
+    }
+    if (!mask) return 0;
+    VkDeviceSize at = detile_room(size);
+    if (at == UINT64_MAX) return 0;
+    uint64_t align = detile_align > 16 ? detile_align : 16;  /* both powers of two */
+    uint64_t bound = start / align * align;  /* the source binding starts here, on a 16-byte piece */
+    VkDescriptorSet set = gpu_alloc_set(detile_set_layout);
+    VkDescriptorBufferInfo bi[2] = {{((GpuPool *)p->gpu)->buf, bound, start + span - bound},
+                                    {detile_ring, 0, DETILE_RING}};
+    VkWriteDescriptorSet w[2];
+    for (int i = 0; i < 2; i++)
+        w[i] = (VkWriteDescriptorSet){.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET, .dstSet = set, .dstBinding = (uint32_t)i,
+                                      .descriptorCount = 1, .descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+                                      .pBufferInfo = &bi[i]};
+    vkUpdateDescriptorSets(vk.device, 2, w, 0, NULL);
+    full_barrier(cb);  /* earlier work on the ring and the image */
+    vkCmdBindPipeline(cb, VK_PIPELINE_BIND_POINT_COMPUTE, detile_pipe);
+    vkCmdBindDescriptorSets(cb, VK_PIPELINE_BIND_POINT_COMPUTE, detile_layout, 0, 1, &set, 0, NULL);
+    VkBufferImageCopy copies[16];
+    uint32_t ncopies = 0;
+    VkDeviceSize off = at;
+    for (uint32_t l = 0; l < g->levels && l < 16; l++) {
+        if (!(mask >> l & 1)) continue;
+        LevelLayout lv = tegra_level(L, l);
+        uint32_t row = lv.wb * f->bpb;
+        VkDeviceSize layer_bytes = (VkDeviceSize)row * lv.hb * lv.d;
+        for (uint32_t k = 0; k < g->layers; k++) {
+            DetileLevel pc = {.src_base = (uint32_t)((start + k * layer_size + lv.offset - bound) / 16),
+                              .dst_base = (uint32_t)((off + k * layer_bytes) / 16), .row16 = row / 16, .rows = lv.hb,
+                              .slices = lv.d, .width_gobs = (row + 63) / 64, .bh = lv.block_height_log2,
+                              .bd = lv.block_depth_log2,
+                              .block_rows = (lv.hb + (8u << lv.block_height_log2) - 1) / (8u << lv.block_height_log2)};
+            uint64_t groups = ((uint64_t)pc.row16 * pc.rows * pc.slices + 63) / 64;
+            uint32_t gx = groups < 65535 ? (uint32_t)groups : 65535, gy = (uint32_t)((groups + gx - 1) / gx);
+            vkCmdPushConstants(cb, detile_layout, VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof pc, &pc);
+            vkCmdDispatch(cb, gx, gy, 1);
+        }
+        copies[ncopies++] = (VkBufferImageCopy){
+            .bufferOffset = off, .imageSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, l, 0, g->layers},
+            .imageExtent = {lv.w, lv.h, lv.d}};
+        off += layer_bytes * g->layers;
+    }
+    full_barrier(cb);
+    vkCmdCopyBufferToImage(cb, detile_ring, g->image, VK_IMAGE_LAYOUT_GENERAL, ncopies, copies);
+    full_barrier(cb);
+    /* YW4_DETILE_CHECK=1: the GPU's bytes copied out, and the CPU's for the same levels, for begin() to compare */
+    static int check = -1;
+    if (check < 0) check = getenv("YW4_DETILE_CHECK") && atoi(getenv("YW4_DETILE_CHECK"));
+    if (check && cur->nchecks < 64 && cur->nstaging + 2 <= MAX_STAGING) {
+        VkBuffer gb, cbuf;
+        uint8_t *gpu = staging(size, &gb), *cpu = staging(size, &cbuf);
+        VkBufferCopy bc = {at, 0, size};
+        vkCmdCopyBuffer(cb, detile_ring, gb, 1, &bc);
+        full_barrier(cb);
+        VkDeviceSize o = 0;
+        for (uint32_t l = 0; l < g->levels && l < 16; l++) {
+            if (!(mask >> l & 1)) continue;
+            LevelLayout lv = tegra_level(L, l);
+            VkDeviceSize layer_bytes = (VkDeviceSize)lv.wb * f->bpb * lv.hb * lv.d;
+            for (uint32_t k = 0; k < g->layers; k++)
+                tegra_read_region(L, (const uint8_t *)(uintptr_t)t->addr, l, k, 0, 0, 0, lv.w, lv.h, lv.d,
+                                  cpu + o + k * layer_bytes);
+            o += layer_bytes * g->layers;
+        }
+        cur->checks[cur->nchecks].gpu = gpu, cur->checks[cur->nchecks].cpu = cpu, cur->checks[cur->nchecks].n = size;
+        cur->nchecks++;
+    }
+    return mask;
+}
+
 static void upload(VkCommandBuffer cb, NvnTexture *t, GpuImage *g) {
     int64_t t0 = host_now_ns();
     upload_texels(cb, t, g);
@@ -652,17 +828,21 @@ static void upload_texels(VkCommandBuffer cb, NvnTexture *t, GpuImage *g) {
     if (g->aspect != VK_IMAGE_ASPECT_COLOR_BIT) return;  /* depth/stencil: rendered, not loaded */
     g->upload_gen = g->checked_gen = write_gen;
     g->uploaded_frame = present_count;
+    uint32_t on_gpu = detile(cb, t, g);  /* the levels the GPU has done; the rest here */
     VkDeviceSize total = 0;
     for (uint32_t l = 0; l < g->levels; l++) {
+        if (l < 16 && on_gpu >> l & 1) continue;
         LevelLayout lv = tegra_level(L, l);
         total += (VkDeviceSize)lv.wb * lv.hb * lv.d * f->bpb * g->layers;
     }
+    if (!total) return;
     VkBuffer buf;
     uint8_t *dst = staging(total, &buf);
     VkBufferImageCopy copies[16];
     uint32_t ncopies = 0;
     VkDeviceSize off = 0;
     for (uint32_t l = 0; l < g->levels && l < 16; l++) {
+        if (on_gpu >> l & 1) continue;
         LevelLayout lv = tegra_level(L, l);
         VkDeviceSize layer_bytes = (VkDeviceSize)lv.wb * lv.hb * lv.d * f->bpb;
         for (uint32_t k = 0; k < g->layers; k++)

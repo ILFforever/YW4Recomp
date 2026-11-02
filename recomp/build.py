@@ -77,14 +77,15 @@ def compile_one(cc: str, src: Path, obj: Path, includes: list[str]) -> str | Non
 
 
 def native_shaders(cfg: config.Config) -> bool:
-    """Our own renderer's shaders (runtime/shaders/*.vert, *.frag; decision 0024) to SPIR-V in
+    """Our own renderer's shaders (runtime/shaders/*.vert, *.frag, *.comp; decision 0024) to SPIR-V in
     work/build/shaders/, where the runtime reads them. Without glslang only a warning: the
     native passes then stay off."""
     from . import shader
     out = cfg.work_dir / "build" / "shaders"
     out.mkdir(parents=True, exist_ok=True)
     exe = shader.glslang(cfg)
-    srcs = sorted([*(RUNTIME / "shaders").glob("*.vert"), *(RUNTIME / "shaders").glob("*.frag")])
+    srcs = sorted([*(RUNTIME / "shaders").glob("*.vert"), *(RUNTIME / "shaders").glob("*.frag"),
+                   *(RUNTIME / "shaders").glob("*.comp")])
     # shared code the programs #include (*.glsl): a change rebuilds them all
     newest_include = max((p.stat().st_mtime for p in (RUNTIME / "shaders").glob("*.glsl")), default=0)
     for src in srcs:

@@ -1,0 +1,36 @@
+// A texture level out of the game's block-linear layout (Tegra GOBs), on the GPU: one invocation per 16-byte
+// piece of the level's tightly packed rows, read from the game's memory pool and written in row order, for a
+// copy into the image after. The address is runtime/src/tegra.c's gob_offset: GOBs of 64 bytes x 8 rows,
+// 2^bh GOBs tall and 2^bd deep per block; inside a GOB, 16-byte sectors.
+#version 450
+
+layout(local_size_x = 64) in;
+
+layout(set = 0, binding = 0, std430) readonly buffer Source { uvec4 src[]; };  // the pool, from the bound offset
+layout(set = 0, binding = 1, std430) writeonly buffer Packed { uvec4 dst[]; };
+
+layout(push_constant) uniform Level {
+    uint src_base;    // the level's start in the bound source, in 16-byte pieces
+    uint dst_base;    // where its rows go, in 16-byte pieces
+    uint row16;       // pieces per row
+    uint rows;        // rows of blocks
+    uint slices;      // depth of a 3D texture (1 otherwise)
+    uint width_gobs;  // the level's width in GOBs
+    uint bh, bd;      // log2 of GOBs per block in height and depth
+    uint block_rows;  // block rows in a slice
+} p;
+
+void main() {
+    // 2D dispatch: x up to 65535 groups
+    uint id = (gl_WorkGroupID.y * gl_NumWorkGroups.x + gl_WorkGroupID.x) * 64u + gl_LocalInvocationID.x;
+    if (id >= p.row16 * p.rows * p.slices) return;
+    uint xb = (id % p.row16) * 16u, y = (id / p.row16) % p.rows, z = id / (p.row16 * p.rows);
+    uint gob_y = y >> 3;
+    uint block_size = 512u << (p.bh + p.bd);
+    uint off = ((z >> p.bd) * p.block_rows + (gob_y >> p.bh)) * p.width_gobs * block_size;
+    off += (xb >> 6) * block_size;
+    off += (((z & ((1u << p.bd) - 1u)) << p.bh) | (gob_y & ((1u << p.bh) - 1u))) * 512u;
+    uint xi = xb & 63u, yi = y & 7u;
+    off += ((xi >> 5) << 8) | ((yi >> 1) << 6) | (((xi >> 4) & 1u) << 5) | ((yi & 1u) << 4);
+    dst[p.dst_base + id] = src[p.src_base + (off >> 4)];
+}
