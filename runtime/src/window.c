@@ -290,6 +290,8 @@ static int vk_init(void) {
         vkEnumerateDeviceExtensionProperties(vk.gpu, NULL, &n, e);
         for (uint32_t i = 0; i < n; i++)
             if (!strcmp(e[i].extensionName, VK_EXT_EXTERNAL_MEMORY_HOST_EXTENSION_NAME)) vk.host_import = 1;
+        for (uint32_t i = 0; i < n; i++)
+            if (!strcmp(e[i].extensionName, VK_EXT_MEMORY_BUDGET_EXTENSION_NAME)) vk.memory_budget = 1;
         for (unsigned k = 0; k < ndlss && ndexts < 14; k++)
             for (uint32_t i = 0; i < n; i++)
                 if (!strcmp(e[i].extensionName, dlss_exts[k])) {
@@ -310,6 +312,8 @@ static int vk_init(void) {
         vk.host_import_align = hp.minImportedHostPointerAlignment;
     }
     fprintf(stderr, "yw4: window: host memory import: %s\n", vk.host_import ? "yes" : "no (no draw path)");
+    if (vk.memory_budget && ndexts < 16) dexts[ndexts++] = VK_EXT_MEMORY_BUDGET_EXTENSION_NAME;  /* gpu_vram */
+    else vk.memory_budget = 0;
 
     /* Features: what the translated shaders (0020) and NVN's state use, where the GPU has it. */
     VkPhysicalDeviceVulkan13Features f13 = {.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_3_FEATURES};

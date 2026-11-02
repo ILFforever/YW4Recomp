@@ -20,7 +20,7 @@
     X(vkGetPhysicalDeviceSurfaceFormatsKHR) X(vkGetPhysicalDeviceMemoryProperties) X(vkCreateDevice)          \
     X(vkGetDeviceProcAddr) X(vkEnumerateDeviceExtensionProperties) X(vkGetPhysicalDeviceFeatures2)            \
     X(vkGetPhysicalDeviceProperties2) X(vkGetPhysicalDeviceFormatProperties)                                  \
-    X(vkGetPhysicalDeviceSurfacePresentModesKHR)
+    X(vkGetPhysicalDeviceSurfacePresentModesKHR) X(vkGetPhysicalDeviceMemoryProperties2)
 #define VK_DEVICE_FNS(X)                                                                                      \
     X(vkGetDeviceQueue) X(vkCreateSwapchainKHR) X(vkDestroySwapchainKHR) X(vkGetSwapchainImagesKHR)          \
     X(vkAcquireNextImageKHR) X(vkQueuePresentKHR) X(vkCreateCommandPool) X(vkAllocateCommandBuffers)         \
@@ -59,6 +59,7 @@ typedef struct {
     HostLock queue_lock;
     VkPhysicalDeviceProperties props;
     int host_import;               /* VK_EXT_external_memory_host is enabled */
+    int memory_budget;             /* VK_EXT_memory_budget is enabled: video memory use (gpu_vram) */
     int sampler_anisotropy;        /* the samplerAnisotropy feature is enabled */
     VkDeviceSize host_import_align;
 } VkContext;

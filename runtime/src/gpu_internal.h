@@ -81,7 +81,9 @@ struct GpuImage {
     uint64_t last_frame;      /* frame it was last used in, and the submission: for freeing */
     uint64_t last_seq;
     VkImage image;
-    VkDeviceMemory mem;
+    VkDeviceMemory mem;            /* its own allocation, or NULL: a slice of a shared block (gpu.c) */
+    struct MemBlock *block;
+    VkDeviceSize mem_off, mem_size;
     VkFormat format;
     VkImageAspectFlags aspect;
     uint32_t width, height, depth, layers, levels;

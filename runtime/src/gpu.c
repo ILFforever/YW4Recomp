@@ -659,7 +659,10 @@ static void upload_texels(VkCommandBuffer cb, NvnTexture *t, GpuImage *g);
  * its rows in order into a ring in video memory, copied into the image after. An area's few hundred new
  * textures took the CPU ~70 ms at once even with tegra.c's GOB rows (2026-11-02). Levels whose rows aren't
  * whole 16-byte pieces (the smallest mips) stay on the CPU. */
-enum { DETILE_RING = 64u << 20 };
+/* 256 MiB: an area's 380 textures are ~130 MiB in one submission, where the ring can't go round; 64 MiB left
+ * 47-91 MiB of them to the CPU. Video memory at the owner's 4K 21:9 settings peaked at 3.8 of 7.2 GB
+ * (2026-11-02, the vram log). */
+enum { DETILE_RING = 256u << 20 };
 static VkBuffer detile_ring;
 static VkDeviceMemory detile_ring_mem;
 static VkDeviceSize detile_head;
@@ -714,12 +717,14 @@ static int detile_ready(void) {
 /* Room for `size` bytes in the ring for the current submission; UINT64_MAX if there is none now (the CPU
  * de-tiles then). It goes round only once the GPU has run the last submission that used it: waiting for that
  * in a loading burst cost 83 ms in one frame (2026-11-02). */
+static long detile_busy, detile_busy_bytes;  /* textures that found no room: the stall report's */
+
 static VkDeviceSize detile_room(VkDeviceSize size) {
-    if (size > DETILE_RING) return UINT64_MAX;
-    if (detile_head + size > DETILE_RING) {
-        if (completed() < detile_last_seq) return UINT64_MAX;
-        detile_head = 0;
+    if (size > DETILE_RING || (detile_head + size > DETILE_RING && completed() < detile_last_seq)) {
+        detile_busy++, detile_busy_bytes += (long)size;
+        return UINT64_MAX;
     }
+    if (detile_head + size > DETILE_RING) detile_head = 0;
     VkDeviceSize at = detile_head;
     detile_head = (at + size + 255) & ~(VkDeviceSize)255;
     detile_last_seq = cur->seq;
@@ -1174,6 +1179,130 @@ int gpu_needs_transfer(const NvnTexture *t) {
 
 static void image_destroy(GpuImage *g);  /* below, after GpuView */
 
+/* ---- image memory: images up to IMAGE_SLICE_MAX take slices of shared IMAGE_BLOCK blocks; an allocation of
+ * their own each (0.11 ms) was ~40 ms of an area's 380 new textures (2026-11-02). Bigger ones (screen targets)
+ * keep their own. YW4_IMAGE_BLOCKS=0: every image its own. Only optimal-tiling images share a block, so the
+ * buffer-image granularity doesn't matter. gpu_lock held. */
+enum { IMAGE_BLOCK = 64u << 20, IMAGE_SLICE_MAX = 16u << 20 };
+typedef struct {
+    VkDeviceSize off, size;
+} FreeRange;
+typedef struct MemBlock {
+    struct MemBlock *next;
+    VkDeviceMemory mem;
+    uint32_t type;
+    VkDeviceSize used;
+    FreeRange *free;  /* by offset, neighbours merged */
+    int nfree, cap;
+} MemBlock;
+static MemBlock *blocks;
+
+static void range_insert(MemBlock *b, int i, VkDeviceSize off, VkDeviceSize size) {
+    if (b->nfree == b->cap) {
+        b->cap = b->cap ? 2 * b->cap : 16;
+        b->free = realloc(b->free, (size_t)b->cap * sizeof *b->free);
+        if (!b->free) gpu_stop("no memory for an image block's free list");
+    }
+    memmove(&b->free[i + 1], &b->free[i], (size_t)(b->nfree - i) * sizeof *b->free);
+    b->free[i] = (FreeRange){off, size};
+    b->nfree++;
+}
+
+static void range_remove(MemBlock *b, int i) {
+    memmove(&b->free[i], &b->free[i + 1], (size_t)(b->nfree - i - 1) * sizeof *b->free);
+    b->nfree--;
+}
+
+/* First fit: the offset of `size` bytes aligned to `align` in b, or UINT64_MAX. */
+static VkDeviceSize block_take(MemBlock *b, VkDeviceSize size, VkDeviceSize align) {
+    for (int i = 0; i < b->nfree; i++) {
+        FreeRange r = b->free[i];
+        VkDeviceSize at = (r.off + align - 1) / align * align, end = r.off + r.size;
+        if (at + size > end) continue;
+        if (at > r.off) {  /* the bit before stays free */
+            b->free[i].size = at - r.off;
+            if (at + size < end) range_insert(b, i + 1, at + size, end - (at + size));
+        } else if (at + size < end) {
+            b->free[i] = (FreeRange){at + size, end - (at + size)};
+        } else {
+            range_remove(b, i);
+        }
+        b->used += size;
+        return at;
+    }
+    return UINT64_MAX;
+}
+
+static void block_give(MemBlock *b, VkDeviceSize off, VkDeviceSize size) {
+    int i = 0;
+    while (i < b->nfree && b->free[i].off < off) i++;
+    range_insert(b, i, off, size);
+    if (i + 1 < b->nfree && b->free[i].off + b->free[i].size == b->free[i + 1].off)  /* with the one after */
+        b->free[i].size += b->free[i + 1].size, range_remove(b, i + 1);
+    if (i > 0 && b->free[i - 1].off + b->free[i - 1].size == b->free[i].off)  /* with the one before */
+        b->free[i - 1].size += b->free[i].size, range_remove(b, i);
+    b->used -= size;
+}
+
+/* Memory for g's image, bound: a slice of a block, else its own. */
+static void image_memory(GpuImage *g) {
+    VkMemoryRequirements mr;
+    vkGetImageMemoryRequirements(vk.device, g->image, &mr);
+    uint32_t type = vk_memory_type(mr.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
+    static int on = -1;
+    if (on < 0) on = !getenv("YW4_IMAGE_BLOCKS") || atoi(getenv("YW4_IMAGE_BLOCKS"));
+    if (on && mr.size <= IMAGE_SLICE_MAX) {
+        MemBlock *b;
+        VkDeviceSize at = UINT64_MAX;
+        for (b = blocks; b; b = b->next)
+            if (b->type == type && (at = block_take(b, mr.size, mr.alignment)) != UINT64_MAX) break;
+        if (!b && (b = calloc(1, sizeof *b))) {
+            VkMemoryAllocateInfo mai = {.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO, .allocationSize = IMAGE_BLOCK,
+                                        .memoryTypeIndex = type};
+            if (vkAllocateMemory(vk.device, &mai, NULL, &b->mem) == VK_SUCCESS) {
+                b->type = type;
+                range_insert(b, 0, 0, IMAGE_BLOCK);
+                b->next = blocks, blocks = b;
+                at = block_take(b, mr.size, mr.alignment);
+            } else {
+                free(b), b = NULL;  /* no room for a block: an allocation of its own */
+            }
+        }
+        if (b && at != UINT64_MAX) {
+            g->block = b, g->mem_off = at, g->mem_size = mr.size;
+            CHECK(vkBindImageMemory(vk.device, g->image, b->mem, at));
+            return;
+        }
+    }
+    VkMemoryAllocateInfo mai = {.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO, .allocationSize = mr.size,
+                                .memoryTypeIndex = type};
+    CHECK(vkAllocateMemory(vk.device, &mai, NULL, &g->mem));
+    CHECK(vkBindImageMemory(vk.device, g->image, g->mem, 0));
+}
+
+/* image_destroy: g's memory back (after its image is destroyed). A block that empties goes too, unless it is
+ * its memory type's last. */
+static void image_memory_free(GpuImage *g) {
+    if (!g->block) {
+        vkFreeMemory(vk.device, g->mem, NULL);
+        return;
+    }
+    MemBlock *b = g->block;
+    block_give(b, g->mem_off, g->mem_size);
+    if (b->used) return;
+    int others = 0;
+    for (MemBlock *o = blocks; o; o = o->next) others |= o != b && o->type == b->type;
+    if (!others) return;
+    for (MemBlock **pp = &blocks; *pp; pp = &(*pp)->next)
+        if (*pp == b) {
+            *pp = b->next;
+            break;
+        }
+    vkFreeMemory(vk.device, b->mem, NULL);
+    free(b->free);
+    free(b);
+}
+
 /* Images taken out of the table, the GPU done with them, waiting to be destroyed a few a frame:
  * destroying a few hundred at once (an area's textures after leaving it) stalled one frame for
  * 55-92 ms (2026-11-02, the owner's session). */
@@ -1280,12 +1409,7 @@ GpuImage *image_of(VkCommandBuffer cb, NvnTexture *t) {
         .samples = VK_SAMPLE_COUNT_1_BIT, .tiling = VK_IMAGE_TILING_OPTIMAL, .usage = usage,
         .initialLayout = VK_IMAGE_LAYOUT_UNDEFINED};
     CHECK(vkCreateImage(vk.device, &ici, NULL, &g->image));
-    VkMemoryRequirements mr;
-    vkGetImageMemoryRequirements(vk.device, g->image, &mr);
-    VkMemoryAllocateInfo mai = {.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO, .allocationSize = mr.size,
-                                .memoryTypeIndex = vk_memory_type(mr.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT)};
-    CHECK(vkAllocateMemory(vk.device, &mai, NULL, &g->mem));
-    CHECK(vkBindImageMemory(vk.device, g->image, g->mem, 0));
+    image_memory(g);
     VkImageSubresourceRange all = {g->aspect, 0, VK_REMAINING_MIP_LEVELS, 0, VK_REMAINING_ARRAY_LAYERS};
     VkImageMemoryBarrier b = {.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER, .dstAccessMask = VK_ACCESS_MEMORY_WRITE_BIT,
                               .oldLayout = VK_IMAGE_LAYOUT_UNDEFINED, .newLayout = VK_IMAGE_LAYOUT_GENERAL,
@@ -1334,7 +1458,7 @@ static void image_destroy(GpuImage *g) {
         free(v);
     }
     vkDestroyImage(vk.device, g->image, NULL);
-    vkFreeMemory(vk.device, g->mem, NULL);
+    image_memory_free(g);
     free(g);
 }
 
@@ -1772,6 +1896,30 @@ void gpu_stall_add(int kind, int64_t ns) {
     __atomic_add_fetch(&stall_n[kind], 1, __ATOMIC_RELAXED);
 }
 
+/* ---- video memory (VK_EXT_memory_budget): this process's use of the device-local heaps and the budget the
+ * driver gives it, sampled every present; every 600 frames a line with the peak since the last. */
+static void vram_sample(uint64_t frame) {
+    if (!vk.memory_budget) return;
+    VkPhysicalDeviceMemoryBudgetPropertiesEXT b = {.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MEMORY_BUDGET_PROPERTIES_EXT};
+    VkPhysicalDeviceMemoryProperties2 p = {.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MEMORY_PROPERTIES_2, .pNext = &b};
+    vkGetPhysicalDeviceMemoryProperties2(vk.gpu, &p);
+    uint64_t used = 0, budget = 0, size = 0;
+    for (uint32_t i = 0; i < p.memoryProperties.memoryHeapCount; i++)
+        if (p.memoryProperties.memoryHeaps[i].flags & VK_MEMORY_HEAP_DEVICE_LOCAL_BIT)
+            used += b.heapUsage[i], budget += b.heapBudget[i], size += p.memoryProperties.memoryHeaps[i].size;
+    static uint64_t peak;
+    if (used > peak) peak = used;
+    if (frame % 600) return;
+    int nblocks = 0;
+    VkDeviceSize in_blocks = 0;
+    for (MemBlock *m = blocks; m; m = m->next) nblocks++, in_blocks += m->used;
+    fprintf(stderr, "yw4: vram: %" PRIu64 " MiB used, peak %" PRIu64 " MiB since the last line, budget %" PRIu64 " MiB of %" PRIu64
+            " MiB; image blocks %d x %u MiB (%" PRIu64 " MiB in use), de-tiling ring %u MiB\n",
+            used >> 20, peak >> 20, budget >> 20, size >> 20, nblocks, IMAGE_BLOCK >> 20, (uint64_t)in_blocks >> 20,
+            detile_ring ? DETILE_RING >> 20 : 0);
+    peak = 0;
+}
+
 /* gpu_present, at its end: a line when the frame's command lists and present took over YW4_STALL_MS (default
  * 50; 0 = never), with the share of each thing that can stall them. */
 static void stall_report(uint64_t frame) {
@@ -1781,7 +1929,11 @@ static void stall_report(uint64_t frame) {
     long n[STALL_KINDS];
     for (int k = 0; k < STALL_KINDS; k++)
         ns[k] = __atomic_exchange_n(&stall_ns[k], 0, __ATOMIC_RELAXED), n[k] = __atomic_exchange_n(&stall_n[k], 0, __ATOMIC_RELAXED);
+    long busy = detile_busy, busy_bytes = detile_busy_bytes;
+    detile_busy = detile_busy_bytes = 0;
     if (!limit || ns[STALL_EXEC] + ns[STALL_PRESENT] < limit) return;
+    if (busy) fprintf(stderr, "yw4: stall: frame %" PRIu64 ": %ld textures (%ld MiB) found the de-tiling ring busy: on the CPU\n",
+                      frame, busy, busy_bytes >> 20);
     /* what the parts don't explain (a new image's upload is inside images made, so uploads aren't taken off: other
      * includes re-uploads of changed textures; the command-buffer wait is one of the GPU waits) */
     double other = (ns[STALL_EXEC] + ns[STALL_PRESENT] - ns[STALL_LOCK] - ns[STALL_PIPE] - ns[STALL_IMAGE] -
@@ -2018,6 +2170,7 @@ void gpu_present(NvnTexture *t, uint64_t frame, const int crop[4]) {
     gpu_in_work = 0;
     gpu_stall_add(STALL_PRESENT, host_now_ns() - present_t0);  /* not the window's wait for the display */
     stall_report(present_count);
+    vram_sample(present_count);
     VkRect2D r = {{0, 0}, {g->width, g->height}};
     /* the crop, in the game's pixels: scaled with the window image (YW4_RES) */
     uint32_t cx = gpu_scaled(gpu_scaled(crop[0] > 0 ? (uint32_t)crop[0] : 0, g->scale_num, g->scale_den), g->wide_num,
