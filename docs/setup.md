@@ -38,7 +38,7 @@ the decompressed `main`).
 ## Build and run
 
 ```
-python -m recomp.translate      # main and sdk -> <work_dir>/recomp/ (C, never committed; ~1 min)
+python -m recomp.translate      # main and sdk -> <work_dir>/recomp/ (C, never committed; ~30 s on 16 threads)
 python -m tools.yw4.shaders     # pull the game's shader assembly out -> <work_dir>/shaders/asm/
 python -m recomp.shader --check # translate to GLSL, compile to SPIR-V (needs [tools] glslang)
 python -m recomp.build --run    # build <work_dir>/build/yw4.exe and run it

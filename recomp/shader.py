@@ -995,6 +995,28 @@ def glslang(cfg: config.Config) -> str | None:
     return shutil.which("glslangValidator") or shutil.which("glslang")
 
 
+def one_shader(job) -> tuple[str, str, str | None, list[str] | None]:
+    """Translate one shader, write its GLSL, interface and .iface, then compile it when glslang is given.
+    Returns (key, stage, translation error or None, glslang errors or None); runs in a worker process."""
+    f, out, exe, names = job
+    key, stage = f.name.split(".")[:2]
+    try:
+        glsl, iface = translate(key, stage, f.read_text())
+    except (ShaderError, KeyError, ValueError) as e:
+        msg = f"{type(e).__name__}: {e}" if not isinstance(e, ShaderError) else str(e)
+        return key, stage, re.sub(r"\d+", "N", msg)[:70], None
+    g = out / f"{key}.{stage}"
+    g.write_text(glsl)
+    (out / f"{key}.json").write_text(json.dumps(iface))
+    (out / f"{key}.iface").write_text(iface_text(iface, names))
+    if not exe:
+        return key, stage, None, None
+    r = subprocess.run([exe, "-V", "--target-env", "vulkan1.2", "-o", str(g) + ".spv", str(g)],
+                       capture_output=True, text=True)
+    msgs = [ln for ln in (r.stdout + r.stderr).splitlines() if ln.startswith("ERROR") and "compilation" not in ln]
+    return key, stage, None, msgs if r.returncode else None
+
+
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     ap.add_argument("--check", action="store_true", help="compile the GLSL to SPIR-V with glslangValidator")
@@ -1019,33 +1041,17 @@ def main(argv: list[str] | None = None) -> int:
     index = json.loads(index_path.read_text()) if index_path.is_file() else {}
     errors: dict[str, list[str]] = {}
     bad_compile = []
-    written = []
-    for f in files:
-        key, stage = f.name.split(".")[:2]
-        try:
-            glsl, iface = translate(key, stage, f.read_text())
-        except (ShaderError, KeyError, ValueError) as e:
-            msg = f"{type(e).__name__}: {e}" if not isinstance(e, ShaderError) else str(e)
-            errors.setdefault(re.sub(r"\d+", "N", msg)[:70], []).append(key)
-            continue
-        g = out / f"{key}.{stage}"
-        g.write_text(glsl)
-        (out / f"{key}.json").write_text(json.dumps(iface))
-        names = {r["slot"]: r["name"] for r in index.get(key, {}).get("resources", []) if r["kind"] == "cbuffer"}
-        (out / f"{key}.iface").write_text(iface_text(iface, names))
-        written.append((key, stage, g))
-
-    def compile_one(item):
-        key, stage, g = item
-        r = subprocess.run([exe, "-V", "--target-env", "vulkan1.2", "-o", str(g) + ".spv", str(g)],
-                           capture_output=True, text=True)
-        msgs = [ln for ln in (r.stdout + r.stderr).splitlines() if ln.startswith("ERROR") and "compilation" not in ln]
-        return (key, stage, msgs) if r.returncode else None
-
-    if exe:
-        from concurrent.futures import ThreadPoolExecutor
-        with ThreadPoolExecutor() as pool:
-            bad_compile = [b for b in pool.map(compile_one, written) if b]
+    # One shader per job, on every core: translating is Python (one core per process), and each job compiles its
+    # own shader right away, so the two halves overlap.
+    jobs = [(f, out, exe, {r["slot"]: r["name"] for r in index.get(f.name.split(".")[0], {}).get("resources", [])
+                           if r["kind"] == "cbuffer"}) for f in files]
+    from concurrent.futures import ProcessPoolExecutor
+    with ProcessPoolExecutor() as pool:
+        for key, stage, err, msgs in pool.map(one_shader, jobs, chunksize=8):
+            if err is not None:
+                errors.setdefault(err, []).append(key)
+            elif msgs is not None:
+                bad_compile.append((key, stage, msgs))
     done = len(files) - sum(len(v) for v in errors.values())
     print(f"translated {done}/{len(files)}")
     for msg, keys in sorted(errors.items(), key=lambda kv: -len(kv[1])):

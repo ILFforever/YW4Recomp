@@ -247,22 +247,53 @@ def setjmp_entries(modules: list[Module], symbolic: list[list], entries: list[se
     return out
 
 
+# Each function is found and translated on its own (nothing is shared between functions but the counts in
+# EmitStats), so worker processes take slices of the sorted entries; the results come back in that order, so the
+# output is the same as one process's. The module image and tables go to each worker once (initializer).
+_work = None
+
+
+def _work_init(*args) -> None:
+    global _work
+    _work = args
+
+
+def _work_batch(batch: list[int]) -> tuple[list[tuple[function.Function, str]], function.EmitStats]:
+    code, prefix, entries, overrides, setjmps, hooks, at_hooks = _work
+    stats = function.EmitStats()
+    out = []
+    for e in batch:
+        fn = function.discover(code, e, entries)
+        native = overrides.get(e)
+        if native:  # the address stays a function; its body is the native code
+            src = (f"void {native}(CPUState *ctx);  /* override (recomp/overrides.toml) */\n"
+                   f"void {function.fname(e, prefix)}(CPUState *ctx) {{ {native}(ctx); }}")
+        else:
+            src = function.emit_function(code, fn, entries, coverage.subgroup, stats, setjmps,
+                                         hooks.get(e), at_hooks.get(e))
+        out.append((fn, src))
+    return out, stats
+
+
 def translate(cfg: config.Config, m: Module, overrides: dict[int, str], entries: set[int],
               setjmps: frozenset[int], hooks: dict[int, str],
               at_hooks: dict[int, dict[int, str]]) -> tuple[list[function.Function], list[str]]:
     code = m.code
-    funcs = [function.discover(code, e, entries) for e in sorted(entries)]
+    order = sorted(entries)
+    batches = [order[i:i + 256] for i in range(0, len(order), 256)]
     stats = function.EmitStats()
-    sources = []
-    for fn in funcs:
-        native = overrides.get(fn.entry)
-        if native:  # the address stays a function; its body is the native code
-            name = function.fname(fn.entry, m.prefix)
-            sources.append(f"void {native}(CPUState *ctx);  /* override (recomp/overrides.toml) */\n"
-                           f"void {name}(CPUState *ctx) {{ {native}(ctx); }}")
-        else:
-            sources.append(function.emit_function(code, fn, entries, coverage.subgroup, stats, setjmps,
-                                                  hooks.get(fn.entry), at_hooks.get(fn.entry)))
+    funcs, sources = [], []
+    from concurrent.futures import ProcessPoolExecutor
+    with ProcessPoolExecutor(initializer=_work_init,
+                             initargs=(code, m.prefix, entries, overrides, setjmps, hooks, at_hooks)) as pool:
+        for done, part in pool.map(_work_batch, batches):
+            for fn, src in done:
+                funcs.append(fn)
+                sources.append(src)
+            for g, n in part.unimplemented.items():
+                stats.unimplemented[g] = stats.unimplemented.get(g, 0) + n
+            stats.cached += part.cached
+            stats.not_cached += part.not_cached
     missing = (set(overrides) | set(hooks) | set(at_hooks)) - {fn.entry for fn in funcs}
     if missing:
         raise RuntimeError(f"{m.name}: overridden or hooked functions not found: {sorted(map(hex, missing))}")
