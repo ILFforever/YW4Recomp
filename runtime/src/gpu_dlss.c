@@ -106,10 +106,12 @@ static int create(VkCommandBuffer cb, const GpuDlssInputs *in) {
     cp.Feature.InTargetWidth = in->output_w, cp.Feature.InTargetHeight = in->output_h;
     cp.Feature.InPerfQualityValue = (NVSDK_NGX_PerfQuality_Value)perf[in->quality & 3];
     cp.InFeatureCreateFlags = NVSDK_NGX_DLSS_Feature_Flags_MVLowRes | NVSDK_NGX_DLSS_Feature_Flags_AutoExposure;
-    /* the model for every mode: fast = preset E, best = DLSS's own defaults (0); YW4_DLSS_PRESET=<letter> forces one
-     * (K for DLAA/quality/balanced and M for performance are the transformer defaults; E/F the CNN, deprecated) */
+    /* the model for every mode: the transformer preset K (fast = the CNN's E, tests only); YW4_DLSS_PRESET=<letter>
+     * forces one. DLSS's own default for performance is M, the second-generation transformer: at 4K 21:9 output it
+     * cost 7.4 ms against K's 5.3, so performance mode was slower than quality (2026-11-02; NVIDIA's defaults are K
+     * for DLAA/quality/balanced, M for performance, L for ultra performance). */
     const char *pe = getenv("YW4_DLSS_PRESET");
-    unsigned v = model ? 0 : NVSDK_NGX_DLSS_Hint_Render_Preset_E;
+    unsigned v = model ? NVSDK_NGX_DLSS_Hint_Render_Preset_K : NVSDK_NGX_DLSS_Hint_Render_Preset_E;
     if (pe && *pe >= 'A' && *pe <= 'Z') v = (unsigned)(*pe - 'A' + 1);
     {
         static const char *const hints[] = {
