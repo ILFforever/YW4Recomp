@@ -75,6 +75,7 @@ a:hover { color: var(--violet); }
 .btn.ghost:hover { color: var(--gold); background: oklch(80% 0.12 85 / .12); }
 .demo { background: var(--white); border-radius: var(--r); padding: 8px; box-shadow: 0 18px 40px oklch(15% 0.08 295 / .5); }
 .demo .hint { margin: 8px 6px 2px; color: var(--ink-2); }
+.demo .scenes { display: flex; flex-wrap: wrap; gap: 4px; margin: 8px 2px 0; }
 
 /* layout */
 .shell { max-width: 1280px; margin: 0 auto; padding: 40px 20px 72px; display: grid; grid-template-columns: 236px minmax(0, 1fr); gap: 40px; align-items: start; }
@@ -219,7 +220,7 @@ footer a { color: var(--gold); }
         <a class="btn ghost" href="https://github.com/ILFforever/YW4Recomp">Project on GitHub</a>
       </div>
     </div>
-    <div class="demo" data-hero="shadows"></div>
+    <div class="demo" data-hero="hero"></div>
   </div>
 </header>
 
@@ -430,6 +431,10 @@ const CMP = {
     { name: 'Hedges', set: [[OFF, 'contact-hedges-off.jpg'], ['On', 'contact-hedges-on.jpg']] },
     { name: 'Yo-kai World street: the railing, the cherry tree, the windowsills', set: [[OFF, 'contact-yokaiworld-off.jpg'], ['On', 'contact-yokaiworld-on.jpg']] }] },
   shadows: { rows: [{ set: [["Switch (the game's)", '20-shadows-stock.jpg'], ['Ours', '21-shadows-improved.jpg']] }] },
+  // the header: each scene at the Switch's settings (1600×900, scaled up) and at 3840×2160 with every setting at its highest
+  hero: { rows: [['Bamboo forest', 'forest'], ['Yo-kai World', 'yokaiworld'], ['School front', 'schoolfront'],
+    ['Springdale, the past', 'past'], ['Adams house', 'adams'], ['Schoolyard', 'school']].map(([name, f]) =>
+    ({ name, set: [['Switch', `hero-${f}-switch.jpg`], ['4K high', `hero-${f}-4k.jpg`]] })) },
   shadowmap: { rows: [{ set: [["1024 (the game's)", '12-shadow-map-1024.jpg'], ['2048', '13-shadow-map-2048.jpg'],
     ['4096', '14-shadow-map-4096.jpg']] }] },
   pcss: { rows: [{ set: [['Off', '16-pcss-off.jpg'], ['×1', '17-pcss-x1.jpg'], ['×2', '18-pcss-x2.jpg'], ['×4', '19-pcss-x4.jpg']] }] },
@@ -519,11 +524,23 @@ for (const el of document.querySelectorAll('[data-cmp]')) {
     el.append(comparison(row, row.pixel ?? c.pixel, false));
   }
 }
+// The header: one comparison and a button per scene; a scene's button swaps the comparison for that scene's.
 const hero = document.querySelector('[data-hero]');
-hero.append(comparison(CMP[hero.dataset.hero].rows[0], false, true));
+const heroRows = CMP[hero.dataset.hero].rows;
+let heroFig = comparison(heroRows[0], false, true);
+const scenes = document.createElement('div'); scenes.className = 'scenes'; scenes.setAttribute('aria-label', 'Scene');
+heroRows.forEach((row, k) => {
+  const c = document.createElement('button'); c.type = 'button'; c.className = 'chip'; c.textContent = row.name;
+  c.setAttribute('aria-pressed', k === 0);
+  c.onclick = () => {
+    const f = comparison(row, false, true); heroFig.replaceWith(f); heroFig = f;
+    scenes.querySelectorAll('.chip').forEach((b, j) => b.setAttribute('aria-pressed', j === k));
+  };
+  scenes.append(c);
+});
 const hint = document.createElement('p'); hint.className = 'hint';
-hint.textContent = 'Drag the line (or use the arrow keys); the corner button or F shows it full screen. The Switch on the left, this project on the right.';
-hero.append(hint);
+hint.textContent = 'Drag the line (or use the arrow keys); the corner button or F shows it full screen. The Switch on the left, 4K high on the right.';
+hero.append(heroFig, scenes, hint);
 
 const uw = document.getElementById('uw');
 for (const [f, cap] of ULTRAWIDE) {

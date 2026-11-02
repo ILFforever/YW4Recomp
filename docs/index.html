@@ -50,6 +50,12 @@ h1 { font: 800 clamp(2.4rem, 1.6rem + 3.4vw, 4.2rem)/1.04 var(--display); margin
 .shot { background: var(--white); border-radius: var(--r); padding: 8px; box-shadow: 0 18px 40px oklch(15% 0.08 295 / .5); margin: 0; }
 .shot img { display: block; width: 100%; height: auto; border-radius: 8px; }
 .shot figcaption { color: var(--ink-2); font-size: .8rem; margin: 8px 6px 2px; }
+/* the header's slideshow: the pictures stacked in one 16:9 box, the current one faded in */
+.slides .frames { position: relative; aspect-ratio: 16 / 9; border-radius: 8px; overflow: hidden; background: var(--violet-deep); }
+.slides .frames img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; border-radius: 0;
+  opacity: 0; transition: opacity 1.2s var(--ease); }
+.slides .frames img.on { opacity: 1; }
+@media (prefers-reduced-motion: reduce) { .slides .frames img { transition: none; } }
 
 main { max-width: 1180px; margin: 0 auto; padding: 40px 20px 64px; display: grid; gap: 28px; }
 .panel { background: var(--white); border-radius: var(--r); border: 1px solid var(--lilac-3); overflow: hidden; }
@@ -103,9 +109,16 @@ footer a { color: var(--gold); }
         <a class="btn ghost" href="https://github.com/ILFforever/YW4Recomp">Project on GitHub</a>
       </div>
     </div>
-    <figure class="shot">
-      <img src="compare/img/res-4k.jpg" alt="A town street in Yo-kai Watch 4++, running in the recompiled port at 3840×2160">
-      <figcaption>A town street, recompiled and running natively at 3840×2160.</figcaption>
+    <figure class="shot slides" aria-roledescription="slideshow" aria-label="Screenshots at 3840×2160">
+      <div class="frames">
+        <img src="compare/img/hero-forest-4k.jpg" class="on" alt="Mystic Grove, a bamboo forest by a river, at 3840×2160" data-cap="Mystic Grove · a bamboo forest by the river">
+        <img src="compare/img/hero-yokaiworld-4k.jpg" loading="lazy" alt="A Yo-kai World street under cherry blossoms, at 3840×2160" data-cap="Yo-kai World · a street under the cherry blossoms">
+        <img src="compare/img/hero-schoolfront-4k.jpg" loading="lazy" alt="The front of the school with its statue, at 3840×2160" data-cap="Uptown Springdale · in front of the school">
+        <img src="compare/img/hero-past-4k.jpg" loading="lazy" alt="A snowy shopping street in the past at evening, at 3840×2160" data-cap="Springdale in the past · a snowy evening street">
+        <img src="compare/img/hero-adams-4k.jpg" loading="lazy" alt="The street in front of the Adams house, at 3840×2160" data-cap="Uptown Springdale · in front of the Adams house">
+        <img src="compare/img/hero-school-4k.jpg" loading="lazy" alt="The schoolyard on a sunny day, at 3840×2160" data-cap="Uptown Springdale · the schoolyard">
+      </div>
+      <figcaption><span class="cap">Mystic Grove · a bamboo forest by the river</span> · 4K high</figcaption>
     </figure>
   </div>
 </header>
@@ -184,5 +197,21 @@ footer a { color: var(--gold); }
     <span><a href="https://github.com/ILFforever/YW4Recomp">github.com/ILFforever/YW4Recomp</a></span>
   </div>
 </footer>
+<script>
+// The header's slideshow: the next picture every 5 s (once it has loaded), paused while the tab is hidden;
+// it stays on the first one when the reader asks for less motion.
+(() => {
+  const imgs = [...document.querySelectorAll('.slides .frames img')], cap = document.querySelector('.slides .cap');
+  if (imgs.length < 2 || matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+  for (const img of imgs) img.loading = 'eager';  // fetch the rest now so each fade has its picture
+  let i = 0;
+  setInterval(() => {
+    if (document.hidden) return;
+    const n = (i + 1) % imgs.length;
+    if (!imgs[n].complete || !imgs[n].naturalWidth) return;
+    imgs[i].classList.remove('on'); imgs[n].classList.add('on'); cap.textContent = imgs[n].dataset.cap; i = n;
+  }, 5000);
+})();
+</script>
 </body>
 </html>
