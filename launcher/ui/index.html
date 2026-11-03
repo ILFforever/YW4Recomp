@@ -180,6 +180,46 @@
     </div>
   </main>
 
+  <!-- 5 · Ready: the everyday screen once the game is built -->
+  <main class="screen ready" data-screen="ready" hidden>
+    <section class="ready-main">
+      <div class="offer" id="offer" hidden>
+        <span><b>Setup is done.</b> Your original game files aren't needed any more.</span>
+        <button class="btn small" type="button" id="offer-keep">Keep them</button>
+        <button class="btn small primary" type="button" id="offer-delete">Delete…</button>
+      </div>
+      <div class="picture">
+        <img id="picture" alt="">
+        <div class="picture-title"><span class="art-title">Yo-kai Watch 4 Recomp</span><span class="art-sub">Developed by ILFforever</span></div>
+      </div>
+      <div class="play-row">
+        <button class="btn primary play" type="button" id="play">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M7 4.5v15l13-7.5z"/></svg>
+          Play
+        </button>
+        <ul class="chips ready-chips" id="ready-chips"></ul>
+      </div>
+    </section>
+
+    <aside class="ready-side">
+      <div class="card">
+        <div class="card-head"><h2>Mods</h2><button class="btn small" type="button" data-open="mods">Open folder</button></div>
+        <ul class="mod-list" id="mod-list"></ul>
+      </div>
+      <div class="card">
+        <div class="card-head"><h2>DLC</h2><button class="btn small" type="button" data-open="dlc">Open folder</button></div>
+        <p class="card-line" id="dlc-line"></p>
+      </div>
+      <div class="card more">
+        <button class="btn small" type="button" id="to-options">Options and rebuild</button>
+        <button class="btn small" type="button" data-open="save">Save files</button>
+        <button class="btn small" type="button" data-open="screenshots">Screenshots</button>
+        <button class="btn small" type="button" data-open="logs">Logs</button>
+        <button class="btn small" type="button" id="free-btn">Free up space</button>
+      </div>
+    </aside>
+  </main>
+
   <footer class="status">
     <span id="launcher-version">Launcher</span>
     <span class="status-right" id="game-version">YW4 Recomp · not built yet</span>
@@ -216,6 +256,26 @@
   <div class="dialog-buttons">
     <button class="btn" type="button" id="stop-no">Keep building</button>
     <button class="btn primary" type="button" id="stop-yes">Stop</button>
+  </div>
+</dialog>
+
+<dialog id="free" aria-labelledby="free-title">
+  <h2 id="free-title">Free up space?</h2>
+  <p>Deletes the compiler files and downloads the build used. The game keeps working; the next update rebuilds from scratch.</p>
+  <div class="dialog-buttons">
+    <button class="btn" type="button" id="free-no">Cancel</button>
+    <button class="btn primary" type="button" id="free-yes">Free up space</button>
+  </div>
+</dialog>
+
+<dialog id="originals-dlg" aria-labelledby="originals-title">
+  <h2 id="originals-title">Delete your original files?</h2>
+  <p>These are deleted for good:</p>
+  <ul class="file-list" id="originals-list"></ul>
+  <p class="fine">The game keeps working: everything it needs is in its folder. Your keys are not touched.</p>
+  <div class="dialog-buttons">
+    <button class="btn" type="button" id="originals-no">Cancel</button>
+    <button class="btn primary" type="button" id="originals-yes">Delete</button>
   </div>
 </dialog>
 

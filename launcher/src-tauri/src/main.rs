@@ -7,6 +7,7 @@
 mod buildrun;
 mod check;
 mod options;
+mod ready;
 
 /// The launcher's own version, for its status bar (decision 0047: the launcher has its own number).
 #[tauri::command]
@@ -43,7 +44,9 @@ fn main() {
         .plugin(tauri_plugin_dialog::init())  // the file and folder pickers (Browse…)
         .manage(std::sync::Arc::new(buildrun::Running::default()))  // the build in progress (screen 4)
         .invoke_handler(tauri::generate_handler![launcher_version, open_project_page, start_screen, test_paths, check::check_game,
-            options::gpu_names, options::disk_space, buildrun::start_build, buildrun::cancel_build])
+            options::gpu_names, options::disk_space, buildrun::start_build, buildrun::cancel_build,
+            ready::load_state, ready::save_state, ready::install_info, ready::play, ready::open_folder,
+            ready::free_space, ready::originals, ready::delete_originals, ready::make_shortcuts])
         .run(tauri::generate_context!())
         .expect("the launcher window could not start");
 }

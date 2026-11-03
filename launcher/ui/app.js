@@ -237,7 +237,9 @@ function renderSwitches() {
   }
 }
 
-const gb = (b) => (b / GB).toFixed(b >= 100 * GB ? 0 : 1) + ' GB';
+// sizes for people: GB from 1 GB up, MB below (a DLC file is ~0.1 MB, an NSP several GB)
+const gb = (b) => b >= GB ? (b / GB).toFixed(b >= 100 * GB ? 0 : 1) + ' GB'
+  : Math.max(0.1, b / 1024 ** 2).toFixed(b >= 10 * 1024 ** 2 ? 0 : 1) + ' MB';
 
 function renderSummary() {
   $('install-dir').value = options.install;
@@ -390,6 +392,7 @@ function buildFinished({ ok, message }) {
     for (const s of build.steps) { s.frac = 1; s.state = 'done'; }
     renderBuildSteps();
     renderBuildBar();
+    afterBuild();
     $('build-title').textContent = 'Your game is ready';
     const mins = Math.max(1, Math.round((Date.now() - build.started) / 60000));
     $('build-lead').textContent = `Built in ${mins} minute${mins === 1 ? '' : 's'}.`;
@@ -448,7 +451,111 @@ $('stop-no').addEventListener('click', () => stopDialog.close());
 $('stop-yes').addEventListener('click', () => { stopDialog.close(); invoke && invoke('cancel_build'); });
 $('build-next').addEventListener('click', () => {
   if ($('build-next').dataset.action === 'again') startBuild();
-  else soon.showModal();  // 5 · Play comes next
+  else showReady();
+});
+
+// After a successful build: the launcher remembers the install, makes the shortcuts, frees space if chosen
+async function afterBuild() {
+  inst = { install: options.install, mode, paths: { ...chosen[mode] }, saves: options.saves, fsr: options.fsr,
+    dlss: options.dlss && rtx, freeUp: options.freeUp, desktop: options.desktop, startMenu: options.startMenu,
+    originalsOffered: inst && inst.install === options.install ? !!inst.originalsOffered : false };
+  try { await invoke('save_state', { state: inst }); } catch (e) { logLine('could not remember the install: ' + e); }
+  if (options.desktop || options.startMenu) {
+    try { await invoke('make_shortcuts', { state: inst }); } catch (e) { logLine(String(e)); }
+  }
+  if (options.freeUp) {
+    try { await invoke('free_space', { install: inst.install }); } catch (e) { logLine(String(e)); }
+  }
+}
+
+// ---- 5 · Ready: Play, the picture (the newest screenshot, else the game's icon from the player's files), mods, DLC
+let inst = null;  // the launcher's state of the install (Rust: ready.rs, %AppData%\YW4 Recomp\launcher.json)
+
+function chip(text) {
+  const li = document.createElement('li');
+  li.textContent = text;
+  return li;
+}
+
+async function showReady() {
+  show('ready');
+  const info = await invoke('install_info', { install: inst.install });
+  const img = $('picture');
+  img.hidden = !info.picture;
+  if (info.picture) {
+    img.src = T.core.convertFileSrc(info.picture);
+    img.classList.toggle('icon', /\.ico$/i.test(info.picture));
+  }
+  const chips = $('ready-chips');
+  chips.textContent = '';
+  const v = (info.version.match(/YW4 Recomp (\S+)/) || [])[1];
+  if (v) chips.append(chip('Version ' + v));
+  chips.append(chip(inst.dlss ? 'DLSS + FSR' : inst.fsr ? 'FSR' : 'No upscaler downloads'));
+  chips.append(chip(info.dlc ? `${info.dlc} DLC` : 'No DLC'));
+  chips.append(chip(info.mods.length === 1 ? '1 mod' : `${info.mods.length} mods`));
+  const mods = $('mod-list');
+  mods.textContent = '';
+  if (info.mods.length) for (const m of info.mods) mods.append(chip(m));
+  else { const li = chip('None. Put mods in the mods folder; they load next time you play.'); li.className = 'none'; mods.append(li); }
+  $('dlc-line').textContent = info.dlc ? `${info.dlc} add-ons, checked` : 'None. Put DLC NSPs in the DLC folder; they load next time you play.';
+  reclaimable = info.reclaimable;
+  $('free-btn').textContent = reclaimable > 0.05 * GB ? `Free up ${gb(reclaimable)}` : 'Space freed';
+  $('free-btn').disabled = reclaimable <= 0.05 * GB;
+  $('game-version').textContent = info.version ? info.version.replace(/\s*\(.*$/, '') : 'YW4 Recomp';
+  $('offer').hidden = !!inst.originalsOffered;
+}
+let reclaimable = 0;
+
+$('play').addEventListener('click', async () => {
+  try { await invoke('play', { install: inst.install }); } catch (e) { soon.querySelector('p').textContent = String(e); soon.showModal(); }
+});
+document.querySelectorAll('[data-open]').forEach((b) => b.addEventListener('click', () =>
+  invoke('open_folder', { install: inst.install, which: b.dataset.open, saves: inst.saves })));
+$('to-options').addEventListener('click', () => {  // back into setup with the remembered choices
+  mode = inst.mode;
+  Object.assign(chosen[mode], inst.paths);
+  Object.assign(options, { install: inst.install, saves: inst.saves, fsr: inst.fsr, freeUp: inst.freeUp,
+    desktop: inst.desktop, startMenu: inst.startMenu });
+  renderFields();
+  show('options');
+  loadOptions();
+});
+
+const freeDlg = $('free');
+$('free-btn').addEventListener('click', () => {
+  $('free-title').textContent = `Free up ${gb(reclaimable)}?`;
+  $('free-yes').textContent = `Free up ${gb(reclaimable)}`;
+  freeDlg.showModal();
+});
+$('free-no').addEventListener('click', () => freeDlg.close());
+$('free-yes').addEventListener('click', async () => {
+  freeDlg.close();
+  await invoke('free_space', { install: inst.install });
+  showReady();
+});
+
+// the one-time offer: delete the player's originals (never the keys)
+const origDlg = $('originals-dlg');
+async function markOffered() {
+  inst.originalsOffered = true;
+  $('offer').hidden = true;
+  try { await invoke('save_state', { state: inst }); } catch (e) { /* asked again next time */ }
+}
+$('offer-keep').addEventListener('click', markOffered);
+$('offer-delete').addEventListener('click', async () => {
+  const files = await invoke('originals', { state: inst });
+  const list = $('originals-list');
+  list.textContent = '';
+  let total = 0;
+  for (const f of files) { list.append(chip(`${f.path} · ${gb(f.size)}`)); total += f.size; }
+  $('originals-yes').textContent = `Delete ${gb(total)}`;
+  origDlg.showModal();
+});
+$('originals-no').addEventListener('click', () => origDlg.close());
+$('originals-yes').addEventListener('click', async () => {
+  origDlg.close();
+  try { await invoke('delete_originals', { state: inst }); } catch (e) { soon.querySelector('p').textContent = String(e); soon.showModal(); }
+  markOffered();
 });
 renderFields();
 
@@ -492,7 +599,10 @@ $('welcome-close').addEventListener('click', closeWelcome);
     screen = 'files';
   }
   if (screen === 'options') { show('options'); loadOptions(); return; }
-  if (screen) { show(screen); return; }
+  if (screen && screen !== 'ready') { show(screen); return; }
+  // a built install: straight to Play (the welcome popup is for the first run)
+  try { inst = invoke ? await invoke('load_state') : null; } catch (e) { inst = null; }
+  if (inst) { showReady(); return; }
   show('home');
   let hidden = false;
   try { hidden = localStorage.getItem(HIDE) === '1'; } catch (e) { /* storage unavailable: show it */ }
