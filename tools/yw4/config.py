@@ -6,13 +6,15 @@ ever hardcoded (CLAUDE.md rule 2).
 
 from __future__ import annotations
 
+import os
 import sys
 import tomllib
 from dataclasses import dataclass
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-CONFIG_PATH = REPO_ROOT / "config.local.toml"
+# YW4_CONFIG: another config file, e.g. the one the launcher writes for an install folder (decision 0050)
+CONFIG_PATH = Path(os.environ["YW4_CONFIG"]) if os.environ.get("YW4_CONFIG") else REPO_ROOT / "config.local.toml"
 EXAMPLE_PATH = REPO_ROOT / "config.example.toml"
 
 
