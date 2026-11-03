@@ -194,7 +194,7 @@ $('continue').addEventListener('click', () => {
 // ---- 3 · Options: downloads (by the graphics card), where the game goes, saves, shortcuts
 const GB = 1024 ** 3;
 const options = {
-  fsr: true, dlss: false, freeUp: false, desktop: true, startMenu: true,
+  fsr: true, dlss: false, freeUp: false, desktop: true, startMenu: false,
   install: 'C:\\Games\\YW4 Recomp', saves: 'install',
 };
 let rtx = false;
