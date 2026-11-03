@@ -22,16 +22,69 @@ body { color: var(--ink); font: 400 15px/1.5 var(--body); overflow: hidden; user
 .bar { flex-shrink: 0; display: flex; align-items: center; gap: 8px; height: 64px; padding: 0 16px 0 28px;
   background: var(--violet-deep); color: var(--white); border-bottom: 3px solid var(--gold); }
 .brand { font: 800 20px/1 var(--display); letter-spacing: -.01em; margin-right: auto; }
+/* no transparent buttons (owner's rule): the top-bar icons sit on a solid chip a step lighter than the bar */
 .icon-btn { display: grid; place-items: center; width: 44px; height: 44px; border-radius: 12px; border: 0;
-  background: transparent; color: oklch(88% 0.03 300); cursor: pointer; }
-.icon-btn:hover { background: oklch(36% 0.1 295); }
+  background: oklch(34% 0.1 295); color: oklch(92% 0.03 300); cursor: pointer; }
+.icon-btn:hover { background: oklch(42% 0.11 295); color: var(--white); }
 
+[hidden] { display: none !important; }
+
+/* the setup steps in the top bar */
+.steps-bar { display: flex; gap: 6px; margin: 0 12px 0 0; padding: 0; list-style: none; font: 700 13px/1 var(--display); }
+.steps-bar li { padding: 8px 12px; border-radius: 999px; color: oklch(84% 0.03 300); }
+.steps-bar li.done { color: var(--gold); }
+.steps-bar li.now { background: var(--gold); color: var(--violet-deep); }
+
+/* a setup screen: its content, then a footer with Back and the next step */
+.screen.setup { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+.setup-body { flex: 1; min-height: 0; overflow: auto; display: flex; flex-direction: column; gap: 18px; padding: 30px 48px 8px; }
+.setup-body h1 { margin: 0 0 4px; font: 800 30px/1.15 var(--display); color: var(--violet); }
+.lead { margin: 0; color: var(--ink-2); }
+.setup-foot { flex-shrink: 0; display: flex; align-items: center; gap: 14px; padding: 16px 48px 18px; }
+.foot-note { margin-right: auto; font-size: 13px; color: var(--ink-2); }
+/* the next step before it's ready: a dashed gold slot with how many things are left (owner's pick C + D); a click
+   shows what's missing. Ready: the full gold button with an arrow. */
+.btn.primary.not-ready { background: var(--white); border: 2px dashed var(--gold-deep); color: var(--violet); }
+.btn.primary.not-ready:hover { background: var(--cream); }
+.btn.primary.not-ready:active { background: oklch(93% 0.05 88); }
+.left-badge { display: inline-grid; place-items: center; min-width: 22px; height: 22px; padding: 0 7px; border-radius: 999px;
+  background: var(--violet-deep); color: var(--gold); font: 800 12px/1 var(--display); }
+.field.missing input { border: 2px solid var(--gold-deep); background: var(--cream); }
+
+/* the choice between two kinds of dump: solid cards; the chosen one white, violet-edged, lifted */
+.modes { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+.mode { display: flex; align-items: flex-start; gap: 14px; padding: 16px 18px; border-radius: 14px; cursor: pointer;
+  font: inherit; color: inherit; text-align: left; background: var(--lilac-0); border: 2px solid var(--lilac-2);
+  transition: border-color .15s, box-shadow .15s, background .15s; }
+.mode:hover { border-color: var(--lilac-3); background: var(--white); }
+.mode b { display: block; font: 700 16px/1.3 var(--display); color: var(--ink-2); }
+.mode small { display: block; font-size: 13px; color: var(--ink-2); }
+.mode[aria-checked="true"] { background: var(--white); border-color: var(--violet-soft); }
+.mode[aria-checked="true"] b { color: var(--violet); }
+.dot { flex-shrink: 0; width: 18px; height: 18px; margin-top: 2px; border-radius: 50%; background: var(--white); border: 2px solid var(--lilac-3); }
+.mode[aria-checked="true"] .dot { border: 6px solid var(--violet-soft); }
+
+.fields { background: var(--white); border: 1px solid var(--lilac-3); border-radius: 14px; padding: 4px 20px; }
+.field { display: grid; grid-template-columns: 190px minmax(0, 1fr) auto; align-items: center; gap: 14px; padding: 12px 0;
+  border-bottom: 1px solid var(--lilac-2); }
+.field:last-child { border-bottom: 0; }
+.field label b { display: block; font: 700 14px/1.2 var(--display); }
+.field label small { display: block; font-size: 12px; color: var(--ink-2); }
+.field input { height: 40px; min-width: 0; padding: 0 12px; border: 1px solid var(--lilac-3); border-radius: 10px;
+  background: var(--lilac-0); font: 13px/1 ui-monospace, Consolas, monospace; color: var(--ink); user-select: text; }
+.field input::placeholder { color: oklch(62% 0.03 295); }
+.field .btn { height: 40px; padding: 0 16px; font-size: 13px; }
+
+/* buttons are always solid: white with a lilac edge (secondary), gold (primary) */
 .btn { display: inline-flex; align-items: center; gap: 10px; height: 46px; padding: 0 24px; border-radius: 999px;
-  border: 1.5px solid var(--violet-soft); background: transparent; color: var(--violet);
+  border: 1.5px solid var(--lilac-3); background: var(--white); color: var(--violet);
   font: 700 15px/1 var(--display); cursor: pointer; }
-.btn.primary { border: 0; background: var(--gold); color: var(--violet-deep); font-weight: 800; box-shadow: 0 4px 0 var(--gold-deep); }
+.btn:not(.primary):not(:disabled):hover { background: var(--lilac-1); border-color: var(--violet-soft); }
+/* flat, like the game's menu buttons: no raised edge; pressing darkens */
+.btn.primary { border: 0; background: var(--gold); color: var(--violet-deep); font-weight: 800; }
 .btn.primary:hover { background: oklch(85% 0.12 85); }
-.btn.primary:active { transform: translateY(2px); box-shadow: 0 2px 0 var(--gold-deep); }
+.btn.primary:active { background: oklch(74% 0.12 82); }
+.btn:not(.primary):not(:disabled):active { background: var(--lilac-2); }
 .btn.big { height: 52px; padding: 0 28px; font-size: 17px; }
 
 .home { flex: 1; min-height: 0; display: grid; grid-template-columns: minmax(0, 1fr) 340px; gap: 20px; padding: 24px 28px; }

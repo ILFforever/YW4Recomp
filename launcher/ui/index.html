@@ -13,6 +13,10 @@
 <div class="app">
   <header class="bar">
     <div class="brand">YW4 Recomp</div>
+    <ol class="steps-bar" id="steps-bar" hidden>
+      <li data-step="files">1 Game files</li><li data-step="check">2 Check</li><li data-step="options">3 Options</li>
+      <li data-step="build">4 Build</li><li data-step="play">5 Play</li>
+    </ol>
     <button class="icon-btn" type="button" id="github" aria-label="GitHub" title="GitHub">
       <svg width="22" height="22" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 2a10 10 0 0 0-3.16 19.49c.5.09.68-.22.68-.48v-1.7c-2.78.6-3.37-1.34-3.37-1.34-.45-1.16-1.11-1.47-1.11-1.47-.91-.62.07-.6.07-.6 1 .07 1.53 1.03 1.53 1.03.9 1.52 2.34 1.08 2.91.83.09-.65.35-1.08.63-1.33-2.22-.25-4.55-1.11-4.55-4.94 0-1.09.39-1.98 1.03-2.68-.1-.25-.45-1.27.1-2.65 0 0 .84-.27 2.75 1.02a9.5 9.5 0 0 1 5 0c1.91-1.29 2.75-1.02 2.75-1.02.55 1.38.2 2.4.1 2.65.64.7 1.03 1.59 1.03 2.68 0 3.84-2.34 4.69-4.57 4.93.36.31.68.92.68 1.85v2.74c0 .27.18.58.69.48A10 10 0 0 0 12 2z"/></svg>
     </button>
@@ -24,7 +28,7 @@
     </button>
   </header>
 
-  <main class="home">
+  <main class="screen home" data-screen="home">
     <section class="welcome">
       <div class="art" aria-hidden="true">
         <span class="art-title">Yo-kai Watch 4 Recomp</span>
@@ -59,6 +63,35 @@
     </aside>
   </main>
 
+  <!-- 1 · Game files: what the player has, and where -->
+  <main class="screen setup" data-screen="files" hidden>
+    <div class="setup-body">
+      <div>
+        <h1>Where is your game?</h1>
+        <p class="lead">Base game + update 2.2.0. Select your local game files.</p>
+      </div>
+
+      <div class="modes" role="radiogroup" aria-label="What you have">
+        <button type="button" class="mode" role="radio" data-mode="files" aria-checked="true">
+          <span class="dot" aria-hidden="true"></span>
+          <span><b>NSP or XCI</b><small>Needs prod.keys</small></span>
+        </button>
+        <button type="button" class="mode" role="radio" data-mode="folders" aria-checked="false">
+          <span class="dot" aria-hidden="true"></span>
+          <span><b>Extracted folders</b><small>ExeFS and RomFS, update applied</small></span>
+        </button>
+      </div>
+
+      <div class="fields" id="fields"></div>
+    </div>
+
+    <div class="setup-foot">
+      <button class="btn" type="button" data-go="home">Back</button>
+      <span class="foot-note" id="files-note"></span>
+      <button class="btn primary not-ready" type="button" id="check">Check my files</button>
+    </div>
+  </main>
+
   <footer class="status">
     <span id="launcher-version">Launcher</span>
     <span class="status-right" id="game-version">YW4 Recomp · not built yet</span>
@@ -91,7 +124,7 @@
 
 <dialog id="soon" aria-labelledby="soon-title">
   <h2 id="soon-title">Not yet</h2>
-  <p>Setup isn't built yet.</p>
+  <p>The next step isn't built yet.</p>
   <div class="dialog-buttons"><button class="btn primary" type="button" id="soon-ok">OK</button></div>
 </dialog>
 

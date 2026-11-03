@@ -21,9 +21,17 @@ fn open_project_page() -> Result<(), String> {
     r.map(|_| ()).map_err(|e| e.to_string())
 }
 
+/// For testing and screenshots: YW4_LAUNCHER_SCREEN=<screen> opens straight on that screen, without the
+/// welcome popup. None for players.
+#[tauri::command]
+fn start_screen() -> Option<String> {
+    std::env::var("YW4_LAUNCHER_SCREEN").ok().filter(|s| !s.is_empty())
+}
+
 fn main() {
     tauri::Builder::default()
-        .invoke_handler(tauri::generate_handler![launcher_version, open_project_page])
+        .plugin(tauri_plugin_dialog::init())  // the file and folder pickers (Browse…)
+        .invoke_handler(tauri::generate_handler![launcher_version, open_project_page, start_screen])
         .run(tauri::generate_context!())
         .expect("the launcher window could not start");
 }
