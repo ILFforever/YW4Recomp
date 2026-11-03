@@ -35,4 +35,9 @@ void window_mouse_motion(float *dx, float *dy);
 /* The same as pressing F12 (a screenshot of the next frame), for replays. */
 void window_request_screenshot(void);
 
+/* Full screen (borderless, the desktop's size) or a window: 1 or 0, from YW4_WINDOW=fullscreen|windowed at first;
+ * the cycle flips it (panel WINDOW MODE, F11). Any thread; the window's thread applies it within a few ms. */
+int window_fullscreen_index(void);
+void window_fullscreen_cycle(void);
+
 #endif

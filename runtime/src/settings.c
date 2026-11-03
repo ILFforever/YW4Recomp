@@ -18,6 +18,7 @@
 #include "hud.h"
 #include "settings.h"
 #include "shadow.h"
+#include "window.h"
 
 const char *shadow_mode_name(void);
 
@@ -105,6 +106,11 @@ static const char *upscale_disabled(void) {
  * before. The last row opens the developer page. The texts use the HUD font's characters (hud.c): upper case,
  * digits, . , : % / - ( ) ' ! ? */
 static const Setting player[] = {
+    {"DISPLAY", "WINDOW MODE",
+     "A WINDOW, OR THE WHOLE SCREEN WITHOUT BORDERS. THE MONITOR'S OWN MODE NEVER CHANGES, SO ALT+TAB IS INSTANT. "
+     "F11 SWITCHES TOO.",
+     {"WINDOWED", "FULL SCREEN"}, {"MOVE AND RESIZE IT", "FILLS THE SCREEN"}, 2, window_fullscreen_index,
+     window_fullscreen_cycle, "YW4_WINDOW", {"windowed", "fullscreen"}},
     {"DISPLAY", "RESOLUTION",
      "THE RESOLUTION THE WORLD IS DRAWN AT. HIGHER IS SHARPER AND COSTS GPU TIME. MENUS AND TEXT ARE DRAWN AT THE "
      "SAME SIZE.",

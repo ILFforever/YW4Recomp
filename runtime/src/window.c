@@ -987,6 +987,31 @@ static void panel_pad_stick(void) {
                              : (x < 0 ? SDL_GAMEPAD_BUTTON_DPAD_LEFT : SDL_GAMEPAD_BUTTON_DPAD_RIGHT));
 }
 
+/* ---- full screen (YW4_WINDOW, panel WINDOW MODE, F11): borderless, the size of the desktop (SDL3's fullscreen
+ * without a display mode), so the monitor's mode never changes and Alt+Tab is instant. The panel can change it
+ * from any thread (a replay's keys run on the guest's), so the wish is a flag and the window's thread applies it. */
+static int fullscreen_want = -1;  /* -1: not read yet */
+
+int window_fullscreen_index(void) {
+    int w = __atomic_load_n(&fullscreen_want, __ATOMIC_ACQUIRE);
+    if (w >= 0) return w;
+    const char *e = getenv("YW4_WINDOW");
+    w = e && !strcmp(e, "fullscreen");
+    __atomic_store_n(&fullscreen_want, w, __ATOMIC_RELEASE);
+    return w;
+}
+
+void window_fullscreen_cycle(void) {
+    int w = !window_fullscreen_index();
+    __atomic_store_n(&fullscreen_want, w, __ATOMIC_RELEASE);
+    fprintf(stderr, "yw4: window: %s\n", w ? "full screen" : "windowed");
+}
+
+static void fullscreen_apply(void) {  /* the window's thread */
+    int want = window_fullscreen_index();
+    if (window && !!(SDL_GetWindowFlags(window) & SDL_WINDOW_FULLSCREEN) != want) SDL_SetWindowFullscreen(window, want);
+}
+
 /* ---- the window's thread */
 
 typedef struct {
@@ -1014,7 +1039,8 @@ void window_run(void (*guest)(void *), void *arg) {
         if (!SDL_Init(SDL_INIT_VIDEO | SDL_INIT_GAMEPAD)) {
             fprintf(stderr, "yw4: window: SDL_Init: %s; running headless\n", SDL_GetError());
         } else if (snprintf(title, sizeof title, "Yo-kai Watch 4++ (recompiled) · YW4 Recomp %s", yw4_version) < 0 ||
-                   !(window = SDL_CreateWindow(title, 1280, 720, SDL_WINDOW_VULKAN | SDL_WINDOW_RESIZABLE))) {
+                   !(window = SDL_CreateWindow(title, 1280, 720, SDL_WINDOW_VULKAN | SDL_WINDOW_RESIZABLE |
+                                               (window_fullscreen_index() ? SDL_WINDOW_FULLSCREEN : 0)))) {
             fprintf(stderr, "yw4: window: SDL_CreateWindow: %s; running headless\n", SDL_GetError());
         } else if (vk_init()) {
             fprintf(stderr, "yw4: window: no Vulkan; the window stays empty\n");
@@ -1038,6 +1064,7 @@ void window_run(void (*guest)(void *), void *arg) {
         SDL_Event e;
         int got = SDL_WaitEventTimeout(&e, 8);
         update_input();
+        fullscreen_apply();
         if (!got) continue;
         switch (e.type) {
         case SDL_EVENT_GAMEPAD_ADDED:
@@ -1101,7 +1128,12 @@ void window_run(void (*guest)(void *), void *arg) {
                 }
             }
             if (e.key.key == SDLK_F12) __atomic_store_n(&screenshot_requested, screenshot_burst(), __ATOMIC_RELEASE), yw4_hid_note_key("F12");
-            if (e.key.key == SDLK_F11) gpu_request_trace(450), yw4_hid_note_key("F11");  /* the draws of the next frame, in the log */
+            /* F11: full screen, like most PC games (saved like the panel's row); Shift+F11: the draws of the next
+             * frame, in the log (still "F11" in recordings) */
+            if (e.key.key == SDLK_F11 && !e.key.repeat) {
+                if (e.key.mod & SDL_KMOD_SHIFT) gpu_request_trace(450), yw4_hid_note_key("F11");
+                else window_fullscreen_cycle(), settings_save();
+            }
             if (e.key.key == SDLK_F10) gpu_request_dump(), yw4_hid_note_key("F10");      /* shadow maps etc.: work/dump/ */
             if (e.key.key == SDLK_F3) __atomic_store_n(&hud_on, hud_enabled() ? 0 : 1, __ATOMIC_RELEASE);  /* the HUD */
             if (e.key.key == SDLK_F5) gpu_passes_toggle();  /* per-pass GPU timing in the log */

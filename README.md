@@ -404,8 +404,8 @@ same. **F2** opens the **CONTROLS** page: two keys or mouse buttons and one game
 button and stick direction, changed by pressing the new one, and at the top the mouse's camera sensitivity, left-right and up-down. On a gamepad the DualSense's **mic button** (Share on
 Xbox pads) opens the settings and **Create + Options** (Minus + Plus) the controls; L/R or the triggers switch
 pages. The DualSense's **touchpad** shows the performance HUD (F3). Your choices are saved in
-`settings.ini` next to `yw4.exe` and kept for the next start. Settings are only in the panel; the other function keys
-are debugging tools ([docs/debugging.md](docs/debugging.md)).
+`settings.ini` next to `yw4.exe` and kept for the next start. **F11** switches between full screen and a window (also
+the panel's WINDOW MODE row). Settings are only in the panel; the other function keys except F11 are debugging tools ([docs/debugging.md](docs/debugging.md)).
 
 ![Settings (F1): The settings panel: display, anti-aliasing and upscaling, frame generation and latency, detail, shadows; Developer options: The developer options: shadow pass, G-buffer, bloom, distance blur pass, battle blur](docs/screenshots/91-settings-panels.png)
 
