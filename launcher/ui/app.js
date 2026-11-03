@@ -187,7 +187,113 @@ async function runCheck() {
 
 $('continue').addEventListener('click', () => {
   if (checkBad) return;
-  soon.showModal();  // 3 · Options comes next
+  show('options');
+  loadOptions();
+});
+
+// ---- 3 · Options: downloads (by the graphics card), where the game goes, saves, shortcuts
+const GB = 1024 ** 3;
+const options = {
+  fsr: true, dlss: false, freeUp: false, desktop: true, startMenu: true,
+  install: 'C:\\Games\\YW4 Recomp', saves: 'install',
+};
+let rtx = false;
+let spaceFree = null;
+// What the install folder takes: the copied RomFS (8.5 GB) + ExeFS, the tools (1.5 GB) and build files (0.7 GB),
+// the game itself, and the downloads (target.toml [extracted], measured sizes: FSR 240 MB, DLSS + Streamline 325 MB)
+const downloadMB = () => (options.fsr ? 240 : 0) + (options.dlss ? 325 : 0);
+const diskNeeded = () => 8.5 * GB + 2.4 * GB + downloadMB() * 1024 ** 2;
+
+const SWITCHES = [
+  { key: 'fsr', title: 'AMD FSR', note: () => 'Upscaling and frame generation, any graphics card · about 240 MB' },
+  { key: 'dlss', title: 'NVIDIA DLSS', note: () => rtx ? 'Upscaling, frame generation, Reflex · about 325 MB'
+    : 'Needs an NVIDIA RTX graphics card', needsRtx: true },
+  { key: 'freeUp', title: 'Free up space after building', note: () => 'Deletes the tools and build files (2.2 GB). Updates then rebuild from scratch' },
+  { key: 'desktop', title: 'Desktop shortcut', note: () => 'Opens the launcher' },
+  { key: 'startMenu', title: 'Start menu entry', note: () => 'Opens the launcher' },
+];
+
+function renderSwitches() {
+  const box = $('switches');
+  box.textContent = '';
+  for (const s of SWITCHES) {
+    const off = s.needsRtx && !rtx;
+    const row = document.createElement('div');
+    row.className = 'switch-row' + (off ? ' off-limits' : '');
+    const text = document.createElement('span');
+    text.innerHTML = '<b></b><small></small>';
+    text.querySelector('b').textContent = s.title;
+    text.querySelector('small').textContent = s.note();
+    const t = document.createElement('button');
+    t.type = 'button';
+    t.className = 'toggle';
+    t.setAttribute('role', 'switch');
+    t.setAttribute('aria-label', s.title);
+    t.setAttribute('aria-checked', String(!off && options[s.key]));
+    t.disabled = off;
+    t.addEventListener('click', () => { options[s.key] = !options[s.key]; renderSwitches(); renderSummary(); });
+    row.append(text, t);
+    box.append(row);
+  }
+}
+
+const gb = (b) => (b / GB).toFixed(b >= 100 * GB ? 0 : 1) + ' GB';
+
+function renderSummary() {
+  $('install-dir').value = options.install;
+  $('sum-download').textContent = downloadMB() ? `About ${downloadMB()} MB` : 'Nothing';
+  $('sum-disk').textContent = 'About ' + gb(diskNeeded());
+  const line = $('space-line');
+  const short = spaceFree !== null && spaceFree.free < diskNeeded();
+  line.classList.toggle('short', short);
+  line.textContent = spaceFree === null ? 'Checking free space…'
+    : `${gb(spaceFree.free)} free on ${spaceFree.drive}` + (short ? ' · not enough' : '');
+  const btn = $('build-go');
+  btn.classList.toggle('not-ready', short);
+  btn.innerHTML = 'Build my game ' + (short ? '<span class="left-badge">not enough space</span>' : ARROW);
+  $('options-note').textContent = short ? 'Choose a folder on a drive with more space.' : '';
+}
+
+async function refreshSpace() {
+  spaceFree = null;
+  renderSummary();
+  try { spaceFree = invoke ? await invoke('disk_space', { path: options.install }) : null; } catch (e) { spaceFree = null; }
+  renderSummary();
+}
+
+let optionsLoaded = false;
+async function loadOptions() {
+  renderSwitches();
+  refreshSpace();
+  if (optionsLoaded) return;
+  optionsLoaded = true;
+  let names = [];
+  try { names = invoke ? await invoke('gpu_names') : []; } catch (e) { names = []; }
+  const nvidia = names.find((n) => /nvidia/i.test(n));
+  rtx = !!(nvidia && /rtx/i.test(nvidia));
+  options.dlss = rtx;  // on by default on an RTX card
+  $('gpu-name').innerHTML = names.length
+    ? 'Your graphics card: <b></b>' : 'No graphics card found';
+  if (names.length) $('gpu-name').querySelector('b').textContent = nvidia || names[0];
+  renderSwitches();
+  renderSummary();
+}
+
+$('install-change').addEventListener('click', async () => {
+  if (!T || !T.dialog) return;
+  const dir = await T.dialog.open({ title: 'Install to', directory: true });
+  if (typeof dir === 'string' && dir) {
+    options.install = /YW4 Recomp$/i.test(dir) ? dir : dir.replace(/[\\/]$/, '') + '\\YW4 Recomp';
+    refreshSpace();
+  }
+});
+document.querySelectorAll('.radio[data-saves]').forEach((b) => b.addEventListener('click', () => {
+  options.saves = b.dataset.saves;
+  document.querySelectorAll('.radio[data-saves]').forEach((r) => r.setAttribute('aria-checked', String(r === b)));
+}));
+$('build-go').addEventListener('click', () => {
+  if (spaceFree && spaceFree.free < diskNeeded()) return;
+  soon.showModal();  // 4 · Build comes next
 });
 renderFields();
 
@@ -222,6 +328,7 @@ $('welcome-close').addEventListener('click', closeWelcome);
     renderFields();
     screen = 'files';
   }
+  if (screen === 'options') { show('options'); loadOptions(); return; }
   if (screen) { show(screen); return; }
   show('home');
   let hidden = false;

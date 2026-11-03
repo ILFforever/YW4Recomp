@@ -108,6 +108,51 @@
     </div>
   </main>
 
+  <!-- 3 · Options: downloads, where the game goes, saves, shortcuts -->
+  <main class="screen setup" data-screen="options" hidden>
+    <div class="setup-body options-body">
+      <div class="options-left">
+        <div>
+          <h1>Options</h1>
+          <p class="lead">Graphics settings like resolution and shadows are in the game (F1).</p>
+        </div>
+        <div class="gpu-line">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="6" width="18" height="12" rx="2"/><path d="M7 10h4v4H7zM15 10h2M15 14h2"/></svg>
+          <span id="gpu-name">Looking for your graphics card…</span>
+        </div>
+        <div class="switches" id="switches"></div>
+      </div>
+
+      <aside class="options-side">
+        <h2>Install to</h2>
+        <div class="install-row">
+          <input id="install-dir" readonly>
+          <button class="btn small" type="button" id="install-change">Change…</button>
+        </div>
+        <p class="space-line" id="space-line"></p>
+        <h2>Saves and settings</h2>
+        <div class="radios" role="radiogroup" aria-label="Where saves and settings go">
+          <button type="button" class="radio" role="radio" data-saves="install" aria-checked="true">
+            <span class="dot" aria-hidden="true"></span><span><b>In the install folder</b><small>One folder, easy to back up</small></span>
+          </button>
+          <button type="button" class="radio" role="radio" data-saves="appdata" aria-checked="false">
+            <span class="dot" aria-hidden="true"></span><span><b>In AppData</b><small>Kept if the game folder is deleted</small></span>
+          </button>
+        </div>
+        <dl class="summary">
+          <dt>Download</dt><dd id="sum-download"></dd>
+          <dt>Disk needed</dt><dd id="sum-disk"></dd>
+          <dt>Build time</dt><dd>About 6 minutes</dd>
+        </dl>
+      </aside>
+    </div>
+    <div class="setup-foot">
+      <button class="btn" type="button" data-go="check">Back</button>
+      <span class="foot-note" id="options-note"></span>
+      <button class="btn primary" type="button" id="build-go">Build my game</button>
+    </div>
+  </main>
+
   <footer class="status">
     <span id="launcher-version">Launcher</span>
     <span class="status-right" id="game-version">YW4 Recomp · not built yet</span>

@@ -5,6 +5,7 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 mod check;
+mod options;
 
 /// The launcher's own version, for its status bar (decision 0047: the launcher has its own number).
 #[tauri::command]
@@ -39,7 +40,8 @@ fn test_paths() -> Option<String> {
 fn main() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())  // the file and folder pickers (Browse…)
-        .invoke_handler(tauri::generate_handler![launcher_version, open_project_page, start_screen, test_paths, check::check_game])
+        .invoke_handler(tauri::generate_handler![launcher_version, open_project_page, start_screen, test_paths, check::check_game,
+            options::gpu_names, options::disk_space])
         .run(tauri::generate_context!())
         .expect("the launcher window could not start");
 }

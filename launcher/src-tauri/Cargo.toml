@@ -22,3 +22,7 @@ opt-level = "s"
 lto = true
 codegen-units = 1
 strip = true
+
+# Windows' own API, already in the build through Tauri: free disk space, starting tools without a console window
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61", features = ["Win32_Storage_FileSystem", "Win32_Foundation"] }
