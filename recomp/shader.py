@@ -46,7 +46,7 @@ import sys
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from tools.yw4 import config
+from tools.yw4 import config, progress
 
 SET = {"vert": 0, "frag": 1, "geom": 2, "comp": 0}
 TEX_BINDING, STORAGE_BINDING = 16, 64
@@ -1047,7 +1047,8 @@ def main(argv: list[str] | None = None) -> int:
                            if r["kind"] == "cbuffer"}) for f in files]
     from concurrent.futures import ProcessPoolExecutor
     with ProcessPoolExecutor() as pool:
-        for key, stage, err, msgs in pool.map(one_shader, jobs, chunksize=8):
+        for i, (key, stage, err, msgs) in enumerate(pool.map(one_shader, jobs, chunksize=8), 1):
+            progress.report("shaders", i, len(jobs), every=0.25)
             if err is not None:
                 errors.setdefault(err, []).append(key)
             elif msgs is not None:

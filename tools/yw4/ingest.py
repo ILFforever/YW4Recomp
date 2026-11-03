@@ -17,7 +17,7 @@ import sys
 import tomllib
 from pathlib import Path
 
-from . import config, nso
+from . import config, nso, progress
 
 TARGET_PATH = config.REPO_ROOT / "target.toml"
 MODULE_NAMES = ("rtld", "main", "sdk") + tuple(f"subsdk{i}" for i in range(10))
@@ -75,6 +75,7 @@ def main(argv: list[str] | None = None) -> int:
         print(f"config error: {e}", file=sys.stderr)
         return 1
 
+    progress.report("ingest", 0, 1)
     # main first: nothing else runs until the build is verified.
     try:
         main_header, main_image = process_module(cfg.exefs_dir / "main")
@@ -133,6 +134,7 @@ def main(argv: list[str] | None = None) -> int:
 
     (out_dir / "modules.json").write_text(json.dumps(modules, indent=2) + "\n", encoding="utf-8")
     print(f"wrote {out_dir}")
+    progress.report("ingest", 1, 1)
     return 0
 
 

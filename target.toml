@@ -16,6 +16,11 @@ build_id = "FCF93A41B08C5193A1410D262602DC621617C56F"
 [title]
 application_id = "010086C00AF7C000"
 
+# The extracted game (ExeFS + RomFS, update applied) of this build: its size lets the extractor show a real
+# percentage while hactool works (tools/yw4/extract.py), as it writes the files out.
+[extracted]
+bytes = 9099343632  # RomFS 9081468053 in 4518 files, ExeFS 17875579
+
 # Add-on content (DLC) the game unlocks when found on boot (decision 0049): index (title ID - application ID -
 # 0x1000) = SHA-256 of the add-on's content NCA. That file is the same for every owner (its name is the start of
 # this hash); the NSP's ticket is not, so the whole NSP is never hashed. The versions are the latest ones.

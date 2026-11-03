@@ -47,7 +47,8 @@ def read_entries(f: BinaryIO) -> list[Entry]:
     return entries
 
 
-def extract(f: BinaryIO, entry: Entry, dest: Path) -> None:
+def extract(f: BinaryIO, entry: Entry, dest: Path, on_bytes=None) -> None:
+    """Copy one entry to `dest`; `on_bytes(n)` after each chunk of n bytes, for progress."""
     f.seek(entry.offset)
     with dest.open("wb") as out:
         remaining = entry.size
@@ -57,3 +58,5 @@ def extract(f: BinaryIO, entry: Entry, dest: Path) -> None:
                 raise Pfs0Error(f"{entry.name} runs past end of archive")
             out.write(chunk)
             remaining -= len(chunk)
+            if on_bytes:
+                on_bytes(len(chunk))

@@ -21,7 +21,7 @@ from pathlib import Path
 
 import shutil
 
-from tools.yw4 import config, deps
+from tools.yw4 import config, deps, progress
 
 from . import check
 
@@ -250,8 +250,13 @@ def main(argv: list[str] | None = None) -> int:
 
     t0 = time.time()
     print(f"compiling {len(todo)} of {len(objs)} files with {Path(cc).name} ({args.jobs} jobs)")
-    with concurrent.futures.ThreadPoolExecutor(args.jobs) as pool:
-        errors = [e for e in pool.map(lambda so: compile_one(cc, so[0], so[1], includes), todo) if e]
+    errors = []
+    with concurrent.futures.ThreadPoolExecutor(args.jobs) as pool:  # progress as each file finishes, not in order
+        futures = {pool.submit(compile_one, cc, src, obj, includes): src for src, obj in todo}
+        for i, fut in enumerate(concurrent.futures.as_completed(futures), 1):
+            if fut.result():
+                errors.append(fut.result())
+            progress.report("compile", i, len(todo), futures[fut].name)
     if errors:
         print("\n".join(errors), file=sys.stderr)
         print(f"{len(errors)} file(s) failed", file=sys.stderr)
@@ -276,7 +281,9 @@ def main(argv: list[str] | None = None) -> int:
             (exe.parent / "nvngx_dlss.dll").unlink(missing_ok=True)
             for dll in deps.SL_DLLS:
                 (exe.parent / dll).unlink(missing_ok=True)
+    progress.report("link", 0, 1)
     link = subprocess.run([cc, "-o", str(exe), *map(str, objs), *libs], capture_output=True, text=True)
+    progress.report("link", 1, 1)
     if link.returncode != 0:
         print(f"link failed:\n{link.stderr[-3000:]}", file=sys.stderr)
         return 1

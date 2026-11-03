@@ -38,7 +38,7 @@ from pathlib import Path
 
 import tomllib
 
-from . import config, pfs0, xci
+from . import config, pfs0, progress, xci
 
 TARGET = Path(__file__).resolve().parents[2] / "target.toml"
 
@@ -53,14 +53,22 @@ def unpack_ncas(path: Path, out_dir: Path, tag: str) -> tuple[list[Path], set[st
     ncas, rights_ids = [], set()
     with path.open("rb") as f:
         entries = xci.secure_entries(f) if xci.is_xci(f) else pfs0.read_entries(f)
-        for entry in entries:
-            if entry.name.endswith(".tik"):
-                rights_ids.add(entry.name[:-4].lower())
-            elif entry.name.endswith(".nca") and not entry.name.endswith(".cnmt.nca"):
-                dest = out_dir / f"{tag}-{entry.name}"
-                if not (dest.is_file() and dest.stat().st_size == entry.size):
-                    pfs0.extract(f, entry, dest)
-                ncas.append(dest)
+        wanted = [e for e in entries if e.name.endswith(".nca") and not e.name.endswith(".cnmt.nca")]
+        total, done = sum(e.size for e in wanted), 0
+        rights_ids = {e.name[:-4].lower() for e in entries if e.name.endswith(".tik")}
+
+        def moved(n: int) -> None:
+            nonlocal done
+            done += n
+            progress.report("unpack", done, total, path.name, every=0.25)
+
+        for entry in wanted:
+            dest = out_dir / f"{tag}-{entry.name}"
+            if not (dest.is_file() and dest.stat().st_size == entry.size):
+                pfs0.extract(f, entry, dest, moved)
+            else:
+                moved(entry.size)  # already there from an earlier, interrupted run
+            ncas.append(dest)
     return ncas, rights_ids
 
 
@@ -86,13 +94,41 @@ def write_temp_keys(keys_dir: Path, rights_ids: set[str], home: Path) -> None:
     (switch / "title.keys").write_text("".join(f"{r} = {k}\n" for r, k in found.items()))
 
 
-def run_hactool(hactool: Path, home: Path, args: list[str]) -> str:
+def folder_bytes(dirs: list[Path]) -> int:
+    total = 0
+    for d in dirs:
+        for root, _, files in os.walk(d):
+            for f in files:
+                try:
+                    total += os.path.getsize(os.path.join(root, f))
+                except OSError:
+                    pass  # a file hactool is creating right now
+    return total
+
+
+def run_hactool(hactool: Path, home: Path, args: list[str], watch: tuple[str, list[Path], int] | None = None) -> str:
+    """Run hactool with only our keys (home). `watch` = (progress step, output folders, their final size in bytes):
+    hactool reports nothing while it extracts, so once a second the folders it writes into are measured and a
+    progress line says how far it is (YW4_PROGRESS=1)."""
     env = dict(os.environ, USERPROFILE=str(home), HOME=str(home))
-    proc = subprocess.run([str(hactool), "--disablekeywarns", "--suppresskeys", *args],
-                          env=env, capture_output=True, text=True, errors="replace")
-    out = proc.stdout + proc.stderr
-    if proc.returncode != 0 or re.search(r"(?m)^(Error|\[WARN\] Unable)", out):
-        raise ExtractError(f"hactool failed ({proc.returncode}):\n{out.strip()[-2000:]}")
+    cmd = [str(hactool), "--disablekeywarns", "--suppresskeys", *args]
+    if watch is None:
+        proc = subprocess.run(cmd, env=env, capture_output=True, text=True, errors="replace")
+        out, code = proc.stdout + proc.stderr, proc.returncode
+    else:
+        step, dirs, total = watch
+        with tempfile.TemporaryFile("w+", errors="replace") as log:  # a file, not a pipe: it never fills up
+            proc = subprocess.Popen(cmd, env=env, stdout=log, stderr=subprocess.STDOUT, text=True)
+            while True:
+                try:
+                    code = proc.wait(timeout=1.0)
+                    break
+                except subprocess.TimeoutExpired:
+                    progress.report(step, min(folder_bytes(dirs), total - 1), total)
+            log.seek(0)
+            out = log.read()
+    if code != 0 or re.search(r"(?m)^(Error|\[WARN\] Unable)", out):
+        raise ExtractError(f"hactool failed ({code}):\n{out.strip()[-2000:]}")
     return out
 
 
@@ -155,18 +191,24 @@ def main(argv: list[str] | None = None) -> int:
                 raise ExtractError("no update for this game: set update_nsp to the 2.2.0 update")
             print(f"base program NCA:   {base_prog.name}\nupdate program NCA: {upd_prog.name}")
             print("extracting ExeFS + RomFS with update applied (takes a few minutes) ...")
+            # hactool says nothing while it works: its output folders are measured against this build's size
+            size = int(tomllib.loads(TARGET.read_text()).get("extracted", {}).get("bytes", 0)) or 1
+            progress.report("extract", 0, size)
             run_hactool(cfg.hactool_exe, home, [
                 f"--basenca={base_prog}",
                 f"--exefsdir={cfg.exefs_dir}",
                 f"--romfsdir={cfg.romfs_dir}",
                 str(upd_prog),
-            ])
+            ], watch=("extract", [cfg.exefs_dir, cfg.romfs_dir], size))
+            progress.report("extract", size, size)
             # The game's icon for the exe, from the NCAs already here (decision 0048); not having one is no error
             from . import icon
+            progress.report("icon", 0, 1)
             try:
                 print(f"icon: {icon.make(cfg, home, sorted(ncas, key=lambda n: not n.name.startswith('upd-')))}")
             except (icon.IconError, ExtractError) as e:
                 print(f"icon: none ({e})")
+            progress.report("icon", 1, 1)
     except (ExtractError, pfs0.Pfs0Error, xci.XciError) as e:
         print(f"extract failed: {e}", file=sys.stderr)
         return 1

@@ -34,7 +34,7 @@ import tomllib
 from dataclasses import dataclass
 from pathlib import Path
 
-from tools.yw4 import config, recon, reloc, sdkref
+from tools.yw4 import config, progress, recon, reloc, sdkref
 
 from . import coverage, function
 
@@ -290,6 +290,7 @@ def translate(cfg: config.Config, m: Module, overrides: dict[int, str], entries:
             for fn, src in done:
                 funcs.append(fn)
                 sources.append(src)
+            progress.report("translate", len(funcs), len(order), m.name, every=0.25)
             for g, n in part.unimplemented.items():
                 stats.unimplemented[g] = stats.unimplemented.get(g, 0) + n
             stats.cached += part.cached

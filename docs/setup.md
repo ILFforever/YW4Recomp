@@ -51,6 +51,12 @@ python -m recomp.build --run    # build <work_dir>/build/yw4.exe and run it
 A full build after `translate` takes a few minutes; later builds only recompile what changed (seconds). The build
 cannot relink while `yw4.exe` is running. Details on the recompiler are in [recomp/README.md](../recomp/README.md).
 
+For the launcher ([decision 0050](decisions/0050-launcher-and-install-layout.md)): with `YW4_PROGRESS=1` the
+steps (`extract`, `ingest`, `translate`, `shader`, `build`) also print `@progress <step> <done> <total> <what>`
+lines as they work: bytes unpacked, bytes extracted (measured against `target.toml` `[extracted]`, as hactool
+itself says nothing while it works), functions translated, shaders, files compiled; ingest, icon and link report
+`0 1` at their start and `1 1` at their end. See `tools/yw4/progress.py`.
+
 ### Build options
 
 On Windows, `python -m recomp.build` takes `--no-fsr` and `--no-dlss` to leave out the upscaling and frame
