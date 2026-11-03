@@ -45,9 +45,15 @@
 
   <main class="screen home" data-screen="home">
     <section class="welcome">
-      <div class="art" aria-hidden="true">
+      <!-- the hero: what the port looks like (the README's own screenshots, launcher/ui/hero), crossfading -->
+      <div class="art" id="hero" aria-roledescription="carousel" aria-label="What the port looks like">
+        <img class="slide on" src="hero/1-yokai-world.jpg" alt="Yo-kai World, cherry blossoms" data-caption="Up to 4K, with TAA or SMAA">
+        <img class="slide" src="hero/2-schoolyard.jpg" alt="The schoolyard in 21:9" data-caption="Ultrawide: 21:9 and 32:9">
+        <img class="slide" src="hero/3-dusk.jpg" alt="Yo-kai World at dusk" data-caption="DLSS, FSR and frame generation">
+        <span class="art-cap" id="hero-cap">Up to 4K, with TAA or SMAA</span>
         <span class="art-title">Yo-kai Watch 4 Recomp</span>
         <span class="art-sub">Developed by ILFforever</span>
+        <div class="dots" id="hero-dots"></div>
       </div>
       <div class="welcome-row">
         <div class="welcome-text">

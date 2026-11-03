@@ -45,6 +45,33 @@ $('soon-ok').addEventListener('click', () => soon.close());
 // ---- Home
 $('start').addEventListener('click', () => show('files'));
 
+// the hero: a slide every 6 s with its feature line; dots pick one; hovering pauses; no auto-play when Windows
+// asks for less motion
+(() => {
+  const slides = [...document.querySelectorAll('#hero .slide')];
+  const dots = slides.map((s, i) => {
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.setAttribute('aria-label', s.dataset.caption);
+    b.addEventListener('click', () => go(i));
+    return b;
+  });
+  $('hero-dots').append(...dots);
+  let now = 0;
+  function go(i) {
+    now = (i + slides.length) % slides.length;
+    slides.forEach((s, k) => s.classList.toggle('on', k === now));
+    dots.forEach((d, k) => d.setAttribute('aria-current', String(k === now)));
+    $('hero-cap').textContent = slides[now].dataset.caption;
+  }
+  go(0);
+  if (matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+  let paused = false;
+  $('hero').addEventListener('mouseenter', () => { paused = true; });
+  $('hero').addEventListener('mouseleave', () => { paused = false; });
+  setInterval(() => { if (!paused && !$('hero').closest('.screen').hidden) go(now + 1); }, 6000);
+})();
+
 // ---- 1 · Game files
 // What each kind of dump needs: required fields first. `pick`: what the picker chooses.
 const FIELDS = {
