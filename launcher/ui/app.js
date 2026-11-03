@@ -342,12 +342,15 @@ function renderBuildBar() {
   $('build-pct').textContent = pct + '%';
   $('build-fill').style.width = pct + '%';
   $('build-bar').setAttribute('aria-valuenow', String(pct));
-  const elapsed = (Date.now() - build.started) / 1000;
+  // time left from the speed of real work since the first progress line (steps skipped on Build again don't count)
   const frac = done / total;
-  if (frac > 0.04 && frac < 1) {
-    const left = Math.max(1, Math.round((elapsed / frac - elapsed) / 60));
+  build.frac = frac;
+  const m = build.mark;
+  if (m && frac - m.f > 0.03 && frac < 1) {
+    const rate = (frac - m.f) / ((Date.now() - m.t) / 1000);
+    const left = Math.max(1, Math.round((1 - frac) / rate / 60));
     $('build-eta').textContent = left <= 1 ? 'About a minute left' : `About ${left} minutes left`;
-  } else if (frac >= 1) {
+  } else if (frac >= 1 || !m) {
     $('build-eta').textContent = '';
   }
 }
@@ -388,7 +391,8 @@ function buildFinished({ ok, message }) {
     renderBuildSteps();
     renderBuildBar();
     $('build-title').textContent = 'Your game is ready';
-    $('build-lead').textContent = 'Built in ' + Math.round((Date.now() - build.started) / 60000) + ' minutes.';
+    const mins = Math.max(1, Math.round((Date.now() - build.started) / 60000));
+    $('build-lead').textContent = `Built in ${mins} minute${mins === 1 ? '' : 's'}.`;
     $('build-now').textContent = '';
     next.innerHTML = 'Continue ' + ARROW;
     next.dataset.action = 'play';
@@ -416,6 +420,7 @@ if (T && T.event) {
   });
   T.event.listen('build-progress', ({ payload }) => {
     if (!build) return;
+    if (!build.mark) build.mark = { t: Date.now(), f: build.frac || 0 };  // real work starts here
     let part = PARTS[payload.step];
     if (payload.step === 'translate') part = payload.what === 'sdk' ? ['translate', 0.55, 1] : ['translate', 0, 0.55];
     if (!part) return;

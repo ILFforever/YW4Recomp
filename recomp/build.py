@@ -282,7 +282,11 @@ def main(argv: list[str] | None = None) -> int:
             for dll in deps.SL_DLLS:
                 (exe.parent / dll).unlink(missing_ok=True)
     progress.report("link", 0, 1)
-    link = subprocess.run([cc, "-o", str(exe), *map(str, objs), *libs], capture_output=True, text=True)
+    # the ~270 objects go in a response file: in a deep folder (an install path) the command line would pass
+    # Windows' 32,767-character limit. Forward slashes and quotes: clang reads it with GNU quoting rules.
+    rsp = objdir / "link.rsp"
+    rsp.write_text("\n".join(f'"{Path(o).as_posix()}"' for o in objs) + "\n")
+    link = subprocess.run([cc, "-o", str(exe), f"@{rsp}", *libs], capture_output=True, text=True)
     progress.report("link", 1, 1)
     if link.returncode != 0:
         print(f"link failed:\n{link.stderr[-3000:]}", file=sys.stderr)
