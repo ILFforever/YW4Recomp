@@ -16,8 +16,23 @@ function show(name) {
 }
 document.querySelectorAll('[data-go]').forEach((b) => b.addEventListener('click', () => show(b.dataset.go)));
 
-// ---- top bar, status bar
+// ---- top bar (the launcher's own title bar: Windows' is off), status bar
 $('github').addEventListener('click', () => invoke && invoke('open_project_page'));
+if (T && T.window) {
+  const win = T.window.getCurrentWindow();
+  $('win-min').addEventListener('click', () => win.minimize());
+  $('win-max').addEventListener('click', () => win.toggleMaximize());
+  $('win-close').addEventListener('click', () => win.close());
+  // the maximise button shows "restore" while maximised (double-clicking the bar maximises too)
+  const syncMax = async () => {
+    const max = await win.isMaximized();
+    document.body.classList.toggle('maximised', max);
+    $('win-max').setAttribute('aria-label', max ? 'Restore' : 'Maximise');
+    $('win-max').title = max ? 'Restore' : 'Maximise';
+  };
+  win.onResized(syncMax);
+  syncMax();
+}
 (async () => {
   if (!invoke) return;
   try { $('launcher-version').textContent = 'Launcher ' + await invoke('launcher_version'); } catch (e) { console.error(e); }
@@ -468,8 +483,16 @@ async function afterBuild() {
   }
 }
 
-// ---- 5 · Ready: Play, the picture (the newest screenshot, else the game's icon from the player's files), mods, DLC
+// ---- 5 · Ready (style F): the game in the sidebar; a band with play stats and tabs (Overview, Screenshots,
+// Mods, DLC). Every picture is the player's own: the icon from their files, their screenshots.
 let inst = null;  // the launcher's state of the install (Rust: ready.rs, %AppData%\YW4 Recomp\launcher.json)
+
+// What's new: written for each release (the launcher ships with the notes of the version it builds)
+const NEWS = {
+  version: '0.7.0',
+  items: ['Contact shadows: soft shadows where things touch', 'Fewer stutters in menus and towns',
+    'XCI cartridge dumps work', 'Version numbers, shown in the game and here'],
+};
 
 function chip(text) {
   const li = document.createElement('li');
@@ -477,38 +500,96 @@ function chip(text) {
   return li;
 }
 
+function lastPlayed(secs) {
+  if (!secs) return 'Never';
+  const d = new Date(secs * 1000), today = new Date();
+  const days = Math.round((new Date(today.toDateString()) - new Date(d.toDateString())) / 864e5);
+  if (days === 0) return 'Today';
+  if (days === 1) return 'Yesterday';
+  if (days < 7) return `${days} days ago`;
+  return d.toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: today.getFullYear() === d.getFullYear() ? undefined : 'numeric' });
+}
+const playTime = (s) => s < 3600 ? `${Math.round(s / 60)} min` : `${(s / 3600).toFixed(s < 36000 ? 1 : 0)} h`;
+
+function shotButton(path) {
+  const b = document.createElement('button');
+  b.type = 'button';
+  b.className = 'shot';
+  b.title = 'Open';
+  const img = document.createElement('img');
+  img.loading = 'lazy';
+  img.alt = 'Screenshot';
+  img.src = T.core.convertFileSrc(path);
+  b.append(img);
+  b.addEventListener('click', () => invoke('open_shot', { install: inst.install, path }));
+  return b;
+}
+
+function showTab(name) {
+  document.querySelectorAll('.tabs [data-tab]').forEach((t) => t.setAttribute('aria-selected', String(t.dataset.tab === name)));
+  document.querySelectorAll('.ready [data-panel]').forEach((p) => { p.hidden = p.dataset.panel !== name; });
+}
+document.querySelectorAll('.ready [data-tab]').forEach((b) => b.addEventListener('click', () => showTab(b.dataset.tab)));
+
 async function showReady() {
   show('ready');
   const info = await invoke('install_info', { install: inst.install });
-  const img = $('picture');
-  img.hidden = !info.picture;
-  if (info.picture) {
-    img.src = T.core.convertFileSrc(info.picture);
-    img.classList.toggle('icon', /\.ico$/i.test(info.picture));
-  }
-  const chips = $('ready-chips');
-  chips.textContent = '';
+  const icon = info.icon ? T.core.convertFileSrc(info.icon) : '';
+  $('game-icon').hidden = !icon;
+  if (icon) $('game-icon').src = icon;
+  // the band: the newest screenshot; before there is one, the icon blurred into colour
+  const band = $('band-img');
+  const pic = info.shots[0] ? T.core.convertFileSrc(info.shots[0]) : icon;
+  band.hidden = !pic;
+  if (pic) band.src = pic;
+  band.classList.toggle('blurred', !info.shots[0]);
+
+  $('stat-last').textContent = lastPlayed(info.lastPlayed);
+  $('stat-time').textContent = playTime(info.playSecs);
+  $('stat-shots').textContent = String(info.shotCount);
   const v = (info.version.match(/YW4 Recomp (\S+)/) || [])[1];
-  if (v) chips.append(chip('Version ' + v));
-  chips.append(chip(inst.dlss ? 'DLSS + FSR' : inst.fsr ? 'FSR' : 'No upscaler downloads'));
-  chips.append(chip(info.dlc ? `${info.dlc} DLC` : 'No DLC'));
-  chips.append(chip(info.mods.length === 1 ? '1 mod' : `${info.mods.length} mods`));
+  $('built-line').textContent = v ? `Built and checked · ${v}` : 'Built and checked';
+  $('game-version').textContent = info.version ? info.version.replace(/\s*\(.*$/, '') : 'YW4 Recomp';
+
+  $('news-title').textContent = `What's new in ${NEWS.version}`;
+  const news = $('news-list');
+  news.textContent = '';
+  for (const n of NEWS.items) news.append(chip(n));
+
+  // screenshots: four on the overview, the newest ones on their tab; none yet: how to take one
+  $('recent').hidden = !info.shots.length;
+  $('no-shots').hidden = !!info.shots.length;
+  $('see-all').textContent = `See all ${info.shotCount}`;
+  $('recent-grid').replaceChildren(...info.shots.slice(0, 8).map(shotButton));  // a narrow window shows 4 (CSS)
+  $('shot-grid').replaceChildren(...info.shots.map(shotButton));
+  $('shots-line').textContent = !info.shotCount ? 'None yet. Press F12 in the game.'
+    : info.shotCount > info.shots.length ? `The newest ${info.shots.length} of ${info.shotCount}. Press F12 in the game for more.`
+    : 'Press F12 in the game for more.';
+
   const mods = $('mod-list');
   mods.textContent = '';
   if (info.mods.length) for (const m of info.mods) mods.append(chip(m));
-  else { const li = chip('None. Put mods in the mods folder; they load next time you play.'); li.className = 'none'; mods.append(li); }
-  $('dlc-line').textContent = info.dlc ? `${info.dlc} add-ons, checked` : 'None. Put DLC NSPs in the DLC folder; they load next time you play.';
+  else { const li = chip('None. Put mods in the mods folder.'); li.className = 'none'; mods.append(li); }
+  $('row-mods').textContent = info.mods.length === 1 ? info.mods[0] : info.mods.length ? `${info.mods.length} mods` : 'None';
+  $('dlc-line').textContent = info.dlc ? `${info.dlc} add-ons, checked.` : 'None. Put DLC NSPs in the DLC folder.';
+  $('row-dlc').textContent = info.dlc ? `${info.dlc} checked` : 'None';
+
   reclaimable = info.reclaimable;
-  $('free-btn').textContent = reclaimable > 0.05 * GB ? `Free up ${gb(reclaimable)}` : 'Space freed';
+  $('row-free').textContent = reclaimable > 0.05 * GB ? gb(reclaimable) : 'Done';
   $('free-btn').disabled = reclaimable <= 0.05 * GB;
-  $('game-version').textContent = info.version ? info.version.replace(/\s*\(.*$/, '') : 'YW4 Recomp';
   $('offer').hidden = !!inst.originalsOffered;
 }
 let reclaimable = 0;
+// the game closed: new play time, maybe new screenshots
+if (T && T.event) T.event.listen('played', () => { if (inst && !document.querySelector('[data-screen="ready"]').hidden) showReady(); });
 
 $('play').addEventListener('click', async () => {
-  try { await invoke('play', { install: inst.install }); } catch (e) { soon.querySelector('p').textContent = String(e); soon.showModal(); }
+  try {
+    await invoke('play', { install: inst.install });
+    $('stat-last').textContent = 'Today';
+  } catch (e) { soon.querySelector('p').textContent = String(e); soon.showModal(); }
 });
+$('news-more').addEventListener('click', () => invoke('open_project_page'));
 document.querySelectorAll('[data-open]').forEach((b) => b.addEventListener('click', () =>
   invoke('open_folder', { install: inst.install, which: b.dataset.open, saves: inst.saves })));
 $('to-options').addEventListener('click', () => {  // back into setup with the remembered choices

@@ -65,8 +65,48 @@ pub struct Info {
     version: String,          // yw4 --version
     dlc: usize,               // checked add-ons in data\dlc
     mods: Vec<String>,        // mod folders in mods\ (Atmosphère's layout or plain)
-    picture: Option<String>,  // the newest screenshot, else the game's icon (the player's own files)
+    icon: Option<String>,     // the game's icon, from the player's own files (the build makes it)
+    shots: Vec<String>,       // screenshots, newest first (at most SHOTS)
+    #[serde(rename = "shotCount")]
+    shot_count: usize,        // all of them
     reclaimable: u64,         // what Free up space would delete
+    #[serde(rename = "lastPlayed")]
+    last_played: Option<u64>, // Unix seconds of the last start from the launcher
+    #[serde(rename = "playSecs")]
+    play_secs: u64,           // time played, started from the launcher
+}
+
+const SHOTS: usize = 48;
+
+/// Play time, kept apart from launcher.json: the screens rewrite that file from their own copy, which would undo
+/// what the game's exit adds here. Only starts from the launcher count (a shortcut to yw4.exe isn't seen).
+#[derive(Serialize, Deserialize, Default)]
+struct Played {
+    install: String,
+    #[serde(rename = "lastPlayed")]
+    last_played: Option<u64>,
+    seconds: u64,
+}
+
+fn played_path() -> PathBuf {
+    state_path().with_file_name("play.json")
+}
+
+fn load_played(install: &str) -> Played {
+    std::fs::read_to_string(played_path()).ok()
+        .and_then(|t| serde_json::from_str::<Played>(&t).ok())
+        .filter(|p| p.install == install)  // another install starts from zero
+        .unwrap_or(Played { install: install.to_string(), ..Default::default() })
+}
+
+fn save_played(p: &Played) {
+    let path = played_path();
+    let _ = std::fs::create_dir_all(path.parent().unwrap());
+    let _ = std::fs::write(path, serde_json::to_string_pretty(p).unwrap());
+}
+
+fn now() -> u64 {
+    std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0)
 }
 
 /// Folders the build only needs again for a rebuild: generated C, objects, downloads, shader assembly, unpacked NCAs.
@@ -100,24 +140,44 @@ pub async fn install_info(install: String) -> Info {
             .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string()).unwrap_or_default();
         let dlc = std::fs::read_dir(inst.join("data").join("dlc")).into_iter().flatten().flatten()
             .filter(|e| crate::check::dlc_index_of(&e.path()).is_some()).count();
-        let newest = std::fs::read_dir(inst.join("screenshots")).into_iter().flatten().flatten()
+        let mut shots: Vec<(std::time::SystemTime, PathBuf)> = std::fs::read_dir(inst.join("screenshots")).into_iter().flatten().flatten()
             .filter(|e| e.path().extension().map_or(false, |x| x.eq_ignore_ascii_case("bmp") || x.eq_ignore_ascii_case("png")))
-            .max_by_key(|e| e.metadata().and_then(|m| m.modified()).ok())
-            .map(|e| e.path());
-        let icon = inst.join("work").join("icon").join("yw4.ico");
-        let picture = newest.or_else(|| icon.is_file().then_some(icon)).map(|p| p.display().to_string());
+            .map(|e| (e.metadata().and_then(|m| m.modified()).unwrap_or(std::time::UNIX_EPOCH), e.path()))
+            .collect();
+        shots.sort_by(|a, b| b.0.cmp(&a.0));
+        let shot_count = shots.len();
+        let shots = shots.into_iter().take(SHOTS).map(|(_, p)| p.display().to_string()).collect();
+        // icon.jpg is the game's own picture; installs built before it existed have only the .ico
+        let dir = inst.join("work").join("icon");
+        let icon = [dir.join("icon.jpg"), dir.join("yw4.ico")].into_iter().find(|p| p.is_file()).map(|p| p.display().to_string());
         let reclaimable = reclaim_dirs(&inst).iter().map(|d| dir_size(d)).sum();
-        Info { version, dlc, mods: mod_names(&inst.join("mods")), picture, reclaimable }
+        let played = load_played(&install);
+        Info { version, dlc, mods: mod_names(&inst.join("mods")), icon, shots, shot_count, reclaimable,
+               last_played: played.last_played, play_secs: played.seconds }
     })
     .await
     .unwrap()
 }
 
-/// Starts the game: yw4.exe with no arguments reads game.ini next to it.
+/// Starts the game: yw4.exe with no arguments reads game.ini next to it. Notes the start, and when the game
+/// exits adds the time played and tells the screens ("played"), so the Ready screen's numbers update.
 #[tauri::command]
-pub fn play(install: String) -> Result<(), String> {
+pub fn play(app: tauri::AppHandle, install: String) -> Result<(), String> {
+    use tauri::Emitter;
     let e = exe(&install);
-    Command::new(&e).current_dir(e.parent().unwrap()).spawn().map(|_| ()).map_err(|e| format!("couldn't start the game ({e})"))
+    let mut child = Command::new(&e).current_dir(e.parent().unwrap()).spawn().map_err(|e| format!("couldn't start the game ({e})"))?;
+    let start = now();
+    let mut p = load_played(&install);
+    p.last_played = Some(start);
+    save_played(&p);
+    std::thread::spawn(move || {
+        let _ = child.wait();
+        let mut p = load_played(&install);
+        p.seconds += now().saturating_sub(start);
+        save_played(&p);
+        let _ = app.emit("played", ());
+    });
+    Ok(())
 }
 
 /// Opens one of the install's folders in Explorer (a fixed set: nothing else can be named).
@@ -133,6 +193,17 @@ pub fn open_folder(install: String, which: String, saves: String) -> Result<(), 
     };
     std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
     Command::new("explorer").arg(&dir).spawn().map(|_| ()).map_err(|e| e.to_string())
+}
+
+/// Opens one screenshot in the player's picture viewer: only a file directly in the install's screenshots folder.
+#[tauri::command]
+pub fn open_shot(install: String, path: String) -> Result<(), String> {
+    let p = PathBuf::from(&path);
+    let dir = Path::new(&install).join("screenshots");
+    if p.parent() != Some(dir.as_path()) || !p.is_file() {
+        return Err("not a screenshot".into());
+    }
+    Command::new("explorer").arg(&p).spawn().map(|_| ()).map_err(|e| e.to_string())
 }
 
 /// Deletes what only a rebuild needs; returns the bytes freed. The game keeps working.

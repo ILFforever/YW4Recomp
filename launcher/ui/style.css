@@ -11,7 +11,11 @@
 }
 * { box-sizing: border-box; }
 html, body { margin: 0; height: 100%; }
-body { color: var(--ink); font: 400 15px/1.5 var(--body); overflow: hidden; user-select: none;
+/* the window is see-through (tauri.conf.json: Windows' frosted Mica behind it) only under the top strip: the page
+   itself is transparent and every part below the strip paints its own background */
+html, body { background: transparent; }
+body { color: var(--ink); font: 400 15px/1.5 var(--body); overflow: hidden; user-select: none; }
+.screen {
   /* the Yo-kai Pad's lilac checkerboard, as on the website */
   background-color: var(--lilac-1);
   background-image: conic-gradient(var(--lilac-0) 25%, transparent 0 50%, var(--lilac-0) 0 75%, transparent 0);
@@ -26,6 +30,21 @@ body { color: var(--ink); font: 400 15px/1.5 var(--body); overflow: hidden; user
 .icon-btn { display: grid; place-items: center; width: 44px; height: 44px; border-radius: 12px; border: 0;
   background: oklch(34% 0.1 295); color: oklch(92% 0.03 300); cursor: pointer; }
 .icon-btn:hover { background: oklch(42% 0.11 295); color: var(--white); }
+/* the window strip above the bar (the launcher draws its own title bar): darker and thinner than the bar, with
+   Windows-shaped buttons (wide, square, full height) so they don't read as the launcher's round chips; close goes
+   red on hover like Windows' own */
+/* the strip: plain frosted glass, Windows' Mica (the desktop, blurred) under a light purple tint */
+.titlebar { flex-shrink: 0; display: flex; align-items: stretch; height: 32px; background: oklch(30% 0.08 295 / .45); }
+.titlebar-fill { flex: 1; }
+/* part of the glass until hovered, like Windows' own (the one exception to "no transparent buttons": these are
+   the window's, not the launcher's) */
+.win-btn { display: grid; place-items: center; width: 46px; border: 0; border-radius: 0; background: transparent;
+  color: var(--white); cursor: pointer; }
+.win-btn:hover { background: oklch(36% 0.09 295); color: var(--white); }
+.win-close:hover { background: oklch(52% 0.2 27); color: var(--white); }
+.win-btn .when-max { display: none; }
+.maximised .win-btn .when-max { display: block; }
+.maximised .win-btn .when-normal { display: none; }
 
 [hidden] { display: none !important; }
 
@@ -156,31 +175,94 @@ body { color: var(--ink); font: 400 15px/1.5 var(--body); overflow: hidden; user
 .build-steps .mark { width: 24px; height: 24px; }
 .build-steps .mark.todo { border: 2px solid var(--lilac-3); }
 
-/* screen 5: the picture and Play on the left, mods / DLC / more on the right */
-.ready { flex: 1; min-height: 0; display: grid; grid-template-columns: minmax(0, 1fr) 320px; gap: 20px; padding: 22px 28px; }
-.ready-main { display: flex; flex-direction: column; gap: 14px; min-width: 0; min-height: 0; }
-.offer { display: flex; align-items: center; gap: 10px; padding: 10px 12px 10px 16px; border-radius: 12px; background: var(--cream);
+/* screen 5 (owner's pick F): the game in a white sidebar (icon, Play + Options, what's installed); on the right a
+   band (newest screenshot, else the icon blurred) with play stats and tabs, then the tab's page */
+.ready { flex: 1; min-height: 0; display: grid; grid-template-columns: 280px minmax(0, 1fr); }
+.game-side { display: flex; flex-direction: column; gap: 10px; padding: 18px 20px 16px; min-height: 0; overflow: auto;
+  background: var(--white); border-right: 1px solid var(--lilac-3); }
+/* the icon takes what the window's height leaves after the rest of the sidebar (about 552 px with the window
+   strip), so nothing scrolls */
+.game-icon { width: min(100%, calc(100vh - 552px)); min-width: 120px; aspect-ratio: 1; border-radius: 16px; overflow: hidden;
+  background: var(--violet-deep); flex-shrink: 0; }
+.game-icon img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.game-head { display: flex; flex-direction: column; gap: 10px; }
+/* a short window: the icon goes small, beside the title, so the sidebar never scrolls */
+@media (max-height: 692px) {
+  .game-head { flex-direction: row; align-items: center; gap: 12px; }
+  .game-icon { width: 72px; min-width: 72px; border-radius: 12px; }
+  .game-title { font-size: 17px; }
+}
+.game-title { font: 800 21px/1.15 var(--display); color: var(--violet); }
+.game-sub { font-size: 13px; color: var(--ink-2); }
+.play-split { display: flex; gap: 5px; flex-shrink: 0; }
+.btn.play { flex: 1; justify-content: center; height: 56px; padding: 0 20px; font-size: 22px; border-radius: 999px 10px 10px 999px; }
+.btn.play-opts { width: 56px; height: 56px; padding: 0; justify-content: center; border-radius: 10px 999px 999px 10px; }
+.built-line { display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--ink-2); }
+.built-line svg { color: var(--ok); flex-shrink: 0; }
+.side-rows { display: flex; flex-direction: column; gap: 5px; }
+.side-row { flex-shrink: 0; display: flex; justify-content: space-between; align-items: center; gap: 10px; height: 34px; padding: 0 12px;
+  border-radius: 10px; border: 1px solid var(--lilac-2); background: var(--lilac-0); font: 13px/1 var(--body); color: var(--ink);
+  cursor: pointer; text-align: left; }
+.side-row b { font-weight: 700; }
+.side-row span { color: var(--ink-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.side-row:hover:not(:disabled) { background: var(--lilac-1); border-color: var(--lilac-3); }
+.side-row:disabled { cursor: default; }
+
+.game-main { display: flex; flex-direction: column; min-width: 0; min-height: 0; background: var(--lilac-0); }
+.band { position: relative; height: 128px; flex-shrink: 0; overflow: hidden; background: var(--violet-deep); }
+.band img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
+.band img.blurred { inset: -60px; width: calc(100% + 120px); height: calc(100% + 120px); filter: blur(40px) saturate(1.2); }
+.band::after { content: ""; position: absolute; inset: 0; pointer-events: none;
+  background: linear-gradient(90deg, oklch(18% 0.08 295 / .85), oklch(18% 0.08 295 / .45)); }
+.stats { position: absolute; z-index: 1; left: 26px; top: 20px; display: flex; gap: 30px; margin: 0; color: var(--white); }
+.stats dt { font: 700 11px/1 var(--display); letter-spacing: .06em; text-transform: uppercase; color: oklch(88% 0.03 300); }
+.stats dd { margin: 6px 0 0; font: 800 18px/1 var(--display); }
+.tabs { position: absolute; z-index: 1; left: 22px; right: 22px; bottom: 0; display: flex; gap: 4px; }
+.tabs button { height: 42px; padding: 0 18px; border: 0; border-radius: 12px 12px 0 0; background: var(--violet-deep);
+  color: var(--white); font: 800 15px/1 var(--display); cursor: pointer; }
+.tabs button:hover { background: oklch(34% 0.1 295); }
+.tabs button[aria-selected="true"] { background: var(--lilac-0); color: var(--violet); }
+
+.tab-body { flex: 1; min-height: 0; display: flex; flex-direction: column; gap: 14px; padding: 18px 24px 20px; overflow: auto; }
+.offer { display: flex; align-items: center; gap: 10px; padding: 9px 12px 9px 16px; border-radius: 12px; background: var(--cream);
   border: 1px solid oklch(88% 0.04 85); font-size: 13px; }
 .offer span { flex: 1; min-width: 0; }
-.picture { position: relative; flex: 1; min-height: 0; border-radius: 16px; overflow: hidden; background: var(--violet-deep); }
-.picture img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
-.picture img.icon { object-fit: contain; padding: 40px 40px 110px; }
-.picture::after { content: ""; position: absolute; inset: 45% 0 0 0; pointer-events: none;
-  background: linear-gradient(to bottom, transparent, oklch(20% 0.08 295 / .85)); }
-.picture-title { position: absolute; left: 26px; bottom: 20px; z-index: 1; display: flex; flex-direction: column; color: var(--white); }
-.picture-title .art-title { font-size: 34px; }
-.play-row { display: flex; align-items: center; gap: 16px; }
-.btn.play { height: 58px; padding: 0 38px; font-size: 22px; }
-.ready-chips { margin: 0; }
-.ready-chips li { background: var(--white); }
-.ready-side { display: flex; flex-direction: column; gap: 12px; min-height: 0; overflow: auto; }
+.offer .btn.small { height: 32px; }
+/* capped, so a big window doesn't stretch them into empty boxes */
+.overview { flex: 1; min-height: 220px; max-height: 480px; display: grid; grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr); gap: 14px; }
+/* wide: the news column stops growing, and the cards take their contents' height (the 4 x 2 screenshots) */
+@media (min-width: 1500px) { .overview { flex: none; max-height: none; grid-template-columns: minmax(0, 600px) minmax(0, 1fr); } }
 .card-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 6px; }
 .card-head h2 { margin: 0; }
-.mod-list { margin: 0; padding: 0; list-style: none; font-size: 14px; }
-.mod-list li { padding: 7px 0; border-top: 1px solid var(--lilac-2); }
-.mod-list li.none, .card-line { color: var(--ink-2); font-size: 13px; margin: 0; }
-.more { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
-.more .btn { justify-content: center; }
+.news { display: flex; flex-direction: column; gap: 8px; border-color: var(--lilac-2); }
+.news .tag { align-self: flex-start; padding: 5px 9px; border-radius: 999px; background: var(--violet); color: var(--white);
+  font: 800 11px/1 var(--display); }
+.news h2 { margin: 0; font-size: 21px; }
+.news ul { margin: 0; padding-left: 18px; display: flex; flex-direction: column; gap: 6px; font-size: 14px; }
+.link { align-self: flex-start; margin-top: auto; padding: 4px 0; border: 0; background: none; cursor: pointer;
+  font: 700 13px/1 var(--display); color: var(--violet); text-decoration: underline; }
+.recent { display: flex; flex-direction: column; min-height: 0; border-color: var(--lilac-2); padding: 14px; }
+.recent .link { margin: 0; }
+/* 16:9 tiles: 4 in a normal window (2 x 2), 8 in a wide one (4 x 2) */
+.recent-grid { display: grid; grid-template-columns: 1fr 1fr; align-content: start; gap: 8px; }
+.recent-grid .shot { aspect-ratio: 16 / 9; }
+@media (max-width: 1499px) { .recent-grid .shot:nth-child(n+5) { display: none; } }
+@media (min-width: 1500px) { .recent-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); } }
+.shot { position: relative; min-height: 0; border: 0; padding: 0; border-radius: 10px; overflow: hidden; background: var(--lilac-1); cursor: pointer; }
+.shot img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
+.empty-shots { display: flex; flex-direction: column; justify-content: center; align-items: center; gap: 8px; padding: 18px;
+  border-radius: 16px; border: 2px dashed var(--gold-deep); background: var(--white); text-align: center; color: var(--violet); }
+.empty-shots b { font: 800 17px/1.2 var(--display); }
+.empty-shots span { font-size: 14px; color: var(--ink-2); }
+kbd { padding: 2px 7px; border-radius: 6px; background: var(--lilac-1); color: var(--violet); font: 700 13px/1.4 var(--display); }
+.panel-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; font-size: 14px; color: var(--ink-2); }
+.shot-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 10px; }
+.shot-grid .shot { aspect-ratio: 16 / 9; }
+.list-card { margin: 0; padding: 4px 18px; list-style: none; border-radius: 14px; background: var(--white); border: 1px solid var(--lilac-3); font-size: 14px; }
+p.list-card { padding: 14px 18px; }
+.list-card li { padding: 11px 0; border-top: 1px solid var(--lilac-2); }
+.list-card li:first-child { border-top: 0; }
+.list-card li.none, p.list-card { color: var(--ink-2); }
 .file-list { margin: 0 0 12px; padding: 10px 12px 10px 28px; border-radius: 10px; background: var(--lilac-0);
   font: 12px/1.7 ui-monospace, Consolas, monospace; color: var(--ink-2); max-height: 180px; overflow: auto; overflow-wrap: anywhere; }
 #originals-dlg, #free { width: 520px; }

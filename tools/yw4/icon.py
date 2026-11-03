@@ -1,4 +1,5 @@
-"""The game's icon from the user's own NSP or XCI, as <work_dir>/icon/yw4.ico for the exe (decision 0048).
+"""The game's icon from the user's own NSP or XCI, as <work_dir>/icon/yw4.ico for the exe (decision 0048), and
+the original JPEG beside it as icon.jpg for the launcher's Ready screen.
 
     python -m tools.yw4.icon
 
@@ -98,7 +99,9 @@ def make(cfg: config.Config, home: Path, ncas: list[Path]) -> Path:
     ico = cfg.work_dir / "icon" / "yw4.ico"
     with tempfile.TemporaryDirectory() as t:
         tmp = Path(t)
-        jpeg_to_ico(icon_jpeg(cfg.hactool_exe, home, ncas, tmp), ico, tmp)
+        jpeg = icon_jpeg(cfg.hactool_exe, home, ncas, tmp)
+        jpeg_to_ico(jpeg, ico, tmp)
+        shutil.copyfile(jpeg, ico.with_name("icon.jpg"))  # the launcher's Ready screen shows it (the .ico is for Windows)
     return ico
 
 

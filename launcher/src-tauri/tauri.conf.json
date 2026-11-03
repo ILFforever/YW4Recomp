@@ -12,10 +12,14 @@
       {
         "title": "Yo-kai Watch 4 Recomp",
         "width": 1100,
-        "height": 700,
+        "height": 732,
         "minWidth": 900,
         "minHeight": 600,
-        "center": true
+        "center": true,
+        "decorations": false,
+        "shadow": true,
+        "transparent": true,
+        "windowEffects": { "effects": ["mica"] }
       }
     ],
     "security": {

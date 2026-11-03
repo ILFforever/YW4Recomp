@@ -11,11 +11,26 @@
 </head>
 <body>
 <div class="app">
-  <header class="bar">
-    <div class="brand">YW4 Recomp</div>
-    <ol class="steps-bar" id="steps-bar" hidden>
-      <li data-step="files">1 Game files</li><li data-step="check">2 Check</li><li data-step="options">3 Options</li>
-      <li data-step="build">4 Build</li><li data-step="play">5 Play</li>
+  <!-- the launcher's own window strip (Windows' title bar is off, tauri.conf.json): drag it or the bar below to
+       move the window, double-click to maximise; the window buttons live here, apart from the launcher's own -->
+  <div class="titlebar" data-tauri-drag-region>
+    <span class="titlebar-fill" data-tauri-drag-region></span>
+    <button class="win-btn" type="button" id="win-min" aria-label="Minimise" title="Minimise">
+      <svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.2" aria-hidden="true"><path d="M1 6h10"/></svg>
+    </button>
+    <button class="win-btn" type="button" id="win-max" aria-label="Maximise" title="Maximise">
+      <svg class="when-normal" width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.2" aria-hidden="true"><rect x="1.5" y="1.5" width="9" height="9"/></svg>
+      <svg class="when-max" width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.2" aria-hidden="true"><rect x="1.5" y="3.5" width="7" height="7"/><path d="M3.5 3.5v-2h7v7h-2"/></svg>
+    </button>
+    <button class="win-btn win-close" type="button" id="win-close" aria-label="Close" title="Close">
+      <svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.2" aria-hidden="true"><path d="M1.5 1.5l9 9M10.5 1.5l-9 9"/></svg>
+    </button>
+  </div>
+  <header class="bar" data-tauri-drag-region>
+    <div class="brand" data-tauri-drag-region>YW4 Recomp</div>
+    <ol class="steps-bar" id="steps-bar" data-tauri-drag-region hidden>
+      <li data-tauri-drag-region data-step="files">1 Game files</li><li data-tauri-drag-region data-step="check">2 Check</li><li data-tauri-drag-region data-step="options">3 Options</li>
+      <li data-tauri-drag-region data-step="build">4 Build</li><li data-tauri-drag-region data-step="play">5 Play</li>
     </ol>
     <button class="icon-btn" type="button" id="github" aria-label="GitHub" title="GitHub">
       <svg width="22" height="22" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 2a10 10 0 0 0-3.16 19.49c.5.09.68-.22.68-.48v-1.7c-2.78.6-3.37-1.34-3.37-1.34-.45-1.16-1.11-1.47-1.11-1.47-.91-.62.07-.6.07-.6 1 .07 1.53 1.03 1.53 1.03.9 1.52 2.34 1.08 2.91.83.09-.65.35-1.08.63-1.33-2.22-.25-4.55-1.11-4.55-4.94 0-1.09.39-1.98 1.03-2.68-.1-.25-.45-1.27.1-2.65 0 0 .84-.27 2.75 1.02a9.5 9.5 0 0 1 5 0c1.91-1.29 2.75-1.02 2.75-1.02.55 1.38.2 2.4.1 2.65.64.7 1.03 1.59 1.03 2.68 0 3.84-2.34 4.69-4.57 4.93.36.31.68.92.68 1.85v2.74c0 .27.18.58.69.48A10 10 0 0 0 12 2z"/></svg>
@@ -182,42 +197,91 @@
 
   <!-- 5 · Ready: the everyday screen once the game is built -->
   <main class="screen ready" data-screen="ready" hidden>
-    <section class="ready-main">
-      <div class="offer" id="offer" hidden>
-        <span><b>Setup is done.</b> Your original game files aren't needed any more.</span>
-        <button class="btn small" type="button" id="offer-keep">Keep them</button>
-        <button class="btn small primary" type="button" id="offer-delete">Delete…</button>
+    <!-- the game: icon, Play (+ Options), what's installed -->
+    <aside class="game-side">
+      <div class="game-head">
+        <div class="game-icon"><img id="game-icon" alt="The game's icon"></div>
+        <div>
+          <div class="game-title">Yo-kai Watch 4 Recomp</div>
+          <div class="game-sub">Developed by ILFforever</div>
+        </div>
       </div>
-      <div class="picture">
-        <img id="picture" alt="">
-        <div class="picture-title"><span class="art-title">Yo-kai Watch 4 Recomp</span><span class="art-sub">Developed by ILFforever</span></div>
-      </div>
-      <div class="play-row">
+      <div class="play-split">
         <button class="btn primary play" type="button" id="play">
           <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M7 4.5v15l13-7.5z"/></svg>
           Play
         </button>
-        <ul class="chips ready-chips" id="ready-chips"></ul>
+        <button class="btn primary play-opts" type="button" id="to-options" aria-label="Options and rebuild" title="Options and rebuild">
+          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg>
+        </button>
       </div>
-    </section>
-
-    <aside class="ready-side">
-      <div class="card">
-        <div class="card-head"><h2>Mods</h2><button class="btn small" type="button" data-open="mods">Open folder</button></div>
-        <ul class="mod-list" id="mod-list"></ul>
-      </div>
-      <div class="card">
-        <div class="card-head"><h2>DLC</h2><button class="btn small" type="button" data-open="dlc">Open folder</button></div>
-        <p class="card-line" id="dlc-line"></p>
-      </div>
-      <div class="card more">
-        <button class="btn small" type="button" id="to-options">Options and rebuild</button>
-        <button class="btn small" type="button" data-open="save">Save files</button>
-        <button class="btn small" type="button" data-open="screenshots">Screenshots</button>
-        <button class="btn small" type="button" data-open="logs">Logs</button>
-        <button class="btn small" type="button" id="free-btn">Free up space</button>
+      <div class="built-line"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg><span id="built-line">Built and checked</span></div>
+      <div class="side-rows">
+        <button class="side-row" type="button" data-tab="mods"><b>Mods</b><span id="row-mods"></span></button>
+        <button class="side-row" type="button" data-tab="dlc"><b>DLC</b><span id="row-dlc"></span></button>
+        <button class="side-row" type="button" data-open="save"><b>Saves</b><span>Open folder</span></button>
+        <button class="side-row" type="button" data-open="logs"><b>Logs</b><span>Open folder</span></button>
+        <button class="side-row" type="button" id="free-btn"><b>Free up space</b><span id="row-free"></span></button>
       </div>
     </aside>
+
+    <section class="game-main">
+      <!-- the band: the newest screenshot, else the icon blurred; stats; the tabs -->
+      <div class="band">
+        <img id="band-img" alt="" aria-hidden="true">
+        <dl class="stats">
+          <div><dt>Last played</dt><dd id="stat-last">Never</dd></div>
+          <div><dt>Play time</dt><dd id="stat-time">0 h</dd></div>
+          <div><dt>Screenshots</dt><dd id="stat-shots">0</dd></div>
+        </dl>
+        <div class="tabs" role="tablist">
+          <button type="button" role="tab" data-tab="overview" aria-selected="true">Overview</button>
+          <button type="button" role="tab" data-tab="shots" aria-selected="false">Screenshots</button>
+          <button type="button" role="tab" data-tab="mods" aria-selected="false">Mods</button>
+          <button type="button" role="tab" data-tab="dlc" aria-selected="false">DLC</button>
+        </div>
+      </div>
+
+      <div class="tab-body" data-panel="overview">
+        <div class="offer" id="offer" hidden>
+          <span><b>Setup is done.</b> Your original game files aren't needed any more.</span>
+          <button class="btn small" type="button" id="offer-keep">Keep them</button>
+          <button class="btn small primary" type="button" id="offer-delete">Delete…</button>
+        </div>
+        <div class="overview">
+          <article class="card news">
+            <span class="tag">UPDATE</span>
+            <h2 id="news-title">What's new</h2>
+            <ul id="news-list"></ul>
+            <button class="link" type="button" id="news-more">More on GitHub</button>
+          </article>
+          <div class="card recent" id="recent">
+            <div class="card-head"><h2>Recent screenshots</h2><button class="link" type="button" data-tab="shots" id="see-all">See all</button></div>
+            <div class="recent-grid" id="recent-grid"></div>
+          </div>
+          <div class="empty-shots" id="no-shots">
+            <svg width="34" height="34" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 8h3l2-3h6l2 3h3v11H4z"/><circle cx="12" cy="13" r="3.5"/></svg>
+            <b>No screenshots yet</b>
+            <span>Press <kbd>F12</kbd> in the game.<br>They show up here.</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="tab-body" data-panel="shots" hidden>
+        <div class="panel-head"><span id="shots-line"></span><button class="btn small" type="button" data-open="screenshots">Open folder</button></div>
+        <div class="shot-grid" id="shot-grid"></div>
+      </div>
+
+      <div class="tab-body" data-panel="mods" hidden>
+        <div class="panel-head"><span>Mods load the next time you play.</span><button class="btn small" type="button" data-open="mods">Open folder</button></div>
+        <ul class="list-card" id="mod-list"></ul>
+      </div>
+
+      <div class="tab-body" data-panel="dlc" hidden>
+        <div class="panel-head"><span>DLC loads the next time you play.</span><button class="btn small" type="button" data-open="dlc">Open folder</button></div>
+        <p class="list-card" id="dlc-line"></p>
+      </div>
+    </section>
   </main>
 
   <footer class="status">
