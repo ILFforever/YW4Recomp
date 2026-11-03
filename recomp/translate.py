@@ -27,7 +27,6 @@ from __future__ import annotations
 import argparse
 import collections
 import hashlib
-import json
 import struct
 import sys
 import tomllib
@@ -141,9 +140,9 @@ def entry_points(cfg: config.Config, m: Module) -> set[int]:
     entries = set(recon.eh_frame_function_starts(code.data))
     entries |= recon.address_taken_functions(code.data, code.text_end)
     entries |= {v for _, typ, shndx, v in raw_dynsym(m.image, m.info) if shndx and typ == STT_FUNC}
-    if m.name == "main":
-        ghidra = json.loads((cfg.work_dir / "ghidra" / "main.functions.json").read_text())["functions"]
-        entries |= {f["entry"] for f in ghidra}
+    if m.name == "main":  # the starts found by Ghidra that the rules above miss (decision 0051)
+        extra = Path(__file__).with_name("main_extra_functions.txt").read_text().splitlines()
+        entries |= {int(line, 16) for line in extra if line and not line.startswith("#")}
     for off in range(0, code.text_end, 4):  # BL targets
         f = function.decode_flow(code.word(off), off)
         if f and f.kind == "bl" and code.is_code(f.target):

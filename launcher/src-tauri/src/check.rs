@@ -117,6 +117,18 @@ fn ticket_titles(entries: &[Entry]) -> Vec<(u64, String)> {
 }
 
 /// The add-on index of one DLC NSP: its content NCA's SHA-256 looked up in target.toml [dlc].
+pub fn dlc_index_of(path: &Path) -> Option<u32> {
+    dlc_index(path, &target())
+}
+
+pub fn romfs_bytes() -> u64 {
+    target().romfs_bytes
+}
+
+pub fn folder_size(dir: &Path) -> (u64, u64) {
+    folder_bytes(dir)
+}
+
 fn dlc_index(path: &Path, t: &Target) -> Option<u32> {
     let (entries, _) = contents(path).ok()?;
     let mut f = File::open(path).ok()?;

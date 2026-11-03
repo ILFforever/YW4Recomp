@@ -153,6 +153,33 @@
     </div>
   </main>
 
+  <!-- 4 · Build: the repo's tools into the install folder, with progress -->
+  <main class="screen setup" data-screen="build" hidden>
+    <div class="setup-body build-body">
+      <div class="build-left">
+        <div>
+          <h1 id="build-title">Building your game</h1>
+          <p class="lead" id="build-lead">This happens once. You can minimise this window.</p>
+        </div>
+        <div class="big-progress">
+          <div class="pct-row"><span class="pct" id="build-pct">0%</span><span id="build-eta"></span></div>
+          <div class="bar-track" role="progressbar" aria-label="Build progress" aria-valuemin="0" aria-valuemax="100" id="build-bar">
+            <div class="bar-fill" id="build-fill"></div>
+          </div>
+          <p class="now-line" id="build-now"></p>
+        </div>
+        <button class="btn small" type="button" id="log-toggle" aria-expanded="false">Show details</button>
+        <pre class="log" id="build-log" hidden></pre>
+      </div>
+      <ol class="build-steps" id="build-steps"></ol>
+    </div>
+    <div class="setup-foot">
+      <button class="btn" type="button" id="build-cancel">Cancel</button>
+      <span class="foot-note" id="build-note"></span>
+      <button class="btn primary" type="button" id="build-next" hidden>Continue</button>
+    </div>
+  </main>
+
   <footer class="status">
     <span id="launcher-version">Launcher</span>
     <span class="status-right" id="game-version">YW4 Recomp · not built yet</span>
@@ -180,6 +207,15 @@
   <div class="welcome-foot">
     <label class="check"><input type="checkbox" id="welcome-hide"> Don't show this again</label>
     <button class="btn primary" type="button" id="welcome-close">Enter</button>
+  </div>
+</dialog>
+
+<dialog id="stop" aria-labelledby="stop-title">
+  <h2 id="stop-title">Stop building?</h2>
+  <p>Finished steps are kept. Building again picks up where it stopped.</p>
+  <div class="dialog-buttons">
+    <button class="btn" type="button" id="stop-no">Keep building</button>
+    <button class="btn primary" type="button" id="stop-yes">Stop</button>
   </div>
 </dialog>
 

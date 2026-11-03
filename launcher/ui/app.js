@@ -293,7 +293,157 @@ document.querySelectorAll('.radio[data-saves]').forEach((b) => b.addEventListene
 }));
 $('build-go').addEventListener('click', () => {
   if (spaceFree && spaceFree.free < diskNeeded()) return;
-  soon.showModal();  // 4 · Build comes next
+  show('build');
+  startBuild();
+});
+
+// ---- 4 · Build: the steps (Rust: buildrun.rs) and their "@progress" lines turned into one bar
+// Each step's share of the bar is its measured time (seconds, 2026-11-03 on a 16-thread laptop); inside a step,
+// a progress line's own step name says which part of it is moving.
+const BUILD_STEPS = () => [
+  { id: 'game', label: mode === 'files' ? 'Unpacking your game files' : 'Copying your game files', weight: mode === 'files' ? 190 : 60 },
+  { id: 'dlc', label: 'Copying DLC', weight: 1 },
+  { id: 'version', label: 'Checking the version', weight: 3 },
+  { id: 'translate', label: 'Translating the game code', weight: 30 },
+  { id: 'shaders', label: 'Preparing shaders', weight: 50 },
+  { id: 'compile', label: 'Compiling', weight: 310 },
+  { id: 'finish', label: 'Finishing up', weight: 1 },
+];
+// where a progress line's step sits inside a build step: [start, end] of that step
+const PARTS = {
+  unpack: ['game', 0, 0.07], extract: ['game', 0.07, 0.99], icon: ['game', 0.99, 1], copy: ['game', 0, 1],
+  ingest: ['version', 0, 1], shaders: ['shaders', 0.3, 1], compile: ['compile', 0.1, 0.95], link: ['compile', 0.95, 1],
+};
+const NOW_TEXT = {
+  unpack: 'Unpacking the NSP or XCI', extract: 'Extracting the game files', icon: 'Taking the game icon', copy: 'Copying',
+  ingest: 'Checking the game code', shaders: 'Translating shaders', compile: 'Compiling', link: 'Linking',
+};
+let build = null;
+
+function renderBuildSteps() {
+  const list = $('build-steps');
+  list.textContent = '';
+  for (const s of build.steps) {
+    const li = document.createElement('li');
+    li.className = s.state === 'start' ? 'now' : s.state === 'done' ? 'done' : '';
+    const state = s.state === 'done' ? 'ok' : s.state === 'failed' ? 'bad' : s.state === 'start' ? 'wait' : 'todo';
+    const mark = resultRow(state, '', '').firstChild;  // the same marks as screen 2
+    const label = document.createElement('span');
+    label.textContent = s.label;
+    li.append(mark, label);
+    list.append(li);
+  }
+}
+
+function renderBuildBar() {
+  const total = build.steps.reduce((a, s) => a + s.weight, 0);
+  const done = build.steps.reduce((a, s) => a + s.weight * s.frac, 0);
+  const pct = Math.min(100, Math.floor((100 * done) / total));
+  $('build-pct').textContent = pct + '%';
+  $('build-fill').style.width = pct + '%';
+  $('build-bar').setAttribute('aria-valuenow', String(pct));
+  const elapsed = (Date.now() - build.started) / 1000;
+  const frac = done / total;
+  if (frac > 0.04 && frac < 1) {
+    const left = Math.max(1, Math.round((elapsed / frac - elapsed) / 60));
+    $('build-eta').textContent = left <= 1 ? 'About a minute left' : `About ${left} minutes left`;
+  } else if (frac >= 1) {
+    $('build-eta').textContent = '';
+  }
+}
+
+function logLine(line) {
+  const log = $('build-log');
+  log.textContent += line + '\n';
+  if (log.textContent.length > 60000) log.textContent = log.textContent.slice(-40000);
+  log.scrollTop = log.scrollHeight;
+}
+
+async function startBuild() {
+  build = { steps: BUILD_STEPS().map((s) => ({ ...s, state: '', frac: 0 })), started: Date.now() };
+  $('build-title').textContent = 'Building your game';
+  $('build-lead').textContent = 'This happens once. You can minimise this window.';
+  $('build-now').textContent = '';
+  $('build-eta').textContent = '';
+  $('build-note').textContent = '';
+  $('build-next').hidden = true;
+  $('build-cancel').hidden = false;
+  $('build-log').textContent = '';
+  renderBuildSteps();
+  renderBuildBar();
+  const plan = { mode, paths: chosen[mode], install: options.install, fsr: options.fsr, dlss: options.dlss && rtx, saves: options.saves };
+  try {
+    await invoke('start_build', { plan });
+  } catch (e) {
+    buildFinished({ ok: false, message: String(e) });
+  }
+}
+
+function buildFinished({ ok, message }) {
+  $('build-cancel').hidden = true;
+  const next = $('build-next');
+  next.hidden = false;
+  if (ok) {
+    for (const s of build.steps) { s.frac = 1; s.state = 'done'; }
+    renderBuildSteps();
+    renderBuildBar();
+    $('build-title').textContent = 'Your game is ready';
+    $('build-lead').textContent = 'Built in ' + Math.round((Date.now() - build.started) / 60000) + ' minutes.';
+    $('build-now').textContent = '';
+    next.innerHTML = 'Continue ' + ARROW;
+    next.dataset.action = 'play';
+  } else {
+    const stopped = message === 'cancelled';
+    $('build-title').textContent = stopped ? 'Stopped' : 'The build stopped';
+    // the last line of the error, short; the whole of it is in the details
+    const last = message.split('\n').map((l) => l.trim()).filter(Boolean).pop() || 'Unknown error';
+    $('build-lead').textContent = stopped ? 'Finished steps are kept.' : (last.length > 140 ? last.slice(0, 137) + '…' : last);
+    $('build-now').textContent = '';
+    next.innerHTML = 'Build again ' + ARROW;
+    next.dataset.action = 'again';
+    if (!stopped) { $('log-toggle').click(); }
+  }
+}
+
+if (T && T.event) {
+  T.event.listen('build-step', ({ payload }) => {
+    const s = build && build.steps.find((x) => x.id === payload.id);
+    if (!s) return;
+    s.state = payload.state;
+    if (payload.state === 'done') s.frac = 1;
+    renderBuildSteps();
+    renderBuildBar();
+  });
+  T.event.listen('build-progress', ({ payload }) => {
+    if (!build) return;
+    let part = PARTS[payload.step];
+    if (payload.step === 'translate') part = payload.what === 'sdk' ? ['translate', 0.55, 1] : ['translate', 0, 0.55];
+    if (!part) return;
+    const s = build.steps.find((x) => x.id === part[0]);
+    const f = payload.total ? payload.done / payload.total : 0;
+    s.frac = Math.max(s.frac, part[1] + (part[2] - part[1]) * f);
+    $('build-now').textContent = (NOW_TEXT[payload.step] || 'Translating the game code') +
+      (payload.total > 1 && payload.step !== 'unpack' && payload.step !== 'extract' && payload.step !== 'copy'
+        ? ` · ${payload.done.toLocaleString()} of ${payload.total.toLocaleString()}` : '');
+    renderBuildBar();
+  });
+  T.event.listen('build-log', ({ payload }) => logLine(payload));
+  T.event.listen('build-done', ({ payload }) => buildFinished(payload));
+}
+
+$('log-toggle').addEventListener('click', () => {
+  const log = $('build-log');
+  log.hidden = !log.hidden;
+  $('log-toggle').textContent = log.hidden ? 'Show details' : 'Hide details';
+  $('log-toggle').setAttribute('aria-expanded', String(!log.hidden));
+});
+const stopDialog = $('stop');
+$('build-cancel').addEventListener('click', () => stopDialog.showModal());
+$('stop-no').addEventListener('click', () => stopDialog.close());
+$('stop-yes').addEventListener('click', () => { stopDialog.close(); invoke && invoke('cancel_build'); });
+$('build-next').addEventListener('click', () => {
+  if ($('build-next').dataset.action === 'again') startBuild();
+  else soon.showModal();  // 5 · Play comes next
 });
 renderFields();
 
@@ -311,15 +461,23 @@ $('welcome-close').addEventListener('click', closeWelcome);
 (async () => {
   let screen = null;
   try { screen = invoke ? await invoke('start_screen') : null; } catch (e) { /* none */ }
-  if (screen === 'check') {  // tests: run the check on paths from YW4_LAUNCHER_PATHS (mode;id=path;id=path...)
+  if (screen === 'check' || screen === 'build') {
+    // tests: paths from YW4_LAUNCHER_PATHS (mode;id=path;...; "install=" sets the install folder), then run that screen
     const spec = (invoke ? await invoke('test_paths') : null) || '';
     const [m, ...pairs] = spec.split(';');
     if (m === 'files' || m === 'folders') mode = m;
-    for (const p of pairs) { const i = p.indexOf('='); if (i > 0) chosen[mode][p.slice(0, i)] = p.slice(i + 1); }
+    for (const p of pairs) {
+      const i = p.indexOf('=');
+      if (i <= 0) continue;
+      if (p.slice(0, i) === 'install') options.install = p.slice(i + 1);
+      else chosen[mode][p.slice(0, i)] = p.slice(i + 1);
+    }
     document.querySelectorAll('.mode').forEach((b) => b.setAttribute('aria-checked', String(b.dataset.mode === mode)));
     renderFields();
-    show('check');
-    runCheck();
+    if (screen === 'check') { show('check'); runCheck(); return; }
+    await loadOptions();  // the graphics card decides DLSS
+    show('build');
+    startBuild();
     return;
   }
   if (screen === 'files-ready') {  // screenshots of the ready state: example paths, nothing real is read
