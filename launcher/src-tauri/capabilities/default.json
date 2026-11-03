@@ -1,0 +1,7 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "default",
+  "description": "What the launcher's screens may ask the Rust side for: the core only, for now",
+  "windows": ["main"],
+  "permissions": ["core:default"]
+}

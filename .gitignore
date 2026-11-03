@@ -107,3 +107,8 @@ Thumbs.db
 
 # Screenshots saved by older runs launched outside work/ (images of the game)
 /screenshots/
+
+# The launcher (decision 0050): Node and Rust build output
+launcher/node_modules/
+launcher/src-tauri/target/
+launcher/src-tauri/gen/

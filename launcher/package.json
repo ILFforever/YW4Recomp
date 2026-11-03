@@ -1,0 +1,15 @@
+{
+  "name": "yw4-recomp-launcher",
+  "private": true,
+  "version": "0.1.0",
+  "description": "YW4 Recomp launcher: sets up the game from the player's own dump, builds it and starts it (decision 0050)",
+  "license": "MIT",
+  "scripts": {
+    "dev": "tauri dev",
+    "build": "tauri build",
+    "tauri": "tauri"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "2.12.4"
+  }
+}

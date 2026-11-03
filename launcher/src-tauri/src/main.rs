@@ -1,0 +1,29 @@
+// YW4 Recomp launcher (decision 0050): the screens are plain HTML/CSS/JS in launcher/ui, shown in Windows' own
+// WebView2; this side does what a web page can't (files, processes, starting the game). One command so far.
+
+// No console window behind the launcher in release builds.
+#![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
+
+/// The launcher's own version, for its status bar (decision 0047: the launcher has its own number).
+#[tauri::command]
+fn launcher_version() -> String {
+    env!("CARGO_PKG_VERSION").to_string()
+}
+
+/// The project's GitHub page in the player's browser. Only this one address: the screens can't open others.
+#[tauri::command]
+fn open_project_page() -> Result<(), String> {
+    const URL: &str = "https://github.com/ILFforever/YW4Recomp";
+    #[cfg(windows)]
+    let r = std::process::Command::new("explorer").arg(URL).spawn();
+    #[cfg(not(windows))]
+    let r = std::process::Command::new("xdg-open").arg(URL).spawn();
+    r.map(|_| ()).map_err(|e| e.to_string())
+}
+
+fn main() {
+    tauri::Builder::default()
+        .invoke_handler(tauri::generate_handler![launcher_version, open_project_page])
+        .run(tauri::generate_context!())
+        .expect("the launcher window could not start");
+}

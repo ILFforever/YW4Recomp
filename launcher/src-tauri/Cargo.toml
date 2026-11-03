@@ -1,0 +1,21 @@
+[package]
+name = "yw4-recomp-launcher"
+version = "0.1.0"
+description = "YW4 Recomp launcher: sets up the game from the player's own dump, builds it and starts it"
+license = "MIT"
+edition = "2021"
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = [] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+[profile.release]
+# a small launcher: it only shows screens and runs the build steps
+opt-level = "s"
+lto = true
+codegen-units = 1
+strip = true
