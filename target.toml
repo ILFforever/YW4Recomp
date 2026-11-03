@@ -20,6 +20,7 @@ application_id = "010086C00AF7C000"
 # percentage while hactool works (tools/yw4/extract.py), as it writes the files out.
 [extracted]
 bytes = 9099343632  # RomFS 9081468053 in 4518 files, ExeFS 17875579
+romfs_bytes = 9081468053  # the RomFS alone (4518 files): the launcher checks extracted folders against it
 
 # Add-on content (DLC) the game unlocks when found on boot (decision 0049): index (title ID - application ID -
 # 0x1000) = SHA-256 of the add-on's content NCA. That file is the same for every owner (its name is the start of

@@ -125,7 +125,69 @@ document.querySelectorAll('.mode').forEach((b) => b.addEventListener('click', ()
 }));
 $('check').addEventListener('click', () => {
   if (missingFields().length) { markMissing(); return; }
-  soon.showModal();  // the check screen comes next
+  show('check');
+  runCheck();
+});
+
+// ---- 2 · Check: the quick checks (Rust: check.rs); the exact version check runs as the build's first step
+const MARKS = {
+  ok: '<path d="M5 12.5l4.5 4.5L19 7"/>',
+  warn: '<path d="M12 7v6M12 17v.01"/>',
+  bad: '<path d="M7 7l10 10M17 7L7 17"/>',
+};
+let checkBad = 0;
+
+function resultRow(state, label, detail) {
+  const li = document.createElement('li');
+  const mark = document.createElement('span');
+  mark.className = 'mark ' + state;
+  if (MARKS[state]) {
+    mark.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" ' +
+      'stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' + MARKS[state] + '</svg>';
+  }
+  const b = document.createElement('b');
+  b.textContent = label;
+  const d = document.createElement('span');
+  d.className = 'detail';
+  d.textContent = detail;
+  li.append(mark, b, d);
+  return li;
+}
+
+function setContinue(bad) {
+  checkBad = bad;
+  const btn = $('continue');
+  btn.classList.toggle('not-ready', bad > 0);
+  btn.innerHTML = 'Continue ' + (bad ? `<span class="left-badge">${bad} to fix</span>` : ARROW);
+}
+
+async function runCheck() {
+  const list = $('results');
+  list.textContent = '';
+  const labels = mode === 'files' ? ['Base game', 'Update', 'Keys', 'DLC', 'Version'] : ['ExeFS', 'RomFS', 'DLC', 'Version'];
+  for (const l of labels) list.append(resultRow('wait', l, 'Checking…'));
+  $('check-title').textContent = 'Checking your files…';
+  $('check-lead').textContent = 'A few seconds. Nothing is changed.';
+  $('check-note').textContent = '';
+  setContinue(1);
+  let rows = [];
+  try {
+    rows = await invoke('check_game', { req: { mode, paths: chosen[mode] } });
+  } catch (e) {
+    rows = [{ label: 'Check', state: 'bad', detail: String(e) }];
+  }
+  list.textContent = '';
+  for (const r of rows) list.append(resultRow(r.state, r.label, r.detail));
+  const bad = rows.filter((r) => r.state === 'bad').length;
+  $('check-title').textContent = bad ? 'Something needs fixing' : 'All set';
+  $('check-lead').textContent = bad ? 'Go back and fix the rows marked with a cross.' : 'Your files are ready to build.';
+  $('check-note').textContent = bad ? '' : 'Takes about 10–15 minutes.';
+  setContinue(bad);
+}
+
+$('continue').addEventListener('click', () => {
+  if (checkBad) return;
+  soon.showModal();  // 3 · Options comes next
 });
 renderFields();
 
@@ -143,6 +205,17 @@ $('welcome-close').addEventListener('click', closeWelcome);
 (async () => {
   let screen = null;
   try { screen = invoke ? await invoke('start_screen') : null; } catch (e) { /* none */ }
+  if (screen === 'check') {  // tests: run the check on paths from YW4_LAUNCHER_PATHS (mode;id=path;id=path...)
+    const spec = (invoke ? await invoke('test_paths') : null) || '';
+    const [m, ...pairs] = spec.split(';');
+    if (m === 'files' || m === 'folders') mode = m;
+    for (const p of pairs) { const i = p.indexOf('='); if (i > 0) chosen[mode][p.slice(0, i)] = p.slice(i + 1); }
+    document.querySelectorAll('.mode').forEach((b) => b.setAttribute('aria-checked', String(b.dataset.mode === mode)));
+    renderFields();
+    show('check');
+    runCheck();
+    return;
+  }
   if (screen === 'files-ready') {  // screenshots of the ready state: example paths, nothing real is read
     Object.assign(chosen.files, { base: 'D:\\Switch\\Yo-kai Watch 4++ [BASE].nsp',
       update: 'D:\\Switch\\Yo-kai Watch 4++ 2.2.0 [UPD].nsp', keys: 'D:\\Switch\\keys' });
