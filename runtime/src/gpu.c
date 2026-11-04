@@ -1459,8 +1459,13 @@ struct GpuView {
 
 static void image_destroy(GpuImage *g) {
     image_epoch++;
+    static int vlog = -1;  /* with validation: the views freed, to match "destroyed while in use" errors */
+    if (vlog < 0) vlog = getenv("YW4_VULKAN_VALIDATION") != NULL;
     for (GpuView *v = g->views, *n; v; v = n) {
         n = v->next;
+        if (vlog)
+            fprintf(stderr, "yw4: gpu: freeing image %#" PRIx64 " (%ux%u, format %d), view %#" PRIx64 "\n", g->key.addr,
+                    g->width, g->height, (int)g->format, (uint64_t)v->view);
         vkDestroyImageView(vk.device, v->view, NULL);
         free(v);
     }

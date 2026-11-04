@@ -98,7 +98,7 @@ typedef struct {
     void *ptr;
 } Overlay;
 enum { HUD_W = 256 * 4, HUD_H = 128 * 4 };  /* the HUD drawn at its scale: up to 4x its 1x size */
-static Overlay hud = {HUD_W, HUD_H}, panel = {480, 480};
+static Overlay hud = {HUD_W, HUD_H}, panel = {480, 480}, notice = {1024, 160};
 static int hud_on = -1;
 
 void gpu_request_trace(int draws);  /* gpu_draw.c */
@@ -611,6 +611,15 @@ static void panel_draw(VkImage dst, int32_t x0, int32_t y0, uint32_t bw, uint32_
     overlay_show(&panel, dst, w, h, x0 + ((int32_t)bw - w * s) / 2, y0 + ((int32_t)bh - h * s) / 2, (float)s);
 }
 
+/* "Switching frame generation" in the middle of the picture while the switch's safe frames last (gpu_fg.h). */
+static void notice_draw(VkImage dst, int32_t x0, int32_t y0, uint32_t bw, uint32_t bh) {
+    if (!gpu_fg_switching() || overlay_resources(&notice)) return;
+    float s = overlay_scale(swap_extent.height);
+    int w, h;
+    notice_render(notice.ptr, (int)notice.w, (int)notice.h, "SWITCHING FRAME GENERATION...", s, &w, &h);
+    overlay_show(&notice, dst, w, h, x0 + ((int32_t)bw - w) / 2, y0 + ((int32_t)bh - h) / 2, 1.0f);
+}
+
 /* An overlay's drawn cw x ch part pasted 1:1 into rgba (the w x h frame) at (x, y), clipped. */
 static void paste(uint8_t *rgba, uint32_t w, uint32_t h, const Overlay *o, int cw, int ch, uint32_t x, uint32_t y,
                   float scale) {
@@ -927,6 +936,7 @@ static int present_image(VkImage src, VkImageLayout layout, VkRect2D r0, int rea
     }
     hud_draw(dst, x0, y0);
     panel_draw(dst, x0, y0, bw, bh);
+    notice_draw(dst, x0, y0, bw, bh);
     barrier(dst, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR, VK_ACCESS_TRANSFER_WRITE_BIT, 0);
     vkEndCommandBuffer(cmd);
 
@@ -986,6 +996,11 @@ void window_present_image(VkImage image, VkFormat format, VkRect2D rect, uint64_
     host_lock(&present_lock);
     if (swap_free != free_running() || swap_dlssg != dlssg_chosen()) swapchain_stale = 1;
     flash_n = n, flash_format = format;
+    if (gpu_fg_switching()) {  /* frame generation is switching: the GPU finishes everything first (gpu_fg.h) */
+        host_lock(&vk.queue_lock);
+        vkDeviceWaitIdle(vk.device);
+        host_unlock(&vk.queue_lock);
+    }
     if (!(swapchain_stale && create_swapchain(n)) && !frame_resources(w, h) &&
         !present_image(image, VK_IMAGE_LAYOUT_GENERAL, rect, shot) && shot) {
         /* One bulk copy out of the staging memory: it is uncached, and per-byte reads of it took ~1.7 s. */

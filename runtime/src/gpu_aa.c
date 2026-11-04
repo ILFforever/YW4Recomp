@@ -106,6 +106,8 @@ static void image_make(AaImage *im, VkFormat fmt, uint32_t w, uint32_t h, VkImag
 /* Freed only once the GPU is done with every submission (a size change is rare: the settings panel). */
 static void image_free(AaImage *im) {
     if (!im->image) return;
+    if (getenv("YW4_VULKAN_VALIDATION"))  /* to match "destroyed while in use" errors to an image */
+        fprintf(stderr, "yw4: aa: freeing a %ux%u image, view %#" PRIx64 "\n", im->w, im->h, (uint64_t)im->view);
     vkDestroyImageView(vk.device, im->view, NULL);
     vkDestroyImage(vk.device, im->image, NULL);
     vkFreeMemory(vk.device, im->mem, NULL);

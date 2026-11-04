@@ -10,6 +10,10 @@
 int gpu_fg(void);
 void gpu_fg_cycle(void);
 void gpu_fg_test_switch(uint64_t frame);  /* YW4_FG_AT=<frame>:<mode>,... (tests) */
+/* 1 for the frames after a switch of the setting: the window lets the GPU finish all its work before each of
+ * them and shows "switching" (FSR's and Streamline's switch freed image views a command buffer still used:
+ * Vulkan validation, 2026-11-04; an occasional device-lost crash when turning frame generation on). */
+int gpu_fg_switching(void);
 /* 1 while FSR's frame generation shows frames: the window then doesn't wait for the monitor (window.c). */
 int gpu_fg_active(void);
 /* Frames on screen per game frame while frame generation runs (about 2), else 0 (the HUD's SHOWN line). */

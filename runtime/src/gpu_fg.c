@@ -25,6 +25,18 @@
 #include "window.h"
 
 static int fg_mode = -1;
+static uint64_t switch_until;  /* gpu_fg_switching: the GPU frame the switch's safe frames end at */
+enum { SWITCH_FRAMES = 30 };
+
+static void switch_started(void) {
+    __atomic_store_n(&switch_until, gpu_frames() + SWITCH_FRAMES, __ATOMIC_RELEASE);
+}
+
+int gpu_fg_switching(void) {
+    static int off = -1;  /* YW4_FG_SAFE_SWITCH=0: switch without waiting (tests) */
+    if (off < 0) off = getenv("YW4_FG_SAFE_SWITCH") && *getenv("YW4_FG_SAFE_SWITCH") == '0';
+    return !off && gpu_frames() < __atomic_load_n(&switch_until, __ATOMIC_ACQUIRE);
+}
 
 int gpu_fg(void) {
     int m = __atomic_load_n(&fg_mode, __ATOMIC_ACQUIRE);
@@ -55,6 +67,7 @@ void gpu_fg_test_switch(uint64_t frame) {
         int m = atoi(end + 1);
         if (f == frame && m >= 0 && m <= 2) {
             __atomic_store_n(&fg_mode, m, __ATOMIC_RELEASE);
+            switch_started();
             fprintf(stderr, "yw4: gpu: frame generation %d at frame %llu (YW4_FG_AT)\n", m, f);
         }
         p = strchr(end, ',');
@@ -67,6 +80,7 @@ void gpu_fg_cycle(void) {
     while ((m == 2 && (!gpu_dlss_built() || !dlssg_available())) || (m == 1 && !gpu_fsr_built()))
         m = (m + 1) % 3;
     __atomic_store_n(&fg_mode, m, __ATOMIC_RELEASE);
+    switch_started();
     fprintf(stderr, "yw4: gpu: frame generation %s\n", m == 2 ? "DLSS" : m == 1 ? "FSR" : "off");
 }
 
