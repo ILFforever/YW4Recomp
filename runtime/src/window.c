@@ -682,6 +682,176 @@ static int hudless_window_image(uint32_t w, uint32_t h) {
     return 1;
 }
 
+/* Flash detector (YW4_FLASH=1, docs/debugging.md): each presented frame is also scaled to a small thumbnail and
+ * read back one frame later (after the fence the next present waits for anyway: no stall). A frame where many
+ * thumbnail texels are brighter than in both the frame before and the frame after is logged ("yw4: flash:") and
+ * the three thumbnails are saved, so a one-frame flash is found without screenshots (which stall every frame). */
+#define FLASH_W 320
+#define FLASH_RING 480  /* thumbnails kept for F12: 4 s at 120 frames/s */
+static int flash_dump_requested;
+static uint64_t flash_n = UINT64_MAX;  /* the frame window_present_image presents (UINT64_MAX: a generated one) */
+static VkFormat flash_format;
+static struct {
+    int on;  /* -1 not read yet, 0 off, 1 on */
+    VkImage image;
+    VkDeviceMemory mem, buf_mem;
+    VkBuffer buf;
+    uint8_t *ptr;
+    uint32_t h;
+    VkFormat format;
+    int pending;      /* a thumbnail was copied in the last present */
+    uint64_t pending_n;
+    uint8_t *lum[3];  /* luminance of the last three thumbnails, [2] the newest */
+    uint8_t *rgb[3];
+    uint64_t n[3];
+    int have;
+    int saved;
+} fl = {.on = -1};
+
+static int flash_setup(uint32_t w, uint32_t h, VkFormat format) {
+    if (fl.on < 0) fl.on = getenv("YW4_FLASH") && atoi(getenv("YW4_FLASH")) > 0;
+    if (!fl.on) return 0;
+    uint32_t th = (uint32_t)((uint64_t)FLASH_W * h / w);
+    if (th < 1) th = 1;
+    if (fl.image && fl.h == th && fl.format == format) return 1;
+    if (fl.image) {
+        vkDeviceWaitIdle(vk.device);
+        vkDestroyImage(vk.device, fl.image, NULL), vkFreeMemory(vk.device, fl.mem, NULL);
+        vkDestroyBuffer(vk.device, fl.buf, NULL), vkFreeMemory(vk.device, fl.buf_mem, NULL);
+        fl.image = VK_NULL_HANDLE, fl.pending = 0, fl.have = 0;
+    }
+    VkImageCreateInfo ici = {.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO, .imageType = VK_IMAGE_TYPE_2D,
+                             .format = format, .extent = {FLASH_W, th, 1}, .mipLevels = 1, .arrayLayers = 1,
+                             .samples = VK_SAMPLE_COUNT_1_BIT, .tiling = VK_IMAGE_TILING_OPTIMAL,
+                             .usage = VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT};
+    if (vkCreateImage(vk.device, &ici, NULL, &fl.image) != VK_SUCCESS) return fl.on = 0, 0;
+    VkMemoryRequirements mr;
+    vkGetImageMemoryRequirements(vk.device, fl.image, &mr);
+    VkMemoryAllocateInfo mai = {.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO, .allocationSize = mr.size,
+                                .memoryTypeIndex = vk_memory_type(mr.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT)};
+    vkAllocateMemory(vk.device, &mai, NULL, &fl.mem);
+    vkBindImageMemory(vk.device, fl.image, fl.mem, 0);
+    VkBufferCreateInfo bci = {.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO, .size = (VkDeviceSize)FLASH_W * th * 4,
+                              .usage = VK_BUFFER_USAGE_TRANSFER_DST_BIT};
+    vkCreateBuffer(vk.device, &bci, NULL, &fl.buf);
+    vkGetBufferMemoryRequirements(vk.device, fl.buf, &mr);
+    mai.allocationSize = mr.size;
+    mai.memoryTypeIndex = vk_memory_type(mr.memoryTypeBits, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT |
+                                                                VK_MEMORY_PROPERTY_HOST_COHERENT_BIT |
+                                                                VK_MEMORY_PROPERTY_HOST_CACHED_BIT);
+    if (mai.memoryTypeIndex == UINT32_MAX)
+        mai.memoryTypeIndex = vk_memory_type(mr.memoryTypeBits, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT |
+                                                                    VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
+    vkAllocateMemory(vk.device, &mai, NULL, &fl.buf_mem);
+    vkBindBufferMemory(vk.device, fl.buf, fl.buf_mem, 0);
+    vkMapMemory(vk.device, fl.buf_mem, 0, VK_WHOLE_SIZE, 0, (void **)&fl.ptr);
+    for (int i = 0; i < 3; i++) {
+        free(fl.lum[i]), free(fl.rgb[i]);
+        fl.lum[i] = malloc((size_t)FLASH_W * th), fl.rgb[i] = malloc((size_t)FLASH_W * th * 4);
+    }
+    fl.h = th, fl.format = format;
+    fprintf(stderr, "yw4: flash: detector on, %ux%u thumbnails\n", FLASH_W, th);
+    return 1;
+}
+
+/* in present_image, while recording: the frame into the thumbnail and the thumbnail into the buffer */
+static void flash_record(VkImage src, VkImageLayout layout, int32_t sx, int32_t sy, uint32_t w, uint32_t h, uint64_t n) {
+    barrier(fl.image, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 0, VK_ACCESS_TRANSFER_WRITE_BIT);
+    VkImageBlit b = {.srcSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1},
+                     .srcOffsets = {{sx, sy, 0}, {sx + (int32_t)w, sy + (int32_t)h, 1}},
+                     .dstSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1},
+                     .dstOffsets = {{0, 0, 0}, {FLASH_W, (int32_t)fl.h, 1}}};
+    vkCmdBlitImage(cmd, src, layout, fl.image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &b, VK_FILTER_LINEAR);
+    barrier(fl.image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+            VK_ACCESS_TRANSFER_WRITE_BIT, VK_ACCESS_TRANSFER_READ_BIT);
+    VkBufferImageCopy c = {.imageSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1}, .imageExtent = {FLASH_W, fl.h, 1}};
+    vkCmdCopyImageToBuffer(cmd, fl.image, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, fl.buf, 1, &c);
+    fl.pending = 1, fl.pending_n = n;
+}
+
+static void flash_save(int i, const char *tag) {
+    char path[600];
+    SDL_CreateDirectory(screenshot_dir);
+    snprintf(path, sizeof path, "%s/flash_%06" PRIu64 "_%s.bmp", screenshot_dir, fl.n[i], tag);
+    SDL_Surface *s = SDL_CreateSurfaceFrom(FLASH_W, (int)fl.h, SDL_PIXELFORMAT_ABGR8888, fl.rgb[i], FLASH_W * 4);
+    if (s) SDL_SaveBMP(s, path), SDL_DestroySurface(s);
+}
+
+/* in present_image, after its fence wait: the last present's thumbnail is in the buffer */
+static void flash_collect(void) {
+    if (!fl.pending) return;
+    fl.pending = 0;
+    uint8_t *l = fl.lum[0], *c = fl.rgb[0];  /* the oldest becomes the newest */
+    fl.lum[0] = fl.lum[1], fl.lum[1] = fl.lum[2], fl.lum[2] = l;
+    fl.rgb[0] = fl.rgb[1], fl.rgb[1] = fl.rgb[2], fl.rgb[2] = c;
+    fl.n[0] = fl.n[1], fl.n[1] = fl.n[2], fl.n[2] = fl.pending_n;
+    size_t texels = (size_t)FLASH_W * fl.h;
+    memcpy(c, fl.ptr, texels * 4);
+    int bgra = fl.format == VK_FORMAT_B8G8R8A8_UNORM || fl.format == VK_FORMAT_B8G8R8A8_SRGB;
+    for (size_t i = 0; i < texels; i++) {
+        uint8_t *p = c + i * 4;
+        if (bgra) { uint8_t t = p[0]; p[0] = p[2], p[2] = t; }
+        p[3] = 255;
+        l[i] = (uint8_t)((p[0] * 54 + p[1] * 183 + p[2] * 19) >> 8);
+    }
+    /* the last FLASH_RING thumbnails in memory; F12 saves them all (the owner presses it just after a flash) */
+    static uint8_t *ring[FLASH_RING];
+    static uint64_t ring_n[FLASH_RING];
+    static size_t ring_bytes;
+    if (ring_bytes != texels * 4) {
+        for (int i = 0; i < FLASH_RING; i++) free(ring[i]), ring[i] = NULL, ring_n[i] = 0;
+        ring_bytes = texels * 4;
+    }
+    int slot = (int)(fl.n[2] % FLASH_RING);
+    if (!ring[slot]) ring[slot] = malloc(ring_bytes);
+    if (ring[slot]) memcpy(ring[slot], c, ring_bytes), ring_n[slot] = fl.n[2];
+    if (__atomic_exchange_n(&flash_dump_requested, 0, __ATOMIC_ACQ_REL)) {
+        char dir[600], path[700];
+        snprintf(dir, sizeof dir, "%s/flash_ring_%06" PRIu64, screenshot_dir, fl.n[2]);
+        SDL_CreateDirectory(dir);
+        int saved = 0;
+        for (int i = 0; i < FLASH_RING; i++) {
+            if (!ring[i] || !ring_n[i] || ring_n[i] + FLASH_RING <= fl.n[2]) continue;
+            snprintf(path, sizeof path, "%s/flash_%06" PRIu64 "_all.bmp", dir, ring_n[i]);
+            SDL_Surface *s = SDL_CreateSurfaceFrom(FLASH_W, (int)fl.h, SDL_PIXELFORMAT_ABGR8888, ring[i], FLASH_W * 4);
+            if (s) SDL_SaveBMP(s, path), SDL_DestroySurface(s), saved++;
+        }
+        fprintf(stderr, "yw4: flash: F12 at frame %" PRIu64 ": %d thumbnails saved to %s\n", fl.n[2], saved, dir);
+    }
+    static uint64_t save_from = 1, save_to;  /* YW4_FLASH_SAVE=<from>-<to>: every thumbnail in those frames */
+    if (save_from == 1) {
+        const char *e = getenv("YW4_FLASH_SAVE");
+        save_from = 0;
+        if (e) sscanf(e, "%" SCNu64 "-%" SCNu64, &save_from, &save_to);
+    }
+    if (fl.n[2] >= save_from && fl.n[2] <= save_to) flash_save(2, "all");
+    if (++fl.have < 3 || fl.n[2] != fl.n[1] + 1 || fl.n[1] != fl.n[0] + 1) return;
+    /* the middle frame: texels brighter than both neighbours by more than 40 of 255 */
+    static int thr = -1, min_pm = -1;
+    if (thr < 0) thr = getenv("YW4_FLASH_THRESHOLD") ? atoi(getenv("YW4_FLASH_THRESHOLD")) : 40;
+    if (min_pm < 0) min_pm = getenv("YW4_FLASH_MIN") ? atoi(getenv("YW4_FLASH_MIN")) : 3;  /* per mille */
+    size_t count = 0;
+    int64_t sum = 0;
+    uint32_t x0 = FLASH_W, x1 = 0, y0 = fl.h, y1 = 0;
+    for (size_t i = 0; i < texels; i++) {
+        int a = fl.lum[0][i], m = fl.lum[1][i], b = fl.lum[2][i];
+        int d = m - (a > b ? a : b);
+        if (d > thr) {
+            count++, sum += d;
+            uint32_t x = (uint32_t)(i % FLASH_W), y = (uint32_t)(i / FLASH_W);
+            if (x < x0) x0 = x;
+            if (x > x1) x1 = x;
+            if (y < y0) y0 = y;
+            if (y > y1) y1 = y;
+        }
+    }
+    if (count * 1000 < (size_t)min_pm * texels) return;
+    fprintf(stderr, "yw4: flash: frame %" PRIu64 ": %zu of %zu thumbnail texels brighter than frames %" PRIu64
+            " and %" PRIu64 " (by %.0f of 255 on average), area x %u-%u y %u-%u of %ux%u\n",
+            fl.n[1], count, texels, fl.n[0], fl.n[2], (double)sum / (double)count, x0, x1, y0, y1, FLASH_W, fl.h);
+    if (fl.saved++ < 40) flash_save(0, "a_before"), flash_save(1, "b_flash"), flash_save(2, "c_after");
+}
+
 /* Scales src (w x h colour texels) into the next swapchain image and presents it.
  * layout UNDEFINED: src is `frame`, filled from the staging buffer (the CPU path).
  * Otherwise src is the draw path's image in that layout (GENERAL, decision 0021); with
@@ -691,6 +861,7 @@ static int present_image(VkImage src, VkImageLayout layout, VkRect2D r0, int rea
     uint32_t w = r0.extent.width, h = r0.extent.height;
     int32_t sx = r0.offset.x, sy = r0.offset.y;
     vkWaitForFences(vk.device, 1, &fence, VK_TRUE, UINT64_MAX);
+    flash_collect();
     uint32_t index;
     VkResult r = vkAcquireNextImageKHR(vk.device, swapchain, UINT64_MAX, acquired, VK_NULL_HANDLE, &index);
     if (r == VK_ERROR_OUT_OF_DATE_KHR) {
@@ -715,6 +886,7 @@ static int present_image(VkImage src, VkImageLayout layout, VkRect2D r0, int rea
                                       .imageExtent = {w, h, 1}};
             vkCmdCopyImageToBuffer(cmd, src, layout, staging, 1, &copy);
         }
+        if (flash_n != UINT64_MAX && flash_setup(w, h, flash_format)) flash_record(src, layout, sx, sy, w, h, flash_n);
     }
     VkImage dst = swap_images[index];
     barrier(dst, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 0, VK_ACCESS_TRANSFER_WRITE_BIT);
@@ -813,6 +985,7 @@ void window_present_image(VkImage image, VkFormat format, VkRect2D rect, uint64_
     }
     host_lock(&present_lock);
     if (swap_free != free_running() || swap_dlssg != dlssg_chosen()) swapchain_stale = 1;
+    flash_n = n, flash_format = format;
     if (!(swapchain_stale && create_swapchain(n)) && !frame_resources(w, h) &&
         !present_image(image, VK_IMAGE_LAYOUT_GENERAL, rect, shot) && shot) {
         /* One bulk copy out of the staging memory: it is uncached, and per-byte reads of it took ~1.7 s. */
@@ -1160,7 +1333,8 @@ void window_run(void (*guest)(void *), void *arg) {
                     SDL_SetWindowRelativeMouseMode(window, !rel);
                 }
             }
-            if (e.key.key == SDLK_F12) __atomic_store_n(&screenshot_requested, screenshot_burst(), __ATOMIC_RELEASE), yw4_hid_note_key("F12");
+            if (e.key.key == SDLK_F12) __atomic_store_n(&screenshot_requested, screenshot_burst(), __ATOMIC_RELEASE),
+                                        __atomic_store_n(&flash_dump_requested, 1, __ATOMIC_RELEASE), yw4_hid_note_key("F12");
             /* F11: full screen, like most PC games (saved like the panel's row); Shift+F11: the draws of the next
              * frame, in the log (still "F11" in recordings) */
             if (e.key.key == SDLK_F11 && !e.key.repeat) {
