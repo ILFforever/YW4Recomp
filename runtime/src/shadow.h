@@ -50,6 +50,8 @@ ShadowCopy *gpu_shadow_copies(uint32_t n, uint32_t *first);
 /* CMD_NATIVE callback: `data` holds a ShadowPass pointer. */
 void gpu_shadow_pass(void *vk_cb, void *gpu_state, const void *data, uint32_t size);
 void gpu_shadow_game_draw(void *vk_cb, void *gpu_state, const void *data, uint32_t size);
+/* nvn_cmdbuf.c, before recording SetRenderTargets: queues the open shadow layer's pass if the target moves away */
+void shadow_before_targets(const CPUState *ctx, uint64_t cmd, uint64_t depth_addr, uint32_t depth_layer);
 /* Switch between the game's shadow casters and ours (shadow.c; the settings panel, a replay's F9) */
 void shadow_toggle(void);
 /* Passes skipped because another target was bound, and draws skipped (memory outside the pools). */

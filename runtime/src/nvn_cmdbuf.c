@@ -23,6 +23,7 @@
 #include "kernel.h"
 #include "nvn.h"
 #include "pixels.h"
+#include "shadow.h"
 
 #define JUMP_RESERVE (sizeof(CmdRec) + 8)  /* room always kept for the record that leaves a chunk */
 
@@ -259,6 +260,9 @@ NVN(nvnCommandBufferSetRenderTargets) {
         rt.depth = &rt.depth_snap;
     }
     if (A(5)) rt.has_depth_view = 1, memcpy(&rt.depth_view, AP(5), sizeof rt.depth_view);
+    /* our shadow pass for a layer the game is leaving goes in first (shadow.c) */
+    shadow_before_targets(c, A(0), rt.depth ? rt.depth->addr : 0,
+                          rt.has_depth_view && rt.depth_view.setmask & 2 ? rt.depth_view.min_layer : 0);
     memcpy(record(c, CMD_SET_RENDER_TARGETS, sizeof rt)->extra, &rt, sizeof rt);
     NvnCmdBuf *cb = cb_of(A(0));
     cb->depth_addr = rt.depth ? rt.depth->addr : 0;

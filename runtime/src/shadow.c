@@ -1009,6 +1009,32 @@ static void begin_pass(Layer *k) {
     k->pass = p;
 }
 
+/* nvnCommandBufferSetRenderTargets is about to be recorded in cmd (nvn_cmdbuf.c): if the open shadow layer's pass
+ * still waits and the game moves to another depth target, our pass goes in now, while its target is bound. In
+ * cutscenes the game copies each finished layer into a second map (0x726fe2f000, one full-screen draw, fs
+ * 6b4575fb57b97548) before the next layer starts: queued only then, our casters were missing from that copy, and
+ * the characters, which read it, were lit (2026-11-04, found with the same-frame A/B; the 2026-11-01 "dark frame
+ * every 32" was the one frame the game drew the cut-out caster itself, before the copy). Draws the layer still gets
+ * after this are the game's. */
+void shadow_before_targets(const CPUState *ctx, uint64_t cmd, uint64_t depth_addr, uint32_t depth_layer) {
+    Layer *k = lay;
+    if (!k || !k->active || !k->pass || !k->pass->n || mode != MODE_NATIVE) return;
+    if (U64(k->device + 0x10d0) + 0xd8 != cmd) return;  /* another thread's command buffer */
+    ShadowPass *p = k->pass;
+    if (depth_addr == p->depth_addr && depth_layer == p->depth_layer) return;  /* still the layer's target */
+    static int off = -1;  /* YW4_SHADOW_EARLY_PASS=0: the old order (tests) */
+    if (off < 0) off = getenv("YW4_SHADOW_EARLY_PASS") && *getenv("YW4_SHADOW_EARLY_PASS") == '0';
+    if (off) return;
+    __atomic_add_fetch(&draws_native, p->n, __ATOMIC_RELAXED);
+    __atomic_add_fetch(&draws_since_toggle, p->n, __ATOMIC_RELAXED);
+    nvn_record_native(ctx, cmd, gpu_shadow_pass, &p, sizeof p);
+    k->pass = NULL;
+    static long early;
+    if (early++ < 3)
+        fprintf(stderr, "yw4: shadows: our pass queued before the game moved to target %#" PRIx64 "/%u (%u draws)\n",
+                depth_addr, depth_layer, p->n);
+}
+
 /* The layer has been drawn by the game: queue our pass after it. */
 static void end_layer(Layer *k, const CPUState *ctx) {
     if (!k->active) return;
