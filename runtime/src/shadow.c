@@ -337,7 +337,12 @@ typedef struct {
     uint32_t uv_format, uv_offset;
     uint64_t dither;   /* fading instanced casters: the dither texture (fs slot 18) */
     uint32_t wind_format, wind_offset;  /* wind-swayed casters: attribute 1 */
+    const NvnDescPool *pool;  /* the texture pool and the texels at the handle when learned (YW4_SHADOW_HANDLE_LOG) */
+    uint64_t tex_addr;
+    int has_sampler;          /* the sampler settings the game's draw used (ShadowDraw.sampler) */
+    NvnSamplerDesc sampler;
 } Cutout;
+_Static_assert(sizeof(NvnSamplerDesc) <= sizeof(((ShadowDraw *)0)->sampler), "ShadowDraw.sampler too small");
 static struct { uint64_t obj, sub, model, mat, vs, fs; int ok; uint8_t cull, front; Cutout cut; } learned[LEARN_SLOTS];
 
 static uint32_t learn_slot(uint64_t obj, uint64_t sub) {
@@ -364,6 +369,18 @@ static void learn(uint64_t obj, uint64_t sub, uint64_t vs, uint64_t fs, int ok, 
     learned[h].obj = obj, learned[h].sub = sub, learned[h].model = U64(obj + 0x140), learned[h].mat = U64(obj + 0x120);
     learned[h].vs = vs, learned[h].fs = fs, learned[h].ok = ok;
     learned[h].cull = polygon[0], learned[h].front = polygon[1];
+    /* YW4_SHADOW_HANDLE_LOG=1: a game draw teaching a cut-out caster another texture handle than we had */
+    static int hlog = -1;
+    if (hlog < 0) hlog = getenv("YW4_SHADOW_HANDLE_LOG") && atoi(getenv("YW4_SHADOW_HANDLE_LOG")) > 0;
+    if (hlog && learned[h].obj == obj && learned[h].cut.texture && cut->texture &&
+        learned[h].cut.texture != cut->texture) {
+        static long n;
+        if (n++ < 40)
+            fprintf(stderr, "yw4: handle: frame %" PRIu64 " object %#" PRIx64 " submesh %#" PRIx64 ": cut-out handle %#"
+                    PRIx64 " -> %#" PRIx64 " (texels %#" PRIx64 " -> %#" PRIx64 ")\n",
+                    __atomic_load_n(&yw4_frames_presented, __ATOMIC_RELAXED), obj, sub, learned[h].cut.texture,
+                    cut->texture, learned[h].cut.tex_addr, cut->tex_addr);
+    }
     learned[h].cut = *cut;
 }
 
@@ -534,6 +551,23 @@ static int skinned_ok(const NvnCmdBuf *cb, uint64_t obj, uint64_t sub, uint64_t 
 /* A cut-out draw's texture, threshold and texture coordinates, as the game bound them; 0 if
  * its vertex layout isn't the one our pass reads: position (0x22) at 0 and texture
  * coordinates in attribute 1, both from one vertex buffer and stride. */
+/* The guest address of the texels at a texture handle in a texture pool, 0 if none. */
+static uint64_t slot_texture(const NvnDescPool *pool, uint64_t handle) {
+    uint32_t id = (uint32_t)(handle & 0xFFFFF);
+    if (!pool || !pool->entries || (int)id >= pool->count) return 0;
+    const NvnTexEntry *e = (const NvnTexEntry *)pool->entries + id;
+    return e->tex ? e->tex->addr : 0;
+}
+
+static void note_texture(const NvnCmdBuf *cb, Cutout *cut) {
+    cut->pool = cb->trace_texpool;
+    cut->tex_addr = slot_texture(cut->pool, cut->texture);
+    const NvnDescPool *sp = cb->trace_samplerpool;
+    uint32_t sid = (uint32_t)(cut->texture >> 20 & 0xFFF);
+    cut->has_sampler = sp && sp->entries && (int)sid < sp->count;
+    if (cut->has_sampler) cut->sampler = ((const NvnSamplerDesc *)sp->entries)[sid];
+}
+
 static int cutout_of(const NvnCmdBuf *cb, Cutout *cut) {
     uint32_t a0 = cb->trace_attribs[0], a1 = cb->trace_attribs[1];
     if (cb->trace_nattribs < 2 || (a0 & 0xFF) != 0x22 || a0 >> 8 & 0x1F || a0 >> 13) return 0;
@@ -545,6 +579,7 @@ static int cutout_of(const NvnCmdBuf *cb, Cutout *cut) {
         return 0;
     if (!cb->trace_tex[1][0] || !cb->trace_ub[0][3]) return 0;
     cut->texture = cb->trace_tex[1][0];
+    note_texture(cb, cut);
     memcpy(&cut->threshold, (const void *)(uintptr_t)(cb->trace_ub[0][3] + 12), 4);
     cut->uv_format = a1 & 0xFF;
     cut->uv_offset = a1 >> 13;
@@ -570,6 +605,7 @@ static int wind_of(const NvnCmdBuf *cb, Cutout *cut) {
     }
     if (!cb->trace_tex[1][0] || !cb->trace_ub[0][3] || !cb->trace_tex[0][11] || !cb->trace_tex[0][12]) return 0;
     cut->texture = cb->trace_tex[1][0];
+    note_texture(cb, cut);
     memcpy(&cut->threshold, (const void *)(uintptr_t)(cb->trace_ub[0][3] + 12), 4);
     cut->uv_format = a2 & 0xFF, cut->uv_offset = a2 >> 13;
     cut->wind_format = a1 & 0xFF, cut->wind_offset = a1 >> 13;
@@ -774,6 +810,12 @@ static int ours(const Caster *c, const Mat4 *vp, uint64_t device, ShadowDraw *d,
     if (h == UINT32_MAX || leave_to_game(learned[h].vs, learned[h].fs) || !describe(c, vp, &one)) return -1;
     one.cull = learned[h].cull, one.front = learned[h].front;
     one.texture = learned[h].cut.texture, one.threshold = learned[h].cut.threshold;
+    {
+        static int use = -1;  /* YW4_SHADOW_KEEP_SAMPLER=0: the sampler the handle's slot names now (tests) */
+        if (use < 0) use = !(getenv("YW4_SHADOW_KEEP_SAMPLER") && *getenv("YW4_SHADOW_KEEP_SAMPLER") == '0');
+        one.has_sampler = use && learned[h].cut.has_sampler;
+        if (one.has_sampler) memcpy(one.sampler, &learned[h].cut.sampler, sizeof learned[h].cut.sampler);
+    }
     one.uv_format = learned[h].cut.uv_format, one.uv_offset = learned[h].cut.uv_offset;    if (one.texture && one.uv_offset + 4 > one.stride) return -1;
     if (is_wind(learned[h].vs)) {
         one.wind_format = learned[h].cut.wind_format, one.wind_offset = learned[h].cut.wind_offset;
@@ -1144,11 +1186,13 @@ int yw4_hook_model_renderer(CPUState *ctx) {
          * are skipped, and some of a caster's per-draw data is only brought up to date by them, so after a long menu
          * ours drew part of the casters from old data for about 35 frames (2026-11-04: shadow map 79% empty instead
          * of 61% on frames 4325-4340 after closing the Yo-kai Pad, shadows blinking off; each object's one game draw
-         * in 32 put it right). */
+         * in 32 put it right). Off by default since the cause was found (2026-11-04: the cut-out casters' sampler id
+         * named a slot of the game's sampler ring that a menu had refilled; now the settings are learned, note_texture)
+         * and the owner confirmed the Mirapo flash gone; YW4_SHADOW_REFRESH=33 brings it back for tests. */
         uint64_t f = __atomic_load_n(&yw4_frames_presented, __ATOMIC_RELAXED);
         uint64_t last = __atomic_exchange_n(&last_shadow_frame, f, __ATOMIC_RELAXED);
-        static int refresh = -1;  /* YW4_SHADOW_REFRESH=<frames> (default 33), 0 = off (tests) */
-        if (refresh < 0) refresh = getenv("YW4_SHADOW_REFRESH") ? atoi(getenv("YW4_SHADOW_REFRESH")) : 33;
+        static int refresh = -1;  /* YW4_SHADOW_REFRESH=<frames> (default 0: off) */
+        if (refresh < 0) refresh = getenv("YW4_SHADOW_REFRESH") ? atoi(getenv("YW4_SHADOW_REFRESH")) : 0;
         if (last && f > last + 8 && refresh > 0) {
             __atomic_store_n(&game_draws_until, f + (uint64_t)refresh, __ATOMIC_RELAXED);
             fprintf(stderr, "yw4: shadows: refresh after a %" PRIu64 "-frame gap: the game draws every caster in frames %"

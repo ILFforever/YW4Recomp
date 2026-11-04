@@ -25,6 +25,11 @@ typedef struct {
     uint64_t wind_tex[2];                /* vs textures 11 (noise) and 12 (wind map) */
     uint32_t wind_format, wind_offset;   /* the vertex's wind weights: NVN format, offset (attribute 1) */
     uint32_t wind_header;                /* the header's index in the copies ring */
+    /* cut-out casters: the sampler settings (an NvnSamplerDesc) the game's draw used, copied when learned. The
+     * handle's sampler id names a slot of a ring the game keeps rewriting: a menu fills it with its own samplers,
+     * and through the old id the leaves were alpha-tested away for 20 frames after closing the Yo-kai Pad */
+    uint32_t has_sampler;
+    uint8_t sampler[64];
 } ShadowDraw;
 
 /* One copy of an instanced caster in the copies ring (shadow_instanced.vert's Copy): projection x

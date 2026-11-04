@@ -892,6 +892,14 @@ static const NvnSamplerDesc *sampler_entry(const GpuState *s, uint64_t handle) {
     return (const NvnSamplerDesc *)s->sampler_pool->entries + id;
 }
 
+/* The sampler settings a handle names in the bound sampler pool (diagnostics); 0 if none. */
+int gpu_handle_sampler(const GpuState *s, uint64_t handle, NvnSamplerDesc *out) {
+    const NvnSamplerDesc *sd = sampler_entry(s, handle);
+    if (!sd) return 0;
+    *out = *sd;
+    return 1;
+}
+
 int gpu_handle_texture(VkCommandBuffer cb, const GpuState *s, uint64_t handle, int upload, VkDescriptorImageInfo *ii) {
     NvnTexEntry *e = tex_entry(s, handle);
     if (!e) return 0;

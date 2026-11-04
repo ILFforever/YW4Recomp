@@ -425,11 +425,16 @@ static void draw_pass(VkCommandBuffer cb, GpuState *s, const ShadowPass *p) {
     VkPipeline bound = VK_NULL_HANDLE;
     int cull = -1, front = -1;
     long skipped = 0;
+    long skip_why[7] = {0};  /* 1 vertices, 2 indices, 3 cut-out texture, 4 skin layout, 5 dither, 6 wind textures */
     /* YW4_AB_SELFTEST=1: leave out every second draw of ours, a fault the same-frame A/B must report (checks the tool) */
     static int selftest = -1;
     if (selftest < 0) selftest = getenv("YW4_AB_SELFTEST") && atoi(getenv("YW4_AB_SELFTEST")) > 0;
+    static int no_alpha = -1;  /* YW4_SHADOW_NO_ALPHA=1 (tests): cut-out casters drawn solid, no alpha test */
+    if (no_alpha < 0) no_alpha = getenv("YW4_SHADOW_NO_ALPHA") && atoi(getenv("YW4_SHADOW_NO_ALPHA")) > 0;
+    ShadowDraw solid;
     for (uint32_t i = 0; i < p->n; i += 1 + (uint32_t)selftest) {
         const ShadowDraw *d = &p->d[i];
+        if (no_alpha && d->texture) solid = *d, solid.threshold = -1.0f, d = &solid;
         VkBuffer vb[3], ib;
         VkDeviceSize voff[3], ioff, stride[3] = {d->stride, d->stride, d->stride};
         uint32_t isize = d->index_type == 2 ? 4 : 2;
@@ -437,15 +442,25 @@ static void draw_pass(VkCommandBuffer cb, GpuState *s, const ShadowPass *p) {
         /* 4-bone skinned casters: the weights' format in uv_format, the bone indices' in wind_format */
         VkFormat uv = d->texture || d->skin4 ? gpu_format(d->uv_format) : VK_FORMAT_UNDEFINED;
         VkFormat wind = d->wind_tex[0] || d->skin4 ? gpu_format(d->wind_format) : VK_FORMAT_UNDEFINED;
-        if (!gpu_geometry_at(d->vertices, (uint64_t)d->vertex_count * d->stride, &vb[0], &voff[0]) ||
-            (d->index_count && !gpu_geometry_at(d->indices, (uint64_t)d->index_count * isize, &ib, &ioff)) ||
-            (d->texture && (uv == VK_FORMAT_UNDEFINED || !gpu_handle_texture(cb, s, d->texture, 0, &ii[0]))) ||
-            (d->skin4 && (uv == VK_FORMAT_UNDEFINED || wind == VK_FORMAT_UNDEFINED)) ||
-            (d->dither && !gpu_handle_texture(cb, s, d->dither, 0, &ii[1])) ||
-            (d->wind_tex[0] && (wind == VK_FORMAT_UNDEFINED || !gpu_handle_texture(cb, s, d->wind_tex[0], 0, &ii[2]) ||
-                                !gpu_handle_texture(cb, s, d->wind_tex[1], 0, &ii[3])))) {
+        /* why a draw is skipped, counted per reason for YW4_SHADOW_SKIP_LOG=<from>-<to> (GPU frames) */
+        int why = !gpu_geometry_at(d->vertices, (uint64_t)d->vertex_count * d->stride, &vb[0], &voff[0]) ? 1
+                  : d->index_count && !gpu_geometry_at(d->indices, (uint64_t)d->index_count * isize, &ib, &ioff) ? 2
+                  : d->texture && (uv == VK_FORMAT_UNDEFINED || !gpu_handle_texture(cb, s, d->texture, 0, &ii[0])) ? 3
+                  : d->skin4 && (uv == VK_FORMAT_UNDEFINED || wind == VK_FORMAT_UNDEFINED) ? 4
+                  : d->dither && !gpu_handle_texture(cb, s, d->dither, 0, &ii[1]) ? 5
+                  : d->wind_tex[0] && (wind == VK_FORMAT_UNDEFINED || !gpu_handle_texture(cb, s, d->wind_tex[0], 0, &ii[2]) ||
+                                       !gpu_handle_texture(cb, s, d->wind_tex[1], 0, &ii[3])) ? 6
+                  : 0;
+        if (why) {
             skipped++;
+            skip_why[why]++;
             continue;
+        }
+        if (d->texture && d->has_sampler) {  /* the sampler settings learned with the caster, not the ring slot's now */
+            NvnSamplerDesc sd;
+            memcpy(&sd, d->sampler, sizeof sd);
+            sd.compare_mode = 0;
+            ii[0].sampler = gpu_sampler(&sd);
         }
         int kind = d->palette_size ? (d->skin4 ? KIND_SKINNED4 : KIND_SKINNED)
                    : d->wind_tex[0] ? KIND_WIND
@@ -504,6 +519,35 @@ static void draw_pass(VkCommandBuffer cb, GpuState *s, const ShadowPass *p) {
         }
     }
     if (skipped) __atomic_add_fetch(&draws_skipped, skipped, __ATOMIC_RELAXED);
+    {
+        static uint64_t from = 1, to;
+        if (from == 1) {
+            from = 0;
+            const char *e = getenv("YW4_SHADOW_SKIP_LOG");
+            if (e) sscanf(e, "%" SCNu64 "-%" SCNu64, &from, &to);
+        }
+        uint64_t f = gpu_frames();
+        if (to && f >= from && f <= to) {
+            fprintf(stderr, "yw4: shadowskip: frame %" PRIu64 " layer %u: %u draws, skipped %ld (vertices %ld, indices %ld, "
+                    "cut-out texture %ld, skin %ld, dither %ld, wind %ld); texture pool %p\n", f, p->depth_layer, p->n,
+                    skipped, skip_why[1], skip_why[2], skip_why[3], skip_why[4], skip_why[5], skip_why[6],
+                    (const void *)s->tex_pool);
+            /* the first cut-out draw's sampler, as the bound sampler pool names it */
+            for (uint32_t i = 0; i < p->n; i++) {
+                if (!p->d[i].texture) continue;
+                NvnSamplerDesc sd;
+                if (gpu_handle_sampler(s, p->d[i].texture, &sd))
+                    fprintf(stderr, "yw4: shadowskip:   cut-out handle %#" PRIx64 ": sampler filters %u/%u wrap %u/%u/%u "
+                            "compare %u lod %g..%g bias %g aniso %g reduction %u\n", p->d[i].texture, sd.min_filter,
+                            sd.mag_filter, sd.wrap[0], sd.wrap[1], sd.wrap[2], sd.compare_mode, sd.lod_min, sd.lod_max,
+                            sd.lod_bias, sd.max_aniso, sd.reduction);
+                else
+                    fprintf(stderr, "yw4: shadowskip:   cut-out handle %#" PRIx64 ": no sampler in the bound pool\n",
+                            p->d[i].texture);
+                break;
+            }
+        }
+    }
 }
 
 /* CMD_NATIVE (shadow.c, only with YW4_AB_PASS=shadow): the game's draw that follows is one ours replaces. It is
