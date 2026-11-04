@@ -1,6 +1,6 @@
 # 0052 — Packaging the launcher: what the download holds and what it fetches
 
-Status: **proposed** (2026-11-04), for the owner to decide. Nothing of it is built yet. Follows decision 0050 (one
+Status: **accepted** (2026-11-04, the owner's answers below); nothing of it is built yet. Follows decision 0050 (one
 download, nothing else to install, the build stays this repo's Python tools run by an embedded Python).
 
 ## Context
@@ -31,8 +31,10 @@ The build path uses only Python's standard library (`numpy` and `PIL` appear onl
    the builder folder as the working directory instead of the repo.
 2. **Fetched on the first build**, as `deps.py` already does for SDL/FSR/DLSS: llvm-mingw's official release zip
    at a pinned version and SHA-256, unpacked into `<install>\builder\toolchain\`. The Build screen already shows
-   a download line ("About 565 MB"), which grows by the toolchain's size. "Free up space" keeps it (a rebuild
-   needs it) unless the player asks to delete everything for rebuilding.
+   a download line ("About 565 MB"), which grows by the toolchain's size. **Decided (owner):** the player can
+   delete it afterwards to save space: "Free up space" (the Ready screen's popup and the Options row "Free up
+   space after building") also deletes `builder\toolchain\`, and says so; the next build (an update, Build
+   again) downloads it again, checked against the same pinned hash. The game never needs it to run.
 3. **`config.toml` for the install** (`write_config`) names the bundled tools instead of the repo's `[tools]`.
 4. **Version lock stays as it is**: the main NSO hash check refuses any other game version (rule 3).
 
@@ -50,9 +52,12 @@ two small tools: without them the launcher can't even start the download step, a
 
 ## Open questions for the owner
 
-1. Fetch the compiler on first build (proposed) or bundle it?
-2. NSIS installer (Start menu entry, uninstaller) or a plain zip to unpack?
-3. Where releases live (GitHub Releases on this repo?) and whether the launcher checks for a newer version.
+1. ~~Fetch the compiler on first build or bundle it?~~ Fetch on the first build, deletable after (owner, 2026-11-04).
+2. ~~NSIS installer or a plain zip?~~ **Both** (owner): Tauri's NSIS installer (Start menu entry, uninstaller) and a
+   portable zip of the same files, side by side on each release.
+3. ~~Where releases live, update check?~~ **GitHub Releases on this repo, and the launcher checks for a newer
+   version** (owner) and offers it; the check reads the repo's latest release (GitHub's API, no account needed) and
+   is the launcher's only network call besides the build's pinned downloads.
 4. Pin llvm-mingw at the version used here (20261006, ucrt, x86_64) so every player builds with the compiler the
    owner tested.
 
