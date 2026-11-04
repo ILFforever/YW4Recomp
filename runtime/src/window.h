@@ -29,6 +29,9 @@ void window_screenshot_suffix(const char *suffix);
  * x, y, right x, y; -32767..32767, up positive). Zero without a window. Any thread. */
 void window_input(uint64_t *buttons, int32_t sticks[4]);
 
+/* How many times the game has read window_input so far (a press must last at least two reads to be seen). */
+uint64_t window_input_reads(void);
+
 /* Relative mouse motion accumulated since the last call (bindings.c yw4_hook_mouse_look). */
 void window_mouse_motion(float *dx, float *dy);
 

@@ -204,6 +204,36 @@ offset = "0xa8c3f0"
 native = "yw4_hook_gaiji_render"
 why = "draws one icon sheet's button icons in text: swaps Switch button names for the bound key's or the connected controller's icon (runtime/src/bindings.c, decision 0042)"
 
+[[hook]]
+module = "main"
+offset = "0x6c68f0"
+native = "yw4_hook_menu_focus"
+why = "OnChangeFocus of every menu: the Yo-kai Pad opened (and where its icon grid is), for the mouse in menus (runtime/src/mousemenu.c)"
+
+[[hook]]
+module = "main"
+offset = "0x6c59f0"
+native = "yw4_hook_menu_back"
+why = "OnBack of every menu: the Yo-kai Pad closed, the mouse goes back to the camera (runtime/src/mousemenu.c)"
+
+[[hook]]
+module = "main"
+offset = "0x6c6ba0"
+native = "yw4_hook_menu_decide"
+why = "OnDecideFocus of every menu: a Yo-kai Pad icon was chosen, its page opens over the grid (runtime/src/mousemenu.c)"
+
+[[hook]]
+module = "main"
+offset = "0x6c5fa0"
+native = "yw4_hook_menu_layer_opened"
+why = "OnOpenEndLayer of every menu: counts the Yo-kai Pad's open layers, to know when a page covers its grid (runtime/src/mousemenu.c)"
+
+[[hook]]
+module = "main"
+offset = "0x6c6040"
+native = "yw4_hook_menu_layer_closed"
+why = "OnCloseEndLayer of every menu: a Yo-kai Pad page closed; back on the grid when the count is back (runtime/src/mousemenu.c)"
+
 # A hook with `at` runs just before that instruction inside the function, also when a branch lands
 # there; its result is ignored (decision 0042).
 [[hook]]

@@ -35,6 +35,7 @@
 #include "gbuffer.h"
 #include "gpu.h"
 #include "hud.h"
+#include "mousemenu.h"
 #include "settings.h"
 #include "version.h"
 #include "vk.h"
@@ -69,6 +70,9 @@ static VkSemaphore rendered[8];  /* one per swapchain image: reused only after t
 static uint32_t nswap;
 static VkFormat swap_format;
 static int swapchain_stale = 1;  /* (re)create before the next present: first use, resize */
+/* the last presented picture's place in the window, as fractions (x, y, width, height): the present fits it
+ * with black bars when the window's shape differs. Written by the present, read by the window's thread. */
+static float picture_rect[4] = {0, 0, 1, 1};
 static int swap_free;            /* the swapchain doesn't wait for the monitor (MAILBOX / IMMEDIATE wanted) */
 static int swap_dlssg; /* made while DLSS frame generation was chosen: made again when the player switches it (NVIDIA),
                        * not when a menu pauses it (that rebuild was a 13-43 ms hitch per menu) */
@@ -724,6 +728,9 @@ static int present_image(VkImage src, VkImageLayout layout, VkRect2D r0, int rea
     uint32_t bw = ww, bh = (uint32_t)((uint64_t)ww * h / w);
     if (bh > wh) bh = wh, bw = (uint32_t)((uint64_t)wh * w / h);
     int32_t x0 = (int32_t)(ww - bw) / 2, y0 = (int32_t)(wh - bh) / 2;
+    /* where the picture is, as fractions of the window, for the mouse in menus (window_picture_rect) */
+    picture_rect[0] = (float)x0 / (float)ww, picture_rect[1] = (float)y0 / (float)wh;
+    picture_rect[2] = (float)bw / (float)ww, picture_rect[3] = (float)bh / (float)wh;
     VkImageBlit blit = {.srcSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1},
                         .srcOffsets = {{sx, sy, 0}, {sx + (int32_t)w, sy + (int32_t)h, 1}},
                         .dstSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1},
@@ -868,7 +875,11 @@ void window_mouse_motion(float *dx, float *dy) {
     host_unlock(&mouse_lock);
 }
 
+static uint64_t input_reads;  /* how many times the game has read the input (window_input_reads) */
+uint64_t window_input_reads(void) { return __atomic_load_n(&input_reads, __ATOMIC_ACQUIRE); }
+
 void window_input(uint64_t *buttons, int32_t sticks[4]) {
+    __atomic_add_fetch(&input_reads, 1, __ATOMIC_RELEASE);
     host_lock(&input_lock);
     *buttons = input_buttons;
     memcpy(sticks, input_sticks, sizeof input_sticks);
@@ -909,6 +920,28 @@ static void update_input(void) {
     if (withheld) {
         if (!b && !s[0] && !s[1] && !s[2] && !s[3] && !settings_open()) withheld = 0;
         b = 0, memset(s, 0, sizeof s);
+    }
+    /* the mouse in a supported menu (mousemenu.c): the cursor shows while it is open, and hovering and clicking
+     * become the menu's own D-pad, A and B presses; the camera gets the mouse back when it closes */
+    if (window && !is_open) {
+        static int freed;  /* we turned the relative mouse off for a menu */
+        int ww = 0, wh = 0, want = 0;
+        SDL_GetWindowSize(window, &ww, &wh);
+        /* the mouse in the picture's own rectangle (the window minus any black bars) */
+        float px = picture_rect[0] * (float)ww, py = picture_rect[1] * (float)wh;
+        float pw = picture_rect[2] * (float)ww, ph = picture_rect[3] * (float)wh;
+        uint64_t mm = mousemenu_update(mx - px, my - py, (int)(pw + 0.5f), (int)(ph + 0.5f), SDL_GetMouseState(NULL, NULL), &want);
+        {
+            static uint64_t last_mm;
+            if (mm != last_mm && getenv("YW4_MOUSE_SCRIPT")) fprintf(stderr, "yw4: mouse menus: sends %#llx\n", (unsigned long long)mm);
+            last_mm = mm;
+        }
+        b |= mm;
+        if (want && SDL_GetWindowRelativeMouseMode(window)) SDL_SetWindowRelativeMouseMode(window, false), freed = 1;
+        else if (!want && freed) {
+            freed = 0;
+            if (SDL_GetWindowFlags(window) & SDL_WINDOW_INPUT_FOCUS) SDL_SetWindowRelativeMouseMode(window, true);
+        }
     }
     host_lock(&input_lock);
     input_buttons = b;
