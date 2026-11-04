@@ -215,6 +215,7 @@ static int replay_state(uint64_t tick, uint64_t *buttons, int32_t sticks[4]) {
         const char *k = replay_keys[next_key].name;
         fprintf(stderr, "yw4: replay: key %s at tick %llu\n", k, (unsigned long long)tick);
         if (!strcmp(k, "F11")) gpu_request_trace(450);
+        else if (!strcmp(k, "FULLSCR")) window_fullscreen_cycle();  /* F11 now (names are cut to 7 letters); "F11" in recordings is the trace */
         else if (!strcmp(k, "F10")) gpu_request_dump();
         else if (!strcmp(k, "F12")) window_request_screenshot();
         else if (!strcmp(k, "F9")) shadow_toggle();
