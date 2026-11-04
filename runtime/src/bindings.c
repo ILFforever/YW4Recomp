@@ -636,6 +636,23 @@ static float icon_scale(int sheet) {
     return scale[sheet];
 }
 
+/* The keyboard sheet's mouse icons fill a little more of their cell than its keys, so at the keys' scale they
+ * looked 1.3% too large (owner, 2026-11-04): they get this much more, as a fraction (YW4_MOUSE_ICON_SCALE). */
+static float mouse_icon_scale(uint32_t crc) {
+    static uint32_t crcs[7];
+    static float k;
+    if (!k) {
+        static const int ids[7] = {MOUSE_BIND_LEFT, MOUSE_BIND_RIGHT, MOUSE_BIND_MIDDLE, MOUSE_BIND_X1, MOUSE_BIND_X2,
+                                   MOUSE_BIND_WHEEL_UP, MOUSE_BIND_WHEEL_DOWN};
+        for (int i = 0; i < 7; i++) crcs[i] = gaiji_crc(key_gaiji(ids[i]));
+        const char *e = getenv("YW4_MOUSE_ICON_SCALE");
+        k = e && atof(e) > 0 ? (float)atof(e) : 0.987f;
+    }
+    for (int i = 0; i < 7; i++)
+        if (crcs[i] == crc) return k;
+    return 1.0f;
+}
+
 /* A request's box: +4 x (left), +8 y (middle), +0xc and +0x10 its size, in pixels. */
 typedef struct {
     int32_t x, y, h, w;
@@ -682,9 +699,13 @@ int yw4_hook_gaiji_render(CPUState *ctx) {
         if (!shown) shown = game;
         Box shown_box = game_box;
         if (sheet != SHEET_NX) {
-            float k = icon_scale(sheet);
-            shown_box.h = (int32_t)((float)game_box.h * k + 0.5f);
-            shown_box.w = (int32_t)((float)game_box.w * k + 0.5f);
+            float mk = sheet == SHEET_KEY ? mouse_icon_scale(shown) : 1.0f;
+            float k = icon_scale(sheet) * mk;
+            /* the box is whole pixels of the HUD's 1080-line space: the mouse icons' 1.3% is under half a pixel at
+             * their size (24 -> 35.5), so they are rounded down, a pixel smaller than the keys' rounding */
+            float round_add = mk != 1.0f ? 0.0f : 0.5f;
+            shown_box.h = (int32_t)((float)game_box.h * k + round_add);
+            shown_box.w = (int32_t)((float)game_box.w * k + round_add);
             shown_box.x = game_box.x - (shown_box.w - game_box.w) / 2;
         }
         if (shown != now) st32(req, shown);
