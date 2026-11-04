@@ -39,6 +39,7 @@ const size_t yw4_nguest_symbols = 0;
 uint32_t ipc_connect_named_port(const char *name, uint32_t *h) { (void)name, (void)h; return 1; }
 uint32_t ipc_send_request(uint32_t h, uint64_t m) { (void)h, (void)m; return 1; }
 int ipc_close_handle(uint32_t h) { (void)h; return 0; }
+int yw4_replay_done;  /* svc_hid.c's: no input replay here */
 
 #define FAIL(...) do { printf(__VA_ARGS__); puts(""); fflush(stdout); exit(1); } while (0)
 #define W 0x40000000u
