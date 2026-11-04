@@ -1686,6 +1686,25 @@ static VkImageSubresourceRange target_range(const GpuImage *g, const NvnTextureV
     return r;
 }
 
+/* YW4_AB_TRACE=<from>-<to> (GPU frames): depth-only targets (shadow maps), their clears and draws, in order */
+static int ab_trace_on(void) {
+    static uint64_t from = 1, to;
+    if (from == 1) {
+        from = 0;
+        const char *e = getenv("YW4_AB_TRACE");
+        if (e) sscanf(e, "%" SCNu64 "-%" SCNu64, &from, &to);
+    }
+    uint64_t f = gpu_frames();
+    return to && f >= from && f <= to;
+}
+static void ab_trace_depth(const GpuState *s, uint64_t exec, uint64_t at, const char *what) {
+    if (!ab_trace_on() || !s->rt.depth || s->ncolor) return;
+    uint32_t layer = s->rt.has_depth_view && s->rt.depth_view.setmask & 2 ? s->rt.depth_view.min_layer : 0;
+    fprintf(stderr, "yw4: abtrace: frame %" PRIu64 " exec %#" PRIx64 " at %" PRIu64 ": %s into %#" PRIx64 "/%u, fs %016" PRIx64
+            " (run %d)\n", gpu_frames(), exec, at, what, s->rt.depth->addr, layer,
+            s->program ? s->program->stages[1].key : 0, gpu_ab_game);
+}
+
 void gpu_execute(uint64_t handle) {
     int64_t t0 = host_now_ns();
     host_lock(&gpu_lock);
@@ -1765,6 +1784,7 @@ void gpu_execute(uint64_t handle) {
             s.targets_noted = 0;  /* noted at the first draw, with the state the game draws with */
             gpu_ab_targets(cb, &s);
             gpu_passes_targets(cb, &s);
+            ab_trace_depth(&s, exec, at, "targets");
             break;
         case CMD_SET_VIEWPORTS:  /* (x, y, w, h) */
             for (int i = 0; i < 4; i++) s.viewport[i] = (int32_t)r->x[i];
@@ -1806,6 +1826,7 @@ void gpu_execute(uint64_t handle) {
             break;
         }
         case CMD_CLEAR_DEPTH_STENCIL: {  /* (depth in s0; depth mask, stencil, stencil mask in x1..x3) */
+            ab_trace_depth(&s, exec, at, "clear");
             NvnTexture *t = s.rt.depth;
             if (!t) break;
             gpu_end_rendering(cb, &s);
@@ -1821,6 +1842,7 @@ void gpu_execute(uint64_t handle) {
             break;
         }
         case CMD_DRAW_ARRAYS: case CMD_DRAW_ELEMENTS: {
+            ab_trace_depth(&s, exec, at, "draw");
             if (s.skip_next_draw) {  /* a game shadow draw ours replaces, kept for the A/B's second run */
                 s.skip_next_draw = 0;
                 break;
@@ -1861,6 +1883,31 @@ void gpu_execute(uint64_t handle) {
             full_barrier(cb);
             break;
         case CMD_NATIVE:  /* a pass of our own renderer (decision 0024) */
+            {   /* YW4_AB_TRACE=<from>-<to>: in those GPU frames, the order the A/B's markers, our shadow passes and
+                 * the skipped game shadow draws run in (is our pass inside the compared range?) */
+                static uint64_t tr_from = 1, tr_to;
+                if (tr_from == 1) {
+                    tr_from = 0;
+                    const char *e = getenv("YW4_AB_TRACE");
+                    if (e) sscanf(e, "%" SCNu64 "-%" SCNu64, &tr_from, &tr_to);
+                }
+                uint64_t gf = gpu_frames();
+                NvnNativePass fn = (NvnNativePass)(uintptr_t)r->x[0];
+                if (gf >= tr_from && gf <= tr_to && tr_to) {
+                    if (fn == gpu_ab_native)
+                        fprintf(stderr, "yw4: abtrace: frame %" PRIu64 " exec %#" PRIx64 " at %" PRIu64 ": A/B marker %.*s (run %d)\n",
+                                gf, (uint64_t)exec, (uint64_t)at, (int)r->x[1], (const char *)r->extra, gpu_ab_game);
+                    else if (fn == gpu_shadow_pass) {
+                        const ShadowPass *sp;
+                        memcpy(&sp, r->extra, sizeof sp);
+                        fprintf(stderr, "yw4: abtrace: frame %" PRIu64 " exec %#" PRIx64 " at %" PRIu64 ": our shadow pass, %u draws"
+                                " into %#" PRIx64 "/%u (run %d)\n", gf, (uint64_t)exec, (uint64_t)at, sp ? sp->n : 0,
+                                sp ? sp->depth_addr : 0, sp ? sp->depth_layer : 0, gpu_ab_game);
+                    } else if (fn == gpu_shadow_game_draw)
+                        fprintf(stderr, "yw4: abtrace: frame %" PRIu64 " exec %#" PRIx64 " at %" PRIu64 ": game draw marker (run %d)\n",
+                                gf, (uint64_t)exec, (uint64_t)at, gpu_ab_game);
+                }
+            }
             if ((NvnNativePass)(uintptr_t)r->x[0] == gpu_ab_native) {  /* same-frame A/B: may run a range again */
                 if (gpu_ab_marker(cb, &s, r->extra, (uint32_t)r->x[1], exec, at + r->size, &at)) continue;
                 break;

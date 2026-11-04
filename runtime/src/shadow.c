@@ -1108,7 +1108,6 @@ static void trace_layer_start(const CPUState *ctx) {
 
 int yw4_hook_model_renderer(CPUState *ctx) {
     trace_layer_start(ctx);
-    gbuffer_layer_start(ctx);  /* the G-buffer pass (decision 0026) shares these hooks */
     if (__atomic_load_n(&mode, __ATOMIC_ACQUIRE) < 0) init_mode();
     /* A cascade's job list can draw more than one shadow layer (cutscenes: two per cascade) before
      * the cascade-end job: the next layer of the same cascade ends the previous one, which queues its
@@ -1123,6 +1122,10 @@ int yw4_hook_model_renderer(CPUState *ctx) {
             __atomic_store_n(&two_layer_frame, __atomic_load_n(&yw4_frames_presented, __ATOMIC_RELAXED), __ATOMIC_RELAXED);
         end_layer(lay, second ? ctx : NULL);
     }
+    /* the G-buffer pass (decision 0026) shares these hooks. After the open shadow layer has queued its pass: the
+     * same-frame A/B's range for that layer ends here, and must hold our pass (2026-11-04: in cutscenes the first
+     * layer of a cascade's two was compared without our draws, a whole layer "wrong") */
+    gbuffer_layer_start(ctx);
     if (__atomic_load_n(&mode, __ATOMIC_ACQUIRE) == MODE_GAME) return 0;
     uint64_t list = ctx->x[1], item = ctx->x[2];
     if (!item || U8(item + 8) != LAYER_SHADOW) return 0;

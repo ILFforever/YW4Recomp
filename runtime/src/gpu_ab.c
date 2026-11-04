@@ -241,8 +241,8 @@ void gpu_ab_flush(void) {
                     if (first < 0) first = k;
                     differ++;
                 }
-            fprintf(stderr, "yw4: ab: %s frame %" PRIu64 " %s %d (%ux%u, format %d): %ld of %u texels differ between"
-                    " ours and the game's", ab.pass, ab.frame, t->depth ? "depth" : "colour", i, t->g->width,
+            fprintf(stderr, "yw4: ab: %s frame %" PRIu64 " %s %d (%#" PRIx64 ", %ux%u, format %d): %ld of %u texels differ between"
+                    " ours and the game's", ab.pass, ab.frame, t->depth ? "depth" : "colour", i, t->g->key.addr, t->g->width,
                     t->g->height, (int)t->g->format, differ, t->g->width * t->g->height * t->g->layers);
             if (first >= 0) fprintf(stderr, " (first at %ld, %ld)", first % t->g->width, first / t->g->width);
             if (t->depth && t->g->format == VK_FORMAT_D32_SFLOAT) {

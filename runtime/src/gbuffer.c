@@ -439,10 +439,12 @@ void gbuffer_layer_start(const CPUState *ctx) {
     int ab_this = 1;
     if (name && !strcmp(name, "shadow") && gpu_ab_wanted(name)) {
         static uint64_t seen_frame = ~0ull;
-        static int nth;
+        static int nth, layers;  /* YW4_AB_SHADOW_LAYERS: shadow layers per frame (3; cutscenes draw 6, two per cascade) */
+        if (!layers) layers = getenv("YW4_AB_SHADOW_LAYERS") && atoi(getenv("YW4_AB_SHADOW_LAYERS")) > 0
+                                  ? atoi(getenv("YW4_AB_SHADOW_LAYERS")) : 3;
         uint64_t f = __atomic_load_n(&yw4_frames_presented, __ATOMIC_RELAXED);
         if (f != seen_frame) seen_frame = f, nth = 0;
-        ab_this = nth++ == (int)(f % 3);
+        ab_this = nth++ == (int)(f % (uint64_t)layers);
     }
     if (name && ab_this && gpu_ab_wanted(name) && !ab_open.cmd) {
         char m[17] = "b";
