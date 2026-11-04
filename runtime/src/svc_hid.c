@@ -182,9 +182,13 @@ static void replay_load(void) {
 static int replay_state(uint64_t tick, uint64_t *buttons, int32_t sticks[4]) {
     if (!replay_loaded) replay_load();
     if (!n_states && !n_keys) return 0;
-    /* After the last line the player takes over (e.g. a replay that only loads the save). */
+    /* After the last line the player takes over (e.g. a replay that only loads the save), for good: the tick is
+     * the presented frame until then and the 60 Hz vsync count after (kernel.c), which is lower when the game ran
+     * faster than 60 frames/s, so the test below would hand the input back to the replay (2026-11-04: a replay at
+     * 120 frames/s let one live read through, then the replay's last state held the input). */
+    static int handed_over;
+    if (handed_over) return 0;
     if (next_key == n_keys && (!n_states || tick > replay_states[n_states - 1].tick)) {
-        static int handed_over;
         if (!handed_over) {
             handed_over = 1;
             __atomic_store_n(&yw4_replay_done, 1, __ATOMIC_RELEASE);
