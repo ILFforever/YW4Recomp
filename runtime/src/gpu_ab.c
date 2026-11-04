@@ -13,6 +13,7 @@
  *   (the game's) and go on. The game's result is what the frame keeps.
  * At present the two copies are compared and a line per target goes to the log. gpu_lock held. */
 #include <inttypes.h>
+#include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -48,19 +49,20 @@ static struct {
 static int pending;
 
 static int ab_frame(uint64_t f) {
-    static uint64_t at[32];
+    static uint64_t at[32], to[32];  /* frames or ranges: "1800,1850" or "3400-4000" (every frame of a wide run) */
     static int n = -1;
     if (n < 0) {
         n = 0;
         const char *e = getenv("YW4_AB_AT");
         for (char *end; e && *e && n < 32; e = *end ? end + 1 : end) {
-            at[n] = strtoull(e, &end, 10);
+            at[n] = to[n] = strtoull(e, &end, 10);
             if (end == e) break;
+            if (*end == '-') to[n] = strtoull(end + 1, &end, 10);
             n++;
         }
     }
     for (int i = 0; i < n; i++)
-        if (at[i] == f) return 1;
+        if (f >= at[i] && f <= to[i]) return 1;
     return 0;
 }
 
@@ -218,7 +220,19 @@ void gpu_ab_flush(void) {
             uint8_t *a, *b;
             CHECK(vkMapMemory(vk.device, t->out_mem[0], 0, VK_WHOLE_SIZE, 0, (void **)&a));
             CHECK(vkMapMemory(vk.device, t->out_mem[1], 0, VK_WHOLE_SIZE, 0, (void **)&b));
-            long differ = 0, first = -1;
+            long differ = 0, first = -1, far = 0, far_first = -1;  /* far: 32-bit float depth off by more than
+                                                                   * YW4_AB_TOLERANCE (1e-4), not just rounding */
+            static float tol = -1.0f;
+            if (tol < 0.0f) tol = getenv("YW4_AB_TOLERANCE") ? (float)atof(getenv("YW4_AB_TOLERANCE")) : 1e-4f;
+            if (t->depth && t->g->format == VK_FORMAT_D32_SFLOAT)
+                for (uint32_t k = 0; k < t->bytes / 4; k++) {
+                    float fa, fb;
+                    memcpy(&fa, a + (size_t)k * 4, 4), memcpy(&fb, b + (size_t)k * 4, 4);
+                    if (fabsf(fa - fb) > tol) {
+                        if (far_first < 0) far_first = k;
+                        far++;
+                    }
+                }
             /* 24-bit depth comes out in 32 bits whose top 8 are undefined */
             int d24 = t->depth && (t->g->format == VK_FORMAT_D24_UNORM_S8_UINT || t->g->format == VK_FORMAT_X8_D24_UNORM_PACK32);
             for (uint32_t k = 0; k < t->bytes / t->bpt; k++)
@@ -231,6 +245,12 @@ void gpu_ab_flush(void) {
                     " ours and the game's", ab.pass, ab.frame, t->depth ? "depth" : "colour", i, t->g->width,
                     t->g->height, (int)t->g->format, differ, t->g->width * t->g->height * t->g->layers);
             if (first >= 0) fprintf(stderr, " (first at %ld, %ld)", first % t->g->width, first / t->g->width);
+            if (t->depth && t->g->format == VK_FORMAT_D32_SFLOAT) {
+                fprintf(stderr, "; beyond rounding: %ld", far);
+                if (far_first >= 0)
+                    fprintf(stderr, " (first at %ld, %ld, layer %ld)", far_first % t->g->width,
+                            (far_first / t->g->width) % t->g->height, far_first / ((long)t->g->width * t->g->height));
+            }
             fprintf(stderr, "\n");
             /* YW4_AB_SHOW=<n>: the first n differing texels, ours and the game's (raw, up to 8 bytes) */
             long show = getenv("YW4_AB_SHOW") ? atol(getenv("YW4_AB_SHOW")) : 0;

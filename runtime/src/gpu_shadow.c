@@ -10,6 +10,7 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "gbuffer.h"
 #include "gpu_internal.h"
 #include "host.h"
 #include "shadow.h"
@@ -424,7 +425,10 @@ static void draw_pass(VkCommandBuffer cb, GpuState *s, const ShadowPass *p) {
     VkPipeline bound = VK_NULL_HANDLE;
     int cull = -1, front = -1;
     long skipped = 0;
-    for (uint32_t i = 0; i < p->n; i++) {
+    /* YW4_AB_SELFTEST=1: leave out every second draw of ours, a fault the same-frame A/B must report (checks the tool) */
+    static int selftest = -1;
+    if (selftest < 0) selftest = getenv("YW4_AB_SELFTEST") && atoi(getenv("YW4_AB_SELFTEST")) > 0;
+    for (uint32_t i = 0; i < p->n; i += 1 + (uint32_t)selftest) {
         const ShadowDraw *d = &p->d[i];
         VkBuffer vb[3], ib;
         VkDeviceSize voff[3], ioff, stride[3] = {d->stride, d->stride, d->stride};
@@ -502,10 +506,18 @@ static void draw_pass(VkCommandBuffer cb, GpuState *s, const ShadowPass *p) {
     if (skipped) __atomic_add_fetch(&draws_skipped, skipped, __ATOMIC_RELAXED);
 }
 
+/* CMD_NATIVE (shadow.c, only with YW4_AB_PASS=shadow): the game's draw that follows is one ours replaces. It is
+ * kept in the command list so the same-frame A/B's second run (the game's) has it; every other run skips it. */
+void gpu_shadow_game_draw(void *vk_cb, void *gpu_state, const void *data, uint32_t size) {
+    (void)vk_cb, (void)data, (void)size;
+    ((GpuState *)gpu_state)->skip_next_draw = !gpu_ab_game;
+}
+
 void gpu_shadow_pass(void *vk_cb, void *gpu_state, const void *data, uint32_t size) {
     VkCommandBuffer cb = vk_cb;
     GpuState *s = gpu_state;
     const ShadowPass *p;
+    if (gpu_ab_game) return;  /* the same-frame A/B's second run: the game's draws instead */
     if (size < sizeof p) return;
     memcpy(&p, data, sizeof p);
     if (!p || !p->n) return;

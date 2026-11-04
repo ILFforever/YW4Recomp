@@ -435,7 +435,16 @@ void gbuffer_layer_start(const CPUState *ctx) {
                        : U8(item + 8) == LAYER_GBUFFER ? "gbuffer" : material_layer(item) ? "material"
                        : shadow_layer(item)          ? "shadow"
                                                      : NULL;
-    if (name && gpu_ab_wanted(name) && !ab_open.cmd) {
+    /* shadow: the frame's (frame % 3)-th shadow layer (one per cascade), so a run of frames checks every cascade */
+    int ab_this = 1;
+    if (name && !strcmp(name, "shadow") && gpu_ab_wanted(name)) {
+        static uint64_t seen_frame = ~0ull;
+        static int nth;
+        uint64_t f = __atomic_load_n(&yw4_frames_presented, __ATOMIC_RELAXED);
+        if (f != seen_frame) seen_frame = f, nth = 0;
+        ab_this = nth++ == (int)(f % 3);
+    }
+    if (name && ab_this && gpu_ab_wanted(name) && !ab_open.cmd) {
         char m[17] = "b";
         strcpy(m + 1, name);
         nvn_record_native(ctx, cmd, gpu_ab_native, m, 1 + (uint32_t)strlen(name));

@@ -1191,6 +1191,15 @@ int yw4_hook_submesh_draw(CPUState *ctx) {
              * from the effects of skipping the game's draw */
             static int both = -1;
             if (both < 0) both = env_on("YW4_SHADOWS_BOTH");
+            /* same-frame A/B of the shadow pass: the game's draw stays in the command list behind a marker, so
+             * the A/B's second run can draw it; every other run skips it (gpu_shadow_game_draw) */
+            static int ab = -1;
+            if (ab < 0) ab = gpu_ab_wanted("shadow");
+            if (ab && !both) {
+                uint8_t z = 0;
+                nvn_record_native(ctx, U64(k->device + 0x10d0) + 0xd8, gpu_shadow_game_draw, &z, 1);
+                return 0;
+            }
             if (!both) return gbuffer_disarm(), 1;  /* the game's draw is skipped */
         }
     } else if (mode == MODE_NATIVE && p && k->game_drew) {  /* a recheck: the game draws it */

@@ -153,6 +153,7 @@ typedef struct GpuState {
     int rasterizer_discard, depth_clamp;
     int after_composite;  /* this command list drew the bloom composite: what follows (but the copy into the
                            * window's image) is the UI (gpu_draw.c) */
+    int skip_next_draw;   /* the next draw is a game shadow draw ours replaces (gpu_shadow_game_draw, A/B runs) */
 } GpuState;
 
 void gpu_state_init(GpuState *s);

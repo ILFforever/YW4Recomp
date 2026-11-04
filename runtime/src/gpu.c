@@ -1821,6 +1821,10 @@ void gpu_execute(uint64_t handle) {
             break;
         }
         case CMD_DRAW_ARRAYS: case CMD_DRAW_ELEMENTS: {
+            if (s.skip_next_draw) {  /* a game shadow draw ours replaces, kept for the A/B's second run */
+                s.skip_next_draw = 0;
+                break;
+            }
             /* same-frame A/B of one screen-pass draw (YW4_AB_PASS=screen): a range of just this draw, run
              * again from the draw itself */
             int ab_draw = gpu_screen_ab_draw(&s);
@@ -1865,6 +1869,10 @@ void gpu_execute(uint64_t handle) {
                 gpu_passes_other(cb, "our shadow pass", 0);
                 gpu_shadow_pass(cb, &s, r->extra, (uint32_t)r->x[1]);
                 gpu_passes_targets(cb, &s);
+                break;
+            }
+            if ((NvnNativePass)(uintptr_t)r->x[0] == gpu_gbuffer_draw && s.skip_next_draw) {
+                s.skip_next_draw = 0;  /* a game shadow draw ours replaces (in shadow layers they come in place) */
                 break;
             }
             if ((NvnNativePass)(uintptr_t)r->x[0] == gpu_gbuffer_draw) {  /* a draw, in place */
