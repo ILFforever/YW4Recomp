@@ -709,6 +709,8 @@ static int env_on(const char *name) {
 /* The last frame a cascade drew a second shadow layer: cutscenes do (two layers per cascade), play
  * never did (town, bamboo forest, measured 2026-11-01). */
 static uint64_t two_layer_frame;
+static uint64_t last_shadow_frame;  /* the last presented frame a shadow layer started in */
+static uint64_t game_draws_until;   /* until this frame the game draws every caster (after a gap: a menu) */
 
 /* In cutscenes the game draws all the casters: our cut-out casters leave the characters lit where the
  * game's shade them, one frame in 32 dark (bamboo forest cutscene; not found why: matrix, buffers,
@@ -1124,6 +1126,22 @@ int yw4_hook_model_renderer(CPUState *ctx) {
     if (__atomic_load_n(&mode, __ATOMIC_ACQUIRE) == MODE_GAME) return 0;
     uint64_t list = ctx->x[1], item = ctx->x[2];
     if (!item || U8(item + 8) != LAYER_SHADOW) return 0;
+    {   /* after a stretch with no shadow layers (a menu: none while it is open and for the still frames after it),
+         * the game draws every caster itself for a while (game_draws_until): with our pass the game's own draws
+         * are skipped, and some of a caster's per-draw data is only brought up to date by them, so after a long menu
+         * ours drew part of the casters from old data for about 35 frames (2026-11-04: shadow map 79% empty instead
+         * of 61% on frames 4325-4340 after closing the Yo-kai Pad, shadows blinking off; each object's one game draw
+         * in 32 put it right). */
+        uint64_t f = __atomic_load_n(&yw4_frames_presented, __ATOMIC_RELAXED);
+        uint64_t last = __atomic_exchange_n(&last_shadow_frame, f, __ATOMIC_RELAXED);
+        static int refresh = -1;  /* YW4_SHADOW_REFRESH=<frames> (default 33), 0 = off (tests) */
+        if (refresh < 0) refresh = getenv("YW4_SHADOW_REFRESH") ? atoi(getenv("YW4_SHADOW_REFRESH")) : 33;
+        if (last && f > last + 8 && refresh > 0) {
+            __atomic_store_n(&game_draws_until, f + (uint64_t)refresh, __ATOMIC_RELAXED);
+            fprintf(stderr, "yw4: shadows: refresh after a %" PRIu64 "-frame gap: the game draws every caster in frames %"
+                    PRIu64 "-%" PRIu64 "\n", f - last, f, f + (uint64_t)refresh - 1);
+        }
+    }
     if (!lay && !(lay = calloc(1, sizeof *lay))) return 0;
     Layer *k = lay;
     k->device = ctx->x[0];
@@ -1161,7 +1179,9 @@ int yw4_hook_submesh_draw(CPUState *ctx) {
     k->world.m[15] = 1;
     ShadowPass *p = k->pass;
     uint64_t frame = __atomic_load_n(&yw4_frames_presented, __ATOMIC_RELAXED);
-    if (mode == MODE_NATIVE && p && k->game_drew && ((frame + (obj >> 4)) & 31) != 0 && !cutscene_game_shadows()) {
+    int refreshing = frame < __atomic_load_n(&game_draws_until, __ATOMIC_RELAXED);
+    if (mode == MODE_NATIVE && p && k->game_drew && ((frame + (obj >> 4)) & 31) != 0 && !cutscene_game_shadows() &&
+        !refreshing) {
         const Caster *c = caster_of(obj, sub);
         int n = c ? ours(c, &k->vp, k->device, &p->d[p->n], PASS_DRAWS - (int)p->n) : -1;
         if (n >= 0) {
