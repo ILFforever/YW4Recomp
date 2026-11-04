@@ -250,7 +250,7 @@ const SWITCHES = [
   { key: 'fsr', title: 'AMD FSR', note: () => 'Upscaling and frame generation, any graphics card · about 240 MB' },
   { key: 'dlss', title: 'NVIDIA DLSS', note: () => rtx ? 'Upscaling, frame generation, Reflex · about 325 MB'
     : 'Needs an NVIDIA RTX graphics card', needsRtx: true },
-  { key: 'freeUp', title: 'Free up space after building', note: () => 'Deletes the tools and build files (2.2 GB). Updates then rebuild from scratch' },
+  { key: 'freeUp', title: 'Free up space after building', note: () => 'Deletes the tools and build files (1.3 GB). Updates then rebuild from scratch' },
   { key: 'desktop', title: 'Desktop shortcut', note: () => 'Opens the launcher' },
   { key: 'startMenu', title: 'Start menu entry', note: () => 'Opens the launcher' },
 ];

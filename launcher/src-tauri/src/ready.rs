@@ -278,8 +278,10 @@ pub fn make_shortcuts(state: State) -> Result<(), String> {
     if state.desktop { places.push("[Environment]::GetFolderPath('Desktop')"); }
     if state.start_menu { places.push("[Environment]::GetFolderPath('Programs')"); }
     for place in places {
+        // ({place}): a .NET call given straight to a command is read as text, not run (Join-Path then fails and no
+        // shortcut was ever made: found 2026-11-04 in the first full Home -> Ready test)
         let script = format!(
-            "$s=(New-Object -ComObject WScript.Shell).CreateShortcut((Join-Path {place} 'Yo-kai Watch 4 Recomp.lnk')); \
+            "$s=(New-Object -ComObject WScript.Shell).CreateShortcut((Join-Path ({place}) 'Yo-kai Watch 4 Recomp.lnk')); \
              $s.TargetPath=$env:YW4_LNK_TARGET; $s.WorkingDirectory=(Split-Path $env:YW4_LNK_TARGET); \
              $s.IconLocation=$env:YW4_LNK_ICON; $s.Save()");
         let ok = hidden(Command::new("powershell").args(["-NoProfile", "-NonInteractive", "-Command", &script])
