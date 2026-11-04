@@ -706,24 +706,10 @@ static int env_on(const char *name) {
     return s && atoi(s);
 }
 
-/* The last frame a cascade drew a second shadow layer: cutscenes do (two layers per cascade), play
- * never did (town, bamboo forest, measured 2026-11-01). */
-static uint64_t two_layer_frame;
 static uint64_t last_shadow_frame;  /* the last presented frame a shadow layer started in */
 static uint64_t game_draws_until;   /* until this frame the game draws every caster (after a gap: a menu) */
-
-/* In cutscenes the game draws all the casters: our cut-out casters leave the characters lit where the
- * game's shade them, one frame in 32 dark (bamboo forest cutscene; not found why: matrix, buffers,
- * texture, sampler, threshold and shader all equal the game's). The game's whole pass cost the same
- * GPU time there (6.9 ms, ours 7.0; ours with the game's cut-outs 8.2). Until a second passes without
- * a second layer. YW4_CUTSCENE_SHADOWS=ours keeps ours. */
-static int cutscene_game_shadows(void) {
-    static int keep = -1;
-    if (keep < 0) keep = getenv("YW4_CUTSCENE_SHADOWS") && !strcmp(getenv("YW4_CUTSCENE_SHADOWS"), "ours");
-    uint64_t f = __atomic_load_n(&yw4_frames_presented, __ATOMIC_RELAXED),
-             t = __atomic_load_n(&two_layer_frame, __ATOMIC_RELAXED);
-    return !keep && t && f - t < 60;
-}
+/* (Cutscenes were given back to the game's shadows from 2026-11-01 to 2026-11-04: our casters were missing from the
+ * game's copy of each layer into a second map. shadow_before_targets fixed that; decision 0024.) */
 
 /* The game's draws left to it, for narrowing down a fault by elimination:
  * YW4_SHADOWS_NO_SKINNED=1 (characters), YW4_SHADOWS_NO_CUTOUT=1 (cut-out casters),
@@ -1144,8 +1130,6 @@ int yw4_hook_model_renderer(CPUState *ctx) {
         uint64_t v = U64(ctx->x[0] + 0x2780);
         int c = v && U8(v) >= 1 && U8(v) <= 3 ? U8(v) - 1 : -1;
         int second = lay->device == ctx->x[0] && c >= 0 && c == lay->cascade;
-        if (second && ctx->x[2] && U8(ctx->x[2] + 8) == LAYER_SHADOW)
-            __atomic_store_n(&two_layer_frame, __atomic_load_n(&yw4_frames_presented, __ATOMIC_RELAXED), __ATOMIC_RELAXED);
         end_layer(lay, second ? ctx : NULL);
     }
     /* the G-buffer pass (decision 0026) shares these hooks. After the open shadow layer has queued its pass: the
@@ -1209,7 +1193,7 @@ int yw4_hook_submesh_draw(CPUState *ctx) {
     ShadowPass *p = k->pass;
     uint64_t frame = __atomic_load_n(&yw4_frames_presented, __ATOMIC_RELAXED);
     int refreshing = frame < __atomic_load_n(&game_draws_until, __ATOMIC_RELAXED);
-    if (mode == MODE_NATIVE && p && k->game_drew && ((frame + (obj >> 4)) & 31) != 0 && !cutscene_game_shadows() &&
+    if (mode == MODE_NATIVE && p && k->game_drew && ((frame + (obj >> 4)) & 31) != 0 &&
         !refreshing) {
         const Caster *c = caster_of(obj, sub);
         int n = c ? ours(c, &k->vp, k->device, &p->d[p->n], PASS_DRAWS - (int)p->n) : -1;

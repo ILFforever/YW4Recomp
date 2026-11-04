@@ -217,4 +217,13 @@ and turns them into Vulkan at submit. The expensive part is `f_a45890` plus the 
    (viewport, scissor, depth and polygon state) the game's first draw there used, then restores the game's.
    Restoring only the target was not enough: a few shadows stayed missing. Check mode in the cutscene: all 81,000
    draws per window equal to ours. Owner's playtests: no flicker, identical to the game's shadows.
+   **Fixed 2026-11-04: the characters lit in cutscenes, dark once every 32 frames** (worked around since
+   2026-11-01 by giving cutscenes back to the game's shadows). After each cascade's first layer the game copies the
+   finished layer into the second map with one full-screen draw (fs `6b4575fb57b97548`), and the characters read
+   that copy. Our pass for the layer was queued when the second layer started, after the copy, so the copy lacked
+   our casters; on the recheck frame the game drew the cut-out caster itself, before the copy, hence the dark frame.
+   Now the pass goes in when the game moves to another depth target (`shadow_before_targets`, from
+   `nvnCommandBufferSetRenderTargets`). Found with the same-frame A/B (`YW4_AB_PASS=shadow`, which until then had
+   compared ours with ours) and its command-order trace (`YW4_AB_TRACE`): the second map went from ~674,000 texels
+   beyond rounding to the main map's own 42-204. The workaround is gone; owner watched the cutscene: looks good.
 5. Switch the default to `native` once every street, house and battle layer matches; measure CPU.
