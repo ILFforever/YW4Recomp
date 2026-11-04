@@ -332,7 +332,10 @@ extern "C" void dlssg_tag(VkCommandBuffer cb, const GpuFgPrepare *p, uint32_t ow
     c.depthInverted = sl::Boolean::eFalse;
     c.cameraMotionIncluded = sl::Boolean::eTrue;
     c.motionVectors3D = sl::Boolean::eFalse;
-    c.reset = sl::Boolean::eFalse;
+    /* Start over when generation was off in the last present (a menu, loading): with eRetainResourcesWhenOff it still
+     * holds the frame from before the menu, and its first new frame would blend that in. */
+    c.reset = mode_on == 1 ? sl::Boolean::eFalse : sl::Boolean::eTrue;
+    if (getenv("YW4_DLSSG_NO_RESET")) c.reset = sl::Boolean::eFalse;  /* tests: the old behaviour */
     sl::Result rc = slSetConstants(c, *token, viewport);
     if (r != sl::Result::eOk || rc != sl::Result::eOk) {
         static int logged;
