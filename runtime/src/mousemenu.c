@@ -228,7 +228,7 @@ uint64_t mousemenu_update(float mx, float my, int w, int h, uint32_t mouse_butto
         if (now >= next_dump) {
             next_dump = now + 500;
             fprintf(stderr, "yw4: mouse menus: state t=%llu reads=%llu press=%#llx press_reads=%llu gap_reads=%llu step_from=%d "
-                    "focus=%d hover=%d click=%d front=%d hid=%llu live=%llu\n", (unsigned long long)now, (unsigned long long)reads,
+                    "focus=%d hover=%d click=%d front=%d\n", (unsigned long long)now, (unsigned long long)reads,
                     (unsigned long long)press, (unsigned long long)press_reads, (unsigned long long)gap_reads, step_from,
                     focus, hover_target, click_target, grid_front);
         }
