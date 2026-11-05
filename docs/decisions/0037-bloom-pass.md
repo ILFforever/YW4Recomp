@@ -1,5 +1,12 @@
 # 0037 — Our own bloom pass (first post-processing pass)
 
+<!-- decision
+state: accepted
+date: 2026-10-28
+replaces: none
+code: runtime/src/bloom.c, runtime/src/gpu_post.c, runtime/shaders/bloom_bright.frag, runtime/shaders/bloom_blur.frag, runtime/shaders/bloom_composite.frag
+-->
+
 Status: accepted, on by default (2026-10-28); the settings panel's BLOOM row (F1) or `YW4_BLOOM=game` switches back.
 
 ## Context

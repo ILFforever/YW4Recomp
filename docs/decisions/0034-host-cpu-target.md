@@ -1,5 +1,12 @@
 # 0034 — Host CPU target: a setting, the 2003 baseline by default
 
+<!-- decision
+state: accepted
+date: 2026-10-28
+replaces: none
+code: recomp/check.py
+-->
+
 Status: accepted (2026-10-28). The owner asked for the CPU side to be "very very optimized, or allowed to use
 more resources" after battles at 21:9 were mostly limited by the game's main thread.
 

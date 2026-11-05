@@ -62,6 +62,13 @@ Goal: understand what we're dealing with before writing a recompiler.
 - `docs/frame.md`: how the engine builds a frame (passes, layer kinds, draw items, materials); the decision records
   0024 (shadow pass), 0025 (PCSS), 0026 (G-buffer pass) for what is ours so far.
 
+## Finding decisions
+- `docs/decisions/README.md` indexes every record: its state, date, what replaced it, and its main code files.
+  It is generated from the header under each record's title (`<!-- decision state/date/replaces/code -->`).
+  A new record gets that header; then run `python -m tools.dev.decisions` to rewrite the index, and
+  `python -m tools.dev.decisions --check` before committing docs (dead links, `decision NNNN` mentions of records
+  that don't exist, code paths that are gone).
+
 ## How to work with Dean
 - He prefers practical, direct answers and will push back if something's off.
 - Explain the "why" for anything non-obvious. He wants to be able to explain every subsystem himself.

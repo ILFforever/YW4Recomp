@@ -1,4 +1,10 @@
 # 0050 — The launcher (Tauri) and the install folder
+<!-- decision
+state: accepted
+date: 2026-11-03
+replaces: none
+code: launcher
+-->
 
 Status: accepted as a plan (2026-11-03); nothing of the launcher is written yet. The screens were designed first as
 a clickable mockup (Home, game files, check, check failed, options, building, ready to play).

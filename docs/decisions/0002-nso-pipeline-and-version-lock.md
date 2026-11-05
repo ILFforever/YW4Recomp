@@ -1,5 +1,12 @@
 # 0002 — NSO input pipeline and version lock
 
+<!-- decision
+state: accepted
+date: 2026-10-20
+replaces: none
+code: tools/yw4/nso.py, tools/yw4/lz4_block.py, target.toml
+-->
+
 Date: 2026-10-20
 Status: accepted
 

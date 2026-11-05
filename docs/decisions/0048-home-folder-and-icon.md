@@ -1,4 +1,10 @@
 # 0048 — The exe finds its own files from anywhere; the game's icon from the user's files
+<!-- decision
+state: accepted
+date: 2026-11-03
+replaces: none
+code: tools/yw4/icon.py, recomp/build.py
+-->
 
 Status: accepted (2026-11-03). Both checked: the game started from an unrelated folder finds its shaders, mods
 and DLC and draws the town; the exe and its window carry the 4++ icon made from the owner's update NSP.

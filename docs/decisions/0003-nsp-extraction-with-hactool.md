@@ -1,5 +1,12 @@
 # 0003 — Extracting ExeFS/RomFS from NSPs with hactool
 
+<!-- decision
+state: accepted
+date: 2026-10-20
+replaces: none
+code: tools/yw4/extract.py, tools/yw4/pfs0.py
+-->
+
 Date: 2026-10-20
 Status: accepted
 

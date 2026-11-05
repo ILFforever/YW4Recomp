@@ -1,5 +1,12 @@
 # 0040 — Upscaling with NVIDIA DLSS
 
+<!-- decision
+state: accepted
+date: 2026-10-29
+replaces: none
+code: runtime/src/gpu_dlss.c, runtime/src/msvc_shim.c, runtime/src/window.c, tools/yw4/deps.py
+-->
+
 Status: accepted, first version (2026-10-29). Added after FSR (decision 0039) because FSR turns fine patterns
 smaller than a render pixel (the schoolyard's perforated fence, far goal nets) into grain at performance; a
 machine-learned upscaler handles those better. The owner's GPU (RTX 4070 laptop) runs DLSS.

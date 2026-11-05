@@ -1,5 +1,12 @@
 # 0020 — Shaders: translate the shipped assembly, not the GPU code
 
+<!-- decision
+state: accepted
+date: 2026-10-21
+replaces: none
+code: tools/yw4/shaders.py, recomp/shader.py
+-->
+
 Date: 2026-10-21
 Status: accepted (owner: "which is best, not accounting for complexity")
 

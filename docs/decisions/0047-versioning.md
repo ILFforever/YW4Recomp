@@ -1,4 +1,10 @@
 # 0047 — Versioning: one number for the project, one for the launcher
+<!-- decision
+state: accepted
+date: 2026-11-03
+replaces: none
+code: VERSION, recomp/build.py, runtime/src/version.h
+-->
 
 Status: accepted (2026-11-03). The project's number is in place (0.7.0); the launcher doesn't exist yet.
 

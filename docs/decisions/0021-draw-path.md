@@ -1,5 +1,12 @@
 # 0021 — The draw path: NVN command lists on Vulkan
 
+<!-- decision
+state: accepted
+date: 2026-10-21
+replaces: 0019 (part)
+code: runtime/src/gpu.c, runtime/src/vk.h, runtime/src/gpu_draw.c
+-->
+
 Date: 2026-10-21
 Status: accepted (owner: "go for it" on the proposal; this file is the proposal)
 

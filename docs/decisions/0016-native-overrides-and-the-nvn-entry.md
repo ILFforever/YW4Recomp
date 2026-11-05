@@ -1,5 +1,12 @@
 # 0016 — Native overrides by symbol; NVN starts at nvnBootstrapLoader
 
+<!-- decision
+state: accepted
+date: 2026-10-21
+replaces: none
+code: recomp/overrides.toml, runtime/src/nvn.c
+-->
+
 Date: 2026-10-21
 Status: accepted (follows 0005's graphics plan and 0014's "overrides by symbol stay possible")
 

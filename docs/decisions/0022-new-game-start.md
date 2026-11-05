@@ -1,5 +1,12 @@
 # 0022 — From the title menu into a new game
 
+<!-- decision
+state: accepted
+date: 2026-10-22
+replaces: none
+code: runtime/src/swkbd.c, recomp/function.py, runtime/src/svc_time.c, runtime/src/svc_am.c, runtime/src/gpu_draw.c
+-->
+
 Date: 2026-10-22
 Status: accepted (small steps, each forced by the next stop of the running game)
 

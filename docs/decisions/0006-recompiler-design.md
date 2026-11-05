@@ -1,5 +1,12 @@
 # 0006 — Recompiler design (first version)
 
+<!-- decision
+state: accepted
+date: 2026-10-20
+replaces: 0001 (part)
+code: recomp/golden.py, recomp/check.py, recomp/pi
+-->
+
 Date: 2026-10-20
 Status: accepted (revisit after the first full compile of `main`)
 

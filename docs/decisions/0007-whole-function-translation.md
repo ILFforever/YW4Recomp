@@ -1,5 +1,12 @@
 # 0007 — Whole-function translation
 
+<!-- decision
+state: accepted
+date: 2026-10-20
+replaces: none
+code: recomp/function.py, runtime/src/dispatch.c, tests/functest
+-->
+
 Date: 2026-10-20
 Status: accepted (revisit when the runtime first runs recompiled code)
 

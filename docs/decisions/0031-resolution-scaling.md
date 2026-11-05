@@ -1,5 +1,12 @@
 # 0031 — Resolution scaling of the 3D view
 
+<!-- decision
+state: accepted
+date: 2026-10-27
+replaces: none
+code: none
+-->
+
 Date: 2026-10-27
 Status: accepted (owner: resolution scaling next, before shimmer and before finishing the takeover); off by default
 (`YW4_RES=900`), F4 cycles 900 → 1080 → 1440 → 2160 lines

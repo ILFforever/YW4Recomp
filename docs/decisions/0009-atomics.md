@@ -1,5 +1,12 @@
 # 0009 — Atomics: exclusives, acquire/release
 
+<!-- decision
+state: accepted
+date: 2026-10-21
+replaces: none
+code: tests/functest/atomics.S, tests/test_kernel.py
+-->
+
 Date: 2026-10-20
 Status: accepted
 

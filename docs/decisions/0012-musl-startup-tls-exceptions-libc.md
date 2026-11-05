@@ -1,5 +1,12 @@
 # 0012 — musl start-up, TLS, C++ exceptions, first C library functions
 
+<!-- decision
+state: accepted
+date: 2026-10-21
+replaces: none
+code: runtime/src/hle_string.c
+-->
+
 Date: 2026-10-21
 Status: accepted (except the open question at the end)
 

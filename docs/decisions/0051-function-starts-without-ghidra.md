@@ -1,4 +1,10 @@
 # 0051 — Function starts without Ghidra: 597 addresses in the repo
+<!-- decision
+state: accepted
+date: 2026-11-03
+replaces: none
+code: recomp/main_extra_functions.txt, recomp/translate.py
+-->
 
 Status: accepted (2026-11-03). `recomp.translate` gives byte-identical output (all 152 generated files) with the
 file as it did with Ghidra's export.

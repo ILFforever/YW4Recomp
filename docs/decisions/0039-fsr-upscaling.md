@@ -1,5 +1,12 @@
 # 0039 — Upscaling with AMD FSR
 
+<!-- decision
+state: accepted
+date: 2026-10-29
+replaces: none
+code: runtime/src/gpu_fsr.c, runtime/src/gpu.c, runtime/src/gpu_aa.c, runtime/shaders/aa_depth_upscale.frag, tools/yw4/deps.py, recomp/build.py
+-->
+
 Status: accepted, first version (2026-10-29). The owner chose FSR (option A below) for higher frame rates at 4K,
 after 60 frames/s and no limit came in (the game moves by measured time, `runtime/src/framerate.c`).
 

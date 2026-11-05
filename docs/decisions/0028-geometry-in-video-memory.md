@@ -1,5 +1,12 @@
 # 0028 — The game's geometry in video memory
 
+<!-- decision
+state: accepted
+date: 2026-10-26
+replaces: none
+code: runtime/src/gpu.c, runtime/src/gpu_passes.c
+-->
+
 Date: 2026-10-26
 Status: accepted (the owner reported towns at 20-25 frames/s; the fix is on by default, `YW4_VRAM_GEOMETRY=0` turns
 it off)

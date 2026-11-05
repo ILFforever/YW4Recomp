@@ -1,5 +1,12 @@
 # 0024 — The first replaced pass: shadow casters
 
+<!-- decision
+state: accepted
+date: 2026-10-22
+replaces: none
+code: runtime/src/shadow.c, runtime/src/gpu_shadow.c, runtime/shaders/shadow_static.vert, recomp/overrides.toml, recomp/build.py
+-->
+
 Date: 2026-10-22
 Status: accepted (owner: "write it up, do what you think is best")
 

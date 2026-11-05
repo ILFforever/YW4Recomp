@@ -1,5 +1,12 @@
 # 0041 — Frame generation
 
+<!-- decision
+state: accepted
+date: 2026-10-29
+replaces: none
+code: runtime/src/gpu_fg.c, runtime/src/gpu_dlssg.cpp, runtime/src/gpu_aa.c, runtime/src/gpu.c, runtime/src/window.c
+-->
+
 Status: accepted, first versions with AMD FSR and NVIDIA DLSS (2026-10-29).
 
 ## Context

@@ -1,4 +1,10 @@
 # 0054 — Game updates and launcher updates, each on its own
+<!-- decision
+state: plan
+date: 2026-11-05
+replaces: 0052 (part)
+code: launcher/VERSION, launcher/package.py, launcher/src-tauri/src/buildrun.rs
+-->
 
 Status: **accepted** (2026-11-05, the owner's answers below); nothing is built yet. Changes decision
 0052 (the game's build code no longer lives only inside the launcher's installer) and carries out decision 0047's

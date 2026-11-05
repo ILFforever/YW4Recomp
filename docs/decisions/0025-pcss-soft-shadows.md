@@ -1,5 +1,12 @@
 # 0025 — Soft contact shadows (PCSS) in the shadow mask shader
 
+<!-- decision
+state: accepted
+date: 2026-10-25
+replaces: none
+code: recomp/shader.py
+-->
+
 Date: 2026-10-25
 Status: accepted (owner picked the approach and the defaults: "put it in the shadow mask shader only"; "4096 and x2
 is best")

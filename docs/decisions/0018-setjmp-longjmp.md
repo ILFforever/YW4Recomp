@@ -1,5 +1,12 @@
 # 0018 — setjmp and longjmp in recompiled code
 
+<!-- decision
+state: accepted
+date: 2026-10-21
+replaces: 0015 (part)
+code: runtime/src/setjmp.c, recomp/translate.py, recomp/function.py
+-->
+
 Date: 2026-10-21
 Status: accepted
 

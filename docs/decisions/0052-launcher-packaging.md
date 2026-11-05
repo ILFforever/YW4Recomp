@@ -1,4 +1,10 @@
 # 0052 — Packaging the launcher: what the download holds and what it fetches
+<!-- decision
+state: accepted
+date: 2026-11-04
+replaces: none
+code: launcher/src-tauri/src/buildrun.rs
+-->
 
 Status: **accepted** (2026-11-04, the owner's answers below); nothing of it is built yet. Follows decision 0050 (one
 download, nothing else to install, the build stays this repo's Python tools run by an embedded Python).

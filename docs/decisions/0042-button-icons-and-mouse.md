@@ -1,4 +1,10 @@
 # 0042 — Button icons that follow the device, and the mouse
+<!-- decision
+state: accepted
+date: 2026-10-30
+replaces: none
+code: runtime/src/bindings.c, runtime/src/window.c
+-->
 
 Status: accepted, first version (2026-10-30). Icons checked in game for all four styles; the mouse camera and
 switching devices while playing still need the owner's test.

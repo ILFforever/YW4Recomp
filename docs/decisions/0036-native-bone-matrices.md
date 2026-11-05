@@ -1,5 +1,12 @@
 # 0036 — Native skeleton matrices
 
+<!-- decision
+state: accepted
+date: 2026-10-28
+replaces: none
+code: runtime/src/bones.c, recomp/overrides.toml
+-->
+
 Status: accepted, on by default (2026-10-28). Code in `runtime/src/bones.c`, hooks in `recomp/overrides.toml`.
 
 ## Context

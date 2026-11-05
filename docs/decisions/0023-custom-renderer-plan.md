@@ -1,5 +1,12 @@
 # 0023 — Plan for the custom renderer (Phase 4b/4c)
 
+<!-- decision
+state: accepted
+date: 2026-10-22
+replaces: none
+code: none
+-->
+
 Date: 2026-10-22
 Status: accepted (owner: replace the 3D world; "UI and menu can stay on the old renderer" for now)
 

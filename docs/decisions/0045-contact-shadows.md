@@ -1,4 +1,10 @@
 # 0045 — Contact shadows
+<!-- decision
+state: accepted
+date: 2026-11-01
+replaces: none
+code: runtime/shaders/shadow_mask.frag
+-->
 
 Status: accepted, on by default (2026-11-01); the settings panel's SHADOWS > CONTACT SHADOWS row switches
 them while playing, `YW4_CONTACT=0` at start.

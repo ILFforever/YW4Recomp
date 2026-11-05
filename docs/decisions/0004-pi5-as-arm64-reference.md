@@ -1,5 +1,12 @@
 # 0004 — Raspberry Pi 5 as the ARM64 test reference; x86-64 is the first target
 
+<!-- decision
+state: accepted
+date: 2026-10-20
+replaces: none
+code: none
+-->
+
 Date: 2026-10-20
 Status: accepted
 

@@ -1,5 +1,12 @@
 # 0029 — Translating command lists on a worker thread
 
+<!-- decision
+state: accepted
+date: 2026-10-26
+replaces: none
+code: runtime/src/gpu_queue.c
+-->
+
 Date: 2026-10-26
 Status: accepted (owner chose it over more small fixes and over the takeover first: "sure go A"; asked whether the
 takeover would invalidate it: it doesn't, the takeover's draws go through the same worker)

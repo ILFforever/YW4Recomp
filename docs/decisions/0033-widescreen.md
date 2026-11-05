@@ -1,5 +1,12 @@
 # 0033 — Widescreen: a wider camera, wider screen images, the UI kept 16:9 in the middle
 
+<!-- decision
+state: accepted
+date: 2026-10-27
+replaces: none
+code: runtime/src/gpu.c, runtime/src/gpu_draw.c
+-->
+
 Status: accepted, first version (2026-10-27). The owner asked for widescreen/ultrawide next ("go wide").
 
 ## What we found

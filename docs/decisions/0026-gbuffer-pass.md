@@ -1,5 +1,12 @@
 # 0026 — The second replaced pass: the G-buffer, hybrid first
 
+<!-- decision
+state: accepted
+date: 2026-10-25
+replaces: none
+code: runtime/src/gbuffer.c, runtime/src/gpu_ab.c, runtime/shaders/gbuffer_main.vert, runtime/shaders/gbuffer_main.frag, runtime/shaders/gbuffer_frag.glsl, recomp/shader.py
+-->
+
 Date: 2026-10-25
 Status: accepted (owner: "ok go for it", after choosing a hybrid first and the complete takeover later)
 

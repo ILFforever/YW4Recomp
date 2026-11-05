@@ -1,5 +1,12 @@
 # 0038 — Our own distance blur pass
 
+<!-- decision
+state: accepted
+date: 2026-10-28
+replaces: none
+code: runtime/src/dof.c, runtime/src/gpu_post.c, runtime/shaders/dof_copy.frag, runtime/shaders/dof_blur.frag, runtime/shaders/dof_composite.frag
+-->
+
 Status: accepted, on by default (2026-10-28); the settings panel's DISTANCE BLUR PASS row (F1) or
 `YW4_DOF_PASS=game` switches back.
 

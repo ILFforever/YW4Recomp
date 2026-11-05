@@ -1,4 +1,10 @@
 # 0053 — The in-game overlay: the game's own pause, a side panel drawn on the CPU from its design
+<!-- decision
+state: accepted
+date: 2026-11-05
+replaces: none
+code: runtime/src/pause.c, runtime/src/ui.c, runtime/src/gamemenu.c, runtime/src/gamelogo.c, third_party/fonts, third_party/nanosvg
+-->
 
 Status: **accepted** (2026-11-05; the owner chose the buttons, the fonts and that it must match the design 1:1).
 

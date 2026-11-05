@@ -1,5 +1,12 @@
 # 0015 — Guest threads are host threads; one kernel lock
 
+<!-- decision
+state: accepted
+date: 2026-10-21
+replaces: none
+code: runtime/src/host.c
+-->
+
 Date: 2026-10-21
 Status: accepted
 

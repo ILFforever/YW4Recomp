@@ -1,5 +1,12 @@
 # 0008 — Floating-point and SIMD semantics
 
+<!-- decision
+state: accepted
+date: 2026-10-21
+replaces: none
+code: runtime/include/yw4fp.h
+-->
+
 Date: 2026-10-20
 Status: accepted (FPCR = 0 verified 2026-10-21)
 

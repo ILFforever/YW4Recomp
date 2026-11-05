@@ -1,5 +1,12 @@
 # 0005 — Phase 1 runtime strategy
 
+<!-- decision
+state: accepted
+date: 2026-10-20
+replaces: none
+code: none
+-->
+
 Date: 2026-10-20
 Status: **accepted** (2026-10-20, owner). CLAUDE.md's phase plan updated to match.
 

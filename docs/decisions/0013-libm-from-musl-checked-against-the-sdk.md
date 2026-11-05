@@ -1,5 +1,12 @@
 # 0013 — libm from musl 1.1.19, checked against the sdk's own code
 
+<!-- decision
+state: accepted
+date: 2026-10-21
+replaces: none
+code: runtime/src/hle_math.c, third_party/musl, tools/yw4/sdkref.py, tools/yw4/pi/sdkrun.c
+-->
+
 Date: 2026-10-21
 Status: accepted (owner chose "use musl's source" over the host's libm)
 

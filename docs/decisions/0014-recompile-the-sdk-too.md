@@ -1,5 +1,12 @@
 # 0014 — Recompile the sdk too; native code at the kernel and service level
 
+<!-- decision
+state: accepted
+date: 2026-10-21
+replaces: 0005 (part), 0010 (part)
+code: runtime/src/kernel.c, runtime/src/ipc.c, runtime/src/romfs.c, runtime/src/crypto.c, recomp/function.py, tools/yw4/sdkref.py
+-->
+
 Date: 2026-10-21
 Status: accepted (owner, 2026-10-21). Replaces the "recompile only main, implement the 578 sdk imports natively" part of decision 0005. 0005's graphics plan (NVN at the API level on Vulkan) stands.
 

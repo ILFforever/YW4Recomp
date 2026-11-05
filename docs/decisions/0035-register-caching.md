@@ -1,5 +1,12 @@
 # 0035 — Guest registers in local variables: tried, off
 
+<!-- decision
+state: rejected
+date: 2026-10-28
+replaces: none
+code: recomp/function.py
+-->
+
 Status: rejected for now (2026-10-28); the code stays in `recomp/function.py`, off unless
 `YW4_CACHE_REGISTERS=1` at translation.
 

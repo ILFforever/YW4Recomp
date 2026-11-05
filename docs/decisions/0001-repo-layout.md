@@ -1,5 +1,12 @@
 # 0001 — Repo layout and keeping game data out
 
+<!-- decision
+state: accepted
+date: 2026-10-14
+replaces: none
+code: .gitignore, config.example.toml, tools/yw4/config.py
+-->
+
 Date: 2026-10-14
 Status: accepted
 

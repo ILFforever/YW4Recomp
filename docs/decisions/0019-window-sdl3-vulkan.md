@@ -1,5 +1,12 @@
 # 0019 — The window: SDL3 and Vulkan; CPU clears as the first pixels
 
+<!-- decision
+state: accepted
+date: 2026-10-21
+replaces: none
+code: runtime/src/window.c, recomp/build.py, tools/yw4/deps.py, runtime/src/nvn_cmdbuf.c, third_party/vulkan
+-->
+
 Date: 2026-10-21
 Status: accepted (follows the owner's choices in 0017: SDL3, vendored Vulkan headers)
 

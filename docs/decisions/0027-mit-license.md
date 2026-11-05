@@ -1,5 +1,12 @@
 # 0027 — The project's license: MIT
 
+<!-- decision
+state: accepted
+date: 2026-10-26
+replaces: none
+code: LICENSE
+-->
+
 Date: 2026-10-26
 Status: accepted (owner: "mit sure", after comparing MIT and GPL)
 

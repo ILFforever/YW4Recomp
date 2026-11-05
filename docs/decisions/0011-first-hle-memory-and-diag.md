@@ -1,5 +1,12 @@
 # 0011 — First HLE: memory start-up, diag logging, StandardAllocator
 
+<!-- decision
+state: accepted
+date: 2026-10-21
+replaces: none
+code: runtime/src/hle.h, runtime/src/hle.c, runtime/src/hle_os.c, runtime/src/hle_diag.c, runtime/src/hle_mem.c, runtime/src/heap.c
+-->
+
 Date: 2026-10-21
 Status: accepted
 

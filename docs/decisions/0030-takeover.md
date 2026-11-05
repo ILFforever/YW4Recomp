@@ -1,5 +1,12 @@
 # 0030 — The takeover: our renderer does the per-draw work, then the selection
 
+<!-- decision
+state: accepted
+date: 2026-10-26
+replaces: none
+code: runtime/src/gbuffer.c, runtime/src/gpu_draw.c, runtime/src/nvn_objects.c
+-->
+
 Date: 2026-10-26
 Status: accepted (owner: "Take over", then "yes go" to the order below)
 

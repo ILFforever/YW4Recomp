@@ -1,5 +1,12 @@
 # 0010 — Loader and import stubs (Phase 3 skeleton)
 
+<!-- decision
+state: accepted
+date: 2026-10-21
+replaces: none
+code: recomp/translate.py, recomp/build.py, runtime/src/sha256.c, runtime/src/hle.c
+-->
+
 Date: 2026-10-21
 Status: accepted
 

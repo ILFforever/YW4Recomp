@@ -1,4 +1,10 @@
 # 0049 — DLC: the game finds and checks the owner's add-ons on boot
+<!-- decision
+state: accepted
+date: 2026-11-03
+replaces: none
+code: target.toml, recomp/build.py, runtime/src/svc_misc.c
+-->
 
 Status: accepted (2026-11-03). The owner's 11 add-ons are found; an empty file named like an add-on unlocks
 nothing; a real add-on renamed to another's title ID counts as what it is.

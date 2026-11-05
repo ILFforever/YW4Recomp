@@ -1,5 +1,12 @@
 # 0017 — NVN on the host: headless first; SDL3 and Vulkan next
 
+<!-- decision
+state: accepted
+date: 2026-10-21
+replaces: none
+code: runtime/src/nvn.c, runtime/src/nvn_objects.c, runtime/src/tegra.c, runtime/src/vi.c, runtime/src/svc_am.c, runtime/src/svc_acc.c
+-->
+
 Date: 2026-10-21
 Status: accepted (owner chose all three options below, 2026-10-21)
 

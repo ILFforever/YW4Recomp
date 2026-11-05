@@ -1,4 +1,10 @@
 # 0046 — Our programs in the engine's screen passes
+<!-- decision
+state: accepted
+date: 2026-11-02
+replaces: none
+code: runtime/shaders, runtime/src/gpu_draw.c
+-->
 
 Status: accepted, on by default (2026-11-02); the settings panel's SCREEN PASSES row (F1, DEVELOPER OPTIONS), F7 or
 `YW4_SCREEN_PASSES=game` switches back to the game's programs.

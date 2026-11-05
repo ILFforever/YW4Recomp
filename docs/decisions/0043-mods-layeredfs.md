@@ -1,4 +1,10 @@
 # 0043 — Mods: a mod's romfs laid over the game's (LayeredFS)
+<!-- decision
+state: accepted
+date: 2026-10-30
+replaces: none
+code: runtime/src/romfs.c
+-->
 
 Status: accepted, first version (2026-10-30). The English patch runs: the copyright warning and the town's quest
 marker ("Head to Mt. Wildwood!") show in English.

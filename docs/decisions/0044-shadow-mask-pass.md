@@ -1,4 +1,10 @@
 # 0044 — Our own shadow mask program
+<!-- decision
+state: accepted
+date: 2026-10-30
+replaces: none
+code: runtime/shaders/shadow_mask.frag, runtime/src/shadow_mask.c, runtime/src/gpu_draw.c, runtime/src/gpu_ab.c
+-->
 
 Status: accepted, on by default (2026-10-30); the settings panel's SHADOW MASK row (F1, DEVELOPER OPTIONS) or
 `YW4_SHADOW_MASK=game` switches back.
