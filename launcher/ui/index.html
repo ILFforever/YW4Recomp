@@ -182,6 +182,7 @@
     <div class="setup-body settings-body">
       <h1>Settings</h1>
       <div class="settings-grid">
+        <div class="settings-col">
         <section class="card">
           <h2>Where things are kept</h2>
           <div class="set-row">
@@ -199,17 +200,6 @@
           </div>
         </section>
         <section class="card">
-          <h2>Disk space</h2>
-          <div class="set-row">
-            <span><b>Build files</b><small id="set-free-size"></small></span>
-            <button class="btn small" type="button" id="set-free">Free up…</button>
-          </div>
-          <div class="switch-row">
-            <span><b>Free up space after every build</b><small>Updates then download the compiler again</small></span>
-            <button class="toggle" type="button" role="switch" aria-label="Free up space after every build" id="set-freeup"></button>
-          </div>
-        </section>
-        <section class="card">
           <h2>Shortcuts</h2>
           <div class="switch-row">
             <span><b>Desktop shortcut</b></span>
@@ -218,6 +208,19 @@
           <div class="switch-row">
             <span><b>Start menu entry</b></span>
             <button class="toggle" type="button" role="switch" aria-label="Start menu entry" id="set-startmenu"></button>
+          </div>
+        </section>
+        </div>
+        <div class="settings-col">
+        <section class="card">
+          <h2>Disk space</h2>
+          <div class="set-row">
+            <span><b>Build files</b><small id="set-free-size"></small></span>
+            <button class="btn small" type="button" id="set-free">Free up…</button>
+          </div>
+          <div class="switch-row">
+            <span><b>Free up space after every build</b><small>Updates then download the compiler again</small></span>
+            <button class="toggle" type="button" role="switch" aria-label="Free up space after every build" id="set-freeup"></button>
           </div>
         </section>
         <section class="card">
@@ -234,6 +237,7 @@
             <button class="btn small" type="button" id="set-check">Check now</button>
           </div>
         </section>
+        </div>
       </div>
     </div>
     <div class="setup-foot">
