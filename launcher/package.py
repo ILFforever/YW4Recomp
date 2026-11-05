@@ -109,7 +109,7 @@ def stage(ref: str) -> None:
 
 def build() -> None:
     launcher = REPO / "launcher"
-    version = (REPO / "VERSION").read_text().strip()
+    version = (REPO / "launcher" / "VERSION").read_text().strip()  # the launcher's own number (0054)
     # only for this build: a plain `cargo build` has no stage and must keep working without one
     overrides = OUT / "tauri.package.json"
     overrides.write_text(json.dumps({
@@ -128,9 +128,9 @@ def build() -> None:
     installers = list((release / "bundle" / "nsis").glob(f"*{version}*.exe"))
     if len(installers) != 1:
         raise SystemExit(f"expected one installer, found {installers}")
-    shutil.copy(installers[0], DIST / f"YW4-Recomp-{version}-setup.exe")
+    shutil.copy(installers[0], DIST / f"YW4-Recomp-Launcher-{version}-setup.exe")
 
-    with zipfile.ZipFile(DIST / f"YW4-Recomp-{version}-portable.zip", "w", zipfile.ZIP_DEFLATED) as z:
+    with zipfile.ZipFile(DIST / f"YW4-Recomp-Launcher-{version}-portable.zip", "w", zipfile.ZIP_DEFLATED) as z:
         z.write(release / "YW4 Recomp.exe", "YW4 Recomp/YW4 Recomp.exe")
         for p in (release / "builder").rglob("*"):
             if p.is_file():
