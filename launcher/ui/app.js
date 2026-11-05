@@ -540,7 +540,8 @@ $('build-next').addEventListener('click', () => {
 async function afterBuild() {
   inst = { install: options.install, mode, paths: { ...chosen[mode] }, saves: options.saves, fsr: options.fsr,
     dlss: options.dlss && rtx, freeUp: options.freeUp, desktop: options.desktop, startMenu: options.startMenu,
-    originalsOffered: inst && inst.install === options.install ? !!inst.originalsOffered : false };
+    originalsOffered: inst && inst.install === options.install ? !!inst.originalsOffered : false,
+    onPlay: (inst && inst.onPlay) || 'hide', mods: !(inst && inst.mods === false) };  // Settings' choices stay
   try { await invoke('save_state', { state: inst }); } catch (e) { logLine('could not remember the install: ' + e); }
   if (options.desktop || options.startMenu) {
     try { await invoke('make_shortcuts', { state: inst }); } catch (e) { logLine(String(e)); }
@@ -653,7 +654,7 @@ if (T && T.event) T.event.listen('played', () => { if (inst && !document.querySe
 
 $('play').addEventListener('click', async () => {
   try {
-    await invoke('play', { install: inst.install });
+    await invoke('play', { install: inst.install, mods: inst.mods !== false, onPlay: inst.onPlay || 'hide' });
     $('stat-last').textContent = 'Today';
   } catch (e) { popup('Something went wrong', String(e)); }
 });
@@ -674,6 +675,10 @@ async function showSettings() {
   $('set-install').textContent = inst.install;
   document.querySelectorAll('[data-move]').forEach((b) => b.setAttribute('aria-checked', String(b.dataset.move === inst.saves)));
   setToggle('set-freeup', inst.freeUp);
+  document.querySelectorAll('[data-onplay]').forEach((b) =>
+    b.setAttribute('aria-checked', String(b.dataset.onplay === (inst.onPlay || 'hide'))));
+  setToggle('set-mods', inst.mods !== false);
+  try { setToggle('set-full', await invoke('game_full_screen', { install: inst.install, saves: inst.saves })); } catch (e) { /* off */ }
   setToggle('set-desktop', inst.desktop);
   setToggle('set-startmenu', inst.startMenu);
   const dl = [inst.fsr && 'AMD FSR', inst.dlss && 'NVIDIA DLSS'].filter(Boolean);
@@ -689,6 +694,19 @@ $('set-open-install').addEventListener('click', () => invoke('open_folder', { in
 $('set-free').addEventListener('click', () => $('free-btn').click());  // the same popup as the Play screen's
 $('set-rebuild').addEventListener('click', () => openRebuildOptions());
 $('set-freeup').addEventListener('click', async () => { inst.freeUp = !inst.freeUp; setToggle('set-freeup', inst.freeUp); await saveInst(); });
+document.querySelectorAll('[data-onplay]').forEach((b) => b.addEventListener('click', async () => {
+  inst.onPlay = b.dataset.onplay;
+  document.querySelectorAll('[data-onplay]').forEach((x) => x.setAttribute('aria-checked', String(x === b)));
+  await saveInst();
+}));
+$('set-mods').addEventListener('click', async () => { inst.mods = inst.mods === false; setToggle('set-mods', inst.mods); await saveInst(); });
+$('set-full').addEventListener('click', async () => {
+  const full = $('set-full').getAttribute('aria-checked') !== 'true';
+  try {
+    await invoke('set_game_full_screen', { install: inst.install, saves: inst.saves, full });
+    setToggle('set-full', full);
+  } catch (e) { popup('Full screen', String(e)); }
+});
 for (const [id, key] of [['set-desktop', 'desktop'], ['set-startmenu', 'startMenu']]) {
   $(id).addEventListener('click', async () => {
     inst[key] = !inst[key];

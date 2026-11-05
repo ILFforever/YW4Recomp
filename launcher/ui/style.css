@@ -390,10 +390,10 @@ dialog p { margin: 0 0 10px; font-size: 14px; }
 .changelog ul { margin: 4px 0; padding-left: 18px; }
 .changelog li { margin: 2px 0; }
 
-/* Settings (the Play screen's gear): two columns of cards, each column stacked, so the page fits without scrolling */
+/* Settings (the Play screen's gear): three columns of cards, each column stacked, so the page fits without scrolling */
 .settings-body { gap: 14px; padding-top: 24px; }
 .settings-body h1 { margin: 0; }
-.settings-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; align-items: start; }
+.settings-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; align-items: start; }
 .settings-col { display: flex; flex-direction: column; gap: 14px; min-width: 0; }
 .settings-grid .card { padding: 0; overflow: hidden; }
 .settings-grid .card h2 { margin: 0; padding: 10px 16px 9px; border-bottom: 1px solid var(--lilac-2); background: var(--lilac-0); }
@@ -405,3 +405,6 @@ dialog p { margin: 0 0 10px; font-size: 14px; }
 .set-label { padding: 11px 16px 6px; font: 700 13px/1.2 var(--display); color: var(--ink-2); }
 .settings-grid .radios { padding: 0 16px 14px; }
 .settings-grid .switch-row { padding: 10px 16px; }
+.radios.compact { gap: 4px; }
+.radios.compact .radio { padding: 6px 10px; }
+.radios.compact .radio b { font-size: 13px; }

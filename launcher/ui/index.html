@@ -184,6 +184,26 @@
       <div class="settings-grid">
         <div class="settings-col">
         <section class="card">
+          <h2>Playing</h2>
+          <div class="set-label">When the game starts</div>
+          <div class="radios compact" role="radiogroup" aria-label="When the game starts">
+            <button type="button" class="radio" role="radio" data-onplay="hide"><span class="dot" aria-hidden="true"></span><span><b>Hide the launcher</b><small>It comes back when the game closes</small></span></button>
+            <button type="button" class="radio" role="radio" data-onplay="minimise"><span class="dot" aria-hidden="true"></span><span><b>Minimise it</b></span></button>
+            <button type="button" class="radio" role="radio" data-onplay="keep"><span class="dot" aria-hidden="true"></span><span><b>Keep it open</b></span></button>
+            <button type="button" class="radio" role="radio" data-onplay="close"><span class="dot" aria-hidden="true"></span><span><b>Close it</b><small>Play time isn't counted</small></span></button>
+          </div>
+          <div class="switch-row">
+            <span><b>Start in full screen</b><small>Same as F11 in the game</small></span>
+            <button class="toggle" type="button" role="switch" aria-label="Start in full screen" id="set-full"></button>
+          </div>
+          <div class="switch-row">
+            <span><b>Mods</b><small id="set-mods-line">The mods folder, e.g. the English patch</small></span>
+            <button class="toggle" type="button" role="switch" aria-label="Mods" id="set-mods"></button>
+          </div>
+        </section>
+        </div>
+        <div class="settings-col">
+        <section class="card">
           <h2>Where things are kept</h2>
           <div class="set-row">
             <span><b>Game folder</b><small id="set-install"></small></span>

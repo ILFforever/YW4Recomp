@@ -23,7 +23,16 @@ pub struct State {
     start_menu: bool,
     #[serde(rename = "originalsOffered", default)]
     originals_offered: bool,
+    /// Settings: what the launcher does on Play ("hide" until the game closes, "minimise", "keep", "close")
+    #[serde(rename = "onPlay", default = "default_on_play")]
+    on_play: String,
+    /// Settings: start the game with the mods folder (false: none, e.g. Japanese without the English patch)
+    #[serde(default = "yes")]
+    mods: bool,
 }
+
+fn default_on_play() -> String { "hide".into() }
+fn yes() -> bool { true }
 
 fn state_path() -> PathBuf {
     if let Ok(p) = std::env::var("YW4_LAUNCHER_STATE") {  // tests: keep their state out of the player's AppData
@@ -163,20 +172,36 @@ pub async fn install_info(install: String) -> Info {
 
 /// Starts the game: yw4.exe with no arguments reads game.ini next to it. Notes the start, and when the game
 /// exits adds the time played and tells the screens ("played"), so the Ready screen's numbers update.
+/// Settings (Play): with `mods` off the game starts with none (YW4_MODS=none: an environment variable wins over
+/// game.ini's line); `on_play` says what the launcher's window does meanwhile, and "hide" brings it back afterwards.
 #[tauri::command]
-pub fn play(app: tauri::AppHandle, install: String) -> Result<(), String> {
-    use tauri::Emitter;
+pub fn play(app: tauri::AppHandle, install: String, mods: Option<bool>, on_play: Option<String>) -> Result<(), String> {
+    use tauri::{Emitter, Manager};
     let e = exe(&install);
-    let mut child = Command::new(&e).current_dir(e.parent().unwrap()).spawn().map_err(|e| format!("couldn't start the game ({e})"))?;
+    let mut cmd = Command::new(&e);
+    cmd.current_dir(e.parent().unwrap());
+    if mods == Some(false) { cmd.env("YW4_MODS", "none"); }
+    let mut child = cmd.spawn().map_err(|e| format!("couldn't start the game ({e})"))?;
     let start = now();
     let mut p = load_played(&install);
     p.last_played = Some(start);
     save_played(&p);
+    let on_play = on_play.unwrap_or_else(default_on_play);
+    let win = app.get_webview_window("main");
+    match (on_play.as_str(), &win) {
+        ("hide", Some(w)) => { let _ = w.hide(); }
+        ("minimise", Some(w)) => { let _ = w.minimize(); }
+        ("close", _) => { app.exit(0); return Ok(()); }  // nothing stays to count the play time
+        _ => {}
+    }
     std::thread::spawn(move || {
         let _ = child.wait();
         let mut p = load_played(&install);
         p.seconds += now().saturating_sub(start);
         save_played(&p);
+        if on_play == "hide" {
+            if let Some(w) = app.get_webview_window("main") { let _ = w.show(); let _ = w.unminimize(); let _ = w.set_focus(); }
+        }
         let _ = app.emit("played", ());
     });
     Ok(())
@@ -361,4 +386,24 @@ pub fn move_saves(install: String, to: String) -> Result<(), String> {
     let _ = std::fs::remove_dir_all(&src_save);
     let _ = std::fs::remove_file(&src_ini);
     Ok(())
+}
+
+/// Settings: the game's own "full screen at start" (YW4_WINDOW in its settings.ini, the same line F11 and the
+/// WINDOW MODE row save), read and written here so the two never disagree.
+#[tauri::command]
+pub fn game_full_screen(install: String, saves: String) -> bool {
+    let (_, ini) = saves_place(Path::new(&install), &saves);
+    std::fs::read_to_string(ini).map(|s| s.lines().any(|l| l.trim() == "YW4_WINDOW=fullscreen")).unwrap_or(false)
+}
+
+#[tauri::command]
+pub fn set_game_full_screen(install: String, saves: String, full: bool) -> Result<(), String> {
+    if game_running() { return Err("Close the game first.".into()); }
+    let (_, ini) = saves_place(Path::new(&install), &saves);
+    let line = format!("YW4_WINDOW={}", if full { "fullscreen" } else { "windowed" });
+    let old = std::fs::read_to_string(&ini).unwrap_or_default();
+    let mut lines: Vec<String> = old.lines().filter(|l| !l.starts_with("YW4_WINDOW=")).map(String::from).collect();
+    lines.push(line);
+    if let Some(dir) = ini.parent() { std::fs::create_dir_all(dir).map_err(|e| e.to_string())?; }
+    std::fs::write(&ini, lines.join("\n") + "\n").map_err(|e| e.to_string())
 }
