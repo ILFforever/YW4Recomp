@@ -51,38 +51,15 @@ static const unsigned char font_g700[] = {
 static stbtt_fontinfo fonts[UI_FONTS];
 static int fonts_state;  /* 0 not loaded, 1 loaded, -1 failed */
 
-/* UI_MONO, the HUD's digits: a monospaced font of the system (Consolas on Windows, DejaVu Sans Mono elsewhere), so
- * numbers don't jiggle as they change; without one, Zen Kaku Gothic New. Not built in: the system has one. */
-static int mono_load(stbtt_fontinfo *f) {
-    const char *paths[] = {"C:/Windows/Fonts/consola.ttf", "C:/Windows/Fonts/CascadiaMono.ttf",
-                           "/usr/share/fonts/truetype/dejavu/DejaVuSansMono.ttf", "/usr/share/fonts/TTF/DejaVuSansMono.ttf",
-                           "/usr/share/fonts/dejavu/DejaVuSansMono.ttf"};
-    for (size_t i = 0; i < sizeof paths / sizeof *paths; i++) {
-        FILE *fp = fopen(paths[i], "rb");
-        if (!fp) continue;
-        fseek(fp, 0, SEEK_END);
-        long n = ftell(fp);
-        fseek(fp, 0, SEEK_SET);
-        unsigned char *d = n > 0 ? malloc((size_t)n) : NULL;  /* stays loaded: stb_truetype reads it in place */
-        int ok = d && fread(d, 1, (size_t)n, fp) == (size_t)n;
-        fclose(fp);
-        if (ok && stbtt_InitFont(f, d, stbtt_GetFontOffsetForIndex(d, 0))) return 1;
-        free(d);
-    }
-    return 0;
-}
-
 static int fonts_ready(void) {
     if (fonts_state) return fonts_state > 0;
-    const unsigned char *data[UI_MONO] = {font_r500, font_r700, font_r800, font_g400, font_g500, font_g700};
+    const unsigned char *data[UI_FONTS] = {font_r500, font_r700, font_r800, font_g400, font_g500, font_g700};
     fonts_state = 1;
-    if (!mono_load(&fonts[UI_MONO])) fonts[UI_MONO] = fonts[UI_GOTHIC_500];  /* set below once that one is read */
-    for (int i = 0; i < UI_MONO; i++)
+    for (int i = 0; i < UI_FONTS; i++)
         if (!stbtt_InitFont(&fonts[i], data[i], stbtt_GetFontOffsetForIndex(data[i], 0))) {
             fprintf(stderr, "yw4: ui: built-in font %d unreadable\n", i);
             fonts_state = -1;
         }
-    if (!fonts[UI_MONO].data) fonts[UI_MONO] = fonts[UI_GOTHIC_500];
     return fonts_state > 0;
 }
 

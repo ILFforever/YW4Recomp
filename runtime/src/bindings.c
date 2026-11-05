@@ -730,12 +730,19 @@ int bindings_capturing(void) {
 }
 void bindings_cancel(void) { capturing = 0; }
 
+void bindings_select(int r, int c) {
+    if (capturing || r < 0 || r >= NROWS) return;
+    row = r;
+    if (c >= 0 && c < BIND_COLS) col = c;
+}
+
 void bindings_action(int action) {
     sets_ready();
     int sens = row - SENS_ROW;  /* the sensitivity rows' axis */
     switch (action) {
-    case SETTINGS_UP: row = (row + NROWS - 1) % NROWS; break;
-    case SETTINGS_DOWN: row = (row + 1) % NROWS; break;
+    /* the ends stop the choice (no wrapping round: holding a direction stops at the last row) */
+    case SETTINGS_UP: row = row > 0 ? row - 1 : 0; break;
+    case SETTINGS_DOWN: row = row < NROWS - 1 ? row + 1 : NROWS - 1; break;
     case SETTINGS_LEFT:
     case SETTINGS_RIGHT:
         if (row == SET_ROW) {
@@ -744,7 +751,7 @@ void bindings_action(int action) {
             if (action == SETTINGS_LEFT && sens_index(sens) > 0) sens_choice[sens]--, settings_save();
             if (action == SETTINGS_RIGHT && sens_index(sens) < NSENS - 1) sens_choice[sens]++, settings_save();
         } else {
-            col = (col + (action == SETTINGS_LEFT ? BIND_COLS - 1 : 1)) % BIND_COLS;
+            col = action == SETTINGS_LEFT ? (col > 0 ? col - 1 : 0) : (col < BIND_COLS - 1 ? col + 1 : BIND_COLS - 1);
         }
         break;
     case SETTINGS_ACCEPT:

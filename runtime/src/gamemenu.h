@@ -14,8 +14,9 @@
 #include "ui.h"
 
 enum { GM_RESUME, GM_SETTINGS, GM_CONTROLS, GM_PERF, GM_BUG, GM_EXIT, GM_ITEMS };
-/* GM_LEAVE: back out of a page (the A key; B and Backspace are GM_BACK, which also closes the overlay from the
- * side panel); GM_PREV / GM_NEXT: the page's previous / next section (LB / RB, Q / E) */
+/* GM_BACK: one step back (B, Escape, Backspace, the right mouse button): a page to the side panel, the side panel
+ * to the game. GM_LEAVE: as GM_BACK on a page (older recordings' A key). GM_PREV / GM_NEXT: the page's previous /
+ * next section (LB / RB, LT / RT, Q / E). Lists stop at their ends. */
 /* GM_CLEAR: clear a binding (X, Delete) */
 enum { GM_UP, GM_DOWN, GM_LEFT, GM_RIGHT, GM_ACCEPT, GM_BACK, GM_LEAVE, GM_PREV, GM_NEXT, GM_CLEAR };
 
@@ -24,6 +25,13 @@ int gamemenu_selected(void);   /* GM_* */
 int gamemenu_confirming(void); /* the exit popup shows */
 void gamemenu_toggle(void);    /* the overlay button: open, or close and resume */
 void gamemenu_action(int action);  /* GM_UP... while it is open and no settings page covers it */
+/* The mouse at (x, y) in the design's units (1600 x 900 for 16:9): button 0 moved (hovering chooses), 1 the left
+ * button pressed (as Enter on what is under it), 3 the right one (back, as Escape), 4 moved with the left one held
+ * (a slider follows it). gamemenu_wheel: the wheel, as Up (dy > 0) or Down. */
+void gamemenu_mouse(float x, float y, int button);
+void gamemenu_wheel(int dy);
+/* Draw it again (the hints changed between keyboard and controller). */
+void gamemenu_refresh(void);
 /* Changes each time what the overlay shows changes (window.c draws it again then); `now` in ms, for the
  * "Screenshot saved" note, which shows 1.6 s. */
 uint32_t gamemenu_look(uint64_t now);

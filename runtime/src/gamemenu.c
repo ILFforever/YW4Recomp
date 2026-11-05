@@ -13,10 +13,12 @@
 static int open_, sel, confirm, choice;
 static int focus;             /* 0 the side panel, 1 the page it shows (Settings) */
 static int srow;              /* the chosen row on the settings page (settings_player_rows) */
+static int in_rows;           /* the settings page: 0 the sections list has the focus, 1 the chosen section's rows */
 static int prow;              /* the chosen row on the performance page: mode, corner, the four parts */
 static uint32_t changes;      /* counts every change of what shows */
 static int toast_wanted;      /* the note (Report a bug: coming soon) starts at the next look */
 static uint64_t toast_until;  /* ms */
+static int hover_kind = -1, hover_a, hover_b;  /* what the mouse is over (HIT_*, -1 nothing), for the hover looks */
 
 int gamemenu_open(void) { return __atomic_load_n(&open_, __ATOMIC_ACQUIRE); }
 int gamemenu_selected(void) { return sel; }
@@ -55,7 +57,7 @@ void gamemenu_toggle(void) {
 static void accept(void) {
     switch (sel) {
     case GM_RESUME: close_and_resume(); break;
-    case GM_SETTINGS: focus = 1; break;  /* into its page */
+    case GM_SETTINGS: focus = 1, in_rows = 0; break;  /* into its page: its sections first */
     case GM_CONTROLS: focus = 1; break;
     case GM_PERF: focus = 1; break;
     case GM_BUG: __atomic_store_n(&toast_wanted, 1, __ATOMIC_RELEASE); break;  /* not built yet: says so */
@@ -69,21 +71,35 @@ static void settings_page_action(int a) {
     int n = settings_player_rows(rows, 32);
     if (n <= 0) return;
     if (srow >= n) srow = n - 1;
-    if (a == GM_UP) srow = (srow + n - 1) % n;
-    else if (a == GM_DOWN) srow = (srow + 1) % n;
+    int first = srow;  /* this section's first row */
+    while (first > 0 && !strcmp(rows[first - 1].category, rows[srow].category)) first--;
+    if (!in_rows) {  /* the sections: Up / Down choose one, Right / Enter go into its rows, Back to the side panel */
+        if (a == GM_UP || a == GM_PREV) a = GM_PREV;
+        else if (a == GM_DOWN || a == GM_NEXT) a = GM_NEXT;
+        else if (a == GM_RIGHT || a == GM_ACCEPT) {
+            in_rows = 1;
+            return;
+        } else if (a == GM_BACK || a == GM_LEAVE) {
+            focus = 0;
+            return;
+        } else return;
+    }
+    /* the rows: the ends stop the choice (no wrapping round), so holding a direction stops at the last row */
+    if (a == GM_UP) srow = srow > 0 ? srow - 1 : 0;
+    else if (a == GM_DOWN) srow = srow < n - 1 ? srow + 1 : n - 1;
     else if (a == GM_LEFT || a == GM_RIGHT) settings_change(srow, a == GM_RIGHT ? 1 : -1);
-    else if (a == GM_BACK || a == GM_LEAVE) focus = 0;
+    else if (a == GM_ACCEPT) settings_change(srow, 1);  /* Enter / A: the next option, as Right */
+    else if (a == GM_BACK || a == GM_LEAVE) in_rows = 0, srow = first;  /* back to the sections */
     else if (a == GM_PREV || a == GM_NEXT) {
-        int first = srow;  /* this section's first row */
-        while (first > 0 && !strcmp(rows[first - 1].category, rows[srow].category)) first--;
         if (a == GM_PREV) {
-            int r = first > 0 ? first - 1 : n - 1;  /* a row of the section before (the last wraps round) */
+            if (first == 0) return;  /* the first section: stays */
+            int r = first - 1;  /* a row of the section before: to its first */
             while (r > 0 && !strcmp(rows[r - 1].category, rows[r].category)) r--;
             srow = r;
         } else {
             int r = srow;
             while (r < n && !strcmp(rows[r].category, rows[srow].category)) r++;
-            srow = r < n ? r : 0;
+            if (r < n) srow = r;  /* the last section: stays */
         }
     }
 }
@@ -109,8 +125,9 @@ static void perf_page_action(int a) {
         focus = 0;
         return;
     }
-    if (a == GM_UP) prow = (prow + 7) % 8;
-    else if (a == GM_DOWN) prow = (prow + 1) % 8;
+    if (a == GM_PREV || a == GM_NEXT) return;
+    if (a == GM_UP) prow = prow > 0 ? prow - 1 : 0;
+    else if (a == GM_DOWN) prow = prow < 7 ? prow + 1 : 7;
     else if (prow >= 6) {
         if (a == GM_LEFT || a == GM_RIGHT) settings_hud_step(prow == 7, a == GM_RIGHT ? 1 : -1);
     } else if (a == GM_LEFT || a == GM_RIGHT || a == GM_ACCEPT) {
@@ -131,6 +148,7 @@ static void perf_page_action(int a) {
 void gamemenu_action(int a) {
     if (!gamemenu_open() || settings_open()) return;
     changed();
+    hover_kind = -1;  /* the keys or the pad took over: no hover look until the mouse moves again */
     if (confirm) {
         if (a == GM_LEFT) choice = 0;
         else if (a == GM_RIGHT) choice = 1;
@@ -152,11 +170,117 @@ void gamemenu_action(int a) {
         else settings_page_action(a);
         return;
     }
-    if (a == GM_UP) sel = (sel + GM_ITEMS - 1) % GM_ITEMS;
-    else if (a == GM_DOWN) sel = (sel + 1) % GM_ITEMS;
+    if (a == GM_UP) sel = sel > 0 ? sel - 1 : 0;
+    else if (a == GM_DOWN) sel = sel < GM_ITEMS - 1 ? sel + 1 : GM_ITEMS - 1;
     else if (a == GM_ACCEPT || (a == GM_RIGHT && (sel == GM_SETTINGS || sel == GM_CONTROLS || sel == GM_PERF)))
         accept();
-    else if (a == GM_BACK) close_and_resume();
+    else if (a == GM_BACK) close_and_resume();  /* Escape, Backspace, B on the side panel: back to the game */
+}
+
+void gamemenu_refresh(void) { changed(); }
+
+/* ---- the mouse: where things are, as the last drawing put them (design units). The present draws, the window's
+ * thread reads: two lists, the drawing fills the one not being read, then swaps. */
+
+enum { HIT_SIDE, HIT_SECTION, HIT_ROW, HIT_ROW_PREV, HIT_ROW_NEXT, HIT_BIND, HIT_MODE, HIT_CORNER, HIT_CORNER_BOX,
+       HIT_PART, HIT_SLIDER, HIT_POPUP, HIT_HINT, HIT_BIND_STEP };
+#define HINT_CLOSE (-1)  /* a key hint's action: close the overlay */
+typedef struct {
+    float x, y, w, h;
+    int kind, a, b;
+} Hit;
+static Hit hits[2][96];
+static int hit_n[2], hit_front;  /* hit_front: the list the mouse reads */
+static int hit_back(void) { return __atomic_load_n(&hit_front, __ATOMIC_ACQUIRE) ^ 1; }
+static void hit_add(float x, float y, float w, float h, int kind, int a, int b) {
+    int k = hit_back();
+    if (hit_n[k] < (int)(sizeof hits[k] / sizeof *hits[k])) hits[k][hit_n[k]++] = (Hit){x, y, w, h, kind, a, b};
+}
+/* the topmost thing under (x, y): the last added */
+static int hit_find(float x, float y, Hit *out) {
+    int k = __atomic_load_n(&hit_front, __ATOMIC_ACQUIRE);
+    for (int i = hit_n[k] - 1; i >= 0; i--) {
+        const Hit *h = &hits[k][i];
+        if (x >= h->x && x < h->x + h->w && y >= h->y && y < h->y + h->h) {
+            *out = *h;
+            return 1;
+        }
+    }
+    return 0;
+}
+
+void gamemenu_mouse(float x, float y, int button) {
+    if (!gamemenu_open() || settings_open() || bindings_capturing()) return;
+    if (button == 3) {  /* the right button: back, as Escape */
+        gamemenu_action(GM_BACK);
+        return;
+    }
+    Hit h;
+    int found = hit_find(x, y, &h);
+    if (button == 0 || button == 4) {  /* what is under the mouse now: its hover look */
+        int k = found ? h.kind : -1, ha = found ? h.a : 0, hb = found ? h.b : 0;
+        if (k != hover_kind || ha != hover_a || hb != hover_b) hover_kind = k, hover_a = ha, hover_b = hb, changed();
+    }
+    if (confirm && (!found || h.kind != HIT_POPUP)) return;  /* the popup covers the rest */
+    if (!found) return;
+    int click = button == 1, drag = button == 4;  /* 4: moved with the left button held (a slider's thumb) */
+    int before = sel * 1000 + focus * 100 + srow + prow * 37 + choice * 7 + in_rows * 500;
+    switch (h.kind) {
+    case HIT_SIDE:
+        /* hovering chooses on the side panel; on a page, only a click goes to another item */
+        if (click) sel = h.a, focus = 0, accept();
+        else if (!focus) sel = h.a;
+        break;
+    case HIT_SECTION:
+        if (click) srow = h.a, focus = 1, in_rows = 0;
+        break;
+    case HIT_ROW: case HIT_ROW_PREV: case HIT_ROW_NEXT:
+        srow = h.a, focus = 1, in_rows = 1;
+        if (click) settings_change(h.a, h.kind == HIT_ROW_PREV ? -1 : 1);
+        break;
+    case HIT_BIND:
+        focus = 1, bindings_select(h.a, h.b < 0 ? -1 : h.b);
+        if (click && h.b != -2) bindings_action(SETTINGS_ACCEPT);  /* a key: waits for the new one; a value: the next */        break;
+    case HIT_MODE:
+        focus = 1, prow = 0;
+        if (click) window_hud_set_mode(perf_modes[h.a]), settings_save();
+        break;
+    case HIT_CORNER:
+        focus = 1, prow = 1;
+        if (click) window_hud_set_corner(h.a), settings_save();
+        break;
+    case HIT_CORNER_BOX:
+        focus = 1, prow = 1;
+        if (click) window_hud_set_corner((window_hud_corner() + 1) % 4), settings_save();
+        break;
+    case HIT_PART:
+        focus = 1, prow = 2 + h.a;
+        if (click) window_hud_set_parts(window_hud_parts() ^ (1u << h.a)), settings_save();
+        break;
+    case HIT_SLIDER:  /* a: 1 opacity; the track from x to x + w */
+        focus = 1, prow = 6 + h.a;
+        if (click || drag) settings_hud_set(h.a, (x - h.x) / h.w), changed();
+        break;
+    case HIT_POPUP:
+        choice = h.a;
+        if (click) gamemenu_action(GM_ACCEPT);
+        return;
+    case HIT_HINT:  /* a key hint along the bottom: clicked, as its key */
+        if (!click) return;
+        if (h.a == HINT_CLOSE) close_and_resume();
+        else gamemenu_action(h.a);
+        return;
+    case HIT_BIND_STEP:  /* a value's arrows on the controls page: b -1 or 1, as Left / Right */
+        focus = 1, bindings_select(h.a, -1);
+        if (click) bindings_action(h.b < 0 ? SETTINGS_LEFT : SETTINGS_RIGHT);
+        break;
+    }
+    if (click || sel * 1000 + focus * 100 + srow + prow * 37 + choice * 7 + in_rows * 500 != before) changed();
+}
+
+void gamemenu_wheel(int dy) {
+    if (!gamemenu_open() || settings_open() || bindings_capturing() || confirm) return;
+    gamemenu_action(dy > 0 ? GM_UP : GM_DOWN);
 }
 
 /* ---- the look (Main.dc.html) */
@@ -186,6 +310,10 @@ static const char *const ICON_BUG =
     "<path d=\"M8 10a4 4 0 0 1 8 0v4a4 4 0 0 1-8 0zM12 10v8M4 12h4M16 12h4M5 7.5l3 2M19 7.5l-3 2M5 18.5l3-2M19 18.5"
     "l-3-2M10 6.5L8.5 4M14 6.5L15.5 4\"/>";
 static const char *const ICON_EXIT = "<path d=\"M12 3v9M6.3 6.3a8 8 0 1 0 11.4 0\"/>";
+/* the value arrows (‹ ›): drawn as icons, not the font's characters, which sit low in their line */
+static const char *const ICON_PREV = "<path d=\"M14.5 6l-6 6 6 6\"/>";
+static const char *const ICON_NEXT = "<path d=\"M9.5 6l6 6-6 6\"/>";
+static int hovered(int kind, int a, int b) { return hover_kind == kind && hover_a == a && hover_b == b; }
 static const char *const ICON_CLOCK = "<circle cx=\"12\" cy=\"12\" r=\"8\"/><path d=\"M12 7v5l3 2\"/>";
 
 /* A side panel button (tabStyle): 56 high, radius 12, a 2 px border; the chosen one gold. */
@@ -234,6 +362,14 @@ static float hint(const UiCanvas *c, float x, float y, const char *key, const ch
     }
     float lw = ui_text_w(UI_GOTHIC_400, 16, label);
     ui_text_in(c, UI_GOTHIC_400, 16, x + kw + 10, y, 0, 56, 0, label, SNOW);
+    /* the mouse: a hint of an action is a button too (Move and Choose aren't: they need a direction) */
+    static const struct {
+        const char *label;
+        int action;
+    } acts[] = {{"Back", GM_BACK}, {"Close overlay", HINT_CLOSE}, {"Select", GM_ACCEPT}, {"Open", GM_ACCEPT},
+                {"Change", GM_ACCEPT}, {"Clear", GM_CLEAR}, {"Section", GM_NEXT}};
+    for (size_t i = 0; i < sizeof acts / sizeof *acts; i++)
+        if (!strcmp(label, acts[i].label)) hit_add(x - 6, y + 6, kw + 10 + lw + 12, 44, HIT_HINT, acts[i].action, 0);
     return kw + 10 + lw;
 }
 
@@ -244,6 +380,7 @@ static float popup_button(const UiCanvas *c, float right, float y, const char *l
     int f = quit ? UI_ROUNDED_800 : UI_ROUNDED_700;
     float w = ui_text_w(f, 14, label) + 40;
     float x = right - w;
+    hit_add(x, y, w, 40, HIT_POPUP, quit, 0);
     if (on) ui_box(c, x - 4, y - 4, w + 8, 48, 24, GOLD, 0, 0);
     if (quit) ui_box(c, x, y, w, 40, 20, WINE, 0, 0);
     else ui_box(c, x, y, w, 40, 20, WHITE, 1, POP_LINE);
@@ -385,7 +522,9 @@ static void draw_settings_page(const UiCanvas *c) {
     for (int i = 0; i < n; i++) {
         if (i && !strcmp(rows[i].category, rows[i - 1].category)) continue;
         int on = !strcmp(rows[i].category, sec);
+        if (on && focus && !in_rows) ui_box(c, 488 - 4, y - 4, 300 + 8, 52 + 8, 15, GOLD, 0, 0);  /* the focus */
         ui_box(c, 488, y, 300, 52, 12, on ? PLUM : WHITE, 2, on ? PLUM : LINE);
+        hit_add(488, y, 300, 52, HIT_SECTION, i, 0);
         sentence_case(rows[i].category, t, sizeof t);
         ui_text_wrap(c, UI_GOTHIC_700, 17, 0, 488 + 16, y + 26 - 17 * 1.45f / 2, 300 - 32, 17 * 1.45f, 0, t,
                      on ? SNOW : PLUM);
@@ -397,15 +536,19 @@ static void draw_settings_page(const UiCanvas *c) {
     for (int i = 0; i < n; i++) {
         if (strcmp(rows[i].category, sec)) continue;
         const SettingRow *r = &rows[i];
-        int on = focus && i == cur, off = r->disabled != NULL;
+        int on = focus && in_rows && i == cur, off = r->disabled != NULL;
         ui_box(c, x, y, w, 72, 14, WHITE, on ? 3 : 2, on ? GOLD : LINE);
+        hit_add(x, y, w, 72, HIT_ROW, i, 0);
         sentence_case(r->name, t, sizeof t);
         ui_text_in(c, UI_GOTHIC_500, 18, x + 20, y, 0, 72, 0, t, off ? MUTED : INK);
         float nx = x + w - 12 - 44, vx = nx - 10 - 300, px = vx - 10 - 44, by = y + 14;
-        ui_box(c, px, by, 44, 44, 10, 0xefe7f7, 2, LINE);
-        ui_text_in(c, UI_GOTHIC_500, 22, px, by, 44, 44, 1, "\xe2\x80\xb9", off ? MUTED : PLUM);  /* ‹ */
-        ui_box(c, nx, by, 44, 44, 10, 0xefe7f7, 2, LINE);
-        ui_text_in(c, UI_GOTHIC_500, 22, nx, by, 44, 44, 1, "\xe2\x80\xba", off ? MUTED : PLUM);  /* › */
+        hit_add(px, by, 44, 44, HIT_ROW_PREV, i, 0), hit_add(nx, by, 44, 44, HIT_ROW_NEXT, i, 0);
+        for (int k = 0; k < 2; k++) {  /* ‹ and ›; darker under the mouse */
+            float bx = k ? nx : px;
+            int hv = !off && hovered(k ? HIT_ROW_NEXT : HIT_ROW_PREV, i, 0);
+            ui_box(c, bx, by, 44, 44, 10, hv ? LILAC : 0xefe7f7, 2, hv ? PLUM : LINE);
+            ui_icon(c, k ? ICON_NEXT : ICON_PREV, bx + 11, by + 11, 22, 2.4f, off ? MUTED : PLUM);
+        }
         const char *value = r->options[r->current] ? r->options[r->current] : "";
         const char *note = r->notes[r->current] ? r->notes[r->current] : "";
         sentence_case(value, t, sizeof t);
@@ -477,6 +620,9 @@ static void draw_controls_page(const UiCanvas *c, const GameMenuInfo *in) {
     for (int i = first; i < n && i < first + visible; i++, y += rh) {
         const BindRow *r = &rows[i];
         int on = focus && i == row;
+        /* the mouse: a setting row or the reset row as a whole (a click: as Enter); an input's row chooses it, its
+         * key or input cells below take the click */
+        hit_add(x, y, w, rh, HIT_BIND, i, r->group && !r->value ? -2 : -1);
         ui_rect(c, x + 2, y, w - 4, 2, 0xefe7f7, 1);  /* the line between rows */
         if (on) {  /* a gold ring */
             ui_box(c, x + 4, y + 2, w - 8, rh - 2, 10, GOLD, 0, 0);
@@ -493,19 +639,31 @@ static void draw_controls_page(const UiCanvas *c, const GameMenuInfo *in) {
         if (r->value && !strcmp(r->group, "KEYS FOR")) {  /* which set the page shows: one coloured pill, its name */
             const char *set = !strcmp(r->cells[0], "BATTLES") ? "Battles" : "Exploring";
             /* ‹ name ›: the arrows inside the pill, as the value Left / Right change */
-            float sx = x + cw[0] + 22, sh = rh - 16, sy = y + 8, aw = ui_text_w(UI_GOTHIC_500, 17, "\xe2\x80\xb9") + 10;
+            float sx = x + cw[0] + 22, sh = rh - 16, sy = y + 8, aw = 24;
             float nw = ui_text_w(UI_GOTHIC_700, 15, "Exploring"), sw = 16 + aw + nw + aw + 16;  /* as wide for both */
             ui_box(c, sx, sy, sw, sh, sh / 2, PLUM, 0, 0);
-            ui_text_in(c, UI_GOTHIC_500, 17, sx + 16, sy, aw, sh, 0, "\xe2\x80\xb9", LILAC);
             ui_text_in(c, UI_GOTHIC_700, 15, sx + 16 + aw, sy, nw, sh, 1, set, SNOW);
-            ui_text_in(c, UI_GOTHIC_500, 17, sx + sw - 16 - aw, sy, aw, sh, 2, "\xe2\x80\xba", LILAC);
+            for (int k = 0; k < 2; k++) {  /* ‹ and ›, a lighter circle behind under the mouse */
+                float ix = k ? sx + sw - 12 - aw : sx + 12, iy = sy + (sh - aw) / 2;
+                int hv = hovered(HIT_BIND_STEP, i, k ? 1 : -1);
+                if (hv) ui_box(c, ix, iy, aw, aw, aw / 2, 0x5b4691, 0, 0);
+                ui_icon(c, k ? ICON_NEXT : ICON_PREV, ix + 4, iy + 4, aw - 8, 2.6f, hv ? SNOW : LILAC);
+                hit_add(k ? sx + sw - 16 - aw : sx, sy, 16 + aw, sh, HIT_BIND_STEP, i, k ? 1 : -1);
+            }
             continue;
         }
         if (r->value) {  /* a setting: its value in the keyboard column */
+            /* ‹ value ›: the arrows either side of the value (as the set's pill), Left / Right; a box under the mouse */
             sentence_case(r->cells[0], t, sizeof t);
-            ui_text_in(c, UI_GOTHIC_500, 17, x + cw[0] + 22, y, 0, rh, 0, t, NIGHT);
-            if (on) ui_text_in(c, UI_GOTHIC_500, 17, x + cw[0] + 22 + ui_text_w(UI_GOTHIC_500, 17, t) + 12, y, 0, rh, 0,
-                               "\xe2\x80\xb9 \xe2\x80\xba", PLUM);  /* ‹ ›: Left / Right change it */
+            float lx = x + cw[0] + 14, vw = 110, by = y + (rh - 26) / 2;
+            ui_text_in(c, UI_GOTHIC_500, 17, lx + 30, y, vw, rh, 1, t, NIGHT);
+            for (int k = 0; k < 2; k++) {
+                float bx = k ? lx + 30 + vw + 4 : lx;
+                int hv = hovered(HIT_BIND_STEP, i, k ? 1 : -1);
+                if (hv) ui_box(c, bx, by, 26, 26, 7, LILAC, 0, 0);
+                ui_icon(c, k ? ICON_NEXT : ICON_PREV, bx + 4, by + 4, 18, 2.4f, PLUM);
+                hit_add(bx - 2, y, 30, rh, HIT_BIND_STEP, i, k ? 1 : -1);
+            }
             continue;
         }
         /* the two keys, then the controller input: each a chip when chosen */
@@ -522,6 +680,7 @@ static void draw_controls_page(const UiCanvas *c, const GameMenuInfo *in) {
             if (on && col == k && bindings_capturing()) cell = "PRESS...";
             sentence_case(cell, t, sizeof t);
             float tw = ui_text_w(UI_GOTHIC_500, 17, t);
+            hit_add(kx - 10, y, tw + 20, rh, HIT_BIND, i, k);
             if (on && col == k) ui_box(c, kx - 10, y + 8, tw + 20, rh - 16, 8, GOLD, 0, 0);
             ui_text_in(c, UI_GOTHIC_500, 17, kx, y, 0, rh, 0, t,
                        r->conflict[k] ? WINE : !strcmp(r->cells[k], "-") ? MUTED : INK);
@@ -548,6 +707,7 @@ static void perf_slider(const UiCanvas *c, float x, float y, float w, const char
     y += lh + 10;
     ui_box(c, x, y, w, 52, 12, WHITE, ring ? 3 : 2, ring ? GOLD : LINE);
     float tx = x + 18, tw = w - 18 - 16 - 54 - 14;
+    hit_add(tx, y, tw, 52, HIT_SLIDER, opacity, 0);  /* the track, the box's height */
     ui_box(c, tx, y + 23, tw, 6, 3, LINE, 0, 0);
     if (frac > 0) ui_box(c, tx, y + 23, tw * frac, 6, 3, PLUM, 0, 0);
     ui_box(c, tx + tw * frac - 10, y + 16, 20, 20, 10, PLUM, 2, WHITE);
@@ -587,6 +747,7 @@ static void draw_perf_page(const UiCanvas *c, const GameMenuInfo *in) {
     static const char *const modes[3] = {"Off", "Compact", "Detailed"};
     float lw = 1024 - 360 - 32;
     float mw = (lw - 2 * 10) / 3;
+    for (int i = 0; i < 3; i++) hit_add(x + (float)i * (mw + 10), y, mw, 52, HIT_MODE, i, 0);
     for (int i = 0; i < 3; i++)
         chip(c, x + (float)i * (mw + 10), y, mw, modes[i], perf_modes[i] == mode, focus && prow == 0 && perf_modes[i] == mode);
     y += 52 + 22;
@@ -598,6 +759,9 @@ static void draw_perf_page(const UiCanvas *c, const GameMenuInfo *in) {
         ui_box(c, x, y, lw, 124, 12, WHITE, ring ? 3 : 2, ring ? GOLD : LINE);
         float sx = x + 18, sy = y + 12;
         ui_box(c, sx, sy, 176, 100, 10, LINE, 0, 0);
+        hit_add(x, y, lw, 124, HIT_CORNER_BOX, 0, 0);
+        for (int i = 0; i < 4; i++)  /* each half of the small screen picks its corner */
+            hit_add(sx + (i & 1 ? 88 : 0), sy + (i >> 1 ? 50 : 0), 88, 50, HIT_CORNER, i, 0);
         for (int i = 0; i < 4; i++)
             ui_box(c, sx + (i & 1 ? 176 - 6 - 58 : 6), sy + (i >> 1 ? 100 - 6 - 36 : 6), 58, 36, 7, i == corner ? PLUM : WHITE, 0, 0);
         ui_text_in(c, UI_GOTHIC_700, 17, sx + 176 + 24, y, 0, 124, 0, corners[corner & 3], PLUM);
@@ -609,6 +773,7 @@ static void draw_perf_page(const UiCanvas *c, const GameMenuInfo *in) {
     for (int i = 0; i < 4; i++, y += 52 + 10) {
         int on = parts >> i & 1, ring = focus && prow == 2 + i, off = mode != 1;
         ui_box(c, x, y, lw, 52, 12, WHITE, ring ? 3 : 2, ring ? GOLD : LINE);
+        hit_add(x, y, lw, 52, HIT_PART, i, 0);
         ui_box(c, x + 18, y + 13, 26, 26, 7, on ? PLUM : WHITE, 2, on ? PLUM : 0xc6b2da);
         if (on) ui_text_in(c, UI_ROUNDED_800, 16, x + 18, y + 13, 26, 26, 1, "\xe2\x9c\x93", SNOW);  /* ✓ */
         ui_text_in(c, UI_GOTHIC_700, 17, x + 18 + 26 + 14, y, 0, 52, 0, names[i], off ? MUTED : PLUM);
@@ -638,6 +803,8 @@ static void draw_perf_page(const UiCanvas *c, const GameMenuInfo *in) {
 
 void gamemenu_draw(const UiCanvas *c, const GameMenuInfo *in) {
     float W = (float)c->w / c->s, H = 900;
+    int hk = hit_back();
+    hit_n[hk] = 0;  /* the mouse's list, filled as things are drawn */
     int page = (sel == GM_SETTINGS || sel == GM_CONTROLS || sel == GM_PERF) && !confirm;  /* these show a page */
     ui_rect(c, 0, 0, W, H, SHADE, page ? 0.62f : 0.35f);  /* the tint over the game, darker behind a page */
     if (page && sel == GM_SETTINGS) draw_settings_page(c);
@@ -663,11 +830,13 @@ void gamemenu_draw(const UiCanvas *c, const GameMenuInfo *in) {
     for (int i = 0; i < 5; i++) {
         const char *l = labels[i];
         side_button(c, 20, 128 + i * 66, 356, icons[i], l, sel == i, PLUM);
+        hit_add(20, 128 + i * 66, 356, 56, HIT_SIDE, i, 0);
     }
     /* Exit game at the bottom, under a line; the version under it */
     float vy = H - 20 - 19, ey = vy - 14 - 56;
     ui_rect(c, 20, ey - 14 - 2, 356, 2, LINE, 1);
     side_button(c, 20, ey, 356, ICON_EXIT, "Exit game", sel == GM_EXIT, WINE);
+    hit_add(20, ey, 356, 56, HIT_SIDE, GM_EXIT, 0);
     char ver[48];
     snprintf(ver, sizeof ver, "YW4 Recomp %s", in->version);
     ui_text(c, UI_GOTHIC_400, 13, 20, vy, 19, ver, MUTED);
@@ -678,25 +847,31 @@ void gamemenu_draw(const UiCanvas *c, const GameMenuInfo *in) {
     if (focus && sel == GM_CONTROLS) {  /* the controls page */
         int ps = in->pad == 2;
         hx += hint(c, hx, H - 56, in->pad ? "D-pad" : "W S", "Choose") + 28;
+        if (!in->pad) hx += hint(c, hx, H - 56, "A D", "Navigate") + 28;  /* across: a key, the other key, the pad */
         hx += hint(c, hx, H - 56, in->pad ? (ps ? "Cross" : "A") : "Enter", "Change") + 28;
         hx += hint(c, hx, H - 56, in->pad ? (ps ? "Square" : "X") : "Del", "Clear") + 28;
-        hx += hint(c, hx, H - 56, in->pad ? (ps ? "Circle" : "B") : "A", "Back") + 28;
-        hint(c, hx, H - 56, in->pad ? in->close : "Esc", "Close overlay");
+        hx += hint(c, hx, H - 56, in->pad ? (ps ? "Circle" : "B") : "Esc", "Back") + 28;
+        if (in->pad) hint(c, hx, H - 56, in->close, "Close overlay");
+    } else if (focus && sel == GM_SETTINGS && !in_rows) {  /* the settings page's sections */
+        hx += hint(c, hx, H - 56, in->pad ? "D-pad" : "W S", "Choose section") + 28;
+        hx += hint(c, hx, H - 56, in->pad ? (in->pad == 2 ? "Cross" : "A") : "Enter", "Open") + 28;
+        hx += hint(c, hx, H - 56, in->pad ? (in->pad == 2 ? "Circle" : "B") : "Esc", "Back") + 28;
+        if (in->pad) hint(c, hx, H - 56, in->close, "Close overlay");
     } else if (focus && in->pad) {  /* on a page */
         hx += hint(c, hx, H - 56, "D-pad", "Choose and change") + 28;
+        hx += hint(c, hx, H - 56, in->pad == 2 ? "Cross" : "A", "Select") + 28;
         if (sel == GM_SETTINGS) hx += hint(c, hx, H - 56, in->pad == 2 ? "L1 R1" : "LB RB", "Section") + 28;
         hx += hint(c, hx, H - 56, in->pad == 2 ? "Circle" : "B", "Back") + 28;
         hint(c, hx, H - 56, in->close, "Close overlay");
-    } else if (focus) {
+    } else if (focus) {  /* on a page, with the keyboard: Escape goes back to the side panel, again closes */
         hx += hint(c, hx, H - 56, "W S", "Move") + 28;
-        hx += hint(c, hx, H - 56, "\xe2\x86\x90 \xe2\x86\x92", "Change") + 28;  /* ← → */
+        hx += hint(c, hx, H - 56, "A D", "Change") + 28;
+        hx += hint(c, hx, H - 56, "Enter", "Select") + 28;
         if (sel == GM_SETTINGS) hx += hint(c, hx, H - 56, "Q E", "Section") + 28;
-        hx += hint(c, hx, H - 56, "A", "Back") + 28;
-        hint(c, hx, H - 56, "Esc", "Close overlay");
+        hint(c, hx, H - 56, "Esc", "Back");
     } else if (in->pad) {
         hx += hint(c, hx, H - 56, in->pad == 2 ? "Cross" : "A", "Select") + 28;
-        hx += hint(c, hx, H - 56, in->pad == 2 ? "Circle" : "B", "Back") + 28;
-        hint(c, hx, H - 56, in->close, "Close overlay");
+        hint(c, hx, H - 56, in->pad == 2 ? "Circle" : "B", "Close overlay");
     } else {
         hx += hint(c, hx, H - 56, "W S", "Move") + 28;
         hx += hint(c, hx, H - 56, "Enter", "Select") + 28;
@@ -733,4 +908,5 @@ void gamemenu_draw(const UiCanvas *c, const GameMenuInfo *in) {
         right -= popup_button(c, right, ty + 12, "Quit game", 1, choice == 1) + 10;
         popup_button(c, right, ty + 12, "Keep playing", 0, choice == 0);
     }
+    __atomic_store_n(&hit_front, hk, __ATOMIC_RELEASE);  /* the mouse reads this drawing's list now */
 }

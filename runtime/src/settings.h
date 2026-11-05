@@ -51,6 +51,8 @@ void settings_change(int row, int dir);
  * one step up (dir 1) or down (-1), saved. */
 void settings_hud_slider(int opacity, float *frac, char *text, size_t n);
 void settings_hud_step(int opacity, int dir);
+/* The same slider set from a position along its track (0..1, the mouse), on its steps, saved. */
+void settings_hud_set(int opacity, float frac);
 /* The settings page shows its developer page (DEVELOPER OPTIONS, the last row's; Escape or B goes back). */
 int settings_developer(void);
 /* LEGACY MENUS (YW4_LEGACY_KEYS, default on): 1 if the F1, F2 and F3 keys work. */

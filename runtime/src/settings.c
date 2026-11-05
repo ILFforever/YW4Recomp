@@ -183,9 +183,9 @@ static const Setting player[] = {
       "NVIDIA DLSS: RTX 40 AND NEWER, TURNS REFLEX ON"}, 3, gpu_fg, gpu_fg_cycle,
      "YW4_FG", {"0", "1", "2"}, fg_disabled},
     {"FRAME GENERATION AND LATENCY", "REFLEX",
-     "NVIDIA REFLEX: THE GAME WAITS SO EACH FRAME STARTS AS LATE AS IT CAN, SO WHAT YOU PRESS SHOWS SOONER. HELPS "
-     "MOST WHEN THE GPU LIMITS THE FRAME RATE; WHERE THE CPU DOES IT COSTS FRAMES (ABOUT 14% IN A BUSY TOWN). "
-     "NVIDIA GPUS.",
+     /* (the game waits so each frame starts as late as it can; where the CPU limits, about 14% fewer frames in a busy
+      * town) */
+     "NVIDIA REFLEX: LESS INPUT DELAY. COSTS A LITTLE FRAME RATE WHERE THE CPU LIMITS IT. NVIDIA GPUS.",
      {"OFF", "ON", "ON + BOOST"},
      {"THE GAME'S OWN TIMING", "LESS INPUT DELAY", "LESS DELAY STILL: THE GPU KEPT AT HIGH CLOCKS, MORE POWER"}, 3,
      reflex_index, dlssg_reflex_cycle, "YW4_REFLEX", {"0", "1", "2"}, reflex_disabled},
@@ -497,6 +497,17 @@ void settings_hud_slider(int opacity, float *frac, char *text, size_t n) {
 void settings_hud_step(int opacity, int dir) {
     const Setting *s = hud_slider(opacity);
     if (s) slider_step(s, dir > 0 ? 1 : -1), settings_save();
+}
+
+void settings_hud_set(int opacity, float frac) {
+    const Setting *s = hud_slider(opacity);
+    if (!s) return;
+    if (frac < 0) frac = 0;
+    if (frac > 1) frac = 1;
+    float v = s->lo + frac * (s->hi - s->lo);
+    v = (float)(int)(v / s->step + 0.5f) * s->step;  /* on the steps */
+    s->set(v < s->lo ? s->lo : v > s->hi ? s->hi : v);
+    settings_save();
 }
 
 void settings_change(int row, int dir) {

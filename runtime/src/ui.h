@@ -20,7 +20,6 @@ typedef struct {
 enum {
     UI_ROUNDED_500, UI_ROUNDED_700, UI_ROUNDED_800,  /* M PLUS Rounded 1c: titles, buttons */
     UI_GOTHIC_400, UI_GOTHIC_500, UI_GOTHIC_700,     /* Zen Kaku Gothic New: body text */
-    UI_MONO,                                         /* the system's monospaced font: the HUD's digits */
     UI_FONTS
 };
 

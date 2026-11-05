@@ -1722,8 +1722,23 @@ static int pad_is_playstation(void) {
 }
 
 /* the overlay's key hints: 0 the keyboard's (no pad), 1 a pad's, 2 a PlayStation pad's; *close: its overlay button */
+/* A point of the window (SDL's window units) in the overlay's design units (its picture is 900 high), 0 outside it. */
+static int overlay_point(float mx, float my, float *x, float *y) {
+    int ww = 0, wh = 0;
+    SDL_GetWindowSize(window, &ww, &wh);
+    float px = picture_rect[0] * (float)ww, py = picture_rect[1] * (float)wh;
+    float pw = picture_rect[2] * (float)ww, ph = picture_rect[3] * (float)wh;
+    if (ph <= 0 || mx < px || my < py || mx >= px + pw || my >= py + ph) return 0;
+    *x = (mx - px) * 900.0f / ph, *y = (my - py) * 900.0f / ph;
+    return 1;
+}
+
+static int last_used_pad;  /* the overlay's hints: the controller was used last (else the keyboard or mouse) */
+static void used_pad(int pad) {
+    if (pad != last_used_pad) last_used_pad = pad, gamemenu_refresh();
+}
 static int pad_hints(const char **close) {
-    if (!gamepad) return 0;
+    if (!gamepad || !last_used_pad) return 0;
     int ps = pad_is_playstation();
     if (ps) *close = "Touchpad";
     else if (SDL_GamepadHasButton(gamepad, SDL_GAMEPAD_BUTTON_MISC1))
@@ -1795,7 +1810,10 @@ static void panel_pad_triggers(void) {
         if (v < 8000) held[i] = 0;
         else if (v > 24000 && !held[i]) {
             held[i] = 1;
-            if (!bindings_capturing()) settings_action(SETTINGS_PAGE), yw4_hid_note_key("PAGE");
+            if (bindings_capturing()) continue;
+            if (gamemenu_open() && !settings_open())  /* the overlay: LT / RT as LB / RB, a page's sections */
+                gamemenu_action(i ? GM_NEXT : GM_PREV), yw4_hid_note_key(i ? "M_NEXT" : "M_PREV");
+            else settings_action(SETTINGS_PAGE), yw4_hid_note_key("PAGE");
         }
     }
 }
@@ -1811,6 +1829,31 @@ static void panel_pad_stick(void) {
     held = 1;
     panel_pad_button(ay > ax ? (y < 0 ? SDL_GAMEPAD_BUTTON_DPAD_UP : SDL_GAMEPAD_BUTTON_DPAD_DOWN)
                              : (x < 0 ? SDL_GAMEPAD_BUTTON_DPAD_LEFT : SDL_GAMEPAD_BUTTON_DPAD_RIGHT));
+}
+
+/* The overlay: a D-pad direction or the stick held repeats, as a held key does (after 0.4 s, then 11 a second). The
+ * first step is the press's own (panel_pad_button, panel_pad_stick); this adds the rest. */
+static void overlay_pad_repeat(void) {
+    static int dir = -1;
+    static uint64_t next;
+    static const SDL_GamepadButton dirs[4] = {SDL_GAMEPAD_BUTTON_DPAD_UP, SDL_GAMEPAD_BUTTON_DPAD_DOWN,
+                                              SDL_GAMEPAD_BUTTON_DPAD_LEFT, SDL_GAMEPAD_BUTTON_DPAD_RIGHT};
+    int d = -1;
+    if (gamepad && gamemenu_open() && !settings_open() && !bindings_capturing()) {
+        for (int i = 0; i < 4 && d < 0; i++)
+            if (SDL_GetGamepadButton(gamepad, dirs[i])) d = i;
+        if (d < 0) {
+            int x = SDL_GetGamepadAxis(gamepad, SDL_GAMEPAD_AXIS_LEFTX), y = SDL_GetGamepadAxis(gamepad, SDL_GAMEPAD_AXIS_LEFTY);
+            int ax = x < 0 ? -x : x, ay = y < 0 ? -y : y;
+            if (ax >= 16000 || ay >= 16000) d = ay > ax ? (y < 0 ? 0 : 1) : (x < 0 ? 2 : 3);
+        }
+    }
+    uint64_t now = SDL_GetTicks();
+    if (d != dir) {
+        dir = d, next = now + 400;
+        return;
+    }
+    if (d >= 0 && now >= next) next = now + 90, panel_pad_button(dirs[d]);
 }
 
 /* ---- full screen (YW4_WINDOW, panel WINDOW MODE, F11): borderless, the size of the desktop (SDL3's fullscreen
@@ -1890,6 +1933,7 @@ void window_run(void (*guest)(void *), void *arg) {
         SDL_Event e;
         int got = SDL_WaitEventTimeout(&e, 8);
         update_input();
+        overlay_pad_repeat();
         fullscreen_apply();
         if (!got) continue;
         switch (e.type) {
@@ -1905,12 +1949,14 @@ void window_run(void (*guest)(void *), void *arg) {
             }
             break;
         case SDL_EVENT_GAMEPAD_BUTTON_DOWN:
-            if (gamepad && SDL_GetGamepadID(gamepad) == e.gbutton.which) panel_pad_button(e.gbutton.button);
+            if (gamepad && SDL_GetGamepadID(gamepad) == e.gbutton.which) used_pad(1), panel_pad_button(e.gbutton.button);
             break;
         case SDL_EVENT_GAMEPAD_AXIS_MOTION:
             if (gamepad && SDL_GetGamepadID(gamepad) == e.gaxis.which && (settings_open() || gamemenu_open()) &&
-                !bindings_capture_axis(e.gaxis.axis, e.gaxis.value))
+                !bindings_capture_axis(e.gaxis.axis, e.gaxis.value)) {
+                if (e.gaxis.value > 16000 || e.gaxis.value < -16000) used_pad(1);
                 panel_pad_stick(), panel_pad_triggers();
+            }
             break;
         case SDL_EVENT_MOUSE_MOTION:
             if (window && SDL_GetWindowRelativeMouseMode(window)) {
@@ -1918,11 +1964,19 @@ void window_run(void (*guest)(void *), void *arg) {
                 mouse_accum_x += e.motion.xrel;
                 mouse_accum_y += e.motion.yrel;
                 host_unlock(&mouse_lock);
+            } else if (gamemenu_open() && !settings_open()) {  /* the overlay: hovering chooses */
+                float x, y;
+                if (overlay_point(e.motion.x, e.motion.y, &x, &y))
+                    used_pad(0), gamemenu_mouse(x, y, e.motion.state & SDL_BUTTON_LMASK ? 4 : 0);
             }
             break;
         case SDL_EVENT_MOUSE_BUTTON_DOWN:
             if (settings_open() || gamemenu_open()) {  /* not the game's: the panel's or the overlay's */
+                float x, y;
                 if (bindings_capturing()) bindings_capture_mouse(e.button.button);
+                else if (!settings_open() && (e.button.button == SDL_BUTTON_LEFT || e.button.button == SDL_BUTTON_RIGHT) &&
+                         overlay_point(e.button.x, e.button.y, &x, &y))
+                    used_pad(0), gamemenu_mouse(x, y, e.button.button == SDL_BUTTON_LEFT ? 1 : 3);
             } else if (window && !SDL_GetWindowRelativeMouseMode(window) && !mouse_off()) {
                 SDL_SetWindowRelativeMouseMode(window, true);
                 mouse_held_off = 1;
@@ -1931,6 +1985,7 @@ void window_run(void (*guest)(void *), void *arg) {
         case SDL_EVENT_MOUSE_WHEEL:
             if (settings_open() || gamemenu_open()) {
                 if (bindings_capturing()) bindings_capture_wheel(e.wheel.y > 0 ? 1 : -1);
+                else if (!settings_open() && e.wheel.y != 0) used_pad(0), gamemenu_wheel(e.wheel.y > 0 ? 1 : -1);
             } else {
                 host_lock(&mouse_lock);
                 if (e.wheel.y > 0) mouse_wheel_pulses[0] = 3;
@@ -1979,40 +2034,44 @@ void window_run(void (*guest)(void *), void *arg) {
                 if (window && SDL_GetWindowRelativeMouseMode(window)) SDL_SetWindowRelativeMouseMode(window, false);
                 settings_show(1), yw4_hid_note_key("F2");  /* the controls */
             }
-            /* the in-game overlay (gamemenu.h): Escape opens it (or closes it: resume); while its side panel shows,
-             * the arrows choose, Enter or Space selects, Backspace resumes. A settings page it opened takes Escape
-             * itself (back to the overlay). */
-            if (!settings_open() && !e.key.repeat) {
+            /* the in-game overlay (gamemenu.h): Escape opens it; while it shows, the arrows or W A S D choose and
+             * change, Enter or Space selects, Escape or Backspace go back one step (from the side panel: resume).
+             * A settings page it opened takes Escape itself (back to the overlay). */
+            if (!settings_open()) {
+                /* held keys repeat only to move and change (the arrows, W A S D), never to select or go back */
+                SDL_Keycode k = e.key.key;
+                int moves = k == SDLK_UP || k == SDLK_DOWN || k == SDLK_LEFT || k == SDLK_RIGHT || k == SDLK_W ||
+                            k == SDLK_A || k == SDLK_S || k == SDLK_D;
+                if (e.key.repeat && !(moves && gamemenu_open() && !bindings_capturing())) break;
                 /* the overlay's controls page waits for a key to bind: it takes the key (not F1..F12; Escape
                  * gives up waiting) */
                 if (gamemenu_open() && bindings_capturing()) {
-                    if (e.key.key == SDLK_ESCAPE) bindings_cancel();
+                    if (k == SDLK_ESCAPE) bindings_cancel();
                     else if (e.key.scancode < SDL_SCANCODE_F1 || e.key.scancode > SDL_SCANCODE_F12)
                         bindings_capture_key(e.key.scancode);
                     break;
                 }
-                if (e.key.key == SDLK_ESCAPE) {
+                if (gamemenu_open() && (e.key.scancode < SDL_SCANCODE_F1 || e.key.scancode > SDL_SCANCODE_F12))
+                    used_pad(0);
+                if (k == SDLK_ESCAPE && !gamemenu_open()) {
                     gamemenu_toggle(), yw4_hid_note_key("MENU");
                 } else if (gamemenu_open()) {
+                    /* Escape and Backspace go back one step: a page to the side panel, the popup away, the side
+                     * panel to the game. W A S D as the arrows. */
                     static const struct {
                         SDL_Keycode key;
                         int action;
                         const char *name;
                     } mk[] = {{SDLK_UP, GM_UP, "M_UP"},          {SDLK_DOWN, GM_DOWN, "M_DOWN"},
                               {SDLK_LEFT, GM_LEFT, "M_LEFT"},    {SDLK_RIGHT, GM_RIGHT, "M_RIGHT"},
+                              {SDLK_W, GM_UP, "M_UP"},           {SDLK_S, GM_DOWN, "M_DOWN"},
+                              {SDLK_A, GM_LEFT, "M_LEFT"},       {SDLK_D, GM_RIGHT, "M_RIGHT"},
                               {SDLK_RETURN, GM_ACCEPT, "M_OK"},  {SDLK_KP_ENTER, GM_ACCEPT, "M_OK"},
                               {SDLK_SPACE, GM_ACCEPT, "M_OK"},   {SDLK_BACKSPACE, GM_BACK, "M_BACK"},
-                              {SDLK_DELETE, GM_CLEAR, "M_CLEAR"}};
+                              {SDLK_ESCAPE, GM_BACK, "M_BACK"},  {SDLK_DELETE, GM_CLEAR, "M_CLEAR"},
+                              {SDLK_Q, GM_PREV, "M_PREV"},       {SDLK_E, GM_NEXT, "M_NEXT"}};
                     for (size_t i = 0; i < sizeof mk / sizeof *mk; i++)
-                        if (e.key.key == mk[i].key) gamemenu_action(mk[i].action), yw4_hid_note_key(mk[i].name);
-                    /* WASD: W/S choose, D enters the chosen item; in the exit popup A/D pick a button */
-                    int pop = gamemenu_confirming();
-                    if (e.key.key == SDLK_W) gamemenu_action(GM_UP), yw4_hid_note_key("M_UP");
-                    if (e.key.key == SDLK_S) gamemenu_action(GM_DOWN), yw4_hid_note_key("M_DOWN");
-                    if (e.key.key == SDLK_D) gamemenu_action(pop ? GM_RIGHT : GM_ACCEPT), yw4_hid_note_key(pop ? "M_RIGHT" : "M_OK");
-                    if (e.key.key == SDLK_A) gamemenu_action(pop ? GM_LEFT : GM_LEAVE), yw4_hid_note_key(pop ? "M_LEFT" : "M_LEAVE");
-                    if (e.key.key == SDLK_Q) gamemenu_action(GM_PREV), yw4_hid_note_key("M_PREV");  /* a page's sections */
-                    if (e.key.key == SDLK_E) gamemenu_action(GM_NEXT), yw4_hid_note_key("M_NEXT");
+                        if (k == mk[i].key) gamemenu_action(mk[i].action), yw4_hid_note_key(mk[i].name);
                 }
                 break;  /* not the settings panel's keys below: the overlay's Enter mustn't reach a page it opens */
             }

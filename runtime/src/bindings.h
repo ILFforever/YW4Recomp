@@ -52,6 +52,8 @@ int bindings_capture_wheel(int y);
 int bindings_capture_button(int button);
 int bindings_capture_axis(int axis, int value);
 void bindings_cancel(void);
+/* Chooses row r (and column c, -1: as it was), as the mouse over the overlay's Controls table; not while waiting. */
+void bindings_select(int r, int c);
 /* The rows as they are now, the chosen row and column, and the text for the explanation box. */
 int bindings_rows(BindRow *rows, int max, int *row, int *col, char *help, int help_size);
 
