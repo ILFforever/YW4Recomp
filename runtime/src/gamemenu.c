@@ -490,10 +490,13 @@ static void draw_controls_page(const UiCanvas *c, const GameMenuInfo *in) {
         if (!r->group) continue;
         if (r->value && !strcmp(r->group, "KEYS FOR")) {  /* which set the page shows: one coloured pill, its name */
             const char *set = !strcmp(r->cells[0], "BATTLES") ? "Battles" : "Exploring";
-            float sx = x + cw[0] + 22, sh = rh - 16, sy = y + 8, sw = ui_text_w(UI_GOTHIC_700, 15, set) + 32;
+            /* ‹ name ›: the arrows inside the pill, as the value Left / Right change */
+            float sx = x + cw[0] + 22, sh = rh - 16, sy = y + 8, aw = ui_text_w(UI_GOTHIC_500, 17, "\xe2\x80\xb9") + 10;
+            float nw = ui_text_w(UI_GOTHIC_700, 15, "Exploring"), sw = 16 + aw + nw + aw + 16;  /* as wide for both */
             ui_box(c, sx, sy, sw, sh, sh / 2, PLUM, 0, 0);
-            ui_text_in(c, UI_GOTHIC_700, 15, sx, sy, sw, sh, 1, set, SNOW);
-            if (on) ui_text_in(c, UI_GOTHIC_500, 17, sx + sw + 12, y, 0, rh, 0, "\xe2\x80\xb9 \xe2\x80\xba", PLUM);  /* ‹ › */
+            ui_text_in(c, UI_GOTHIC_500, 17, sx + 16, sy, aw, sh, 0, "\xe2\x80\xb9", LILAC);
+            ui_text_in(c, UI_GOTHIC_700, 15, sx + 16 + aw, sy, nw, sh, 1, set, SNOW);
+            ui_text_in(c, UI_GOTHIC_500, 17, sx + sw - 16 - aw, sy, aw, sh, 2, "\xe2\x80\xba", LILAC);
             continue;
         }
         if (r->value) {  /* a setting: its value in the keyboard column */
