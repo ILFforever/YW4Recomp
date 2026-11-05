@@ -615,6 +615,7 @@ async function showReady() {
   const v = (info.version.match(/YW4 Recomp (\S+)/) || [])[1];
   $('built-line').textContent = v ? `Built and checked · ${v}` : 'Built and checked';
   setGameVersion(info);
+  showUpdates(info);
 
   $('news-title').textContent = `What's new in ${NEWS.version}`;
   const news = $('news-list');
@@ -666,16 +667,62 @@ let optionsFromPlay = false;
 $('options-back').addEventListener('click', () => {
   if (optionsFromPlay) { optionsFromPlay = false; showReady(); } else show('check');
 });
-$('rebuild-btn').addEventListener('click', () => {  // back into setup with the remembered choices
-  optionsFromPlay = true;
+// the remembered choices of this install, back in the setup's state (for Rebuild and for a game update)
+function choicesFromInstall() {
   mode = inst.mode;
   Object.assign(chosen[mode], inst.paths);
   Object.assign(options, { install: inst.install, saves: inst.saves, fsr: inst.fsr, freeUp: inst.freeUp,
     desktop: inst.desktop, startMenu: inst.startMenu });
+  if (inst.dlss !== undefined) options.dlss = inst.dlss;
   renderFields();
+}
+$('rebuild-btn').addEventListener('click', () => {  // back into setup with the remembered choices
+  optionsFromPlay = true;
+  choicesFromInstall();
   show('options');
   loadOptions();
 });
+
+// ---- updates (decision 0054): at most one offer on the Play screen. A downloaded game update waiting for its
+// rebuild comes first, then a game update on GitHub, then a newer launcher (installed by the player).
+function offerText(box, title, rest) {
+  const span = box.querySelector('span');
+  span.textContent = '';
+  const b = document.createElement('b');
+  b.textContent = title;
+  span.append(b, ' ' + rest);
+}
+async function showUpdates(info) {
+  const box = $('update-offer');
+  const btn = $('update-btn');
+  box.hidden = true;
+  btn.disabled = false;
+  let u = null;
+  try { u = await invoke('check_updates', { install: inst.install, built: info.version || '' }); } catch (e) { return; }
+  if (u.rebuild) {
+    offerText(box, `Game update ${u.rebuild} is ready.`, 'Rebuild to play it: about 5 minutes. Your saves stay.');
+    btn.textContent = 'Rebuild';
+    btn.onclick = async () => { choicesFromInstall(); await loadOptions(); show('build'); startBuild(); };
+  } else if (u.game) {
+    offerText(box, `Game update ${u.game.version} is out.`, `${gb(u.game.size)} to download, then a rebuild.`);
+    btn.textContent = 'Update';
+    btn.onclick = async () => {
+      btn.disabled = true;
+      btn.textContent = 'Downloading…';
+      try {
+        await invoke('download_game_update', { install: inst.install, version: u.game.version, url: u.game.url, sha256: u.game.sha256 });
+      } catch (e) { popup('Game update', String(e)); }
+      showUpdates(info);
+    };
+  } else if (u.launcher) {
+    offerText(box, `Launcher ${u.launcher.version} is out.`, 'Download it and install it over this one.');
+    btn.textContent = 'Download';
+    btn.onclick = () => invoke('open_release_page', { url: u.launcher.page });
+  } else {
+    return;
+  }
+  box.hidden = false;
+}
 
 const freeDlg = $('free');
 $('free-btn').addEventListener('click', () => {

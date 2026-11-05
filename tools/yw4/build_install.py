@@ -70,10 +70,17 @@ def say(line: str) -> None:
     print(line, flush=True)
 
 
+# `python -c BOOT <code folder> <module> <args>`: `python -m <module>` from that folder. The launcher's bundled
+# Python (its ._pth file) only looks where it is told, and a game update lives in its own folder, so this game
+# code's folder is put first on the path; multiprocessing's workers get the same path from their parent.
+BOOT = ("import runpy, sys; sys.path.insert(0, sys.argv[1]); m = sys.argv[2]; sys.argv = [m] + sys.argv[3:]; "
+        "runpy.run_module(m, run_name='__main__', alter_sys=True)")
+
+
 def run(module: str, *args: str) -> None:
     """One build step's tool, in its own process (as before), its output straight to the launcher."""
     say(f"> python -m {module} {' '.join(args)}".rstrip())
-    r = subprocess.run([sys.executable, "-u", "-m", module, *args], cwd=config.REPO_ROOT)
+    r = subprocess.run([sys.executable, "-u", "-c", BOOT, str(config.REPO_ROOT), module, *args], cwd=config.REPO_ROOT)
     if r.returncode:
         raise RuntimeError(f"{module} failed")
 

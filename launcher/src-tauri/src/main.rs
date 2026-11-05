@@ -8,12 +8,13 @@ mod buildrun;
 mod check;
 mod options;
 mod ready;
+mod update;
 
 /// The launcher's own number (launcher/VERSION, decisions 0047 and 0054): apart from the game's, so a launcher fix
 /// never asks for a rebuild. Shown in the status bar next to the game's.
 #[tauri::command]
 fn launcher_version() -> String {
-    include_str!("../../VERSION").trim().to_string()
+    update::LAUNCHER.trim().to_string()
 }
 
 /// The project's GitHub page in the player's browser. Only this one address: the screens can't open others.
@@ -45,7 +46,7 @@ fn main() {
         .plugin(tauri_plugin_dialog::init())  // the file and folder pickers (Browse…)
         .manage(std::sync::Arc::new(buildrun::Running::default()))  // the build in progress (screen 4)
         .invoke_handler(tauri::generate_handler![launcher_version, open_project_page, start_screen, test_paths, check::check_game,
-            options::gpu_names, options::disk_space, buildrun::start_build, buildrun::cancel_build, buildrun::builder_bundled,
+            options::gpu_names, options::disk_space, buildrun::start_build, buildrun::cancel_build, buildrun::builder_bundled, update::check_updates, update::download_game_update, update::open_release_page,
             ready::load_state, ready::save_state, ready::install_info, ready::play, ready::open_folder, ready::open_shot,
             ready::free_space, ready::originals, ready::delete_originals, ready::make_shortcuts])
         .run(tauri::generate_context!())

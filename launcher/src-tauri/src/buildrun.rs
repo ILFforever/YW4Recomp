@@ -66,9 +66,19 @@ fn plain_path(p: PathBuf) -> PathBuf {
     }
 }
 
-fn builder(app: &AppHandle) -> Builder {
+/// The launcher's own copy of the game code (builder\src), in a download.
+pub fn bundled_src(app: &AppHandle) -> Option<PathBuf> {
+    bundled_dir(app).map(|b| b.join("src"))
+}
+
+/// In a download the game code is the newest this launcher can run: its own or a downloaded game update
+/// (update.rs, decision 0054).
+fn builder(app: &AppHandle, inst: &Path) -> Builder {
     match bundled_dir(app) {
-        Some(b) => Builder { python: b.join("python").join("python.exe"), src: b.join("src"), tools: Some(b.join("tools")) },
+        Some(b) => {
+            let code = crate::update::game_code(&b.join("src"), inst);
+            Builder { python: b.join("python").join("python.exe"), src: code.dir, tools: Some(b.join("tools")) }
+        }
         None => {
             let p = Path::new(env!("CARGO_MANIFEST_DIR")).join("..").join("..");
             Builder { python: PathBuf::from("python"), src: p.canonicalize().unwrap_or(p), tools: None }
@@ -124,13 +134,19 @@ fn write_config(b: &Builder, plan: &Plan, inst: &Path) -> std::io::Result<PathBu
     Ok(path)
 }
 
+/// `python -c BOOT <code folder> <module> <args>`: runs <module> as `python -m` would, from that folder.
+const BOOT: &str = "import runpy, sys; sys.path.insert(0, sys.argv[1]); m = sys.argv[2]; sys.argv = [m] + sys.argv[3:]; \
+                    runpy.run_module(m, run_name='__main__', alter_sys=True)";
+
 /// One run of the game code's Python (`python -m <module> <args>`), its lines to the screen; Err on failure or
 /// Cancel. The build's own lines (decision 0054): `@steps <json>` the list of steps (the launcher adds its DLC
 /// copy at the end), `@step <id> <state>` each step starting and ending, `@progress` the bar.
 fn python(app: &AppHandle, run: &Running, b: &Builder, cfg: &Path, module: &str, args: &[String]) -> Result<(), String> {
     if run.cancel.load(Ordering::SeqCst) { return Err("cancelled".into()); }
+    // The game code's folder goes first on Python's path (tools/yw4/build_install.py BOOT does the same for each
+    // step it starts): the bundled Python's ._pth file names no code folder, and a game update lives in its own.
     let mut cmd = Command::new(&b.python);
-    cmd.arg("-u").arg("-m").arg(module).args(args).current_dir(&b.src)
+    cmd.arg("-u").arg("-c").arg(BOOT).arg(&b.src).arg(module).args(args).current_dir(&b.src)
         .env("YW4_CONFIG", cfg).env("YW4_PROGRESS", "1").env("PYTHONIOENCODING", "utf-8")
         .stdout(Stdio::piped()).stderr(Stdio::piped());
     if b.tools.is_some() {
@@ -220,7 +236,8 @@ fn run_all(app: &AppHandle, run: &Running, plan: &Plan) -> Result<(), String> {
     for d in ["data", "work", "mods", "screenshots", "logs"] {
         std::fs::create_dir_all(inst.join(d)).map_err(|e| format!("can't create {}: {e}", inst.join(d).display()))?;
     }
-    let b = builder(app);
+    let b = builder(app, &inst);
+    emit_log(app, &format!("game code: {}", b.src.display()));
     let cfg = write_config(&b, plan, &inst).map_err(|e| e.to_string())?;
     let mut args: Vec<String> = vec!["--mode".into(), plan.mode.clone(), "--saves".into(), plan.saves.clone()];
     if plan.mode == "folders" {
@@ -244,6 +261,9 @@ fn run_all(app: &AppHandle, run: &Running, plan: &Plan) -> Result<(), String> {
     let _ = app.emit("build-step", StepEvent { id: "dlc".into(), state: "start".into() });
     let r = copy_dlc(app, plan, &inst);
     let _ = app.emit("build-step", StepEvent { id: "dlc".into(), state: if r.is_ok() { "done" } else { "failed" }.into() });
+    if r.is_ok() && b.tools.is_some() {
+        crate::update::drop_other_game_code(&inst, &b.src);  // older downloaded game code isn't needed any more
+    }
     r
 }
 

@@ -123,11 +123,10 @@ def stage(ref: str) -> None:
     py = STAGE / "python"
     with zipfile.ZipFile(io.BytesIO(fetch(PYTHON_ZIP, "python.zip"))) as z:
         z.extractall(py)
-    # The ._pth decides Python's whole import path (no PATH, no registry, no current folder): add our code.
-    pth = next(py.glob("python*._pth"))
-    pth.write_text(pth.read_text().replace("\n.\n", "\n.\n..\\src\n", 1))
-    if "..\\src" not in pth.read_text():
-        raise SystemExit(f"{pth.name}: unexpected contents")
+    # The ._pth decides Python's whole import path (no PATH, no registry, no current folder). It stays as shipped:
+    # the launcher names the game code's folder on each run (its own copy or a game update, decision 0054).
+    if not next(py.glob("python*._pth"), None):
+        raise SystemExit("the embeddable Python has no ._pth file")
     shutil.copy(py / "LICENSE.txt", STAGE / "licenses" / "python.txt")
 
     with zipfile.ZipFile(io.BytesIO(fetch(GLSLANG_ZIP, "glslang.zip"))) as z:
