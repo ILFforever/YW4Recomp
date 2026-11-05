@@ -446,6 +446,7 @@ kbd { display: inline-block; min-width: 22px; padding: 1px 6px; border-radius: 6
 .icon-btn.small:hover { background: var(--lilac-1); color: var(--violet); border-color: var(--violet-soft); }
 .icon-btn.small:disabled { cursor: default; }
 /* one turn while it reads the folder again (app.js keeps it at least 450 ms, so a quick read still shows) */
+.icon-btn.small svg { transform: rotate(45deg); }  /* the arrowhead up to the top right (owner) */
 .icon-btn.small.spinning svg { animation: spin-once .45s ease-in-out; }
-@keyframes spin-once { to { transform: rotate(360deg); } }
+@keyframes spin-once { from { transform: rotate(45deg); } to { transform: rotate(405deg); } }
 @media (prefers-reduced-motion: reduce) { .icon-btn.small.spinning svg { animation: none; } }
