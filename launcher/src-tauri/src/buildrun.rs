@@ -1,10 +1,11 @@
-// Screen 4, Build: runs the repo's own tools (for now; packaging decides later what ships) into the install folder
+// Screen 4, Build: runs the build tools (bundled in a download, decision 0052) into the install folder
 // and tells the screen how far it is (decision 0050). Each Python step runs with YW4_PROGRESS=1 and its
 // "@progress <step> <done> <total> <what>" lines go to the screen as they come; everything else goes to the log.
 //
 //   <install>\data\     exefs\, romfs\ (extracted or copied), dlc\ (checked add-ons, copied)
 //   <install>\work\     the build: exefs\ (checked), recomp\, shaders\, build\yw4.exe + game.ini, deps\
 //   <install>\mods\  screenshots\  logs\   (save\ and settings.ini too, when kept in the install folder)
+//   <install>\builder\toolchain\   the compiler, downloaded on the first build; Free up space deletes it
 //   <install>\config.toml   the tools' config for this install (YW4_CONFIG)
 //
 // A step whose result is already there is skipped, so Build after a Cancel picks up where it stopped.
@@ -42,19 +43,43 @@ struct ProgressEvent { step: String, done: u64, total: u64, what: String }
 #[derive(Serialize, Clone)]
 struct DoneEvent { ok: bool, message: String }
 
-/// The repo this launcher was built from: its tools do the work for now.
-fn repo() -> PathBuf {
-    let p = Path::new(env!("CARGO_MANIFEST_DIR")).join("..").join("..");
-    p.canonicalize().unwrap_or(p)
+/// What runs the build (decision 0052). A download has builder\ next to the launcher (launcher/package.py): its own
+/// Python, the build code and tools, nothing taken from the PC. A launcher built with plain `cargo build` has no
+/// builder\ and uses the repo it was built from, with the repo's Python and config.local.toml.
+struct Builder {
+    python: PathBuf,
+    src: PathBuf,        // the folder the build's Python modules run from
+    tools: Option<PathBuf>,  // builder\tools; None = the repo's
+}
+
+fn bundled_dir(app: &AppHandle) -> Option<PathBuf> {
+    let b = app.path().resource_dir().ok()?.join("builder");
+    b.join("python").join("python.exe").is_file().then_some(b)
+}
+
+fn builder(app: &AppHandle) -> Builder {
+    match bundled_dir(app) {
+        Some(b) => Builder { python: b.join("python").join("python.exe"), src: b.join("src"), tools: Some(b.join("tools")) },
+        None => {
+            let p = Path::new(env!("CARGO_MANIFEST_DIR")).join("..").join("..");
+            Builder { python: PathBuf::from("python"), src: p.canonicalize().unwrap_or(p), tools: None }
+        }
+    }
+}
+
+/// True in a download: the Options screen then counts the compiler's download and disk space.
+#[tauri::command]
+pub fn builder_bundled(app: AppHandle) -> bool {
+    bundled_dir(&app).is_some()
 }
 
 fn emit_log(app: &AppHandle, line: &str) {
     let _ = app.emit("build-log", line.to_string());
 }
 
-/// The repo's own [tools] (compiler, glslang): the install's tools come with packaging later.
-fn repo_tools() -> toml::Table {
-    std::fs::read_to_string(repo().join("config.local.toml")).ok()
+/// The repo's own [tools] (compiler, glslang), when running from the repo.
+fn repo_tools(repo: &Path) -> toml::Table {
+    std::fs::read_to_string(repo.join("config.local.toml")).ok()
         .and_then(|s| s.parse::<toml::Table>().ok())
         .and_then(|t| t.get("tools").and_then(|v| v.as_table()).cloned())
         .unwrap_or_default()
@@ -64,7 +89,7 @@ fn lit(p: &Path) -> String {
     format!("'{}'", p.display())  // a TOML literal string: no escapes, Windows paths can't contain '
 }
 
-fn write_config(plan: &Plan, inst: &Path) -> std::io::Result<PathBuf> {
+fn write_config(b: &Builder, plan: &Plan, inst: &Path) -> std::io::Result<PathBuf> {
     let get = |k: &str| plan.paths.get(k).filter(|v| !v.is_empty()).map(PathBuf::from);
     let mut s = String::from("# Written by the YW4 Recomp launcher for this install folder (decision 0050).\n[input]\n");
     s += &format!("exefs_dir = {}\nromfs_dir = {}\n", lit(&inst.join("data/exefs")), lit(&inst.join("data/romfs")));
@@ -73,10 +98,15 @@ fn write_config(plan: &Plan, inst: &Path) -> std::io::Result<PathBuf> {
         if let Some(u) = get("update") { s += &format!("update_nsp = {}\n", lit(&u)); }
     }
     s += &format!("dlc_dir = {}\n[output]\nwork_dir = {}\n[tools]\n", lit(&inst.join("data/dlc")), lit(&inst.join("work")));
-    let tools = repo_tools();
-    for key in ["cc", "glslang", "hactool_exe"] {
-        if let Some(v) = tools.get(key).and_then(|v| v.as_str()).filter(|v| !v.is_empty()) {
-            s += &format!("{key} = {}\n", lit(Path::new(v)));
+    if let Some(tools) = &b.tools {
+        s += &format!("cc = {}\n", lit(&inst.join("builder/toolchain/llvm-mingw/bin/clang.exe")));
+        s += &format!("glslang = {}\nhactool_exe = {}\n", lit(&tools.join("glslang.exe")), lit(&tools.join("hactool.exe")));
+    } else {
+        let tools = repo_tools(&b.src);
+        for key in ["cc", "glslang", "hactool_exe"] {
+            if let Some(v) = tools.get(key).and_then(|v| v.as_str()).filter(|v| !v.is_empty()) {
+                s += &format!("{key} = {}\n", lit(Path::new(v)));
+            }
         }
     }
     if let Some(k) = get("keys") { s += &format!("keys_dir = {}\n", lit(&k)); }
@@ -85,13 +115,18 @@ fn write_config(plan: &Plan, inst: &Path) -> std::io::Result<PathBuf> {
     Ok(path)
 }
 
-/// One Python step of the repo (`python -m <module> <args>`), its lines to the screen; Err on failure or Cancel.
-fn python(app: &AppHandle, run: &Running, cfg: &Path, module: &str, args: &[&str]) -> Result<(), String> {
+/// One Python step of the build (`python -m <module> <args>`), its lines to the screen; Err on failure or Cancel.
+fn python(app: &AppHandle, run: &Running, b: &Builder, cfg: &Path, module: &str, args: &[&str]) -> Result<(), String> {
     if run.cancel.load(Ordering::SeqCst) { return Err("cancelled".into()); }
-    let mut cmd = Command::new("python");
-    cmd.arg("-u").arg("-m").arg(module).args(args).current_dir(repo())
+    let mut cmd = Command::new(&b.python);
+    cmd.arg("-u").arg("-m").arg(module).args(args).current_dir(&b.src)
         .env("YW4_CONFIG", cfg).env("YW4_PROGRESS", "1").env("PYTHONIOENCODING", "utf-8")
         .stdout(Stdio::piped()).stderr(Stdio::piped());
+    if b.tools.is_some() {
+        // A player's own CC would override the compiler we tested. Python's caches go in the build folder: the
+        // launcher's folder stays as installed, so uninstalling leaves nothing.
+        cmd.env_remove("CC").env("PYTHONPYCACHEPREFIX", cfg.with_file_name("work").join("pycache"));
+    }
     #[cfg(windows)]
     { use std::os::windows::process::CommandExt; cmd.creation_flags(0x0800_0000); }
     emit_log(app, &format!("> python -m {module} {}", args.join(" ")));
@@ -154,7 +189,7 @@ fn copy_tree(app: &AppHandle, run: &Running, step: &str, from: &Path, to: &Path)
     Ok(())
 }
 
-fn game_files(app: &AppHandle, run: &Running, plan: &Plan, inst: &Path, cfg: &Path) -> Result<(), String> {
+fn game_files(app: &AppHandle, run: &Running, b: &Builder, plan: &Plan, inst: &Path, cfg: &Path) -> Result<(), String> {
     let (exefs, romfs) = (inst.join("data/exefs"), inst.join("data/romfs"));
     let complete = exefs.join("main").is_file() && crate::check::folder_size(&romfs).0 == crate::check::romfs_bytes();
     if complete {
@@ -171,7 +206,7 @@ fn game_files(app: &AppHandle, run: &Running, plan: &Plan, inst: &Path, cfg: &Pa
         let _ = std::fs::remove_dir_all(d);
         std::fs::create_dir_all(d).map_err(|e| e.to_string())?;
     }
-    python(app, run, cfg, "tools.yw4.extract", &[])
+    python(app, run, b, cfg, "tools.yw4.extract", &[])
 }
 
 /// The checked add-ons, copied into data\dlc (the game checks them again on boot, decision 0049).
@@ -225,19 +260,28 @@ fn run_all(app: &AppHandle, run: &Running, plan: &Plan) -> Result<(), String> {
     for d in ["data", "work", "mods", "screenshots", "logs"] {
         std::fs::create_dir_all(inst.join(d)).map_err(|e| format!("can't create {}: {e}", inst.join(d).display()))?;
     }
-    let cfg = write_config(plan, &inst).map_err(|e| e.to_string())?;
-    step(app, "game", || game_files(app, run, plan, &inst, &cfg))?;
+    let b = builder(app);
+    let cfg = write_config(&b, plan, &inst).map_err(|e| e.to_string())?;
+    // First, so a failed download shows before minutes of unpacking. From the repo: nothing to fetch.
+    step(app, "tools", || match &b.tools {
+        Some(_) => {
+            let dest = inst.join("builder").join("toolchain");
+            python(app, run, &b, &cfg, "tools.yw4.deps", &["--toolchain", &dest.to_string_lossy()])
+        }
+        None => Ok(()),
+    })?;
+    step(app, "game", || game_files(app, run, &b, plan, &inst, &cfg))?;
     step(app, "dlc", || copy_dlc(app, plan, &inst))?;
-    step(app, "version", || python(app, run, &cfg, "tools.yw4.ingest", &[]))?;
-    step(app, "translate", || python(app, run, &cfg, "recomp.translate", &[]))?;
+    step(app, "version", || python(app, run, &b, &cfg, "tools.yw4.ingest", &[]))?;
+    step(app, "translate", || python(app, run, &b, &cfg, "recomp.translate", &[]))?;
     step(app, "shaders", || {
-        python(app, run, &cfg, "tools.yw4.shaders", &[])?;
-        python(app, run, &cfg, "recomp.shader", &["--check"])
+        python(app, run, &b, &cfg, "tools.yw4.shaders", &[])?;
+        python(app, run, &b, &cfg, "recomp.shader", &["--check"])
     })?;
     let mut build_args = vec![];
     if !plan.fsr { build_args.push("--no-fsr"); }
     if !plan.dlss { build_args.push("--no-dlss"); }
-    step(app, "compile", || python(app, run, &cfg, "recomp.build", &build_args))?;
+    step(app, "compile", || python(app, run, &b, &cfg, "recomp.build", &build_args))?;
     step(app, "finish", || write_game_ini(plan, &inst))
 }
 

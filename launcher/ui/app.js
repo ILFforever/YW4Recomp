@@ -241,16 +241,20 @@ const options = {
 };
 let rtx = false;
 let spaceFree = null;
+// A download brings everything but the compiler, which the first build fetches (decision 0052): 182 MB, 737 MB
+// unpacked. A launcher built from the repo uses the repo's compiler.
+let bundled = false;
+if (invoke) invoke('builder_bundled').then((b) => { bundled = b; renderSwitches(); renderSummary(); });
 // What the install folder takes: the copied RomFS (8.5 GB) + ExeFS, the tools (1.5 GB) and build files (0.7 GB),
 // the game itself, and the downloads (target.toml [extracted], measured sizes: FSR 240 MB, DLSS + Streamline 325 MB)
-const downloadMB = () => (options.fsr ? 240 : 0) + (options.dlss ? 325 : 0);
-const diskNeeded = () => 8.5 * GB + 2.4 * GB + downloadMB() * 1024 ** 2;
+const downloadMB = () => (bundled ? 182 : 0) + (options.fsr ? 240 : 0) + (options.dlss ? 325 : 0);
+const diskNeeded = () => 8.5 * GB + 2.4 * GB + (bundled ? 737 * 1024 ** 2 : 0) + downloadMB() * 1024 ** 2;
 
 const SWITCHES = [
   { key: 'fsr', title: 'AMD FSR', note: () => 'Upscaling and frame generation, any graphics card · about 240 MB' },
   { key: 'dlss', title: 'NVIDIA DLSS', note: () => rtx ? 'Upscaling, frame generation, Reflex · about 325 MB'
     : 'Needs an NVIDIA RTX graphics card', needsRtx: true },
-  { key: 'freeUp', title: 'Free up space after building', note: () => 'Deletes the tools and build files (1.3 GB). Updates then rebuild from scratch' },
+  { key: 'freeUp', title: 'Free up space after building', note: () => `Deletes the tools and build files (${bundled ? '2 GB' : '1.3 GB'}). Updates then download them and rebuild` },
   { key: 'desktop', title: 'Desktop shortcut', note: () => 'Opens the launcher' },
   { key: 'startMenu', title: 'Start menu entry', note: () => 'Opens the launcher' },
 ];
@@ -345,6 +349,7 @@ $('build-go').addEventListener('click', () => {
 // Each step's share of the bar is its measured time (seconds, 2026-11-03 on a 16-thread laptop); inside a step,
 // a progress line's own step name says which part of it is moving.
 const BUILD_STEPS = () => [
+  ...(bundled ? [{ id: 'tools', label: 'Downloading the compiler', weight: 40 }] : []),
   { id: 'game', label: mode === 'files' ? 'Unpacking your game files' : 'Copying your game files', weight: mode === 'files' ? 190 : 60 },
   { id: 'dlc', label: 'Copying DLC', weight: 1 },
   { id: 'version', label: 'Checking the version', weight: 3 },
@@ -355,10 +360,12 @@ const BUILD_STEPS = () => [
 ];
 // where a progress line's step sits inside a build step: [start, end] of that step
 const PARTS = {
+  compiler: ['tools', 0, 0.6], compilerunpack: ['tools', 0.6, 1],
   unpack: ['game', 0, 0.07], extract: ['game', 0.07, 0.99], icon: ['game', 0.99, 1], copy: ['game', 0, 1],
   ingest: ['version', 0, 1], shaders: ['shaders', 0.3, 1], compile: ['compile', 0.1, 0.95], link: ['compile', 0.95, 1],
 };
 const NOW_TEXT = {
+  compiler: 'Downloading the compiler', compilerunpack: 'Unpacking the compiler',
   unpack: 'Unpacking the NSP or XCI', extract: 'Extracting the game files', icon: 'Taking the game icon', copy: 'Copying',
   ingest: 'Checking the game code', shaders: 'Translating shaders', compile: 'Compiling', link: 'Linking',
 };

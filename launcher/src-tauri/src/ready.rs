@@ -109,10 +109,12 @@ fn now() -> u64 {
     std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0)
 }
 
-/// Folders the build only needs again for a rebuild: generated C, objects, downloads, shader assembly, unpacked NCAs.
+/// Folders the build only needs again for a rebuild: generated C, objects, downloads, shader assembly, unpacked NCAs,
+/// and the compiler (decision 0052; the next build downloads it again, checked against the same hash).
 fn reclaim_dirs(install: &Path) -> Vec<PathBuf> {
     let w = install.join("work");
-    vec![w.join("recomp"), w.join("build").join("obj"), w.join("deps"), w.join("shaders").join("asm"), w.join("nca")]
+    vec![w.join("recomp"), w.join("build").join("obj"), w.join("deps"), w.join("shaders").join("asm"), w.join("nca"),
+         install.join("builder").join("toolchain")]
 }
 
 fn mod_names(mods: &Path) -> Vec<String> {

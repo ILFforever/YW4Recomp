@@ -28,7 +28,7 @@ import zipfile
 import urllib.request
 from pathlib import Path
 
-from . import config
+from . import config, progress
 
 SDL_VERSION = "3.4.18"
 SDL_URL = f"https://github.com/libsdl-org/SDL/releases/download/release-{SDL_VERSION}/SDL3-devel-{SDL_VERSION}-mingw.tar.gz"
@@ -189,8 +189,63 @@ def fetch_streamline(cfg: config.Config) -> Path:
     return out
 
 
+# The compiler for players' builds (decision 0052): llvm-mingw's official release, the version the owner tests with.
+# The address names the exact version, so a newer release doesn't change this file. If it was ever replaced or
+# removed the check below stops the build with a message; the fix is a launcher update with a new pin.
+TOOLCHAIN_NAME = "llvm-mingw-20261006-ucrt-x86_64"
+TOOLCHAIN_URL = f"https://github.com/mstorsjo/llvm-mingw/releases/download/20261006/{TOOLCHAIN_NAME}.zip"
+TOOLCHAIN_SHA256 = "317492c456aa27ee607a5919f1d2d38dcdc1112516a24d0bf4b00d078f52d17a"
+
+
+def fetch_toolchain(dest: Path) -> Path:
+    """The compiler in <dest>/llvm-mingw (bin/clang.exe ...), downloaded and checked unless already there. The
+    `.version` file is written last: a stopped unpack, or an older pin, starts over."""
+    out = dest / "llvm-mingw"
+    stamp = out / ".version"
+    if stamp.is_file() and stamp.read_text().strip() == TOOLCHAIN_NAME:
+        return out
+    dest.mkdir(parents=True, exist_ok=True)
+    archive = dest / f"{TOOLCHAIN_NAME}.zip"
+    print(f"downloading {TOOLCHAIN_URL}")
+    digest = hashlib.sha256()
+    with urllib.request.urlopen(TOOLCHAIN_URL) as r, open(archive, "wb") as f:
+        total, done = int(r.headers.get("Content-Length") or 0), 0
+        while chunk := r.read(1 << 20):
+            f.write(chunk)
+            digest.update(chunk)
+            done += len(chunk)
+            progress.report("compiler", done, total or done, every=0.25)
+    if digest.hexdigest() != TOOLCHAIN_SHA256:
+        archive.unlink()
+        raise RuntimeError("The compiler download isn't the file this launcher was tested with. "
+                           "Check for a newer launcher version.")
+    shutil.rmtree(out, ignore_errors=True)
+    with zipfile.ZipFile(archive) as z:
+        members = [i for i in z.infolist() if not i.is_dir()]
+        size = sum(i.file_size for i in members)
+        done = 0
+        for i in members:
+            parts = Path(i.filename).parts
+            if len(parts) < 2 or parts[0] != TOOLCHAIN_NAME or ".." in parts:
+                raise RuntimeError(f"{archive.name}: unexpected path {i.filename}")
+            dst = out.joinpath(*parts[1:])
+            dst.parent.mkdir(parents=True, exist_ok=True)
+            with z.open(i) as src, open(dst, "wb") as f:
+                shutil.copyfileobj(src, f)
+            done += i.file_size
+            progress.report("compilerunpack", done, size, every=0.25)
+    if not (out / "bin" / "clang.exe").is_file():
+        raise RuntimeError(f"{archive.name} unpacked without bin/clang.exe")
+    archive.unlink()
+    stamp.write_text(TOOLCHAIN_NAME + "\n")
+    return out
+
+
 def main() -> int:
     try:
+        if len(sys.argv) == 3 and sys.argv[1] == "--toolchain":  # needs no config: the launcher names the folder
+            print(f"compiler: {fetch_toolchain(Path(sys.argv[2]))}")
+            return 0
         cfg = config.load()
         if sys.platform != "win32":
             print("not Windows: use the system's SDL3 (pkg-config sdl3)")
