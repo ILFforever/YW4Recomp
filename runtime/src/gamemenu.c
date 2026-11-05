@@ -162,6 +162,9 @@ void gamemenu_action(int a) {
 enum {
     INK = 0x2b2338, NIGHT = 0x2a1b4c, PLUM = 0x3e2a6e, PAPER = 0xf8f4fc, GOLD = 0xe3be5c, LINE = 0xe2d5ef,
     WHITE = 0xffffff, SNOW = 0xfdfcfe, LILAC = 0xd9cdea, MUTED = 0x605673, WINE = 0x8c1f3f, SHADE = 0x160e26,
+    /* the launcher's popup colours (style.css, OKLCH converted to sRGB) */
+    POP_DEEP = 0x2b1a4d, POP_GOLD = 0xe1b75c, POP_WHITE = 0xfdfcff, POP_INK = 0x231e33, POP_LILAC = 0xf8f5fd,
+    POP_LINE = 0xe1d5f1, POP_BORDER = 0x312451, POP_SHADOW = 0x0f0028, POP_BACKDROP = 0x1a0a35,
 };
 
 #define GAME_VERSION "2.2.0"  /* the one build this port runs (CLAUDE.md: the final 4++ update) */
@@ -188,25 +191,56 @@ static void side_button(const UiCanvas *c, float x, float y, float w, const char
 }
 
 /* A key hint: the key on a round chip, then what it does (the bottom bar). Returns its width. */
+/* Buttons shown as their symbol in a key hint, not their name: PlayStation's shapes, the D-pad, and the overlay
+ * buttons (24 x 24 view boxes, stroked). Back + Start shows both: View's two windows, Menu's three lines. */
+static const struct {
+    const char *name, *icon[2];
+} hint_icons[] = {
+    {"Cross", {"<path d=\"M7 7l10 10M17 7L7 17\"/>"}},
+    {"Circle", {"<circle cx=\"12\" cy=\"12\" r=\"6.5\"/>"}},
+    {"Square", {"<rect x=\"6\" y=\"6\" width=\"12\" height=\"12\" rx=\"1\"/>"}},
+    {"Triangle", {"<path d=\"M12 5l7.5 12.5h-15z\"/>"}},
+    {"D-pad", {"<path d=\"M9 3h6v6h6v6h-6v6H9v-6H3V9h6z\"/>"}},
+    {"Touchpad", {"<rect x=\"3\" y=\"6\" width=\"18\" height=\"12\" rx=\"3\"/><path d=\"M12 6v5\"/>"}},
+    {"Share", {"<path d=\"M12 3v11M8 7l4-4 4 4M5 11v9h14v-9\"/>"}},
+    {"Capture", {"<rect x=\"4\" y=\"4\" width=\"16\" height=\"16\" rx=\"2\"/><circle cx=\"12\" cy=\"12\" r=\"4\"/>"}},
+    {"Back + Start", {"<rect x=\"4\" y=\"5\" width=\"9\" height=\"9\" rx=\"1\"/><rect x=\"11\" y=\"10\" width=\"9\" "
+                      "height=\"9\" rx=\"1\"/>",
+                      "<path d=\"M5 7h14M5 12h14M5 17h14\"/>"}},
+};
+
 static float hint(const UiCanvas *c, float x, float y, const char *key, const char *label) {
-    float kw = ui_text_w(UI_GOTHIC_700, 14, key) + 16;
-    if (kw < 30) kw = 30;
-    ui_box(c, x, y + 13, kw, 30, 15, SNOW, 0, 0);
-    ui_text_in(c, UI_GOTHIC_700, 14, x, y + 13, kw, 30, 1, key, NIGHT);
+    int sym = -1;
+    for (size_t i = 0; i < sizeof hint_icons / sizeof *hint_icons; i++)
+        if (!strcmp(hint_icons[i].name, key)) sym = (int)i;
+    float kw;
+    if (sym >= 0) {  /* the button's symbol on the chip, 18 units, one per button */
+        int n = hint_icons[sym].icon[1] ? 2 : 1;
+        kw = 30 + (n - 1) * 24;
+        ui_box(c, x, y + 13, kw, 30, 15, SNOW, 0, 0);
+        for (int k = 0; k < n; k++) ui_icon(c, hint_icons[sym].icon[k], x + 6 + k * 24, y + 19, 18, 2.4f, NIGHT);
+    } else {
+        kw = ui_text_w(UI_GOTHIC_700, 14, key) + 16;
+        if (kw < 30) kw = 30;
+        ui_box(c, x, y + 13, kw, 30, 15, SNOW, 0, 0);
+        ui_text_in(c, UI_GOTHIC_700, 14, x, y + 13, kw, 30, 1, key, NIGHT);
+    }
     float lw = ui_text_w(UI_GOTHIC_400, 16, label);
     ui_text_in(c, UI_GOTHIC_400, 16, x + kw + 10, y, 0, 56, 0, label, SNOW);
     return kw + 10 + lw;
 }
 
 /* A popup button (Keep playing / Quit game): 56 high, radius 14; the chosen one ringed in gold. */
+/* A popup button, as the launcher's (style.css dialog): 40 high, pill-shaped, 20 at the sides; the chosen one
+ * ringed in gold. */
 static float popup_button(const UiCanvas *c, float right, float y, const char *label, int quit, int on) {
     int f = quit ? UI_ROUNDED_800 : UI_ROUNDED_700;
-    float w = ui_text_w(f, 18, label) + 52 + (quit ? 0 : 4);
+    float w = ui_text_w(f, 14, label) + 40;
     float x = right - w;
-    if (on) ui_box(c, x - 5, y - 5, w + 10, 66, 19, GOLD, 0, 0);
-    if (quit) ui_box(c, x, y, w, 56, 14, WINE, 0, 0);
-    else ui_box(c, x, y, w, 56, 14, WHITE, 2, LINE);
-    ui_text_in(c, f, 18, x, y, w, 56, 1, label, quit ? SNOW : PLUM);
+    if (on) ui_box(c, x - 4, y - 4, w + 8, 48, 24, GOLD, 0, 0);
+    if (quit) ui_box(c, x, y, w, 40, 20, WINE, 0, 0);
+    else ui_box(c, x, y, w, 40, 20, WHITE, 1, POP_LINE);
+    ui_text_in(c, f, 14, x, y, w, 40, 1, label, quit ? SNOW : PLUM);
     return w;
 }
 
@@ -487,7 +521,7 @@ void gamemenu_draw(const UiCanvas *c, const GameMenuInfo *in) {
         hint(c, hx, H - 56, in->pad ? in->close : "Esc", "Close overlay");
     } else if (focus && in->pad) {  /* on a page */
         hx += hint(c, hx, H - 56, "D-pad", "Choose and change") + 28;
-        if (sel == GM_SETTINGS) hx += hint(c, hx, H - 56, "LB RB", "Section") + 28;
+        if (sel == GM_SETTINGS) hx += hint(c, hx, H - 56, in->pad == 2 ? "L1 R1" : "LB RB", "Section") + 28;
         hx += hint(c, hx, H - 56, in->pad == 2 ? "Circle" : "B", "Back") + 28;
         hint(c, hx, H - 56, in->close, "Close overlay");
     } else if (focus) {
@@ -514,20 +548,26 @@ void gamemenu_draw(const UiCanvas *c, const GameMenuInfo *in) {
         ui_text_in(c, UI_GOTHIC_700, 17, W - 48 - bw, 40, bw, bh, 1, t, NIGHT);
     }
 
-    /* the exit popup: 560 wide in the middle, a gold top edge */
+    /* the exit popup: a small window as the launcher's popups (launcher/ui/style.css "dialog", 2026-11-05): a
+     * violet title bar over a gold rule, the text on white, the buttons in a lilac tray at the bottom */
     if (confirm) {
-        ui_rect(c, 0, 0, W, H, SHADE, 0.55f);
-        float pw = 560, ph = 32 + 28 * 1.25f + 16 + 17 * 1.5f + 16 + 8 + 56 + 32;
+        ui_rect(c, 0, 0, W, H, POP_BACKDROP, 0.6f);
+        float pw = 460, lh_title = 17 * 1.3f, bar = 15 + lh_title + 13, lh = 14 * 1.5f, tray = 12 + 40 + 12;
+        float ph = bar + 3 + 18 + lh + 18 + tray;
         float px = (W - pw) / 2, py = (H - ph) / 2;
-        ui_box(c, px, py, pw, ph, 20, GOLD, 0, 0);
-        ui_box(c, px, py + 6, pw, ph - 6, 20, PAPER, 0, 0);
-        float y = py + 6 + 32;
-        ui_text(c, UI_ROUNDED_800, 28, px + 36, y, 28 * 1.25f, "Quit the game?", NIGHT);
-        y += 28 * 1.25f + 16;
-        ui_text(c, UI_GOTHIC_400, 17, px + 36, y, 17 * 1.5f, "Progress since your last save is lost.", INK);
-        y += 17 * 1.5f + 16 + 8;
-        float right = px + pw - 36;
-        right -= popup_button(c, right, y, "Quit game", 1, choice == 1) + 12;
-        popup_button(c, right, y, "Keep playing", 0, choice == 0);
+        ui_shadow(c, px, py + 14, pw, ph, 14, 36, POP_SHADOW, 0.45f);
+        ui_box_alpha(c, px - 1, py - 1, pw + 2, ph + 2, 15, POP_BORDER, 0.5f);  /* the 1 px border, half seen */
+        ui_box(c, px, py, pw, ph, 14, POP_WHITE, 0, 0);
+        ui_box(c, px, py, pw, bar + 14, 14, POP_DEEP, 0, 0);  /* the title bar (its lower corners covered below) */
+        ui_rect(c, px, py + bar, pw, 3, POP_GOLD, 1);
+        float ty = py + ph - tray;
+        ui_box(c, px, ty - 14, pw, tray + 14, 14, POP_LILAC, 0, 0);  /* the tray (its upper corners covered) */
+        ui_rect(c, px, py + bar + 3, pw, ty - (py + bar + 3), POP_WHITE, 1);
+        ui_rect(c, px, ty, pw, 1, POP_LINE, 1);
+        ui_text(c, UI_ROUNDED_800, 17, px + 22, py + 15, lh_title, "Quit the game?", POP_WHITE);
+        ui_text(c, UI_GOTHIC_400, 14, px + 22, py + bar + 3 + 18, lh, "Progress since your last save is lost.", POP_INK);
+        float right = px + pw - 16;
+        right -= popup_button(c, right, ty + 12, "Quit game", 1, choice == 1) + 10;
+        popup_button(c, right, ty + 12, "Keep playing", 0, choice == 0);
     }
 }

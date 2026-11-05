@@ -26,6 +26,10 @@ enum {
  * bw 0: none). */
 void ui_rect(const UiCanvas *c, float x, float y, float w, float h, uint32_t rgb, float a);
 void ui_box(const UiCanvas *c, float x, float y, float w, float h, float r, uint32_t fill, float bw, uint32_t border);
+/* A rounded box of colour rgb at opacity a (no border), and a soft shadow around a box: CSS
+ * box-shadow 0 0 <blur> rgb/a, drawn as layers (offset it by moving y). */
+void ui_box_alpha(const UiCanvas *c, float x, float y, float w, float h, float r, uint32_t rgb, float a);
+void ui_shadow(const UiCanvas *c, float x, float y, float w, float h, float r, float blur, uint32_t rgb, float a);
 /* Text in font f at size px (the CSS font-size), its line box of height lh (0: the font's normal height) with its
  * top at y, starting at x; returns its width. ui_text_w measures without drawing. */
 float ui_text(const UiCanvas *c, int f, float px, float x, float y, float lh, const char *str, uint32_t rgb);

@@ -125,6 +125,18 @@ void ui_box(const UiCanvas *c, float x, float y, float w, float h, float r, uint
     box_a(c, x, y, w, h, r, fill, 1.0f, bw, border);
 }
 
+void ui_box_alpha(const UiCanvas *c, float x, float y, float w, float h, float r, uint32_t rgb, float a) {
+    box_a(c, x, y, w, h, r, rgb, a, 0, 0);
+}
+
+void ui_shadow(const UiCanvas *c, float x, float y, float w, float h, float r, float blur, uint32_t rgb, float a) {
+    enum { STEPS = 12 };  /* layers from the widest to the box itself: a soft edge like CSS box-shadow */
+    for (int i = STEPS; i >= 1; i--) {
+        float e = blur * 0.5f * (float)i / STEPS;
+        box_a(c, x - e, y - e, w + 2 * e, h + 2 * e, r + e, rgb, a / STEPS * 1.6f, 0, 0);
+    }
+}
+
 /* ---- text */
 
 static int utf8_next(const char **s) {
