@@ -37,7 +37,7 @@ pub struct Running {
 }
 
 #[derive(Serialize, Clone)]
-struct StepEvent { id: &'static str, state: &'static str }
+struct StepEvent { id: String, state: String }
 #[derive(Serialize, Clone)]
 struct ProgressEvent { step: String, done: u64, total: u64, what: String }
 #[derive(Serialize, Clone)]
@@ -124,8 +124,10 @@ fn write_config(b: &Builder, plan: &Plan, inst: &Path) -> std::io::Result<PathBu
     Ok(path)
 }
 
-/// One Python step of the build (`python -m <module> <args>`), its lines to the screen; Err on failure or Cancel.
-fn python(app: &AppHandle, run: &Running, b: &Builder, cfg: &Path, module: &str, args: &[&str]) -> Result<(), String> {
+/// One run of the game code's Python (`python -m <module> <args>`), its lines to the screen; Err on failure or
+/// Cancel. The build's own lines (decision 0054): `@steps <json>` the list of steps (the launcher adds its DLC
+/// copy at the end), `@step <id> <state>` each step starting and ending, `@progress` the bar.
+fn python(app: &AppHandle, run: &Running, b: &Builder, cfg: &Path, module: &str, args: &[String]) -> Result<(), String> {
     if run.cancel.load(Ordering::SeqCst) { return Err("cancelled".into()); }
     let mut cmd = Command::new(&b.python);
     cmd.arg("-u").arg("-m").arg(module).args(args).current_dir(&b.src)
@@ -154,6 +156,19 @@ fn python(app: &AppHandle, run: &Running, b: &Builder, cfg: &Path, module: &str,
         tail.join("\n")
     });
     for line in BufReader::new(out).lines().map_while(Result::ok) {
+        if let Some(rest) = line.strip_prefix("@steps ") {
+            if let Ok(mut list) = serde_json::from_str::<serde_json::Value>(rest) {
+                if let Some(a) = list.as_array_mut() {
+                    a.push(serde_json::json!({ "id": "dlc", "label": "Copying DLC", "seconds": 1, "parts": {} }));
+                }
+                let _ = app.emit("build-steps", list);
+            }
+            continue;
+        }
+        if let Some((id, state)) = line.strip_prefix("@step ").and_then(|r| r.split_once(' ')) {
+            let _ = app.emit("build-step", StepEvent { id: id.into(), state: state.into() });
+            continue;
+        }
         if let Some(rest) = line.strip_prefix("@progress ") {
             let mut it = rest.splitn(4, ' ');
             let (step, done, total, what) = (it.next(), it.next(), it.next(), it.next().unwrap_or(""));
@@ -171,51 +186,6 @@ fn python(app: &AppHandle, run: &Running, b: &Builder, cfg: &Path, module: &str,
         Some(Ok(s)) if s.success() => Ok(()),
         _ => Err(if tail.is_empty() { format!("{module} failed") } else { tail }),
     }
-}
-
-/// Copies a folder tree with progress (extracted folders → data\), skipping files already there at full size.
-fn copy_tree(app: &AppHandle, run: &Running, step: &str, from: &Path, to: &Path) -> Result<(), String> {
-    let (total, _) = crate::check::folder_size(from);
-    let mut done = 0u64;
-    let mut stack = vec![(from.to_path_buf(), to.to_path_buf())];
-    while let Some((src, dst)) = stack.pop() {
-        std::fs::create_dir_all(&dst).map_err(|e| e.to_string())?;
-        for e in std::fs::read_dir(&src).map_err(|e| e.to_string())?.flatten() {
-            if run.cancel.load(Ordering::SeqCst) { return Err("cancelled".into()); }
-            let (s, d) = (e.path(), dst.join(e.file_name()));
-            if e.file_type().map(|t| t.is_dir()).unwrap_or(false) {
-                stack.push((s, d));
-                continue;
-            }
-            let len = e.metadata().map(|m| m.len()).unwrap_or(0);
-            if d.metadata().map(|m| m.len()).ok() != Some(len) {
-                std::fs::copy(&s, &d).map_err(|e| format!("copying {}: {e}", s.display()))?;
-            }
-            done += len;
-            let _ = app.emit("build-progress", ProgressEvent { step: step.into(), done, total, what: String::new() });
-        }
-    }
-    Ok(())
-}
-
-fn game_files(app: &AppHandle, run: &Running, b: &Builder, plan: &Plan, inst: &Path, cfg: &Path) -> Result<(), String> {
-    let (exefs, romfs) = (inst.join("data/exefs"), inst.join("data/romfs"));
-    let complete = exefs.join("main").is_file() && crate::check::folder_size(&romfs).0 == crate::check::romfs_bytes();
-    if complete {
-        emit_log(app, "game files already here: skipped");
-        return Ok(());
-    }
-    if plan.mode == "folders" {
-        let get = |k: &str| PathBuf::from(plan.paths.get(k).cloned().unwrap_or_default());
-        copy_tree(app, run, "copy", &get("exefs"), &exefs)?;
-        return copy_tree(app, run, "copy", &get("romfs"), &romfs);
-    }
-    // NSP/XCI: the extractor wants empty folders; a stopped extraction left ours half full
-    for d in [&exefs, &romfs] {
-        let _ = std::fs::remove_dir_all(d);
-        std::fs::create_dir_all(d).map_err(|e| e.to_string())?;
-    }
-    python(app, run, b, cfg, "tools.yw4.extract", &[])
 }
 
 /// The checked add-ons, copied into data\dlc (the game checks them again on boot, decision 0049).
@@ -243,33 +213,8 @@ fn copy_dlc(app: &AppHandle, plan: &Plan, inst: &Path) -> Result<(), String> {
     Ok(())
 }
 
-/// game.ini next to yw4.exe: its folders relative to it (decision 0050), so the install folder can move.
-fn write_game_ini(plan: &Plan, inst: &Path) -> Result<(), String> {
-    let (save, settings) = if plan.saves == "appdata" {
-        let base = PathBuf::from(std::env::var("APPDATA").unwrap_or_default()).join("YW4 Recomp");
-        (base.join("save").display().to_string(), base.join("settings.ini").display().to_string())
-    } else {
-        ("../../save".to_string(), "../../settings.ini".to_string())
-    };
-    if plan.saves == "appdata" {
-        std::fs::create_dir_all(&save).map_err(|e| e.to_string())?;
-    } else {
-        std::fs::create_dir_all(inst.join("save")).map_err(|e| e.to_string())?;
-    }
-    let ini = format!("# Written by the YW4 Recomp launcher: how yw4.exe runs on its own (decision 0050).\n\
-        YW4_EXEFS=../exefs\nYW4_ROMFS=../../data/romfs\nYW4_SAVE={save}\nYW4_SETTINGS_FILE={settings}\n\
-        YW4_DLC_DIR=../../data/dlc\nYW4_MODS=../../mods\nYW4_SCREENSHOT_DIR=../../screenshots\n\
-        YW4_LOG_DIR=../../logs\nYW4_PERF_DIR=../../logs\nYW4_RECORD=0\n");
-    std::fs::write(inst.join("work/build/game.ini"), ini).map_err(|e| e.to_string())
-}
-
-fn step(app: &AppHandle, id: &'static str, f: impl FnOnce() -> Result<(), String>) -> Result<(), String> {
-    let _ = app.emit("build-step", StepEvent { id, state: "start" });
-    let r = f();
-    let _ = app.emit("build-step", StepEvent { id, state: if r.is_ok() { "done" } else { "failed" } });
-    r
-}
-
+/// The whole build: the game code's own steps (tools.yw4.build_install, decision 0054), then the DLC copy. The
+/// launcher knows no step of the game's; a game update can change them.
 fn run_all(app: &AppHandle, run: &Running, plan: &Plan) -> Result<(), String> {
     let inst = PathBuf::from(&plan.install);
     for d in ["data", "work", "mods", "screenshots", "logs"] {
@@ -277,27 +222,29 @@ fn run_all(app: &AppHandle, run: &Running, plan: &Plan) -> Result<(), String> {
     }
     let b = builder(app);
     let cfg = write_config(&b, plan, &inst).map_err(|e| e.to_string())?;
-    // First, so a failed download shows before minutes of unpacking. From the repo: nothing to fetch.
-    step(app, "tools", || match &b.tools {
-        Some(_) => {
-            let dest = inst.join("builder").join("toolchain");
-            python(app, run, &b, &cfg, "tools.yw4.deps", &["--toolchain", &dest.to_string_lossy()])
+    let mut args: Vec<String> = vec!["--mode".into(), plan.mode.clone(), "--saves".into(), plan.saves.clone()];
+    if plan.mode == "folders" {
+        let get = |k: &str| plan.paths.get(k).cloned().unwrap_or_default();
+        args.extend(["--exefs".into(), get("exefs"), "--romfs".into(), get("romfs")]);
+    }
+    if b.tools.is_some() {  // a download: the compiler comes on the first build; from the repo, the repo's own
+        args.extend(["--toolchain".into(), inst.join("builder").join("toolchain").to_string_lossy().into_owned()]);
+    }
+    if !plan.fsr { args.push("--no-fsr".into()); }
+    if !plan.dlss { args.push("--no-dlss".into()); }
+    if let Err(e) = python(app, run, &b, &cfg, "tools.yw4.build_install", &args) {
+        if run.cancel.load(Ordering::SeqCst) {
+            // Cancel ended the build's processes at once, so it couldn't put back the game it had set aside
+            run.cancel.store(false, Ordering::SeqCst);
+            let _ = python(app, run, &b, &cfg, "tools.yw4.build_install", &["--recover".into()]);
+            run.cancel.store(true, Ordering::SeqCst);
         }
-        None => Ok(()),
-    })?;
-    step(app, "game", || game_files(app, run, &b, plan, &inst, &cfg))?;
-    step(app, "dlc", || copy_dlc(app, plan, &inst))?;
-    step(app, "version", || python(app, run, &b, &cfg, "tools.yw4.ingest", &[]))?;
-    step(app, "translate", || python(app, run, &b, &cfg, "recomp.translate", &[]))?;
-    step(app, "shaders", || {
-        python(app, run, &b, &cfg, "tools.yw4.shaders", &[])?;
-        python(app, run, &b, &cfg, "recomp.shader", &["--check"])
-    })?;
-    let mut build_args = vec![];
-    if !plan.fsr { build_args.push("--no-fsr"); }
-    if !plan.dlss { build_args.push("--no-dlss"); }
-    step(app, "compile", || python(app, run, &b, &cfg, "recomp.build", &build_args))?;
-    step(app, "finish", || write_game_ini(plan, &inst))
+        return Err(e);
+    }
+    let _ = app.emit("build-step", StepEvent { id: "dlc".into(), state: "start".into() });
+    let r = copy_dlc(app, plan, &inst);
+    let _ = app.emit("build-step", StepEvent { id: "dlc".into(), state: if r.is_ok() { "done" } else { "failed" }.into() });
+    r
 }
 
 #[tauri::command]
