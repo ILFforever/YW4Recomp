@@ -33,7 +33,10 @@ from pathlib import Path
 
 from . import config, deps, progress
 
-PROTOCOL = 1  # what the launcher and this script agree on; a launcher that knows less refuses (release.toml)
+PROTOCOL = 1  # the @steps/@step/@progress lines and the options above; a launcher that knows less refuses
+# The oldest launcher that can build this game code (release.toml, decision 0054): raise it when a change here needs
+# something only a newer launcher does, e.g. a new protocol, a new bundled tool or a newer Python.
+MIN_LAUNCHER = "0.5.0"
 
 
 def steps(mode: str, toolchain: bool) -> list[dict]:

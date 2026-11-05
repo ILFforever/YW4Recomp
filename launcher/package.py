@@ -1,7 +1,9 @@
-"""Make the launcher's download (decision 0052): the NSIS installer and a portable zip of the same files.
+"""Make the downloads of a release (decisions 0052, 0054).
 
-    python launcher/package.py               everything, into work/package/dist/
+    python launcher/package.py [launcher]    the launcher: the NSIS installer and a portable zip, into work/package/dist/
     python launcher/package.py --stage-only  only work/package/builder/ (no Rust build)
+    python launcher/package.py game          the game's build code alone (~3 MB), into work/package/game/: a game
+                                             update the launcher downloads (tag vX.Y.Z)
 
 What ships next to the launcher, in a folder called builder/:
 
@@ -21,6 +23,7 @@ import argparse
 import hashlib
 import io
 import json
+import re
 import shutil
 import subprocess
 import sys
@@ -34,6 +37,7 @@ OUT = REPO / "work" / "package"
 CACHE = OUT / "cache"
 STAGE = OUT / "builder"
 DIST = OUT / "dist"
+GAME_DIST = OUT / "game"
 
 PYTHON_ZIP = ("https://www.python.org/ftp/python/3.13.5/python-3.13.5-embed-amd64.zip",
               "7d2650fd9d1b9d002d4a315d5f354247fd6a44f30517c7ef577b08f57a0fb6d9")
@@ -71,6 +75,46 @@ def git(*args: str) -> bytes:
     return subprocess.run(["git", "-C", str(REPO), *args], capture_output=True, check=True).stdout
 
 
+def game_tree(ref: str, dest: Path) -> str:
+    """The game's build code at `ref` into `dest`: committed files only (git archive), the commit (recomp/build.py's
+    build stamp: a player's PC has no git) and release.toml, which the launcher reads before using it."""
+    shutil.rmtree(dest, ignore_errors=True)
+    with tarfile.open(fileobj=io.BytesIO(git("archive", "--format=tar", ref, "--", *SOURCES))) as t:
+        t.extractall(dest, filter="data")
+    commit = git("rev-parse", "--short=7", ref).decode().strip()
+    (dest / "COMMIT").write_text(commit + "\n")
+    code = (dest / "tools" / "yw4" / "build_install.py").read_text()
+    protocol = re.search(r"^PROTOCOL = (\d+)", code, re.M)
+    min_launcher = re.search(r'^MIN_LAUNCHER = "([\d.]+)"', code, re.M)
+    if not (protocol and min_launcher):
+        raise SystemExit("tools/yw4/build_install.py: no PROTOCOL or MIN_LAUNCHER")
+    version = (dest / "VERSION").read_text().strip()
+    (dest / "release.toml").write_text(
+        "# Written by launcher/package.py (decision 0054): what the launcher checks before using this game code.\n"
+        f'version = "{version}"\ncommit = "{commit}"\nprotocol = {protocol[1]}\nmin_launcher = "{min_launcher[1]}"\n')
+    bad = [p for p in dest.rglob("*") if p.suffix.lower() in GAME_DATA]
+    if bad:
+        raise SystemExit(f"game data in the game code, refusing: {bad[:5]}")
+    return commit
+
+
+def game(ref: str) -> None:
+    """The game update: the game code as one zip, files at its top level."""
+    tree = OUT / "game-tree"
+    commit = game_tree(ref, tree)
+    version = (tree / "VERSION").read_text().strip()
+    GAME_DIST.mkdir(parents=True, exist_ok=True)
+    out = GAME_DIST / f"yw4recomp-game-{version}.zip"
+    with zipfile.ZipFile(out, "w", zipfile.ZIP_DEFLATED) as z:
+        for p in sorted(tree.rglob("*")):
+            if p.is_file():
+                z.write(p, p.relative_to(tree).as_posix())
+    shutil.rmtree(tree)
+    digest = hashlib.sha256(out.read_bytes()).hexdigest()
+    print(f"{out.name}: {out.stat().st_size / 1e6:.1f} MB, {ref} = {commit}, SHA-256 {digest}")
+    print(f"publish: gh release create v{version} --target {commit} --title \"YW4 Recomp {version}\" \"{out}\"")
+
+
 def stage(ref: str) -> None:
     shutil.rmtree(STAGE, ignore_errors=True)
     (STAGE / "tools").mkdir(parents=True)
@@ -93,12 +137,8 @@ def stage(ref: str) -> None:
     (STAGE / "licenses" / "glslang.txt").write_bytes(fetch(GLSLANG_LICENSE, "glslang-license.txt"))
     (STAGE / "licenses" / "hactool.txt").write_bytes(fetch(HACTOOL_LICENSE, "hactool-license.txt"))
 
-    src = STAGE / "src"
-    with tarfile.open(fileobj=io.BytesIO(git("archive", "--format=tar", ref, "--", *SOURCES))) as t:
-        t.extractall(src, filter="data")
-    commit = git("rev-parse", "--short=7", ref).decode().strip()
-    (src / "COMMIT").write_text(commit + "\n")  # recomp/build.py's build stamp: a player's PC has no git
-    shutil.copy(src / "LICENSE", STAGE / "licenses" / "yw4recomp.txt")
+    commit = game_tree(ref, STAGE / "src")
+    shutil.copy(STAGE / "src" / "LICENSE", STAGE / "licenses" / "yw4recomp.txt")
 
     bad = [p for p in STAGE.rglob("*") if p.suffix.lower() in GAME_DATA]
     if bad:
@@ -141,11 +181,15 @@ def build() -> None:
 
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap.add_argument("what", nargs="?", choices=("launcher", "game"), default="launcher")
     ap.add_argument("--stage-only", action="store_true")
     ap.add_argument("--ref", default="HEAD", help="the commit whose build code ships (default: HEAD)")
     args = ap.parse_args()
     if sys.platform != "win32":
         raise SystemExit("the launcher's download is Windows only for now")
+    if args.what == "game":
+        game(args.ref)
+        return 0
     stage(args.ref)
     if not args.stage_only:
         if git("status", "--porcelain", "--", "launcher"):
