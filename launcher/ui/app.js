@@ -722,7 +722,7 @@ $('settings-back').addEventListener('click', () => showReady());
 
 // Uninstall: the popup lists what goes (sizes from the install); kept by default: saves and screenshots
 const unDlg = $('uninstall-dlg');
-const sizeNote = (b) => (b > 0 ? `(${gb(b)})` : '');
+const sizeNote = (b) => (b > 0 ? `(${gb(b)})` : '(empty)');  // always shown: "empty" says it was looked at
 $('set-uninstall').addEventListener('click', async () => {
   const u = await invoke('uninstall_info', { install: inst.install, saves: inst.saves });
   $('uninstall-text').textContent = `Deletes the game files and the build (${gb(u.game)}) from ${inst.install}.`;
