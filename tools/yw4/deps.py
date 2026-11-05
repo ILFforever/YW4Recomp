@@ -24,6 +24,7 @@ import hashlib
 import shutil
 import sys
 import tarfile
+import time
 import zipfile
 import urllib.request
 from pathlib import Path
@@ -36,12 +37,17 @@ from . import config, progress
 MIRROR = "https://github.com/ILFforever/YW4Recomp/releases/download/deps-mirror/"
 
 
-def fetch_pinned(urls: list[str], dst: Path, sha256: str, step: str = "") -> None:
+def size_text(n: float) -> str:
+    return f"{n / 1e9:.1f} GB" if n >= 1e9 else f"{n / 1e6:.0f} MB" if n >= 1e6 else f"{n / 1e3:.0f} KB"
+
+
+def fetch_pinned(urls: list[str], dst: Path, sha256: str, step: str = "download") -> None:
     """Downloads the first of `urls` whose file has the pinned SHA-256 into `dst`; raises if none does. `step`: the
-    progress step name for its bytes."""
+    progress step name for its bytes (the file's name goes with it)."""
     errors = []
     for url in urls:
-        print(f"downloading {url}")
+        print(f"downloading {url}", flush=True)
+        t0 = time.time()
         digest = hashlib.sha256()
         try:
             with urllib.request.urlopen(url, timeout=60) as r, open(dst, "wb") as f:
@@ -50,13 +56,13 @@ def fetch_pinned(urls: list[str], dst: Path, sha256: str, step: str = "") -> Non
                     f.write(chunk)
                     digest.update(chunk)
                     done += len(chunk)
-                    if step:
-                        progress.report(step, done, total or done, every=0.25)
+                    progress.report(step, done, total or done, dst.name, every=0.25)
         except OSError as e:  # urllib's errors (HTTP, network, timeouts) are OSErrors
             errors.append(f"{url}: {e}")
             dst.unlink(missing_ok=True)
             continue
         if digest.hexdigest() == sha256:
+            print(f"{dst.name}: {size_text(done)} in {time.time() - t0:.0f} s, checked", flush=True)
             return
         errors.append(f"{url}: SHA-256 {digest.hexdigest()}, expected {sha256}")
         dst.unlink()
@@ -155,13 +161,7 @@ def fetch_dlss(cfg: config.Config) -> Path:
         if dst.is_file() and hashlib.sha256(dst.read_bytes()).hexdigest() == want:
             continue
         dst.parent.mkdir(parents=True, exist_ok=True)
-        print(f"downloading {DLSS_URL}{rel}")
-        with urllib.request.urlopen(DLSS_URL + rel) as r, open(dst, "wb") as f:
-            shutil.copyfileobj(r, f)
-        digest = hashlib.sha256(dst.read_bytes()).hexdigest()
-        if digest != want:
-            dst.unlink()
-            raise RuntimeError(f"{rel}: SHA-256 {digest}, expected {want}")
+        fetch_pinned([DLSS_URL + rel], dst, want)  # NVIDIA's own address only (its licence: never mirrored)
     return out
 
 
@@ -191,14 +191,8 @@ def fetch_streamline(cfg: config.Config) -> Path:
     deps = cfg.work_dir / "deps" / f"streamline-{SL_VERSION}-dl"  # the archive alone in its own folder
     deps.mkdir(parents=True, exist_ok=True)
     archive = deps / Path(SL_URL).name
-    if not archive.is_file():
-        print(f"downloading {SL_URL} (~280 MB)")
-        with urllib.request.urlopen(SL_URL) as r, open(archive, "wb") as f:
-            shutil.copyfileobj(r, f)
-    digest = hashlib.sha256(archive.read_bytes()).hexdigest()
-    if digest != SL_SHA256:
-        archive.unlink()
-        raise RuntimeError(f"{archive.name}: SHA-256 {digest}, expected {SL_SHA256}")
+    if not archive.is_file() or hashlib.sha256(archive.read_bytes()).hexdigest() != SL_SHA256:
+        fetch_pinned([SL_URL], archive, SL_SHA256)  # ~280 MB, NVIDIA's own address only
     with zipfile.ZipFile(archive) as z:
         for name in z.namelist():
             if name.endswith("/") or not any(name.startswith(t) for t in SL_TAKE) or ".." in name:

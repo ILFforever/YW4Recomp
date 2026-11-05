@@ -53,8 +53,17 @@ struct Builder {
 }
 
 fn bundled_dir(app: &AppHandle) -> Option<PathBuf> {
-    let b = app.path().resource_dir().ok()?.join("builder");
+    let b = plain_path(app.path().resource_dir().ok()?).join("builder");
     b.join("python").join("python.exe").is_file().then_some(b)
+}
+
+/// Windows' long-path form `\\?\C:\...` (Tauri gives the resource folder that way) back to `C:\...`, for the
+/// config file people read. A network path (`\\?\UNC\...`) is left as it is.
+fn plain_path(p: PathBuf) -> PathBuf {
+    match p.to_str().and_then(|s| s.strip_prefix(r"\\?\")) {
+        Some(rest) if !rest.starts_with("UNC\\") => PathBuf::from(rest),
+        _ => p,
+    }
 }
 
 fn builder(app: &AppHandle) -> Builder {

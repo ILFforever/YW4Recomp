@@ -2,6 +2,9 @@
 const T = window.__TAURI__ || null;
 const invoke = T ? T.core.invoke : null;
 const $ = (id) => document.getElementById(id);
+// the focus ring only after keyboard use (style.css body.pointer): a click hides it, a key brings it back
+document.addEventListener('pointerdown', () => document.body.classList.add('pointer'), true);
+document.addEventListener('keydown', () => document.body.classList.remove('pointer'), true);
 
 // ---- screens: one shown at a time; the setup ones light up their step in the top bar
 const STEPS = ['files', 'check', 'options', 'build', 'play'];
@@ -41,6 +44,12 @@ if (T && T.window) {
 // ---- placeholder for what isn't built yet
 const soon = $('soon');
 $('soon-ok').addEventListener('click', () => soon.close());
+// the small message popup: a title and one line
+function popup(title, text) {
+  soon.querySelector('h2').textContent = title;
+  soon.querySelector('p').textContent = text;
+  soon.showModal();
+}
 
 // ---- Home
 $('start').addEventListener('click', () => show('files'));
@@ -229,6 +238,7 @@ async function runCheck() {
 
 $('continue').addEventListener('click', () => {
   if (checkBad) return;
+  optionsFromPlay = false;
   show('options');
   loadOptions();
 });
@@ -346,29 +356,50 @@ $('build-go').addEventListener('click', () => {
 });
 
 // ---- 4 · Build: the steps (Rust: buildrun.rs) and their "@progress" lines turned into one bar
-// Each step's share of the bar is its measured time (seconds, 2026-11-03 on a 16-thread laptop); inside a step,
-// a progress line's own step name says which part of it is moving.
+// Each step's share of the bar is its measured time in seconds (the installed launcher's first build, 2026-11-05,
+// 16-thread laptop, game on an SSD); compiling scales with the CPU's threads. Inside a step, a progress line's own
+// step name says which part of it is moving.
+const CORES = navigator.hardwareConcurrency || 16;
 const BUILD_STEPS = () => [
-  ...(bundled ? [{ id: 'tools', label: 'Downloading the compiler', weight: 40 }] : []),
-  { id: 'game', label: mode === 'files' ? 'Unpacking your game files' : 'Copying your game files', weight: mode === 'files' ? 190 : 60 },
+  ...(bundled ? [{ id: 'tools', label: 'Downloading the compiler', weight: 30 }] : []),
+  { id: 'game', label: mode === 'files' ? 'Unpacking your game files' : 'Copying your game files', weight: 60 },
   { id: 'dlc', label: 'Copying DLC', weight: 1 },
   { id: 'version', label: 'Checking the version', weight: 3 },
   { id: 'translate', label: 'Translating the game code', weight: 30 },
-  { id: 'shaders', label: 'Preparing shaders', weight: 50 },
-  { id: 'compile', label: 'Compiling', weight: 310 },
+  { id: 'shaders', label: 'Preparing shaders', weight: 40 },
+  { id: 'compile', label: 'Compiling', weight: Math.round(360 * Math.min(3, Math.max(0.5, 16 / CORES))) },
   { id: 'finish', label: 'Finishing up', weight: 1 },
 ];
 // where a progress line's step sits inside a build step: [start, end] of that step
 const PARTS = {
   compiler: ['tools', 0, 0.6], compilerunpack: ['tools', 0.6, 1],
   unpack: ['game', 0, 0.07], extract: ['game', 0.07, 0.99], icon: ['game', 0.99, 1], copy: ['game', 0, 1],
-  ingest: ['version', 0, 1], shaders: ['shaders', 0.3, 1], compile: ['compile', 0.1, 0.95], link: ['compile', 0.95, 1],
+  ingest: ['version', 0, 1], shaders: ['shaders', 0.3, 1],
+  download: ['compile', 0, 0.1], compile: ['compile', 0.1, 0.95], link: ['compile', 0.95, 1],
 };
 const NOW_TEXT = {
   compiler: 'Downloading the compiler', compilerunpack: 'Unpacking the compiler',
   unpack: 'Unpacking the NSP or XCI', extract: 'Extracting the game files', icon: 'Taking the game icon', copy: 'Copying',
   ingest: 'Checking the game code', shaders: 'Translating shaders', compile: 'Compiling', link: 'Linking',
 };
+// steps whose counts are bytes: shown as sizes
+const BYTE_STEPS = new Set(['compiler', 'compilerunpack', 'download', 'unpack', 'extract', 'copy']);
+// what a downloaded file is, for the line under the bar
+function downloadName(file) {
+  if (/^SDL/i.test(file)) return 'SDL';
+  if (/FidelityFX/i.test(file)) return 'AMD FSR';
+  if (/streamline/i.test(file)) return 'NVIDIA Streamline';
+  return 'NVIDIA DLSS';
+}
+function nowText(p) {
+  if (p.step === 'download') return `Downloading ${downloadName(p.what)} · ${gb(p.done)} of ${gb(p.total)}`;
+  const files = p.step === 'compile' && /^(\d+)\/(\d+)$/.exec(p.what);
+  if (files) return `Compiling · ${(+files[1]).toLocaleString()} of ${(+files[2]).toLocaleString()} files`;
+  const what = NOW_TEXT[p.step] || 'Translating the game code';
+  if (p.total <= 1) return what;
+  return BYTE_STEPS.has(p.step) ? `${what} · ${gb(p.done)} of ${gb(p.total)}`
+    : `${what} · ${p.done.toLocaleString()} of ${p.total.toLocaleString()}`;
+}
 let build = null;
 
 function renderBuildSteps() {
@@ -393,17 +424,29 @@ function renderBuildBar() {
   $('build-pct').textContent = pct + '%';
   $('build-fill').style.width = pct + '%';
   $('build-bar').setAttribute('aria-valuenow', String(pct));
-  // time left from the speed of real work since the first progress line (steps skipped on Build again don't count)
-  const frac = done / total;
-  build.frac = frac;
-  const m = build.mark;
-  if (m && frac - m.f > 0.03 && frac < 1) {
-    const rate = (frac - m.f) / ((Date.now() - m.t) / 1000);
-    const left = Math.max(1, Math.round((1 - frac) / rate / 60));
-    $('build-eta').textContent = left <= 1 ? 'About a minute left' : `About ${left} minutes left`;
-  } else if (frac >= 1 || !m) {
-    $('build-eta').textContent = '';
+  // Time left, step by step: the part that is running at its own measured speed (once it has moved 5%), the rest of
+  // that step and the steps after it at their measured times. A whole-build average was too hopeful: the early
+  // steps are quick, compiling is slow.
+  const started = build.steps.some((s) => s.state);
+  if (!started || done >= total) { $('build-eta').textContent = ''; return; }
+  let left = 0;
+  for (const s of build.steps) {
+    if (s.state === 'done' || s.frac >= 1) continue;
+    const m = s.mark;
+    if (s.state === 'start' && m && s.frac - m.f > 0.05 * (m.end - m.f)) {
+      const rate = (s.frac - m.f) / ((Date.now() - m.t) / 1000);
+      left += (m.end - s.frac) / rate + s.weight * (1 - m.end);
+    } else {
+      left += s.weight * (1 - s.frac);
+    }
   }
+  const mins = Math.round(left / 60);
+  $('build-eta').textContent = left < 45 ? 'Almost done' : mins <= 1 ? 'About a minute left' : `About ${mins} minutes left`;
+}
+
+// the game's version in the status bar (from its build stamp)
+function setGameVersion(info) {
+  $('game-version').textContent = info && info.version ? info.version.replace(/\s*\(.*$/, '') : 'YW4 Recomp';
 }
 
 function logLine(line) {
@@ -442,6 +485,7 @@ function buildFinished({ ok, message }) {
     renderBuildSteps();
     renderBuildBar();
     afterBuild();
+    invoke('install_info', { install: options.install }).then(setGameVersion).catch(() => {});
     $('build-title').textContent = 'Your game is ready';
     const mins = Math.max(1, Math.round((Date.now() - build.started) / 60000));
     $('build-lead').textContent = `Built in ${mins} minute${mins === 1 ? '' : 's'}.`;
@@ -472,16 +516,16 @@ if (T && T.event) {
   });
   T.event.listen('build-progress', ({ payload }) => {
     if (!build) return;
-    if (!build.mark) build.mark = { t: Date.now(), f: build.frac || 0 };  // real work starts here
     let part = PARTS[payload.step];
     if (payload.step === 'translate') part = payload.what === 'sdk' ? ['translate', 0.55, 1] : ['translate', 0, 0.55];
     if (!part) return;
     const s = build.steps.find((x) => x.id === part[0]);
+    // each part of a step is timed on its own (downloads and compiling go at very different speeds)
+    const key = part.join();
+    if (!s.mark || s.mark.key !== key) s.mark = { key, t: Date.now(), f: Math.max(s.frac, part[1]), end: part[2] };
     const f = payload.total ? payload.done / payload.total : 0;
     s.frac = Math.max(s.frac, part[1] + (part[2] - part[1]) * f);
-    $('build-now').textContent = (NOW_TEXT[payload.step] || 'Translating the game code') +
-      (payload.total > 1 && payload.step !== 'unpack' && payload.step !== 'extract' && payload.step !== 'copy'
-        ? ` · ${payload.done.toLocaleString()} of ${payload.total.toLocaleString()}` : '');
+    $('build-now').textContent = nowText(payload);
     renderBuildBar();
   });
   T.event.listen('build-log', ({ payload }) => logLine(payload));
@@ -583,7 +627,7 @@ async function showReady() {
   $('stat-shots').textContent = String(info.shotCount);
   const v = (info.version.match(/YW4 Recomp (\S+)/) || [])[1];
   $('built-line').textContent = v ? `Built and checked · ${v}` : 'Built and checked';
-  $('game-version').textContent = info.version ? info.version.replace(/\s*\(.*$/, '') : 'YW4 Recomp';
+  setGameVersion(info);
 
   $('news-title').textContent = `What's new in ${NEWS.version}`;
   const news = $('news-list');
@@ -621,12 +665,22 @@ $('play').addEventListener('click', async () => {
   try {
     await invoke('play', { install: inst.install });
     $('stat-last').textContent = 'Today';
-  } catch (e) { soon.querySelector('p').textContent = String(e); soon.showModal(); }
+  } catch (e) { popup('Something went wrong', String(e)); }
 });
 $('news-more').addEventListener('click', () => invoke('open_project_page'));
 document.querySelectorAll('[data-open]').forEach((b) => b.addEventListener('click', () =>
   invoke('open_folder', { install: inst.install, which: b.dataset.open, saves: inst.saves })));
-$('to-options').addEventListener('click', () => {  // back into setup with the remembered choices
+// Play's gear: game and launcher settings, not designed yet (the owner decides what goes there)
+$('to-options').addEventListener('click', () => {
+  popup('Settings', 'Coming soon.');
+});
+// Options is reached from setup (after Check) or from Play's Rebuild row: Back returns where it came from
+let optionsFromPlay = false;
+$('options-back').addEventListener('click', () => {
+  if (optionsFromPlay) { optionsFromPlay = false; showReady(); } else show('check');
+});
+$('rebuild-btn').addEventListener('click', () => {  // back into setup with the remembered choices
+  optionsFromPlay = true;
   mode = inst.mode;
   Object.assign(chosen[mode], inst.paths);
   Object.assign(options, { install: inst.install, saves: inst.saves, fsr: inst.fsr, freeUp: inst.freeUp,
@@ -669,7 +723,7 @@ $('offer-delete').addEventListener('click', async () => {
 $('originals-no').addEventListener('click', () => origDlg.close());
 $('originals-yes').addEventListener('click', async () => {
   origDlg.close();
-  try { await invoke('delete_originals', { state: inst }); } catch (e) { soon.querySelector('p').textContent = String(e); soon.showModal(); }
+  try { await invoke('delete_originals', { state: inst }); } catch (e) { popup('Something went wrong', String(e)); }
   markOffered();
 });
 renderFields();

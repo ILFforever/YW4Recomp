@@ -251,12 +251,41 @@ def main(argv: list[str] | None = None) -> int:
     t0 = time.time()
     print(f"compiling {len(todo)} of {len(objs)} files with {Path(cc).name} ({args.jobs} jobs)")
     errors = []
-    with concurrent.futures.ThreadPoolExecutor(args.jobs) as pool:  # progress as each file finishes, not in order
-        futures = {pool.submit(compile_one, cc, src, obj, includes): src for src, obj in todo}
-        for i, fut in enumerate(concurrent.futures.as_completed(futures), 1):
-            if fut.result():
-                errors.append(fut.result())
-            progress.report("compile", i, len(todo), futures[fut].name)
+    # Progress counts source bytes, not files: the few biggest generated files take minutes each, so a file count
+    # races to the end and then sits there. One log line per finished file, and while nothing finishes, a line every
+    # 15 s naming the files still compiling (so a long wait doesn't look like a hang).
+    sizes = {src: src.stat().st_size for src, _ in todo}
+    total_bytes = sum(sizes.values()) or 1
+    started: dict[Path, float] = {}
+
+    def compile_timed(src: Path, obj: Path) -> str | None:
+        started[src] = time.time()
+        return compile_one(cc, src, obj, includes)
+
+    def took(s: float) -> str:
+        return f"{s:.0f} s" if s < 90 else f"{s / 60:.0f} min"
+
+    with concurrent.futures.ThreadPoolExecutor(args.jobs) as pool:
+        futures = {pool.submit(compile_timed, src, obj): src for src, obj in todo}
+        pending, done_n, done_bytes, quiet_since = set(futures), 0, 0, time.time()
+        while pending:
+            finished, pending = concurrent.futures.wait(pending, timeout=15,
+                                                        return_when=concurrent.futures.FIRST_COMPLETED)
+            now = time.time()
+            for fut in finished:
+                src = futures[fut]
+                done_n += 1
+                done_bytes += sizes[src]
+                if fut.result():
+                    errors.append(fut.result())
+                print(f"{src.name} done ({took(now - started.get(src, t0))}) · {done_n} of {len(todo)}", flush=True)
+                progress.report("compile", done_bytes, total_bytes, f"{done_n}/{len(todo)}")
+                quiet_since = now
+            if pending and now - quiet_since >= 15:
+                running = sorted(((now - started[futures[f]], futures[f].name) for f in pending if futures[f] in started),
+                                 reverse=True)
+                print("still compiling: " + ", ".join(f"{n} ({took(s)})" for s, n in running[:6]), flush=True)
+                quiet_since = now
     if errors:
         print("\n".join(errors), file=sys.stderr)
         print(f"{len(errors)} file(s) failed", file=sys.stderr)
@@ -283,6 +312,8 @@ def main(argv: list[str] | None = None) -> int:
             for dll in deps.SL_DLLS:
                 (exe.parent / dll).unlink(missing_ok=True)
     progress.report("link", 0, 1)
+    print(f"linking {len(objs)} objects into {exe.name}", flush=True)
+    t_link = time.time()
     # the ~270 objects go in a response file: in a deep folder (an install path) the command line would pass
     # Windows' 32,767-character limit. Forward slashes and quotes: clang reads it with GNU quoting rules.
     rsp = objdir / "link.rsp"
@@ -292,6 +323,7 @@ def main(argv: list[str] | None = None) -> int:
     if link.returncode != 0:
         print(f"link failed:\n{link.stderr[-3000:]}", file=sys.stderr)
         return 1
+    print(f"linked {exe.name} ({time.time() - t_link:.0f} s)")
     print(f"built {exe} in {time.time() - t0:.0f} s")
     if not native_shaders(cfg):
         return 1

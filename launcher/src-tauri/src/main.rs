@@ -9,10 +9,11 @@ mod check;
 mod options;
 mod ready;
 
-/// The launcher's own version, for its status bar (decision 0047: the launcher has its own number).
+/// The launcher's version, for its status bar: the repo's VERSION file, the same number as the game and the
+/// download (launcher/package.py), so a release says one number everywhere. Cargo.toml's own stays unused.
 #[tauri::command]
 fn launcher_version() -> String {
-    env!("CARGO_PKG_VERSION").to_string()
+    include_str!("../../../VERSION").trim().to_string()
 }
 
 /// The project's GitHub page in the player's browser. Only this one address: the screens can't open others.

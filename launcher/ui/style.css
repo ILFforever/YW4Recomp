@@ -21,6 +21,8 @@ body { color: var(--ink); font: 400 15px/1.5 var(--body); overflow: hidden; user
   background-image: conic-gradient(var(--lilac-0) 25%, transparent 0 50%, var(--lilac-0) 0 75%, transparent 0);
   background-size: 64px 64px; }
 :focus-visible { outline: 2px solid var(--gold-deep); outline-offset: 3px; }
+/* the ring is for the keyboard: after a mouse click (body.pointer, app.js) the browser can keep it, so hide it */
+body.pointer :focus-visible { outline: none; }
 
 .app { height: 100%; display: flex; flex-direction: column; }
 .bar { flex-shrink: 0; display: flex; align-items: center; gap: 8px; height: 64px; padding: 0 16px 0 28px;
@@ -50,10 +52,16 @@ body { color: var(--ink); font: 400 15px/1.5 var(--body); overflow: hidden; user
 
 /* the setup steps in the top bar */
 .steps-bar { display: flex; gap: 6px; margin: 0 12px 0 0; padding: 0; list-style: none; font: 700 13px/1 var(--display); }
-.steps-bar li { padding: 8px 12px; border-radius: 999px; color: oklch(84% 0.03 300); }
-.steps-bar li.done { color: oklch(92% 0.03 300); }  /* finished: light, with a tick (no gold text) */
-.steps-bar li.done::before { content: "✓ "; }
+/* each step's number in a circle (owner, 2026-11-05): filled = done, the gold pill = now, an empty grey ring = not
+   reached yet */
+.steps-bar li { display: flex; align-items: center; gap: 8px; padding: 6px 12px 6px 6px; border-radius: 999px;
+  color: oklch(64% 0.04 300); }
+.steps-bar .n { display: grid; place-items: center; width: 22px; height: 22px; border-radius: 50%;
+  border: 1.5px solid oklch(52% 0.05 300); font-size: 12px; }
+.steps-bar li.done { color: oklch(92% 0.03 300); }
+.steps-bar li.done .n { border-color: transparent; background: oklch(90% 0.04 300); color: var(--violet-deep); }
 .steps-bar li.now { background: var(--gold); color: var(--violet-deep); }
+.steps-bar li.now .n { border-color: transparent; background: var(--violet-deep); color: var(--gold); }
 
 /* a setup screen: its content, then a footer with Back and the next step */
 .screen.setup { flex: 1; min-height: 0; display: flex; flex-direction: column; }
@@ -156,16 +164,25 @@ body { color: var(--ink); font: 400 15px/1.5 var(--body); overflow: hidden; user
 
 /* screen 4: the overall progress on the left, the steps on the right */
 .build-body { flex-direction: row; gap: 28px; align-items: flex-start; }
-.build-left { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 18px; }
+/* the progress on a white card, so the small text and the bar don't sit on the checkerboard; it takes the
+   screen's height so the details log can fill what's left */
+.build-left { flex: 1; min-width: 0; align-self: stretch; display: flex; flex-direction: column; gap: 18px;
+  padding: 24px 28px; border-radius: 16px; background: var(--white); border: 1px solid var(--lilac-3);
+  box-shadow: 0 10px 30px oklch(30% 0.08 295 / .12); }
+.build-left h1 { margin-top: 0; }
 .big-progress { display: flex; flex-direction: column; gap: 10px; }
 .pct-row { display: flex; align-items: baseline; gap: 14px; color: var(--ink-2); }
 .pct { font: 800 46px/1 var(--display); color: var(--violet); }
-.bar-track { height: 14px; border-radius: 999px; background: var(--lilac-2); overflow: hidden; }
+.bar-track { height: 14px; border-radius: 999px; background: oklch(86% 0.05 305); overflow: hidden; }
 .bar-fill { height: 100%; width: 0; border-radius: 999px; background: var(--gold); transition: width .3s; }
 .now-line { margin: 0; font-size: 13px; color: var(--ink-2); min-height: 1.5em; }
 #log-toggle { align-self: flex-start; }
-.log { margin: 0; height: 170px; overflow: auto; padding: 12px 14px; border-radius: 12px; background: var(--violet-deep);
-  color: oklch(88% 0.03 300); font: 12px/1.55 ui-monospace, Consolas, monospace; white-space: pre-wrap; user-select: text; }
+/* the details: the rest of the card's height; long lines (addresses) wrap; scrolls with the wheel, no scrollbars */
+.log { margin: 0; flex: 1; min-height: 170px; overflow-x: hidden; overflow-y: auto; padding: 12px 14px;
+  border-radius: 12px; background: var(--violet-deep); color: oklch(88% 0.03 300);
+  font: 12px/1.55 ui-monospace, Consolas, monospace; white-space: pre-wrap; overflow-wrap: anywhere; user-select: text;
+  scrollbar-width: none; }
+.log::-webkit-scrollbar { display: none; }
 .build-steps { width: 340px; flex-shrink: 0; margin: 0; padding: 14px 18px; list-style: none; border-radius: 14px;
   background: var(--white); border: 1px solid var(--lilac-3); }
 .build-steps li { display: grid; grid-template-columns: 28px minmax(0, 1fr); align-items: center; gap: 12px; padding: 9px 0;

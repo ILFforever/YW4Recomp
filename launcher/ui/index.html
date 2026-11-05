@@ -29,8 +29,11 @@
   <header class="bar" data-tauri-drag-region>
     <div class="brand" data-tauri-drag-region>YW4 Recomp</div>
     <ol class="steps-bar" id="steps-bar" data-tauri-drag-region hidden>
-      <li data-tauri-drag-region data-step="files">1 Game files</li><li data-tauri-drag-region data-step="check">2 Check</li><li data-tauri-drag-region data-step="options">3 Options</li>
-      <li data-tauri-drag-region data-step="build">4 Build</li><li data-tauri-drag-region data-step="play">5 Play</li>
+      <li data-tauri-drag-region data-step="files"><span class="n" data-tauri-drag-region>1</span>Game files</li>
+      <li data-tauri-drag-region data-step="check"><span class="n" data-tauri-drag-region>2</span>Check</li>
+      <li data-tauri-drag-region data-step="options"><span class="n" data-tauri-drag-region>3</span>Options</li>
+      <li data-tauri-drag-region data-step="build"><span class="n" data-tauri-drag-region>4</span>Build</li>
+      <li data-tauri-drag-region data-step="play"><span class="n" data-tauri-drag-region>5</span>Play</li>
     </ol>
     <button class="icon-btn" type="button" id="github" aria-label="GitHub" title="GitHub">
       <svg width="22" height="22" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 2a10 10 0 0 0-3.16 19.49c.5.09.68-.22.68-.48v-1.7c-2.78.6-3.37-1.34-3.37-1.34-.45-1.16-1.11-1.47-1.11-1.47-.91-.62.07-.6.07-.6 1 .07 1.53 1.03 1.53 1.03.9 1.52 2.34 1.08 2.91.83.09-.65.35-1.08.63-1.33-2.22-.25-4.55-1.11-4.55-4.94 0-1.09.39-1.98 1.03-2.68-.1-.25-.45-1.27.1-2.65 0 0 .84-.27 2.75 1.02a9.5 9.5 0 0 1 5 0c1.91-1.29 2.75-1.02 2.75-1.02.55 1.38.2 2.4.1 2.65.64.7 1.03 1.59 1.03 2.68 0 3.84-2.34 4.69-4.57 4.93.36.31.68.92.68 1.85v2.74c0 .27.18.58.69.48A10 10 0 0 0 12 2z"/></svg>
@@ -163,12 +166,12 @@
         <dl class="summary">
           <dt>Download</dt><dd id="sum-download"></dd>
           <dt>Disk needed</dt><dd id="sum-disk"></dd>
-          <dt>Build time</dt><dd>About 6 minutes</dd>
+          <dt>Build time</dt><dd>About 10 minutes</dd>
         </dl>
       </aside>
     </div>
     <div class="setup-foot">
-      <button class="btn" type="button" data-go="check">Back</button>
+      <button class="btn" type="button" id="options-back">Back</button>
       <span class="foot-note" id="options-note"></span>
       <button class="btn primary" type="button" id="build-go">Build my game</button>
     </div>
@@ -217,7 +220,7 @@
           <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M7 4.5v15l13-7.5z"/></svg>
           Play
         </button>
-        <button class="btn primary play-opts" type="button" id="to-options" aria-label="Options and rebuild" title="Options and rebuild">
+        <button class="btn primary play-opts" type="button" id="to-options" aria-label="Settings" title="Settings">
           <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg>
         </button>
       </div>
@@ -228,6 +231,7 @@
         <button class="side-row" type="button" data-open="save"><b>Saves</b><span>Open folder</span></button>
         <button class="side-row" type="button" data-open="logs"><b>Logs</b><span>Open folder</span></button>
         <button class="side-row" type="button" id="free-btn"><b>Free up space</b><span id="row-free"></span></button>
+        <button class="side-row" type="button" id="rebuild-btn"><b>Rebuild</b><span>Change downloads</span></button>
       </div>
     </aside>
 
