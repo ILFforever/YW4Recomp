@@ -352,7 +352,7 @@ document.querySelectorAll('.radio[data-saves]').forEach((b) => b.addEventListene
 $('build-go').addEventListener('click', () => {
   if (spaceFree && spaceFree.free < diskNeeded()) return;
   show('build');
-  startBuild();
+  startBuild(optionsFromPlay ? 'rebuild' : 'first');
 });
 
 // ---- 4 · Build: the steps come from the game code (tools.yw4.build_install, decision 0054): its "@steps" list
@@ -439,10 +439,12 @@ function logLine(line) {
   log.scrollTop = log.scrollHeight;
 }
 
-async function startBuild() {
-  build = { steps: [], started: Date.now() };  // the list arrives with the build's first line
-  $('build-title').textContent = 'Building your game';
-  $('build-lead').textContent = 'This happens once. You can minimise this window.';
+// kind: 'first' (setup), 'update' (a game update's rebuild) or 'rebuild' (other downloads); "Build again" keeps it
+async function startBuild(kind = build ? build.kind : 'first') {
+  build = { steps: [], started: Date.now(), kind };  // the list arrives with the build's first line
+  $('build-title').textContent = kind === 'first' ? 'Building your game' : 'Updating your game';
+  $('build-lead').textContent = kind === 'first' ? 'This happens once. You can minimise this window.'
+    : 'Your saves stay as they are. You can minimise this window.';
   $('build-now').textContent = '';
   $('build-eta').textContent = '';
   $('build-note').textContent = '';
@@ -739,7 +741,7 @@ async function showUpdates(info) {
         choicesFromInstall();
         await loadOptions();
         show('build');
-        startBuild();
+        startBuild('update');
       }, u.rebuild_notes);
   } else if (u.game) {
     askUpdate('game ' + u.game.version, `Game update ${u.game.version}`,
@@ -835,7 +837,7 @@ $('welcome-close').addEventListener('click', closeWelcome);
     if (screen === 'check') { show('check'); runCheck(); return; }
     await loadOptions();  // the graphics card decides DLSS
     show('build');
-    startBuild();
+    startBuild('first');
     return;
   }
   if (screen === 'files-ready') {  // screenshots of the ready state: example paths, nothing real is read
