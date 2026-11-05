@@ -121,6 +121,11 @@ pub fn dlc_index_of(path: &Path) -> Option<u32> {
     dlc_index(path, &target())
 }
 
+/// An add-on's title ID from its index: the application's + 0x1000 + index (target.toml).
+pub fn dlc_title_id(index: u32) -> String {
+    format!("{:016X}", target().app + 0x1000 + index as u64)
+}
+
 pub fn folder_size(dir: &Path) -> (u64, u64) {
     folder_bytes(dir)
 }

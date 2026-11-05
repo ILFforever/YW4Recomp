@@ -619,7 +619,26 @@ function renderModsDlc(info) {
   if (info.mods.length) for (const m of info.mods) mods.append(chip(m));
   else { const li = chip('None. Put mods in the mods folder.'); li.className = 'none'; mods.append(li); }
   $('row-mods').textContent = info.mods.length === 1 ? info.mods[0] : info.mods.length ? `${info.mods.length} mods` : 'None';
-  $('dlc-line').textContent = info.dlc ? `${info.dlc} add-ons, checked.` : 'None. Put DLC NSPs in the DLC folder.';
+  const dlcs = $('dlc-list');
+  dlcs.textContent = '';
+  for (const d of info.dlcList) {
+    const li = document.createElement('li');
+    li.className = 'dlc-row';
+    const name = document.createElement('b');
+    name.textContent = d.index === null ? d.file : `Add-on ${d.index}`;
+    if (d.index !== null) {
+      const id = document.createElement('code');
+      id.textContent = d.id;
+      li.append(name, id);
+    } else {
+      li.append(name);
+    }
+    const state = document.createElement('span');
+    state.textContent = d.index === null ? 'Not recognised: the game leaves it out' : 'Checked';
+    li.append(state);
+    dlcs.append(li);
+  }
+  if (!info.dlcList.length) { const li = chip('None. Put DLC NSPs in the DLC folder.'); li.className = 'none'; dlcs.append(li); }
   $('row-dlc').textContent = info.dlc ? `${info.dlc} checked` : 'None';
 }
 document.querySelectorAll('[data-refresh]').forEach((b) => b.addEventListener('click', async () => {

@@ -69,10 +69,20 @@ fn dir_size(p: &Path) -> u64 {
     crate::check::folder_size(p).0
 }
 
+/// One NSP in data\dlc. The add-ons hold no name we can read, so a checked one is its index and title ID.
+#[derive(Serialize)]
+pub struct DlcItem {
+    index: Option<u32>,       // None: the file isn't a known add-on (the game will leave it out)
+    id: Option<String>,       // title ID
+    file: String,
+}
+
 #[derive(Serialize)]
 pub struct Info {
     version: String,          // yw4 --version
     dlc: usize,               // checked add-ons in data\dlc
+    #[serde(rename = "dlcList")]
+    dlc_list: Vec<DlcItem>,   // every NSP there: the checked ones by index, then the others
     mods: Vec<String>,        // mod folders in mods\ (Atmosphère's layout or plain)
     icon: Option<String>,     // the game's icon, from the player's own files (the build makes it)
     shots: Vec<String>,       // screenshots, newest first (at most SHOTS)
@@ -148,8 +158,17 @@ pub async fn install_info(install: String) -> Info {
     tauri::async_runtime::spawn_blocking(move || {
         let inst = PathBuf::from(&install);
         let version = game_version(&exe(&install));
-        let dlc = std::fs::read_dir(inst.join("data").join("dlc")).into_iter().flatten().flatten()
-            .filter(|e| crate::check::dlc_index_of(&e.path()).is_some()).count();
+        let mut dlc_list: Vec<DlcItem> = std::fs::read_dir(inst.join("data").join("dlc")).into_iter().flatten().flatten()
+            .map(|e| e.path())
+            .filter(|p| p.extension().map_or(false, |x| x.eq_ignore_ascii_case("nsp")))
+            .map(|p| {
+                let index = crate::check::dlc_index_of(&p);
+                DlcItem { index, id: index.map(crate::check::dlc_title_id),
+                          file: p.file_name().unwrap_or_default().to_string_lossy().into_owned() }
+            })
+            .collect();
+        dlc_list.sort_by(|a, b| (a.index.is_none(), a.index, &a.file).cmp(&(b.index.is_none(), b.index, &b.file)));
+        let dlc = dlc_list.iter().filter(|d| d.index.is_some()).count();
         let mut shots: Vec<(std::time::SystemTime, PathBuf)> = std::fs::read_dir(inst.join("screenshots")).into_iter().flatten().flatten()
             .filter(|e| e.path().extension().map_or(false, |x| x.eq_ignore_ascii_case("bmp") || x.eq_ignore_ascii_case("png")))
             .map(|e| (e.metadata().and_then(|m| m.modified()).unwrap_or(std::time::UNIX_EPOCH), e.path()))
@@ -162,7 +181,7 @@ pub async fn install_info(install: String) -> Info {
         let icon = [dir.join("icon.jpg"), dir.join("yw4.ico")].into_iter().find(|p| p.is_file()).map(|p| p.display().to_string());
         let reclaimable = reclaim_dirs(&inst).iter().map(|d| dir_size(d)).sum();
         let played = load_played(&install);
-        Info { version, dlc, mods: mod_names(&inst.join("mods")), icon, shots, shot_count, reclaimable,
+        Info { version, dlc, dlc_list, mods: mod_names(&inst.join("mods")), icon, shots, shot_count, reclaimable,
                last_played: played.last_played, play_secs: played.seconds }
     })
     .await

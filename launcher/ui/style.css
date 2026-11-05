@@ -276,6 +276,10 @@ p.list-card { padding: 14px 18px; }
 .list-card li { padding: 11px 0; border-top: 1px solid var(--lilac-2); }
 .list-card li:first-child { border-top: 0; }
 .list-card li.none, p.list-card { color: var(--ink-2); }
+.dlc-row { display: flex; align-items: baseline; gap: 12px; }
+.dlc-row b { font-weight: 700; overflow-wrap: anywhere; }
+.dlc-row code { font: 12px ui-monospace, Consolas, monospace; color: var(--ink-2); }
+.dlc-row span { margin-left: auto; flex: none; color: var(--ink-2); }
 .file-list { margin: 0 0 12px; padding: 10px 12px 10px 28px; border-radius: 10px; background: var(--lilac-0);
   font: 12px/1.7 ui-monospace, Consolas, monospace; color: var(--ink-2); max-height: 180px; overflow: auto; overflow-wrap: anywhere; }
 #originals-dlg, #free { width: 520px; }
