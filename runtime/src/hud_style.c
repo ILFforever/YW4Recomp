@@ -13,10 +13,16 @@
 #include <string.h>
 
 #include "hud.h"
+#include "theme.h"
 #include "ui.h"
 
-enum { TEXT = 0xfdfcfe, LABEL = 0xd9cdea, GOOD = 0x7fe0a0, WARN = 0xf0c060, BAD = 0xff8a8a, CARD = 0x2a1b4c,
-       PLOT = 0x3e2a6e, TARGET = 0xc6b2da };
+/* the card's colours follow the theme (theme.h); the numbers' traffic-light colours stay the same in every theme */
+enum { GOOD = 0x7fe0a0, WARN = 0xf0c060, BAD = 0xff8a8a };
+#define TEXT (theme_colors()->hud_text)
+#define LABEL (theme_colors()->hud_label)
+#define CARD (theme_colors()->hud_card)
+#define PLOT (theme_colors()->hud_plot)
+#define TARGET (theme_colors()->hud_target)
 
 /* the fonts: numbers, and the small words between them */
 enum { NUM = UI_ROUNDED_700, WORD = UI_GOTHIC_700 };

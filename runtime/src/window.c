@@ -1107,7 +1107,9 @@ static int overlay_background(uint32_t bw, uint32_t bh) {
 }
 
 static void menu_draw(VkImage dst, int32_t x0, int32_t y0, uint32_t bw, uint32_t bh) {
-    if (!gamemenu_open() || settings_open() || overlay_background(bw, bh)) return;
+    if (!gamemenu_open() || settings_open()) return;
+    int pv = gamemenu_previewing();  /* Preview: only its bar, over the live picture (no kept picture needed) */
+    if (!pv && overlay_background(bw, bh)) return;
     if (ov.img.image && (ov.img.w != bw || ov.img.h != bh)) {  /* the window changed size */
         vkDeviceWaitIdle(vk.device);
         vkDestroyImage(vk.device, ov.img.image, NULL), vkFreeMemory(vk.device, ov.img.image_mem, NULL);
@@ -1121,15 +1123,21 @@ static void menu_draw(VkImage dst, int32_t x0, int32_t y0, uint32_t bw, uint32_t
     }
     uint64_t now = SDL_GetTicks();
     uint32_t look = gamemenu_look(now);
+    if (pv) look ^= 0x80000000u | (uint32_t)(now / 500) << 20;  /* the bar's frame rate, twice a second */
     if (!ov.uploaded || look != ov.look) {  /* draw it again: on the CPU, then one copy into the upload buffer */
         if (!ov.px && !(ov.px = malloc((size_t)bw * bh * 4))) return;
-        memcpy(ov.px, ov.bg, (size_t)bw * bh * 4);
+        if (!pv) memcpy(ov.px, ov.bg, (size_t)bw * bh * 4);  /* the bar is opaque: drawn over anything */
         UiCanvas c = {ov.px, (int)bw, (int)bh, (float)bh / 900.0f, 0, 0};
         const char *close = "Esc";
         GameMenuInfo info = {hud_enabled(), yw4_version, pad_hints(&close), close, NULL, 0, 0, now};
         info.logo = game_logo(&info.logo_w, &info.logo_h);
         info.pad_name = pad_name();
-        info.picture = ov.bg, info.picture_w = (int)bw, info.picture_h = (int)bh;
+        info.picture = pv ? NULL : ov.bg, info.picture_w = (int)bw, info.picture_h = (int)bh;
+        if (pv) {
+            static HudContent hc;
+            yw4_perf_hud(&hc, 1, 0);
+            info.fps = hc.fps, info.shown_fps = hc.shown_fps;
+        }
         gamemenu_draw(&c, &info);
         memcpy(ov.img.ptr, ov.px, (size_t)bw * bh * 4);
         barrier(ov.img.image, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 0, VK_ACCESS_TRANSFER_WRITE_BIT);
@@ -1141,19 +1149,29 @@ static void menu_draw(VkImage dst, int32_t x0, int32_t y0, uint32_t bw, uint32_t
     }
     barrier(dst, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_ACCESS_TRANSFER_WRITE_BIT,
             VK_ACCESS_TRANSFER_WRITE_BIT);
+    int32_t rx = 0, ry = 0, rw = (int32_t)bw, rh = (int32_t)bh;  /* the part shown: all, or the preview's bar */
+    if (pv) {
+        float r[4], s = (float)bh / 900.0f;
+        gamemenu_preview_rect(r);
+        rx = (int32_t)(r[0] * s), ry = (int32_t)(r[1] * s), rw = (int32_t)(r[2] * s + 0.5f), rh = (int32_t)(r[3] * s + 0.5f);
+        if (rx < 0) rx = 0;
+        if (ry < 0) ry = 0;
+        if (rx + rw > (int32_t)bw) rw = (int32_t)bw - rx;
+        if (ry + rh > (int32_t)bh) rh = (int32_t)bh - ry;
+        if (rw <= 0 || rh <= 0) return;
+    }
     VkImageBlit blit = {.srcSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1},
-                        .srcOffsets = {{0, 0, 0}, {(int32_t)bw, (int32_t)bh, 1}},
+                        .srcOffsets = {{rx, ry, 0}, {rx + rw, ry + rh, 1}},
                         .dstSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1},
-                        .dstOffsets = {{x0, y0, 0}, {x0 + (int32_t)bw, y0 + (int32_t)bh, 1}}};
+                        .dstOffsets = {{x0 + rx, y0 + ry, 0}, {x0 + rx + rw, y0 + ry + rh, 1}}};
     vkCmdBlitImage(cmd, ov.img.image, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, dst, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1,
                    &blit, VK_FILTER_NEAREST);  /* a blit: the window's format may order the channels differently */
 }
 
 /* A notice in the middle of the picture: "Switching frame generation" while the switch's safe frames last
- * (gpu_fg.h), "Paused" while the overlay's pause shows the kept picture. */
+ * (gpu_fg.h). F4's test pause shows none (owner, 2026-11-06: the picture stays clean). */
 static void notice_draw(VkImage dst, int32_t x0, int32_t y0, uint32_t bw, uint32_t bh) {
-    const char *msg = paused_view && !gamemenu_open() ? "PAUSED (F4 TO RESUME)"
-                      : gpu_fg_switching() ? "SWITCHING FRAME GENERATION..." : NULL;
+    const char *msg = gpu_fg_switching() ? "SWITCHING FRAME GENERATION..." : NULL;
     if (!msg || overlay_resources(&notice)) return;
     float s = overlay_scale(swap_extent.height);
     int w, h;
@@ -1204,10 +1222,17 @@ static void hud_onto(uint8_t *rgba, uint32_t w, uint32_t h) {
     static int shot_menu = -1;
     if (shot_menu < 0) shot_menu = getenv("YW4_SHOT_MENU") != NULL;
     if (!shot_menu || !gamemenu_open() || settings_open() || !ov.px || !ov.uploaded) return;
+    /* the part shown: all, or in the preview only its bar (the rest of ov.px is an older drawing), as menu_draw */
+    float r[4] = {0, 0, (float)ov.img.w * 900.0f / (float)ov.img.h, 900};
+    if (gamemenu_previewing()) gamemenu_preview_rect(r);
+    float k = (float)h / 900.0f;  /* design units to the frame's pixels */
     for (uint32_t y = 0; y < h; y++)  /* the overlay's picture (the window's size) scaled to the frame's */
-        for (uint32_t x = 0; x < w; x++)
+        for (uint32_t x = 0; x < w; x++) {
+            if ((float)x < r[0] * k || (float)x >= (r[0] + r[2]) * k || (float)y < r[1] * k || (float)y >= (r[1] + r[3]) * k)
+                continue;
             memcpy(rgba + ((size_t)y * w + x) * 4,
                    ov.px + ((size_t)(y * ov.img.h / h) * ov.img.w + x * ov.img.w / w) * 4, 4);
+        }
 }
 
 /* DLSS frame generation's HUD-less copy at the window's size and format (made again when either changes). */
@@ -1777,7 +1802,9 @@ static void panel_pad_button(SDL_GamepadButton button) {
                    {nin ? SDL_GAMEPAD_BUTTON_SOUTH : SDL_GAMEPAD_BUTTON_EAST, GM_BACK, "M_BACK"},
                    {SDL_GAMEPAD_BUTTON_LEFT_SHOULDER, GM_PREV, "M_PREV"},
                    {SDL_GAMEPAD_BUTTON_RIGHT_SHOULDER, GM_NEXT, "M_NEXT"},
-                   {nin ? SDL_GAMEPAD_BUTTON_NORTH : SDL_GAMEPAD_BUTTON_WEST, GM_CLEAR, "M_CLEAR"}};
+                   {nin ? SDL_GAMEPAD_BUTTON_NORTH : SDL_GAMEPAD_BUTTON_WEST, GM_CLEAR, "M_CLEAR"},
+                   /* Y (Triangle): Preview on the Settings page, its bar hidden or shown in it */
+                   {nin ? SDL_GAMEPAD_BUTTON_WEST : SDL_GAMEPAD_BUTTON_NORTH, GM_ALT, "M_ALT"}};
         for (size_t i = 0; i < sizeof map / sizeof *map; i++)
             if (button == map[i].button) gamemenu_action(map[i].action), yw4_hid_note_key(map[i].name);
         return;
@@ -2069,7 +2096,8 @@ void window_run(void (*guest)(void *), void *arg) {
                               {SDLK_RETURN, GM_ACCEPT, "M_OK"},  {SDLK_KP_ENTER, GM_ACCEPT, "M_OK"},
                               {SDLK_SPACE, GM_ACCEPT, "M_OK"},   {SDLK_BACKSPACE, GM_BACK, "M_BACK"},
                               {SDLK_ESCAPE, GM_BACK, "M_BACK"},  {SDLK_DELETE, GM_CLEAR, "M_CLEAR"},
-                              {SDLK_Q, GM_PREV, "M_PREV"},       {SDLK_E, GM_NEXT, "M_NEXT"}};
+                              {SDLK_Q, GM_PREV, "M_PREV"},       {SDLK_E, GM_NEXT, "M_NEXT"},
+                              {SDLK_P, GM_ALT, "M_ALT"},         {SDLK_H, GM_ALT, "M_ALT"}};  /* Preview; its bar */
                     for (size_t i = 0; i < sizeof mk / sizeof *mk; i++)
                         if (k == mk[i].key) gamemenu_action(mk[i].action), yw4_hid_note_key(mk[i].name);
                 }

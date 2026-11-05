@@ -8,6 +8,7 @@
 #include "gamemenu.h"
 #include "bindings.h"
 #include "settings.h"
+#include "theme.h"
 #include "window.h"
 
 static int open_, sel, confirm, choice;
@@ -19,8 +20,13 @@ static uint32_t changes;      /* counts every change of what shows */
 static int toast_wanted;      /* the note (Report a bug: coming soon) starts at the next look */
 static uint64_t toast_until;  /* ms */
 static int hover_kind = -1, hover_a, hover_b;  /* what the mouse is over (HIT_*, -1 nothing), for the hover looks */
+static int ctrl_first, ctrl_rows, ctrl_visible;  /* the Controls table: its first row shown, rows, rows that fit */
+static int preview, preview_hidden;  /* Preview: the game runs under the bar; the bar hidden (only its chip shows) */
+static float pv_rect[4];             /* the part of the overlay the window shows while previewing (design units) */
 
 int gamemenu_open(void) { return __atomic_load_n(&open_, __ATOMIC_ACQUIRE); }
+int gamemenu_previewing(void) { return __atomic_load_n(&preview, __ATOMIC_ACQUIRE); }
+void gamemenu_preview_rect(float r[4]) { memcpy(r, pv_rect, sizeof pv_rect); }
 int gamemenu_selected(void) { return sel; }
 int gamemenu_confirming(void) { return confirm; }
 
@@ -36,6 +42,7 @@ static void close_and_resume(void) {
     if (settings_open()) settings_toggle();
     bindings_cancel();
     confirm = 0, focus = 0;
+    __atomic_store_n(&preview, 0, __ATOMIC_RELEASE);  /* the overlay button in the preview: the game runs on */
     __atomic_store_n(&open_, 0, __ATOMIC_RELEASE);
     if (window_paused()) window_pause_toggle();
     changed();
@@ -65,6 +72,62 @@ static void accept(void) {
     }
 }
 
+/* Preview: the graphics sections only (Advanced has nothing to see) */
+static int previewable(const char *category) { return strcmp(category, "ADVANCED") != 0; }
+
+static int can_preview(void) {  /* the Settings page's chosen section has something to see */
+    SettingRow rows[32];
+    int n = settings_player_rows(rows, 32);
+    return n > 0 && previewable(rows[srow < n ? srow : n - 1].category);
+}
+
+static void preview_start(void) {
+    SettingRow rows[32];
+    int n = settings_player_rows(rows, 32);
+    if (n <= 0) return;
+    if (srow >= n) srow = n - 1;
+    if (!previewable(rows[srow].category)) return;
+    preview_hidden = 0, focus = 1, in_rows = 1;
+    __atomic_store_n(&preview, 1, __ATOMIC_RELEASE);
+    if (window_paused()) window_pause_toggle();  /* the game runs behind the bar (the player's input held back) */
+    fprintf(stderr, "yw4: overlay: preview\n");
+}
+
+static void preview_stop(void) {
+    __atomic_store_n(&preview, 0, __ATOMIC_RELEASE);
+    if (!window_paused()) window_pause_toggle();  /* paused again: a new picture kept for the overlay */
+    fprintf(stderr, "yw4: overlay: preview ends\n");
+}
+
+/* in the preview: Up / Down the section's rows, Left / Right (Enter) change, PREV / NEXT the graphics sections,
+ * ALT hides or shows the bar, Back returns to the Settings page */
+static void preview_action(int a) {
+    SettingRow rows[32];
+    int n = settings_player_rows(rows, 32);
+    if (n <= 0) return;
+    if (srow >= n) srow = n - 1;
+    int first = srow, last = srow;
+    while (first > 0 && !strcmp(rows[first - 1].category, rows[srow].category)) first--;
+    while (last < n - 1 && !strcmp(rows[last + 1].category, rows[srow].category)) last++;
+    if (a == GM_UP && srow > first) srow--;
+    else if (a == GM_DOWN && srow < last) srow++;
+    else if (a == GM_LEFT || a == GM_RIGHT) settings_change(srow, a == GM_RIGHT ? 1 : -1);
+    else if (a == GM_ACCEPT) settings_change(srow, 1);
+    else if (a == GM_ALT) preview_hidden ^= 1;
+    else if (a == GM_BACK || a == GM_LEAVE) preview_stop();
+    else if (a == GM_PREV) {  /* the graphics section before, its first row */
+        int r = first - 1;
+        while (r >= 0 && !previewable(rows[r].category)) r--;
+        if (r < 0) return;
+        while (r > 0 && !strcmp(rows[r - 1].category, rows[r].category)) r--;
+        srow = r;
+    } else if (a == GM_NEXT) {
+        int r = last + 1;
+        while (r < n && !previewable(rows[r].category)) r++;
+        if (r < n) srow = r;
+    }
+}
+
 /* the settings page: rows run on from one section into the next; PREV / NEXT jump to a section's first row */
 static void settings_page_action(int a) {
     SettingRow rows[32];
@@ -73,6 +136,10 @@ static void settings_page_action(int a) {
     if (srow >= n) srow = n - 1;
     int first = srow;  /* this section's first row */
     while (first > 0 && !strcmp(rows[first - 1].category, rows[srow].category)) first--;
+    if (a == GM_ALT) {  /* Preview, from the sections or the rows */
+        preview_start();
+        return;
+    }
     if (!in_rows) {  /* the sections: Up / Down choose one, Right / Enter go into its rows, Back to the side panel */
         if (a == GM_UP || a == GM_PREV) a = GM_PREV;
         else if (a == GM_DOWN || a == GM_NEXT) a = GM_NEXT;
@@ -80,7 +147,7 @@ static void settings_page_action(int a) {
             in_rows = 1;
             return;
         } else if (a == GM_BACK || a == GM_LEAVE) {
-            focus = 0;
+            focus = 0, sel = GM_RESUME;  /* back on the side panel: Resume chosen (owner) */
             return;
         } else return;
     }
@@ -110,7 +177,7 @@ static void controls_page_action(int a) {
                               [GM_RIGHT] = SETTINGS_RIGHT, [GM_ACCEPT] = SETTINGS_ACCEPT, [GM_CLEAR] = SETTINGS_CLEAR};
     if (a == GM_BACK || a == GM_LEAVE) {
         bindings_cancel();
-        focus = 0;
+        focus = 0, sel = GM_RESUME;
     } else if (a == GM_UP || a == GM_DOWN || a == GM_LEFT || a == GM_RIGHT || a == GM_ACCEPT || a == GM_CLEAR) {
         bindings_action(map[a]);
     }
@@ -122,7 +189,7 @@ static const int perf_modes[3] = {0, 2, 1};  /* the chips' order: Off, Compact, 
 
 static void perf_page_action(int a) {
     if (a == GM_BACK || a == GM_LEAVE) {
-        focus = 0;
+        focus = 0, sel = GM_RESUME;
         return;
     }
     if (a == GM_PREV || a == GM_NEXT) return;
@@ -164,6 +231,10 @@ void gamemenu_action(int a) {
         }
         return;
     }
+    if (preview) {
+        preview_action(a);
+        return;
+    }
     if (focus) {
         if (sel == GM_CONTROLS) controls_page_action(a);
         else if (sel == GM_PERF) perf_page_action(a);
@@ -183,7 +254,7 @@ void gamemenu_refresh(void) { changed(); }
  * thread reads: two lists, the drawing fills the one not being read, then swaps. */
 
 enum { HIT_SIDE, HIT_SECTION, HIT_ROW, HIT_ROW_PREV, HIT_ROW_NEXT, HIT_BIND, HIT_MODE, HIT_CORNER, HIT_CORNER_BOX,
-       HIT_PART, HIT_SLIDER, HIT_POPUP, HIT_HINT, HIT_BIND_STEP };
+       HIT_PART, HIT_SLIDER, HIT_POPUP, HIT_HINT, HIT_BIND_STEP, HIT_PREVIEW };
 #define HINT_CLOSE (-1)  /* a key hint's action: close the overlay */
 typedef struct {
     float x, y, w, h;
@@ -270,6 +341,9 @@ void gamemenu_mouse(float x, float y, int button) {
         if (h.a == HINT_CLOSE) close_and_resume();
         else gamemenu_action(h.a);
         return;
+    case HIT_PREVIEW:  /* the Settings page's Preview button */
+        if (click) preview_start(), changed();
+        return;
     case HIT_BIND_STEP:  /* a value's arrows on the controls page: b -1 or 1, as Left / Right */
         focus = 1, bindings_select(h.a, -1);
         if (click) bindings_action(h.b < 0 ? SETTINGS_LEFT : SETTINGS_RIGHT);
@@ -279,19 +353,58 @@ void gamemenu_mouse(float x, float y, int button) {
 }
 
 void gamemenu_wheel(int dy) {
-    if (!gamemenu_open() || settings_open() || bindings_capturing() || confirm) return;
-    gamemenu_action(dy > 0 ? GM_UP : GM_DOWN);
+    /* only a page that scrolls takes the wheel (the Controls table): its rows shown, one a notch; elsewhere it does
+     * nothing (owner, 2026-11-06: the wheel scrolls, it doesn't choose) */
+    if (!gamemenu_open() || settings_open() || bindings_capturing() || confirm || sel != GM_CONTROLS) return;
+    if (ctrl_visible <= 0 || ctrl_rows <= ctrl_visible) return;  /* not drawn yet, or it all fits */
+    int f = ctrl_first + (dy > 0 ? -1 : 1);  /* one row a notch (owner: no fast scroll) */
+    if (f > ctrl_rows - ctrl_visible) f = ctrl_rows - ctrl_visible;
+    if (f < 0) f = 0;
+    ctrl_first = f;
+    /* the chosen row stays among the ones shown (else the drawing would scroll back to it) */
+    static BindRow rows[64];
+    char help[8];
+    int row, col;
+    bindings_rows(rows, 64, &row, &col, help, sizeof help);
+    if (row < f) bindings_select(f, -1);
+    else if (row >= f + ctrl_visible) bindings_select(f + ctrl_visible - 1, -1);
+    hover_kind = -1;
+    changed();
 }
 
 /* ---- the look (Main.dc.html) */
 
-enum {
-    INK = 0x2b2338, NIGHT = 0x2a1b4c, PLUM = 0x3e2a6e, PAPER = 0xf8f4fc, GOLD = 0xe3be5c, LINE = 0xe2d5ef,
-    WHITE = 0xffffff, SNOW = 0xfdfcfe, LILAC = 0xd9cdea, MUTED = 0x605673, WINE = 0x8c1f3f, SHADE = 0x160e26,
-    /* the launcher's popup colours (style.css, OKLCH converted to sRGB) */
-    POP_DEEP = 0x2b1a4d, POP_GOLD = 0xe1b75c, POP_WHITE = 0xfdfcff, POP_INK = 0x231e33, POP_LILAC = 0xf8f5fd,
-    POP_LINE = 0xe1d5f1, POP_BORDER = 0x312451, POP_SHADOW = 0x0f0028, POP_BACKDROP = 0x1a0a35,
-};
+/* the colours: the chosen theme's (theme.h; the built-in one is the design's), read at each drawing */
+static const Theme *TH;
+#define INK (TH->ink)
+#define NIGHT (TH->night)
+#define PLUM (TH->plum)
+#define PAPER (TH->paper)
+#define GOLD (TH->gold)
+#define RING (TH->ring)
+#define LINE (TH->line)
+#define WHITE (TH->white)
+#define SNOW (TH->snow)
+#define LILAC (TH->lilac)
+#define ON_DARK (TH->on_dark)
+#define MUTED (TH->muted)
+#define WINE (TH->wine)
+#define SHADE (TH->shade)
+#define SOFT (TH->soft)
+#define EDGE (TH->edge)
+#define TAGFILL (TH->tag)
+#define VSOFT (TH->vsoft)
+#define ON_GOLD (TH->on_gold)
+/* the launcher's popup colours (style.css) */
+#define POP_DEEP (TH->pop_deep)
+#define POP_GOLD (TH->pop_gold)
+#define POP_WHITE (TH->pop_white)
+#define POP_INK (TH->pop_ink)
+#define POP_LILAC (TH->pop_lilac)
+#define POP_LINE (TH->pop_line)
+#define POP_BORDER (TH->pop_border)
+#define POP_SHADOW (TH->pop_shadow)
+#define POP_BACKDROP (TH->pop_backdrop)
 
 #define GAME_VERSION "2.2.0"  /* the one build this port runs (CLAUDE.md: the final 4++ update) */
 
@@ -314,13 +427,18 @@ static const char *const ICON_EXIT = "<path d=\"M12 3v9M6.3 6.3a8 8 0 1 0 11.4 0
 static const char *const ICON_PREV = "<path d=\"M14.5 6l-6 6 6 6\"/>";
 static const char *const ICON_NEXT = "<path d=\"M9.5 6l6 6-6 6\"/>";
 static int hovered(int kind, int a, int b) { return hover_kind == kind && hover_a == a && hover_b == b; }
+static const char *const ICON_EYE =
+    "<path d=\"M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12z\"/><circle cx=\"12\" cy=\"12\" r=\"3\"/>";
+/* the pad's button for GM_ALT (Preview, hide the bar): the top face button, Y on Xbox and Switch layouts alike
+ * (window.c maps it), Triangle on PlayStation */
+static const char *alt_button(const GameMenuInfo *in) { return in->pad == 2 ? "Triangle" : "Y"; }
 static const char *const ICON_CLOCK = "<circle cx=\"12\" cy=\"12\" r=\"8\"/><path d=\"M12 7v5l3 2\"/>";
 
 /* A side panel button (tabStyle): 56 high, radius 12, a 2 px border; the chosen one gold. */
 static void side_button(const UiCanvas *c, float x, float y, float w, const char *icon, const char *label, int on,
                         uint32_t ink) {
     ui_box(c, x, y, w, 56, 12, on ? GOLD : WHITE, 2, on ? GOLD : LINE);
-    uint32_t col = on && ink == PLUM ? NIGHT : ink;
+    uint32_t col = on && ink == PLUM ? ON_GOLD : ink;
     ui_icon(c, icon, x + 20, y + 16, 24, 2, col);
     ui_text_in(c, UI_ROUNDED_700, 18, x + 20 + 24 + 14, y, 0, 56, 0, label, col);
 }
@@ -367,7 +485,8 @@ static float hint(const UiCanvas *c, float x, float y, const char *key, const ch
         const char *label;
         int action;
     } acts[] = {{"Back", GM_BACK}, {"Close overlay", HINT_CLOSE}, {"Select", GM_ACCEPT}, {"Open", GM_ACCEPT},
-                {"Change", GM_ACCEPT}, {"Clear", GM_CLEAR}, {"Section", GM_NEXT}};
+                {"Change", GM_ACCEPT}, {"Clear", GM_CLEAR}, {"Section", GM_NEXT}, {"Preview", GM_ALT},
+                {"Hide bar", GM_ALT}, {"Show bar", GM_ALT}, {"Back to settings", GM_BACK}};
     for (size_t i = 0; i < sizeof acts / sizeof *acts; i++)
         if (!strcmp(label, acts[i].label)) hit_add(x - 6, y + 6, kw + 10 + lw + 12, 44, HIT_HINT, acts[i].action, 0);
     return kw + 10 + lw;
@@ -381,7 +500,7 @@ static float popup_button(const UiCanvas *c, float right, float y, const char *l
     float w = ui_text_w(f, 14, label) + 40;
     float x = right - w;
     hit_add(x, y, w, 40, HIT_POPUP, quit, 0);
-    if (on) ui_box(c, x - 4, y - 4, w + 8, 48, 24, GOLD, 0, 0);
+    if (on) ui_box(c, x - 4, y - 4, w + 8, 48, 24, RING, 0, 0);
     if (quit) ui_box(c, x, y, w, 40, 20, WINE, 0, 0);
     else ui_box(c, x, y, w, 40, 20, WHITE, 1, POP_LINE);
     ui_text_in(c, f, 14, x, y, w, 40, 1, label, quit ? SNOW : PLUM);
@@ -507,7 +626,7 @@ static float tag(const UiCanvas *c, float x, float y, const char *label, uint32_
 
 /* The settings page (the design's isSettings section): the sections on the left (the chosen row's lit), its
  * section's rows with the value, its note and arrows, the chosen row's description at the bottom. */
-static void draw_settings_page(const UiCanvas *c) {
+static void draw_settings_page(const UiCanvas *c, const GameMenuInfo *in) {
     SettingRow rows[32];
     int n = settings_player_rows(rows, 32);
     if (n <= 0) return;
@@ -516,14 +635,33 @@ static void draw_settings_page(const UiCanvas *c) {
     char t[160];
     ui_box(c, 448, 40, 1104, 764, 20, PAPER, 0, 0);
     ui_text(c, UI_ROUNDED_800, 34, 488, 76, 34 * 1.25f, "Settings", NIGHT);
+    {  /* Preview, at the right of the title (canvas board "Settings page: the Preview button"): an eye, its name, its
+        * key; greyed where there is nothing to see (Advanced) */
+        int can = previewable(sec);
+        const char *key = in->pad ? alt_button(in) : "P";
+        int tri = !strcmp(key, "Triangle");  /* drawn as its shape */
+        float kw = tri ? 30 : ui_text_w(UI_GOTHIC_700, 13, key) + 18, tw = ui_text_w(UI_ROUNDED_700, 17, "Preview");
+        float bw = 14 + 22 + 10 + tw + 10 + kw + 14, bx = 448 + 1104 - 40 - bw, by = 76 + (34 * 1.25f - 48) / 2;
+        int hv = can && hovered(HIT_PREVIEW, 0, 0);
+        uint32_t ink = can ? PLUM : MUTED;
+        ui_box(c, bx, by, bw, 48, 24, hv ? LILAC : WHITE, 2, can ? PLUM : LINE);
+        ui_icon(c, ICON_EYE, bx + 14, by + 13, 22, 2, ink);
+        ui_text_in(c, UI_ROUNDED_700, 17, bx + 14 + 22 + 10, by, 0, 48, 0, "Preview", ink);
+        float kx = bx + 14 + 22 + 10 + tw + 10;
+        ui_box(c, kx, by + 11, kw, 26, 13, SOFT, 0, 0);
+        if (tri) ui_icon(c, hint_icons[3].icon[0], kx + 7, by + 13, 16, 2.4f, can ? NIGHT : MUTED);
+        else ui_text_in(c, UI_GOTHIC_700, 13, kx, by + 11, kw, 26, 1, key, can ? NIGHT : MUTED);
+        if (can) hit_add(bx, by, bw, 48, HIT_PREVIEW, 0, 0);
+    }
     float top = 76 + 34 * 1.25f + 22, bottom = 40 + 764 - 36;
     /* the sections */
     float y = top;
     for (int i = 0; i < n; i++) {
         if (i && !strcmp(rows[i].category, rows[i - 1].category)) continue;
         int on = !strcmp(rows[i].category, sec);
-        if (on && focus && !in_rows) ui_box(c, 488 - 4, y - 4, 300 + 8, 52 + 8, 15, GOLD, 0, 0);  /* the focus */
-        ui_box(c, 488, y, 300, 52, 12, on ? PLUM : WHITE, 2, on ? PLUM : LINE);
+        if (on && focus && !in_rows) ui_box(c, 488 - 4, y - 4, 300 + 8, 52 + 8, 15, RING, 0, 0);  /* the focus */
+        int hv = !on && hovered(HIT_SECTION, i, 0);  /* under the mouse: lighter lilac, a darker edge */
+        ui_box(c, 488, y, 300, 52, 12, on ? PLUM : hv ? SOFT : WHITE, 2, on ? PLUM : hv ? EDGE : LINE);
         hit_add(488, y, 300, 52, HIT_SECTION, i, 0);
         sentence_case(rows[i].category, t, sizeof t);
         ui_text_wrap(c, UI_GOTHIC_700, 17, 0, 488 + 16, y + 26 - 17 * 1.45f / 2, 300 - 32, 17 * 1.45f, 0, t,
@@ -537,7 +675,7 @@ static void draw_settings_page(const UiCanvas *c) {
         if (strcmp(rows[i].category, sec)) continue;
         const SettingRow *r = &rows[i];
         int on = focus && in_rows && i == cur, off = r->disabled != NULL;
-        ui_box(c, x, y, w, 72, 14, WHITE, on ? 3 : 2, on ? GOLD : LINE);
+        ui_box(c, x, y, w, 72, 14, WHITE, on ? 3 : 2, on ? RING : LINE);
         hit_add(x, y, w, 72, HIT_ROW, i, 0);
         sentence_case(r->name, t, sizeof t);
         ui_text_in(c, UI_GOTHIC_500, 18, x + 20, y, 0, 72, 0, t, off ? MUTED : INK);
@@ -546,12 +684,13 @@ static void draw_settings_page(const UiCanvas *c) {
         for (int k = 0; k < 2; k++) {  /* ‹ and ›; darker under the mouse */
             float bx = k ? nx : px;
             int hv = !off && hovered(k ? HIT_ROW_NEXT : HIT_ROW_PREV, i, 0);
-            ui_box(c, bx, by, 44, 44, 10, hv ? LILAC : 0xefe7f7, 2, hv ? PLUM : LINE);
+            ui_box(c, bx, by, 44, 44, 10, hv ? LILAC : SOFT, 2, hv ? PLUM : LINE);
             ui_icon(c, k ? ICON_NEXT : ICON_PREV, bx + 11, by + 11, 22, 2.4f, off ? MUTED : PLUM);
         }
         const char *value = r->options[r->current] ? r->options[r->current] : "";
         const char *note = r->notes[r->current] ? r->notes[r->current] : "";
-        sentence_case(value, t, sizeof t);
+        if (r->verbatim) snprintf(t, sizeof t, "%s", value);  /* a theme's name, as written */
+        else sentence_case(value, t, sizeof t);
         /* under the value: its tags (Switch default, Recommended), then the rest of its note as a sentence */
         char rest[200], prose[200];
         int tags = note_tags(note, rest, sizeof rest);
@@ -567,8 +706,8 @@ static void draw_settings_page(const UiCanvas *c) {
         float ny = vy + vh + 2;
         if (tags) {
             float tx = vx + (300 - tw) / 2;
-            if (tags & TAG_DEFAULT) tx += tag(c, tx, ny, "Switch default", 0xe8dff4, PLUM, 0) + 6;
-            if (tags & TAG_RECOMMENDED) tag(c, tx, ny, "Recommended", GOLD, NIGHT, 0);
+            if (tags & TAG_DEFAULT) tx += tag(c, tx, ny, "Switch default", TAGFILL, PLUM, 0) + 6;
+            if (tags & TAG_RECOMMENDED) tag(c, tx, ny, "Recommended", GOLD, ON_GOLD, 0);
             ny += th + gap;
         }
         if (nh) ui_text_wrap(c, UI_GOTHIC_500, 13, 0, vx + 10, ny, 280, 13 * 1.3f, 1, prose, MUTED);  /* clear of the arrows */
@@ -585,7 +724,42 @@ static void draw_settings_page(const UiCanvas *c) {
     float lh = 15 * 1.5f, dh = lh + 4 + ui_text_wrap(NULL, UI_GOTHIC_500, 15, 0, 0, 0, w - 40, lh, 0, dprose, 0) + 32;
     ui_box(c, x, bottom - dh, w, dh, 14, NIGHT, 0, 0);
     ui_text(c, UI_ROUNDED_800, 15, x + 20, bottom - dh + 16, lh, dname, SNOW);
-    ui_text_wrap(c, UI_GOTHIC_500, 15, 0, x + 20, bottom - dh + 16 + lh + 4, w - 40, lh, 0, dprose, LILAC);
+    ui_text_wrap(c, UI_GOTHIC_500, 15, 0, x + 20, bottom - dh + 16 + lh + 4, w - 40, lh, 0, dprose, ON_DARK);
+}
+
+/* A binding's name (bindings.c pad_label, key names) with its symbols drawn as icons, as the old F2 page's pixel
+ * font drew them: \1..\4 the arrows (up, down, left, right), \5..\8 PlayStation's triangle, circle, square, cross.
+ * The rest in sentence case. Drawn from x, centred in [y, y + h]; returns its width. c NULL: only measures. */
+static float cell_text(const UiCanvas *c, float x, float y, float h, const char *cell, uint32_t rgb) {
+    static const char *const sym[9] = {
+        NULL,
+        "<path d=\"M12 19V5M6 11l6-6 6 6\"/>",   /* up */
+        "<path d=\"M12 5v14M6 13l6 6 6-6\"/>",   /* down */
+        "<path d=\"M19 12H5M11 6l-6 6 6 6\"/>",  /* left */
+        "<path d=\"M5 12h14M13 6l6 6-6 6\"/>",   /* right */
+        "<path d=\"M12 5l7.5 12.5h-15z\"/>",     /* triangle */
+        "<circle cx=\"12\" cy=\"12\" r=\"6.5\"/>",  /* circle */
+        "<rect x=\"6\" y=\"6\" width=\"12\" height=\"12\" rx=\"1\"/>",  /* square */
+        "<path d=\"M7 7l10 10M17 7L7 17\"/>",    /* cross */
+    };
+    float w = 0;
+    for (const char *p = cell; *p;) {
+        if (*p >= 1 && *p <= 8) {  /* a symbol: 20 units, a little space after when text follows */
+            if (c) ui_icon(c, sym[(int)*p], x + w, y + (h - 20) / 2, 20, 2.4f, rgb);
+            w += 20;
+            p++;
+            if (*p) w += 4;
+            continue;
+        }
+        char run[96], t[160];
+        size_t n = 0;
+        while (*p && !(*p >= 1 && *p <= 8) && n + 1 < sizeof run) run[n++] = *p++;
+        run[n] = 0;
+        sentence_case(run, t, sizeof t);
+        if (c) ui_text_in(c, UI_GOTHIC_500, 17, x + w, y, 0, h, 0, t, rgb);
+        w += ui_text_w(UI_GOTHIC_500, 17, t);
+    }
+    return w;
 }
 
 /* The controls page (the design's isControls section): a table of each Switch input with its two keys and its
@@ -606,13 +780,18 @@ static void draw_controls_page(const UiCanvas *c, const GameMenuInfo *in) {
     int visible = (int)((bottom - hh - 22 - top - hdr - 4) / rh);
     if (visible < 1) visible = 1;
     float th = hdr + visible * rh + 4;
-    int first = row - visible / 2;
-    if (first > n - visible) first = n - visible;
-    if (first < 0) first = 0;
+    /* the rows shown: they move only when the chosen row leaves them (keys, the pad), or by the wheel
+     * (gamemenu_wheel), never because the mouse hovers a row, so the table doesn't run away under the cursor */
+    if (row < ctrl_first) ctrl_first = row;
+    if (row >= ctrl_first + visible) ctrl_first = row - visible + 1;
+    if (ctrl_first > n - visible) ctrl_first = n - visible;
+    if (ctrl_first < 0) ctrl_first = 0;
+    ctrl_rows = n, ctrl_visible = visible;
+    int first = ctrl_first;
     /* the table: a white box, its header row lilac */
     ui_box(c, x, top, w, th, 16, WHITE, 2, LINE);
-    ui_box(c, x + 2, top + 2, w - 4, hdr, 14, 0xefe7f7, 0, 0);
-    ui_rect(c, x + 2, top + 2 + hdr - 14, w - 4, 14, 0xefe7f7, 1);
+    ui_box(c, x + 2, top + 2, w - 4, hdr, 14, SOFT, 0, 0);
+    ui_rect(c, x + 2, top + 2 + hdr - 14, w - 4, 14, SOFT, 1);
     static const char *const heads[3] = {"Switch button", "Keyboard", "Controller"};
     float cx = x;
     for (int k = 0; k < 3; k++) ui_text_in(c, UI_GOTHIC_700, 16, cx + 22, top + 2, 0, hdr, 0, heads[k], PLUM), cx += cw[k];
@@ -623,9 +802,9 @@ static void draw_controls_page(const UiCanvas *c, const GameMenuInfo *in) {
         /* the mouse: a setting row or the reset row as a whole (a click: as Enter); an input's row chooses it, its
          * key or input cells below take the click */
         hit_add(x, y, w, rh, HIT_BIND, i, r->group && !r->value ? -2 : -1);
-        ui_rect(c, x + 2, y, w - 4, 2, 0xefe7f7, 1);  /* the line between rows */
+        ui_rect(c, x + 2, y, w - 4, 2, SOFT, 1);  /* the line between rows */
         if (on) {  /* a gold ring */
-            ui_box(c, x + 4, y + 2, w - 8, rh - 2, 10, GOLD, 0, 0);
+            ui_box(c, x + 4, y + 2, w - 8, rh - 2, 10, RING, 0, 0);
             ui_box(c, x + 7, y + 5, w - 14, rh - 8, 7, WHITE, 0, 0);
         }
         /* the Switch input's name */
@@ -646,8 +825,8 @@ static void draw_controls_page(const UiCanvas *c, const GameMenuInfo *in) {
             for (int k = 0; k < 2; k++) {  /* ‹ and ›, a lighter circle behind under the mouse */
                 float ix = k ? sx + sw - 12 - aw : sx + 12, iy = sy + (sh - aw) / 2;
                 int hv = hovered(HIT_BIND_STEP, i, k ? 1 : -1);
-                if (hv) ui_box(c, ix, iy, aw, aw, aw / 2, 0x5b4691, 0, 0);
-                ui_icon(c, k ? ICON_NEXT : ICON_PREV, ix + 4, iy + 4, aw - 8, 2.6f, hv ? SNOW : LILAC);
+                if (hv) ui_box(c, ix, iy, aw, aw, aw / 2, VSOFT, 0, 0);
+                ui_icon(c, k ? ICON_NEXT : ICON_PREV, ix + 4, iy + 4, aw - 8, 2.6f, hv ? SNOW : ON_DARK);
                 hit_add(k ? sx + sw - 16 - aw : sx, sy, 16 + aw, sh, HIT_BIND_STEP, i, k ? 1 : -1);
             }
             continue;
@@ -670,20 +849,16 @@ static void draw_controls_page(const UiCanvas *c, const GameMenuInfo *in) {
         for (int k = 0; k < 3; k++) {
             float kx = k < 2 ? x + cw[0] + 22 : x + cw[0] + cw[1] + 22;
             if (k == 1) {  /* after the first key: "E, Enter" */
-                char k0[64];
-                sentence_case(r->cells[0], k0, sizeof k0);
-                kx += ui_text_w(UI_GOTHIC_500, 17, k0);
+                kx += cell_text(NULL, kx, y, rh, r->cells[0], 0);
                 ui_text_in(c, UI_GOTHIC_500, 17, kx, y, 0, rh, 0, ",", MUTED);
                 kx += ui_text_w(UI_GOTHIC_500, 17, ", ") + 6;
             }
             const char *cell = r->cells[k];
             if (on && col == k && bindings_capturing()) cell = "PRESS...";
-            sentence_case(cell, t, sizeof t);
-            float tw = ui_text_w(UI_GOTHIC_500, 17, t);
+            float tw = cell_text(NULL, kx, y, rh, cell, 0);
             hit_add(kx - 10, y, tw + 20, rh, HIT_BIND, i, k);
             if (on && col == k) ui_box(c, kx - 10, y + 8, tw + 20, rh - 16, 8, GOLD, 0, 0);
-            ui_text_in(c, UI_GOTHIC_500, 17, kx, y, 0, rh, 0, t,
-                       r->conflict[k] ? WINE : !strcmp(r->cells[k], "-") ? MUTED : INK);
+            cell_text(c, kx, y, rh, cell, r->conflict[k] ? WINE : !strcmp(r->cells[k], "-") ? MUTED : INK);
         }
     }
     char hprose[512];
@@ -693,7 +868,7 @@ static void draw_controls_page(const UiCanvas *c, const GameMenuInfo *in) {
 
 /* A choice chip (the design's chipStyle): the chosen one filled; ringed in gold where the focus is. */
 static void chip(const UiCanvas *c, float x, float y, float w, const char *label, int on, int ring) {
-    if (ring) ui_box(c, x - 4, y - 4, w + 8, 60, 15, GOLD, 0, 0);
+    if (ring) ui_box(c, x - 4, y - 4, w + 8, 60, 15, RING, 0, 0);
     ui_box(c, x, y, w, 52, 12, on ? PLUM : WHITE, 2, on ? PLUM : LINE);
     ui_text_in(c, UI_GOTHIC_700, 17, x, y, w, 52, 1, label, on ? SNOW : PLUM);
 }
@@ -705,7 +880,7 @@ static void perf_slider(const UiCanvas *c, float x, float y, float w, const char
     settings_hud_slider(opacity, &frac, text, sizeof text);
     ui_text(c, UI_GOTHIC_700, 16, x, y, lh, label, PLUM);
     y += lh + 10;
-    ui_box(c, x, y, w, 52, 12, WHITE, ring ? 3 : 2, ring ? GOLD : LINE);
+    ui_box(c, x, y, w, 52, 12, WHITE, ring ? 3 : 2, ring ? RING : LINE);
     float tx = x + 18, tw = w - 18 - 16 - 54 - 14;
     hit_add(tx, y, tw, 52, HIT_SLIDER, opacity, 0);  /* the track, the box's height */
     ui_box(c, tx, y + 23, tw, 6, 3, LINE, 0, 0);
@@ -756,7 +931,7 @@ static void draw_perf_page(const UiCanvas *c, const GameMenuInfo *in) {
     static const char *const corners[4] = {"Top left", "Top right", "Bottom left", "Bottom right"};
     {  /* a small screen with the four corners on it, and the chosen one's name */
         int ring = focus && prow == 1;
-        ui_box(c, x, y, lw, 124, 12, WHITE, ring ? 3 : 2, ring ? GOLD : LINE);
+        ui_box(c, x, y, lw, 124, 12, WHITE, ring ? 3 : 2, ring ? RING : LINE);
         float sx = x + 18, sy = y + 12;
         ui_box(c, sx, sy, 176, 100, 10, LINE, 0, 0);
         hit_add(x, y, lw, 124, HIT_CORNER_BOX, 0, 0);
@@ -772,9 +947,9 @@ static void draw_perf_page(const UiCanvas *c, const GameMenuInfo *in) {
     static const char *const names[4] = {"Frame rate", "Frame time graph", "GPU, CPU and RAM", "Frame generation"};
     for (int i = 0; i < 4; i++, y += 52 + 10) {
         int on = parts >> i & 1, ring = focus && prow == 2 + i, off = mode != 1;
-        ui_box(c, x, y, lw, 52, 12, WHITE, ring ? 3 : 2, ring ? GOLD : LINE);
+        ui_box(c, x, y, lw, 52, 12, WHITE, ring ? 3 : 2, ring ? RING : LINE);
         hit_add(x, y, lw, 52, HIT_PART, i, 0);
-        ui_box(c, x + 18, y + 13, 26, 26, 7, on ? PLUM : WHITE, 2, on ? PLUM : 0xc6b2da);
+        ui_box(c, x + 18, y + 13, 26, 26, 7, on ? PLUM : WHITE, 2, on ? PLUM : EDGE);
         if (on) ui_text_in(c, UI_ROUNDED_800, 16, x + 18, y + 13, 26, 26, 1, "\xe2\x9c\x93", SNOW);  /* ✓ */
         ui_text_in(c, UI_GOTHIC_700, 17, x + 18 + 26 + 14, y, 0, 52, 0, names[i], off ? MUTED : PLUM);
     }
@@ -801,13 +976,131 @@ static void draw_perf_page(const UiCanvas *c, const GameMenuInfo *in) {
     perf_slider(c, px, py + lh + 10 + 52 + 22, 360, "Opacity", lh, 1, focus && prow == 7);
 }
 
+/* The preview's bar (canvas board B): over the running game at the bottom, the section's name and the frame rate,
+ * its rows (the chosen one ringed in gold, the value between arrows), the chosen row's description in a dark box,
+ * the key hints. Hidden (GM_ALT): only a chip saying how to show it again. Sets pv_rect, the part the window shows. */
+static void draw_preview(const UiCanvas *c, const GameMenuInfo *in) {
+    float W = (float)c->w / c->s, H = 900;
+    SettingRow rows[32];
+    int n = settings_player_rows(rows, 32);
+    if (n <= 0) return;
+    int cur = srow < n ? srow : n - 1;
+    int first = cur, last = cur;
+    while (first > 0 && !strcmp(rows[first - 1].category, rows[cur].category)) first--;
+    while (last < n - 1 && !strcmp(rows[last + 1].category, rows[cur].category)) last++;
+    char t[200];
+    const char *alt = in->pad ? alt_button(in) : "H";
+    if (preview_hidden) {
+        float hw = 12 + 30 + 10 + ui_text_w(UI_GOTHIC_400, 16, "Show bar") + 16;
+        ui_box(c, 24, H - 24 - 56, hw, 56, 16, NIGHT, 0, 0);
+        hint(c, 36, H - 24 - 56, alt, "Show bar");
+        pv_rect[0] = 24, pv_rect[1] = H - 24 - 56, pv_rect[2] = hw, pv_rect[3] = 56;
+        return;
+    }
+    float paper = 214, top = H - 56 - paper - 4, py = top + 4;
+    pv_rect[0] = 0, pv_rect[1] = top, pv_rect[2] = W, pv_rect[3] = H - top;
+    ui_rect(c, 0, top, W, 4, GOLD, 1);
+    ui_rect(c, 0, py, W, paper, PAPER, 1);
+    /* the left: one card, level with the rows and the description (owner: nothing floating): Preview and the
+     * section at its top, a strip at its bottom with the frame rate and which graphics section this is */
+    float cx = 40, cy = py + 14, cw = 240, ch = paper - 28, sh = 40;
+    ui_box(c, cx, cy, cw, ch, 14, WHITE, 2, LINE);
+    tag(c, cx + 16, cy + 14, "Preview", GOLD, ON_GOLD, 0);
+    sentence_case(rows[cur].category, t, sizeof t);
+    ui_text_wrap(c, UI_ROUNDED_800, 20, 0, cx + 16, cy + 14 + 18 + 8, cw - 32, 20 * 1.25f, 0, t, NIGHT);
+    int nsec = 0, isec = 0;
+    for (int i = 0; i < n; i++) {
+        if (!previewable(rows[i].category) || (i && !strcmp(rows[i].category, rows[i - 1].category))) continue;
+        nsec++;
+        if (i <= cur) isec = nsec;
+    }
+    ui_box(c, cx + 2, cy + ch - 2 - sh, cw - 4, sh, 12, SOFT, 0, 0);
+    ui_rect(c, cx + 2, cy + ch - 2 - sh, cw - 4, 12, SOFT, 1);  /* square top corners: a strip, not a pill */
+    if (in->shown_fps > 0) snprintf(t, sizeof t, "%.0f FPS (%.0f)", in->shown_fps, in->fps);
+    else snprintf(t, sizeof t, "%.0f FPS", in->fps);
+    ui_text_in(c, UI_ROUNDED_800, 17, cx + 16, cy + ch - 2 - sh, 0, sh, 0, t, PLUM);
+    snprintf(t, sizeof t, "%d / %d", isec, nsec);
+    ui_text_in(c, UI_GOTHIC_700, 14, cx + 16, cy + ch - 2 - sh, cw - 32, sh, 2, t, MUTED);
+    /* the rows: up to four, the chosen one among them */
+    float rx = 304, dw = 440, rw = W - 40 - dw - 24 - rx, rh = 42, gap = 6;
+    int shown = 4, from = first;
+    if (last - first + 1 > shown) {
+        from = cur - 1 < first ? first : cur - 1;
+        if (from > last - shown + 1) from = last - shown + 1;
+    }
+    float ry = py + 14;
+    for (int i = from; i <= last && i < from + shown; i++, ry += rh + gap) {
+        const SettingRow *r = &rows[i];
+        int on = i == cur, off = r->disabled != NULL;
+        ui_box(c, rx, ry, rw, rh, 12, WHITE, on ? 3 : 2, on ? RING : LINE);
+        hit_add(rx, ry, rw, rh, HIT_ROW, i, 0);
+        sentence_case(r->name, t, sizeof t);
+        ui_text_in(c, UI_GOTHIC_500, 17, rx + 18, ry, 0, rh, 0, t, off ? MUTED : INK);
+        float nx = rx + rw - 10 - 30, vx = nx - 6 - 170, px = vx - 6 - 30, by = ry + (rh - 30) / 2;
+        for (int k = 0; k < 2; k++) {  /* ‹ and ›; a box under the mouse */
+            float bx = k ? nx : px;
+            int hv = !off && hovered(k ? HIT_ROW_NEXT : HIT_ROW_PREV, i, 0);
+            if (hv) ui_box(c, bx, by, 30, 30, 8, LILAC, 0, 0);
+            ui_icon(c, k ? ICON_NEXT : ICON_PREV, bx + 5, by + 5, 20, 2.4f, off ? MUTED : PLUM);
+            hit_add(bx, by, 30, 30, k ? HIT_ROW_NEXT : HIT_ROW_PREV, i, 0);
+        }
+        if (r->verbatim) snprintf(t, sizeof t, "%s", r->options[r->current] ? r->options[r->current] : "");
+        else sentence_case(r->options[r->current] ? r->options[r->current] : "", t, sizeof t);
+        ui_text_in(c, UI_ROUNDED_700, 17, vx, ry, 170, rh, 1, t, off ? MUTED : NIGHT);
+    }
+    /* the chosen row: name and value, its tags, then its note and what it does */
+    const SettingRow *r = &rows[cur];
+    float dx = W - 40 - dw, dy = py + 14, dh = paper - 28;
+    ui_box(c, dx, dy, dw, dh, 14, NIGHT, 0, 0);
+    char name[96], value[96], rest[200], desc[700], prose[700];
+    sentence_case(r->name, name, sizeof name);
+    if (r->verbatim) snprintf(value, sizeof value, "%s", r->options[r->current] ? r->options[r->current] : "");
+    else sentence_case(r->options[r->current] ? r->options[r->current] : "", value, sizeof value);
+    snprintf(t, sizeof t, "%s: %s", name, value);
+    ui_text(c, UI_ROUNDED_800, 15, dx + 20, dy + 14, 15 * 1.5f, t, SNOW);
+    int tags = note_tags(r->notes[r->current] ? r->notes[r->current] : "", rest, sizeof rest);
+    float ty = dy + 14 + 15 * 1.5f + 4;
+    if (tags) {
+        float tx = dx + 20;
+        if (tags & TAG_DEFAULT) tx += tag(c, tx, ty, "Switch default", TAGFILL, PLUM, 0) + 6;
+        if (tags & TAG_RECOMMENDED) tag(c, tx, ty, "Recommended", GOLD, ON_GOLD, 0);
+        ty += 18 + 6;
+    }
+    if (r->disabled) snprintf(desc, sizeof desc, "OFF FOR NOW: %s.", r->disabled);
+    else if (*rest) snprintf(desc, sizeof desc, "%s. %s", rest, r->help);
+    else snprintf(desc, sizeof desc, "%s", r->help);
+    prose_case(desc, prose, sizeof prose);
+    ui_text_wrap(c, UI_GOTHIC_500, 14, 0, dx + 20, ty, dw - 40, 14 * 1.45f, 0, prose, ON_DARK);
+    /* the hints */
+    ui_rect(c, 0, H - 56, W, 56, NIGHT, 1);
+    float hx = 40;
+    if (in->pad) {
+        hx += hint(c, hx, H - 56, "D-pad", "Setting and change") + 28;
+        hx += hint(c, hx, H - 56, in->pad == 2 ? "L1 R1" : "LB RB", "Section") + 28;
+        hx += hint(c, hx, H - 56, alt, "Hide bar") + 28;
+        hint(c, hx, H - 56, in->pad == 2 ? "Circle" : "B", "Back to settings");
+    } else {
+        hx += hint(c, hx, H - 56, "W S", "Setting") + 28;
+        hx += hint(c, hx, H - 56, "A D", "Change") + 28;
+        hx += hint(c, hx, H - 56, "Q E", "Section") + 28;
+        hx += hint(c, hx, H - 56, "H", "Hide bar") + 28;
+        hint(c, hx, H - 56, "Esc", "Back to settings");
+    }
+}
+
 void gamemenu_draw(const UiCanvas *c, const GameMenuInfo *in) {
+    TH = theme_colors();
     float W = (float)c->w / c->s, H = 900;
     int hk = hit_back();
     hit_n[hk] = 0;  /* the mouse's list, filled as things are drawn */
+    if (preview) {  /* only the bar, over the running game */
+        draw_preview(c, in);
+        __atomic_store_n(&hit_front, hk, __ATOMIC_RELEASE);
+        return;
+    }
     int page = (sel == GM_SETTINGS || sel == GM_CONTROLS || sel == GM_PERF) && !confirm;  /* these show a page */
     ui_rect(c, 0, 0, W, H, SHADE, page ? 0.62f : 0.35f);  /* the tint over the game, darker behind a page */
-    if (page && sel == GM_SETTINGS) draw_settings_page(c);
+    if (page && sel == GM_SETTINGS) draw_settings_page(c, in);
     if (page && sel == GM_CONTROLS) draw_controls_page(c, in);
     if (page && sel == GM_PERF) draw_perf_page(c, in);
 
@@ -823,7 +1116,7 @@ void gamemenu_draw(const UiCanvas *c, const GameMenuInfo *in) {
     }
     float th = 21 * 1.2f, sh = 14 * 1.45f, ty = 28 + (56 - (th + 4 + sh)) / 2;
     ui_text(c, UI_ROUNDED_800, 21, 100, ty, th, "Yo-kai Watch 4 Recomp", SNOW);
-    ui_text(c, UI_GOTHIC_400, 14, 100, ty + th + 4, sh, "Game version " GAME_VERSION, LILAC);
+    ui_text(c, UI_GOTHIC_400, 14, 100, ty + th + 4, sh, "Game version " GAME_VERSION, ON_DARK);
 
     static const char *const labels[] = {"Resume", "Settings", "Controls", "Overlay", "Report a bug"};
     const char *icons[] = {ICON_RESUME, ICON_SETTINGS, ICON_CONTROLS, ICON_PERF, ICON_BUG};
@@ -855,12 +1148,14 @@ void gamemenu_draw(const UiCanvas *c, const GameMenuInfo *in) {
     } else if (focus && sel == GM_SETTINGS && !in_rows) {  /* the settings page's sections */
         hx += hint(c, hx, H - 56, in->pad ? "D-pad" : "W S", "Choose section") + 28;
         hx += hint(c, hx, H - 56, in->pad ? (in->pad == 2 ? "Cross" : "A") : "Enter", "Open") + 28;
+        if (can_preview()) hx += hint(c, hx, H - 56, in->pad ? alt_button(in) : "P", "Preview") + 28;
         hx += hint(c, hx, H - 56, in->pad ? (in->pad == 2 ? "Circle" : "B") : "Esc", "Back") + 28;
         if (in->pad) hint(c, hx, H - 56, in->close, "Close overlay");
     } else if (focus && in->pad) {  /* on a page */
         hx += hint(c, hx, H - 56, "D-pad", "Choose and change") + 28;
         hx += hint(c, hx, H - 56, in->pad == 2 ? "Cross" : "A", "Select") + 28;
         if (sel == GM_SETTINGS) hx += hint(c, hx, H - 56, in->pad == 2 ? "L1 R1" : "LB RB", "Section") + 28;
+        if (sel == GM_SETTINGS && can_preview()) hx += hint(c, hx, H - 56, alt_button(in), "Preview") + 28;
         hx += hint(c, hx, H - 56, in->pad == 2 ? "Circle" : "B", "Back") + 28;
         hint(c, hx, H - 56, in->close, "Close overlay");
     } else if (focus) {  /* on a page, with the keyboard: Escape goes back to the side panel, again closes */
@@ -868,6 +1163,7 @@ void gamemenu_draw(const UiCanvas *c, const GameMenuInfo *in) {
         hx += hint(c, hx, H - 56, "A D", "Change") + 28;
         hx += hint(c, hx, H - 56, "Enter", "Select") + 28;
         if (sel == GM_SETTINGS) hx += hint(c, hx, H - 56, "Q E", "Section") + 28;
+        if (sel == GM_SETTINGS && can_preview()) hx += hint(c, hx, H - 56, "P", "Preview") + 28;
         hint(c, hx, H - 56, "Esc", "Back");
     } else if (in->pad) {
         hx += hint(c, hx, H - 56, in->pad == 2 ? "Cross" : "A", "Select") + 28;
@@ -882,7 +1178,7 @@ void gamemenu_draw(const UiCanvas *c, const GameMenuInfo *in) {
     if (in->now < toast_until) {
         const char *t = "Bug reports are coming soon";
         float tw = ui_text_w(UI_GOTHIC_700, 17, t), bw = tw + 44 + 6, bh = 17 * 1.45f + 28 + 6;
-        ui_box(c, W - 48 - bw, 40, bw, bh, 14, SNOW, 3, GOLD);
+        ui_box(c, W - 48 - bw, 40, bw, bh, 14, SNOW, 3, RING);
         ui_text_in(c, UI_GOTHIC_700, 17, W - 48 - bw, 40, bw, bh, 1, t, NIGHT);
     }
 

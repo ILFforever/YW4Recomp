@@ -17,6 +17,7 @@
 #include "gpu.h"
 #include "hud.h"
 #include "settings.h"
+#include "theme.h"
 #include "shadow.h"
 #include "window.h"
 
@@ -213,10 +214,10 @@ static const Setting player[] = {
      {"OFF", "X1", "X2", "X4"},
      {"THE SWITCH'S DEFAULT: HARD SHADOWS", "SLIGHTLY SOFT", "SOFT (RECOMMENDED)", "VERY SOFT"}, 4, pcss_index, gpu_pcss_cycle, "YW4_PCSS", {"0", "1", "2", "3"}},
     {"SHADOWS", "CONTACT SHADOWS",
-     "SMALL SHADOWS THE SHADOW MAP IS TOO COARSE FOR: INSIDE BUSHES AND TREES, UNDER LEDGES, EAVES AND RAILINGS. "
-     "WORKED OUT FROM THE PICTURE, SO THEY ONLY COME FROM WHAT IS ON SCREEN.",
+     /* (the shadow map is too coarse for these; worked out from the picture, about 0.85 ms at 4K) */
+     "SMALL SHADOWS WHERE THINGS TOUCH: INSIDE BUSHES AND TREES, UNDER LEDGES AND EAVES. ALMOST NO COST.",
      {"OFF", "ON"},
-     {"THE SWITCH'S DEFAULT", "MORE DEPTH IN LEAVES AND UNDER EDGES, ALMOST NO COST"}, 2, gpu_contact,
+     {"THE SWITCH'S DEFAULT", "MORE DEPTH IN LEAVES AND UNDER EDGES"}, 2, gpu_contact,
      gpu_contact_toggle, "YW4_CONTACT", {"0", "1"}, contact_disabled},
     {"ADVANCED", "LEGACY MENUS",
      "THE OLD KEYS: F1 OPENS THE OLD SETTINGS PANEL AND ITS DEVELOPER OPTIONS, F2 THE OLD CONTROLS PAGE, F3 SHOWS OR "
@@ -334,6 +335,7 @@ void settings_load(void) {
         for (int i = 0; i < NSETTINGS; i++)  /* only the panel's settings, and never over the environment */
             if (!strcmp(line, setting(i)->env) && !getenv(line)) set_env(line, value), n++;
         n += bindings_load_line(line, value);
+        if (!strcmp(line, "YW4_THEME") && !getenv(line)) set_env(line, value), n++;
     }
     fclose(f);
     fprintf(stderr, "yw4: settings: %d from %s\n", n, path);
@@ -359,6 +361,7 @@ void settings_save(void) {
     /* the performance HUD (F3, the in-game overlay's Performance page) */
     fprintf(f, "YW4_HUD=%d\nYW4_HUD_CORNER=%d\nYW4_HUD_PARTS=%u\n", window_hud_mode(), window_hud_corner(),
             window_hud_parts());
+    fprintf(f, "YW4_THEME=%s\n", theme_id());  /* the overlay's Look > Theme (theme.h) */
     bindings_save(f);
     fclose(f);
 }
@@ -472,10 +475,29 @@ static int hud_slider_row(const Setting *s) { return s->get == hud_scale_get || 
 
 /* The HUD's sliders live on the overlay's Overlay page, next to their preview, so its Settings page leaves them out
  * (the old panel keeps them). */
-int settings_player_rows(SettingRow *rows, int max) {
+/* The overlay's Look > Theme row (theme.h): before Advanced, overlay only (the old panel's pixel font has no lower
+ * case for the names); its value one theme's name, Left / Right step through them. */
+static int theme_row(void) {
     int n = 0;
-    for (int i = 0; i < NPLAYER && n < max; i++)
-        if (!hud_slider_row(&player[i])) n += fill_rows(rows + n, 1, &player[i], 1);
+    for (int i = 0; i < NPLAYER && strcmp(player[i].category, "ADVANCED"); i++) n += !hud_slider_row(&player[i]);
+    return n;
+}
+
+static void fill_theme_row(SettingRow *r) {
+    static char note[32];
+    memset(r, 0, sizeof *r);
+    r->category = "LOOK", r->name = "THEME", r->verbatim = 1;
+    r->help = "THE COLOURS OF THIS MENU AND THE PERFORMANCE HUD: THE SAME THEMES AS THE LAUNCHER'S.";
+    snprintf(note, sizeof note, "%d / %d", theme_index() + 1, theme_count());
+    r->options[0] = theme_name(theme_index()), r->notes[0] = note, r->noptions = 1, r->current = 0;
+}
+
+int settings_player_rows(SettingRow *rows, int max) {
+    int n = 0, at = theme_row();
+    for (int i = 0; i < NPLAYER && n < max; i++) {
+        if (n == at && !strcmp(player[i].category, "ADVANCED")) fill_theme_row(&rows[n++]);
+        if (n < max && !hud_slider_row(&player[i])) n += fill_rows(rows + n, 1, &player[i], 1);
+    }
     return n;
 }
 
@@ -511,6 +533,13 @@ void settings_hud_set(int opacity, float frac) {
 }
 
 void settings_change(int row, int dir) {
+    int at = theme_row();
+    if (row == at) {  /* Look > Theme */
+        theme_step(dir);
+        settings_save();
+        return;
+    }
+    if (row > at) row--;
     const Setting *s = NULL;
     for (int i = 0, seen = 0; i < NPLAYER && !s; i++)
         if (!hud_slider_row(&player[i]) && seen++ == row) s = &player[i];

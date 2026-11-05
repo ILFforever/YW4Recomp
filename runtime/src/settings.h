@@ -21,6 +21,7 @@ typedef struct {
     int slider;            /* a slider instead of options: frac (0..1) its position, value its text */
     float frac;
     char value[16];
+    int verbatim;  /* options[] are names to show as they are (the overlay's Theme row: "Jibanyan", "YW4 Recomp") */
 } SettingRow;
 
 enum { SETTINGS_UP, SETTINGS_DOWN, SETTINGS_LEFT, SETTINGS_RIGHT, SETTINGS_CLOSE, SETTINGS_ACCEPT, SETTINGS_CLEAR,
