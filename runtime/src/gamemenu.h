@@ -5,7 +5,7 @@
  * preview); Take screenshot; Exit game (with a popup to confirm). Opening it pauses the game (the game's own
  * pause, its screen hidden: pause.c), Resume or the overlay button again resumes. Its look is the design on the
  * canvas https://claude.ai/artifact/DpV5n3eHezBdAMY2aQUgPg (Main.dc.html), drawn 1:1 in the design's units by
- * gamemenu_draw (ui.h); window.c puts it over the paused picture and feeds it input. */
+ * gamemenu_draw (ui.h); window.c puts it over the paused picture and feeds it input. Why so: decision 0053. */
 #ifndef YW4_GAMEMENU_H
 #define YW4_GAMEMENU_H
 
