@@ -122,7 +122,7 @@ function renderFields() {
     const browse = document.createElement('button');
     browse.type = 'button';
     browse.className = 'btn';
-    browse.textContent = 'Browse…';
+    browse.textContent = 'Browse';
     browse.addEventListener('click', () => pick(f));
     row.append(label, input, browse);
     box.append(row);
