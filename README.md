@@ -46,8 +46,8 @@ diary and autosave), and from late-game saves: towns at night, the bamboo forest
 Most of the game has not been tried.
 
 - **Frame rate**: the game's 30 frames/s, or 60, 120, 144 or no limit (FRAME RATE in the settings panel, F1). The game
-  moves by real time, so walking and battles keep their speed at any rate; menus and cutscenes are still being
-  checked. The game's own 30 holds everywhere tested.
+  moves by real time, so walking, battles, menus and cutscenes all work at any rate. The game's own 30 holds
+  everywhere tested.
 - **Graphics**: up to 4K and ultrawide, sharper shadows and textures, TAA, and upscaling with NVIDIA DLSS or AMD FSR
   for high frame rates at 4K (~85-118 frames/s at 4K 21:9 with DLSS or FSR on an RTX 4070 laptop), and frame generation
   with NVIDIA DLSS or AMD FSR (about twice as many frames on screen). Parts of the game's renderer already run as our
@@ -218,7 +218,7 @@ The same spot zoomed in 2×: the crosswalk far ahead, the pavement on the right 
 <details>
 <summary><b>Frame rate</b>: 30, 60, 120, 144 or no limit, switchable while playing</summary>
 
-FRAME RATE in the settings panel: the game's 30 frames/s, or 60, 120, 144 or no limit. The game already moves by the real time between frames, so walking and battles keep their speed at any rate (~140 frames/s at 1600×900). Menus and cutscenes are still being checked. At 4K the GPU is the limit: upscaling lifts it, frame generation doubles what is shown.
+FRAME RATE in the settings panel: the game's 30 frames/s, or 60, 120, 144 or no limit. The game already moves by the real time between frames, so walking, battles, menus and cutscenes all work at any rate (~140 frames/s at 1600×900). At 4K the GPU is the limit: upscaling lifts it, frame generation doubles what is shown.
 
 </details>
 
@@ -472,20 +472,21 @@ shadows here are our own pass with no graphical improvements applied (SHADOW PAS
 
 | Goal | Where it stands |
 |---|---|
-| **Our own renderer** | Replace the game's renderer pass by pass: the base for the graphics features above; shadows, surfaces, bloom and distance blur are ours already |
-| **Better shadows** | Bigger shadow maps and PCSS soft shadows done; contact shadows and steadier cascades next |
-| **Higher frame rates** | 30, 60, 120, 144 or no limit, switchable while playing (FRAME RATE in the panel): the game already moves by the real time between frames, so walking and battles keep their speed (~140 frames/s at 1600×900). At 4K the GPU is the limit; upscaling lifts it, frame generation doubles what is shown. Menus and cutscenes are being checked |
-| **Better anti-aliasing** | FXAA, SMAA and now TAA (steady thin edges: fences, nets, leaves) on the 3D scene before the UI is drawn, so text stays crisp; per-object motion for TAA next |
-| **Keyboard, mouse and controllers** | Bindings on the panel's CONTROLS page, saved, with your controller's own button names; tested with a DualSense. On-screen button icons follow what you play with and your bindings (keyboard, Xbox, PlayStation or Nintendo, [decision 0042](docs/decisions/0042-button-icons-and-mouse.md)). The mouse turns the camera through the game's own unused mouse code; being tested |
+| **Our own renderer** | Replace the game's renderer pass by pass: the base for the graphics features above; shadows, surfaces, the shadow mask, bloom, distance blur and most screen passes (lighting, sky, tone mapping) are ours already |
+| **Better shadows** | Bigger shadow maps, PCSS soft shadows and contact shadows done; steadier cascades next |
+| **Better anti-aliasing** | FXAA, SMAA and TAA (steady thin edges: fences, nets, leaves) on the 3D scene before the UI is drawn, so text stays crisp; per-object motion for TAA next (a first version is in, off by default) |
+| **Keyboard, mouse and controllers** | Bindings on the panel's CONTROLS page, saved, with separate keys for battles and your controller's own button names; tested with a DualSense. On-screen button icons follow what you play with and your bindings (keyboard, Xbox, PlayStation or Nintendo, [decision 0042](docs/decisions/0042-button-icons-and-mouse.md)). The mouse turns the camera through the game's own unused mouse code. Pointing and clicking in menus has started: the Yo-kai Pad's icon grid works, other menus not yet |
+| **Launcher** | A Windows app that takes your game files, checks them, builds the game and starts it, with mods, DLC, saves and screenshots in one place. Works from start to finish on the developer's PC, but it still needs this repo's tools, so for now [build from source](#building-from-source). Next: an installer and a portable zip ([decision 0052](docs/decisions/0052-launcher-packaging.md)), then a test on a clean PC |
 
 </details>
 
 <details>
-<summary><b>Finished</b> (7)</summary>
+<summary><b>Finished</b> (8)</summary>
 
 | Goal | Where it stands |
 |---|---|
 | **Performance** | The game's 30 frames/s everywhere tested, and well above it with the FRAME RATE setting (60, 120, 144 or no limit) |
+| **Higher frame rates** | 30, 60, 120, 144, VSYNC or no limit, switchable while playing (FRAME RATE in the panel; VSYNC after a restart): the game already moves by the real time between frames, so walking, battles, menus and cutscenes all work (~140 frames/s at 1600×900). At 4K the GPU is the limit; upscaling lifts it, frame generation doubles what is shown |
 | **Sharper distance** | Anisotropic texture filtering and a softer distance blur: distant ground, roads and buildings stay sharp without 4K |
 | **Higher resolution** | The 3D view at 1080p, 1440p or 4K instead of the game's 1600×900 (30 frames/s at 4K on an RTX 4070 laptop) |
 | **Ultrawide and other aspect ratios** | 16:10, 21:9 and 32:9 in the panel: a wider view of the world with the UI kept 16:9 in the middle; exploring, battles and cutscenes work; dialog dimming and the loading screen cover the full width |
