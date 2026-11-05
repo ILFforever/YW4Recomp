@@ -342,12 +342,19 @@ p.list-card { padding: 14px 18px; }
   border-top: 1px solid var(--lilac-3); font-size: 12px; color: var(--ink-2); }
 .status-right { margin-left: auto; }
 
-dialog { width: 440px; padding: 24px; border: 0; border-top: 4px solid var(--gold); border-radius: 18px; background: var(--white);
-  color: var(--ink); box-shadow: 0 24px 60px oklch(15% 0.08 295 / .5); }
-dialog::backdrop { background: oklch(20% 0.08 295 / .55); }
-dialog h2 { margin: 0 0 8px; font: 800 20px/1.2 var(--display); color: var(--violet); }
-dialog p { margin: 0 0 12px; font-size: 14px; }
-.dialog-buttons { display: flex; justify-content: flex-end; gap: 10px; }
+/* Popups are small windows of the launcher (owner, 2026-11-05: "less AI slop"): the top bar's dark violet with its
+   gold rule as the title bar, a plain white body, the buttons in a lilac tray across the bottom. */
+dialog { width: 460px; padding: 0; overflow: hidden; border: 1px solid oklch(30% 0.08 295 / .5); border-radius: 14px;
+  background: var(--white); color: var(--ink); box-shadow: 0 14px 36px oklch(15% 0.08 295 / .45); }
+dialog::backdrop { background: oklch(20% 0.08 295 / .6); }
+dialog:not(.welcome-dialog) > h2 { margin: 0; padding: 15px 22px 13px; background: var(--violet-deep);
+  border-bottom: 3px solid var(--gold); font: 800 17px/1.25 var(--display); color: var(--white); }
+dialog:not(.welcome-dialog) > :not(h2):not(.dialog-buttons) { margin-left: 22px; margin-right: 22px; }
+dialog:not(.welcome-dialog) > h2 + * { margin-top: 18px; }
+dialog p { margin: 0 0 10px; font-size: 14px; }
+.dialog-buttons { display: flex; justify-content: flex-end; gap: 10px; margin-top: 18px; padding: 12px 16px;
+  background: var(--lilac-0); border-top: 1px solid var(--lilac-2); }
+.dialog-buttons .btn { height: 40px; padding: 0 20px; }
 
 /* The welcome popup: the website's header band on top */
 .welcome-dialog { width: 560px; padding: 0; overflow: hidden; border-top: 0; }
