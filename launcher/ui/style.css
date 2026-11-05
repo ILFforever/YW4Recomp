@@ -52,14 +52,14 @@ body.pointer :focus-visible { outline: none; }
 
 /* the setup steps in the top bar */
 .steps-bar { display: flex; gap: 6px; margin: 0 12px 0 0; padding: 0; list-style: none; font: 700 13px/1 var(--display); }
-/* each step's number in a circle (owner, 2026-11-05): filled = done, the gold pill = now, an empty grey ring = not
-   reached yet */
+/* each step's number in a circle (owner, 2026-11-05): a muted gold pill = done, the gold pill = now, an empty grey
+   ring = not reached yet */
 .steps-bar li { display: flex; align-items: center; gap: 8px; padding: 6px 12px 6px 6px; border-radius: 999px;
   color: oklch(64% 0.04 300); }
 .steps-bar .n { display: grid; place-items: center; width: 22px; height: 22px; border-radius: 50%;
   border: 1.5px solid oklch(52% 0.05 300); font-size: 12px; }
-.steps-bar li.done { color: oklch(92% 0.03 300); }
-.steps-bar li.done .n { border-color: transparent; background: oklch(90% 0.04 300); color: var(--violet-deep); }
+.steps-bar li.done { background: oklch(64% 0.07 82); color: var(--violet-deep); }
+.steps-bar li.done .n { border-color: transparent; background: var(--violet-deep); color: oklch(78% 0.07 85); }
 .steps-bar li.now { background: var(--gold); color: var(--violet-deep); }
 .steps-bar li.now .n { border-color: transparent; background: var(--violet-deep); color: var(--gold); }
 
