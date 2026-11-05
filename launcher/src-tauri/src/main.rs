@@ -77,8 +77,8 @@ fn main() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())  // the file and folder pickers (Browse…)
         .manage(std::sync::Arc::new(buildrun::Running::default()))  // the build in progress (screen 4)
-        // The launcher never fills the screen (owner, 2026-11-05). tauri.conf.json turns maximising off and caps the
-        // size, but Windows can still maximise a window itself (Win+Up, dragging it to the top edge): undo that.
+        // The launcher never fills the screen (owner, 2026-11-05). tauri.conf.json makes it a fixed size, maximising off;
+        // Windows can still maximise a window itself (Win+Up, dragging it to the top edge): undo that.
         .on_window_event(|window, event| {
             if let tauri::WindowEvent::Resized(size) = event {
                 if window.is_maximized().unwrap_or(false) {
