@@ -177,6 +177,70 @@
     </div>
   </main>
 
+  <!-- Settings (the Play screen's gear): where things are kept, disk space, shortcuts, downloads, updates -->
+  <main class="screen setup" data-screen="settings" hidden>
+    <div class="setup-body settings-body">
+      <h1>Settings</h1>
+      <div class="settings-grid">
+        <section class="card">
+          <h2>Where things are kept</h2>
+          <div class="set-row">
+            <span><b>Game folder</b><small id="set-install"></small></span>
+            <button class="btn small" type="button" id="set-open-install">Open</button>
+          </div>
+          <div class="set-label">Saves and settings</div>
+          <div class="radios" role="radiogroup" aria-label="Where saves and settings are kept">
+            <button type="button" class="radio" role="radio" data-move="install" aria-checked="true">
+              <span class="dot" aria-hidden="true"></span><span><b>In the game folder</b><small>One folder, easy to back up</small></span>
+            </button>
+            <button type="button" class="radio" role="radio" data-move="appdata" aria-checked="false">
+              <span class="dot" aria-hidden="true"></span><span><b>In AppData</b><small>Kept if the game folder is deleted</small></span>
+            </button>
+          </div>
+        </section>
+        <section class="card">
+          <h2>Disk space</h2>
+          <div class="set-row">
+            <span><b>Build files</b><small id="set-free-size"></small></span>
+            <button class="btn small" type="button" id="set-free">Free up…</button>
+          </div>
+          <div class="switch-row">
+            <span><b>Free up space after every build</b><small>Updates then download the compiler again</small></span>
+            <button class="toggle" type="button" role="switch" aria-label="Free up space after every build" id="set-freeup"></button>
+          </div>
+        </section>
+        <section class="card">
+          <h2>Shortcuts</h2>
+          <div class="switch-row">
+            <span><b>Desktop shortcut</b></span>
+            <button class="toggle" type="button" role="switch" aria-label="Desktop shortcut" id="set-desktop"></button>
+          </div>
+          <div class="switch-row">
+            <span><b>Start menu entry</b></span>
+            <button class="toggle" type="button" role="switch" aria-label="Start menu entry" id="set-startmenu"></button>
+          </div>
+        </section>
+        <section class="card">
+          <h2>Downloads</h2>
+          <div class="set-row">
+            <span><b id="set-downloads"></b><small>Changing them rebuilds the game</small></span>
+            <button class="btn small" type="button" id="set-rebuild">Change…</button>
+          </div>
+        </section>
+        <section class="card">
+          <h2>Updates</h2>
+          <div class="set-row">
+            <span><b id="set-versions"></b><small id="set-update-line">Checked when the launcher starts</small></span>
+            <button class="btn small" type="button" id="set-check">Check now</button>
+          </div>
+        </section>
+      </div>
+    </div>
+    <div class="setup-foot">
+      <button class="btn" type="button" id="settings-back">Back</button>
+    </div>
+  </main>
+
   <!-- 4 · Build: the repo's tools into the install folder, with progress -->
   <main class="screen setup" data-screen="build" hidden>
     <div class="setup-body build-body">
@@ -361,6 +425,15 @@
   <div class="dialog-buttons">
     <button class="btn" type="button" id="update-later">Later</button>
     <button class="btn primary" type="button" id="update-btn">Update</button>
+  </div>
+</dialog>
+
+<dialog id="move-dlg" aria-labelledby="move-title">
+  <h2 id="move-title">Move your saves?</h2>
+  <p id="move-text"></p>
+  <div class="dialog-buttons">
+    <button class="btn" type="button" id="move-no">Cancel</button>
+    <button class="btn primary" type="button" id="move-yes">Move</button>
   </div>
 </dialog>
 

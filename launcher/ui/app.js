@@ -661,14 +661,82 @@ $('news-more').addEventListener('click', () => invoke('open_project_page'));
 document.querySelectorAll('[data-open]').forEach((b) => b.addEventListener('click', () =>
   invoke('open_folder', { install: inst.install, which: b.dataset.open, saves: inst.saves })));
 // Play's gear: game and launcher settings, not designed yet (the owner decides what goes there)
-$('to-options').addEventListener('click', () => {
-  popup('Settings', 'Coming soon.');
+$('to-options').addEventListener('click', () => showSettings());
+
+// ---- Settings (the Play screen's gear): every change is saved at once (launcher.json); moving the saves asks first
+const onScreen = (name) => !document.querySelector(`.screen[data-screen="${name}"]`).hidden;
+function setToggle(id, on) { $(id).setAttribute('aria-checked', String(!!on)); }
+async function saveInst() {
+  try { await invoke('save_state', { state: inst }); } catch (e) { popup('Settings', 'Could not save: ' + e); }
+}
+async function showSettings() {
+  show('settings');
+  $('set-install').textContent = inst.install;
+  document.querySelectorAll('[data-move]').forEach((b) => b.setAttribute('aria-checked', String(b.dataset.move === inst.saves)));
+  setToggle('set-freeup', inst.freeUp);
+  setToggle('set-desktop', inst.desktop);
+  setToggle('set-startmenu', inst.startMenu);
+  const dl = [inst.fsr && 'AMD FSR', inst.dlss && 'NVIDIA DLSS'].filter(Boolean);
+  $('set-downloads').textContent = dl.length ? dl.join(' and ') : 'No upscaler downloads';
+  $('set-versions').textContent = `Launcher ${$('launcher-version').textContent.replace('Launcher ', '')} · Game ${$('game-version').textContent.replace('YW4 Recomp ', '')}`;
+  const info = await invoke('install_info', { install: inst.install });
+  reclaimable = info.reclaimable;
+  $('set-free-size').textContent = reclaimable > 0.05 * GB ? `${gb(reclaimable)} the game doesn't need to run` : 'Already freed up';
+  $('set-free').disabled = reclaimable <= 0.05 * GB;
+}
+$('settings-back').addEventListener('click', () => showReady());
+$('set-open-install').addEventListener('click', () => invoke('open_folder', { install: inst.install, which: 'install', saves: inst.saves }));
+$('set-free').addEventListener('click', () => $('free-btn').click());  // the same popup as the Play screen's
+$('set-rebuild').addEventListener('click', () => openRebuildOptions());
+$('set-freeup').addEventListener('click', async () => { inst.freeUp = !inst.freeUp; setToggle('set-freeup', inst.freeUp); await saveInst(); });
+for (const [id, key] of [['set-desktop', 'desktop'], ['set-startmenu', 'startMenu']]) {
+  $(id).addEventListener('click', async () => {
+    inst[key] = !inst[key];
+    setToggle(id, inst[key]);
+    await saveInst();
+    try { await invoke('make_shortcuts', { state: inst }); } catch (e) { popup('Shortcuts', String(e)); }
+  });
+}
+// moving the saves: a popup first, then the move (the launcher refuses while the game runs or if saves are there)
+const moveDlg = $('move-dlg');
+document.querySelectorAll('[data-move]').forEach((b) => b.addEventListener('click', () => {
+  if (b.dataset.move === inst.saves) return;
+  moveDlg.dataset.to = b.dataset.move;
+  $('move-text').textContent = b.dataset.move === 'appdata'
+    ? 'Your saves and settings move to AppData. They stay there if the game folder is deleted.'
+    : 'Your saves and settings move into the game folder, next to the game.';
+  moveDlg.showModal();
+}));
+$('move-no').addEventListener('click', () => moveDlg.close());
+$('move-yes').addEventListener('click', async () => {
+  moveDlg.close();
+  try {
+    await invoke('move_saves', { install: inst.install, to: moveDlg.dataset.to });
+    inst.saves = moveDlg.dataset.to;
+    await saveInst();
+  } catch (e) { popup("Saves weren't moved", String(e)); }
+  showSettings();
+});
+// Check now: GitHub asked again (not the hour-old answer); what it finds opens the update popup
+$('set-check').addEventListener('click', async () => {
+  const btn = $('set-check');
+  btn.disabled = true;
+  btn.textContent = 'Checking…';
+  const info = await invoke('install_info', { install: inst.install });
+  let u = null;
+  try { u = await invoke('check_updates', { install: inst.install, built: info.version || '', fresh: true }); } catch (e) { /* below */ }
+  btn.disabled = false;
+  btn.textContent = 'Check now';
+  if (!u) return;
+  laterFor.clear();  // asked for: offer again what "Later" put off
+  if (u.rebuild || u.game || u.launcher) { showUpdates(info); return; }
+  $('set-update-line').textContent = u.offline ? "Couldn't reach GitHub. Try again later." : 'Everything is up to date';
 });
 // Options is reached from setup (after Check) or, to rebuild with other downloads, from the Play screen (the
 // Settings page will open it): Back returns where it came from
 let optionsFromPlay = false;
 $('options-back').addEventListener('click', () => {
-  if (optionsFromPlay) { optionsFromPlay = false; showReady(); } else show('check');
+  if (optionsFromPlay) { optionsFromPlay = false; showSettings(); } else show('check');
 });
 // the remembered choices of this install, back in the setup's state (for a rebuild and for a game update)
 function choicesFromInstall() {
@@ -779,7 +847,7 @@ $('free-no').addEventListener('click', () => freeDlg.close());
 $('free-yes').addEventListener('click', async () => {
   freeDlg.close();
   await invoke('free_space', { install: inst.install });
-  showReady();
+  if (onScreen('settings')) showSettings(); else showReady();
 });
 
 // the one-time offer: delete the player's originals (never the keys)

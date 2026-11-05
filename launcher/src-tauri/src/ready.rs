@@ -188,6 +188,7 @@ pub fn open_folder(install: String, which: String, saves: String) -> Result<(), 
     let inst = PathBuf::from(&install);
     let dir = match which.as_str() {
         "mods" | "screenshots" | "logs" => inst.join(&which),
+        "install" => inst.clone(),
         "dlc" => inst.join("data").join("dlc"),
         "save" if saves == "appdata" => PathBuf::from(std::env::var("APPDATA").unwrap_or_default()).join("YW4 Recomp").join("save"),
         "save" => inst.join("save"),
@@ -279,6 +280,14 @@ pub fn make_shortcuts(state: State) -> Result<(), String> {
     let mut places = Vec::new();
     if state.desktop { places.push("[Environment]::GetFolderPath('Desktop')"); }
     if state.start_menu { places.push("[Environment]::GetFolderPath('Programs')"); }
+    // the ones switched off go (Settings): only our own shortcut's name, nothing else in those folders
+    for (on, place) in [(state.desktop, "[Environment]::GetFolderPath('Desktop')"),
+                        (state.start_menu, "[Environment]::GetFolderPath('Programs')")] {
+        if !on {
+            let script = format!("Remove-Item -LiteralPath (Join-Path ({place}) 'Yo-kai Watch 4 Recomp.lnk') -ErrorAction SilentlyContinue");
+            let _ = hidden(Command::new("powershell").args(["-NoProfile", "-NonInteractive", "-Command", &script])).status();
+        }
+    }
     for place in places {
         // ({place}): a .NET call given straight to a command is read as text, not run (Join-Path then fails and no
         // shortcut was ever made: found 2026-11-04 in the first full Home -> Ready test)
@@ -290,5 +299,66 @@ pub fn make_shortcuts(state: State) -> Result<(), String> {
             .env("YW4_LNK_TARGET", &target).env("YW4_LNK_ICON", &icon)).status().map(|s| s.success()).unwrap_or(false);
         if !ok { return Err("couldn't make a shortcut".into()); }
     }
+    Ok(())
+}
+
+/// Where the saves and settings.ini live for `saves` ("install" or "appdata").
+fn saves_place(install: &Path, saves: &str) -> (PathBuf, PathBuf) {
+    if saves == "appdata" {
+        let base = PathBuf::from(std::env::var("APPDATA").unwrap_or_default()).join("YW4 Recomp");
+        (base.join("save"), base.join("settings.ini"))
+    } else {
+        (install.join("save"), install.join("settings.ini"))
+    }
+}
+
+fn copy_dir(from: &Path, to: &Path) -> std::io::Result<()> {
+    std::fs::create_dir_all(to)?;
+    for e in std::fs::read_dir(from)?.flatten() {
+        let (s, d) = (e.path(), to.join(e.file_name()));
+        if e.file_type()?.is_dir() { copy_dir(&s, &d)?; } else { std::fs::copy(&s, &d)?; }
+    }
+    Ok(())
+}
+
+fn game_running() -> bool {
+    hidden(Command::new("tasklist").args(["/FI", "IMAGENAME eq yw4.exe", "/NH"])).output()
+        .map(|o| String::from_utf8_lossy(&o.stdout).to_lowercase().contains("yw4.exe")).unwrap_or(false)
+}
+
+/// Settings: moves the saves and settings.ini to the other place and points game.ini there. Refuses while the
+/// game runs, and when the other place already holds saves (nothing is ever overwritten). Copy first, then delete,
+/// so a failure leaves the saves where they were.
+#[tauri::command]
+pub fn move_saves(install: String, to: String) -> Result<(), String> {
+    if to != "install" && to != "appdata" { return Err("unknown place".into()); }
+    if game_running() { return Err("Close the game first.".into()); }
+    let inst = PathBuf::from(&install);
+    let from = if to == "appdata" { "install" } else { "appdata" };
+    let ((src_save, src_ini), (dst_save, dst_ini)) = (saves_place(&inst, from), saves_place(&inst, &to));
+    let has_files = |d: &Path| std::fs::read_dir(d).map(|mut r| r.next().is_some()).unwrap_or(false);
+    if has_files(&dst_save) || dst_ini.is_file() {
+        return Err(format!("There are already saves in {}. Move or delete them first.", dst_save.parent().unwrap().display()));
+    }
+    if src_save.is_dir() { copy_dir(&src_save, &dst_save).map_err(|e| format!("copying the saves: {e}"))?; }
+    else { std::fs::create_dir_all(&dst_save).map_err(|e| e.to_string())?; }
+    if src_ini.is_file() { std::fs::copy(&src_ini, &dst_ini).map_err(|e| format!("copying settings.ini: {e}"))?; }
+    // game.ini: the two lines that say where (decision 0050); relative inside the install, absolute in AppData
+    let ini_path = inst.join("work").join("build").join("game.ini");
+    let (save_v, set_v) = if to == "appdata" {
+        (dst_save.display().to_string(), dst_ini.display().to_string())
+    } else {
+        ("../../save".to_string(), "../../settings.ini".to_string())
+    };
+    if let Ok(ini) = std::fs::read_to_string(&ini_path) {
+        let out: Vec<String> = ini.lines().map(|l| {
+            if l.starts_with("YW4_SAVE=") { format!("YW4_SAVE={save_v}") }
+            else if l.starts_with("YW4_SETTINGS_FILE=") { format!("YW4_SETTINGS_FILE={set_v}") }
+            else { l.to_string() }
+        }).collect();
+        std::fs::write(&ini_path, out.join("\n") + "\n").map_err(|e| format!("game.ini: {e}"))?;
+    }
+    let _ = std::fs::remove_dir_all(&src_save);
+    let _ = std::fs::remove_file(&src_ini);
     Ok(())
 }

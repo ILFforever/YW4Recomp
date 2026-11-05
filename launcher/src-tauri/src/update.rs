@@ -102,6 +102,7 @@ pub struct Updates {
     launcher: Option<LauncherOffer>,  // a newer launcher on GitHub
     rebuild: Option<String>,          // game code on this PC newer than the game built from it: its version
     rebuild_notes: String,            // its change log, kept from its release when it was downloaded
+    offline: bool,                    // GitHub couldn't be asked (Settings' "Check now" says so)
 }
 
 fn cache_path() -> PathBuf {
@@ -114,12 +115,13 @@ fn now() -> u64 {
 
 /// GitHub's list of releases (JSON), from the hour-old cache when there is one. YW4_UPDATE_FEED=<file>: that file
 /// instead (tests: a fake list in GitHub's format, never cached).
-fn releases() -> Option<serde_json::Value> {
+fn releases(fresh: bool) -> Option<serde_json::Value> {
     if let Ok(feed) = std::env::var("YW4_UPDATE_FEED") {
         return serde_json::from_str(&std::fs::read_to_string(feed).ok()?).ok();
     }
     let cache = cache_path();
-    if let Some(c) = std::fs::read_to_string(&cache).ok().and_then(|s| serde_json::from_str::<serde_json::Value>(&s).ok()) {
+    if let Some(c) = std::fs::read_to_string(&cache).ok().filter(|_| !fresh)
+        .and_then(|s| serde_json::from_str::<serde_json::Value>(&s).ok()) {
         if now().saturating_sub(c["at"].as_u64().unwrap_or(0)) < 3600 {
             return Some(c["releases"].clone());
         }
@@ -143,7 +145,7 @@ fn built_version(line: &str) -> Option<Ver> {
 /// What the Play screen offers: a game update, a newer launcher, or a rebuild. Nothing for a launcher run from the
 /// repo (it builds the repo's own code).
 #[tauri::command]
-pub async fn check_updates(app: tauri::AppHandle, install: String, built: String) -> Updates {
+pub async fn check_updates(app: tauri::AppHandle, install: String, built: String, fresh: Option<bool>) -> Updates {
     let Some(own) = crate::buildrun::bundled_src(&app) else { return Updates::default() };
     tauri::async_runtime::spawn_blocking(move || {
         let inst = PathBuf::from(&install);
@@ -155,7 +157,7 @@ pub async fn check_updates(app: tauri::AppHandle, install: String, built: String
                 u.rebuild_notes = std::fs::read_to_string(code.dir.join("notes.md")).unwrap_or_default();
             }
         }
-        let Some(list) = releases() else { return u };
+        let Some(list) = releases(fresh.unwrap_or(false)) else { u.offline = true; return u };
         let (mut game, mut launcher): (Option<(Ver, GameOffer)>, Option<(Ver, LauncherOffer)>) = (None, None);
         for r in list.as_array().into_iter().flatten() {
             if r["draft"].as_bool().unwrap_or(false) || r["prerelease"].as_bool().unwrap_or(false) { continue; }
