@@ -438,3 +438,14 @@ kbd { display: inline-block; min-width: 22px; padding: 1px 6px; border-radius: 6
 ::-webkit-scrollbar-thumb { border-radius: 999px; background: var(--lilac-3); }
 ::-webkit-scrollbar-thumb:hover { background: var(--violet-soft); }
 ::-webkit-scrollbar-button { display: none; }
+
+/* the Mods and DLC tabs' Refresh (an icon) next to Open folder: a white round chip like the small buttons */
+.panel-actions { display: flex; align-items: center; gap: 8px; flex-shrink: 0; }
+.icon-btn.small { width: 36px; height: 36px; border-radius: 999px; background: var(--white); color: var(--violet);
+  border: 1.5px solid var(--lilac-3); }
+.icon-btn.small:hover { background: var(--lilac-1); color: var(--violet); border-color: var(--violet-soft); }
+.icon-btn.small:disabled { cursor: default; }
+/* one turn while it reads the folder again (app.js keeps it at least 450 ms, so a quick read still shows) */
+.icon-btn.small.spinning svg { animation: spin-once .45s ease-in-out; }
+@keyframes spin-once { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .icon-btn.small.spinning svg { animation: none; } }

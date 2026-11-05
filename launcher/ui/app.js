@@ -612,6 +612,29 @@ function showTab(name) {
 }
 document.querySelectorAll('.ready [data-tab]').forEach((b) => b.addEventListener('click', () => showTab(b.dataset.tab)));
 
+// the Mods and DLC tabs and their sidebar rows, from install_info (also after their Refresh buttons)
+function renderModsDlc(info) {
+  const mods = $('mod-list');
+  mods.textContent = '';
+  if (info.mods.length) for (const m of info.mods) mods.append(chip(m));
+  else { const li = chip('None. Put mods in the mods folder.'); li.className = 'none'; mods.append(li); }
+  $('row-mods').textContent = info.mods.length === 1 ? info.mods[0] : info.mods.length ? `${info.mods.length} mods` : 'None';
+  $('dlc-line').textContent = info.dlc ? `${info.dlc} add-ons, checked.` : 'None. Put DLC NSPs in the DLC folder.';
+  $('row-dlc').textContent = info.dlc ? `${info.dlc} checked` : 'None';
+}
+document.querySelectorAll('[data-refresh]').forEach((b) => b.addEventListener('click', async () => {
+  b.disabled = true;
+  b.classList.remove('spinning');
+  void b.offsetWidth;  // restart the turn on a quick second click
+  b.classList.add('spinning');
+  const turn = new Promise((r) => setTimeout(r, 450));
+  try { renderModsDlc(await invoke('install_info', { install: inst.install })); } finally {
+    await turn;
+    b.classList.remove('spinning');
+    b.disabled = false;
+  }
+}));
+
 async function showReady() {
   show('ready');
   const info = await invoke('install_info', { install: inst.install });
@@ -648,13 +671,7 @@ async function showReady() {
     : info.shotCount > info.shots.length ? `The newest ${info.shots.length} of ${info.shotCount}. Press F12 in the game for more.`
     : 'Press F12 in the game for more.';
 
-  const mods = $('mod-list');
-  mods.textContent = '';
-  if (info.mods.length) for (const m of info.mods) mods.append(chip(m));
-  else { const li = chip('None. Put mods in the mods folder.'); li.className = 'none'; mods.append(li); }
-  $('row-mods').textContent = info.mods.length === 1 ? info.mods[0] : info.mods.length ? `${info.mods.length} mods` : 'None';
-  $('dlc-line').textContent = info.dlc ? `${info.dlc} add-ons, checked.` : 'None. Put DLC NSPs in the DLC folder.';
-  $('row-dlc').textContent = info.dlc ? `${info.dlc} checked` : 'None';
+  renderModsDlc(info);
 
   reclaimable = info.reclaimable;
   $('row-free').textContent = reclaimable > 0.05 * GB ? gb(reclaimable) : 'Done';
