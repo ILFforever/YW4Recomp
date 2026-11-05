@@ -407,8 +407,10 @@ way its own pause does (the whole world stops), without its pause screen. From t
   what the detailed one shows.
 - **Report a bug** (coming soon), and **Exit game** (it asks first). F12 takes screenshots, in the overlay or not.
 
-W/S or the arrow keys choose, Enter or D opens, A or Backspace goes back, ←/→ change a setting, Q/E jump between
-sections (LB/RB on a controller). Escape again, or Resume, goes back to the game. On a DualSense the **mic button**
+W/S or the arrow keys choose, A/D or ←/→ change a setting, Enter selects, Q/E jump between sections (LB/RB or
+LT/RT on a controller). Holding a direction keeps moving. Escape, Backspace or B goes back one step; from the side
+panel it goes back to the game, as Resume does. The mouse works too: hover to choose, click to select or drag a
+slider, right-click to go back. The key hints follow whatever you used last. On a DualSense the **mic button**
 shows or hides the performance HUD.
 
 ![The in-game overlay: Settings with the display options; Controls with a DualSense; Performance: the HUD detailed, top right, with a live preview; Exit game asks first](docs/screenshots/97-overlay.jpg)
@@ -497,7 +499,7 @@ shadows here are our own pass with no graphical improvements applied (SHADOW PAS
 | **Better shadows** | Bigger shadow maps, PCSS soft shadows and contact shadows done; steadier cascades next |
 | **Better anti-aliasing** | FXAA, SMAA and TAA (steady thin edges: fences, nets, leaves) on the 3D scene before the UI is drawn, so text stays crisp; per-object motion for TAA next (a first version is in, off by default) |
 | **Keyboard, mouse and controllers** | Bindings on the panel's CONTROLS page, saved, with separate keys for battles and your controller's own button names; tested with a DualSense. On-screen button icons follow what you play with and your bindings (keyboard, Xbox, PlayStation or Nintendo, [decision 0042](docs/decisions/0042-button-icons-and-mouse.md)). The mouse turns the camera through the game's own unused mouse code. Pointing and clicking in menus has started: the Yo-kai Pad's icon grid works, other menus not yet |
-| **In-game overlay** | Escape or a controller button pauses the game and opens a side panel: settings, controls, the performance HUD's options, screenshots and exit, drawn like its design ([decision 0053](docs/decisions/0053-in-game-overlay.md)). Next: mouse support and testing on more controllers |
+| **In-game overlay** | Escape or a controller button pauses the game and opens a side panel: settings, controls, the performance HUD's options, screenshots and exit, drawn like its design ([decision 0053](docs/decisions/0053-in-game-overlay.md)). Next: testing on more controllers |
 | **Launcher** | A Windows app that takes your game files, checks them, builds the game and starts it, with mods, DLC, saves and screenshots in one place. Works from start to finish on the developer's PC, but it still needs this repo's tools, so for now [build from source](#building-from-source). Next: an installer and a portable zip ([decision 0052](docs/decisions/0052-launcher-packaging.md)), then a test on a clean PC |
 
 </details>
