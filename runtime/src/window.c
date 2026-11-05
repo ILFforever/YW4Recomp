@@ -833,14 +833,19 @@ static void hud_draw(VkImage dst, uint32_t index, int32_t x0, int32_t y0, uint32
 }
 
 /* The HUD as it would show now, drawn into rgba (w x h, straight RGBA: the overlay's Overlay page previews it on
- * its violet box); its size. */
-void window_hud_preview(uint8_t *rgba, int w, int h, int *used_w, int *used_h) {
+ * the paused game); its size. canvas_s: the image pixels per unit of the page it goes on. Drawn at the size it has
+ * against the picture, so the Scale slider shows, as far as the preview's box holds it (1.46 x a page unit: the
+ * detailed card just fits). */
+void window_hud_preview(uint8_t *rgba, int w, int h, float canvas_s, int *used_w, int *used_h) {
     static HudContent content;
     int compact = hud_mode_read() == 2;
     unsigned parts = window_hud_parts();
     yw4_perf_hud(&content, compact, parts);
     *used_w = *used_h = 0;  /* nothing known drawn before: the whole image is cleared */
-    hud_style_render(rgba, w, h, &content, compact, parts, 1.5f, used_w, used_h);
+    float s = overlay_scale(swap_extent.height), most = 1.46f * canvas_s, fit = (float)w / 235.0f;
+    if (s > most) s = most;
+    if (s > fit) s = fit;
+    hud_style_render(rgba, w, h, &content, compact, parts, s, used_w, used_h);
     for (int j = 0; j < *used_h; j++)  /* premultiplied -> straight, as ui_image takes it */
         for (int i = 0; i < *used_w; i++) {
             uint8_t *p = rgba + ((size_t)j * w + i) * 4;
@@ -1124,6 +1129,7 @@ static void menu_draw(VkImage dst, int32_t x0, int32_t y0, uint32_t bw, uint32_t
         GameMenuInfo info = {hud_enabled(), yw4_version, pad_hints(&close), close, NULL, 0, 0, now};
         info.logo = game_logo(&info.logo_w, &info.logo_h);
         info.pad_name = pad_name();
+        info.picture = ov.bg, info.picture_w = (int)bw, info.picture_h = (int)bh;
         gamemenu_draw(&c, &info);
         memcpy(ov.img.ptr, ov.px, (size_t)bw * bh * 4);
         barrier(ov.img.image, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 0, VK_ACCESS_TRANSFER_WRITE_BIT);

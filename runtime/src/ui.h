@@ -39,6 +39,8 @@ void ui_shadow(const UiCanvas *c, float x, float y, float w, float h, float r, f
  * top at y, starting at x; returns its width. ui_text_w measures without drawing. */
 float ui_text(const UiCanvas *c, int f, float px, float x, float y, float lh, const char *str, uint32_t rgb);
 float ui_text_w(int f, float px, const char *str);
+/* Where ui_text puts the baseline, from the top of a line box lh high: to line up texts of different sizes. */
+float ui_baseline(int f, float px, float lh);
 /* Text centred vertically in [y, y + h], from x (align 0), centred in [x, x + w] (1) or ending at x + w (2). */
 void ui_text_in(const UiCanvas *c, int f, float px, float x, float y, float w, float h, int align, const char *str,
                 uint32_t rgb);

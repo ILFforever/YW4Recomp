@@ -37,12 +37,16 @@ typedef struct {
     void (*set)(float);
     float lo, hi, step;
     const char *auto_note;
+    int percent;  /* a slider of 0..1 shown in percent: no AUTO, 0 is a value like any other (auto_note: what it does) */
 } Setting;
 
 /* A slider's value as shown and as saved. */
 static void slider_text(const Setting *s, char *shown, size_t n1, char *saved, size_t n2) {
     float v = s->get();
-    if (v <= 0) {
+    if (s->percent) {
+        if (shown) snprintf(shown, n1, "%d%%", (int)(v * 100 + 0.5f));
+        if (saved) snprintf(saved, n2, "%.2f", v);
+    } else if (v <= 0) {
         if (shown) snprintf(shown, n1, "AUTO");
         if (saved) snprintf(saved, n2, "auto");
     } else {
@@ -52,6 +56,11 @@ static void slider_text(const Setting *s, char *shown, size_t n1, char *saved, s
 }
 static void slider_step(const Setting *s, int dir) {
     float v = s->get();
+    if (s->percent) {
+        v = (float)(int)((v + dir * s->step) / s->step + 0.5f) * s->step;  /* on the steps */
+        s->set(v < s->lo ? s->lo : v > s->hi ? s->hi : v);
+        return;
+    }
     if (v <= 0) v = dir > 0 ? s->lo : 0;
     else {
         v += dir * s->step;
@@ -144,10 +153,13 @@ static const Setting player[] = {
       "THE MONITOR'S OWN REFRESH RATE, SMOOTHEST (APPLIES AFTER A RESTART)", "AS FAST AS THE PC CAN: MOTION CAN JUDDER"}, 6,
      framerate_index, framerate_cycle, "YW4_FPS", {"30", "60", "120", "144", "vsync", "0"}},
     {"DISPLAY", "HUD SCALE",
-     "HOW BIG THE PERFORMANCE HUD (F3) IS IN THE WINDOW'S CORNER, IN STEPS OF 0.05. WHOLE NUMBERS KEEP ITS PIXEL FONT "
-     "SHARPEST. ALL THE WAY LEFT: AUTO.",
+     "HOW BIG THE PERFORMANCE HUD (F3) IS IN THE WINDOW'S CORNER, IN STEPS OF 0.05. ALL THE WAY LEFT: AUTO.",
      {NULL}, {NULL}, 0, NULL, NULL, "YW4_HUD_SCALE", {NULL}, NULL, hud_scale_get, hud_scale_set, 0.75f, 3.0f, 0.05f,
      "GROWS WITH THE WINDOW"},
+    {"DISPLAY", "HUD OPACITY",
+     "HOW SOLID THE BACKGROUND OF THE PERFORMANCE HUD (F3) IS. THE NUMBERS STAY SOLID. ALL THE WAY LEFT: ONLY THE NUMBERS.",
+     {NULL}, {NULL}, 0, NULL, NULL, "YW4_HUD_OPACITY", {NULL}, NULL, hud_opacity_get, hud_opacity_set, 0.0f, 1.0f, 0.05f,
+     "ONLY THE NUMBERS", 1},
     {"ANTI-ALIASING AND UPSCALING", "ANTI-ALIASING",
      "SMOOTHS THE JAGGED EDGES OF OBJECTS. APPLIED BEFORE THE MENUS ARE DRAWN, SO TEXT STAYS SHARP.",
      {"OFF", "FXAA", "SMAA", "TAA", "FSR", "DLSS"},
@@ -456,11 +468,42 @@ int settings_rows(SettingRow *rows, int max, int *sel) {
 
 /* The in-game overlay's settings page (gamemenu.c): the player's settings, without the developer page's link, and
  * changing one of them by row (as Left / Right on it), whatever the panel shows. */
-int settings_player_rows(SettingRow *rows, int max) { return fill_rows(rows, max, player, NPLAYER); }
+static int hud_slider_row(const Setting *s) { return s->get == hud_scale_get || s->get == hud_opacity_get; }
+
+/* The HUD's sliders live on the overlay's Overlay page, next to their preview, so its Settings page leaves them out
+ * (the old panel keeps them). */
+int settings_player_rows(SettingRow *rows, int max) {
+    int n = 0;
+    for (int i = 0; i < NPLAYER && n < max; i++)
+        if (!hud_slider_row(&player[i])) n += fill_rows(rows + n, 1, &player[i], 1);
+    return n;
+}
+
+static const Setting *hud_slider(int opacity) {
+    for (int i = 0; i < NPLAYER; i++)
+        if (player[i].get == (opacity ? hud_opacity_get : hud_scale_get)) return &player[i];
+    return NULL;
+}
+
+void settings_hud_slider(int opacity, float *frac, char *text, size_t n) {
+    const Setting *s = hud_slider(opacity);
+    float v = s ? s->get() : 0;
+    *frac = !s || v <= 0 ? 0.0f : (v - s->lo) / (s->hi - s->lo);
+    if (opacity) snprintf(text, n, "%d%%", (int)(v * 100 + 0.5f));
+    else if (v <= 0) snprintf(text, n, "Auto");
+    else snprintf(text, n, "%.2fx", v);
+}
+
+void settings_hud_step(int opacity, int dir) {
+    const Setting *s = hud_slider(opacity);
+    if (s) slider_step(s, dir > 0 ? 1 : -1), settings_save();
+}
 
 void settings_change(int row, int dir) {
-    if (row < 0 || row >= NPLAYER) return;
-    const Setting *s = &player[row];
+    const Setting *s = NULL;
+    for (int i = 0, seen = 0; i < NPLAYER && !s; i++)
+        if (!hud_slider_row(&player[i]) && seen++ == row) s = &player[i];
+    if (!s) return;
     if (s->disabled && s->disabled()) return;  /* greyed out */
     if (!s->noptions) slider_step(s, dir > 0 ? 1 : -1);
     else for (int i = 0; i < (dir > 0 ? 1 : s->noptions - 1); i++) s->next();  /* the cycle goes forward only */

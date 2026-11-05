@@ -214,6 +214,14 @@ static float text_run(const UiCanvas *c, int f, float px, float x, float base, c
 
 float ui_text_w(int f, float px, const char *str) { return text_run(NULL, f, px, 0, 0, str, 0, 0); }
 
+float ui_baseline(int f, float px, float lh) {
+    if (!fonts_ready()) return 0;
+    int asc, desc, gap;
+    stbtt_GetFontVMetrics(&fonts[f], &asc, &desc, &gap);
+    float sc = stbtt_ScaleForMappingEmToPixels(&fonts[f], px);
+    return (lh - (float)(asc - desc) * sc) * 0.5f + (float)asc * sc;
+}
+
 float ui_text(const UiCanvas *c, int f, float px, float x, float y, float lh, const char *str, uint32_t rgb) {
     if (!fonts_ready()) return 0;
     const stbtt_fontinfo *fi = &fonts[f];

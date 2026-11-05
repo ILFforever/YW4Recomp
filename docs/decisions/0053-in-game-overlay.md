@@ -46,7 +46,7 @@ put in by the build from the player's files (decision 0048), never in the repo.
 
 **Pages use the real data**: Settings shows the player's settings by section (`settings_player_rows`,
 `settings_change`), Controls the bindings with their own selection and key capture (`bindings.h`), Performance the
-HUD's form (off, compact, detailed), corner and parts, saved with the settings and previewed with the HUD itself.
+HUD's form (off, compact, detailed), corner and parts, saved with the settings and previewed with the HUD itself. The HUD is a see-through rounded card drawn with `ui.c` (`hud_style.c`) and blended by the GPU in `window.c`; its layout and the frame generation rule (big number = frames on screen with DLSS or FSR, the game's FPS small, the colour following the game's FPS) are the owner's pick from a design canvas, 2026-11-06.
 
 **Buttons** (the owner's choice): Escape on the keyboard (no longer the keyboard's second B); the touchpad on
 PlayStation pads, the button SDL calls MISC1 on the others (Share on Xbox Series, Capture on Switch Pro), and Back +

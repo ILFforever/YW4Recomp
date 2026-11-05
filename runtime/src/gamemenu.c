@@ -100,8 +100,8 @@ static void controls_page_action(int a) {
     }
 }
 
-/* the performance page: its rows are the mode (Off / Compact / Detailed), the corner, then the detailed HUD's four
- * parts; Left / Right change the first two, A / Enter or Left / Right turn a part on or off */
+/* the performance page: its rows are the mode (Off / Compact / Detailed), the corner, the detailed HUD's four parts,
+ * then the scale and opacity sliders; Left / Right change them, A / Enter or Left / Right turn a part on or off */
 static const int perf_modes[3] = {0, 2, 1};  /* the chips' order: Off, Compact, Detailed (window_hud_mode) */
 
 static void perf_page_action(int a) {
@@ -109,9 +109,11 @@ static void perf_page_action(int a) {
         focus = 0;
         return;
     }
-    if (a == GM_UP) prow = (prow + 5) % 6;
-    else if (a == GM_DOWN) prow = (prow + 1) % 6;
-    else if (a == GM_LEFT || a == GM_RIGHT || a == GM_ACCEPT) {
+    if (a == GM_UP) prow = (prow + 7) % 8;
+    else if (a == GM_DOWN) prow = (prow + 1) % 8;
+    else if (prow >= 6) {
+        if (a == GM_LEFT || a == GM_RIGHT) settings_hud_step(prow == 7, a == GM_RIGHT ? 1 : -1);
+    } else if (a == GM_LEFT || a == GM_RIGHT || a == GM_ACCEPT) {
         int d = a == GM_LEFT ? -1 : 1;
         if (prow == 0) {
             int m = window_hud_mode(), i = 0;
@@ -537,9 +539,44 @@ static void chip(const UiCanvas *c, float x, float y, float w, const char *label
     ui_text_in(c, UI_GOTHIC_700, 17, x, y, w, 52, 1, label, on ? SNOW : PLUM);
 }
 
-/* The performance page (the design's isPerf section): how the HUD shows while playing, its corner, the detailed
- * one's parts, and a preview of the HUD as it is now (live, where the design shows example values). */
-static void draw_perf_page(const UiCanvas *c) {
+/* A slider of the Overlay page: the track, its filled part, the thumb, the value at the right. */
+static void perf_slider(const UiCanvas *c, float x, float y, float w, const char *label, float lh, int opacity, int ring) {
+    float frac;
+    char text[16];
+    settings_hud_slider(opacity, &frac, text, sizeof text);
+    ui_text(c, UI_GOTHIC_700, 16, x, y, lh, label, PLUM);
+    y += lh + 10;
+    ui_box(c, x, y, w, 52, 12, WHITE, ring ? 3 : 2, ring ? GOLD : LINE);
+    float tx = x + 18, tw = w - 18 - 16 - 54 - 14;
+    ui_box(c, tx, y + 23, tw, 6, 3, LINE, 0, 0);
+    if (frac > 0) ui_box(c, tx, y + 23, tw * frac, 6, 3, PLUM, 0, 0);
+    ui_box(c, tx + tw * frac - 10, y + 16, 20, 20, 10, PLUM, 2, WHITE);
+    ui_text_in(c, UI_ROUNDED_700, 16, x + w - 16 - 54, y, 54, 52, 2, text, INK);
+}
+
+/* The preview's picture: the paused game at its true size, the part where the HUD sits (the chosen corner), so the
+ * opacity slider shows what the card will really be over. */
+static void perf_preview_picture(const UiCanvas *c, const GameMenuInfo *in, float x, float y, float w, float h, int corner) {
+    int pw = (int)(w * c->s), ph = (int)(h * c->s);
+    if (!in->picture || pw > in->picture_w || ph > in->picture_h) {
+        ui_box(c, x, y, w, h, 16, NIGHT, 0, 0);
+        return;
+    }
+    uint8_t *crop = malloc((size_t)pw * ph * 4);
+    if (!crop) {
+        ui_box(c, x, y, w, h, 16, NIGHT, 0, 0);
+        return;
+    }
+    int ox = corner & 1 ? in->picture_w - pw : 0, oy = corner >> 1 ? in->picture_h - ph : 0;
+    for (int j = 0; j < ph; j++)
+        memcpy(crop + (size_t)j * pw * 4, in->picture + ((size_t)(oy + j) * in->picture_w + ox) * 4, (size_t)pw * 4);
+    ui_image(c, crop, pw, ph, x, y, w, h, 16);
+    free(crop);
+}
+
+/* The performance page (design canvas: Overlay v2, the corner on a small screen): how the HUD shows while playing, its
+ * corner, the detailed one's parts, a preview of the HUD over the paused game, its scale and opacity. */
+static void draw_perf_page(const UiCanvas *c, const GameMenuInfo *in) {
     ui_box(c, 448, 40, 1104, 764, 20, PAPER, 0, 0);
     ui_text(c, UI_ROUNDED_800, 34, 488, 76, 34 * 1.25f, "Overlay", NIGHT);
     float y = 76 + 34 * 1.25f + 24, x = 488, lh = 16 * 1.45f;
@@ -548,50 +585,55 @@ static void draw_perf_page(const UiCanvas *c) {
     ui_text(c, UI_GOTHIC_700, 16, x, y, lh, "Show while playing", PLUM);
     y += lh + 10;
     static const char *const modes[3] = {"Off", "Compact", "Detailed"};
-    for (int i = 0; i < 3; i++) {
-        float w = ui_text_w(UI_GOTHIC_700, 17, modes[i]) + 40;
-        if (w < 130) w = 130;
-        chip(c, x, y, w, modes[i], perf_modes[i] == mode, focus && prow == 0 && perf_modes[i] == mode);
-        x += w + 10;
-    }
-    x = 488, y += 52 + 22;
+    float lw = 1024 - 360 - 32;
+    float mw = (lw - 2 * 10) / 3;
+    for (int i = 0; i < 3; i++)
+        chip(c, x + (float)i * (mw + 10), y, mw, modes[i], perf_modes[i] == mode, focus && prow == 0 && perf_modes[i] == mode);
+    y += 52 + 22;
     ui_text(c, UI_GOTHIC_700, 16, x, y, lh, "Corner", PLUM);
     y += lh + 10;
     static const char *const corners[4] = {"Top left", "Top right", "Bottom left", "Bottom right"};
-    for (int i = 0; i < 4; i++)
-        chip(c, x + (i & 1) * 215, y + (i >> 1) * 62, 205, corners[i], i == corner, focus && prow == 1 && i == corner);
-    y += 2 * 52 + 10 + 22;
+    {  /* a small screen with the four corners on it, and the chosen one's name */
+        int ring = focus && prow == 1;
+        ui_box(c, x, y, lw, 124, 12, WHITE, ring ? 3 : 2, ring ? GOLD : LINE);
+        float sx = x + 18, sy = y + 12;
+        ui_box(c, sx, sy, 176, 100, 10, LINE, 0, 0);
+        for (int i = 0; i < 4; i++)
+            ui_box(c, sx + (i & 1 ? 176 - 6 - 58 : 6), sy + (i >> 1 ? 100 - 6 - 36 : 6), 58, 36, 7, i == corner ? PLUM : WHITE, 0, 0);
+        ui_text_in(c, UI_GOTHIC_700, 17, sx + 176 + 24, y, 0, 124, 0, corners[corner & 3], PLUM);
+    }
+    y += 124 + 22;
     ui_text(c, UI_GOTHIC_700, 16, x, y, lh, "In the detailed overlay", PLUM);
     y += lh + 10;
-    static const char *const names[4] = {"FPS and 1% low", "Frame time graph", "GPU and CPU time", "Frame generation"};
-    float lw = 1024 - 360 - 32;
+    static const char *const names[4] = {"Frame rate", "Frame time graph", "GPU, CPU and RAM", "Frame generation"};
     for (int i = 0; i < 4; i++, y += 52 + 10) {
         int on = parts >> i & 1, ring = focus && prow == 2 + i, off = mode != 1;
         ui_box(c, x, y, lw, 52, 12, WHITE, ring ? 3 : 2, ring ? GOLD : LINE);
         ui_box(c, x + 18, y + 13, 26, 26, 7, on ? PLUM : WHITE, 2, on ? PLUM : 0xc6b2da);
         if (on) ui_text_in(c, UI_ROUNDED_800, 16, x + 18, y + 13, 26, 26, 1, "\xe2\x9c\x93", SNOW);  /* ✓ */
-        ui_text_in(c, UI_GOTHIC_400, 17, x + 18 + 26 + 14, y, 0, 52, 0, names[i], off ? MUTED : INK);
+        ui_text_in(c, UI_GOTHIC_700, 17, x + 18 + 26 + 14, y, 0, 52, 0, names[i], off ? MUTED : PLUM);
     }
-    /* the preview: the HUD itself, drawn now */
-    float px = 488 + lw + 32, py = 76 + 34 * 1.25f + 24;
+    /* the preview: the HUD itself, drawn now, over the paused game; one height for every form, so the sliders below
+     * stay put and the two columns end level */
+    float px = 488 + lw + 32, py = 76 + 34 * 1.25f + 24, bh = 310;
     ui_text(c, UI_GOTHIC_700, 16, px, py, lh, "Preview", PLUM);
     py += lh + 10;
-    static uint8_t img[512 * 512 * 4], tight[512 * 512 * 4];
+    static uint8_t img[1024 * 1024 * 4], tight[1024 * 1024 * 4];
     int iw = 0, ih = 0;
-    if (mode) window_hud_preview(img, 512, 512, &iw, &ih);
-    float bh = 120;
+    if (mode) window_hud_preview(img, 1024, 1024, c->s, &iw, &ih);
+    perf_preview_picture(c, in, px, py, 360, bh, corner);
     if (iw > 0 && ih > 0) {
-        for (int j = 0; j < ih; j++) memcpy(tight + (size_t)j * iw * 4, img + (size_t)j * 512 * 4, (size_t)iw * 4);
-        float sw = 320, sh = sw * (float)ih / (float)iw;
-        if (sh > 420) sh = 420, sw = sh * (float)iw / (float)ih;
-        bh = sh + 36;
-        ui_box(c, px, py, 360, bh, 16, NIGHT, 0, 0);
-        ui_image(c, tight, iw, ih, px + 20, py + 18, sw, sh, 0);
+        for (int j = 0; j < ih; j++) memcpy(tight + (size_t)j * iw * 4, img + (size_t)j * 1024 * 4, (size_t)iw * 4);
+        /* pixel for pixel, so it is sharp and as big as it will be; centred in the box */
+        float sw = (float)iw / c->s, sh = (float)ih / c->s;
+        ui_image(c, tight, iw, ih, px + (360 - sw) * 0.5f, py + (bh - sh) * 0.5f, sw, sh, 0);
     } else {
-        ui_box(c, px, py, 360, bh, 16, NIGHT, 0, 0);
-        ui_text_in(c, UI_GOTHIC_700, 16, px, py, 360, bh, 1, "Off while playing", LILAC);
+        ui_box_alpha(c, px, py, 360, bh, 16, NIGHT, 0.6f);
+        ui_text_in(c, UI_GOTHIC_700, 16, px, py, 360, bh, 1, "Off while playing", SNOW);
     }
-    ui_text(c, UI_GOTHIC_400, 14, px, py + bh + 10, 14 * 1.45f, "Live values, as the HUD shows them now.", MUTED);
+    py += bh + 22;
+    perf_slider(c, px, py, 360, "Scale", lh, 0, focus && prow == 6);
+    perf_slider(c, px, py + lh + 10 + 52 + 22, 360, "Opacity", lh, 1, focus && prow == 7);
 }
 
 void gamemenu_draw(const UiCanvas *c, const GameMenuInfo *in) {
@@ -600,7 +642,7 @@ void gamemenu_draw(const UiCanvas *c, const GameMenuInfo *in) {
     ui_rect(c, 0, 0, W, H, SHADE, page ? 0.62f : 0.35f);  /* the tint over the game, darker behind a page */
     if (page && sel == GM_SETTINGS) draw_settings_page(c);
     if (page && sel == GM_CONTROLS) draw_controls_page(c, in);
-    if (page && sel == GM_PERF) draw_perf_page(c);
+    if (page && sel == GM_PERF) draw_perf_page(c, in);
 
     /* the side panel: 400 wide with a 4 px gold edge towards the game */
     ui_rect(c, 0, 0, 400, H, PAPER, 1);

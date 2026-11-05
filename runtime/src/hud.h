@@ -58,6 +58,9 @@ int gbuffer_native(void);
 /* window.c: the HUD's scale, the settings panel's HUD SCALE slider: 0 auto (grows with the window), else the scale. */
 float hud_scale_get(void);
 void hud_scale_set(float v);
+/* hud_style.c: the HUD's background, the HUD OPACITY slider: 0 (only the numbers) to 1. */
+float hud_opacity_get(void);
+void hud_opacity_set(float v);
 
 /* Draws c into rgba (w x h texels, 4 bytes each, rows of w) at scale s (the text in the system's font at that
  * size); *used_w and *used_h: the part drawn. */

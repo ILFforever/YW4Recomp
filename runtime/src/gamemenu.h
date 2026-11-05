@@ -39,6 +39,8 @@ typedef struct {
     const uint8_t *logo;  /* the game's icon (RGBA, logo_w x logo_h), NULL: none */
     int logo_w, logo_h;
     uint64_t now;  /* ms */
+    const uint8_t *picture;  /* the paused game without the overlay (RGBA, picture_w x picture_h): the HUD's preview */
+    int picture_w, picture_h;
 } GameMenuInfo;
 
 /* Draws the overlay over what is in c (the paused picture): the tint, the side panel, the key hints, the note,

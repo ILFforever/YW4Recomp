@@ -53,7 +53,7 @@ int window_hud_corner(void);
 void window_hud_set_corner(int corner);
 unsigned window_hud_parts(void);
 void window_hud_set_parts(unsigned parts);
-void window_hud_preview(uint8_t *rgba, int w, int h, int *used_w, int *used_h);
+void window_hud_preview(uint8_t *rgba, int w, int h, float canvas_s, int *used_w, int *used_h);
 
 /* Full screen (borderless, the desktop's size) or a window: 1 or 0, from YW4_WINDOW=fullscreen|windowed at first;
  * the cycle flips it (panel WINDOW MODE, F11). Any thread; the window's thread applies it within a few ms. */

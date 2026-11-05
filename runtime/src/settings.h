@@ -47,6 +47,10 @@ int settings_rows(SettingRow *rows, int max, int *selected);
  * `row` one option forward (dir 1) or back (-1), as Right / Left on it. */
 int settings_player_rows(SettingRow *rows, int max);
 void settings_change(int row, int dir);
+/* The overlay's Overlay page: the HUD's scale (opacity 0) or opacity (1) slider: its position 0..1 and its text, and
+ * one step up (dir 1) or down (-1), saved. */
+void settings_hud_slider(int opacity, float *frac, char *text, size_t n);
+void settings_hud_step(int opacity, int dir);
 /* The settings page shows its developer page (DEVELOPER OPTIONS, the last row's; Escape or B goes back). */
 int settings_developer(void);
 /* LEGACY MENUS (YW4_LEGACY_KEYS, default on): 1 if the F1, F2 and F3 keys work. */

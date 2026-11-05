@@ -403,9 +403,9 @@ way its own pause does (the whole world stops), without its pause screen. From t
 
 - **Settings**: every option of the settings panel, by section, with what each choice means.
 - **Controls**: the keys and controller buttons for every Switch button. Choose one, then press the new key or button.
-- **Performance**: the performance HUD off, compact (the frame rate only) or detailed, which corner it sits in, and
+- **Overlay**: the performance HUD off, compact (the frame rate only) or detailed, which corner it sits in, its size and opacity, and
   what the detailed one shows.
-- **Take screenshot** of the paused game, and **Exit game** (it asks first).
+- **Report a bug** (coming soon), and **Exit game** (it asks first). F12 takes screenshots, in the overlay or not.
 
 W/S or the arrow keys choose, Enter or D opens, A or Backspace goes back, ←/→ change a setting, Q/E jump between
 sections (LB/RB on a controller). Escape again, or Resume, goes back to the game. On a DualSense the **mic button**
@@ -454,8 +454,8 @@ the panel's WINDOW MODE row). Settings are in the panel and the overlay; the oth
 | Battle blur | The game's or fast (default): the blur as a battle starts with a quarter of the rounds, the same look, ~3 ms less GPU time |
 
 F3 shows a performance HUD in the window's corner: frame time, CPU and GPU cost and memory; with frame generation on,
-also the frames on screen (SHOWN). Its size is HUD SCALE in the panel; the overlay's Performance page chooses compact
-or detailed, the corner and the parts.
+the big number is the frames on screen with DLSS or FSR beside it, and the game's own FPS goes small. The overlay's Overlay page chooses compact
+or detailed, the corner, the parts, the size and how solid its background is.
 
 The game starts at the Switch's 1600×900 and 16:9 with a 4096 shadow map, PCSS ×2, ×16 texture filtering, half
 distance blur, half-size effects and no anti-aliasing. For the game's original look, set every setting to its first choice in the
