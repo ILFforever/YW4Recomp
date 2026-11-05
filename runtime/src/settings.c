@@ -325,6 +325,9 @@ void settings_save(void) {
         int c = t->current();
         if (c >= 0 && c < t->noptions) fprintf(f, "%s=%s\n", t->env, t->values[c]);
     }
+    /* the performance HUD (F3, the in-game overlay's Performance page) */
+    fprintf(f, "YW4_HUD=%d\nYW4_HUD_CORNER=%d\nYW4_HUD_PARTS=%u\n", window_hud_mode(), window_hud_corner(),
+            window_hud_parts());
     bindings_save(f);
     fclose(f);
 }

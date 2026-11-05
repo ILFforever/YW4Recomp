@@ -19,8 +19,11 @@ typedef struct {
     float target_ms;  /* drawn as a line: the game's frame pacing */
 } HudContent;
 
-/* perf.c: the HUD's lines and graph. */
-void yw4_perf_hud(HudContent *c);
+/* The HUD's parts in its detailed form: FPS and 1% low, the frame-time graph, GPU and CPU time, frame
+ * generation. */
+enum { HUD_PART_FPS = 1, HUD_PART_GRAPH = 2, HUD_PART_TIMES = 4, HUD_PART_FG = 8, HUD_PART_ALL = 15 };
+/* perf.c: the HUD's lines and graph: compact (one line), or the detailed one's chosen parts. */
+void yw4_perf_hud(HudContent *c, int compact, unsigned parts);
 
 /* shadow.c: whose shadow casters are drawn ("ORIGINAL": the game's, "CUSTOM": our pass, "CHECK"). */
 const char *shadow_mode_name(void);

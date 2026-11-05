@@ -101,7 +101,10 @@ typedef struct {
 } Overlay;
 enum { HUD_W = 256 * 4, HUD_H = 128 * 4 };  /* the HUD drawn at its scale: up to 4x its 1x size */
 static Overlay hud = {HUD_W, HUD_H}, panel = {480, 480}, notice = {1024, 160};
-static int hud_on = -1;
+/* The performance HUD (F3; the in-game overlay's Performance page): hud_on 0 off, 1 detailed, 2 compact (-1:
+ * not read yet, YW4_HUD); its corner (0 top left, 1 top right, 2 bottom left, 3 bottom right, YW4_HUD_CORNER)
+ * and in the detailed one its parts (HUD_PART_*, YW4_HUD_PARTS). Saved with the settings. */
+static int hud_on = -1, hud_last = 1, hud_corner = -1, hud_parts = -1;
 
 void gpu_request_trace(int draws);  /* gpu_draw.c */
 void gpu_request_dump(void);        /* gpu.c */
@@ -483,16 +486,42 @@ static int screenshot_wanted(uint64_t n) {
     return 0;
 }
 
-static int hud_enabled(void) {
+static int hud_mode_read(void) {
     int on = __atomic_load_n(&hud_on, __ATOMIC_ACQUIRE);
     if (on < 0) {
         const char *e = getenv("YW4_HUD");
-        int want = e && *e && *e != '0';
+        int want = e && *e ? atoi(e) : 0;  /* the old YW4_HUD=1: the detailed one */
+        if (want < 0 || want > 2) want = 1;
+        if (want) hud_last = want;
         __atomic_compare_exchange_n(&hud_on, &on, want, 0, __ATOMIC_ACQ_REL, __ATOMIC_ACQUIRE);
         on = __atomic_load_n(&hud_on, __ATOMIC_ACQUIRE);
     }
-    return on > 0;
+    return on;
 }
+
+static int hud_enabled(void) { return hud_mode_read() > 0; }
+
+int window_hud_mode(void) { return hud_mode_read(); }
+void window_hud_set_mode(int m) {
+    if (m) hud_last = m;
+    __atomic_store_n(&hud_on, m, __ATOMIC_RELEASE);
+}
+int window_hud_corner(void) {
+    if (hud_corner < 0) {
+        const char *e = getenv("YW4_HUD_CORNER");
+        hud_corner = e && *e ? atoi(e) & 3 : 0;
+    }
+    return hud_corner;
+}
+void window_hud_set_corner(int c) { hud_corner = c & 3; }
+unsigned window_hud_parts(void) {
+    if (hud_parts < 0) {
+        const char *e = getenv("YW4_HUD_PARTS");
+        hud_parts = e && *e ? (int)(strtoul(e, NULL, 0) & HUD_PART_ALL) : HUD_PART_ALL;
+    }
+    return (unsigned)hud_parts;
+}
+void window_hud_set_parts(unsigned p) { hud_parts = (int)(p & HUD_PART_ALL); }
 
 /* An overlay's staging buffer (mapped) and image, made on first use. 0 when ready. */
 static int overlay_resources(Overlay *o) {
@@ -577,16 +606,34 @@ static float overlay_scale(uint32_t h) {
     return s > 0 ? s : h >= 1440 ? (float)(h / 720) : 1.0f;
 }
 
-static void hud_draw(VkImage dst, int32_t x0, int32_t y0) {
+/* where the HUD (w x h) goes in a picture bw x bh at the HUD's scale s: its corner, 6 units in */
+static void hud_place(int w, int h, uint32_t bw, uint32_t bh, float s, int32_t *x, int32_t *y) {
+    int c = window_hud_corner();
+    *x = c & 1 ? (int32_t)bw - w - (int32_t)(6 * s) : (int32_t)(6 * s);
+    *y = c & 2 ? (int32_t)bh - h - (int32_t)(6 * s) : (int32_t)(6 * s);
+    if (*x < 0) *x = 0;
+    if (*y < 0) *y = 0;
+}
+
+static void hud_draw(VkImage dst, int32_t x0, int32_t y0, uint32_t bw, uint32_t bh) {
     hud_shown_w = hud_shown_h = 0;
     if (!hud_enabled() || overlay_resources(&hud)) return;
     static HudContent content;
     int w, h;
-    yw4_perf_hud(&content);
+    yw4_perf_hud(&content, hud_mode_read() == 2, window_hud_parts());
     float s = overlay_scale(swap_extent.height);
     hud_render(hud.ptr, HUD_W, HUD_H, &content, s, &w, &h);  /* drawn at its size: shown 1:1 */
     hud_shown_w = w, hud_shown_h = h;
-    overlay_show(&hud, dst, w, h, x0 + (int32_t)(6 * s), y0 + (int32_t)(6 * s), 1.0f);
+    int32_t hx, hy;
+    hud_place(w, h, bw, bh, s, &hx, &hy);
+    overlay_show(&hud, dst, w, h, x0 + hx, y0 + hy, 1.0f);
+}
+
+/* The HUD as it would show now, drawn into rgba (w x h; the overlay's Performance page previews it); its size. */
+void window_hud_preview(uint8_t *rgba, int w, int h, int *used_w, int *used_h) {
+    static HudContent content;
+    yw4_perf_hud(&content, hud_mode_read() == 2, window_hud_parts());
+    hud_render(rgba, w, h, &content, 2.0f, used_w, used_h);
 }
 
 /* The settings panel (F1), in the middle of the picture (bw x bh at x0, y0). */
@@ -613,7 +660,7 @@ static void panel_draw(VkImage dst, int32_t x0, int32_t y0, uint32_t bw, uint32_
     overlay_show(&panel, dst, w, h, x0 + ((int32_t)bw - w * s) / 2, y0 + ((int32_t)bh - h * s) / 2, (float)s);
 }
 
-void window_hud_toggle(void) { __atomic_store_n(&hud_on, hud_enabled() ? 0 : 1, __ATOMIC_RELEASE); }
+void window_hud_toggle(void) { __atomic_store_n(&hud_on, hud_enabled() ? 0 : hud_last, __ATOMIC_RELEASE); }
 int window_hud_shown(void) { return hud_enabled(); }
 
 static void menu_draw(VkImage dst, int32_t x0, int32_t y0, uint32_t bw, uint32_t bh);  /* below, with the pause */
@@ -921,7 +968,9 @@ static uint32_t panel_scale(uint32_t bw, uint32_t bh) {
  * for a picture of this size (rgba: the w x h frame, colours as the window shows). */
 static void hud_onto(uint8_t *rgba, uint32_t w, uint32_t h) {
     float hs = overlay_scale(h);
-    paste(rgba, w, h, &hud, hud_shown_w, hud_shown_h, (uint32_t)(6 * hs), (uint32_t)(6 * hs), 1.0f);
+    int32_t hx, hy;
+    hud_place(hud_shown_w, hud_shown_h, w, h, hs, &hx, &hy);
+    paste(rgba, w, h, &hud, hud_shown_w, hud_shown_h, (uint32_t)hx, (uint32_t)hy, 1.0f);
     uint32_t s = panel_scale(w, h);
     if (panel_shown_w && (uint32_t)panel_shown_w * s <= w && (uint32_t)panel_shown_h * s <= h)
         paste(rgba, w, h, &panel, panel_shown_w, panel_shown_h, (w - (uint32_t)panel_shown_w * s) / 2,
@@ -1223,7 +1272,7 @@ static int present_image(VkImage src, VkImageLayout layout, VkRect2D r0, int rea
     } else {
         dlssg_hudless(VK_NULL_HANDLE, VK_NULL_HANDLE, swap_format, 0, 0);
     }
-    hud_draw(dst, x0, y0);
+    hud_draw(dst, x0, y0, bw, bh);
     menu_draw(dst, x0, y0, bw, bh);
     panel_draw(dst, x0, y0, bw, bh);
     notice_draw(dst, x0, y0, bw, bh);
@@ -1688,7 +1737,7 @@ void window_run(void (*guest)(void *), void *arg) {
                 else window_fullscreen_cycle(), settings_save();
             }
             if (e.key.key == SDLK_F10) gpu_request_dump(), yw4_hid_note_key("F10");      /* shadow maps etc.: work/dump/ */
-            if (e.key.key == SDLK_F3) __atomic_store_n(&hud_on, hud_enabled() ? 0 : 1, __ATOMIC_RELEASE);  /* the HUD */
+            if (e.key.key == SDLK_F3) window_hud_toggle(), settings_save();  /* the HUD */
             if (e.key.key == SDLK_F4 && !e.key.repeat) game_pause_toggle();  /* test: the overlay's pause (below) */
             if (e.key.key == SDLK_F5) gpu_passes_toggle();  /* per-pass GPU timing in the log */
             if (e.key.key == SDLK_F7 && !e.key.repeat) screen_passes_toggle();  /* the screen passes: ours or the game's */

@@ -1,7 +1,8 @@
 /* The in-game overlay (2026-11-05): a side panel over the paused game, opened by the overlay button (Escape;
  * the touchpad on PlayStation pads, Share on Xbox Series, Capture on Switch Pro; Back + Start on any pad). Its
- * items: Resume, Settings and Controls (the settings panel's pages, settings.h), Performance (the HUD on or off
- * for now), Take screenshot, Exit game (with a popup to confirm). Opening it pauses the game (the game's own
+ * items: Resume; Settings, Controls and Performance, each with its page beside the panel (the player's settings by
+ * section, settings.h; the bindings as a table, bindings.h; the performance HUD's form, corner and parts, with a
+ * preview); Take screenshot; Exit game (with a popup to confirm). Opening it pauses the game (the game's own
  * pause, its screen hidden: pause.c), Resume or the overlay button again resumes. Its look is the design on the
  * canvas https://claude.ai/artifact/DpV5n3eHezBdAMY2aQUgPg (Main.dc.html), drawn 1:1 in the design's units by
  * gamemenu_draw (ui.h); window.c puts it over the paused picture and feeds it input. */

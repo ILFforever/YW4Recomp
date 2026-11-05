@@ -212,7 +212,7 @@ static void start(void) {
 
 /* The HUD (hud.h): averages over the last 30 frames; lows, min and max over the last 600 (20 s);
  * the graph is the last HUD_POINTS frames. */
-void yw4_perf_hud(HudContent *c) {
+void yw4_perf_hud(HudContent *c, int compact, unsigned parts) {
     c->nlines = c->npoints = 0;
     c->target_ms = 1000.0f / 30.0f;
 #define LINE(...) (c->nlines < HUD_LINES ? snprintf(c->lines[c->nlines++], HUD_COLS, __VA_ARGS__) : 0)
@@ -234,31 +234,41 @@ void yw4_perf_hud(HudContent *c) {
             if (recent[i] > hi) hi = recent[i];
         }
         double p99 = percentile(recent, 0, m, 99), p999 = percentile(recent, 0, m, 99.9);
-        LINE("FPS %4.1f  1%% %4.1f  0.1%% %4.1f", interval > 0 ? 1000.0 / interval : 0.0, p99 > 0 ? 1000.0 / p99 : 0.0,
-             p999 > 0 ? 1000.0 / p999 : 0.0);
+        if (compact) {  /* one line: the frame rate and its 1% low */
+            LINE("FPS %4.1f  1%% %4.1f", interval > 0 ? 1000.0 / interval : 0.0, p99 > 0 ? 1000.0 / p99 : 0.0);
+            return;
+        }
+        if (parts & HUD_PART_FPS)
+            LINE("FPS %4.1f  1%% %4.1f  0.1%% %4.1f", interval > 0 ? 1000.0 / interval : 0.0,
+                 p99 > 0 ? 1000.0 / p99 : 0.0, p999 > 0 ? 1000.0 / p999 : 0.0);
         /* frame generation: the frames on screen (the lines above count the game's) */
         float shown = gpu_fg_shown_per_frame();
-        if (shown > 0.0f && interval > 0)
+        if ((parts & HUD_PART_FG) && shown > 0.0f && interval > 0)
             LINE("SHOWN %4.1f  FRAME GEN %s", 1000.0 / interval * shown, gpu_fg() == 2 ? "DLSS" : "FSR");
-        LINE("FRAME %4.1f  MIN %4.1f  MAX %5.1f MS", interval, lo, hi);
+        if (parts & HUD_PART_FPS) LINE("FRAME %4.1f  MIN %4.1f  MAX %5.1f MS", interval, lo, hi);
         size_t g = ngpu < 30 ? ngpu : 30;  /* GPU times arrive PERF_DELAY frames late */
         double busy = 0;
         for (size_t i = ngpu - g; i < ngpu; i++) busy += gpu_busy[i];
-        if (g) LINE("WORK %4.1f  GPU %4.1f MS", work, busy / (double)g);
-        else LINE("WORK %4.1f  GPU - MS", work);
+        if (!(parts & HUD_PART_TIMES)) {
+        } else if (g) {
+            LINE("WORK %4.1f  GPU %4.1f MS", work, busy / (double)g);
+        } else {
+            LINE("WORK %4.1f  GPU - MS", work);
+        }
         /* cpu is 100 per busy core: shown as the share of the whole CPU (as task managers do) and in cores */
         static int ncpu;
         if (!ncpu) ncpu = host_cpu_count();
-        LINE("CPU %.0f%% (%.1f OF %d CORES)", cpu / ncpu, cpu / 100.0, ncpu);
-        LINE("DRAWS %.0f  RAM %.0f MB", draws, rows[nrows - 1].rss);
+        if (parts & HUD_PART_TIMES) {
+            LINE("CPU %.0f%% (%.1f OF %d CORES)", cpu / ncpu, cpu / 100.0, ncpu);
+            LINE("DRAWS %.0f  RAM %.0f MB", draws, rows[nrows - 1].rss);
+        }
         size_t p = nrows < HUD_POINTS ? nrows : HUD_POINTS;
         for (size_t i = 0; i < p; i++) {
             c->frame_ms[i] = (float)rows[nrows - p + i].interval;
             c->work_ms[i] = (float)rows[nrows - p + i].work;
         }
-        c->npoints = (int)p;
+        c->npoints = parts & HUD_PART_GRAPH ? (int)p : 0;
     }
-    LINE("F1: SETTINGS");
 #undef LINE
 }
 

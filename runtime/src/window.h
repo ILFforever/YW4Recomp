@@ -42,9 +42,18 @@ void window_mouse_motion(float *dx, float *dy);
 
 /* The same as pressing F12 (a screenshot of the next frame), for replays. */
 void window_request_screenshot(void);
-/* The performance HUD on or off (F3, the overlay's PERF HUD). */
+/* The performance HUD (F3, the in-game overlay's Performance page): on or off (back to its last mode); its mode
+ * (0 off, 1 detailed, 2 compact), corner (0 top left, 1 top right, 2 bottom left, 3 bottom right) and parts in the
+ * detailed one (hud.h HUD_PART_*); a preview of it drawn into an RGBA image (w x h), and the part drawn. */
 void window_hud_toggle(void);
 int window_hud_shown(void);
+int window_hud_mode(void);
+void window_hud_set_mode(int mode);
+int window_hud_corner(void);
+void window_hud_set_corner(int corner);
+unsigned window_hud_parts(void);
+void window_hud_set_parts(unsigned parts);
+void window_hud_preview(uint8_t *rgba, int w, int h, int *used_w, int *used_h);
 
 /* Full screen (borderless, the desktop's size) or a window: 1 or 0, from YW4_WINDOW=fullscreen|windowed at first;
  * the cycle flips it (panel WINDOW MODE, F11). Any thread; the window's thread applies it within a few ms. */

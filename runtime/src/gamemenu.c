@@ -13,6 +13,7 @@
 static int open_, sel, confirm, choice;
 static int focus;             /* 0 the side panel, 1 the page it shows (Settings) */
 static int srow;              /* the chosen row on the settings page (settings_player_rows) */
+static int prow;              /* the chosen row on the performance page: mode, corner, the four parts */
 static uint32_t changes;      /* counts every change of what shows */
 static int toast_wanted;      /* a screenshot was asked for: the note starts at the next look */
 static uint64_t toast_until;  /* ms */
@@ -56,7 +57,7 @@ static void accept(void) {
     case GM_RESUME: close_and_resume(); break;
     case GM_SETTINGS: focus = 1; break;  /* into its page */
     case GM_CONTROLS: focus = 1; break;
-    case GM_PERF: window_hud_toggle(); break;
+    case GM_PERF: focus = 1; break;
     case GM_SHOT: window_request_screenshot(), __atomic_store_n(&toast_wanted, 1, __ATOMIC_RELEASE); break;
     case GM_EXIT: confirm = 1, choice = 0; break;  /* "keep playing" chosen first */
     }
@@ -99,6 +100,32 @@ static void controls_page_action(int a) {
     }
 }
 
+/* the performance page: its rows are the mode (Off / Compact / Detailed), the corner, then the detailed HUD's four
+ * parts; Left / Right change the first two, A / Enter or Left / Right turn a part on or off */
+static const int perf_modes[3] = {0, 2, 1};  /* the chips' order: Off, Compact, Detailed (window_hud_mode) */
+
+static void perf_page_action(int a) {
+    if (a == GM_BACK || a == GM_LEAVE) {
+        focus = 0;
+        return;
+    }
+    if (a == GM_UP) prow = (prow + 5) % 6;
+    else if (a == GM_DOWN) prow = (prow + 1) % 6;
+    else if (a == GM_LEFT || a == GM_RIGHT || a == GM_ACCEPT) {
+        int d = a == GM_LEFT ? -1 : 1;
+        if (prow == 0) {
+            int m = window_hud_mode(), i = 0;
+            while (i < 3 && perf_modes[i] != m) i++;
+            window_hud_set_mode(perf_modes[((i < 3 ? i : 0) + d + 3) % 3]);
+        } else if (prow == 1) {
+            window_hud_set_corner((window_hud_corner() + d + 4) % 4);
+        } else {
+            window_hud_set_parts(window_hud_parts() ^ (1u << (prow - 2)));
+        }
+        settings_save();
+    }
+}
+
 void gamemenu_action(int a) {
     if (!gamemenu_open() || settings_open()) return;
     changed();
@@ -119,12 +146,14 @@ void gamemenu_action(int a) {
     }
     if (focus) {
         if (sel == GM_CONTROLS) controls_page_action(a);
+        else if (sel == GM_PERF) perf_page_action(a);
         else settings_page_action(a);
         return;
     }
     if (a == GM_UP) sel = (sel + GM_ITEMS - 1) % GM_ITEMS;
     else if (a == GM_DOWN) sel = (sel + 1) % GM_ITEMS;
-    else if (a == GM_ACCEPT || (a == GM_RIGHT && sel == GM_SETTINGS)) accept();
+    else if (a == GM_ACCEPT || (a == GM_RIGHT && (sel == GM_SETTINGS || sel == GM_CONTROLS || sel == GM_PERF)))
+        accept();
     else if (a == GM_BACK) close_and_resume();
 }
 
@@ -346,12 +375,77 @@ static void draw_controls_page(const UiCanvas *c, const GameMenuInfo *in) {
     ui_text_wrap(c, UI_GOTHIC_400, 15, 0, x, top + th + 22, w, 15 * 1.45f, 0, help, MUTED);
 }
 
+/* A choice chip (the design's chipStyle): the chosen one filled; ringed in gold where the focus is. */
+static void chip(const UiCanvas *c, float x, float y, float w, const char *label, int on, int ring) {
+    if (ring) ui_box(c, x - 4, y - 4, w + 8, 60, 15, GOLD, 0, 0);
+    ui_box(c, x, y, w, 52, 12, on ? PLUM : WHITE, 2, on ? PLUM : LINE);
+    ui_text_in(c, UI_GOTHIC_700, 17, x, y, w, 52, 1, label, on ? SNOW : PLUM);
+}
+
+/* The performance page (the design's isPerf section): how the HUD shows while playing, its corner, the detailed
+ * one's parts, and a preview of the HUD as it is now (live, where the design shows example values). */
+static void draw_perf_page(const UiCanvas *c) {
+    ui_box(c, 448, 40, 1104, 764, 20, PAPER, 0, 0);
+    ui_text(c, UI_ROUNDED_800, 34, 488, 76, 34 * 1.25f, "Performance overlay", NIGHT);
+    float y = 76 + 34 * 1.25f + 24, x = 488, lh = 16 * 1.45f;
+    int mode = window_hud_mode(), corner = window_hud_corner();
+    unsigned parts = window_hud_parts();
+    ui_text(c, UI_GOTHIC_700, 16, x, y, lh, "Show while playing", PLUM);
+    y += lh + 10;
+    static const char *const modes[3] = {"Off", "Compact", "Detailed"};
+    for (int i = 0; i < 3; i++) {
+        float w = ui_text_w(UI_GOTHIC_700, 17, modes[i]) + 40;
+        if (w < 130) w = 130;
+        chip(c, x, y, w, modes[i], perf_modes[i] == mode, focus && prow == 0 && perf_modes[i] == mode);
+        x += w + 10;
+    }
+    x = 488, y += 52 + 22;
+    ui_text(c, UI_GOTHIC_700, 16, x, y, lh, "Corner", PLUM);
+    y += lh + 10;
+    static const char *const corners[4] = {"Top left", "Top right", "Bottom left", "Bottom right"};
+    for (int i = 0; i < 4; i++)
+        chip(c, x + (i & 1) * 215, y + (i >> 1) * 62, 205, corners[i], i == corner, focus && prow == 1 && i == corner);
+    y += 2 * 52 + 10 + 22;
+    ui_text(c, UI_GOTHIC_700, 16, x, y, lh, "In the detailed overlay", PLUM);
+    y += lh + 10;
+    static const char *const names[4] = {"FPS and 1% low", "Frame time graph", "GPU and CPU time", "Frame generation"};
+    float lw = 1024 - 360 - 32;
+    for (int i = 0; i < 4; i++, y += 52 + 10) {
+        int on = parts >> i & 1, ring = focus && prow == 2 + i, off = mode != 1;
+        ui_box(c, x, y, lw, 52, 12, WHITE, ring ? 3 : 2, ring ? GOLD : LINE);
+        ui_box(c, x + 18, y + 13, 26, 26, 7, on ? PLUM : WHITE, 2, on ? PLUM : 0xc6b2da);
+        if (on) ui_text_in(c, UI_ROUNDED_800, 16, x + 18, y + 13, 26, 26, 1, "\xe2\x9c\x93", SNOW);  /* ✓ */
+        ui_text_in(c, UI_GOTHIC_400, 17, x + 18 + 26 + 14, y, 0, 52, 0, names[i], off ? MUTED : INK);
+    }
+    /* the preview: the HUD itself, drawn now */
+    float px = 488 + lw + 32, py = 76 + 34 * 1.25f + 24;
+    ui_text(c, UI_GOTHIC_700, 16, px, py, lh, "Preview", PLUM);
+    py += lh + 10;
+    static uint8_t img[512 * 512 * 4], tight[512 * 512 * 4];
+    int iw = 0, ih = 0;
+    if (mode) window_hud_preview(img, 512, 512, &iw, &ih);
+    float bh = 120;
+    if (iw > 0 && ih > 0) {
+        for (int j = 0; j < ih; j++) memcpy(tight + (size_t)j * iw * 4, img + (size_t)j * 512 * 4, (size_t)iw * 4);
+        float sw = 320, sh = sw * (float)ih / (float)iw;
+        if (sh > 420) sh = 420, sw = sh * (float)iw / (float)ih;
+        bh = sh + 36;
+        ui_box(c, px, py, 360, bh, 16, NIGHT, 0, 0);
+        ui_image(c, tight, iw, ih, px + 20, py + 18, sw, sh, 0);
+    } else {
+        ui_box(c, px, py, 360, bh, 16, NIGHT, 0, 0);
+        ui_text_in(c, UI_GOTHIC_700, 16, px, py, 360, bh, 1, "Off while playing", LILAC);
+    }
+    ui_text(c, UI_GOTHIC_400, 14, px, py + bh + 10, 14 * 1.45f, "Live values, as the HUD shows them now.", MUTED);
+}
+
 void gamemenu_draw(const UiCanvas *c, const GameMenuInfo *in) {
     float W = (float)c->w / c->s, H = 900;
-    int page = (sel == GM_SETTINGS || sel == GM_CONTROLS) && !confirm;  /* these show their page */
+    int page = (sel == GM_SETTINGS || sel == GM_CONTROLS || sel == GM_PERF) && !confirm;  /* these show a page */
     ui_rect(c, 0, 0, W, H, SHADE, page ? 0.62f : 0.35f);  /* the tint over the game, darker behind a page */
     if (page && sel == GM_SETTINGS) draw_settings_page(c);
     if (page && sel == GM_CONTROLS) draw_controls_page(c, in);
+    if (page && sel == GM_PERF) draw_perf_page(c);
 
     /* the side panel: 400 wide with a 4 px gold edge towards the game */
     ui_rect(c, 0, 0, 400, H, PAPER, 1);
@@ -371,7 +465,6 @@ void gamemenu_draw(const UiCanvas *c, const GameMenuInfo *in) {
     const char *icons[] = {ICON_RESUME, ICON_SETTINGS, ICON_CONTROLS, ICON_PERF, ICON_SHOT};
     for (int i = 0; i < 5; i++) {
         const char *l = labels[i];
-        if (i == GM_PERF) l = in->hud_on ? "Performance HUD: on" : "Performance HUD: off";
         side_button(c, 20, 128 + i * 66, 356, icons[i], l, sel == i, PLUM);
     }
     /* Exit game at the bottom, under a line; the version under it */
@@ -394,13 +487,13 @@ void gamemenu_draw(const UiCanvas *c, const GameMenuInfo *in) {
         hint(c, hx, H - 56, in->pad ? in->close : "Esc", "Close overlay");
     } else if (focus && in->pad) {  /* on a page */
         hx += hint(c, hx, H - 56, "D-pad", "Choose and change") + 28;
-        hx += hint(c, hx, H - 56, "LB RB", "Section") + 28;
+        if (sel == GM_SETTINGS) hx += hint(c, hx, H - 56, "LB RB", "Section") + 28;
         hx += hint(c, hx, H - 56, in->pad == 2 ? "Circle" : "B", "Back") + 28;
         hint(c, hx, H - 56, in->close, "Close overlay");
     } else if (focus) {
         hx += hint(c, hx, H - 56, "W S", "Move") + 28;
         hx += hint(c, hx, H - 56, "\xe2\x86\x90 \xe2\x86\x92", "Change") + 28;  /* ← → */
-        hx += hint(c, hx, H - 56, "Q E", "Section") + 28;
+        if (sel == GM_SETTINGS) hx += hint(c, hx, H - 56, "Q E", "Section") + 28;
         hx += hint(c, hx, H - 56, "A", "Back") + 28;
         hint(c, hx, H - 56, "Esc", "Close overlay");
     } else if (in->pad) {
