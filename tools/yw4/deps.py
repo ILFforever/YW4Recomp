@@ -30,6 +30,40 @@ from pathlib import Path
 
 from . import config, progress
 
+# Our own copies of the open-licence archives (the GitHub release "deps-mirror" of this repo, the official files
+# unchanged): tried first, since they are the exact files the owner built with; the official address after. Either
+# is used only if its SHA-256 is the pinned one, so the two sources can't differ.
+MIRROR = "https://github.com/ILFforever/YW4Recomp/releases/download/deps-mirror/"
+
+
+def fetch_pinned(urls: list[str], dst: Path, sha256: str, step: str = "") -> None:
+    """Downloads the first of `urls` whose file has the pinned SHA-256 into `dst`; raises if none does. `step`: the
+    progress step name for its bytes."""
+    errors = []
+    for url in urls:
+        print(f"downloading {url}")
+        digest = hashlib.sha256()
+        try:
+            with urllib.request.urlopen(url, timeout=60) as r, open(dst, "wb") as f:
+                total, done = int(r.headers.get("Content-Length") or 0), 0
+                while chunk := r.read(1 << 20):
+                    f.write(chunk)
+                    digest.update(chunk)
+                    done += len(chunk)
+                    if step:
+                        progress.report(step, done, total or done, every=0.25)
+        except OSError as e:  # urllib's errors (HTTP, network, timeouts) are OSErrors
+            errors.append(f"{url}: {e}")
+            dst.unlink(missing_ok=True)
+            continue
+        if digest.hexdigest() == sha256:
+            return
+        errors.append(f"{url}: SHA-256 {digest.hexdigest()}, expected {sha256}")
+        dst.unlink()
+    raise RuntimeError(f"{dst.name}: no source had the tested file. Check for a newer launcher version.\n  "
+                       + "\n  ".join(errors))
+
+
 SDL_VERSION = "3.4.18"
 SDL_URL = f"https://github.com/libsdl-org/SDL/releases/download/release-{SDL_VERSION}/SDL3-devel-{SDL_VERSION}-mingw.tar.gz"
 SDL_SHA256 = "049b9dd711e3fb3f8d84feb998dfec54a75e17cf539c4a80ff4d058d839771cf"
@@ -47,14 +81,8 @@ def fetch_sdl(cfg: config.Config) -> Path:
     deps = cfg.work_dir / "deps"
     deps.mkdir(parents=True, exist_ok=True)
     archive = deps / Path(SDL_URL).name
-    if not archive.is_file():
-        print(f"downloading {SDL_URL}")
-        with urllib.request.urlopen(SDL_URL) as r, open(archive, "wb") as f:
-            shutil.copyfileobj(r, f)
-    digest = hashlib.sha256(archive.read_bytes()).hexdigest()
-    if digest != SDL_SHA256:
-        archive.unlink()
-        raise RuntimeError(f"{archive.name}: SHA-256 {digest}, expected {SDL_SHA256}")
+    if not archive.is_file() or hashlib.sha256(archive.read_bytes()).hexdigest() != SDL_SHA256:
+        fetch_pinned([MIRROR + archive.name, SDL_URL], archive, SDL_SHA256)
     with tarfile.open(archive) as t:
         t.extractall(deps, filter="data")  # "data": no absolute paths, links or devices
     if not (out / "bin" / "SDL3.dll").is_file():
@@ -85,14 +113,8 @@ def fetch_fsr(cfg: config.Config) -> Path:
     deps = cfg.work_dir / "deps" / f"fsr-{FSR_VERSION}-dl"  # the archive alone in its own folder
     deps.mkdir(parents=True, exist_ok=True)
     archive = deps / f"FidelityFX-SDK-v{FSR_VERSION}.zip"
-    if not archive.is_file():
-        print(f"downloading {FSR_URL} (~250 MB)")
-        with urllib.request.urlopen(FSR_URL) as r, open(archive, "wb") as f:
-            shutil.copyfileobj(r, f)
-    digest = hashlib.sha256(archive.read_bytes()).hexdigest()
-    if digest != FSR_SHA256:
-        archive.unlink()
-        raise RuntimeError(f"{archive.name}: SHA-256 {digest}, expected {FSR_SHA256}")
+    if not archive.is_file() or hashlib.sha256(archive.read_bytes()).hexdigest() != FSR_SHA256:
+        fetch_pinned([MIRROR + archive.name, FSR_URL], archive, FSR_SHA256)  # ~250 MB
     with zipfile.ZipFile(archive) as z:
         for name in z.namelist():
             rel = name.split("/", 1)[1] if "/" in name else ""
@@ -190,8 +212,8 @@ def fetch_streamline(cfg: config.Config) -> Path:
 
 
 # The compiler for players' builds (decision 0052): llvm-mingw's official release, the version the owner tests with.
-# The address names the exact version, so a newer release doesn't change this file. If it was ever replaced or
-# removed the check below stops the build with a message; the fix is a launcher update with a new pin.
+# Our copy first, the official address (which names the exact version) after; if neither has the pinned file the
+# build stops with a message, and the fix is a launcher update with a new pin.
 TOOLCHAIN_NAME = "llvm-mingw-20261006-ucrt-x86_64"
 TOOLCHAIN_URL = f"https://github.com/mstorsjo/llvm-mingw/releases/download/20261006/{TOOLCHAIN_NAME}.zip"
 TOOLCHAIN_SHA256 = "317492c456aa27ee607a5919f1d2d38dcdc1112516a24d0bf4b00d078f52d17a"
@@ -206,19 +228,7 @@ def fetch_toolchain(dest: Path) -> Path:
         return out
     dest.mkdir(parents=True, exist_ok=True)
     archive = dest / f"{TOOLCHAIN_NAME}.zip"
-    print(f"downloading {TOOLCHAIN_URL}")
-    digest = hashlib.sha256()
-    with urllib.request.urlopen(TOOLCHAIN_URL) as r, open(archive, "wb") as f:
-        total, done = int(r.headers.get("Content-Length") or 0), 0
-        while chunk := r.read(1 << 20):
-            f.write(chunk)
-            digest.update(chunk)
-            done += len(chunk)
-            progress.report("compiler", done, total or done, every=0.25)
-    if digest.hexdigest() != TOOLCHAIN_SHA256:
-        archive.unlink()
-        raise RuntimeError("The compiler download isn't the file this launcher was tested with. "
-                           "Check for a newer launcher version.")
+    fetch_pinned([MIRROR + archive.name, TOOLCHAIN_URL], archive, TOOLCHAIN_SHA256, "compiler")
     shutil.rmtree(out, ignore_errors=True)
     with zipfile.ZipFile(archive) as z:
         members = [i for i in z.infolist() if not i.is_dir()]
