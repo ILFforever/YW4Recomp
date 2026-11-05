@@ -488,17 +488,12 @@ static void draw_controls_page(const UiCanvas *c, const GameMenuInfo *in) {
         sentence_case(u, t, sizeof t);
         ui_text_in(c, UI_GOTHIC_400, 17, x + 22, y, 0, rh, 0, t, INK);
         if (!r->group) continue;
-        if (r->value && !strcmp(r->group, "KEYS FOR")) {  /* which set the page shows: a pill switch, both named */
-            static const char *const sets[2] = {"Exploring", "Battles"};
-            int battles = !strcmp(r->cells[0], "BATTLES");
-            float sx = x + cw[0] + 22, sw = 110, sh = rh - 14, sy = y + 7;
-            ui_box(c, sx, sy, 2 * sw + 8, sh, sh / 2, 0xefe7f7, 1, LINE);
-            for (int k = 0; k < 2; k++) {
-                int act = k == battles;
-                float bx = sx + 4 + k * sw;
-                if (act) ui_box(c, bx, sy + 3, sw, sh - 6, (sh - 6) / 2, PLUM, 0, 0);
-                ui_text_in(c, UI_GOTHIC_700, 15, bx, sy, sw, sh, 1, sets[k], act ? SNOW : PLUM);
-            }
+        if (r->value && !strcmp(r->group, "KEYS FOR")) {  /* which set the page shows: one coloured pill, its name */
+            const char *set = !strcmp(r->cells[0], "BATTLES") ? "Battles" : "Exploring";
+            float sx = x + cw[0] + 22, sh = rh - 16, sy = y + 8, sw = ui_text_w(UI_GOTHIC_700, 15, set) + 32;
+            ui_box(c, sx, sy, sw, sh, sh / 2, PLUM, 0, 0);
+            ui_text_in(c, UI_GOTHIC_700, 15, sx, sy, sw, sh, 1, set, SNOW);
+            if (on) ui_text_in(c, UI_GOTHIC_500, 17, sx + sw + 12, y, 0, rh, 0, "\xe2\x80\xb9 \xe2\x80\xba", PLUM);  /* ‹ › */
             continue;
         }
         if (r->value) {  /* a setting: its value in the keyboard column */
