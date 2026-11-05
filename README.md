@@ -361,7 +361,7 @@ battles included, and with the controls page.
 
 **Mouse:** the game's code still has a mouse camera that the Switch version never feeds; we feed it, so the mouse
 turns the camera. A click in the
-window gives the mouse to the game, Alt or opening the panel gives it back. Mouse buttons and the wheel can be bound
+window gives the mouse to the game, Alt or opening the panel or the overlay gives it back. Mouse buttons and the wheel can be bound
 on the CONTROLS page; none are by default.
 
 </details>
@@ -395,17 +395,37 @@ get yours from [GameBanana](https://gamebanana.com/mods/480884)):
 **Settings**
 
 <details>
+<summary><b>In-game overlay</b>: pause for settings, controls, the HUD, screenshots and quitting (Escape)</summary>
+
+Press **Escape** to pause and open the overlay. On a controller: the **touchpad** on PlayStation, **Share** on Xbox
+Series, **Capture** on a Switch Pro controller, or **Back + Start** together on any controller. The game pauses the
+way its own pause does (the whole world stops), without its pause screen. From the side panel:
+
+- **Settings**: every option of the settings panel, by section, with what each choice means.
+- **Controls**: the keys and controller buttons for every Switch button. Choose one, then press the new key or button.
+- **Performance**: the performance HUD off, compact (the frame rate only) or detailed, which corner it sits in, and
+  what the detailed one shows.
+- **Take screenshot** of the paused game, and **Exit game** (it asks first).
+
+W/S or the arrow keys choose, Enter or D opens, A or Backspace goes back, ←/→ change a setting, Q/E jump between
+sections (LB/RB on a controller). Escape again, or Resume, goes back to the game. On a DualSense the **mic button**
+shows or hides the performance HUD.
+
+![The in-game overlay: Settings with the display options; Controls with a DualSense; Performance: the HUD detailed, top right, with a live preview; Exit game asks first](docs/screenshots/97-overlay.jpg)
+
+</details>
+
+<details>
 <summary><b>Settings panel</b>: every option in game (F1), the controls on F2, the performance HUD on F3</summary>
 
 Press **F1** in game for the settings panel: every option with all its choices, and what each one does (arrow keys or
 D-pad to choose and change). Its last row, **DEVELOPER OPTIONS**, opens the switches players don't need: which parts
 of the picture the game draws and which our own renderer does (the picture is the same), and speed-ups that look the
 same. **F2** opens the **CONTROLS** page: two keys or mouse buttons and one gamepad button for every Switch
-button and stick direction, changed by pressing the new one, and at the top the mouse's camera sensitivity, left-right and up-down. On a gamepad the DualSense's **mic button** (Share on
-Xbox pads) opens the settings and **Create + Options** (Minus + Plus) the controls; L/R or the triggers switch
-pages. The DualSense's **touchpad** shows the performance HUD (F3). Your choices are saved in
+button and stick direction, changed by pressing the new one, and at the top the mouse's camera sensitivity, left-right and up-down. On a
+controller, open them from the in-game overlay (above). Your choices are saved in
 `settings.ini` next to `yw4.exe` and kept for the next start. **F11** switches between full screen and a window (also
-the panel's WINDOW MODE row). Settings are only in the panel; the other function keys except F11 are debugging tools ([docs/debugging.md](docs/debugging.md)).
+the panel's WINDOW MODE row). Settings are in the panel and the overlay; the other function keys except F11 are debugging tools ([docs/debugging.md](docs/debugging.md)).
 
 ![Settings (F1): The settings panel: display, anti-aliasing and upscaling, frame generation and latency, detail, shadows; Developer options: The developer options: shadow pass, G-buffer, bloom, distance blur pass, battle blur](docs/screenshots/91-settings-panels.png)
 
@@ -434,7 +454,8 @@ the panel's WINDOW MODE row). Settings are only in the panel; the other function
 | Battle blur | The game's or fast (default): the blur as a battle starts with a quarter of the rounds, the same look, ~3 ms less GPU time |
 
 F3 shows a performance HUD in the window's corner: frame time, CPU and GPU cost and memory; with frame generation on,
-also the frames on screen (SHOWN). Its size is HUD SCALE in the panel.
+also the frames on screen (SHOWN). Its size is HUD SCALE in the panel; the overlay's Performance page chooses compact
+or detailed, the corner and the parts.
 
 The game starts at the Switch's 1600×900 and 16:9 with a 4096 shadow map, PCSS ×2, ×16 texture filtering, half
 distance blur, half-size effects and no anti-aliasing. For the game's original look, set every setting to its first choice in the
@@ -468,7 +489,7 @@ shadows here are our own pass with no graphical improvements applied (SHADOW PAS
 </details>
 
 <details>
-<summary><b>Ongoing</b> (5)</summary>
+<summary><b>Ongoing</b> (6)</summary>
 
 | Goal | Where it stands |
 |---|---|
@@ -476,6 +497,7 @@ shadows here are our own pass with no graphical improvements applied (SHADOW PAS
 | **Better shadows** | Bigger shadow maps, PCSS soft shadows and contact shadows done; steadier cascades next |
 | **Better anti-aliasing** | FXAA, SMAA and TAA (steady thin edges: fences, nets, leaves) on the 3D scene before the UI is drawn, so text stays crisp; per-object motion for TAA next (a first version is in, off by default) |
 | **Keyboard, mouse and controllers** | Bindings on the panel's CONTROLS page, saved, with separate keys for battles and your controller's own button names; tested with a DualSense. On-screen button icons follow what you play with and your bindings (keyboard, Xbox, PlayStation or Nintendo, [decision 0042](docs/decisions/0042-button-icons-and-mouse.md)). The mouse turns the camera through the game's own unused mouse code. Pointing and clicking in menus has started: the Yo-kai Pad's icon grid works, other menus not yet |
+| **In-game overlay** | Escape or a controller button pauses the game and opens a side panel: settings, controls, the performance HUD's options, screenshots and exit, drawn like its design ([decision 0053](docs/decisions/0053-in-game-overlay.md)). Next: mouse support and testing on more controllers |
 | **Launcher** | A Windows app that takes your game files, checks them, builds the game and starts it, with mods, DLC, saves and screenshots in one place. Works from start to finish on the developer's PC, but it still needs this repo's tools, so for now [build from source](#building-from-source). Next: an installer and a portable zip ([decision 0052](docs/decisions/0052-launcher-packaging.md)), then a test on a clean PC |
 
 </details>
