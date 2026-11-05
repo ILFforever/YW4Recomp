@@ -230,9 +230,7 @@
         <button class="side-row" type="button" data-tab="dlc"><b>DLC</b><span id="row-dlc"></span></button>
         <button class="side-row" type="button" data-open="save"><b>Saves</b><span>Open folder</span></button>
         <button class="side-row" type="button" data-open="logs"><b>Logs</b><span>Open folder</span></button>
-        <button class="side-row" type="button" id="free-btn"><b>Free up space</b><span id="row-free"></span></button>
-        <button class="side-row" type="button" id="rebuild-btn"><b>Rebuild</b><span>Change downloads</span></button>
-      </div>
+        <button class="side-row" type="button" id="free-btn"><b>Free up space</b><span id="row-free"></span></button>      </div>
     </aside>
 
     <section class="game-main">
@@ -253,10 +251,6 @@
       </div>
 
       <div class="tab-body" data-panel="overview">
-        <div class="offer" id="update-offer" hidden>
-          <span></span>
-          <button class="btn small primary" type="button" id="update-btn">Update</button>
-        </div>
         <div class="offer" id="offer" hidden>
           <span><b>Setup is done.</b> Your original game files aren't needed any more.</span>
           <button class="btn small" type="button" id="offer-keep">Keep them</button>
@@ -354,6 +348,15 @@
   <div class="dialog-buttons">
     <button class="btn" type="button" id="originals-no">Cancel</button>
     <button class="btn primary" type="button" id="originals-yes">Delete</button>
+  </div>
+</dialog>
+
+<dialog id="update-dlg" aria-labelledby="update-title">
+  <h2 id="update-title">Game update</h2>
+  <p id="update-text"></p>
+  <div class="dialog-buttons">
+    <button class="btn" type="button" id="update-later">Later</button>
+    <button class="btn primary" type="button" id="update-btn">Update</button>
   </div>
 </dialog>
 

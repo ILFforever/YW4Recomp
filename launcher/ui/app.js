@@ -662,12 +662,13 @@ document.querySelectorAll('[data-open]').forEach((b) => b.addEventListener('clic
 $('to-options').addEventListener('click', () => {
   popup('Settings', 'Coming soon.');
 });
-// Options is reached from setup (after Check) or from Play's Rebuild row: Back returns where it came from
+// Options is reached from setup (after Check) or, to rebuild with other downloads, from the Play screen (the
+// Settings page will open it): Back returns where it came from
 let optionsFromPlay = false;
 $('options-back').addEventListener('click', () => {
   if (optionsFromPlay) { optionsFromPlay = false; showReady(); } else show('check');
 });
-// the remembered choices of this install, back in the setup's state (for Rebuild and for a game update)
+// the remembered choices of this install, back in the setup's state (for a rebuild and for a game update)
 function choicesFromInstall() {
   mode = inst.mode;
   Object.assign(chosen[mode], inst.paths);
@@ -676,52 +677,66 @@ function choicesFromInstall() {
   if (inst.dlss !== undefined) options.dlss = inst.dlss;
   renderFields();
 }
-$('rebuild-btn').addEventListener('click', () => {  // back into setup with the remembered choices
+function openRebuildOptions() {  // for the Settings page's "Rebuild with other downloads"
   optionsFromPlay = true;
   choicesFromInstall();
   show('options');
   loadOptions();
-});
+}
 
-// ---- updates (decision 0054): at most one offer on the Play screen. A downloaded game update waiting for its
-// rebuild comes first, then a game update on GitHub, then a newer launcher (installed by the player).
-function offerText(box, title, rest) {
-  const span = box.querySelector('span');
-  span.textContent = '';
-  const b = document.createElement('b');
-  b.textContent = title;
-  span.append(b, ' ' + rest);
+// ---- updates (decision 0054): a popup when the Play screen opens, at most one offer: a downloaded game update
+// waiting for its rebuild first, then a game update on GitHub, then a newer launcher (installed by the player).
+// "Later" doesn't ask again until the launcher is started again.
+const updateDlg = $('update-dlg');
+const laterFor = new Set();  // offers put off in this run
+$('update-later').addEventListener('click', () => { laterFor.add(updateDlg.dataset.offer); updateDlg.close(); });
+function askUpdate(key, title, text, action, run) {
+  if (laterFor.has(key)) return;
+  updateDlg.dataset.offer = key;
+  $('update-title').textContent = title;
+  $('update-text').textContent = text;
+  const btn = $('update-btn');
+  btn.textContent = action;
+  btn.disabled = false;
+  $('update-later').disabled = false;
+  btn.onclick = run;
+  if (!updateDlg.open) updateDlg.showModal();
 }
 async function showUpdates(info) {
-  const box = $('update-offer');
-  const btn = $('update-btn');
-  box.hidden = true;
-  btn.disabled = false;
   let u = null;
   try { u = await invoke('check_updates', { install: inst.install, built: info.version || '' }); } catch (e) { return; }
   if (u.rebuild) {
-    offerText(box, `Game update ${u.rebuild} is ready.`, 'Rebuild to play it: about 5 minutes. Your saves stay.');
-    btn.textContent = 'Rebuild';
-    btn.onclick = async () => { choicesFromInstall(); await loadOptions(); show('build'); startBuild(); };
+    askUpdate('rebuild ' + u.rebuild, `Game update ${u.rebuild} is ready`,
+      'Rebuild the game to play it. It takes about 5 minutes; your saves stay as they are.', 'Rebuild', async () => {
+        updateDlg.close();
+        choicesFromInstall();
+        await loadOptions();
+        show('build');
+        startBuild();
+      });
   } else if (u.game) {
-    offerText(box, `Game update ${u.game.version} is out.`, `${gb(u.game.size)} to download, then a rebuild.`);
-    btn.textContent = 'Update';
-    btn.onclick = async () => {
-      btn.disabled = true;
-      btn.textContent = 'Downloading…';
-      try {
-        await invoke('download_game_update', { install: inst.install, version: u.game.version, url: u.game.url, sha256: u.game.sha256 });
-      } catch (e) { popup('Game update', String(e)); }
-      showUpdates(info);
-    };
+    askUpdate('game ' + u.game.version, `Game update ${u.game.version}`,
+      `A new version of the game is out: ${gb(u.game.size)} to download, then a rebuild of about 5 minutes.`, 'Update', async () => {
+        const btn = $('update-btn');
+        btn.disabled = true;
+        $('update-later').disabled = true;
+        btn.textContent = 'Downloading…';
+        try {
+          await invoke('download_game_update', { install: inst.install, version: u.game.version, url: u.game.url, sha256: u.game.sha256 });
+        } catch (e) {
+          updateDlg.close();
+          popup('Game update', String(e));
+          return;
+        }
+        showUpdates(info);  // now the rebuild question, in the same popup
+      });
   } else if (u.launcher) {
-    offerText(box, `Launcher ${u.launcher.version} is out.`, 'Download it and install it over this one.');
-    btn.textContent = 'Download';
-    btn.onclick = () => invoke('open_release_page', { url: u.launcher.page });
-  } else {
-    return;
+    askUpdate('launcher ' + u.launcher.version, `Launcher ${u.launcher.version}`,
+      'A new launcher is out. Download it and install it over this one; your game and saves stay.', 'Download', () => {
+        updateDlg.close();
+        invoke('open_release_page', { url: u.launcher.page });
+      });
   }
-  box.hidden = false;
 }
 
 const freeDlg = $('free');
