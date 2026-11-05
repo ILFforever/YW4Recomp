@@ -54,6 +54,11 @@ Start on any pad (Xbox One and older have no Share). On a DualSense MISC1 is the
 Home / PS is left alone: Steam opens Big Picture on it. In the overlay W/S choose, D enters a page, A leaves it,
 Q/E or LB/RB jump between sections, Left/Right change a value.
 
+Later the same day (the owner): the performance HUD's page is called **Overlay** ("Performance" read like a
+picture setting), **Take screenshot** became **Report a bug** (a stub for now; F12 takes screenshots), the hints under
+each setting are sentences with **Switch default** / **Recommended** tags instead of the F1 panel's capitals, the
+Controls icon is a fuller pad, and the exit popup follows the launcher's popups.
+
 ## Consequences
 
 - Once drawn, the overlay costs one image copy per frame; a change (a key press) redraws it on the CPU (not timed

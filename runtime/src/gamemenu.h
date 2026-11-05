@@ -1,8 +1,8 @@
 /* The in-game overlay (2026-11-05): a side panel over the paused game, opened by the overlay button (Escape;
  * the touchpad on PlayStation pads, Share on Xbox Series, Capture on Switch Pro; Back + Start on any pad). Its
- * items: Resume; Settings, Controls and Performance, each with its page beside the panel (the player's settings by
+ * items: Resume; Settings, Controls and Overlay, each with its page beside the panel (the player's settings by
  * section, settings.h; the bindings as a table, bindings.h; the performance HUD's form, corner and parts, with a
- * preview); Take screenshot; Exit game (with a popup to confirm). Opening it pauses the game (the game's own
+ * preview); Report a bug (not built yet: a note says so; F12 takes screenshots); Exit game (with a popup to confirm). Opening it pauses the game (the game's own
  * pause, its screen hidden: pause.c), Resume or the overlay button again resumes. Its look is the design on the
  * canvas https://claude.ai/artifact/DpV5n3eHezBdAMY2aQUgPg (Main.dc.html), drawn 1:1 in the design's units by
  * gamemenu_draw (ui.h); window.c puts it over the paused picture and feeds it input. Why so: decision 0053. */
@@ -13,7 +13,7 @@
 
 #include "ui.h"
 
-enum { GM_RESUME, GM_SETTINGS, GM_CONTROLS, GM_PERF, GM_SHOT, GM_EXIT, GM_ITEMS };
+enum { GM_RESUME, GM_SETTINGS, GM_CONTROLS, GM_PERF, GM_BUG, GM_EXIT, GM_ITEMS };
 /* GM_LEAVE: back out of a page (the A key; B and Backspace are GM_BACK, which also closes the overlay from the
  * side panel); GM_PREV / GM_NEXT: the page's previous / next section (LB / RB, Q / E) */
 /* GM_CLEAR: clear a binding (X, Delete) */

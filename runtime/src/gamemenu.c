@@ -15,7 +15,7 @@ static int focus;             /* 0 the side panel, 1 the page it shows (Settings
 static int srow;              /* the chosen row on the settings page (settings_player_rows) */
 static int prow;              /* the chosen row on the performance page: mode, corner, the four parts */
 static uint32_t changes;      /* counts every change of what shows */
-static int toast_wanted;      /* a screenshot was asked for: the note starts at the next look */
+static int toast_wanted;      /* the note (Report a bug: coming soon) starts at the next look */
 static uint64_t toast_until;  /* ms */
 
 int gamemenu_open(void) { return __atomic_load_n(&open_, __ATOMIC_ACQUIRE); }
@@ -58,7 +58,7 @@ static void accept(void) {
     case GM_SETTINGS: focus = 1; break;  /* into its page */
     case GM_CONTROLS: focus = 1; break;
     case GM_PERF: focus = 1; break;
-    case GM_SHOT: window_request_screenshot(), __atomic_store_n(&toast_wanted, 1, __ATOMIC_RELEASE); break;
+    case GM_BUG: __atomic_store_n(&toast_wanted, 1, __ATOMIC_RELEASE); break;  /* not built yet: says so */
     case GM_EXIT: confirm = 1, choice = 0; break;  /* "keep playing" chosen first */
     }
 }
@@ -173,11 +173,16 @@ enum {
 static const char *const ICON_RESUME = "<path d=\"M8 5v14l11-7z\"/>";
 static const char *const ICON_SETTINGS =
     "<path d=\"M4 7h9m4 0h3M4 17h3m4 0h9M14 7a2 2 0 1 0 4 0a2 2 0 1 0-4 0M7 17a2 2 0 1 0 4 0a2 2 0 1 0-4 0\"/>";
+/* a rounder, fuller pad than the design's (owner, 2026-11-05: the design's looked "malnourished") */
 static const char *const ICON_CONTROLS =
-    "<path d=\"M6 9h12a4 4 0 0 1 4 4v1a3 3 0 0 1-5.2 2L15 14H9l-1.8 2A3 3 0 0 1 2 14v-1a4 4 0 0 1 4-4zM8 11v4M6 13h4"
-    "M16 12h.01M18 14h.01\"/>";
+    "<path d=\"M8 6h8c3.3 0 5.6 2.3 6 5.5l.8 5.5c.3 2.2-2.4 3.5-4 2L16 16H8l-2.8 3c-1.6 1.5-4.3.2-4-2L2 11.5"
+    "C2.4 8.3 4.7 6 8 6zM8 9.5v4M6 11.5h4\"/><circle cx=\"15.4\" cy=\"10.2\" r=\"0.7\"/>"
+    "<circle cx=\"18.4\" cy=\"13\" r=\"0.7\"/>";
 static const char *const ICON_PERF = "<path d=\"M3 20h18M5 16l4-5 4 3 6-8\"/>";
-static const char *const ICON_SHOT = "<path d=\"M4 8h3l2-3h6l2 3h3v11H4zM12 17a3.5 3.5 0 1 0 0-7a3.5 3.5 0 1 0 0 7z\"/>";
+/* a bug: its body, a line down its back, legs and feelers */
+static const char *const ICON_BUG =
+    "<path d=\"M8 10a4 4 0 0 1 8 0v4a4 4 0 0 1-8 0zM12 10v8M4 12h4M16 12h4M5 7.5l3 2M19 7.5l-3 2M5 18.5l3-2M19 18.5"
+    "l-3-2M10 6.5L8.5 4M14 6.5L15.5 4\"/>";
 static const char *const ICON_EXIT = "<path d=\"M12 3v9M6.3 6.3a8 8 0 1 0 11.4 0\"/>";
 static const char *const ICON_CLOCK = "<circle cx=\"12\" cy=\"12\" r=\"8\"/><path d=\"M12 7v5l3 2\"/>";
 
@@ -278,6 +283,89 @@ static void sentence_case(const char *in, char *out, size_t n) {
     out[o] = 0;
 }
 
+/* The settings' notes and descriptions as sentences: lower case, a capital at each sentence's start, names and
+ * acronyms kept ("THE SWITCH'S DEFAULT: JAGGED EDGES" -> "The Switch's default: jagged edges", "ABOUT 2 MS" -> "about
+ * 2 ms", "ENTER OR A: CHANGE" -> "Enter or A: change"). */
+static void prose_case(const char *in, char *out, size_t n) {
+    static const struct {
+        const char *word, *as;
+    } names[] = {
+        {"SWITCH", "Switch"}, {"SWITCH'S", "Switch's"}, {"ALT", "Alt"}, {"TAB", "Tab"}, {"ENTER", "Enter"},
+        {"DELETE", "Delete"}, {"ESCAPE", "Escape"}, {"BACKSPACE", "Backspace"}, {"SHIFT", "Shift"}, {"MS", "ms"},
+        {"HZ", "Hz"}, {"NVIDIA", "NVIDIA"}, {"AMD", "AMD"}, {"GPU", "GPU"}, {"GPUS", "GPUs"}, {"CPU", "CPU"},
+        {"HUD", "HUD"}, {"FXAA", "FXAA"}, {"SMAA", "SMAA"}, {"TAA", "TAA"}, {"FSR", "FSR"}, {"DLSS", "DLSS"},
+        {"RTX", "RTX"}, {"AI", "AI"}, {"HD", "HD"}, {"PCSS", "PCSS"}, {"VSYNC", "VSync"}, {"F1", "F1"}, {"F2", "F2"},
+        {"F3", "F3"}, {"F11", "F11"}, {"ZL", "ZL"}, {"ZR", "ZR"}, {"LB", "LB"}, {"RB", "RB"}, {"OK", "OK"},
+    };
+    size_t o = 0;
+    int start = 1;     /* at a sentence's start */
+    int after_or = 0;  /* the word before was OR / AND: a single letter is then a button ("ENTER OR A") */
+    int after_the = 0; /* the word before was THE: "THE SWITCH" is the console, "LEFT/RIGHT: SWITCH" the verb */
+    for (const char *p = in; *p && o + 1 < n;) {
+        int alnum = (*p >= 'A' && *p <= 'Z') || (*p >= '0' && *p <= '9');
+        if (!alnum) {
+            if (*p == '.' || *p == '?' || *p == '!') start = 1;
+            out[o++] = *p++;
+            continue;
+        }
+        const char *e = p;
+        while ((*e >= 'A' && *e <= 'Z') || (*e >= '0' && *e <= '9') || (*e == '\'' && e[1] >= 'A' && e[1] <= 'Z')) e++;
+        size_t len = (size_t)(e - p);
+        const char *as = NULL;
+        for (size_t k = 0; k < sizeof names / sizeof *names; k++)
+            if (strlen(names[k].word) == len && !strncmp(names[k].word, p, len)) as = names[k].as;
+        int digit = *p >= '0' && *p <= '9';
+        if (as && len == 6 && !strncmp(p, "SWITCH", 6) && !after_the) as = NULL;  /* the verb */
+        if (as) {
+            for (const char *q = as; *q && o + 1 < n; q++) out[o++] = *q;
+        } else if (len == 1 && (after_or || *e == ':' || *e == '/') && *p != 'I') {
+            out[o++] = *p;  /* a button: A, B, X, Y */
+        } else {
+            for (size_t k = 0; k < len && o + 1 < n; k++) {
+                char ch = p[k];
+                int cap = start && k == 0 && !digit;
+                out[o++] = cap || ch < 'A' || ch > 'Z' ? ch : (char)(ch + 32);  /* "1.5X" -> "1.5x" too */
+            }
+        }
+        after_or = (len == 2 && !strncmp(p, "OR", 2)) || (len == 3 && !strncmp(p, "AND", 3));
+        after_the = len == 3 && !strncmp(p, "THE", 3);
+        if (!digit || as) start = 0;
+        p = e;
+    }
+    out[o] = 0;
+}
+
+/* A note's highlights: "THE SWITCH'S DEFAULT" and "(RECOMMENDED)" become tags; *rest is what remains of it. */
+enum { TAG_DEFAULT = 1, TAG_RECOMMENDED = 2 };
+static int note_tags(const char *note, char *rest, size_t n) {
+    int tags = 0;
+    const char *def = "THE SWITCH'S DEFAULT";
+    if (!strncmp(note, def, strlen(def))) {
+        tags |= TAG_DEFAULT;
+        note += strlen(def);
+        while (*note == ':' || *note == ' ') note++;
+    }
+    snprintf(rest, n, "%s", note);
+    char *r = strstr(rest, "(RECOMMENDED)");
+    if (r) {
+        tags |= TAG_RECOMMENDED;
+        memmove(r, r + 13, strlen(r + 13) + 1);
+        size_t l = strlen(rest);
+        while (l && rest[l - 1] == ' ') rest[--l] = 0;
+    }
+    return tags;
+}
+
+/* a small tag (a note's highlight), centred at cx; returns its width */
+static float tag(const UiCanvas *c, float x, float y, const char *label, uint32_t fill, uint32_t ink, int measure) {
+    float w = ui_text_w(UI_GOTHIC_700, 12, label) + 16;
+    if (!measure) {
+        ui_box(c, x, y, w, 18, 9, fill, 0, 0);
+        ui_text_in(c, UI_GOTHIC_700, 12, x, y, w, 18, 1, label, ink);
+    }
+    return w;
+}
+
 /* The settings page (the design's isSettings section): the sections on the left (the chosen row's lit), its
  * section's rows with the value, its note and arrows, the chosen row's description at the bottom. */
 static void draw_settings_page(const UiCanvas *c) {
@@ -319,20 +407,40 @@ static void draw_settings_page(const UiCanvas *c) {
         const char *value = r->options[r->current] ? r->options[r->current] : "";
         const char *note = r->notes[r->current] ? r->notes[r->current] : "";
         sentence_case(value, t, sizeof t);
-        float vh = 18 * 1.45f, nh = *note ? ui_text_wrap(NULL, UI_GOTHIC_700, 12, 0.04f, 0, 0, 300, 12 * 1.3f, 1, note, 0) : 0;
-        float vy = y + (72 - (vh + (nh ? 2 + nh : 0))) / 2;
+        /* under the value: its tags (Switch default, Recommended), then the rest of its note as a sentence */
+        char rest[200], prose[200];
+        int tags = note_tags(note, rest, sizeof rest);
+        prose_case(rest, prose, sizeof prose);
+        float tw = 0;
+        if (tags & TAG_DEFAULT) tw += tag(c, 0, 0, "Switch default", 0, 0, 1);
+        if (tags & TAG_RECOMMENDED) tw += (tw ? 6 : 0) + tag(c, 0, 0, "Recommended", 0, 0, 1);
+        float th = tags ? 18 : 0, gap = tags && *prose ? 3 : 0;
+        float vh = 18 * 1.4f, nh = *prose ? ui_text_wrap(NULL, UI_GOTHIC_500, 13, 0, 0, 0, 280, 13 * 1.3f, 1, prose, 0) : 0;
+        float bh2 = vh + (th || nh ? 2 + th + gap + nh : 0);
+        float vy = y + (72 - bh2) / 2;
         ui_text_in(c, UI_ROUNDED_700, 18, vx, vy, 300, vh, 1, t, off ? MUTED : NIGHT);
-        if (nh) ui_text_wrap(c, UI_GOTHIC_700, 12, 0.04f, vx, vy + vh + 2, 300, 12 * 1.3f, 1, note, MUTED);
+        float ny = vy + vh + 2;
+        if (tags) {
+            float tx = vx + (300 - tw) / 2;
+            if (tags & TAG_DEFAULT) tx += tag(c, tx, ny, "Switch default", 0xe8dff4, PLUM, 0) + 6;
+            if (tags & TAG_RECOMMENDED) tag(c, tx, ny, "Recommended", GOLD, NIGHT, 0);
+            ny += th + gap;
+        }
+        if (nh) ui_text_wrap(c, UI_GOTHIC_500, 13, 0, vx + 10, ny, 280, 13 * 1.3f, 1, prose, MUTED);  /* clear of the arrows */
         y += 72 + 10;
     }
     /* the chosen row's description */
     const SettingRow *r = &rows[cur];
-    char desc[600];
+    char desc[600], dprose[600], dname[160];
     if (r->disabled) snprintf(desc, sizeof desc, "%s OFF FOR NOW: %s", r->help, r->disabled);
     else snprintf(desc, sizeof desc, "%s", r->help);
-    float dh = ui_text_wrap(NULL, UI_GOTHIC_700, 14, 0.04f, 0, 0, w - 40, 14 * 1.55f, 0, desc, 0) + 32;
+    prose_case(desc, dprose, sizeof dprose);
+    sentence_case(r->name, dname, sizeof dname);
+    /* the setting's name in bold white, then what it does as sentences (no gold text: the owner's rule) */
+    float lh = 15 * 1.5f, dh = lh + 4 + ui_text_wrap(NULL, UI_GOTHIC_500, 15, 0, 0, 0, w - 40, lh, 0, dprose, 0) + 32;
     ui_box(c, x, bottom - dh, w, dh, 14, NIGHT, 0, 0);
-    ui_text_wrap(c, UI_GOTHIC_700, 14, 0.04f, x + 20, bottom - dh + 16, w - 40, 14 * 1.55f, 0, desc, SNOW);
+    ui_text(c, UI_ROUNDED_800, 15, x + 20, bottom - dh + 16, lh, dname, SNOW);
+    ui_text_wrap(c, UI_GOTHIC_500, 15, 0, x + 20, bottom - dh + 16 + lh + 4, w - 40, lh, 0, dprose, LILAC);
 }
 
 /* The controls page (the design's isControls section): a table of each Switch input with its two keys and its
@@ -348,7 +456,7 @@ static void draw_controls_page(const UiCanvas *c, const GameMenuInfo *in) {
     else snprintf(t, sizeof t, "No controller connected");
     ui_text_in(c, UI_GOTHIC_400, 16, 488, 76 + 12, 1024, 34 * 1.25f - 12, 2, t, MUTED);
     float top = 76 + 34 * 1.25f + 22, bottom = 40 + 764 - 36;
-    float hh = ui_text_wrap(NULL, UI_GOTHIC_400, 15, 0, 0, 0, 1024, 15 * 1.45f, 0, help, 0);
+    float hh = ui_text_wrap(NULL, UI_GOTHIC_500, 15, 0, 0, 0, 1024, 15 * 1.45f, 0, help, 0);
     float x = 488, w = 1024, cw[3] = {379, 379, 266}, hdr = 16 * 1.45f + 28, rh = 17 * 1.45f + 24;
     int visible = (int)((bottom - hh - 22 - top - hdr - 4) / rh);
     if (visible < 1) visible = 1;
@@ -406,7 +514,9 @@ static void draw_controls_page(const UiCanvas *c, const GameMenuInfo *in) {
                        r->conflict[k] ? WINE : !strcmp(r->cells[k], "-") ? MUTED : INK);
         }
     }
-    ui_text_wrap(c, UI_GOTHIC_400, 15, 0, x, top + th + 22, w, 15 * 1.45f, 0, help, MUTED);
+    char hprose[512];
+    prose_case(help, hprose, sizeof hprose);
+    ui_text_wrap(c, UI_GOTHIC_500, 15, 0, x, top + th + 22, w, 15 * 1.45f, 0, hprose, MUTED);
 }
 
 /* A choice chip (the design's chipStyle): the chosen one filled; ringed in gold where the focus is. */
@@ -420,7 +530,7 @@ static void chip(const UiCanvas *c, float x, float y, float w, const char *label
  * one's parts, and a preview of the HUD as it is now (live, where the design shows example values). */
 static void draw_perf_page(const UiCanvas *c) {
     ui_box(c, 448, 40, 1104, 764, 20, PAPER, 0, 0);
-    ui_text(c, UI_ROUNDED_800, 34, 488, 76, 34 * 1.25f, "Performance overlay", NIGHT);
+    ui_text(c, UI_ROUNDED_800, 34, 488, 76, 34 * 1.25f, "Overlay", NIGHT);
     float y = 76 + 34 * 1.25f + 24, x = 488, lh = 16 * 1.45f;
     int mode = window_hud_mode(), corner = window_hud_corner();
     unsigned parts = window_hud_parts();
@@ -495,8 +605,8 @@ void gamemenu_draw(const UiCanvas *c, const GameMenuInfo *in) {
     ui_text(c, UI_ROUNDED_800, 21, 100, ty, th, "Yo-kai Watch 4 Recomp", SNOW);
     ui_text(c, UI_GOTHIC_400, 14, 100, ty + th + 4, sh, "Game version " GAME_VERSION, LILAC);
 
-    static const char *const labels[] = {"Resume", "Settings", "Controls", "Performance", "Take screenshot"};
-    const char *icons[] = {ICON_RESUME, ICON_SETTINGS, ICON_CONTROLS, ICON_PERF, ICON_SHOT};
+    static const char *const labels[] = {"Resume", "Settings", "Controls", "Overlay", "Report a bug"};
+    const char *icons[] = {ICON_RESUME, ICON_SETTINGS, ICON_CONTROLS, ICON_PERF, ICON_BUG};
     for (int i = 0; i < 5; i++) {
         const char *l = labels[i];
         side_button(c, 20, 128 + i * 66, 356, icons[i], l, sel == i, PLUM);
@@ -540,9 +650,9 @@ void gamemenu_draw(const UiCanvas *c, const GameMenuInfo *in) {
         hint(c, hx, H - 56, "Esc", "Close overlay");
     }
 
-    /* the note after a screenshot: top right */
+    /* the note after Report a bug (not built yet): top right */
     if (in->now < toast_until) {
-        const char *t = "Screenshot saved";
+        const char *t = "Bug reports are coming soon";
         float tw = ui_text_w(UI_GOTHIC_700, 17, t), bw = tw + 44 + 6, bh = 17 * 1.45f + 28 + 6;
         ui_box(c, W - 48 - bw, 40, bw, bh, 14, SNOW, 3, GOLD);
         ui_text_in(c, UI_GOTHIC_700, 17, W - 48 - bw, 40, bw, bh, 1, t, NIGHT);
