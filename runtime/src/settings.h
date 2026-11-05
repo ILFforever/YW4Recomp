@@ -49,5 +49,7 @@ int settings_player_rows(SettingRow *rows, int max);
 void settings_change(int row, int dir);
 /* The settings page shows its developer page (DEVELOPER OPTIONS, the last row's; Escape or B goes back). */
 int settings_developer(void);
+/* LEGACY MENUS (YW4_LEGACY_KEYS, default on): 1 if the F1, F2 and F3 keys work. */
+int settings_legacy_keys(void);
 
 #endif

@@ -102,6 +102,19 @@ static const char *upscale_disabled(void) {
     return gpu_aa() >= 4 ? NULL : "NEEDS ANTI-ALIASING SET TO FSR OR DLSS";
 }
 
+/* LEGACY MENUS: the keys from before the in-game overlay. Read once, after settings_load has filled the
+ * environment. Only the window's real key presses ask (window.c); a replay's F1 and F2 still open the panel, so
+ * the test recordings don't depend on this setting. */
+static int legacy_keys = -1;
+int settings_legacy_keys(void) {
+    if (legacy_keys < 0) {
+        const char *e = getenv("YW4_LEGACY_KEYS");
+        legacy_keys = !(e && !strcmp(e, "0"));
+    }
+    return legacy_keys;
+}
+static void legacy_keys_toggle(void) { legacy_keys = !settings_legacy_keys(); }
+
 /* The player's settings, in the order shown; a row starts a new group when its category differs from the row
  * before. The last row opens the developer page. The texts use the HUD font's characters (hud.c): upper case,
  * digits, . , : % / - ( ) ' ! ? */
@@ -193,6 +206,12 @@ static const Setting player[] = {
      {"OFF", "ON"},
      {"THE SWITCH'S DEFAULT", "MORE DEPTH IN LEAVES AND UNDER EDGES, ALMOST NO COST"}, 2, gpu_contact,
      gpu_contact_toggle, "YW4_CONTACT", {"0", "1"}, contact_disabled},
+    {"ADVANCED", "LEGACY MENUS",
+     "THE OLD KEYS: F1 OPENS THE OLD SETTINGS PANEL AND ITS DEVELOPER OPTIONS, F2 THE OLD CONTROLS PAGE, F3 SHOWS OR "
+     "HIDES THE PERFORMANCE HUD. OFF, THE THREE KEYS DO NOTHING: THIS MENU HAS ALL OF IT BUT THE DEVELOPER OPTIONS.",
+     {"OFF", "ON"},
+     {"F1, F2 AND F3 DO NOTHING", "F1, F2 AND F3 WORK"}, 2, settings_legacy_keys, legacy_keys_toggle,
+     "YW4_LEGACY_KEYS", {"0", "1"}},
 };
 /* The developer page (DEVELOPER OPTIONS): behind-the-scenes switches for testing the port, which the picture
  * doesn't show: who draws each part of it, and speed-ups that look the same. The defaults are the recommended
