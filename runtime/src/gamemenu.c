@@ -6,6 +6,7 @@
 #include <string.h>
 
 #include "gamemenu.h"
+#include "bindings.h"
 #include "settings.h"
 #include "window.h"
 
@@ -24,11 +25,13 @@ static void changed(void) { __atomic_add_fetch(&changes, 1, __ATOMIC_RELEASE); }
 
 uint32_t gamemenu_look(uint64_t now) {
     if (__atomic_exchange_n(&toast_wanted, 0, __ATOMIC_ACQ_REL)) toast_until = now + 1600;
-    return __atomic_load_n(&changes, __ATOMIC_ACQUIRE) * 2u + (now < toast_until);
+    /* also when a key capture ends by itself (five seconds) */
+    return __atomic_load_n(&changes, __ATOMIC_ACQUIRE) * 4u + (now < toast_until) + 2u * (uint32_t)bindings_capturing();
 }
 
 static void close_and_resume(void) {
     if (settings_open()) settings_toggle();
+    bindings_cancel();
     confirm = 0, focus = 0;
     __atomic_store_n(&open_, 0, __ATOMIC_RELEASE);
     if (window_paused()) window_pause_toggle();
@@ -52,7 +55,7 @@ static void accept(void) {
     switch (sel) {
     case GM_RESUME: close_and_resume(); break;
     case GM_SETTINGS: focus = 1; break;  /* into its page */
-    case GM_CONTROLS: settings_show(1); break;  /* the panel's controls page for now; closing it comes back here */
+    case GM_CONTROLS: focus = 1; break;
     case GM_PERF: window_hud_toggle(); break;
     case GM_SHOT: window_request_screenshot(), __atomic_store_n(&toast_wanted, 1, __ATOMIC_RELEASE); break;
     case GM_EXIT: confirm = 1, choice = 0; break;  /* "keep playing" chosen first */
@@ -84,6 +87,18 @@ static void settings_page_action(int a) {
     }
 }
 
+/* the controls page: the controls' own selection and key capture (bindings.h), as the F2 page's */
+static void controls_page_action(int a) {
+    static const int map[] = {[GM_UP] = SETTINGS_UP, [GM_DOWN] = SETTINGS_DOWN, [GM_LEFT] = SETTINGS_LEFT,
+                              [GM_RIGHT] = SETTINGS_RIGHT, [GM_ACCEPT] = SETTINGS_ACCEPT, [GM_CLEAR] = SETTINGS_CLEAR};
+    if (a == GM_BACK || a == GM_LEAVE) {
+        bindings_cancel();
+        focus = 0;
+    } else if (a == GM_UP || a == GM_DOWN || a == GM_LEFT || a == GM_RIGHT || a == GM_ACCEPT || a == GM_CLEAR) {
+        bindings_action(map[a]);
+    }
+}
+
 void gamemenu_action(int a) {
     if (!gamemenu_open() || settings_open()) return;
     changed();
@@ -103,7 +118,8 @@ void gamemenu_action(int a) {
         return;
     }
     if (focus) {
-        settings_page_action(a);
+        if (sel == GM_CONTROLS) controls_page_action(a);
+        else settings_page_action(a);
         return;
     }
     if (a == GM_UP) sel = (sel + GM_ITEMS - 1) % GM_ITEMS;
@@ -169,9 +185,18 @@ static float popup_button(const UiCanvas *c, float right, float y, const char *l
  * options and sections in sentence case and keeps acronyms: "WINDOW MODE" -> "Window mode", "X16" -> "x16". */
 static void sentence_case(const char *in, char *out, size_t n) {
     static const char *const keep[] = {"HUD", "FXAA", "SMAA", "TAA", "FSR", "DLSS", "GPU", "GPUS", "CPU", "AMD",
-                                       "NVIDIA", "RTX", "HD", "MS", "F3", "F11", "AI"};
+                                       "NVIDIA", "RTX", "HD", "MS", "F3", "F11", "AI", "ZL", "ZR", "LB", "RB", "LT",
+                                       "RT", "L1", "R1", "L2", "R2", "L3", "R3", "PS"};
+    /* the F1 panel font's own symbols (bindings.c): arrows, and PlayStation's shapes by name */
+    static const char *const sym[9] = {NULL, "\xe2\x86\x91", "\xe2\x86\x93", "\xe2\x86\x90", "\xe2\x86\x92",
+                                       "Triangle", "Circle", "Square", "Cross"};
     size_t o = 0;
     for (const char *p = in; *p && o + 1 < n;) {
+        if (*p >= 1 && *p <= 8) {
+            for (const char *q = sym[(int)*p]; *q && o + 1 < n; q++) out[o++] = *q;
+            p++;
+            continue;
+        }
         if ((*p >= 'A' && *p <= 'Z') || (*p >= '0' && *p <= '9')) {  /* a word */
             const char *e = p;
             while ((*e >= 'A' && *e <= 'Z') || (*e >= '0' && *e <= '9')) e++;
@@ -247,11 +272,86 @@ static void draw_settings_page(const UiCanvas *c) {
     ui_text_wrap(c, UI_GOTHIC_700, 14, 0.04f, x + 20, bottom - dh + 16, w - 40, 14 * 1.55f, 0, desc, SNOW);
 }
 
+/* The controls page (the design's isControls section): a table of each Switch input with its two keys and its
+ * controller input, the chosen row ringed in gold and the chosen key or input on a gold chip; the rows scroll.
+ * Under it, what the chosen row does (the design's note line). */
+static void draw_controls_page(const UiCanvas *c, const GameMenuInfo *in) {
+    static BindRow rows[64];
+    char help[512], t[160], u[160];
+    int row, col, n = bindings_rows(rows, 64, &row, &col, help, sizeof help);
+    ui_box(c, 448, 40, 1104, 764, 20, PAPER, 0, 0);
+    ui_text(c, UI_ROUNDED_800, 34, 488, 76, 34 * 1.25f, "Controls", NIGHT);
+    if (in->pad_name) snprintf(t, sizeof t, "%s connected", in->pad_name);
+    else snprintf(t, sizeof t, "No controller connected");
+    ui_text_in(c, UI_GOTHIC_400, 16, 488, 76 + 12, 1024, 34 * 1.25f - 12, 2, t, MUTED);
+    float top = 76 + 34 * 1.25f + 22, bottom = 40 + 764 - 36;
+    float hh = ui_text_wrap(NULL, UI_GOTHIC_400, 15, 0, 0, 0, 1024, 15 * 1.45f, 0, help, 0);
+    float x = 488, w = 1024, cw[3] = {379, 379, 266}, hdr = 16 * 1.45f + 28, rh = 17 * 1.45f + 24;
+    int visible = (int)((bottom - hh - 22 - top - hdr - 4) / rh);
+    if (visible < 1) visible = 1;
+    float th = hdr + visible * rh + 4;
+    int first = row - visible / 2;
+    if (first > n - visible) first = n - visible;
+    if (first < 0) first = 0;
+    /* the table: a white box, its header row lilac */
+    ui_box(c, x, top, w, th, 16, WHITE, 2, LINE);
+    ui_box(c, x + 2, top + 2, w - 4, hdr, 14, 0xefe7f7, 0, 0);
+    ui_rect(c, x + 2, top + 2 + hdr - 14, w - 4, 14, 0xefe7f7, 1);
+    static const char *const heads[3] = {"Switch button", "Keyboard", "Controller"};
+    float cx = x;
+    for (int k = 0; k < 3; k++) ui_text_in(c, UI_GOTHIC_700, 16, cx + 22, top + 2, 0, hdr, 0, heads[k], PLUM), cx += cw[k];
+    float y = top + 2 + hdr;
+    for (int i = first; i < n && i < first + visible; i++, y += rh) {
+        const BindRow *r = &rows[i];
+        int on = focus && i == row;
+        ui_rect(c, x + 2, y, w - 4, 2, 0xefe7f7, 1);  /* the line between rows */
+        if (on) {  /* a gold ring */
+            ui_box(c, x + 4, y + 2, w - 8, rh - 2, 10, GOLD, 0, 0);
+            ui_box(c, x + 7, y + 5, w - 14, rh - 8, 7, WHITE, 0, 0);
+        }
+        /* the Switch input's name */
+        if (!r->group) snprintf(u, sizeof u, "%s", r->name);  /* the reset row */
+        else if (!strcmp(r->group, "BUTTONS")) snprintf(u, sizeof u, "%s", r->name);
+        else if (!strcmp(r->group, "KEYS FOR")) snprintf(u, sizeof u, "KEYS FOR");
+        else snprintf(u, sizeof u, "%s %s", r->group, r->name);
+        sentence_case(u, t, sizeof t);
+        ui_text_in(c, UI_GOTHIC_400, 17, x + 22, y, 0, rh, 0, t, INK);
+        if (!r->group) continue;
+        if (r->value) {  /* a setting: its value in the keyboard column */
+            sentence_case(r->cells[0], t, sizeof t);
+            ui_text_in(c, UI_GOTHIC_500, 17, x + cw[0] + 22, y, 0, rh, 0, t, NIGHT);
+            if (on) ui_text_in(c, UI_GOTHIC_500, 17, x + cw[0] + 22 + ui_text_w(UI_GOTHIC_500, 17, t) + 12, y, 0, rh, 0,
+                               "\xe2\x80\xb9 \xe2\x80\xba", PLUM);  /* ‹ ›: Left / Right change it */
+            continue;
+        }
+        /* the two keys, then the controller input: each a chip when chosen */
+        for (int k = 0; k < 3; k++) {
+            float kx = k < 2 ? x + cw[0] + 22 : x + cw[0] + cw[1] + 22;
+            if (k == 1) {  /* after the first key: "E, Enter" */
+                char k0[64];
+                sentence_case(r->cells[0], k0, sizeof k0);
+                kx += ui_text_w(UI_GOTHIC_500, 17, k0);
+                ui_text_in(c, UI_GOTHIC_500, 17, kx, y, 0, rh, 0, ",", MUTED);
+                kx += ui_text_w(UI_GOTHIC_500, 17, ", ") + 6;
+            }
+            const char *cell = r->cells[k];
+            if (on && col == k && bindings_capturing()) cell = "PRESS...";
+            sentence_case(cell, t, sizeof t);
+            float tw = ui_text_w(UI_GOTHIC_500, 17, t);
+            if (on && col == k) ui_box(c, kx - 10, y + 8, tw + 20, rh - 16, 8, GOLD, 0, 0);
+            ui_text_in(c, UI_GOTHIC_500, 17, kx, y, 0, rh, 0, t,
+                       r->conflict[k] ? WINE : !strcmp(r->cells[k], "-") ? MUTED : INK);
+        }
+    }
+    ui_text_wrap(c, UI_GOTHIC_400, 15, 0, x, top + th + 22, w, 15 * 1.45f, 0, help, MUTED);
+}
+
 void gamemenu_draw(const UiCanvas *c, const GameMenuInfo *in) {
     float W = (float)c->w / c->s, H = 900;
-    int page = sel == GM_SETTINGS && !confirm;  /* the side panel's Settings shows its page */
+    int page = (sel == GM_SETTINGS || sel == GM_CONTROLS) && !confirm;  /* these show their page */
     ui_rect(c, 0, 0, W, H, SHADE, page ? 0.62f : 0.35f);  /* the tint over the game, darker behind a page */
-    if (page) draw_settings_page(c);
+    if (page && sel == GM_SETTINGS) draw_settings_page(c);
+    if (page && sel == GM_CONTROLS) draw_controls_page(c, in);
 
     /* the side panel: 400 wide with a 4 px gold edge towards the game */
     ui_rect(c, 0, 0, 400, H, PAPER, 1);
@@ -285,7 +385,14 @@ void gamemenu_draw(const UiCanvas *c, const GameMenuInfo *in) {
     /* the key hints along the bottom */
     ui_rect(c, 400, H - 56, W - 400, 56, NIGHT, 1);
     float hx = 448;
-    if (focus && in->pad) {  /* on a page */
+    if (focus && sel == GM_CONTROLS) {  /* the controls page */
+        int ps = in->pad == 2;
+        hx += hint(c, hx, H - 56, in->pad ? "D-pad" : "W S", "Choose") + 28;
+        hx += hint(c, hx, H - 56, in->pad ? (ps ? "Cross" : "A") : "Enter", "Change") + 28;
+        hx += hint(c, hx, H - 56, in->pad ? (ps ? "Square" : "X") : "Del", "Clear") + 28;
+        hx += hint(c, hx, H - 56, in->pad ? (ps ? "Circle" : "B") : "A", "Back") + 28;
+        hint(c, hx, H - 56, in->pad ? in->close : "Esc", "Close overlay");
+    } else if (focus && in->pad) {  /* on a page */
         hx += hint(c, hx, H - 56, "D-pad", "Choose and change") + 28;
         hx += hint(c, hx, H - 56, "LB RB", "Section") + 28;
         hx += hint(c, hx, H - 56, in->pad == 2 ? "Circle" : "B", "Back") + 28;

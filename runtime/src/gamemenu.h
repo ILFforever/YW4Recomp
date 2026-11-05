@@ -15,7 +15,8 @@
 enum { GM_RESUME, GM_SETTINGS, GM_CONTROLS, GM_PERF, GM_SHOT, GM_EXIT, GM_ITEMS };
 /* GM_LEAVE: back out of a page (the A key; B and Backspace are GM_BACK, which also closes the overlay from the
  * side panel); GM_PREV / GM_NEXT: the page's previous / next section (LB / RB, Q / E) */
-enum { GM_UP, GM_DOWN, GM_LEFT, GM_RIGHT, GM_ACCEPT, GM_BACK, GM_LEAVE, GM_PREV, GM_NEXT };
+/* GM_CLEAR: clear a binding (X, Delete) */
+enum { GM_UP, GM_DOWN, GM_LEFT, GM_RIGHT, GM_ACCEPT, GM_BACK, GM_LEAVE, GM_PREV, GM_NEXT, GM_CLEAR };
 
 int gamemenu_open(void);       /* the overlay is open (its panel shows, or a page it opened) */
 int gamemenu_selected(void);   /* GM_* */
@@ -33,6 +34,7 @@ typedef struct {
     const char *version;  /* "0.7.0" */
     int pad;
     const char *close;
+    const char *pad_name;  /* the connected controller (the Controls page), NULL: none */
     const uint8_t *logo;  /* the game's icon (RGBA, logo_w x logo_h), NULL: none */
     int logo_w, logo_h;
     uint64_t now;  /* ms */

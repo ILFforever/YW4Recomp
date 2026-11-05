@@ -766,6 +766,7 @@ static struct {
 } ov;
 
 static int pad_hints(const char **close);  /* below, with the gamepad */
+static const char *pad_name(void);
 const uint8_t *game_logo(int *w, int *h);  /* gamelogo.c */
 
 static void kept_read_back(uint32_t w, uint32_t h) {
@@ -862,6 +863,7 @@ static void menu_draw(VkImage dst, int32_t x0, int32_t y0, uint32_t bw, uint32_t
         const char *close = "Esc";
         GameMenuInfo info = {hud_enabled(), yw4_version, pad_hints(&close), close, NULL, 0, 0, now};
         info.logo = game_logo(&info.logo_w, &info.logo_h);
+        info.pad_name = pad_name();
         gamemenu_draw(&c, &info);
         memcpy(ov.img.ptr, ov.px, (size_t)bw * bh * 4);
         barrier(ov.img.image, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 0, VK_ACCESS_TRANSFER_WRITE_BIT);
@@ -1456,7 +1458,11 @@ static int pad_hints(const char **close) {
     return ps ? 2 : 1;
 }
 
+static const char *pad_name(void) { return gamepad ? SDL_GetGamepadName(gamepad) : NULL; }
+
 static void panel_pad_button(SDL_GamepadButton button) {
+    /* the overlay's controls page waits for an input to bind: it takes the press */
+    if (gamemenu_open() && !settings_open() && bindings_capturing() && bindings_capture_button(button)) return;
     int both = SDL_GetGamepadButton(gamepad, SDL_GAMEPAD_BUTTON_BACK) &&
                SDL_GetGamepadButton(gamepad, SDL_GAMEPAD_BUTTON_START);
     /* buttons a Switch controller doesn't have (or two at once), so the game never sees them alone */
@@ -1481,7 +1487,8 @@ static void panel_pad_button(SDL_GamepadButton button) {
                    {nin ? SDL_GAMEPAD_BUTTON_EAST : SDL_GAMEPAD_BUTTON_SOUTH, GM_ACCEPT, "M_OK"},
                    {nin ? SDL_GAMEPAD_BUTTON_SOUTH : SDL_GAMEPAD_BUTTON_EAST, GM_BACK, "M_BACK"},
                    {SDL_GAMEPAD_BUTTON_LEFT_SHOULDER, GM_PREV, "M_PREV"},
-                   {SDL_GAMEPAD_BUTTON_RIGHT_SHOULDER, GM_NEXT, "M_NEXT"}};
+                   {SDL_GAMEPAD_BUTTON_RIGHT_SHOULDER, GM_NEXT, "M_NEXT"},
+                   {nin ? SDL_GAMEPAD_BUTTON_NORTH : SDL_GAMEPAD_BUTTON_WEST, GM_CLEAR, "M_CLEAR"}};
         for (size_t i = 0; i < sizeof map / sizeof *map; i++)
             if (button == map[i].button) gamemenu_action(map[i].action), yw4_hid_note_key(map[i].name);
         return;
@@ -1640,7 +1647,7 @@ void window_run(void (*guest)(void *), void *arg) {
             }
             break;
         case SDL_EVENT_MOUSE_BUTTON_DOWN:
-            if (settings_open()) {
+            if (settings_open() || gamemenu_open()) {  /* not the game's: the panel's or the overlay's */
                 if (bindings_capturing()) bindings_capture_mouse(e.button.button);
             } else if (window && !SDL_GetWindowRelativeMouseMode(window) && !mouse_off()) {
                 SDL_SetWindowRelativeMouseMode(window, true);
@@ -1648,7 +1655,7 @@ void window_run(void (*guest)(void *), void *arg) {
             }
             break;
         case SDL_EVENT_MOUSE_WHEEL:
-            if (settings_open()) {
+            if (settings_open() || gamemenu_open()) {
                 if (bindings_capturing()) bindings_capture_wheel(e.wheel.y > 0 ? 1 : -1);
             } else {
                 host_lock(&mouse_lock);
@@ -1700,6 +1707,14 @@ void window_run(void (*guest)(void *), void *arg) {
              * the arrows choose, Enter or Space selects, Backspace resumes. A settings page it opened takes Escape
              * itself (back to the overlay). */
             if (!settings_open() && !e.key.repeat) {
+                /* the overlay's controls page waits for a key to bind: it takes the key (not F1..F12; Escape
+                 * gives up waiting) */
+                if (gamemenu_open() && bindings_capturing()) {
+                    if (e.key.key == SDLK_ESCAPE) bindings_cancel();
+                    else if (e.key.scancode < SDL_SCANCODE_F1 || e.key.scancode > SDL_SCANCODE_F12)
+                        bindings_capture_key(e.key.scancode);
+                    break;
+                }
                 if (e.key.key == SDLK_ESCAPE) {
                     gamemenu_toggle(), yw4_hid_note_key("MENU");
                 } else if (gamemenu_open()) {
@@ -1710,7 +1725,8 @@ void window_run(void (*guest)(void *), void *arg) {
                     } mk[] = {{SDLK_UP, GM_UP, "M_UP"},          {SDLK_DOWN, GM_DOWN, "M_DOWN"},
                               {SDLK_LEFT, GM_LEFT, "M_LEFT"},    {SDLK_RIGHT, GM_RIGHT, "M_RIGHT"},
                               {SDLK_RETURN, GM_ACCEPT, "M_OK"},  {SDLK_KP_ENTER, GM_ACCEPT, "M_OK"},
-                              {SDLK_SPACE, GM_ACCEPT, "M_OK"},   {SDLK_BACKSPACE, GM_BACK, "M_BACK"}};
+                              {SDLK_SPACE, GM_ACCEPT, "M_OK"},   {SDLK_BACKSPACE, GM_BACK, "M_BACK"},
+                              {SDLK_DELETE, GM_CLEAR, "M_CLEAR"}};
                     for (size_t i = 0; i < sizeof mk / sizeof *mk; i++)
                         if (e.key.key == mk[i].key) gamemenu_action(mk[i].action), yw4_hid_note_key(mk[i].name);
                     /* WASD: W/S choose, D enters the chosen item; in the exit popup A/D pick a button */

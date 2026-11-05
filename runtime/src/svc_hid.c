@@ -230,6 +230,7 @@ static int replay_state(uint64_t tick, uint64_t *buttons, int32_t sticks[4]) {
         else if (!strcmp(k, "M_LEAVE")) gamemenu_action(GM_LEAVE);
         else if (!strcmp(k, "M_PREV")) gamemenu_action(GM_PREV);
         else if (!strcmp(k, "M_NEXT")) gamemenu_action(GM_NEXT);
+        else if (!strcmp(k, "M_CLEAR")) gamemenu_action(GM_CLEAR);
         else if (!strcmp(k, "F10")) gpu_request_dump();
         else if (!strcmp(k, "F12")) window_request_screenshot();
         else if (!strcmp(k, "F9")) shadow_toggle();
