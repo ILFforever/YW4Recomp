@@ -43,6 +43,10 @@ void settings_save(void);
 void settings_action(int action);
 /* The rows as they are now, and the selected one; returns the count. */
 int settings_rows(SettingRow *rows, int max, int *selected);
+/* The in-game overlay's settings page (gamemenu.c): the player's settings (no developer link), and changing row
+ * `row` one option forward (dir 1) or back (-1), as Right / Left on it. */
+int settings_player_rows(SettingRow *rows, int max);
+void settings_change(int row, int dir);
 /* The settings page shows its developer page (DEVELOPER OPTIONS, the last row's; Escape or B goes back). */
 int settings_developer(void);
 

@@ -18,6 +18,7 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "gamemenu.h"
 #include "gbuffer.h"
 #include "ipc_simple.h"
 #include "settings.h"
@@ -219,6 +220,16 @@ static int replay_state(uint64_t tick, uint64_t *buttons, int32_t sticks[4]) {
         if (!strcmp(k, "F11")) gpu_request_trace(450);
         else if (!strcmp(k, "FULLSCR")) window_fullscreen_cycle();  /* F11 now (names are cut to 7 letters); "F11" in recordings is the trace */
         else if (!strcmp(k, "PAUSE")) window_pause_toggle();  /* the overlay's pause, as F4 */
+        else if (!strcmp(k, "MENU")) gamemenu_toggle();  /* the in-game overlay, as Escape */
+        else if (!strcmp(k, "M_UP")) gamemenu_action(GM_UP);
+        else if (!strcmp(k, "M_DOWN")) gamemenu_action(GM_DOWN);
+        else if (!strcmp(k, "M_LEFT")) gamemenu_action(GM_LEFT);
+        else if (!strcmp(k, "M_RIGHT")) gamemenu_action(GM_RIGHT);
+        else if (!strcmp(k, "M_OK")) gamemenu_action(GM_ACCEPT);
+        else if (!strcmp(k, "M_BACK")) gamemenu_action(GM_BACK);
+        else if (!strcmp(k, "M_LEAVE")) gamemenu_action(GM_LEAVE);
+        else if (!strcmp(k, "M_PREV")) gamemenu_action(GM_PREV);
+        else if (!strcmp(k, "M_NEXT")) gamemenu_action(GM_NEXT);
         else if (!strcmp(k, "F10")) gpu_request_dump();
         else if (!strcmp(k, "F12")) window_request_screenshot();
         else if (!strcmp(k, "F9")) shadow_toggle();

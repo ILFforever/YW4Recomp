@@ -32,7 +32,7 @@ typedef struct {
 
 static const Input inputs[] = {
     {"BUTTONS", "A", "A", 0, 0, 0, {SDL_SCANCODE_SPACE, SDL_SCANCODE_RETURN}, PAD_FACE + 0},
-    {"BUTTONS", "B", "B", 1, 0, 0, {SDL_SCANCODE_BACKSPACE, SDL_SCANCODE_ESCAPE}, PAD_FACE + 1},
+    {"BUTTONS", "B", "B", 1, 0, 0, {SDL_SCANCODE_BACKSPACE}, PAD_FACE + 1},  /* Escape: the in-game overlay */
     {"BUTTONS", "X", "X", 2, 0, 0, {SDL_SCANCODE_X}, PAD_FACE + 2},
     {"BUTTONS", "Y", "Y", 3, 0, 0, {SDL_SCANCODE_Y}, PAD_FACE + 3},
     {"BUTTONS", "L", "L", 6, 0, 0, {SDL_SCANCODE_Q}, SDL_GAMEPAD_BUTTON_LEFT_SHOULDER},

@@ -35,6 +35,7 @@
 #include "gbuffer.h"
 #include "gpu.h"
 #include "hud.h"
+#include "gamemenu.h"
 #include "pause.h"
 #include "mousemenu.h"
 #include "settings.h"
@@ -612,6 +613,11 @@ static void panel_draw(VkImage dst, int32_t x0, int32_t y0, uint32_t bw, uint32_
     overlay_show(&panel, dst, w, h, x0 + ((int32_t)bw - w * s) / 2, y0 + ((int32_t)bh - h * s) / 2, (float)s);
 }
 
+void window_hud_toggle(void) { __atomic_store_n(&hud_on, hud_enabled() ? 0 : 1, __ATOMIC_RELEASE); }
+int window_hud_shown(void) { return hud_enabled(); }
+
+static void menu_draw(VkImage dst, int32_t x0, int32_t y0, uint32_t bw, uint32_t bh);  /* below, with the pause */
+
 /* ---- the overlay's pause (2026-11-05, F4 for now): the game's own pause (Plus: the world, timers and sound
  * stop) with its pause screen hidden (pause.c). Pausing presses Plus for the player and keeps the picture of that
  * moment; while paused the window shows that picture, so the game's "Paused" screen under it never shows, and the
@@ -652,8 +658,11 @@ static void pause_live(const char *why) {
     fprintf(stderr, "yw4: pause: live again (%s), %.0f ms after F4\n", why, (double)(SDL_GetTicks() - pause_asked_at));
 }
 
+static int pause_resume_pending;  /* resume asked while the game was still pausing */
+
 static void game_pause_toggle(void) {
     if (!paused_view) {
+        pause_resume_pending = 0;
         pause_request();
         pause_keep_request = 1, kept.valid = 0, pause_asked_at = SDL_GetTicks();
         __atomic_store_n(&paused_view, 1, __ATOMIC_RELEASE);
@@ -662,7 +671,10 @@ static void game_pause_toggle(void) {
     } else if (pause_resume()) {
         pause_asked_at = SDL_GetTicks(), pause_a_at = 0, pause_a_tries = 0;
         fprintf(stderr, "yw4: pause: resume: A on Continue\n");
-    }  /* else: not paused yet (or already resuming) */
+    } else if (pause_state() == PAUSE_WANTED) {
+        pause_resume_pending = 1;  /* not paused yet: resume as soon as it is */
+        fprintf(stderr, "yw4: pause: resume once the game has paused\n");
+    }
 }
 
 /* once per input update (window's thread, and replays): moves the pause on; returns the buttons pressed for the
@@ -671,9 +683,13 @@ uint64_t window_pause_buttons(void) {
     if (window_paused()) {
         uint64_t now = SDL_GetTicks();
         int st = pause_state();
-        if (st == PAUSE_OFF) {
+        if (st == PAUSE_ON && pause_resume_pending) {
+            pause_resume_pending = 0;
+            game_pause_toggle();  /* the resume asked while it was pausing */
+        } else if (st == PAUSE_OFF) {
             pause_live("the game resumed");
         } else if (st == PAUSE_WANTED && now - pause_asked_at > 2000) {
+            pause_resume_pending = 0;
             pause_forget();
             pause_live("the game didn't pause here, a cutscene?");
         } else if (st == PAUSE_RESUME && (!pause_a_at || now - pause_a_at > 1200)) {
@@ -691,6 +707,8 @@ uint64_t window_pause_buttons(void) {
     if (p && window_input_reads() >= pause_press_reads) __atomic_store_n(&pause_press, 0, __ATOMIC_RELEASE), p = 0;
     return p;
 }
+
+static void kept_read_back(uint32_t w, uint32_t h);  /* below: the in-game overlay needs it on the CPU */
 
 /* in present_image, while recording: keep src (w x h at sx, sy, in layout) when asked */
 static void pause_keep(VkImage src, VkImageLayout layout, int32_t sx, int32_t sy, uint32_t w, uint32_t h, VkFormat format) {
@@ -725,12 +743,149 @@ static void pause_keep(VkImage src, VkImageLayout layout, int32_t sx, int32_t sy
     barrier(kept.image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_GENERAL, VK_ACCESS_TRANSFER_WRITE_BIT,
             VK_ACCESS_TRANSFER_READ_BIT);
     kept.valid = 1;
+    kept_read_back(w, h);
+}
+
+/* ---- the in-game overlay (gamemenu.h) on screen. It is see-through (a tint over the game, a dimmed backdrop
+ * behind its popup), and the window copies overlays without blending, so it is put together on the CPU: the kept
+ * picture (read back once when the pause keeps it, scaled to the window and turned into what the window shows),
+ * with the overlay drawn over it (ui.h), the whole picture area uploaded as one image when what it shows changes
+ * (gamemenu_look) and copied onto each frame. While a settings page it opened is up, that page shows instead. */
+static struct {
+    VkBuffer buf;            /* the kept picture read back: kept.w x kept.h texels of kept.format */
+    VkDeviceMemory mem;
+    void *ptr;
+    VkDeviceSize size;
+    int state;               /* 0 none, 1 copy recorded, 2 in ptr (the frame's fence has passed) */
+    uint8_t *bg;             /* it scaled to the picture area, RGBA as the window shows it */
+    uint32_t bg_w, bg_h;
+    uint8_t *px;             /* the overlay over it */
+    Overlay img;             /* its upload buffer and image, the picture area's size */
+    uint32_t look;           /* gamemenu_look of what img holds */
+    int uploaded;
+} ov;
+
+static int pad_hints(const char **close);  /* below, with the gamepad */
+const uint8_t *game_logo(int *w, int *h);  /* gamelogo.c */
+
+static void kept_read_back(uint32_t w, uint32_t h) {
+    VkDeviceSize need = (VkDeviceSize)w * h * 4;
+    if (ov.buf && ov.size < need) {
+        vkDeviceWaitIdle(vk.device);
+        vkDestroyBuffer(vk.device, ov.buf, NULL), vkFreeMemory(vk.device, ov.mem, NULL);
+        ov.buf = VK_NULL_HANDLE;
+    }
+    if (!ov.buf) {
+        VkBufferCreateInfo bci = {.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO, .size = need,
+                                  .usage = VK_BUFFER_USAGE_TRANSFER_DST_BIT};
+        if (vkCreateBuffer(vk.device, &bci, NULL, &ov.buf) != VK_SUCCESS) return;
+        VkMemoryRequirements mr;
+        vkGetBufferMemoryRequirements(vk.device, ov.buf, &mr);
+        VkMemoryAllocateInfo mai = {.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO, .allocationSize = mr.size,
+                                    .memoryTypeIndex = vk_memory_type(mr.memoryTypeBits, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT |
+                                                                                          VK_MEMORY_PROPERTY_HOST_COHERENT_BIT)};
+        if (vkAllocateMemory(vk.device, &mai, NULL, &ov.mem) != VK_SUCCESS) {
+            vkDestroyBuffer(vk.device, ov.buf, NULL), ov.buf = VK_NULL_HANDLE;
+            return;
+        }
+        vkBindBufferMemory(vk.device, ov.buf, ov.mem, 0);
+        vkMapMemory(vk.device, ov.mem, 0, VK_WHOLE_SIZE, 0, &ov.ptr);
+        ov.size = need;
+    }
+    VkBufferImageCopy copy = {.imageSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1}, .imageExtent = {w, h, 1}};
+    vkCmdCopyImageToBuffer(cmd, kept.image, VK_IMAGE_LAYOUT_GENERAL, ov.buf, 1, &copy);
+    ov.state = 1, ov.bg_w = 0;  /* the scaled copy is made again */
+}
+
+/* the kept picture scaled to bw x bh (bilinear), as the window shows it: BGRA swapped, sRGB decoded as the blit
+ * into the window does */
+static int overlay_background(uint32_t bw, uint32_t bh) {
+    if (ov.state != 2 || !kept.valid) return -1;
+    if (ov.bg && ov.bg_w == bw && ov.bg_h == bh) return 0;
+    free(ov.bg);
+    ov.bg = malloc((size_t)bw * bh * 4);
+    if (!ov.bg) return -1;
+    uint32_t w = kept.w, h = kept.h;
+    uint8_t *src = malloc((size_t)w * h * 4);  /* one bulk copy: the mapped memory is slow to read piecemeal */
+    if (!src) return -1;
+    memcpy(src, ov.ptr, (size_t)w * h * 4);
+    int bgra = kept.format == VK_FORMAT_B8G8R8A8_UNORM || kept.format == VK_FORMAT_B8G8R8A8_SRGB;
+    int srgb = kept.format == VK_FORMAT_B8G8R8A8_SRGB || kept.format == VK_FORMAT_R8G8B8A8_SRGB;
+    uint8_t lut[256];
+    for (int i = 0; i < 256; i++) {
+        double c = i / 255.0;
+        if (srgb) c = c <= 0.04045 ? c / 12.92 : pow((c + 0.055) / 1.055, 2.4);
+        lut[i] = (uint8_t)(c * 255.0 + 0.5);
+    }
+    for (uint32_t y = 0; y < bh; y++) {
+        float fy = ((float)y + 0.5f) * (float)h / (float)bh - 0.5f;
+        int y0 = fy < 0 ? 0 : (int)fy, y1 = y0 + 1 < (int)h ? y0 + 1 : y0;
+        float ty = fy < 0 ? 0 : fy - (float)y0;
+        for (uint32_t x = 0; x < bw; x++) {
+            float fx = ((float)x + 0.5f) * (float)w / (float)bw - 0.5f;
+            int x0 = fx < 0 ? 0 : (int)fx, x1 = x0 + 1 < (int)w ? x0 + 1 : x0;
+            float tx = fx < 0 ? 0 : fx - (float)x0;
+            const uint8_t *a = src + ((size_t)y0 * w + x0) * 4, *b = src + ((size_t)y0 * w + x1) * 4;
+            const uint8_t *c = src + ((size_t)y1 * w + x0) * 4, *d = src + ((size_t)y1 * w + x1) * 4;
+            uint8_t *o = ov.bg + ((size_t)y * bw + x) * 4;
+            for (int k = 0; k < 3; k++) {
+                float v = (a[k] * (1 - tx) + b[k] * tx) * (1 - ty) + (c[k] * (1 - tx) + d[k] * tx) * ty;
+                o[bgra ? 2 - k : k] = lut[(int)(v + 0.5f)];
+            }
+            o[3] = 255;
+        }
+    }
+    free(src);
+    ov.bg_w = bw, ov.bg_h = bh;
+    return 0;
+}
+
+static void menu_draw(VkImage dst, int32_t x0, int32_t y0, uint32_t bw, uint32_t bh) {
+    if (!gamemenu_open() || settings_open() || overlay_background(bw, bh)) return;
+    if (ov.img.image && (ov.img.w != bw || ov.img.h != bh)) {  /* the window changed size */
+        vkDeviceWaitIdle(vk.device);
+        vkDestroyImage(vk.device, ov.img.image, NULL), vkFreeMemory(vk.device, ov.img.image_mem, NULL);
+        vkDestroyBuffer(vk.device, ov.img.buffer, NULL), vkFreeMemory(vk.device, ov.img.buffer_mem, NULL);
+        memset(&ov.img, 0, sizeof ov.img);
+        free(ov.px), ov.px = NULL;
+    }
+    if (!ov.img.image) {
+        ov.img.w = bw, ov.img.h = bh, ov.uploaded = 0;
+        if (overlay_resources(&ov.img)) return;
+    }
+    uint64_t now = SDL_GetTicks();
+    uint32_t look = gamemenu_look(now);
+    if (!ov.uploaded || look != ov.look) {  /* draw it again: on the CPU, then one copy into the upload buffer */
+        if (!ov.px && !(ov.px = malloc((size_t)bw * bh * 4))) return;
+        memcpy(ov.px, ov.bg, (size_t)bw * bh * 4);
+        UiCanvas c = {ov.px, (int)bw, (int)bh, (float)bh / 900.0f, 0, 0};
+        const char *close = "Esc";
+        GameMenuInfo info = {hud_enabled(), yw4_version, pad_hints(&close), close, NULL, 0, 0, now};
+        info.logo = game_logo(&info.logo_w, &info.logo_h);
+        gamemenu_draw(&c, &info);
+        memcpy(ov.img.ptr, ov.px, (size_t)bw * bh * 4);
+        barrier(ov.img.image, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 0, VK_ACCESS_TRANSFER_WRITE_BIT);
+        VkBufferImageCopy copy = {.imageSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1}, .imageExtent = {bw, bh, 1}};
+        vkCmdCopyBufferToImage(cmd, ov.img.buffer, ov.img.image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &copy);
+        barrier(ov.img.image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+                VK_ACCESS_TRANSFER_WRITE_BIT, VK_ACCESS_TRANSFER_READ_BIT);
+        ov.look = look, ov.uploaded = 1;
+    }
+    barrier(dst, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_ACCESS_TRANSFER_WRITE_BIT,
+            VK_ACCESS_TRANSFER_WRITE_BIT);
+    VkImageBlit blit = {.srcSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1},
+                        .srcOffsets = {{0, 0, 0}, {(int32_t)bw, (int32_t)bh, 1}},
+                        .dstSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1},
+                        .dstOffsets = {{x0, y0, 0}, {x0 + (int32_t)bw, y0 + (int32_t)bh, 1}}};
+    vkCmdBlitImage(cmd, ov.img.image, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, dst, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1,
+                   &blit, VK_FILTER_NEAREST);  /* a blit: the window's format may order the channels differently */
 }
 
 /* A notice in the middle of the picture: "Switching frame generation" while the switch's safe frames last
  * (gpu_fg.h), "Paused" while the overlay's pause shows the kept picture. */
 static void notice_draw(VkImage dst, int32_t x0, int32_t y0, uint32_t bw, uint32_t bh) {
-    const char *msg = paused_view ? "PAUSED (F4 TO RESUME)" : gpu_fg_switching() ? "SWITCHING FRAME GENERATION..." : NULL;
+    const char *msg = paused_view && !gamemenu_open() ? "PAUSED (F4 TO RESUME)"
+                      : gpu_fg_switching() ? "SWITCHING FRAME GENERATION..." : NULL;
     if (!msg || overlay_resources(&notice)) return;
     float s = overlay_scale(swap_extent.height);
     int w, h;
@@ -769,6 +924,14 @@ static void hud_onto(uint8_t *rgba, uint32_t w, uint32_t h) {
     if (panel_shown_w && (uint32_t)panel_shown_w * s <= w && (uint32_t)panel_shown_h * s <= h)
         paste(rgba, w, h, &panel, panel_shown_w, panel_shown_h, (w - (uint32_t)panel_shown_w * s) / 2,
               (h - (uint32_t)panel_shown_h * s) / 2, (float)s);
+    /* YW4_SHOT_MENU=1 (tests): the in-game overlay too; normally left out, so its TAKE SCREENSHOT shows the game */
+    static int shot_menu = -1;
+    if (shot_menu < 0) shot_menu = getenv("YW4_SHOT_MENU") != NULL;
+    if (!shot_menu || !gamemenu_open() || settings_open() || !ov.px || !ov.uploaded) return;
+    for (uint32_t y = 0; y < h; y++)  /* the overlay's picture (the window's size) scaled to the frame's */
+        for (uint32_t x = 0; x < w; x++)
+            memcpy(rgba + ((size_t)y * w + x) * 4,
+                   ov.px + ((size_t)(y * ov.img.h / h) * ov.img.w + x * ov.img.w / w) * 4, 4);
 }
 
 /* DLSS frame generation's HUD-less copy at the window's size and format (made again when either changes). */
@@ -988,6 +1151,7 @@ static int present_image(VkImage src, VkImageLayout layout, VkRect2D r0, int rea
     uint32_t w = r0.extent.width, h = r0.extent.height;
     int32_t sx = r0.offset.x, sy = r0.offset.y;
     vkWaitForFences(vk.device, 1, &fence, VK_TRUE, UINT64_MAX);
+    if (ov.state == 1) ov.state = 2;  /* the kept picture's read-back copy is done */
     flash_collect();
     uint32_t index;
     VkResult r = vkAcquireNextImageKHR(vk.device, swapchain, UINT64_MAX, acquired, VK_NULL_HANDLE, &index);
@@ -1008,17 +1172,17 @@ static int present_image(VkImage src, VkImageLayout layout, VkRect2D r0, int rea
         layout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
     } else {
         barrier(src, layout, layout, VK_ACCESS_MEMORY_WRITE_BIT, VK_ACCESS_TRANSFER_READ_BIT);
+        pause_keep(src, layout, sx, sy, w, h, flash_format);
+        if (paused_view && kept.valid && kept.w == w && kept.h == h) {  /* the kept picture instead of the game's */
+            src = kept.image, layout = VK_IMAGE_LAYOUT_GENERAL, sx = sy = 0;  /* screenshots too: not its pause screen */
+            barrier(src, layout, layout, VK_ACCESS_MEMORY_WRITE_BIT, VK_ACCESS_TRANSFER_READ_BIT);
+        }
         if (readback) {
             VkBufferImageCopy copy = {.imageSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1}, .imageOffset = {sx, sy, 0},
                                       .imageExtent = {w, h, 1}};
             vkCmdCopyImageToBuffer(cmd, src, layout, staging, 1, &copy);
         }
         if (flash_n != UINT64_MAX && flash_setup(w, h, flash_format)) flash_record(src, layout, sx, sy, w, h, flash_n);
-        pause_keep(src, layout, sx, sy, w, h, flash_format);
-        if (paused_view && kept.valid && kept.w == w && kept.h == h) {  /* the kept picture instead of the game's */
-            src = kept.image, layout = VK_IMAGE_LAYOUT_GENERAL, sx = sy = 0;
-            barrier(src, layout, layout, VK_ACCESS_MEMORY_WRITE_BIT, VK_ACCESS_TRANSFER_READ_BIT);
-        }
     }
     VkImage dst = swap_images[index];
     barrier(dst, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 0, VK_ACCESS_TRANSFER_WRITE_BIT);
@@ -1058,6 +1222,7 @@ static int present_image(VkImage src, VkImageLayout layout, VkRect2D r0, int rea
         dlssg_hudless(VK_NULL_HANDLE, VK_NULL_HANDLE, swap_format, 0, 0);
     }
     hud_draw(dst, x0, y0);
+    menu_draw(dst, x0, y0, bw, bh);
     panel_draw(dst, x0, y0, bw, bh);
     notice_draw(dst, x0, y0, bw, bh);
     barrier(dst, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR, VK_ACCESS_TRANSFER_WRITE_BIT, 0);
@@ -1220,7 +1385,7 @@ static void update_input(void) {
      * everything is let go, so the button that closed it (B, Escape) doesn't reach the game as well. */
     static int withheld;
     static int was_open;
-    int is_open = settings_open();
+    int is_open = settings_open() || gamemenu_open();  /* the panel or the in-game overlay */
     if (is_open) {
         withheld = 1;
         if (window && SDL_GetWindowRelativeMouseMode(window))
@@ -1231,7 +1396,7 @@ static void update_input(void) {
     }
     was_open = is_open;
     if (withheld) {
-        if (!b && !s[0] && !s[1] && !s[2] && !s[3] && !settings_open()) withheld = 0;
+        if (!b && !s[0] && !s[1] && !s[2] && !s[3] && !is_open) withheld = 0;
         b = 0, memset(s, 0, sizeof s);
     }
     /* the mouse in a supported menu (mousemenu.c): the cursor shows while it is open, and hovering and clicking
@@ -1264,29 +1429,61 @@ static void update_input(void) {
     host_unlock(&input_lock);
 }
 
-/* The settings panel from the gamepad: the mic button (Share on Xbox pads) as F1, the settings; Minus and Plus
- * together (Create + Options) as F2, the controls (not Home / PS: Steam takes that one and opens Big Picture); the D-pad or the left stick choose (up/down) and change (left/right); B closes;
- * on the controls page A changes a binding and X clears it (A, B, X as named on the controller); the shoulder
- * buttons and the triggers switch pages. The touchpad shows or hides the performance HUD (F3). Named like the
+/* The gamepad outside the game: the overlay button opens or closes the in-game overlay (gamemenu.h): the touchpad
+ * on PlayStation pads, the button SDL calls MISC1 on the others (Share on Xbox Series, Capture on Switch Pro), and
+ * Back + Start together on any pad (Xbox One and older have no Share); on a DualSense MISC1 is the mic button,
+ * which shows or hides the performance HUD (F3). (Not Home / PS: Steam takes that one and opens Big Picture.) In
+ * the overlay the D-pad or the left stick choose, A selects, B resumes. In the settings panel the D-pad or the left
+ * stick choose (up/down) and change (left/right); B closes; on the controls page A changes a binding and X clears
+ * it (A, B, X as named on the controller); the shoulder buttons and the triggers switch pages. Named like the
  * keys, so recordings and replays see the same presses. While the controls wait for an input, the press goes
  * there instead. */
 void yw4_hid_note_key(const char *name);  /* svc_hid.c: key presses go into the input recording */
 
+static int pad_is_playstation(void) {
+    SDL_GamepadType t = SDL_GetGamepadType(gamepad);
+    return t == SDL_GAMEPAD_TYPE_PS3 || t == SDL_GAMEPAD_TYPE_PS4 || t == SDL_GAMEPAD_TYPE_PS5;
+}
+
+/* the overlay's key hints: 0 the keyboard's (no pad), 1 a pad's, 2 a PlayStation pad's; *close: its overlay button */
+static int pad_hints(const char **close) {
+    if (!gamepad) return 0;
+    int ps = pad_is_playstation();
+    if (ps) *close = "Touchpad";
+    else if (SDL_GamepadHasButton(gamepad, SDL_GAMEPAD_BUTTON_MISC1))
+        *close = SDL_GetGamepadType(gamepad) == SDL_GAMEPAD_TYPE_NINTENDO_SWITCH_PRO ? "Capture" : "Share";
+    else *close = "Back + Start";
+    return ps ? 2 : 1;
+}
+
 static void panel_pad_button(SDL_GamepadButton button) {
     int both = SDL_GetGamepadButton(gamepad, SDL_GAMEPAD_BUTTON_BACK) &&
                SDL_GetGamepadButton(gamepad, SDL_GAMEPAD_BUTTON_START);
-    /* buttons a Switch controller doesn't have, so the game never sees them: the mic button, the DualSense's
-     * touchpad */
-    if (button == SDL_GAMEPAD_BUTTON_TOUCHPAD) {
-        __atomic_store_n(&hud_on, hud_enabled() ? 0 : 1, __ATOMIC_RELEASE);
+    /* buttons a Switch controller doesn't have (or two at once), so the game never sees them alone */
+    int ps = pad_is_playstation();
+    if ((button == SDL_GAMEPAD_BUTTON_TOUCHPAD && ps) || (button == SDL_GAMEPAD_BUTTON_MISC1 && !ps) ||
+        (both && (button == SDL_GAMEPAD_BUTTON_BACK || button == SDL_GAMEPAD_BUTTON_START))) {
+        gamemenu_toggle(), yw4_hid_note_key("MENU");
         return;
     }
-    if (button == SDL_GAMEPAD_BUTTON_MISC1) {  /* as F1: the settings */
-        settings_show(0), yw4_hid_note_key("F1");
+    if (button == SDL_GAMEPAD_BUTTON_MISC1) {  /* the DualSense's mic button: the HUD */
+        window_hud_toggle();
         return;
     }
-    if (both && (button == SDL_GAMEPAD_BUTTON_BACK || button == SDL_GAMEPAD_BUTTON_START)) {  /* as F2: the controls */
-        settings_show(1), yw4_hid_note_key("F2");
+    if (gamemenu_open() && !settings_open()) {  /* the overlay's side panel */
+        int nin = bindings_pad_nintendo();
+        const struct {
+            SDL_GamepadButton button;
+            int action;
+            const char *name;
+        } map[] = {{SDL_GAMEPAD_BUTTON_DPAD_UP, GM_UP, "M_UP"}, {SDL_GAMEPAD_BUTTON_DPAD_DOWN, GM_DOWN, "M_DOWN"},
+                   {SDL_GAMEPAD_BUTTON_DPAD_LEFT, GM_LEFT, "M_LEFT"}, {SDL_GAMEPAD_BUTTON_DPAD_RIGHT, GM_RIGHT, "M_RIGHT"},
+                   {nin ? SDL_GAMEPAD_BUTTON_EAST : SDL_GAMEPAD_BUTTON_SOUTH, GM_ACCEPT, "M_OK"},
+                   {nin ? SDL_GAMEPAD_BUTTON_SOUTH : SDL_GAMEPAD_BUTTON_EAST, GM_BACK, "M_BACK"},
+                   {SDL_GAMEPAD_BUTTON_LEFT_SHOULDER, GM_PREV, "M_PREV"},
+                   {SDL_GAMEPAD_BUTTON_RIGHT_SHOULDER, GM_NEXT, "M_NEXT"}};
+        for (size_t i = 0; i < sizeof map / sizeof *map; i++)
+            if (button == map[i].button) gamemenu_action(map[i].action), yw4_hid_note_key(map[i].name);
         return;
     }
     if (!settings_open() || bindings_capture_button(button)) return;
@@ -1328,7 +1525,7 @@ static void panel_pad_stick(void) {
     int x = SDL_GetGamepadAxis(gamepad, SDL_GAMEPAD_AXIS_LEFTX), y = SDL_GetGamepadAxis(gamepad, SDL_GAMEPAD_AXIS_LEFTY);
     int ax = x < 0 ? -x : x, ay = y < 0 ? -y : y;
     if (ax < 8000 && ay < 8000) held = 0;
-    if (held || !settings_open() || (ax < 16000 && ay < 16000)) return;
+    if (held || !(settings_open() || gamemenu_open()) || (ax < 16000 && ay < 16000)) return;
     if (bindings_capturing()) return;  /* bindings_capture_axis takes it */
     held = 1;
     panel_pad_button(ay > ax ? (y < 0 ? SDL_GAMEPAD_BUTTON_DPAD_UP : SDL_GAMEPAD_BUTTON_DPAD_DOWN)
@@ -1430,7 +1627,7 @@ void window_run(void (*guest)(void *), void *arg) {
             if (gamepad && SDL_GetGamepadID(gamepad) == e.gbutton.which) panel_pad_button(e.gbutton.button);
             break;
         case SDL_EVENT_GAMEPAD_AXIS_MOTION:
-            if (gamepad && SDL_GetGamepadID(gamepad) == e.gaxis.which && settings_open() &&
+            if (gamepad && SDL_GetGamepadID(gamepad) == e.gaxis.which && (settings_open() || gamemenu_open()) &&
                 !bindings_capture_axis(e.gaxis.axis, e.gaxis.value))
                 panel_pad_stick(), panel_pad_triggers();
             break;
@@ -1499,6 +1696,34 @@ void window_run(void (*guest)(void *), void *arg) {
                 if (window && SDL_GetWindowRelativeMouseMode(window)) SDL_SetWindowRelativeMouseMode(window, false);
                 settings_show(1), yw4_hid_note_key("F2");  /* the controls */
             }
+            /* the in-game overlay (gamemenu.h): Escape opens it (or closes it: resume); while its side panel shows,
+             * the arrows choose, Enter or Space selects, Backspace resumes. A settings page it opened takes Escape
+             * itself (back to the overlay). */
+            if (!settings_open() && !e.key.repeat) {
+                if (e.key.key == SDLK_ESCAPE) {
+                    gamemenu_toggle(), yw4_hid_note_key("MENU");
+                } else if (gamemenu_open()) {
+                    static const struct {
+                        SDL_Keycode key;
+                        int action;
+                        const char *name;
+                    } mk[] = {{SDLK_UP, GM_UP, "M_UP"},          {SDLK_DOWN, GM_DOWN, "M_DOWN"},
+                              {SDLK_LEFT, GM_LEFT, "M_LEFT"},    {SDLK_RIGHT, GM_RIGHT, "M_RIGHT"},
+                              {SDLK_RETURN, GM_ACCEPT, "M_OK"},  {SDLK_KP_ENTER, GM_ACCEPT, "M_OK"},
+                              {SDLK_SPACE, GM_ACCEPT, "M_OK"},   {SDLK_BACKSPACE, GM_BACK, "M_BACK"}};
+                    for (size_t i = 0; i < sizeof mk / sizeof *mk; i++)
+                        if (e.key.key == mk[i].key) gamemenu_action(mk[i].action), yw4_hid_note_key(mk[i].name);
+                    /* WASD: W/S choose, D enters the chosen item; in the exit popup A/D pick a button */
+                    int pop = gamemenu_confirming();
+                    if (e.key.key == SDLK_W) gamemenu_action(GM_UP), yw4_hid_note_key("M_UP");
+                    if (e.key.key == SDLK_S) gamemenu_action(GM_DOWN), yw4_hid_note_key("M_DOWN");
+                    if (e.key.key == SDLK_D) gamemenu_action(pop ? GM_RIGHT : GM_ACCEPT), yw4_hid_note_key(pop ? "M_RIGHT" : "M_OK");
+                    if (e.key.key == SDLK_A) gamemenu_action(pop ? GM_LEFT : GM_LEAVE), yw4_hid_note_key(pop ? "M_LEFT" : "M_LEAVE");
+                    if (e.key.key == SDLK_Q) gamemenu_action(GM_PREV), yw4_hid_note_key("M_PREV");  /* a page's sections */
+                    if (e.key.key == SDLK_E) gamemenu_action(GM_NEXT), yw4_hid_note_key("M_NEXT");
+                }
+                break;  /* not the settings panel's keys below: the overlay's Enter mustn't reach a page it opens */
+            }
             if (settings_open() && !e.key.repeat &&
                 !((e.key.scancode < SDL_SCANCODE_F1 || e.key.scancode > SDL_SCANCODE_F12) &&
                   bindings_capture_key(e.key.scancode))) {
@@ -1510,7 +1735,11 @@ void window_run(void (*guest)(void *), void *arg) {
                            {SDLK_LEFT, SETTINGS_LEFT, "LEFT"},     {SDLK_RIGHT, SETTINGS_RIGHT, "RIGHT"},
                            {SDLK_ESCAPE, SETTINGS_CLOSE, "F1"},    {SDLK_RETURN, SETTINGS_ACCEPT, "ENTER"},
                            {SDLK_KP_ENTER, SETTINGS_ACCEPT, "ENTER"}, {SDLK_DELETE, SETTINGS_CLEAR, "DELETE"},
-                           {SDLK_BACKSPACE, SETTINGS_CLEAR, "DELETE"}};
+                           {SDLK_BACKSPACE, SETTINGS_CLEAR, "DELETE"},
+                           /* WASD: W/S choose, D enters (a page, a binding), A leaves the page (back to the
+                            * overlay when it opened it); values change with the arrows */
+                           {SDLK_W, SETTINGS_UP, "UP"},            {SDLK_S, SETTINGS_DOWN, "DOWN"},
+                           {SDLK_D, SETTINGS_ACCEPT, "ENTER"},     {SDLK_A, SETTINGS_CLOSE, "F1"}};
                 for (size_t i = 0; i < sizeof map / sizeof *map; i++)
                     if (e.key.key == map[i].key) settings_action(map[i].action), yw4_hid_note_key(map[i].name);
             }

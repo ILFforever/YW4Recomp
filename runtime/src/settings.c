@@ -397,9 +397,7 @@ void settings_action(int action) {
 
 int settings_developer(void) { return developer_page; }
 
-int settings_rows(SettingRow *rows, int max, int *sel) {
-    const Setting *list = developer_page ? developer : player;
-    int count = developer_page ? NDEVELOPER : NPLAYER;
+static int fill_rows(SettingRow *rows, int max, const Setting *list, int count) {
     int n = count < max ? count : max;
     for (int i = 0; i < n; i++) {
         memset(&rows[i], 0, sizeof rows[i]);
@@ -420,6 +418,11 @@ int settings_rows(SettingRow *rows, int max, int *sel) {
         }
         rows[i].disabled = list[i].disabled ? list[i].disabled() : NULL;
     }
+    return n;
+}
+
+int settings_rows(SettingRow *rows, int max, int *sel) {
+    int n = fill_rows(rows, max, developer_page ? developer : player, developer_page ? NDEVELOPER : NPLAYER);
     if (!developer_page && n < max) {
         memset(&rows[n], 0, sizeof rows[n]);
         rows[n].category = "ADVANCED", rows[n].name = "DEVELOPER OPTIONS", rows[n].help = link_help;
@@ -427,4 +430,17 @@ int settings_rows(SettingRow *rows, int max, int *sel) {
     }
     *sel = selected[developer_page];
     return n;
+}
+
+/* The in-game overlay's settings page (gamemenu.c): the player's settings, without the developer page's link, and
+ * changing one of them by row (as Left / Right on it), whatever the panel shows. */
+int settings_player_rows(SettingRow *rows, int max) { return fill_rows(rows, max, player, NPLAYER); }
+
+void settings_change(int row, int dir) {
+    if (row < 0 || row >= NPLAYER) return;
+    const Setting *s = &player[row];
+    if (s->disabled && s->disabled()) return;  /* greyed out */
+    if (!s->noptions) slider_step(s, dir > 0 ? 1 : -1);
+    else for (int i = 0; i < (dir > 0 ? 1 : s->noptions - 1); i++) s->next();  /* the cycle goes forward only */
+    settings_save();
 }
