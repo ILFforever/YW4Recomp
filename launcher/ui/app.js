@@ -674,10 +674,9 @@ $('play').addEventListener('click', async () => {
 $('news-more').addEventListener('click', () => invoke('open_project_page'));
 document.querySelectorAll('[data-open]').forEach((b) => b.addEventListener('click', () =>
   invoke('open_folder', { install: inst.install, which: b.dataset.open, saves: inst.saves })));
-// Play's gear: game and launcher settings, not designed yet (the owner decides what goes there)
-$('to-options').addEventListener('click', () => showSettings());
 
-// ---- Settings (the Play screen's gear): every change is saved at once (launcher.json); moving the saves asks first
+
+// ---- Settings (the top bar's gear): every change is saved at once (launcher.json); moving the saves asks first
 const onScreen = (name) => !document.querySelector(`.screen[data-screen="${name}"]`).hidden;
 function setToggle(id, on) { $(id).setAttribute('aria-checked', String(!!on)); }
 async function saveInst() {

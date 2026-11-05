@@ -209,8 +209,7 @@ body.pointer :focus-visible { outline: none; }
 .game-title { font: 800 21px/1.15 var(--display); color: var(--violet); }
 .game-sub { font-size: 13px; color: var(--ink-2); }
 .play-split { display: flex; gap: 5px; flex-shrink: 0; }
-.btn.play { flex: 1; justify-content: center; height: 56px; padding: 0 20px; font-size: 22px; border-radius: 999px 10px 10px 999px; }
-.btn.play-opts { width: 56px; height: 56px; padding: 0; justify-content: center; border-radius: 10px 999px 999px 10px; }
+.btn.play { flex: 1; justify-content: center; height: 56px; padding: 0 20px; font-size: 22px; border-radius: 999px; }
 .built-line { display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--ink-2); }
 .built-line svg { color: var(--ok); flex-shrink: 0; }
 .side-rows { display: flex; flex-direction: column; gap: 5px; }
@@ -387,7 +386,7 @@ dialog p { margin: 0 0 10px; font-size: 14px; overflow-wrap: anywhere; }
 .changelog ul { margin: 4px 0; padding-left: 18px; }
 .changelog li { margin: 2px 0; }
 
-/* Settings (the Play screen's gear): three columns of cards, each column stacked, so the page fits without scrolling */
+/* Settings (the top bar's gear): three columns of cards, each column stacked, so the page fits without scrolling */
 .settings-body { gap: 14px; padding-top: 24px; }
 .settings-body h1 { margin: 0; }
 .settings-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; align-items: start; }
