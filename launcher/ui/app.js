@@ -690,17 +690,44 @@ function openRebuildOptions() {  // for the Settings page's "Rebuild with other 
 const updateDlg = $('update-dlg');
 const laterFor = new Set();  // offers put off in this run
 $('update-later').addEventListener('click', () => { laterFor.add(updateDlg.dataset.offer); updateDlg.close(); });
-function askUpdate(key, title, text, action, run) {
+// a release's change log (its GitHub description, Markdown): "-" / "*" lines as a list, "#" lines as headings, the
+// rest as paragraphs; plain text only (nothing from GitHub becomes HTML)
+function renderNotes(md) {
+  const body = $('update-notes-body');
+  body.textContent = '';
+  let list = null;
+  for (const raw of (md || '').split(/\r?\n/)) {
+    const line = raw.trim();
+    if (!line) { list = null; continue; }
+    const item = /^[-*]\s+(.*)$/.exec(line);
+    if (item) {
+      if (!list) { list = document.createElement('ul'); body.append(list); }
+      const li = document.createElement('li');
+      li.textContent = item[1].replace(/\*\*|`/g, '');
+      list.append(li);
+      continue;
+    }
+    list = null;
+    const head = /^#+\s+(.*)$/.exec(line);
+    const el = document.createElement(head ? 'h4' : 'p');
+    el.textContent = (head ? head[1] : line).replace(/\*\*|`/g, '');
+    body.append(el);
+  }
+  $('update-notes').hidden = !body.childNodes.length;
+}
+function askUpdate(key, title, text, action, run, notes) {
   if (laterFor.has(key)) return;
   updateDlg.dataset.offer = key;
   $('update-title').textContent = title;
   $('update-text').textContent = text;
+  renderNotes(notes);
   const btn = $('update-btn');
   btn.textContent = action;
   btn.disabled = false;
   $('update-later').disabled = false;
   btn.onclick = run;
   if (!updateDlg.open) updateDlg.showModal();
+  btn.focus();  // Enter takes the update
 }
 async function showUpdates(info) {
   let u = null;
@@ -713,7 +740,7 @@ async function showUpdates(info) {
         await loadOptions();
         show('build');
         startBuild();
-      });
+      }, u.rebuild_notes);
   } else if (u.game) {
     askUpdate('game ' + u.game.version, `Game update ${u.game.version}`,
       `A new version of the game is out: ${gb(u.game.size)} to download, then a rebuild of about 5 minutes.`, 'Update', async () => {
@@ -722,20 +749,21 @@ async function showUpdates(info) {
         $('update-later').disabled = true;
         btn.textContent = 'Downloading…';
         try {
-          await invoke('download_game_update', { install: inst.install, version: u.game.version, url: u.game.url, sha256: u.game.sha256 });
+          await invoke('download_game_update', { install: inst.install, version: u.game.version, url: u.game.url,
+            sha256: u.game.sha256, notes: u.game.notes });
         } catch (e) {
           updateDlg.close();
           popup('Game update', String(e));
           return;
         }
         showUpdates(info);  // now the rebuild question, in the same popup
-      });
+      }, u.game.notes);
   } else if (u.launcher) {
     askUpdate('launcher ' + u.launcher.version, `Launcher ${u.launcher.version}`,
       'A new launcher is out. Download it and install it over this one; your game and saves stay.', 'Download', () => {
         updateDlg.close();
         invoke('open_release_page', { url: u.launcher.page });
-      });
+      }, u.launcher.notes);
   }
 }
 

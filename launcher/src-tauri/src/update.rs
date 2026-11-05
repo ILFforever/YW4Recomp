@@ -95,12 +95,13 @@ pub fn drop_other_game_code(install: &Path, used: &Path) {
 #[derive(Serialize, Clone)]
 pub struct GameOffer { version: String, url: String, sha256: String, size: u64, notes: String }
 #[derive(Serialize, Clone)]
-pub struct LauncherOffer { version: String, page: String }
+pub struct LauncherOffer { version: String, page: String, notes: String }
 #[derive(Serialize, Clone, Default)]
 pub struct Updates {
     game: Option<GameOffer>,          // newer game code on GitHub
     launcher: Option<LauncherOffer>,  // a newer launcher on GitHub
     rebuild: Option<String>,          // game code on this PC newer than the game built from it: its version
+    rebuild_notes: String,            // its change log, kept from its release when it was downloaded
 }
 
 fn cache_path() -> PathBuf {
@@ -149,7 +150,10 @@ pub async fn check_updates(app: tauri::AppHandle, install: String, built: String
         let code = game_code(&own, &inst);
         let mut u = Updates::default();
         if let (Some(have), Some(built)) = (ver(&code.version), built_version(&built)) {
-            if have > built { u.rebuild = Some(code.version.clone()); }
+            if have > built {
+                u.rebuild = Some(code.version.clone());
+                u.rebuild_notes = std::fs::read_to_string(code.dir.join("notes.md")).unwrap_or_default();
+            }
         }
         let Some(list) = releases() else { return u };
         let (mut game, mut launcher): (Option<(Ver, GameOffer)>, Option<(Ver, LauncherOffer)>) = (None, None);
@@ -159,7 +163,8 @@ pub async fn check_updates(app: tauri::AppHandle, install: String, built: String
             if let Some(v) = tag.strip_prefix("launcher-v").and_then(ver) {
                 if launcher.as_ref().map_or(true, |(b, _)| v > *b) {
                     let page = r["html_url"].as_str().unwrap_or("").to_string();
-                    launcher = Some((v, LauncherOffer { version: format!("{}.{}.{}", v.0, v.1, v.2), page }));
+                    let notes = r["body"].as_str().unwrap_or("").to_string();
+                    launcher = Some((v, LauncherOffer { version: format!("{}.{}.{}", v.0, v.1, v.2), page, notes }));
                 }
             } else if let Some(v) = tag.strip_prefix('v').and_then(ver) {
                 let name = format!("yw4recomp-game-{}.{}.{}.zip", v.0, v.1, v.2);
@@ -193,7 +198,7 @@ pub fn open_release_page(url: String) -> Result<(), String> {
 /// Downloads a game update into <install>\builder\game\<version>\: checked against GitHub's SHA-256 before it is
 /// unpacked, then its release.toml (a newer launcher needed: refused, with the reason).
 #[tauri::command]
-pub async fn download_game_update(install: String, version: String, url: String, sha256: String) -> Result<String, String> {
+pub async fn download_game_update(install: String, version: String, url: String, sha256: String, notes: String) -> Result<String, String> {
     tauri::async_runtime::spawn_blocking(move || {
         // GitHub only; a test feed (YW4_UPDATE_FEED) may also point at a local file
         let local_test = std::env::var("YW4_UPDATE_FEED").is_ok() && url.starts_with("file:///");
@@ -226,6 +231,7 @@ pub async fn download_game_update(install: String, version: String, url: String,
             Ok(v) if v == version => {
                 let _ = std::fs::remove_dir_all(&dst);
                 std::fs::rename(&tmp, &dst).map_err(|e| e.to_string())?;
+                let _ = std::fs::write(dst.join("notes.md"), notes);  // the change log, for the rebuild question
                 Ok(version)
             }
             other => {
