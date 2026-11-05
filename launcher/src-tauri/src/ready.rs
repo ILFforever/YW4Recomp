@@ -407,3 +407,78 @@ pub fn set_game_full_screen(install: String, saves: String, full: bool) -> Resul
     if let Some(dir) = ini.parent() { std::fs::create_dir_all(dir).map_err(|e| e.to_string())?; }
     std::fs::write(&ini, lines.join("\n") + "\n").map_err(|e| e.to_string())
 }
+
+// ---- Uninstall (Settings). Only the launcher's own parts of the install folder are deleted, by name, and only in
+// a folder whose config.toml the launcher wrote; the folder itself goes only if nothing else is left in it.
+
+const BUILT_PARTS: [&str; 5] = ["data", "work", "builder", "logs", "config.toml"];
+
+fn ours(inst: &Path) -> bool {
+    std::fs::read_to_string(inst.join("config.toml"))
+        .map(|s| s.starts_with("# Written by the YW4 Recomp launcher")).unwrap_or(false)
+}
+
+fn uninstaller() -> Option<PathBuf> {
+    std::env::current_exe().ok()?.parent().map(|d| d.join("uninstall.exe")).filter(|p| p.is_file())
+}
+
+#[derive(Serialize)]
+pub struct UninstallInfo { game: u64, saves: u64, shots: u64, mods: u64, launcher: bool }
+
+/// What Uninstall would delete, for its popup: sizes of the game files and build, the saves (+ settings.ini),
+/// screenshots and mods; whether this launcher has a Windows uninstaller (the installer's; the portable zip's not).
+#[tauri::command]
+pub async fn uninstall_info(install: String, saves: String) -> UninstallInfo {
+    tauri::async_runtime::spawn_blocking(move || {
+        let inst = PathBuf::from(&install);
+        let (save, ini) = saves_place(&inst, &saves);
+        UninstallInfo {
+            game: BUILT_PARTS.iter().map(|p| dir_size(&inst.join(p))).sum(),
+            saves: dir_size(&save) + dir_size(&ini),
+            shots: dir_size(&inst.join("screenshots")),
+            mods: dir_size(&inst.join("mods")),
+            launcher: uninstaller().is_some(),
+        }
+    }).await.unwrap_or(UninstallInfo { game: 0, saves: 0, shots: 0, mods: 0, launcher: false })
+}
+
+fn remove(p: &Path) {
+    let _ = if p.is_dir() { std::fs::remove_dir_all(p) } else { std::fs::remove_file(p) };
+}
+
+/// Deletes the install (what the popup listed, keeping what the player ticked), the shortcuts and the launcher's
+/// own records; with `launcher`, then runs its Windows uninstaller and closes.
+#[tauri::command]
+pub async fn uninstall(app: tauri::AppHandle, install: String, saves: String, keep_saves: bool, keep_shots: bool,
+                       keep_mods: bool, launcher: bool) -> Result<(), String> {
+    if game_running() { return Err("Close the game first.".into()); }
+    let inst = PathBuf::from(&install);
+    if !ours(&inst) { return Err(format!("{} doesn't look like a game folder this launcher made.", inst.display())); }
+    tauri::async_runtime::spawn_blocking(move || {
+        for p in BUILT_PARTS { remove(&inst.join(p)); }
+        if !keep_shots { remove(&inst.join("screenshots")); }
+        if !keep_mods { remove(&inst.join("mods")); }
+        if !keep_saves {
+            let (save, ini) = saves_place(&inst, &saves);
+            remove(&save);
+            remove(&ini);
+        }
+        let _ = std::fs::remove_dir(&inst);  // only if empty: what was kept, or anything else, stays
+        make_shortcuts(State { desktop: false, start_menu: false, install: install.clone(), ..Default::default() })
+    }).await.map_err(|e| e.to_string())??;
+    // the launcher's own records: its state, play time, update cache; its AppData folder if that leaves it empty
+    let state = state_path();
+    remove(&state);
+    remove(&played_path());
+    let appdata = PathBuf::from(std::env::var("APPDATA").unwrap_or_default()).join("YW4 Recomp");
+    remove(&appdata.join("releases.json"));
+    let _ = std::fs::remove_dir(&appdata);
+    if launcher {
+        if let Some(u) = uninstaller() {
+            // after we close: it removes this program's files and its entry in Windows' installed apps
+            hidden(Command::new(u).arg("/S")).spawn().map_err(|e| e.to_string())?;
+            app.exit(0);
+        }
+    }
+    Ok(())
+}

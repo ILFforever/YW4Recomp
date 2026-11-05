@@ -4,5 +4,5 @@
   "description": "What the launcher's screens may ask the Rust side for: the core, the file/folder pickers, and the window controls of the launcher's own title bar",
   "windows": ["main"],
   "permissions": ["core:default", "dialog:allow-open", "core:window:allow-start-dragging", "core:window:allow-minimize",
-    "core:window:allow-toggle-maximize", "core:window:allow-close", "core:window:allow-is-maximized"]
+    "core:window:allow-close"]
 }

@@ -44,9 +44,6 @@ body.pointer :focus-visible { outline: none; }
   color: var(--white); cursor: pointer; }
 .win-btn:hover { background: oklch(36% 0.09 295); color: var(--white); }
 .win-close:hover { background: oklch(52% 0.2 27); color: var(--white); }
-.win-btn .when-max { display: none; }
-.maximised .win-btn .when-max { display: block; }
-.maximised .win-btn .when-normal { display: none; }
 
 [hidden] { display: none !important; }
 
@@ -408,3 +405,10 @@ dialog p { margin: 0 0 10px; font-size: 14px; }
 .radios.compact { gap: 4px; }
 .radios.compact .radio { padding: 6px 10px; }
 .radios.compact .radio b { font-size: 13px; }
+/* the Uninstall popup's choices, and its red button (as the in-game "Quit game") */
+.check-list { display: flex; flex-direction: column; gap: 8px; margin-bottom: 4px; }
+.check-list .check { margin: 0; color: var(--ink); font-size: 14px; }
+.check-list .check span { color: var(--ink-2); font-size: 12px; }
+.btn.danger { border: 0; background: oklch(48% 0.17 20); color: var(--white); font-weight: 800; }
+.btn.danger:not(:disabled):not(.x):hover { background: oklch(54% 0.18 20); }
+.btn.danger:not(:disabled):not(.x):active { background: oklch(42% 0.16 20); }

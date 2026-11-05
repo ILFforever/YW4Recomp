@@ -18,10 +18,6 @@
     <button class="win-btn" type="button" id="win-min" aria-label="Minimise" title="Minimise">
       <svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.2" aria-hidden="true"><path d="M1 6h10"/></svg>
     </button>
-    <button class="win-btn" type="button" id="win-max" aria-label="Maximise" title="Maximise">
-      <svg class="when-normal" width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.2" aria-hidden="true"><rect x="1.5" y="1.5" width="9" height="9"/></svg>
-      <svg class="when-max" width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.2" aria-hidden="true"><rect x="1.5" y="3.5" width="7" height="7"/><path d="M3.5 3.5v-2h7v7h-2"/></svg>
-    </button>
     <button class="win-btn win-close" type="button" id="win-close" aria-label="Close" title="Close">
       <svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" stroke-width="1.2" aria-hidden="true"><path d="M1.5 1.5l9 9M10.5 1.5l-9 9"/></svg>
     </button>
@@ -262,6 +258,8 @@
     </div>
     <div class="setup-foot">
       <button class="btn" type="button" id="settings-back">Back</button>
+      <span class="foot-note"></span>
+      <button class="btn" type="button" id="set-uninstall">Uninstall</button>
     </div>
   </main>
 
@@ -458,6 +456,21 @@
   <div class="dialog-buttons">
     <button class="btn" type="button" id="move-no">Cancel</button>
     <button class="btn primary" type="button" id="move-yes">Move</button>
+  </div>
+</dialog>
+
+<dialog id="uninstall-dlg" aria-labelledby="uninstall-title">
+  <h2 id="uninstall-title">Uninstall Yo-kai Watch 4 Recomp?</h2>
+  <p id="uninstall-text">Deletes the game files and the build.</p>
+  <div class="check-list">
+    <label class="check"><input type="checkbox" id="un-saves" checked> Keep my saves and settings <span id="un-saves-size"></span></label>
+    <label class="check"><input type="checkbox" id="un-shots" checked> Keep my screenshots <span id="un-shots-size"></span></label>
+    <label class="check"><input type="checkbox" id="un-mods"> Keep my mods <span id="un-mods-size"></span></label>
+    <label class="check" id="un-launcher-row"><input type="checkbox" id="un-launcher" checked> Remove the launcher too</label>
+  </div>
+  <div class="dialog-buttons">
+    <button class="btn" type="button" id="un-no">Cancel</button>
+    <button class="btn danger" type="button" id="un-yes">Uninstall</button>
   </div>
 </dialog>
 

@@ -24,17 +24,8 @@ $('github').addEventListener('click', () => invoke && invoke('open_project_page'
 if (T && T.window) {
   const win = T.window.getCurrentWindow();
   $('win-min').addEventListener('click', () => win.minimize());
-  $('win-max').addEventListener('click', () => win.toggleMaximize());
   $('win-close').addEventListener('click', () => win.close());
-  // the maximise button shows "restore" while maximised (double-clicking the bar maximises too)
-  const syncMax = async () => {
-    const max = await win.isMaximized();
-    document.body.classList.toggle('maximised', max);
-    $('win-max').setAttribute('aria-label', max ? 'Restore' : 'Maximise');
-    $('win-max').title = max ? 'Restore' : 'Maximise';
-  };
-  win.onResized(syncMax);
-  syncMax();
+  // no maximise (owner, 2026-11-05: the launcher never fills the screen; tauri.conf.json caps its size too)
 }
 (async () => {
   if (!invoke) return;
@@ -690,6 +681,39 @@ async function showSettings() {
   $('set-free').disabled = reclaimable <= 0.05 * GB;
 }
 $('settings-back').addEventListener('click', () => showReady());
+
+// Uninstall: the popup lists what goes (sizes from the install); kept by default: saves and screenshots
+const unDlg = $('uninstall-dlg');
+const sizeNote = (b) => (b > 0 ? `(${gb(b)})` : '');
+$('set-uninstall').addEventListener('click', async () => {
+  const u = await invoke('uninstall_info', { install: inst.install, saves: inst.saves });
+  $('uninstall-text').textContent = `Deletes the game files and the build (${gb(u.game)}) from ${inst.install}.`;
+  $('un-saves-size').textContent = sizeNote(u.saves);
+  $('un-shots-size').textContent = sizeNote(u.shots);
+  $('un-mods-size').textContent = sizeNote(u.mods);
+  $('un-launcher-row').hidden = !u.launcher;  // the portable zip has no uninstaller: delete its folder by hand
+  $('un-launcher').checked = u.launcher;
+  $('un-yes').disabled = false;
+  unDlg.showModal();
+  $('un-no').focus();
+});
+$('un-no').addEventListener('click', () => unDlg.close());
+$('un-yes').addEventListener('click', async () => {
+  $('un-yes').disabled = true;
+  try {
+    await invoke('uninstall', { install: inst.install, saves: inst.saves, keepSaves: $('un-saves').checked,
+      keepShots: $('un-shots').checked, keepMods: $('un-mods').checked, launcher: $('un-launcher').checked });
+  } catch (e) {
+    unDlg.close();
+    popup("Couldn't uninstall", String(e));
+    return;
+  }
+  unDlg.close();  // (with "Remove the launcher too" the launcher has closed by now)
+  inst = null;
+  setGameVersion(null);
+  $('game-version').textContent = 'YW4 Recomp · not built yet';
+  show('home');
+});
 $('set-open-install').addEventListener('click', () => invoke('open_folder', { install: inst.install, which: 'install', saves: inst.saves }));
 $('set-free').addEventListener('click', () => $('free-btn').click());  // the same popup as the Play screen's
 $('set-rebuild').addEventListener('click', () => openRebuildOptions());

@@ -45,10 +45,26 @@ fn main() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())  // the file and folder pickers (Browse…)
         .manage(std::sync::Arc::new(buildrun::Running::default()))  // the build in progress (screen 4)
+        // The launcher never fills the screen (owner, 2026-11-05). tauri.conf.json turns maximising off and caps the
+        // size, but Windows can still maximise a window itself (Win+Up, dragging it to the top edge): undo that.
+        .on_window_event(|window, event| {
+            if let tauri::WindowEvent::Resized(size) = event {
+                if window.is_maximized().unwrap_or(false) {
+                    let _ = window.unmaximize();
+                    return;
+                }
+                // snap layouts and other programs can size it past the cap too: back inside 1600 x 1000
+                let scale = window.scale_factor().unwrap_or(1.0);
+                let (w, h) = (size.width as f64 / scale, size.height as f64 / scale);
+                if w > 1600.5 || h > 1000.5 {
+                    let _ = window.set_size(tauri::LogicalSize::new(w.min(1600.0), h.min(1000.0)));
+                }
+            }
+        })
         .invoke_handler(tauri::generate_handler![launcher_version, open_project_page, start_screen, test_paths, check::check_game,
             options::gpu_names, options::disk_space, buildrun::start_build, buildrun::cancel_build, buildrun::builder_bundled, update::check_updates, update::download_game_update, update::open_release_page,
             ready::load_state, ready::save_state, ready::install_info, ready::play, ready::open_folder, ready::open_shot,
-            ready::free_space, ready::originals, ready::delete_originals, ready::make_shortcuts, ready::move_saves, ready::game_full_screen, ready::set_game_full_screen])
+            ready::free_space, ready::originals, ready::delete_originals, ready::make_shortcuts, ready::move_saves, ready::game_full_screen, ready::set_game_full_screen, ready::uninstall_info, ready::uninstall])
         .run(tauri::generate_context!())
         .expect("the launcher window could not start");
 }
