@@ -34,10 +34,10 @@
     <button class="icon-btn" type="button" id="github" aria-label="GitHub" title="GitHub">
       <svg width="22" height="22" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 2a10 10 0 0 0-3.16 19.49c.5.09.68-.22.68-.48v-1.7c-2.78.6-3.37-1.34-3.37-1.34-.45-1.16-1.11-1.47-1.11-1.47-.91-.62.07-.6.07-.6 1 .07 1.53 1.03 1.53 1.03.9 1.52 2.34 1.08 2.91.83.09-.65.35-1.08.63-1.33-2.22-.25-4.55-1.11-4.55-4.94 0-1.09.39-1.98 1.03-2.68-.1-.25-.45-1.27.1-2.65 0 0 .84-.27 2.75 1.02a9.5 9.5 0 0 1 5 0c1.91-1.29 2.75-1.02 2.75-1.02.55 1.38.2 2.4.1 2.65.64.7 1.03 1.59 1.03 2.68 0 3.84-2.34 4.69-4.57 4.93.36.31.68.92.68 1.85v2.74c0 .27.18.58.69.48A10 10 0 0 0 12 2z"/></svg>
     </button>
-    <button class="icon-btn" type="button" aria-label="Help" title="Help">
+    <button class="icon-btn" type="button" id="help-btn" aria-label="Help" title="Help">
       <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M9.5 9.5a2.5 2.5 0 0 1 4.9.7c0 1.7-2.4 2.2-2.4 3.8M12 17.2v.01"/></svg>
     </button>
-    <button class="icon-btn" type="button" aria-label="Settings" title="Settings">
+    <button class="icon-btn" type="button" id="top-settings" aria-label="Settings" title="Settings">
       <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg>
     </button>
   </header>
@@ -260,6 +260,78 @@
       <button class="btn" type="button" id="settings-back">Back</button>
       <span class="foot-note"></span>
       <button class="btn" type="button" id="set-uninstall">Uninstall</button>
+    </div>
+  </main>
+
+  <!-- Help (the top bar's ?): keys and controller, troubleshooting, links, credits and licences. No dumping or key
+       instructions here, ever (CLAUDE.md rule 4): only "your own dump of 2.2.0". -->
+  <main class="screen setup" data-screen="help" hidden>
+    <div class="setup-body settings-body">
+      <h1>Help</h1>
+      <div class="settings-grid">
+        <div class="settings-col">
+        <section class="card">
+          <h2>Keys and controller</h2>
+          <div class="set-label">In the game</div>
+          <dl class="keys">
+            <dt><kbd>Esc</kbd></dt><dd>Overlay: pause, settings, exit</dd>
+            <dt><kbd>F1</kbd></dt><dd>Graphics</dd>
+            <dt><kbd>F2</kbd></dt><dd>Controls: change any button</dd>
+            <dt><kbd>F3</kbd></dt><dd>Performance overlay</dd>
+            <dt><kbd>F11</kbd></dt><dd>Full screen</dd>
+            <dt><kbd>F12</kbd></dt><dd>Screenshot</dd>
+          </dl>
+          <div class="set-label">Overlay on a controller</div>
+          <dl class="keys">
+            <dt>PlayStation</dt><dd>Touchpad</dd>
+            <dt>Xbox Series</dt><dd>Share</dd>
+            <dt>Switch Pro</dt><dd>Capture</dd>
+            <dt>Any pad</dt><dd>Back + Start</dd>
+          </dl>
+        </section>
+        </div>
+        <div class="settings-col">
+        <section class="card">
+          <h2>Troubleshooting</h2>
+          <div class="faq">
+            <b>The build stopped</b>
+            <p>Show details says why. Build again keeps the finished steps.</p>
+            <b>The game doesn't start</b>
+            <p>Update your graphics driver (Vulkan 1.3 is needed), then check the logs.</p>
+            <b>DLSS is greyed out</b>
+            <p>DLSS needs an NVIDIA RTX card. FSR works on any card.</p>
+</div>
+</section>
+        </div>
+        <div class="settings-col">
+        <section class="card">
+          <h2>Report a problem</h2>
+          <div class="set-row">
+            <span><b>Logs</b><small>Add the newest log file to your report</small></span>
+            <button class="btn small" type="button" id="help-logs">Open</button>
+          </div>
+          <div class="set-row">
+            <span><b>Report a problem</b><small>On GitHub</small></span>
+            <button class="btn small" type="button" data-link="issues">Open</button>
+          </div>
+        </section>
+        <section class="card">
+          <div class="card-head"><h2>Credits and licences</h2><button class="link" type="button" id="help-licences">Full texts</button></div>
+          <ul class="credits">
+            <li><b>YW4 Recomp</b> (ILFforever), <b>LAS Recomp</b> (Peiikai) · MIT</li>
+            <li><b>AMD FSR</b>, <b>Streamline</b>, <b>SMAA</b>, <b>musl</b>, <b>stb</b>, <b>Tauri</b> · MIT</li>
+            <li><b>NVIDIA DLSS, Reflex</b> · NVIDIA RTX SDK</li>
+            <li><b>SDL 3</b>, <b>nanosvg</b> · zlib; <b>hactool</b> · ISC</li>
+            <li><b>Vulkan headers</b>, <b>LLVM</b> · Apache 2.0; <b>glslang</b> · BSD</li>
+            <li><b>Fonts</b> · OFL; <b>Python</b> · PSF</li>
+          </ul>
+          <p class="fine-print">Yo-kai Watch © LEVEL-5. Not affiliated with LEVEL-5 or Nintendo.</p>
+        </section>
+        </div>
+      </div>
+    </div>
+    <div class="setup-foot">
+      <button class="btn" type="button" id="help-back">Back</button>
     </div>
   </main>
 

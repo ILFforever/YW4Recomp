@@ -28,6 +28,27 @@ fn open_project_page() -> Result<(), String> {
     r.map(|_| ()).map_err(|e| e.to_string())
 }
 
+/// Help's links, a fixed set: the project page and its issues (Report a problem). Nothing else can be opened.
+#[tauri::command]
+fn open_link(which: String) -> Result<(), String> {
+    let url = match which.as_str() {
+        "project" => "https://github.com/ILFforever/YW4Recomp",
+        "issues" => "https://github.com/ILFforever/YW4Recomp/issues",
+        _ => return Err("unknown link".into()),
+    };
+    std::process::Command::new("explorer").arg(url).spawn().map(|_| ()).map_err(|e| e.to_string())
+}
+
+/// Help: the licence texts that ship with the launcher (builder\licenses, from launcher/package.py), if any.
+#[tauri::command]
+fn licences_folder(app: tauri::AppHandle, open: bool) -> bool {
+    use tauri::Manager;
+    let Some(dir) = app.path().resource_dir().ok().map(|d| d.join("builder").join("licenses")).filter(|d| d.is_dir())
+        else { return false };
+    if open { let _ = std::process::Command::new("explorer").arg(&dir).spawn(); }
+    true
+}
+
 /// For testing and screenshots: YW4_LAUNCHER_SCREEN=<screen> opens straight on that screen, without the
 /// welcome popup. None for players.
 #[tauri::command]
@@ -72,7 +93,7 @@ fn main() {
                 }
             }
         })
-        .invoke_handler(tauri::generate_handler![launcher_version, open_project_page, start_screen, test_paths, check::check_game,
+        .invoke_handler(tauri::generate_handler![launcher_version, open_project_page, open_link, licences_folder, start_screen, test_paths, check::check_game,
             options::gpu_names, options::disk_space, buildrun::start_build, buildrun::cancel_build, buildrun::builder_bundled, update::check_updates, update::download_game_update, update::open_release_page,
             ready::load_state, ready::save_state, ready::install_info, ready::play, ready::open_folder, ready::open_shot,
             ready::free_space, ready::originals, ready::delete_originals, ready::make_shortcuts, ready::move_saves, ready::game_full_screen, ready::set_game_full_screen, ready::uninstall_info, ready::uninstall])

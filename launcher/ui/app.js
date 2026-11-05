@@ -21,6 +21,28 @@ document.querySelectorAll('[data-go]').forEach((b) => b.addEventListener('click'
 
 // ---- top bar (the launcher's own title bar: Windows' is off), status bar
 $('github').addEventListener('click', () => invoke && invoke('open_project_page'));
+
+// Help (the top bar's ?): from any screen; Back returns to it. A build keeps running underneath.
+let helpFrom = 'home';
+const currentScreen = () => (document.querySelector('.screen:not([hidden])') || {}).dataset?.screen || 'home';
+$('help-btn').addEventListener('click', async () => {
+  if (currentScreen() === 'help') return;
+  helpFrom = currentScreen();
+  show('help');
+  $('help-logs').disabled = !(typeof inst !== 'undefined' && inst);  // the logs live in the game folder
+  let lic = false;
+  try { lic = invoke ? await invoke('licences_folder', { open: false }) : false; } catch (e) { /* none */ }
+  $('help-licences').hidden = !lic;  // a launcher built from the repo has none next to it
+});
+$('help-back').addEventListener('click', () => show(helpFrom));
+$('help-logs').addEventListener('click', () => invoke('open_folder', { install: inst.install, which: 'logs', saves: inst.saves }));
+$('help-licences').addEventListener('click', () => invoke('licences_folder', { open: true }));
+document.querySelectorAll('[data-link]').forEach((b) => b.addEventListener('click', () => invoke('open_link', { which: b.dataset.link })));
+// the top bar's gear: the Settings page once the game is built; before that there is nothing to set
+$('top-settings').addEventListener('click', () => {
+  if (typeof inst !== 'undefined' && inst) showSettings();
+  else popup('Settings', 'Settings are here once your game is built.');
+});
 if (T && T.window) {
   const win = T.window.getCurrentWindow();
   $('win-min').addEventListener('click', () => win.minimize());
