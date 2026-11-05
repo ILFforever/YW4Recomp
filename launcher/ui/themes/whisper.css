@@ -1,0 +1,40 @@
+/* name: Whisper */
+/* Whisper: white body, grey shade, black eye mask, dark blue smile outline. Overrides the tokens in style.css only. */
+:root {
+  --lilac-0: #f7f8fa;   /* page background */
+  --lilac-1: #e9ecf1;   /* hover, soft fills */
+  --lilac-2: #d3d9e2;   /* lines */
+  --lilac-3: #9aa3b2;   /* card and button outlines */
+  --violet: #2b3a55;    /* headings, selected text */
+  --violet-deep: #1c1f26; /* title bar, darkest: Whisper's mask */
+  --violet-soft: #4a5a7a;
+  --ink: #1a1c22;       /* body text */
+  --ink-2: #5c6372;     /* secondary text */
+  --gold: #d5dce8;      /* primary button: light grey */
+  --gold-deep: #9aa3b2;
+  --gold-hi: #e8edf5;
+  --gold-press: #bcc6d6;
+  --cream: #f1f3f6;
+  --white: #ffffff;
+  --ok: #2e7d5b;
+  --ok-bg: #e3f1ea;
+  --danger: #b3261e;
+  --danger-hi: #c9302a;
+  --danger-press: #8e1c17;
+  --select: #4a5fc1;      /* selected: outline, on-toggle, chosen radio (the smile's dark blue) */
+  --bar: rgb(28 31 38 / .92);
+  --bar-btn: #2d313b;
+  --bar-btn-hover: #3d4350;
+  --bar-hover: #33384a;
+  --bar-ink: #f1f3f6;
+  --dot: #1c1f26;
+  --track: #d3d9e2;
+  --ink-soft: #e9ecf1;
+  --ink-art: #f7f8fa;
+  --ink-welcome: #e9ecf1;
+  --shadow-text: rgb(0 0 0 / .6);
+  --play: #4a5fc1;      /* Play: the smile's blue, white text */
+  --play-hi: #5b70d0;
+  --play-press: #3a4fa8;
+  --play-ink: #ffffff;
+}

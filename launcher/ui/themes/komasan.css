@@ -1,0 +1,40 @@
+/* name: Komasan */
+/* Komasan: cream body, blue horns and belly, green leaf, red cheek spirals. Overrides the tokens in style.css only. */
+:root {
+  --lilac-0: #f8f3e9;   /* page background: cream */
+  --lilac-1: #efe6d6;   /* hover, soft fills */
+  --lilac-2: #e0d4c0;   /* lines */
+  --lilac-3: #b9a88f;   /* card and button outlines */
+  --violet: #2c5f8a;    /* headings, selected text: the horn blue */
+  --violet-deep: #2c5f8a; /* title bar */
+  --violet-soft: #3e8ec4;
+  --ink: #24313f;       /* body text */
+  --ink-2: #5a6b78;     /* secondary text */
+  --gold: #e8d9a8;      /* primary buttons: straw */
+  --gold-deep: #b89c5a;
+  --gold-hi: #f3e8c4;
+  --gold-press: #d9c58e;
+  --cream: #f1ead9;
+  --white: #ffffff;
+  --ok: #3f7a2e;
+  --ok-bg: #e6f1e0;
+  --danger: #b3261e;
+  --danger-hi: #c9302a;
+  --danger-press: #8e1c17;
+  --select: #4f9a3c;      /* selected: outline, on-toggle, chosen radio (the leaf green) */
+  --bar: rgb(44 95 138 / .92);
+  --bar-btn: #3a7aa8;
+  --bar-btn-hover: #4b8cbd;
+  --bar-hover: #3a6f98;
+  --bar-ink: #f4f8fb;
+  --dot: #2c5f8a;
+  --track: #e0d4c0;
+  --ink-soft: #efe6d6;
+  --ink-art: #fbf7ef;
+  --ink-welcome: #efe6d6;
+  --shadow-text: rgb(10 30 50 / .55);
+  --play: #4f8f3a;      /* Play: the leaf green, white text */
+  --play-hi: #5f9f48;
+  --play-press: #3f7a2e;
+  --play-ink: #ffffff;
+}

@@ -1,0 +1,40 @@
+/* name: Damona */
+/* Damona: purple hair and eyes, violet kimono tones, pink obi. Overrides the tokens in style.css only. */
+:root {
+  --lilac-0: #f7f2fb;   /* page background: lilac */
+  --lilac-1: #efe4f8;   /* hover, soft fills */
+  --lilac-2: #dccbf0;   /* lines */
+  --lilac-3: #9a72c4;   /* card and button outlines */
+  --violet: #5b2f8c;    /* headings: her purple hair */
+  --violet-deep: #4e2876; /* title bar: deep purple */
+  --violet-soft: #7a4aa8;
+  --ink: #1f1530;       /* body text */
+  --ink-2: #5f4a78;     /* secondary text */
+  --gold: #f3c4d8;      /* primary buttons: the obi's pink */
+  --gold-deep: #c98aa8;
+  --gold-hi: #f9d8e6;
+  --gold-press: #eab3cb;
+  --cream: #f5eefb;
+  --white: #ffffff;
+  --ok: #3f7a2e;
+  --ok-bg: #e6f1e0;
+  --danger: #b3261e;
+  --danger-hi: #c9302a;
+  --danger-press: #8e1c17;
+  --select: #d4608f;      /* selected: outline, on-toggle, chosen radio (the obi pink) */
+  --bar: rgb(78 40 118 / .94);
+  --bar-btn: #6a3d8f;
+  --bar-btn-hover: #7d4fa6;
+  --bar-hover: #5e3585;
+  --bar-ink: #f7f2fb;
+  --dot: #4e2876;
+  --track: #dccbf0;
+  --ink-soft: #efe4f8;
+  --ink-art: #fbf7fe;
+  --ink-welcome: #efe4f8;
+  --shadow-text: rgb(40 10 70 / .6);
+  --play: #7a4aa8;      /* Play: her purple, white text */
+  --play-hi: #8a5cb9;
+  --play-press: #633a8c;
+  --play-ink: #ffffff;
+}

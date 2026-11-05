@@ -1,0 +1,37 @@
+/* name: Jibanyan */
+/* Jibanyan: fur red, eye and belt yellow, flame and collar blue. Overrides the tokens in style.css only. */
+:root {
+  --lilac-0: #fff7f2;   /* page background */
+  --lilac-1: #fde7dc;   /* hover, soft fills */
+  --lilac-2: #f9cdb8;   /* lines */
+  --lilac-3: #e98a66;   /* card and button outlines */
+  --violet: #b93a1f;    /* headings, selected text (fur red, readable on cream) */
+  --violet-deep: #d9462a; /* title bar, darkest: Jibanyan's fur */
+  --violet-soft: #e5532b;
+  --select: #eaa51a;      /* selected: outline, on-toggle, chosen radio (the belt and eye yellow, a little deeper to show on white) */
+  --ink: #2a1410;       /* body text */
+  --ink-2: #6b4a40;     /* secondary text */
+  --gold: #f4c542;      /* primary button (eye yellow) */
+  --gold-deep: #c99a1e;
+  --gold-hi: #ffd766;
+  --gold-press: #e0ae2a;
+  --cream: #fff3de;
+  --white: #ffffff;
+  --ok: #2e8b57;
+  --ok-bg: #e3f3ea;
+  --danger: #b3261e;
+  --danger-hi: #c9302a;
+  --danger-press: #8e1c17;
+  --bar: rgb(217 70 42 / .92);
+  --bar-btn: #c23d24;
+  --bar-btn-hover: #e5532b;
+  --bar-hover: #cc4a2e;
+  --bar-ink: #fff3ee;
+  --dot: #d9462a;
+  --track: #f9cdb8;
+  --ink-soft: #fde7dc;
+  --ink-art: #fff1e8;
+  --ink-welcome: #fde7dc;
+  --shadow-text: rgb(30 8 2 / .6);
+  --play-ink: #2a1410;  /* Play: yellow with dark text (the red violet-deep is too bright for text) */
+}

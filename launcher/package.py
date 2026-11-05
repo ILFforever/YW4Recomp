@@ -154,7 +154,8 @@ def build() -> None:
     overrides.write_text(json.dumps({
         "version": version,
         "mainBinaryName": "YW4 Recomp",
-        "bundle": {"resources": {STAGE.as_posix() + "/": "builder/"}},
+        # the launcher's themes (themes.rs): files anyone can copy into this folder, so they ship next to the launcher
+        "bundle": {"resources": {STAGE.as_posix() + "/": "builder/", (REPO / "launcher" / "ui" / "themes").as_posix() + "/": "themes/"}},
     }, indent=2))
     npx = shutil.which("npx")
     if not npx:

@@ -115,6 +115,21 @@ const NOTES = {
 };
 const chosen = { files: {}, folders: {} };  // what the player picked, per mode (kept when switching back and forth)
 let mode = 'files';
+let rebuildFlow = false;  // these steps were opened by Settings' Rebuild, for an install that already has a game
+$('files-back').addEventListener('click', () => { if (rebuildFlow) showSettings(); else show('home'); });
+// A rebuild of an install with all its game files: a third choice on Game files, chosen first. With it the originals
+// aren't needed and the build skips unpacking; with another, the usual fields, and the build extracts or copies again.
+let foundFiles = false, useFound = true, freshFiles = false;
+let foundFrom = null;  // using them for a build in another folder: that folder has none, so they're copied from here
+const usingFound = () => rebuildFlow && foundFiles && useFound;
+function renderFound() {
+  $('mode-found').hidden = !(rebuildFlow && foundFiles);
+  document.querySelectorAll('.mode').forEach((m) => m.setAttribute('aria-checked',
+    String(m.dataset.mode === 'found' ? usingFound() : !usingFound() && m.dataset.mode === mode)));
+  $('fields').hidden = usingFound();
+  $('found-note').hidden = !usingFound();
+  updateCheck();
+}
 
 function renderFields() {
   const box = $('fields');
@@ -160,7 +175,7 @@ async function pick(f) {
 // arrow. The note says what's missing; clicking early marks the missing rows.
 const ARROW = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.8" ' +
   'stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12h14M13 6l6 6-6 6"/></svg>';
-const missingFields = () => FIELDS[mode].filter((f) => f.required && !chosen[mode][f.id]);
+const missingFields = () => (usingFound() ? [] : FIELDS[mode].filter((f) => f.required && !chosen[mode][f.id]));
 
 function updateCheck() {
   const missing = missingFields();
@@ -172,7 +187,7 @@ function updateCheck() {
   btn.setAttribute('aria-label', missing.length ? `Check my files (${missing.length} left)` : 'Check my files');
   $('files-note').textContent = missing.length
     ? 'Choose the ' + missing.map((f) => f.label.toLowerCase()).join(' and the ') + '.'
-    : NOTES[mode];
+    : usingFound() ? '' : NOTES[mode];
 }
 
 function markMissing() {
@@ -183,9 +198,10 @@ function markMissing() {
 }
 
 document.querySelectorAll('.mode').forEach((b) => b.addEventListener('click', () => {
-  mode = b.dataset.mode;
-  document.querySelectorAll('.mode').forEach((m) => m.setAttribute('aria-checked', String(m === b)));
+  useFound = b.dataset.mode === 'found';
+  if (!useFound) mode = b.dataset.mode;  // "mode" stays NSP or folders: what the install's paths are
   renderFields();
+  renderFound();
 }));
 $('check').addEventListener('click', () => {
   if (missingFields().length) { markMissing(); return; }
@@ -236,7 +252,10 @@ async function runCheck() {
   setContinue(1);
   let rows = [];
   try {
-    rows = await invoke('check_game', { req: { mode, paths: chosen[mode] } });
+    rows = usingFound()
+      ? [{ label: 'Game files', state: 'ok', detail: 'From your last build, the exact size of 2.2.0' },
+        { label: 'Version', state: 'ok', detail: "Checked exactly while building (the game code's hash)" }]
+      : await invoke('check_game', { req: { mode, paths: chosen[mode] } });
   } catch (e) {
     rows = [{ label: 'Check', state: 'bad', detail: String(e) }];
   }
@@ -271,7 +290,7 @@ if (invoke) invoke('builder_bundled').then((b) => { bundled = b; renderSwitches(
 // What the install folder takes: the copied RomFS (8.5 GB) + ExeFS, the tools (1.5 GB) and build files (0.7 GB),
 // the game itself, and the downloads (target.toml [extracted], measured sizes: FSR 240 MB, DLSS + Streamline 325 MB)
 const downloadMB = () => (bundled ? 182 : 0) + (options.fsr ? 240 : 0) + (options.dlss ? 325 : 0);
-const diskNeeded = () => 8.5 * GB + 2.4 * GB + (bundled ? 737 * 1024 ** 2 : 0) + downloadMB() * 1024 ** 2;
+const diskNeeded = () => (usingFound() && options.install === inst.install ? 0 : 8.5 * GB) + 2.4 * GB + (bundled ? 737 * 1024 ** 2 : 0) + downloadMB() * 1024 ** 2;
 
 const SWITCHES = [
   { key: 'fsr', title: 'AMD FSR', note: () => 'Upscaling and frame generation, any graphics card · about 240 MB' },
@@ -342,7 +361,8 @@ async function loadOptions() {
   try { names = invoke ? await invoke('gpu_names') : []; } catch (e) { names = []; }
   const nvidia = names.find((n) => /nvidia/i.test(n));
   rtx = !!(nvidia && /rtx/i.test(nvidia));
-  options.dlss = rtx;  // on by default on an RTX card
+  // on by default on an RTX card; a rebuild keeps what this install chose
+  options.dlss = rebuildFlow && inst.dlss !== undefined ? inst.dlss && rtx : rtx;
   $('gpu-name').innerHTML = names.length
     ? 'Your graphics card: <b></b>' : 'No graphics card found';
   if (names.length) $('gpu-name').querySelector('b').textContent = nvidia || names[0];
@@ -354,10 +374,38 @@ $('install-change').addEventListener('click', async () => {
   if (!T || !T.dialog) return;
   const dir = await T.dialog.open({ title: 'Install to', directory: true });
   if (typeof dir === 'string' && dir) {
-    options.install = /YW4 Recomp$/i.test(dir) ? dir : dir.replace(/[\\/]$/, '') + '\\YW4 Recomp';
+    let next = /YW4 Recomp$/i.test(dir) ? dir : dir.replace(/[\\/]$/, '') + '\\YW4 Recomp';
+    if (rebuildFlow || optionsFromPlay) {  // this install has a game already
+      const low = (p) => p.replace(/[\\/]+$/, '').toLowerCase(), old = low(inst.install);
+      if (low(dir) === old) next = inst.install;  // its own folder again: no new folder inside it
+      else if ((low(next) + '\\').startsWith(old + '\\')) {
+        popup('Choose another folder', 'That is inside your game folder. Deleting the old copy would delete the new one too.');
+        return;
+      } else if (low(next) !== old && !await confirmNewFolder(next)) return;
+    }
+    options.install = next;
     refreshSpace();
   }
 });
+// A rebuild into another folder leaves the old copy behind: say how big it is, that it is theirs to delete, and
+// that what they'd want to keep is in there.
+async function confirmNewFolder(next) {
+  let u = { game: 0, saves: 0, shots: 0, mods: 0 };
+  try { u = await invoke('uninstall_info', { install: inst.install, saves: inst.saves }); } catch (e) { /* no size then */ }
+  const inFolder = inst.saves === 'install', total = u.game + u.shots + u.mods + (inFolder ? u.saves : 0);
+  $('newfolder-text').textContent = `The game is built again in ${next}. The old copy stays in ${inst.install} and keeps taking up ${gb(total)}: delete that folder yourself when the new one works.`;
+  $('newfolder-keep').textContent = inFolder
+    ? 'Your saves, settings, screenshots and mods are in the old folder and the new copy starts without them. Copy them across before you delete it.'
+    : 'Your screenshots and mods are in the old folder. Copy them across before you delete it. Your saves are safe in AppData.';
+  const dlg = $('newfolder-dlg');
+  dlg.showModal();
+  return new Promise((done) => {
+    const answer = (yes) => () => { dlg.close(); done(yes); };
+    $('newfolder-no').onclick = answer(false);
+    $('newfolder-yes').onclick = answer(true);
+    dlg.oncancel = () => done(false);  // Escape
+  });
+}
 document.querySelectorAll('.radio[data-saves]').forEach((b) => b.addEventListener('click', () => {
   options.saves = b.dataset.saves;
   document.querySelectorAll('.radio[data-saves]').forEach((r) => r.setAttribute('aria-checked', String(r === b)));
@@ -365,7 +413,10 @@ document.querySelectorAll('.radio[data-saves]').forEach((b) => b.addEventListene
 $('build-go').addEventListener('click', () => {
   if (spaceFree && spaceFree.free < diskNeeded()) return;
   show('build');
-  startBuild(optionsFromPlay ? 'rebuild' : 'first');
+  freshFiles = rebuildFlow && foundFiles && !useFound;
+  foundFrom = usingFound() && options.install !== inst.install ? inst.install : null;
+  startBuild(optionsFromPlay || rebuildFlow ? 'rebuild' : 'first');
+  rebuildFlow = false;
 });
 
 // ---- 4 · Build: the steps come from the game code (tools.yw4.build_install, decision 0054): its "@steps" list
@@ -455,7 +506,7 @@ function logLine(line) {
 // kind: 'first' (setup), 'update' (a game update's rebuild) or 'rebuild' (other downloads); "Build again" keeps it
 async function startBuild(kind = build ? build.kind : 'first') {
   build = { steps: [], started: Date.now(), kind };  // the list arrives with the build's first line
-  $('build-title').textContent = kind === 'first' ? 'Building your game' : 'Updating your game';
+  $('build-title').textContent = kind === 'first' ? 'Building your game' : kind === 'rebuild' ? 'Rebuilding your game' : 'Updating your game';
   $('build-lead').textContent = kind === 'first' ? 'This happens once. You can minimise this window.'
     : 'Your saves stay as they are. You can minimise this window.';
   $('build-now').textContent = '';
@@ -464,9 +515,12 @@ async function startBuild(kind = build ? build.kind : 'first') {
   $('build-next').hidden = true;
   $('build-cancel').hidden = false;
   $('build-log').textContent = '';
+  $('log-toggle').hidden = false;
+  $('build-back').hidden = true;
   renderBuildSteps();
   renderBuildBar();
-  const plan = { mode, paths: chosen[mode], install: options.install, fsr: options.fsr, dlss: options.dlss && rtx, saves: options.saves };
+  const paths = foundFrom ? { exefs: `${foundFrom}\\data\\exefs`, romfs: `${foundFrom}\\data\\romfs`, dlc: `${foundFrom}\\data\\dlc` } : chosen[mode];
+  const plan = { mode: foundFrom ? 'folders' : mode, paths, install: options.install, fsr: options.fsr, dlss: options.dlss && rtx, saves: options.saves, fresh: freshFiles };
   try {
     await invoke('start_build', { plan });
   } catch (e) {
@@ -479,6 +533,8 @@ function buildFinished({ ok, message }) {
   const next = $('build-next');
   next.hidden = false;
   if (ok) {
+    freshFiles = false;
+    foundFrom = null;
     for (const s of build.steps) { s.frac = 1; s.state = 'done'; }
     renderBuildSteps();
     renderBuildBar();
@@ -499,7 +555,12 @@ function buildFinished({ ok, message }) {
     $('build-now').textContent = '';
     next.innerHTML = 'Build again ' + ARROW;
     next.dataset.action = 'again';
-    if (!stopped) { $('log-toggle').click(); }
+    $('build-back').hidden = false;
+    // the details open on a failure; refused before it began (the game is open) there are none to show
+    const log = $('build-log'), hasLog = Boolean(log.textContent);
+    $('log-toggle').hidden = !hasLog;
+    if (!hasLog) log.hidden = true;
+    else if (!stopped && log.hidden) $('log-toggle').click();
   }
 }
 
@@ -544,6 +605,11 @@ const stopDialog = $('stop');
 $('build-cancel').addEventListener('click', () => stopDialog.showModal());
 $('stop-no').addEventListener('click', () => stopDialog.close());
 $('stop-yes').addEventListener('click', () => { stopDialog.close(); invoke && invoke('cancel_build'); });
+// a stopped build: back to where its choices can change. Setup: Options (and its own Back to Check and Game files).
+// A rebuild or update: Settings, as the game built before is still there.
+$('build-back').addEventListener('click', () => {
+  if (build && build.kind === 'first') { show('options'); loadOptions(); } else showSettings();
+});
 $('build-next').addEventListener('click', () => {
   if ($('build-next').dataset.action === 'again') startBuild();
   else showReady();
@@ -719,8 +785,13 @@ async function saveInst() {
   try { await invoke('save_state', { state: inst }); } catch (e) { popup('Settings', 'Could not save: ' + e); }
 }
 async function showSettings() {
+  rebuildFlow = false;
+  freshFiles = false;
+  foundFrom = null;
+  renderFound();
   show('settings');
   $('set-install').textContent = inst.install;
+  $('set-install').title = inst.install;  // one line, cut off when long: the whole of it on hover
   document.querySelectorAll('[data-move]').forEach((b) => b.setAttribute('aria-checked', String(b.dataset.move === inst.saves)));
   setToggle('set-freeup', inst.freeUp);
   document.querySelectorAll('[data-onplay]').forEach((b) =>
@@ -774,6 +845,17 @@ $('un-yes').addEventListener('click', async () => {
 $('set-open-install').addEventListener('click', () => invoke('open_folder', { install: inst.install, which: 'install', saves: inst.saves }));
 $('set-free').addEventListener('click', () => $('free-btn').click());  // the same popup as the Play screen's
 $('set-rebuild').addEventListener('click', () => openRebuildOptions());
+// Rebuild (owner): the setup's steps from Game files on, filled in with this install's choices. Nothing happens until
+// "Build my game"; Back on Game files returns here.
+$('set-rebuild-now').addEventListener('click', async () => {
+  rebuildFlow = true;
+  optionsFromPlay = false;
+  useFound = true;
+  try { foundFiles = await invoke('extracted_files', { install: inst.install }); } catch (e) { foundFiles = false; }
+  choicesFromInstall();
+  renderFound();
+  show('files');
+});
 $('set-freeup').addEventListener('click', async () => { inst.freeUp = !inst.freeUp; setToggle('set-freeup', inst.freeUp); await saveInst(); });
 document.querySelectorAll('[data-onplay]').forEach((b) => b.addEventListener('click', async () => {
   inst.onPlay = b.dataset.onplay;

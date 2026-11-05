@@ -1,0 +1,40 @@
+/* name: Happierre */
+/* Happierre: butter-yellow body, yellow cap and smile, a leaf-green touch, white flower. Overrides the tokens in style.css only. */
+:root {
+  --lilac-0: #fffbe6;   /* page background: butter cream */
+  --lilac-1: #fbf1c6;   /* hover, soft fills */
+  --lilac-2: #efe0a0;   /* lines */
+  --lilac-3: #c4a53a;   /* card and button outlines */
+  --violet: #8a6a10;    /* headings: dark gold */
+  --violet-deep: #e8b923; /* title bar: his yellow */
+  --violet-soft: #9bcf4a; /* the leaf green, a small accent */
+  --ink: #2e2a14;       /* body text */
+  --ink-2: #6e6640;     /* secondary text */
+  --gold: #f3dc78;      /* primary buttons: his butter yellow */
+  --gold-deep: #c9a640;
+  --gold-hi: #f9e9a2;
+  --gold-press: #e6cc60;
+  --cream: #fbf6dc;
+  --white: #ffffff;
+  --ok: #3f7a2e;
+  --ok-bg: #e6f1e0;
+  --danger: #b3261e;
+  --danger-hi: #c9302a;
+  --danger-press: #8e1c17;
+  --select: #e8b923;      /* selected: outline, on-toggle, chosen radio (his yellow) */
+  --bar: rgb(232 185 35 / .94);
+  --bar-btn: #d9a91e;
+  --bar-btn-hover: #e8b923;
+  --bar-hover: #e0b02a;
+  --bar-ink: #2e2a14;
+  --dot: #e8b923;
+  --track: #efe0a0;
+  --ink-soft: #f8f0c4;
+  --ink-art: #fffdf2;
+  --ink-welcome: #f8f0c4;
+  --shadow-text: rgb(40 40 10 / .45);
+  --play: #f3dc78;      /* Play: his yellow, dark text */
+  --play-hi: #f9e9a2;
+  --play-press: #e6cc60;
+  --play-ink: #2e2a14;
+}

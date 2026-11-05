@@ -27,6 +27,8 @@ pub struct Plan {
     fsr: bool,
     dlss: bool,
     saves: String,                  // "install" or "appdata"
+    #[serde(default)]
+    fresh: bool,                    // extract or copy the game files again, though the install already has them
 }
 
 #[derive(Default)]
@@ -247,6 +249,7 @@ fn run_all(app: &AppHandle, run: &Running, plan: &Plan) -> Result<(), String> {
     if b.tools.is_some() {  // a download: the compiler comes on the first build; from the repo, the repo's own
         args.extend(["--toolchain".into(), inst.join("builder").join("toolchain").to_string_lossy().into_owned()]);
     }
+    if plan.fresh { args.push("--fresh-files".into()); }
     if !plan.fsr { args.push("--no-fsr".into()); }
     if !plan.dlss { args.push("--no-dlss".into()); }
     if let Err(e) = python(app, run, &b, &cfg, "tools.yw4.build_install", &args) {
@@ -269,6 +272,9 @@ fn run_all(app: &AppHandle, run: &Running, plan: &Plan) -> Result<(), String> {
 
 #[tauri::command]
 pub fn start_build(app: AppHandle, plan: Plan) -> Result<(), String> {
+    if crate::ready::exe_in_use(&plan.install) {
+        return Err("Close the game first, then build again.".into());
+    }
     let run = app.state::<Arc<Running>>().inner().clone();
     if run.busy.swap(true, Ordering::SeqCst) {
         return Err("a build is already running".into());

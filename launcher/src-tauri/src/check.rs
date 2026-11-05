@@ -121,6 +121,18 @@ pub fn dlc_index_of(path: &Path) -> Option<u32> {
     dlc_index(path, &target())
 }
 
+/// This install already has all the game files from its last build: the same test as the build's own
+/// (tools/yw4/build_install.py game_files), so what this says is what the build will do.
+#[tauri::command]
+pub async fn extracted_files(install: String) -> bool {
+    tauri::async_runtime::spawn_blocking(move || {
+        let data = Path::new(&install).join("data");
+        data.join("exefs").join("main").is_file() && folder_bytes(&data.join("romfs")).0 == target().romfs_bytes
+    })
+    .await
+    .unwrap_or(false)
+}
+
 /// An add-on's title ID from its index: the application's + 0x1000 + index (target.toml).
 pub fn dlc_title_id(index: u32) -> String {
     format!("{:016X}", target().app + 0x1000 + index as u64)

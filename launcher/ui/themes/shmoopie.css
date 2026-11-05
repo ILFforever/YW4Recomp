@@ -1,0 +1,40 @@
+/* name: Shmoopie */
+/* Shmoopie: rose pink, heart-shaped accents, cream and red. Overrides the tokens in style.css only. */
+:root {
+  --lilac-0: #fff4f7;   /* page background: pale rose */
+  --lilac-1: #fbe3ec;   /* hover, soft fills */
+  --lilac-2: #f2c4d4;   /* lines */
+  --lilac-3: #d97fa3;   /* card and button outlines */
+  --violet: #a3285f;    /* headings: deep rose */
+  --violet-deep: #b8336f; /* title bar */
+  --violet-soft: #e0649a;
+  --ink: #3a1a2a;       /* body text */
+  --ink-2: #7a5566;     /* secondary text */
+  --gold: #f9c9da;      /* primary buttons: pale heart pink */
+  --gold-deep: #d98aa6;
+  --gold-hi: #fde0ea;
+  --gold-press: #f3b3c9;
+  --cream: #fdf1f5;
+  --white: #ffffff;
+  --ok: #3f7a2e;
+  --ok-bg: #e6f1e0;
+  --danger: #b3261e;
+  --danger-hi: #c9302a;
+  --danger-press: #8e1c17;
+  --select: #e0649a;      /* selected: outline, on-toggle, chosen radio (the heart pink) */
+  --bar: rgb(184 51 111 / .92);
+  --bar-btn: #c44a84;
+  --bar-btn-hover: #d55d96;
+  --bar-hover: #cc528d;
+  --bar-ink: #fff4f7;
+  --dot: #b8336f;
+  --track: #f2c4d4;
+  --ink-soft: #fbe3ec;
+  --ink-art: #fff9fb;
+  --ink-welcome: #fbe3ec;
+  --shadow-text: rgb(80 10 40 / .5);
+  --play: #d6457f;      /* Play: the heart red-pink, white text */
+  --play-hi: #e25c92;
+  --play-press: #b83468;
+  --play-ink: #ffffff;
+}

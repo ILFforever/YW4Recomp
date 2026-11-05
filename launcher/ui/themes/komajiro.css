@@ -1,0 +1,40 @@
+/* name: Komajiro */
+/* Komajiro: golden tan body, brown horns, teal eyes, scarf and shell. Overrides the tokens in style.css only. */
+:root {
+  --lilac-0: #fbf5e6;   /* page background: warm cream */
+  --lilac-1: #f3e6c8;   /* hover, soft fills */
+  --lilac-2: #e6d3a6;   /* lines */
+  --lilac-3: #b08a4f;   /* card and button outlines */
+  --violet: #6b4a24;    /* headings, selected text: his horn brown */
+  --violet-deep: #5a3d1c; /* title bar */
+  --violet-soft: #9a6b32;
+  --ink: #3a2a14;       /* body text */
+  --ink-2: #7a6546;     /* secondary text */
+  --gold: #f0d27a;      /* primary buttons: his tan */
+  --gold-deep: #c79a3b;
+  --gold-hi: #f8e4a0;
+  --gold-press: #e0bd5e;
+  --cream: #f6eddc;
+  --white: #ffffff;
+  --ok: #3f7a2e;
+  --ok-bg: #e6f1e0;
+  --danger: #b3261e;
+  --danger-hi: #c9302a;
+  --danger-press: #8e1c17;
+  --select: #2f9aa6;      /* selected: outline, on-toggle, chosen radio (the scarf teal) */
+  --bar: rgb(90 61 28 / .92);
+  --bar-btn: #6e4b23;
+  --bar-btn-hover: #855a2c;
+  --bar-hover: #7a5227;
+  --bar-ink: #fbf5e6;
+  --dot: #5a3d1c;
+  --track: #e6d3a6;
+  --ink-soft: #f3e6c8;
+  --ink-art: #fdf9ef;
+  --ink-welcome: #f3e6c8;
+  --shadow-text: rgb(40 25 5 / .55);
+  --play: #2f8f9c;      /* Play: the scarf teal, white text */
+  --play-hi: #3ea3af;
+  --play-press: #237482;
+  --play-ink: #ffffff;
+}

@@ -1,0 +1,40 @@
+/* name: Manjimutt */
+/* Manjimutt: chocolate-brown fur, beige face, mint-green tuft. Overrides the tokens in style.css only. */
+:root {
+  --lilac-0: #f7f3ec;   /* page background: beige */
+  --lilac-1: #ece4d6;   /* hover, soft fills */
+  --lilac-2: #d9cdb8;   /* lines */
+  --lilac-3: #8a6b55;   /* card and button outlines */
+  --violet: #5a3a2c;    /* headings: his fur brown */
+  --violet-deep: #5b3a2e; /* title bar */
+  --violet-soft: #8fc9a0; /* the mint tuft */
+  --ink: #2a1d16;       /* body text */
+  --ink-2: #6e5a4c;     /* secondary text */
+  --gold: #d9c6a0;      /* primary buttons: beige */
+  --gold-deep: #a88c60;
+  --gold-hi: #eadcbd;
+  --gold-press: #c9b286;
+  --cream: #f3ece0;
+  --white: #ffffff;
+  --ok: #3f7a2e;
+  --ok-bg: #e6f1e0;
+  --danger: #b3261e;
+  --danger-hi: #c9302a;
+  --danger-press: #8e1c17;
+  --select: #6fb88a;      /* selected: outline, on-toggle, chosen radio (the mint tuft) */
+  --bar: rgb(91 58 46 / .92);
+  --bar-btn: #6f4b3b;
+  --bar-btn-hover: #82594a;
+  --bar-hover: #785043;
+  --bar-ink: #f7f3ec;
+  --dot: #5b3a2e;
+  --track: #d9cdb8;
+  --ink-soft: #ece4d6;
+  --ink-art: #fbf8f3;
+  --ink-welcome: #ece4d6;
+  --shadow-text: rgb(35 20 12 / .55);
+  --play: #4f8a64;      /* Play: the mint tuft, deeper, white text */
+  --play-hi: #5f9c74;
+  --play-press: #3f7150;
+  --play-ink: #ffffff;
+}

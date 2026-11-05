@@ -8,6 +8,7 @@
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=M+PLUS+Rounded+1c:wght@500;700;800&family=Zen+Kaku+Gothic+New:wght@400;500;700&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="style.css">
+<style id="theme-css"></style>
 </head>
 <body>
 <div class="app">
@@ -91,7 +92,11 @@
         <p class="lead">Base game + update 2.2.0. Select your local game files.</p>
       </div>
 
-      <div class="modes" role="radiogroup" aria-label="What you have">
+      <div class="modes" id="modes" role="radiogroup" aria-label="What you have">
+        <button type="button" class="mode" id="mode-found" role="radio" data-mode="found" aria-checked="false" hidden>
+          <span class="dot" aria-hidden="true"></span>
+          <span><b>Last build's files</b><small>Found in your game folder</small></span>
+        </button>
         <button type="button" class="mode" role="radio" data-mode="files" aria-checked="true">
           <span class="dot" aria-hidden="true"></span>
           <span><b>NSP or XCI</b><small>Needs prod.keys</small></span>
@@ -103,10 +108,11 @@
       </div>
 
       <div class="fields" id="fields"></div>
+      <p class="list-card" id="found-note" hidden>The build will use the game files from your last build. You don't need your original files.</p>
     </div>
 
     <div class="setup-foot">
-      <button class="btn" type="button" data-go="home">Back</button>
+      <button class="btn" type="button" id="files-back">Back</button>
       <span class="foot-note" id="files-note"></span>
       <button class="btn primary not-ready" type="button" id="check">Check my files</button>
     </div>
@@ -179,8 +185,19 @@
       <h1>Settings</h1>
       <div class="settings-grid">
         <div class="settings-col">
-        <section class="card">
+        <section class="card look-host">
           <h2>Playing</h2>
+          <div class="set-row look-row">
+            <span><b>Theme</b></span>
+            <div class="look">
+              <button class="look-btn" type="button" id="look-btn" aria-haspopup="listbox" aria-expanded="false" aria-label="Theme">
+                <span class="look-dots" id="look-dots" aria-hidden="true"></span>
+                <b id="set-look-name"></b>
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg>
+              </button>
+              <div class="look-menu" id="look-menu" role="listbox" aria-label="Themes" hidden></div>
+            </div>
+          </div>
           <div class="set-label">When the game starts</div>
           <div class="radios compact" role="radiogroup" aria-label="When the game starts">
             <button type="button" class="radio" role="radio" data-onplay="hide"><span class="dot" aria-hidden="true"></span><span><b>Hide the launcher</b><small>It comes back when the game closes</small></span></button>
@@ -259,6 +276,7 @@
     <div class="setup-foot">
       <button class="btn" type="button" id="settings-back">Back</button>
       <span class="foot-note"></span>
+      <button class="btn" type="button" id="set-rebuild-now">Rebuild</button>
       <button class="btn danger" type="button" id="set-uninstall">Uninstall</button>
     </div>
   </main>
@@ -357,6 +375,7 @@
     </div>
     <div class="setup-foot">
       <button class="btn" type="button" id="build-cancel">Cancel</button>
+      <button class="btn" type="button" id="build-back" hidden>Back</button>
       <span class="foot-note" id="build-note"></span>
       <button class="btn primary" type="button" id="build-next" hidden>Continue</button>
     </div>
@@ -528,6 +547,16 @@
   </div>
 </dialog>
 
+<dialog id="newfolder-dlg" aria-labelledby="newfolder-title">
+  <h2 id="newfolder-title">Build in a new folder?</h2>
+  <p id="newfolder-text"></p>
+  <p id="newfolder-keep"></p>
+  <div class="dialog-buttons">
+    <button class="btn" type="button" id="newfolder-no">Cancel</button>
+    <button class="btn primary" type="button" id="newfolder-yes">Use new folder</button>
+  </div>
+</dialog>
+
 <dialog id="uninstall-dlg" aria-labelledby="uninstall-title">
   <h2 id="uninstall-title">Uninstall Yo-kai Watch 4 Recomp?</h2>
   <p id="uninstall-text">Deletes the game files and the build.</p>
@@ -549,6 +578,7 @@
   <div class="dialog-buttons"><button class="btn primary" type="button" id="soon-ok">OK</button></div>
 </dialog>
 
+<script src="themes.js"></script>
 <script src="app.js"></script>
 </body>
 </html>

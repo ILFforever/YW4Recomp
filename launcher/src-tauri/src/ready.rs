@@ -369,6 +369,16 @@ fn game_running() -> bool {
         .map(|o| String::from_utf8_lossy(&o.stdout).to_lowercase().contains("yw4.exe")).unwrap_or(false)
 }
 
+/// This install's own game is running: Windows won't open a running program for writing (5 or 32), and a build
+/// would fail at its very end when it can't replace it. By file, not by name: another copy of the game elsewhere
+/// is no reason to refuse. Opening it this way changes nothing in the file.
+pub fn exe_in_use(install: &str) -> bool {
+    match std::fs::OpenOptions::new().write(true).open(exe(install)) {
+        Ok(_) => false,
+        Err(e) => matches!(e.raw_os_error(), Some(5) | Some(32)),
+    }
+}
+
 /// Settings: moves the saves and settings.ini to the other place and points game.ini there. Refuses while the
 /// game runs, and when the other place already holds saves (nothing is ever overwritten). Copy first, then delete,
 /// so a failure leaves the saves where they were.

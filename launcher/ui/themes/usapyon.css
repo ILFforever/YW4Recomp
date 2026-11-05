@@ -1,0 +1,40 @@
+/* name: Usapyon */
+/* Usapyon: blue body, yellow helmet, orange-and-teal suit. Overrides the tokens in style.css only. */
+:root {
+  --lilac-0: #f2f7fd;   /* page background */
+  --lilac-1: #e0ecf8;   /* hover, soft fills */
+  --lilac-2: #c3d8ee;   /* lines */
+  --lilac-3: #5d9ad6;   /* card and button outlines: his blue */
+  --violet: #2f5f9a;    /* headings */
+  --violet-deep: #2f6f9a; /* title bar */
+  --violet-soft: #3f86c8;
+  --ink: #1a2a3a;       /* body text */
+  --ink-2: #4f6a85;     /* secondary text */
+  --gold: #f7d56a;      /* primary buttons: his helmet yellow */
+  --gold-deep: #c99a2b;
+  --gold-hi: #fbe59a;
+  --gold-press: #e8c44e;
+  --cream: #f4f8fd;
+  --white: #ffffff;
+  --ok: #3f7a2e;
+  --ok-bg: #e6f1e0;
+  --danger: #b3261e;
+  --danger-hi: #c9302a;
+  --danger-press: #8e1c17;
+  --select: #f2b630;      /* selected: outline, on-toggle, chosen radio (the helmet yellow) */
+  --bar: rgb(47 111 154 / .94);
+  --bar-btn: #3f7fb0;
+  --bar-btn-hover: #5290c4;
+  --bar-hover: #3a78a8;
+  --bar-ink: #f2f7fd;
+  --dot: #2f6f9a;
+  --track: #c3d8ee;
+  --ink-soft: #e0ecf8;
+  --ink-art: #f8fbff;
+  --ink-welcome: #e0ecf8;
+  --shadow-text: rgb(10 30 60 / .55);
+  --play: #8fd0f5;      /* Play: light blue, dark text */
+  --play-hi: #a6dcf8;
+  --play-press: #74bde6;
+  --play-ink: #1a2a3a;
+}

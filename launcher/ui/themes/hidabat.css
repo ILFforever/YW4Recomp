@@ -1,0 +1,40 @@
+/* name: Hidabat */
+/* Hidabat: slate body with a hint of purple, blue cape with yellow stripes, cyan eyes. Overrides the tokens in style.css only. */
+:root {
+  --lilac-0: #f4f3f8;   /* page background */
+  --lilac-1: #e6e3f0;   /* hover, soft fills */
+  --lilac-2: #cfcadf;   /* lines */
+  --lilac-3: #8c85a6;   /* card and button outlines */
+  --violet: #3f3a5a;    /* headings: his slate body */
+  --violet-deep: #443a62; /* title bar */
+  --violet-soft: #4a78b0; /* the cape blue */
+  --ink: #1f1d2b;       /* body text */
+  --ink-2: #5b5673;     /* secondary text */
+  --gold: #f5cf6a;      /* primary buttons: the cape's yellow */
+  --gold-deep: #c99a2b;
+  --gold-hi: #fbe196;
+  --gold-press: #e8bb4e;
+  --cream: #f0eef6;
+  --white: #ffffff;
+  --ok: #3f7a2e;
+  --ok-bg: #e6f1e0;
+  --danger: #b3261e;
+  --danger-hi: #c9302a;
+  --danger-press: #8e1c17;
+  --select: #e9a92b;      /* selected: outline, on-toggle, chosen radio (the stripe yellow) */
+  --bar: rgb(68 58 98 / .93);
+  --bar-btn: #5a4e7e;
+  --bar-btn-hover: #6b5e92;
+  --bar-hover: #5f5289;
+  --bar-ink: #f4f3f8;
+  --dot: #443a62;
+  --track: #cfcadf;
+  --ink-soft: #e6e3f0;
+  --ink-art: #f9f8fc;
+  --ink-welcome: #e6e3f0;
+  --shadow-text: rgb(20 16 40 / .6);
+  --play: #4a78b0;      /* Play: the cape blue, white text */
+  --play-hi: #5a88c0;
+  --play-press: #3a6598;
+  --play-ink: #ffffff;
+}
