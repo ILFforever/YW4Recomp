@@ -51,7 +51,7 @@ Most of the game has not been tried.
 - **Graphics**: up to 4K and ultrawide, sharper shadows and textures, TAA, and upscaling with NVIDIA DLSS or AMD FSR
   for high frame rates at 4K (~85-118 frames/s at 4K 21:9 with DLSS or FSR on an RTX 4070 laptop), and frame generation
   with NVIDIA DLSS or AMD FSR (about twice as many frames on screen). Parts of the game's renderer already run as our
-  own code (shadows, surfaces, bloom, distance blur).
+  own code (shadows, surfaces, the shadow mask, bloom, distance blur, most screen passes).
 
 Expect missing effects and crashes in places nobody has reached yet.
 
