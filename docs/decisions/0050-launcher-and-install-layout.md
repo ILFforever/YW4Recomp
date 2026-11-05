@@ -6,7 +6,9 @@ replaces: none
 code: launcher
 -->
 
-Status: accepted as a plan (2026-11-03); nothing of the launcher is written yet. The screens were designed first as
+Status: accepted (2026-11-03) and built: the launcher in `launcher/`, all five screens, tested end to end from an
+installed download (2026-11-05). The install layout below is the plan; as built, the game is in `work\build\` and
+the build tools in `builder\` (decision 0052). The screens were designed first as
 a clickable mockup (Home, game files, check, check failed, options, building, ready to play).
 
 ## Context

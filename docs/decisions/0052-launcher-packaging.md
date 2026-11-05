@@ -6,7 +6,10 @@ replaces: none
 code: launcher/src-tauri/src/buildrun.rs
 -->
 
-Status: **accepted** (2026-11-04, the owner's answers below); nothing of it is built yet. Follows decision 0050 (one
+Status: **accepted** (2026-11-04, the owner's answers below) and built 2026-11-05: `launcher/package.py` makes the
+installer and portable zip, the compiler comes on the first build, from this repo's `deps-mirror` release first (the
+owner's choice) and the official address after. Decision 0054 later moves the game's build code into its own
+download. Follows decision 0050 (one
 download, nothing else to install, the build stays this repo's Python tools run by an embedded Python).
 
 ## Context

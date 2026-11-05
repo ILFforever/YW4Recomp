@@ -3,10 +3,12 @@
 state: plan
 date: 2026-11-05
 replaces: 0052 (part)
-code: launcher/VERSION, launcher/package.py, launcher/src-tauri/src/buildrun.rs
+code: launcher/VERSION, launcher/package.py, launcher/src-tauri/src/buildrun.rs, tools/yw4/build_install.py
 -->
 
-Status: **accepted** (2026-11-05, the owner's answers below); nothing is built yet. Changes decision
+Status: **accepted** (2026-11-05, the owner's answers below). Built so far: the launcher's own number (0.5.0) and
+the build steps in the game code with the old game kept during an update (`tools/yw4/build_install.py`). Not yet:
+the game zip, the update check and the Play screen band. Changes decision
 0052 (the game's build code no longer lives only inside the launcher's installer) and carries out decision 0047's
 "the launcher has its own number".
 
