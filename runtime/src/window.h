@@ -31,6 +31,11 @@ void window_input(uint64_t *buttons, int32_t sticks[4]);
 
 /* How many times the game has read window_input so far (a press must last at least two reads to be seen). */
 uint64_t window_input_reads(void);
+void window_input_read_replayed(void);  /* a replay gave the game its input instead: counts as a read too */
+/* The overlay's pause on or off (the game's Plus pause, its screen hidden): F4, replays' PAUSE key. */
+void window_pause_toggle(void);
+int window_paused(void);  /* the overlay's pause is on: the player's input is held back */
+uint64_t window_pause_buttons(void);  /* the buttons it presses for the player now (live input and replays) */
 
 /* Relative mouse motion accumulated since the last call (bindings.c yw4_hook_mouse_look). */
 void window_mouse_motion(float *dx, float *dy);

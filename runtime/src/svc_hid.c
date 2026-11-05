@@ -211,11 +211,14 @@ static int replay_state(uint64_t tick, uint64_t *buttons, int32_t sticks[4]) {
         *buttons = 0;
         memset(sticks, 0, 4 * sizeof(int32_t));
     }
+    if (window_paused()) *buttons = 0, memset(sticks, 0, 4 * sizeof(int32_t));  /* as live input: held back */
+    *buttons |= window_pause_buttons();  /* the overlay's pause presses Plus and A for the player in replays too */
     for (; next_key < n_keys && replay_keys[next_key].tick <= tick; next_key++) {
         const char *k = replay_keys[next_key].name;
         fprintf(stderr, "yw4: replay: key %s at tick %llu\n", k, (unsigned long long)tick);
         if (!strcmp(k, "F11")) gpu_request_trace(450);
         else if (!strcmp(k, "FULLSCR")) window_fullscreen_cycle();  /* F11 now (names are cut to 7 letters); "F11" in recordings is the trace */
+        else if (!strcmp(k, "PAUSE")) window_pause_toggle();  /* the overlay's pause, as F4 */
         else if (!strcmp(k, "F10")) gpu_request_dump();
         else if (!strcmp(k, "F12")) window_request_screenshot();
         else if (!strcmp(k, "F9")) shadow_toggle();
@@ -239,7 +242,9 @@ void yw4_hid_update(uint64_t tick) {
     uint64_t buttons;
     int32_t sticks[4];
     rec_tick = tick;
-    if (!replay_state(tick, &buttons, sticks)) {
+    if (replay_state(tick, &buttons, sticks)) {
+        window_input_read_replayed();  /* presses made for the player (pause, mouse menus) end after two reads */
+    } else {
         window_input(&buttons, sticks);
         /* record changes of the physical input */
         static uint64_t last_buttons = ~0ull;

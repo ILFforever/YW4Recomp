@@ -35,6 +35,7 @@
 #include "gbuffer.h"
 #include "gpu.h"
 #include "hud.h"
+#include "pause.h"
 #include "mousemenu.h"
 #include "settings.h"
 #include "version.h"
@@ -611,12 +612,129 @@ static void panel_draw(VkImage dst, int32_t x0, int32_t y0, uint32_t bw, uint32_
     overlay_show(&panel, dst, w, h, x0 + ((int32_t)bw - w * s) / 2, y0 + ((int32_t)bh - h * s) / 2, (float)s);
 }
 
-/* "Switching frame generation" in the middle of the picture while the switch's safe frames last (gpu_fg.h). */
+/* ---- the overlay's pause (2026-11-05, F4 for now): the game's own pause (Plus: the world, timers and sound
+ * stop) with its pause screen hidden (pause.c). Pausing presses Plus for the player and keeps the picture of that
+ * moment; while paused the window shows that picture, so the game's "Paused" screen under it never shows, and the
+ * player's own input doesn't reach the game (a held stick would move its cursor onto Return to Title). Resuming
+ * presses A on its first item, Continue, until the game has left its pause (pause.c sees it), then shows the live
+ * picture. Again every 1.2 s: a press while the screen is still opening is lost (at 30 frames/s it opens for about
+ * 2 s), and closing takes the game about 0.9 s at 30 frames/s, so a quicker second A could reach the field. Where
+ * Plus pauses nothing (a cutscene), the window is live again after two seconds; if the game doesn't resume within
+ * 20 A presses, the window shows it (its pause screen, to use by hand). A press lasts until the game has read the
+ * input twice (as mousemenu.c; replays count as reads). */
+enum { BTN_A_BIT = 1 << 0, BTN_PLUS_BIT = 1 << 10 };
+static int paused_view;          /* the window shows the kept picture; the player's input is held back */
+static int pause_keep_request;   /* keep the next presented picture */
+static uint64_t pause_press, pause_press_reads;  /* the button pressed for the player */
+static uint64_t pause_asked_at;  /* SDL ticks of F4 (pausing, then resuming) */
+static uint64_t pause_a_at;      /* SDL ticks of the last A on Continue */
+static int pause_a_tries;
+static struct {
+    VkImage image;
+    VkDeviceMemory mem;
+    uint32_t w, h;
+    VkFormat format;
+    int valid;
+} kept;
+
+static void game_pause_toggle(void);
+void window_pause_toggle(void) { game_pause_toggle(); }  /* replays: the key PAUSE */
+int window_paused(void) { return __atomic_load_n(&paused_view, __ATOMIC_ACQUIRE); }
+
+static void pause_press_button(uint64_t button) {
+    pause_press_reads = window_input_reads() + 2;
+    __atomic_store_n(&pause_press, button, __ATOMIC_RELEASE);
+}
+
+static void pause_live(const char *why) {
+    __atomic_store_n(&pause_press, 0, __ATOMIC_RELEASE);
+    __atomic_store_n(&paused_view, 0, __ATOMIC_RELEASE);
+    fprintf(stderr, "yw4: pause: live again (%s), %.0f ms after F4\n", why, (double)(SDL_GetTicks() - pause_asked_at));
+}
+
+static void game_pause_toggle(void) {
+    if (!paused_view) {
+        pause_request();
+        pause_keep_request = 1, kept.valid = 0, pause_asked_at = SDL_GetTicks();
+        __atomic_store_n(&paused_view, 1, __ATOMIC_RELEASE);
+        pause_press_button(BTN_PLUS_BIT);
+        fprintf(stderr, "yw4: pause: Plus for the player, the picture kept\n");
+    } else if (pause_resume()) {
+        pause_asked_at = SDL_GetTicks(), pause_a_at = 0, pause_a_tries = 0;
+        fprintf(stderr, "yw4: pause: resume: A on Continue\n");
+    }  /* else: not paused yet (or already resuming) */
+}
+
+/* once per input update (window's thread, and replays): moves the pause on; returns the buttons pressed for the
+ * player, OR'd into the input */
+uint64_t window_pause_buttons(void) {
+    if (window_paused()) {
+        uint64_t now = SDL_GetTicks();
+        int st = pause_state();
+        if (st == PAUSE_OFF) {
+            pause_live("the game resumed");
+        } else if (st == PAUSE_WANTED && now - pause_asked_at > 2000) {
+            pause_forget();
+            pause_live("the game didn't pause here, a cutscene?");
+        } else if (st == PAUSE_RESUME && (!pause_a_at || now - pause_a_at > 1200)) {
+            if (pause_a_tries < 20) {
+                pause_a_at = now, pause_a_tries++;
+                pause_press_button(BTN_A_BIT);
+                fprintf(stderr, "yw4: pause: A %d, %.0f ms after F4\n", pause_a_tries, (double)(now - pause_asked_at));
+            } else {
+                pause_forget();
+                pause_live("the game didn't resume: its pause screen is shown");
+            }
+        }
+    }
+    uint64_t p = __atomic_load_n(&pause_press, __ATOMIC_ACQUIRE);
+    if (p && window_input_reads() >= pause_press_reads) __atomic_store_n(&pause_press, 0, __ATOMIC_RELEASE), p = 0;
+    return p;
+}
+
+/* in present_image, while recording: keep src (w x h at sx, sy, in layout) when asked */
+static void pause_keep(VkImage src, VkImageLayout layout, int32_t sx, int32_t sy, uint32_t w, uint32_t h, VkFormat format) {
+    if (!pause_keep_request) return;
+    pause_keep_request = 0;
+    if (kept.image && (kept.w != w || kept.h != h || kept.format != format)) {
+        vkDeviceWaitIdle(vk.device);
+        vkDestroyImage(vk.device, kept.image, NULL), vkFreeMemory(vk.device, kept.mem, NULL);
+        kept.image = VK_NULL_HANDLE;
+    }
+    if (!kept.image) {
+        VkImageCreateInfo ici = {.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO, .imageType = VK_IMAGE_TYPE_2D,
+                                 .format = format, .extent = {w, h, 1}, .mipLevels = 1, .arrayLayers = 1,
+                                 .samples = VK_SAMPLE_COUNT_1_BIT, .tiling = VK_IMAGE_TILING_OPTIMAL,
+                                 .usage = VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT};
+        if (vkCreateImage(vk.device, &ici, NULL, &kept.image) != VK_SUCCESS) return;
+        VkMemoryRequirements mr;
+        vkGetImageMemoryRequirements(vk.device, kept.image, &mr);
+        VkMemoryAllocateInfo mai = {.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO, .allocationSize = mr.size,
+                                    .memoryTypeIndex = vk_memory_type(mr.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT)};
+        if (vkAllocateMemory(vk.device, &mai, NULL, &kept.mem) != VK_SUCCESS) {
+            vkDestroyImage(vk.device, kept.image, NULL), kept.image = VK_NULL_HANDLE;
+            return;
+        }
+        vkBindImageMemory(vk.device, kept.image, kept.mem, 0);
+        kept.w = w, kept.h = h, kept.format = format;
+    }
+    barrier(kept.image, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 0, VK_ACCESS_TRANSFER_WRITE_BIT);
+    VkImageCopy c = {.srcSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1}, .srcOffset = {sx, sy, 0},
+                     .dstSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1}, .extent = {w, h, 1}};
+    vkCmdCopyImage(cmd, src, layout, kept.image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &c);
+    barrier(kept.image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_GENERAL, VK_ACCESS_TRANSFER_WRITE_BIT,
+            VK_ACCESS_TRANSFER_READ_BIT);
+    kept.valid = 1;
+}
+
+/* A notice in the middle of the picture: "Switching frame generation" while the switch's safe frames last
+ * (gpu_fg.h), "Paused" while the overlay's pause shows the kept picture. */
 static void notice_draw(VkImage dst, int32_t x0, int32_t y0, uint32_t bw, uint32_t bh) {
-    if (!gpu_fg_switching() || overlay_resources(&notice)) return;
+    const char *msg = paused_view ? "PAUSED (F4 TO RESUME)" : gpu_fg_switching() ? "SWITCHING FRAME GENERATION..." : NULL;
+    if (!msg || overlay_resources(&notice)) return;
     float s = overlay_scale(swap_extent.height);
     int w, h;
-    notice_render(notice.ptr, (int)notice.w, (int)notice.h, "SWITCHING FRAME GENERATION...", s, &w, &h);
+    notice_render(notice.ptr, (int)notice.w, (int)notice.h, msg, s, &w, &h);
     overlay_show(&notice, dst, w, h, x0 + ((int32_t)bw - w) / 2, y0 + ((int32_t)bh - h) / 2, 1.0f);
 }
 
@@ -896,6 +1014,11 @@ static int present_image(VkImage src, VkImageLayout layout, VkRect2D r0, int rea
             vkCmdCopyImageToBuffer(cmd, src, layout, staging, 1, &copy);
         }
         if (flash_n != UINT64_MAX && flash_setup(w, h, flash_format)) flash_record(src, layout, sx, sy, w, h, flash_n);
+        pause_keep(src, layout, sx, sy, w, h, flash_format);
+        if (paused_view && kept.valid && kept.w == w && kept.h == h) {  /* the kept picture instead of the game's */
+            src = kept.image, layout = VK_IMAGE_LAYOUT_GENERAL, sx = sy = 0;
+            barrier(src, layout, layout, VK_ACCESS_MEMORY_WRITE_BIT, VK_ACCESS_TRANSFER_READ_BIT);
+        }
     }
     VkImage dst = swap_images[index];
     barrier(dst, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 0, VK_ACCESS_TRANSFER_WRITE_BIT);
@@ -919,7 +1042,7 @@ static int present_image(VkImage src, VkImageLayout layout, VkRect2D r0, int rea
     vkCmdBlitImage(cmd, src, layout, dst, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &blit, VK_FILTER_LINEAR);
     /* DLSS frame generation works on this window image: its HUD-less copy the same, the picture before the UI
      * (gpu_fg.c) scaled into the same place, so DLSS-G keeps the menus, our HUD and the panel still */
-    VkImage hl = layout == VK_IMAGE_LAYOUT_GENERAL && dlssg_on() ? gpu_fg_hudless() : VK_NULL_HANDLE;
+    VkImage hl = layout == VK_IMAGE_LAYOUT_GENERAL && dlssg_on() && !paused_view ? gpu_fg_hudless() : VK_NULL_HANDLE;
     if (hl && hudless_window_image(ww, wh)) {
         barrier(hl, VK_IMAGE_LAYOUT_GENERAL, VK_IMAGE_LAYOUT_GENERAL, VK_ACCESS_MEMORY_WRITE_BIT, VK_ACCESS_TRANSFER_READ_BIT);
         barrier(hlw.image, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 0, VK_ACCESS_TRANSFER_WRITE_BIT);
@@ -1066,6 +1189,8 @@ void window_mouse_motion(float *dx, float *dy) {
 static uint64_t input_reads;  /* how many times the game has read the input (window_input_reads) */
 uint64_t window_input_reads(void) { return __atomic_load_n(&input_reads, __ATOMIC_ACQUIRE); }
 
+void window_input_read_replayed(void) { __atomic_add_fetch(&input_reads, 1, __ATOMIC_RELEASE); }
+
 void window_input(uint64_t *buttons, int32_t sticks[4]) {
     __atomic_add_fetch(&input_reads, 1, __ATOMIC_RELEASE);
     host_lock(&input_lock);
@@ -1131,6 +1256,8 @@ static void update_input(void) {
             if (SDL_GetWindowFlags(window) & SDL_WINDOW_INPUT_FOCUS) SDL_SetWindowRelativeMouseMode(window, true);
         }
     }
+    if (window_paused()) b = 0, memset(s, 0, sizeof s);  /* the overlay's pause: the player's input held back */
+    b |= window_pause_buttons();  /* the overlay's pause: Plus and A pressed for the player */
     host_lock(&input_lock);
     input_buttons = b;
     memcpy(input_sticks, s, sizeof s);
@@ -1358,6 +1485,7 @@ void window_run(void (*guest)(void *), void *arg) {
             }
             if (e.key.key == SDLK_F10) gpu_request_dump(), yw4_hid_note_key("F10");      /* shadow maps etc.: work/dump/ */
             if (e.key.key == SDLK_F3) __atomic_store_n(&hud_on, hud_enabled() ? 0 : 1, __ATOMIC_RELEASE);  /* the HUD */
+            if (e.key.key == SDLK_F4 && !e.key.repeat) game_pause_toggle();  /* test: the overlay's pause (below) */
             if (e.key.key == SDLK_F5) gpu_passes_toggle();  /* per-pass GPU timing in the log */
             if (e.key.key == SDLK_F7 && !e.key.repeat) screen_passes_toggle();  /* the screen passes: ours or the game's */
             /* the settings live in the panel only (F1); its keys are recorded like the F keys, so a replay

@@ -62,6 +62,13 @@ static const SimpleCommand self_controller_simple[] = {
 };
 
 static void self_controller(Service *s, IpcRequest *req, IpcResponse *resp) {
+    /* how the game wants to be paused when it loses focus (the Home button on a Switch): logged once each. It
+     * asks (0, 0, 1) and not to be suspended, then ignores FocusStateChanged while exploring, so losing focus
+     * can't pause it (tried 2026-11-05; the overlay's pause uses the game's own pause instead, pause.c) */
+    if (req->cmd == 13)
+        fprintf(stderr, "yw4: am: SetFocusHandlingMode(%u, %u, %u)\n", IPC_IN(uint8_t, 0), IPC_IN(uint8_t, 1),
+                IPC_IN(uint8_t, 2));
+    if (req->cmd == 16) fprintf(stderr, "yw4: am: SetOutOfFocusSuspendingEnabled(%u)\n", IPC_IN(uint8_t, 0));
     if (!IPC_SIMPLE(self_controller_simple, req, resp)) ipc_unimplemented(s, req, resp);
 }
 

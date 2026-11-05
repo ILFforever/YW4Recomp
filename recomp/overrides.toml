@@ -230,6 +230,18 @@ why = "OnOpenEndLayer of every menu: counts the Yo-kai Pad's open layers, to kno
 
 [[hook]]
 module = "main"
+offset = "0x880750"
+native = "yw4_hook_scene_open"
+why = "opening a scene: the game's pause screen opened for the overlay's pause (SceneMenu gameover_menu + pause_menu); YW4_MENU_LOG logs every scene (runtime/src/pause.c)"
+
+[[hook]]
+module = "main"
+offset = "0x866cc0"
+native = "yw4_hook_menu_state_exit"
+why = "yw::MenuState's Exit: the game left its pause, the overlay's pause shows the live picture again (runtime/src/pause.c)"
+
+[[hook]]
+module = "main"
 offset = "0x6c6040"
 native = "yw4_hook_menu_layer_closed"
 why = "OnCloseEndLayer of every menu: a Yo-kai Pad page closed; back on the grid when the count is back (runtime/src/mousemenu.c)"
