@@ -348,7 +348,7 @@ dialog:not(.welcome-dialog) > h2 { margin: 0; padding: 15px 22px 13px; backgroun
   border-bottom: 3px solid var(--gold); font: 800 17px/1.25 var(--display); color: var(--white); }
 dialog:not(.welcome-dialog) > :not(h2):not(.dialog-buttons) { margin-left: 22px; margin-right: 22px; }
 dialog:not(.welcome-dialog) > h2 + * { margin-top: 18px; }
-dialog p { margin: 0 0 10px; font-size: 14px; }
+dialog p { margin: 0 0 10px; font-size: 14px; overflow-wrap: anywhere; }
 .dialog-buttons { display: flex; justify-content: flex-end; gap: 10px; margin-top: 18px; padding: 12px 16px;
   background: var(--lilac-0); border-top: 1px solid var(--lilac-2); }
 .dialog-buttons .btn { height: 40px; padding: 0 20px; }

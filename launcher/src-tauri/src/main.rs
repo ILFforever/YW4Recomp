@@ -41,7 +41,18 @@ fn test_paths() -> Option<String> {
     std::env::var("YW4_LAUNCHER_PATHS").ok().filter(|s| !s.is_empty())
 }
 
+/// No Windows error boxes from what the launcher starts ("SDL3.dll was not found" from a broken install's
+/// yw4.exe): the error mode is inherited by child processes, and the launcher reports such failures itself.
+pub fn quiet_errors() {
+    #[cfg(windows)]
+    unsafe {
+        use windows_sys::Win32::System::Diagnostics::Debug::{SetErrorMode, SEM_FAILCRITICALERRORS, SEM_NOOPENFILEERRORBOX};
+        SetErrorMode(SEM_FAILCRITICALERRORS | SEM_NOOPENFILEERRORBOX);
+    }
+}
+
 fn main() {
+    quiet_errors();
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())  // the file and folder pickers (Browse…)
         .manage(std::sync::Arc::new(buildrun::Running::default()))  // the build in progress (screen 4)

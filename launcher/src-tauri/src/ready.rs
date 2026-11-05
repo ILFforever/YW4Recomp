@@ -147,8 +147,7 @@ fn mod_names(mods: &Path) -> Vec<String> {
 pub async fn install_info(install: String) -> Info {
     tauri::async_runtime::spawn_blocking(move || {
         let inst = PathBuf::from(&install);
-        let version = hidden(Command::new(exe(&install)).arg("--version")).output().ok()
-            .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string()).unwrap_or_default();
+        let version = game_version(&exe(&install));
         let dlc = std::fs::read_dir(inst.join("data").join("dlc")).into_iter().flatten().flatten()
             .filter(|e| crate::check::dlc_index_of(&e.path()).is_some()).count();
         let mut shots: Vec<(std::time::SystemTime, PathBuf)> = std::fs::read_dir(inst.join("screenshots")).into_iter().flatten().flatten()
@@ -481,4 +480,23 @@ pub async fn uninstall(app: tauri::AppHandle, install: String, saves: String, ke
         }
     }
     Ok(())
+}
+
+/// `yw4.exe --version`'s line, or "" if it doesn't answer within 5 s. A broken install (a DLL missing, a half
+/// copied file) must never hang the screen; Windows' own error box for it is turned off in main.rs.
+fn game_version(exe: &Path) -> String {
+    crate::quiet_errors();  // set again here: the window's start-up resets it (seen 2026-11-05)
+    let Ok(mut child) = hidden(Command::new(exe).arg("--version")).stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::null()).spawn() else { return String::new() };
+    let started = std::time::Instant::now();
+    loop {
+        match child.try_wait() {
+            Ok(Some(_)) => break,
+            Ok(None) if started.elapsed() < std::time::Duration::from_secs(5) => std::thread::sleep(std::time::Duration::from_millis(50)),
+            _ => { let _ = child.kill(); let _ = child.wait(); return String::new(); }
+        }
+    }
+    let mut out = String::new();
+    if let Some(mut s) = child.stdout.take() { use std::io::Read; let _ = s.read_to_string(&mut out); }
+    out.trim().to_string()
 }
