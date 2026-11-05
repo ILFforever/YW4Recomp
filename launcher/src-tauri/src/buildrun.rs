@@ -223,6 +223,12 @@ fn copy_dlc(app: &AppHandle, plan: &Plan, inst: &Path) -> Result<(), String> {
     let dst = inst.join("data/dlc");
     std::fs::create_dir_all(&dst).map_err(|e| e.to_string())?;
     let Some(src) = plan.paths.get("dlc").filter(|d| !d.is_empty()) else { return Ok(()) };
+    // The player may have deleted their originals after the first build (the Ready screen offers it): the add-ons
+    // already copied into data\dlc are what the game uses, so a missing source folder is fine.
+    if !Path::new(src).is_dir() {
+        emit_log(app, &format!("DLC folder {src} is gone: keeping the add-ons already in data\\dlc"));
+        return Ok(());
+    }
     let mut n = 0;
     for p in std::fs::read_dir(src).map_err(|e| e.to_string())?.flatten().map(|e| e.path()) {
         if p.extension().map_or(false, |x| x.eq_ignore_ascii_case("nsp")) && crate::check::dlc_index_of(&p).is_some() {
