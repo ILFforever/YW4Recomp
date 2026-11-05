@@ -17,6 +17,17 @@ typedef struct {
     float frame_ms[HUD_POINTS], work_ms[HUD_POINTS];  /* the graph, oldest first */
     int npoints;
     float target_ms;  /* drawn as a line: the game's frame pacing */
+    /* the same numbers as values, for the styled HUD (hud_style.c); valid 0: no frames yet (lines[0] says why) */
+    int valid;
+    float target_fps;  /* the FRAME RATE setting; 0: none (vsync, unlimited) */
+    float fps, low1, low01;              /* the last 30 frames' rate; the 1% and 0.1% lows of the last 600 */
+    float frame_avg_ms, min_ms, max_ms;  /* frame time: average, lowest, highest of the last 600 */
+    float work_avg_ms, gpu_ms;           /* the game's work and the GPU's busy time per frame; gpu_ms < 0: not yet */
+    float cpu_pct, cpu_cores;            /* the whole CPU's share, and in cores */
+    int ncpu;
+    float draws, ram_mb;
+    float shown_fps;                     /* frames on screen with frame generation; 0: off */
+    const char *fg;                      /* "DLSS" or "FSR" */
 } HudContent;
 
 /* The HUD's parts in its detailed form: FPS and 1% low, the frame-time graph, GPU and CPU time, frame
@@ -24,6 +35,12 @@ typedef struct {
 enum { HUD_PART_FPS = 1, HUD_PART_GRAPH = 2, HUD_PART_TIMES = 4, HUD_PART_FG = 8, HUD_PART_ALL = 15 };
 /* perf.c: the HUD's lines and graph: compact (one line), or the detailed one's chosen parts. */
 void yw4_perf_hud(HudContent *c, int compact, unsigned parts);
+
+/* hud_style.c: the HUD as a see-through card (premultiplied RGBA, w x h) at s pixels per unit: compact (a chip) or
+ * the detailed card with the chosen parts (HUD_PART_*). *used_w x *used_h: in, the part the last drawing in this
+ * image touched, cleared first (0: the whole image); out, the part drawn. */
+void hud_style_render(uint8_t *rgba, int w, int h, const HudContent *c, int compact, unsigned parts, float s,
+                      int *used_w, int *used_h);
 
 /* shadow.c: whose shadow casters are drawn ("ORIGINAL": the game's, "CUSTOM": our pass, "CHECK"). */
 const char *shadow_mode_name(void);

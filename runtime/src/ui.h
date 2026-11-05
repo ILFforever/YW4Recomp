@@ -3,7 +3,8 @@
  * third_party/fonts), and line icons from SVG path data (nanosvg). Everything is placed in the design's own units
  * (CSS pixels of its 1600 x 900 artboard) and drawn at `s` image pixels per unit, so the overlay keeps the design's
  * proportions at any window size and stays sharp. Colours are 0xRRGGBB, drawn over what is there with opacity
- * `a` (0..1), blended as browsers do (on the stored values). */
+ * `a` (0..1), blended as browsers do (on the stored values). The image is kept premultiplied: drawn on a
+ * transparent image (alpha 0) the result is a see-through picture to blend onto another (the HUD). */
 #ifndef YW4_UI_H
 #define YW4_UI_H
 
@@ -19,6 +20,7 @@ typedef struct {
 enum {
     UI_ROUNDED_500, UI_ROUNDED_700, UI_ROUNDED_800,  /* M PLUS Rounded 1c: titles, buttons */
     UI_GOTHIC_400, UI_GOTHIC_500, UI_GOTHIC_700,     /* Zen Kaku Gothic New: body text */
+    UI_MONO,                                         /* the system's monospaced font: the HUD's digits */
     UI_FONTS
 };
 
@@ -28,6 +30,9 @@ void ui_rect(const UiCanvas *c, float x, float y, float w, float h, uint32_t rgb
 void ui_box(const UiCanvas *c, float x, float y, float w, float h, float r, uint32_t fill, float bw, uint32_t border);
 /* A rounded box of colour rgb at opacity a (no border), and a soft shadow around a box: CSS
  * box-shadow 0 0 <blur> rgb/a, drawn as layers (offset it by moving y). */
+/* A rounded box whose fill and border have their own opacity (the HUD's see-through card). */
+void ui_card(const UiCanvas *c, float x, float y, float w, float h, float r, uint32_t fill, float fa, float bw,
+             uint32_t border, float ba);
 void ui_box_alpha(const UiCanvas *c, float x, float y, float w, float h, float r, uint32_t rgb, float a);
 void ui_shadow(const UiCanvas *c, float x, float y, float w, float h, float r, float blur, uint32_t rgb, float a);
 /* Text in font f at size px (the CSS font-size), its line box of height lh (0: the font's normal height) with its

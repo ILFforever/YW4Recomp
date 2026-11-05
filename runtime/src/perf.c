@@ -36,6 +36,7 @@
 
 #include "host.h"
 #include "gpu_fg.h"
+#include "framerate.h"
 #include "hud.h"
 #include "kernel.h"
 #include "nvn.h"
@@ -214,7 +215,10 @@ static void start(void) {
  * the graph is the last HUD_POINTS frames. */
 void yw4_perf_hud(HudContent *c, int compact, unsigned parts) {
     c->nlines = c->npoints = 0;
-    c->target_ms = 1000.0f / 30.0f;
+    c->valid = 0;
+    int hz = framerate_hz();
+    c->target_fps = hz > 0 ? (float)hz : 0.0f;
+    c->target_ms = hz > 0 ? 1000.0f / (float)hz : 1000.0f / 30.0f;
 #define LINE(...) (c->nlines < HUD_LINES ? snprintf(c->lines[c->nlines++], HUD_COLS, __VA_ARGS__) : 0)
     if (enabled <= 0 || !nrows) {
         LINE(enabled == 0 ? "PERF OFF (YW4_PERF=0)" : "PERF: NO FRAMES YET");
@@ -234,6 +238,23 @@ void yw4_perf_hud(HudContent *c, int compact, unsigned parts) {
             if (recent[i] > hi) hi = recent[i];
         }
         double p99 = percentile(recent, 0, m, 99), p999 = percentile(recent, 0, m, 99.9);
+        {  /* the values, for the styled HUD */
+            static int nc;
+            if (!nc) nc = host_cpu_count();
+            size_t gg = ngpu < 30 ? ngpu : 30;
+            double b = 0;
+            for (size_t i = ngpu - gg; i < ngpu; i++) b += gpu_busy[i];
+            float sh = gpu_fg_shown_per_frame();
+            c->valid = 1;
+            c->fps = interval > 0 ? (float)(1000.0 / interval) : 0;
+            c->low1 = p99 > 0 ? (float)(1000.0 / p99) : 0, c->low01 = p999 > 0 ? (float)(1000.0 / p999) : 0;
+            c->frame_avg_ms = (float)interval, c->min_ms = (float)lo, c->max_ms = (float)hi;
+            c->work_avg_ms = (float)work, c->gpu_ms = gg ? (float)(b / (double)gg) : -1.0f;
+            c->ncpu = nc, c->cpu_pct = (float)(cpu / nc), c->cpu_cores = (float)(cpu / 100.0);
+            c->draws = (float)draws, c->ram_mb = (float)rows[nrows - 1].rss;
+            c->shown_fps = sh > 0.0f && interval > 0 ? (float)(1000.0 / interval * sh) : 0.0f;
+            c->fg = gpu_fg() == 2 ? "DLSS" : "FSR";
+        }
         if (compact) {  /* one line: the frame rate and its 1% low */
             LINE("FPS %4.1f  1%% %4.1f", interval > 0 ? 1000.0 / interval : 0.0, p99 > 0 ? 1000.0 / p99 : 0.0);
             return;

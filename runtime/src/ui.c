@@ -51,15 +51,38 @@ static const unsigned char font_g700[] = {
 static stbtt_fontinfo fonts[UI_FONTS];
 static int fonts_state;  /* 0 not loaded, 1 loaded, -1 failed */
 
+/* UI_MONO, the HUD's digits: a monospaced font of the system (Consolas on Windows, DejaVu Sans Mono elsewhere), so
+ * numbers don't jiggle as they change; without one, Zen Kaku Gothic New. Not built in: the system has one. */
+static int mono_load(stbtt_fontinfo *f) {
+    const char *paths[] = {"C:/Windows/Fonts/consola.ttf", "C:/Windows/Fonts/CascadiaMono.ttf",
+                           "/usr/share/fonts/truetype/dejavu/DejaVuSansMono.ttf", "/usr/share/fonts/TTF/DejaVuSansMono.ttf",
+                           "/usr/share/fonts/dejavu/DejaVuSansMono.ttf"};
+    for (size_t i = 0; i < sizeof paths / sizeof *paths; i++) {
+        FILE *fp = fopen(paths[i], "rb");
+        if (!fp) continue;
+        fseek(fp, 0, SEEK_END);
+        long n = ftell(fp);
+        fseek(fp, 0, SEEK_SET);
+        unsigned char *d = n > 0 ? malloc((size_t)n) : NULL;  /* stays loaded: stb_truetype reads it in place */
+        int ok = d && fread(d, 1, (size_t)n, fp) == (size_t)n;
+        fclose(fp);
+        if (ok && stbtt_InitFont(f, d, stbtt_GetFontOffsetForIndex(d, 0))) return 1;
+        free(d);
+    }
+    return 0;
+}
+
 static int fonts_ready(void) {
     if (fonts_state) return fonts_state > 0;
-    const unsigned char *data[UI_FONTS] = {font_r500, font_r700, font_r800, font_g400, font_g500, font_g700};
+    const unsigned char *data[UI_MONO] = {font_r500, font_r700, font_r800, font_g400, font_g500, font_g700};
     fonts_state = 1;
-    for (int i = 0; i < UI_FONTS; i++)
+    if (!mono_load(&fonts[UI_MONO])) fonts[UI_MONO] = fonts[UI_GOTHIC_500];  /* set below once that one is read */
+    for (int i = 0; i < UI_MONO; i++)
         if (!stbtt_InitFont(&fonts[i], data[i], stbtt_GetFontOffsetForIndex(data[i], 0))) {
             fprintf(stderr, "yw4: ui: built-in font %d unreadable\n", i);
             fonts_state = -1;
         }
+    if (!fonts[UI_MONO].data) fonts[UI_MONO] = fonts[UI_GOTHIC_500];
     return fonts_state > 0;
 }
 
@@ -70,8 +93,10 @@ static void blend(const UiCanvas *c, int x, int y, uint32_t rgb, float a) {
     if (a > 1.0f) a = 1.0f;
     uint8_t *p = c->px + ((size_t)y * (size_t)c->w + (size_t)x) * 4;
     const int src[3] = {(int)(rgb >> 16 & 255), (int)(rgb >> 8 & 255), (int)(rgb & 255)};
+    /* "over", kept premultiplied: on an opaque picture the same as before (alpha stays 255); on a see-through one
+     * (the HUD) the alpha builds up as layers are drawn */
     for (int k = 0; k < 3; k++) p[k] = (uint8_t)((float)p[k] + ((float)src[k] - (float)p[k]) * a + 0.5f);
-    p[3] = 255;
+    p[3] = (uint8_t)(a * 255.0f + (float)p[3] * (1.0f - a) + 0.5f);
 }
 
 /* the signed distance from (px, py) to a rounded box (image pixels), negative inside */
@@ -87,14 +112,14 @@ static float box_dist(float px, float py, float x0, float y0, float x1, float y1
 static float cover(float d) { return d <= -0.5f ? 1.0f : d >= 0.5f ? 0.0f : 0.5f - d; }
 
 static void box_a(const UiCanvas *c, float x, float y, float w, float h, float r, uint32_t fill, float fa, float bw,
-                  uint32_t border);
+                  uint32_t border, float ba);
 
 void ui_rect(const UiCanvas *c, float x, float y, float w, float h, uint32_t rgb, float a) {
-    box_a(c, x, y, w, h, 0, rgb, a, 0, 0);
+    box_a(c, x, y, w, h, 0, rgb, a, 0, 0, 1);
 }
 
 static void box_a(const UiCanvas *c, float x, float y, float w, float h, float r, uint32_t fill, float fa, float bw,
-                  uint32_t border) {
+                  uint32_t border, float ba) {
     float s = c->s;
     float x0 = c->ox + x * s, y0 = c->oy + y * s, x1 = x0 + w * s, y1 = y0 + h * s, R = r * s, B = bw * s;
     float mr = (x1 - x0 < y1 - y0 ? x1 - x0 : y1 - y0) * 0.5f;
@@ -116,24 +141,29 @@ static void box_a(const UiCanvas *c, float x, float y, float w, float h, float r
             }
             float ci = x1 - x0 > 2 * B && y1 - y0 > 2 * B ? cover(box_dist(px, py, x0 + B, y0 + B, x1 - B, y1 - B, iR)) : 0;
             /* the border where the inner box isn't, the fill inside it */
-            if (ci < 1.0f) blend(c, i, j, border, co * (1.0f - ci));
+            if (ci < 1.0f) blend(c, i, j, border, co * (1.0f - ci) * ba);
             if (ci > 0.0f) blend(c, i, j, fill, co * ci * fa);
         }
 }
 
 void ui_box(const UiCanvas *c, float x, float y, float w, float h, float r, uint32_t fill, float bw, uint32_t border) {
-    box_a(c, x, y, w, h, r, fill, 1.0f, bw, border);
+    box_a(c, x, y, w, h, r, fill, 1.0f, bw, border, 1.0f);
+}
+
+void ui_card(const UiCanvas *c, float x, float y, float w, float h, float r, uint32_t fill, float fa, float bw,
+             uint32_t border, float ba) {
+    box_a(c, x, y, w, h, r, fill, fa, bw, border, ba);
 }
 
 void ui_box_alpha(const UiCanvas *c, float x, float y, float w, float h, float r, uint32_t rgb, float a) {
-    box_a(c, x, y, w, h, r, rgb, a, 0, 0);
+    box_a(c, x, y, w, h, r, rgb, a, 0, 0, 1);
 }
 
 void ui_shadow(const UiCanvas *c, float x, float y, float w, float h, float r, float blur, uint32_t rgb, float a) {
     enum { STEPS = 12 };  /* layers from the widest to the box itself: a soft edge like CSS box-shadow */
     for (int i = STEPS; i >= 1; i--) {
         float e = blur * 0.5f * (float)i / STEPS;
-        box_a(c, x - e, y - e, w + 2 * e, h + 2 * e, r + e, rgb, a / STEPS * 1.6f, 0, 0);
+        box_a(c, x - e, y - e, w + 2 * e, h + 2 * e, r + e, rgb, a / STEPS * 1.6f, 0, 0, 1);
     }
 }
 

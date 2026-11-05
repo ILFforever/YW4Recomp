@@ -68,6 +68,7 @@ static VkSemaphore acquired;
 static VkSwapchainKHR swapchain;
 static VkExtent2D swap_extent;
 static VkImage swap_images[8];
+static VkImageView swap_views[8];  /* to draw into (the HUD, blended) */
 static VkSemaphore rendered[8];  /* one per swapchain image: reused only after that image is presented */
 static uint32_t nswap;
 static VkFormat swap_format;
@@ -100,7 +101,7 @@ typedef struct {
     void *ptr;
 } Overlay;
 enum { HUD_W = 256 * 4, HUD_H = 128 * 4 };  /* the HUD drawn at its scale: up to 4x its 1x size */
-static Overlay hud = {HUD_W, HUD_H}, panel = {480, 480}, notice = {1024, 160};
+static Overlay panel = {480, 480}, notice = {1024, 160};
 /* The performance HUD (F3; the in-game overlay's Performance page): hud_on 0 off, 1 detailed, 2 compact (-1:
  * not read yet, YW4_HUD); its corner (0 top left, 1 top right, 2 bottom left, 3 bottom right, YW4_HUD_CORNER)
  * and in the detailed one its parts (HUD_PART_*, YW4_HUD_PARTS). Saved with the settings. */
@@ -172,7 +173,7 @@ static int create_swapchain(uint64_t frame) {  /* frame: the game frame being pr
         .imageColorSpace = fmt.colorSpace,
         .imageExtent = extent,
         .imageArrayLayers = 1,
-        .imageUsage = VK_IMAGE_USAGE_TRANSFER_DST_BIT,
+        .imageUsage = VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT,  /* copies; the HUD drawn */
         .imageSharingMode = VK_SHARING_MODE_EXCLUSIVE,
         .preTransform = caps.currentTransform,
         .compositeAlpha = VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR,
@@ -191,6 +192,14 @@ static int create_swapchain(uint64_t frame) {  /* frame: the game frame being pr
     vkGetSwapchainImagesKHR(vk.device, swapchain, &nswap, NULL);
     if (nswap > 8) nswap = 8;
     vkGetSwapchainImagesKHR(vk.device, swapchain, &nswap, swap_images);
+    for (uint32_t i = 0; i < 8; i++) {  /* the views of the images, made again with them */
+        if (swap_views[i]) vkDestroyImageView(vk.device, swap_views[i], NULL), swap_views[i] = VK_NULL_HANDLE;
+        if (i >= nswap) continue;
+        VkImageViewCreateInfo vi = {.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO, .image = swap_images[i],
+                                    .viewType = VK_IMAGE_VIEW_TYPE_2D, .format = fmt.format,
+                                    .subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1}};
+        vkCreateImageView(vk.device, &vi, NULL, &swap_views[i]);
+    }
     for (uint32_t i = 0; i < nswap; i++) {
         if (rendered[i]) vkDestroySemaphore(vk.device, rendered[i], NULL);
         VkSemaphoreCreateInfo si = {.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO};
@@ -615,25 +624,229 @@ static void hud_place(int w, int h, uint32_t bw, uint32_t bh, float s, int32_t *
     if (*y < 0) *y = 0;
 }
 
-static void hud_draw(VkImage dst, int32_t x0, int32_t y0, uint32_t bw, uint32_t bh) {
+/* ---- the HUD blended onto the picture (hud_style.c draws it see-through, premultiplied). The window's other
+ * overlays are copies, which can't blend, so this one is drawn: its image as a texture, two triangles over its
+ * corner, blended src + dst * (1 - src.a), into the window's image (swap_views). */
+VkShaderModule gpu_native_shader(const char *name);  /* gpu_aa.c: our SPIR-V from work/build/shaders */
+
+static struct {
+    VkBuffer buf;          /* the upload: drawn into `cpu` (fast memory), then copied here */
+    VkDeviceMemory buf_mem;
+    void *ptr;
+    uint8_t *cpu;
+    VkImage image;         /* HUD_W x HUD_H, sampled */
+    VkDeviceMemory mem;
+    VkImageView view;
+    VkSampler sampler;
+    VkDescriptorSetLayout dsl;
+    VkDescriptorPool pool;
+    VkDescriptorSet set;
+    VkPipelineLayout layout;
+    struct { VkFormat format; VkPipeline pipe; } pipes[4];  /* one per window format (kept: it rarely changes) */
+    int npipes, failed;
+} hb;
+
+static void hb_barrier(VkImage image, VkImageLayout from, VkImageLayout to, VkAccessFlags src, VkAccessFlags dst) {
+    VkImageMemoryBarrier b = {.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER, .srcAccessMask = src, .dstAccessMask = dst,
+                              .oldLayout = from, .newLayout = to, .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+                              .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED, .image = image,
+                              .subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1}};
+    vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, 0, 0, NULL, 0,
+                         NULL, 1, &b);
+}
+
+static int hb_resources(void) {
+    if (hb.set) return 0;
+    if (hb.failed) return -1;
+    hb.failed = 1;  /* until everything below is made */
+    VkBufferCreateInfo bci = {.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO, .size = (VkDeviceSize)HUD_W * HUD_H * 4,
+                              .usage = VK_BUFFER_USAGE_TRANSFER_SRC_BIT};
+    if (vkCreateBuffer(vk.device, &bci, NULL, &hb.buf) != VK_SUCCESS) return -1;
+    VkMemoryRequirements mr;
+    vkGetBufferMemoryRequirements(vk.device, hb.buf, &mr);
+    VkMemoryAllocateInfo mai = {.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO, .allocationSize = mr.size,
+                                .memoryTypeIndex = vk_memory_type(mr.memoryTypeBits, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT |
+                                                                                      VK_MEMORY_PROPERTY_HOST_COHERENT_BIT)};
+    if (vkAllocateMemory(vk.device, &mai, NULL, &hb.buf_mem) != VK_SUCCESS) return -1;
+    vkBindBufferMemory(vk.device, hb.buf, hb.buf_mem, 0);
+    vkMapMemory(vk.device, hb.buf_mem, 0, VK_WHOLE_SIZE, 0, &hb.ptr);
+    if (!(hb.cpu = malloc((size_t)HUD_W * HUD_H * 4))) return -1;
+    VkImageCreateInfo ici = {.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO, .imageType = VK_IMAGE_TYPE_2D,
+                             .format = VK_FORMAT_R8G8B8A8_UNORM, .extent = {HUD_W, HUD_H, 1}, .mipLevels = 1,
+                             .arrayLayers = 1, .samples = VK_SAMPLE_COUNT_1_BIT, .tiling = VK_IMAGE_TILING_OPTIMAL,
+                             .usage = VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT};
+    if (vkCreateImage(vk.device, &ici, NULL, &hb.image) != VK_SUCCESS) return -1;
+    vkGetImageMemoryRequirements(vk.device, hb.image, &mr);
+    mai.allocationSize = mr.size;
+    mai.memoryTypeIndex = vk_memory_type(mr.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
+    if (vkAllocateMemory(vk.device, &mai, NULL, &hb.mem) != VK_SUCCESS) return -1;
+    vkBindImageMemory(vk.device, hb.image, hb.mem, 0);
+    VkImageViewCreateInfo vi = {.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO, .image = hb.image,
+                                .viewType = VK_IMAGE_VIEW_TYPE_2D, .format = VK_FORMAT_R8G8B8A8_UNORM,
+                                .subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1}};
+    if (vkCreateImageView(vk.device, &vi, NULL, &hb.view) != VK_SUCCESS) return -1;
+    VkSamplerCreateInfo si = {.sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO, .magFilter = VK_FILTER_NEAREST,
+                              .minFilter = VK_FILTER_NEAREST, .addressModeU = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE,
+                              .addressModeV = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE,
+                              .addressModeW = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE};
+    if (vkCreateSampler(vk.device, &si, NULL, &hb.sampler) != VK_SUCCESS) return -1;
+    VkDescriptorSetLayoutBinding bd = {0, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 1, VK_SHADER_STAGE_FRAGMENT_BIT, NULL};
+    VkDescriptorSetLayoutCreateInfo lci = {.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
+                                           .bindingCount = 1, .pBindings = &bd};
+    if (vkCreateDescriptorSetLayout(vk.device, &lci, NULL, &hb.dsl) != VK_SUCCESS) return -1;
+    VkDescriptorPoolSize ps = {VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 1};
+    VkDescriptorPoolCreateInfo pci = {.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO, .maxSets = 1,
+                                      .poolSizeCount = 1, .pPoolSizes = &ps};
+    if (vkCreateDescriptorPool(vk.device, &pci, NULL, &hb.pool) != VK_SUCCESS) return -1;
+    VkPushConstantRange pc = {VK_SHADER_STAGE_VERTEX_BIT, 0, 32};
+    VkPipelineLayoutCreateInfo pli = {.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO, .setLayoutCount = 1,
+                                      .pSetLayouts = &hb.dsl, .pushConstantRangeCount = 1, .pPushConstantRanges = &pc};
+    if (vkCreatePipelineLayout(vk.device, &pli, NULL, &hb.layout) != VK_SUCCESS) return -1;
+    VkDescriptorSetAllocateInfo dai = {.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO, .descriptorPool = hb.pool,
+                                       .descriptorSetCount = 1, .pSetLayouts = &hb.dsl};
+    VkDescriptorSet set;
+    if (vkAllocateDescriptorSets(vk.device, &dai, &set) != VK_SUCCESS) return -1;
+    VkDescriptorImageInfo ii = {hb.sampler, hb.view, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL};
+    VkWriteDescriptorSet wr = {.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET, .dstSet = set, .dstBinding = 0,
+                               .descriptorCount = 1, .descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+                               .pImageInfo = &ii};
+    vkUpdateDescriptorSets(vk.device, 1, &wr, 0, NULL);
+    hb.set = set, hb.failed = 0;
+    return 0;
+}
+
+static VkPipeline hb_pipeline(VkFormat format) {
+    for (int i = 0; i < hb.npipes; i++)
+        if (hb.pipes[i].format == format) return hb.pipes[i].pipe;
+    if (hb.npipes == 4) return VK_NULL_HANDLE;
+    static VkShaderModule vs, fs;
+    if (!vs) vs = gpu_native_shader("ui_quad.vert"), fs = gpu_native_shader("ui_blend.frag");
+    VkPipelineShaderStageCreateInfo st[2] = {
+        {.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO, .stage = VK_SHADER_STAGE_VERTEX_BIT, .module = vs,
+         .pName = "main"},
+        {.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO, .stage = VK_SHADER_STAGE_FRAGMENT_BIT, .module = fs,
+         .pName = "main"}};
+    VkPipelineVertexInputStateCreateInfo vin = {.sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO};
+    VkPipelineInputAssemblyStateCreateInfo ia = {.sType = VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO,
+                                                 .topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST};
+    VkPipelineViewportStateCreateInfo vp = {.sType = VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO,
+                                            .viewportCount = 1, .scissorCount = 1};
+    VkPipelineRasterizationStateCreateInfo rs = {.sType = VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO,
+                                                 .polygonMode = VK_POLYGON_MODE_FILL, .cullMode = VK_CULL_MODE_NONE,
+                                                 .lineWidth = 1.0f};
+    VkPipelineMultisampleStateCreateInfo ms = {.sType = VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO,
+                                               .rasterizationSamples = VK_SAMPLE_COUNT_1_BIT};
+    VkPipelineDepthStencilStateCreateInfo ds = {.sType = VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO};
+    VkPipelineColorBlendAttachmentState cba = {.blendEnable = VK_TRUE, .srcColorBlendFactor = VK_BLEND_FACTOR_ONE,
+                                               .dstColorBlendFactor = VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA,
+                                               .colorBlendOp = VK_BLEND_OP_ADD, .srcAlphaBlendFactor = VK_BLEND_FACTOR_ONE,
+                                               .dstAlphaBlendFactor = VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA,
+                                               .alphaBlendOp = VK_BLEND_OP_ADD, .colorWriteMask = 0xF};
+    VkPipelineColorBlendStateCreateInfo cbs = {.sType = VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO,
+                                               .attachmentCount = 1, .pAttachments = &cba};
+    static const VkDynamicState dyn[] = {VK_DYNAMIC_STATE_VIEWPORT, VK_DYNAMIC_STATE_SCISSOR};
+    VkPipelineDynamicStateCreateInfo dy = {.sType = VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO,
+                                           .dynamicStateCount = 2, .pDynamicStates = dyn};
+    VkPipelineRenderingCreateInfo ri = {.sType = VK_STRUCTURE_TYPE_PIPELINE_RENDERING_CREATE_INFO,
+                                        .colorAttachmentCount = 1, .pColorAttachmentFormats = &format};
+    VkGraphicsPipelineCreateInfo gci = {
+        .sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO, .pNext = &ri, .stageCount = 2, .pStages = st,
+        .pVertexInputState = &vin, .pInputAssemblyState = &ia, .pViewportState = &vp, .pRasterizationState = &rs,
+        .pMultisampleState = &ms, .pDepthStencilState = &ds, .pColorBlendState = &cbs, .pDynamicState = &dy,
+        .layout = hb.layout};
+    VkPipeline pipe;
+    if (vkCreateGraphicsPipelines(vk.device, VK_NULL_HANDLE, 1, &gci, NULL, &pipe) != VK_SUCCESS) return VK_NULL_HANDLE;
+    hb.pipes[hb.npipes].format = format, hb.pipes[hb.npipes].pipe = pipe;
+    hb.npipes++;
+    return pipe;
+}
+
+static void hud_draw(VkImage dst, uint32_t index, int32_t x0, int32_t y0, uint32_t bw, uint32_t bh) {
     hud_shown_w = hud_shown_h = 0;
-    if (!hud_enabled() || overlay_resources(&hud)) return;
+    if (!hud_enabled() || hb_resources() || index >= 8 || !swap_views[index]) return;
+    VkPipeline pipe = hb_pipeline(swap_format);
+    if (!pipe) return;
+    /* Drawn again 10 times a second, or at once when its form, parts or size change; the frames between show the
+     * last picture. Drawing it costs the present 0.9 ms (detailed), about 10% of a frame at 120 frames/s: too much
+     * for what measures the game. It also keeps the numbers readable. */
     static HudContent content;
-    int w, h;
-    yw4_perf_hud(&content, hud_mode_read() == 2, window_hud_parts());
+    static int w, h, last_form = -1;
+    static unsigned last_parts;
+    static float last_s;
+    static uint64_t last_at;
+    int compact = hud_mode_read() == 2;
+    unsigned parts = window_hud_parts();
     float s = overlay_scale(swap_extent.height);
-    hud_render(hud.ptr, HUD_W, HUD_H, &content, s, &w, &h);  /* drawn at its size: shown 1:1 */
+    uint64_t now = SDL_GetTicks();
+    int64_t t0 = host_now_ns();
+    int redraw = compact != last_form || parts != last_parts || s != last_s || now - last_at >= 100;
+    if (redraw) {
+        last_form = compact, last_parts = parts, last_s = s, last_at = now;
+        yw4_perf_hud(&content, compact, parts);
+        hud_style_render(hb.cpu, HUD_W, HUD_H, &content, compact, parts, s, &w, &h);  /* w, h: last time's part */
+        for (int j = 0; j < h; j++)  /* the drawn rows into the upload: bulk copies, the mapped memory is slow to read */
+            memcpy((uint8_t *)hb.ptr + (size_t)j * HUD_W * 4, hb.cpu + (size_t)j * HUD_W * 4, (size_t)w * 4);
+    }
+    {  /* YW4_HUD_TIME=1: what the HUD's drawing costs per frame, redraws shared out, every 600 frames in the log */
+        static int on = -1, n;
+        static double sum, worst;
+        if (on < 0) on = getenv("YW4_HUD_TIME") != NULL;
+        double ms = (double)(host_now_ns() - t0) / 1e6;
+        if (on && (sum += ms, worst = ms > worst ? ms : worst, ++n == 600)) {
+            fprintf(stderr, "yw4: hud: %.3f ms per frame on average, %.3f ms at most (600 frames)\n", sum / n, worst);
+            n = 0, sum = worst = 0;
+        }
+    }
     hud_shown_w = w, hud_shown_h = h;
     int32_t hx, hy;
     hud_place(w, h, bw, bh, s, &hx, &hy);
-    overlay_show(&hud, dst, w, h, x0 + hx, y0 + hy, 1.0f);
+    if (redraw) {
+        hb_barrier(hb.image, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 0, VK_ACCESS_TRANSFER_WRITE_BIT);
+        VkBufferImageCopy copy = {.bufferRowLength = HUD_W, .imageSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1},
+                                  .imageExtent = {(uint32_t)w, (uint32_t)h, 1}};
+        vkCmdCopyBufferToImage(cmd, hb.buf, hb.image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &copy);
+        hb_barrier(hb.image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+                   VK_ACCESS_TRANSFER_WRITE_BIT, VK_ACCESS_SHADER_READ_BIT);
+    }
+    hb_barrier(dst, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+               VK_ACCESS_TRANSFER_WRITE_BIT, VK_ACCESS_COLOR_ATTACHMENT_READ_BIT | VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT);
+    VkRenderingAttachmentInfo att = {.sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO, .imageView = swap_views[index],
+                                     .imageLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+                                     .loadOp = VK_ATTACHMENT_LOAD_OP_LOAD, .storeOp = VK_ATTACHMENT_STORE_OP_STORE};
+    VkRenderingInfo ri = {.sType = VK_STRUCTURE_TYPE_RENDERING_INFO, .renderArea = {{0, 0}, swap_extent},
+                          .layerCount = 1, .colorAttachmentCount = 1, .pColorAttachments = &att};
+    vkCmdBeginRendering(cmd, &ri);
+    vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, pipe);
+    VkViewport v = {0, 0, (float)swap_extent.width, (float)swap_extent.height, 0, 1};
+    VkRect2D sc = {{0, 0}, swap_extent};
+    vkCmdSetViewport(cmd, 0, 1, &v);
+    vkCmdSetScissor(cmd, 0, 1, &sc);
+    vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, hb.layout, 0, 1, &hb.set, 0, NULL);
+    float W = (float)swap_extent.width, H = (float)swap_extent.height, px = (float)(x0 + hx), py = (float)(y0 + hy);
+    float push[8] = {px / W * 2 - 1, py / H * 2 - 1, (px + (float)w) / W * 2 - 1, (py + (float)h) / H * 2 - 1,
+                     (float)w / HUD_W, (float)h / HUD_H, 0, 0};
+    vkCmdPushConstants(cmd, hb.layout, VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof push, push);
+    vkCmdDraw(cmd, 6, 1, 0, 0);
+    vkCmdEndRendering(cmd);
+    hb_barrier(dst, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+               VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT, VK_ACCESS_TRANSFER_WRITE_BIT | VK_ACCESS_TRANSFER_READ_BIT);
 }
 
-/* The HUD as it would show now, drawn into rgba (w x h; the overlay's Performance page previews it); its size. */
+/* The HUD as it would show now, drawn into rgba (w x h, straight RGBA: the overlay's Overlay page previews it on
+ * its violet box); its size. */
 void window_hud_preview(uint8_t *rgba, int w, int h, int *used_w, int *used_h) {
     static HudContent content;
-    yw4_perf_hud(&content, hud_mode_read() == 2, window_hud_parts());
-    hud_render(rgba, w, h, &content, 2.0f, used_w, used_h);
+    int compact = hud_mode_read() == 2;
+    unsigned parts = window_hud_parts();
+    yw4_perf_hud(&content, compact, parts);
+    *used_w = *used_h = 0;  /* nothing known drawn before: the whole image is cleared */
+    hud_style_render(rgba, w, h, &content, compact, parts, 1.5f, used_w, used_h);
+    for (int j = 0; j < *used_h; j++)  /* premultiplied -> straight, as ui_image takes it */
+        for (int i = 0; i < *used_w; i++) {
+            uint8_t *p = rgba + ((size_t)j * w + i) * 4;
+            if (p[3] && p[3] < 255)
+                for (int k = 0; k < 3; k++) p[k] = (uint8_t)(p[k] * 255 / p[3] > 255 ? 255 : p[k] * 255 / p[3]);
+        }
 }
 
 /* The settings panel (F1), in the middle of the picture (bw x bh at x0, y0). */
@@ -970,7 +1183,13 @@ static void hud_onto(uint8_t *rgba, uint32_t w, uint32_t h) {
     float hs = overlay_scale(h);
     int32_t hx, hy;
     hud_place(hud_shown_w, hud_shown_h, w, h, hs, &hx, &hy);
-    paste(rgba, w, h, &hud, hud_shown_w, hud_shown_h, (uint32_t)hx, (uint32_t)hy, 1.0f);
+    if (hb.cpu && hud_shown_w)  /* the see-through card, blended as the window does: src + dst * (1 - src.a) */
+        for (int j = 0; j < hud_shown_h && hy + j < (int32_t)h; j++)
+            for (int i = 0; i < hud_shown_w && hx + i < (int32_t)w; i++) {
+                const uint8_t *sp = hb.cpu + ((size_t)j * HUD_W + (size_t)i) * 4;
+                uint8_t *dp = rgba + ((size_t)(hy + j) * w + (size_t)(hx + i)) * 4;
+                for (int k = 0; k < 3; k++) dp[k] = (uint8_t)(sp[k] + dp[k] * (255 - sp[3]) / 255);
+            }
     uint32_t s = panel_scale(w, h);
     if (panel_shown_w && (uint32_t)panel_shown_w * s <= w && (uint32_t)panel_shown_h * s <= h)
         paste(rgba, w, h, &panel, panel_shown_w, panel_shown_h, (w - (uint32_t)panel_shown_w * s) / 2,
@@ -1272,7 +1491,7 @@ static int present_image(VkImage src, VkImageLayout layout, VkRect2D r0, int rea
     } else {
         dlssg_hudless(VK_NULL_HANDLE, VK_NULL_HANDLE, swap_format, 0, 0);
     }
-    hud_draw(dst, x0, y0, bw, bh);
+    hud_draw(dst, index, x0, y0, bw, bh);
     menu_draw(dst, x0, y0, bw, bh);
     panel_draw(dst, x0, y0, bw, bh);
     notice_draw(dst, x0, y0, bw, bh);
