@@ -62,9 +62,6 @@ void hud_scale_set(float v);
 float hud_opacity_get(void);
 void hud_opacity_set(float v);
 
-/* Draws c into rgba (w x h texels, 4 bytes each, rows of w) at scale s (the text in the system's font at that
- * size); *used_w and *used_h: the part drawn. */
-void hud_render(uint8_t *rgba, int w, int h, const HudContent *c, float s, int *used_w, int *used_h);
 /* One line of text in the HUD's box, at scale s (a notice shown in the middle of the screen). */
 void notice_render(uint8_t *rgba, int w, int h, const char *msg, float s, int *used_w, int *used_h);
 /* The settings panel (settings.h) the same way: every row with all its options, the current one boxed. */

@@ -64,7 +64,7 @@ static const uint8_t *glyph(char c) {
     return NULL;
 }
 
-enum { CELL_W = 6, CELL_H = 9, MARGIN = 4, GRAPH_H = 40 };
+enum { CELL_W = 6, CELL_H = 9, MARGIN = 4 };
 
 typedef struct {
     uint8_t *rgba;
@@ -172,8 +172,7 @@ static void text_s(const Canvas *cv, float s, float x, float y, const char *str,
     }
 }
 
-static const uint8_t WHITE[3] = {235, 235, 235}, GREY[3] = {90, 90, 100}, GREEN[3] = {80, 230, 110},
-                     YELLOW[3] = {230, 190, 60}, BOX[3] = {16, 16, 20}, PLOT[3] = {28, 28, 34};
+static const uint8_t WHITE[3] = {235, 235, 235}, BOX[3] = {16, 16, 20};
 
 /* One line of text in the HUD's box (a notice in the middle of the screen, e.g. while frame generation switches). */
 void notice_render(uint8_t *rgba, int w, int h, const char *msg, float s, int *used_w, int *used_h) {
@@ -185,58 +184,6 @@ void notice_render(uint8_t *rgba, int w, int h, const char *msg, float s, int *u
     for (int y = 0; y < cv.bh; y++)
         for (int x = 0; x < cv.bw; x++) put(&cv, x, y, BOX);
     text_s(&cv, s, MARGIN + 4, MARGIN + 2, msg, WHITE, BOX);
-    *used_w = cv.bw, *used_h = cv.bh;
-}
-
-void hud_render(uint8_t *rgba, int w, int h, const HudContent *c, float s, int *used_w, int *used_h) {
-    int cols = 0;
-    for (int i = 0; i < c->nlines; i++) {
-        int len = (int)strnlen(c->lines[i], HUD_COLS);
-        if (len > cols) cols = len;
-    }
-    int graph = c->npoints > 1;
-    int tw = cols * CELL_W - 1, gw = graph ? HUD_POINTS : 0;
-    /* the 1x layout's box, then drawn s times larger */
-    int bw1 = 2 * MARGIN + (tw > gw ? tw : gw);
-    int bh1 = 2 * MARGIN + c->nlines * CELL_H - 2 + (graph ? 3 + GRAPH_H + 3 + CELL_H - 2 : 0);
-    Canvas cv = {rgba, w, h, (int)ceilf(bw1 * s), (int)ceilf(bh1 * s)};
-    if (cv.bw > w) cv.bw = w;
-    if (cv.bh > h) cv.bh = h;
-    for (int y = 0; y < cv.bh; y++)
-        for (int x = 0; x < cv.bw; x++) put(&cv, x, y, BOX);
-    for (int i = 0; i < c->nlines; i++) text_s(&cv, s, MARGIN, MARGIN + i * CELL_H, c->lines[i], WHITE, BOX);
-    if (graph) {
-        /* frame time (green line) over the game's work (yellow columns), newest on the right; the top is
-         * the next 25 ms step above the slowest frame shown, at least 50 ms; a grey line at the target */
-        float gx = MARGIN, gy = MARGIN + c->nlines * CELL_H - 2 + 3;
-        float top = 50;
-        for (int i = 0; i < c->npoints; i++)
-            while (c->frame_ms[i] > top || c->work_ms[i] > top) top += 25;
-        rect_s(&cv, s, gx, gy, HUD_POINTS, GRAPH_H, PLOT);
-        float x0 = gx + HUD_POINTS - c->npoints, last = -1;
-#define Y(ms) (GRAPH_H - (ms) / top * (float)GRAPH_H)
-        for (int i = 0; i < c->npoints; i++) {
-            float yw = Y(c->work_ms[i]);
-            if (yw < 0) yw = 0;
-            rect_s(&cv, s, x0 + i, gy + yw, 1, GRAPH_H - yw, YELLOW);
-        }
-        if (c->target_ms > 0)
-            for (int x = 0; x < HUD_POINTS; x += 2) rect_s(&cv, s, gx + x, gy + Y(c->target_ms) - 0.5f, 1, 1, GREY);
-        for (int i = 0; i < c->npoints; i++) {  /* joined to the previous point, so spikes show as lines */
-            float y = Y(c->frame_ms[i]);
-            if (y < 0) y = 0;
-            float a = last < 0 ? y : last < y ? last : y, b = last < 0 ? y : last < y ? y : last;
-            rect_s(&cv, s, x0 + i, gy + a - 0.5f, 1, b - a + 1, GREEN);
-            last = y;
-        }
-#undef Y
-        float ly = gy + GRAPH_H + 3;
-        char str[24];
-        text_s(&cv, s, gx, ly, "FRAME", GREEN, BOX);
-        text_s(&cv, s, gx + 6 * CELL_W, ly, "WORK", YELLOW, BOX);
-        snprintf(str, sizeof str, "TOP %.0f MS", top);
-        text_s(&cv, s, gx + 11 * CELL_W, ly, str, GREY, BOX);
-    }
     *used_w = cv.bw, *used_h = cv.bh;
 }
 
