@@ -41,9 +41,9 @@
 ## Status
 
 > [!TIP]
-> **1.0.0 releasing soon:** the first release, with the launcher. Until then, [build from source](#building-from-source).
+> **1.0.0 releasing soon:** the first release, with the launcher. See [How to play](#how-to-play).
 
-Work in progress: not playable from start to finish yet. What runs so far: from boot through the start of a new
+Work in progress: not tested from start to finish yet. What runs so far: from boot through the start of a new
 game (logos, title menu, name entry, the opening cutscenes, the Amano house and town, the Yo-kai Pad menus, the
 diary and autosave), and from late-game saves: towns at night, the bamboo forest, the Yo-kai World, and battles.
 Most of the game has not been tried.
@@ -60,6 +60,17 @@ Expect missing effects and crashes in places nobody has reached yet.
 
 - How it got here, step by step: [docs/progress.md](docs/progress.md)
 - What is known to be missing or wrong: [docs/known-issues.md](docs/known-issues.md)
+
+## How to play
+
+The launcher is coming out soon. It takes your game files (NSP, XCI or extracted folders), checks them, builds the
+game on your PC once (about 10 to 15 minutes) and starts it. After that it opens on **Play**, with what's new, your
+screenshots, mods, DLC, saves and logs. Its theme is synced with the in-game overlay's. Until it is out, you can
+[build from source](#building-from-source). Every step and screen is on [the launcher's page](https://ilfforever.github.io/YW4Recomp/launcher/).
+
+![The launcher: the first start with the welcome popup; your game files; Play with what's new; Settings](docs/screenshots/99-launcher.jpg)
+
+![Launcher themes: Jibanyan and Whisper](docs/screenshots/99-launcher-themes.jpg)
 
 ## Why not just use an emulator?
 
@@ -428,20 +439,6 @@ the launcher: the game opens in the launcher's theme, and a theme picked in the 
 closes (a theme file added to the launcher's themes folder shows up in both).
 
 ![Overlay themes: Jibanyan, Komasan, Shmoopie and Whisper](docs/screenshots/98-overlay-themes.jpg)
-
-</details>
-
-<details>
-<summary><b>Launcher</b>: your game files in, the game built and started, with mods, DLC, saves and screenshots</summary>
-
-The launcher takes your game files (NSP, XCI or extracted folders), checks them, builds the game on your PC once
-(about 10 to 15 minutes) and starts it. After that it opens on **Play**, with what's new, your screenshots, mods,
-DLC, saves and logs. Its settings choose what happens when the game starts, where saves are kept, shortcuts and
-updates. Its theme is synced with the in-game overlay's. Every step and screen: [the launcher's page](https://ilfforever.github.io/YW4Recomp/launcher/).
-
-![The launcher: the first start with the welcome popup; your game files; Play with what's new; Settings](docs/screenshots/99-launcher.jpg)
-
-![Launcher themes: Jibanyan and Whisper](docs/screenshots/99-launcher-themes.jpg)
 
 </details>
 
