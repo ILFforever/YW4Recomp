@@ -22,6 +22,7 @@
 #include "gbuffer.h"
 #include "ipc_simple.h"
 #include "settings.h"
+#include "textin.h"
 #include "window.h"
 
 #define HID_SHARED_MEMORY_SIZE 0x40000
@@ -136,6 +137,19 @@ void yw4_hid_note_key(const char *name) {
     host_unlock(&rec_lock);
 }
 
+/* text typed into an overlay field: "t <tick> <text>" (the text to the end of the line) */
+void yw4_hid_note_text(const char *utf8) {
+    host_lock(&rec_lock);
+    rec_open();
+    if (rec_file) {
+        fprintf(rec_file, "t %llu ", (unsigned long long)rec_tick);
+        for (const char *p = utf8; *p; p++) fputc(*p == '\n' || *p == '\r' ? ' ' : *p, rec_file);
+        fputc('\n', rec_file);
+        fflush(rec_file);
+    }
+    host_unlock(&rec_lock);
+}
+
 typedef struct {
     uint64_t tick, buttons;
     int32_t sticks[4];
@@ -143,6 +157,7 @@ typedef struct {
 typedef struct {
     uint64_t tick;
     char name[8];
+    char *text;  /* a "t" line: typed text (name "TEXT") */
 } RecKey;
 static RecState *replay_states;
 static RecKey *replay_keys;
@@ -159,10 +174,10 @@ static void replay_load(void) {
         fprintf(stderr, "yw4: replay: cannot open %s\n", path);
         return;
     }
-    char line[256];
+    char line[2048];
     while (fgets(line, sizeof line, f)) {
         unsigned long long tick, buttons;
-        int lx, ly, rx, ry;
+        int lx, ly, rx, ry, at = 0;
         char name[8];
         if (sscanf(line, "s %llu %llx %d %d %d %d", &tick, &buttons, &lx, &ly, &rx, &ry) == 6) {
             replay_states = realloc(replay_states, (n_states + 1) * sizeof *replay_states);
@@ -171,6 +186,15 @@ static void replay_load(void) {
             replay_keys = realloc(replay_keys, (n_keys + 1) * sizeof *replay_keys);
             replay_keys[n_keys].tick = tick;
             snprintf(replay_keys[n_keys].name, sizeof replay_keys[n_keys].name, "%s", name);
+            replay_keys[n_keys].text = NULL;
+            n_keys++;
+        } else if (sscanf(line, "t %llu %n", &tick, &at) == 1 && at > 0) {  /* typed text, to the end of the line */
+            line[strcspn(line, "\r\n")] = 0;
+            replay_keys = realloc(replay_keys, (n_keys + 1) * sizeof *replay_keys);
+            replay_keys[n_keys].tick = tick;
+            snprintf(replay_keys[n_keys].name, sizeof replay_keys[n_keys].name, "TEXT");
+            size_t tl = strlen(line + at) + 1;  /* (strdup isn't C11) */
+            if ((replay_keys[n_keys].text = malloc(tl))) memcpy(replay_keys[n_keys].text, line + at, tl);
             n_keys++;
         }
     }
@@ -217,7 +241,12 @@ static int replay_state(uint64_t tick, uint64_t *buttons, int32_t sticks[4]) {
     for (; next_key < n_keys && replay_keys[next_key].tick <= tick; next_key++) {
         const char *k = replay_keys[next_key].name;
         fprintf(stderr, "yw4: replay: key %s at tick %llu\n", k, (unsigned long long)tick);
-        if (!strcmp(k, "F11")) gpu_request_trace(450);
+        if (!strcmp(k, "TEXT")) textin_type(replay_keys[next_key].text ? replay_keys[next_key].text : "");
+        else if (!strncmp(k, "T_", 2)) {  /* the typing keys (textin.h) */
+            static const char *const ops[] = {"T_LEFT", "T_RIGHT", "T_HOME", "T_END", "T_BACK", "T_DEL", "T_DONE"};
+            for (int i = 0; i < (int)(sizeof ops / sizeof *ops); i++)
+                if (!strcmp(k, ops[i])) textin_edit(i), gamemenu_refresh();
+        } else if (!strcmp(k, "F11")) gpu_request_trace(450);
         else if (!strcmp(k, "FULLSCR")) window_fullscreen_cycle();  /* F11 now (names are cut to 7 letters); "F11" in recordings is the trace */
         else if (!strcmp(k, "PAUSE")) window_pause_toggle();  /* the overlay's pause, as F4 */
         else if (!strcmp(k, "MENU")) gamemenu_toggle();  /* the in-game overlay, as Escape */

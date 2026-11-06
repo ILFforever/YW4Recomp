@@ -39,6 +39,7 @@
 #include "pause.h"
 #include "mousemenu.h"
 #include "settings.h"
+#include "textin.h"
 #include "version.h"
 #include "vk.h"
 #include "window.h"
@@ -1742,6 +1743,7 @@ static void update_input(void) {
  * keys, so recordings and replays see the same presses. While the controls wait for an input, the press goes
  * there instead. */
 void yw4_hid_note_key(const char *name);  /* svc_hid.c: key presses go into the input recording */
+void yw4_hid_note_text(const char *utf8);  /* and text typed into the overlay's fields */
 
 static int pad_is_playstation(void) {
     SDL_GamepadType t = SDL_GetGamepadType(gamepad);
@@ -1964,8 +1966,20 @@ void window_run(void (*guest)(void *), void *arg) {
         update_input();
         overlay_pad_repeat();
         fullscreen_apply();
+        {  /* the system's text input (a keyboard layout's letters, an IME) runs while a text field has the focus */
+            static int text_on;
+            int want = window && gamemenu_open() && textin_active();
+            if (want != text_on) {
+                if (want) SDL_StartTextInput(window);
+                else if (window) SDL_StopTextInput(window);
+                text_on = want;
+            }
+        }
         if (!got) continue;
         switch (e.type) {
+        case SDL_EVENT_TEXT_INPUT:
+            if (gamemenu_open() && textin_active()) textin_type(e.text.text), yw4_hid_note_text(e.text.text);
+            break;
         case SDL_EVENT_GAMEPAD_ADDED:
             if (!gamepad && (gamepad = SDL_OpenGamepad(e.gdevice.which)))
                 fprintf(stderr, "yw4: window: gamepad %s\n", SDL_GetGamepadName(gamepad));
@@ -2066,6 +2080,34 @@ void window_run(void (*guest)(void *), void *arg) {
             /* the in-game overlay (gamemenu.h): Escape opens it; while it shows, the arrows or W A S D choose and
              * change, Enter or Space selects, Escape or Backspace go back one step (from the side panel: resume).
              * A settings page it opened takes Escape itself (back to the overlay). */
+            /* typing in a text field of the overlay (textin.h): the letters come as text (above); here only the keys
+             * that edit, paste or end the typing; every other key goes nowhere, so W A S D type instead of moving */
+            if (gamemenu_open() && !settings_open() && textin_active() &&
+                (e.key.scancode < SDL_SCANCODE_F1 || e.key.scancode > SDL_SCANCODE_F12)) {
+                SDL_Keycode k = e.key.key;
+                static const struct {
+                    SDL_Keycode key;
+                    int op;
+                    const char *name;
+                } ek[] = {{SDLK_LEFT, TI_LEFT, "T_LEFT"},    {SDLK_RIGHT, TI_RIGHT, "T_RIGHT"},
+                          {SDLK_HOME, TI_HOME, "T_HOME"},    {SDLK_END, TI_END, "T_END"},
+                          {SDLK_BACKSPACE, TI_BACK, "T_BACK"}, {SDLK_DELETE, TI_DEL, "T_DEL"},
+                          {SDLK_RETURN, TI_DONE, "T_DONE"},  {SDLK_KP_ENTER, TI_DONE, "T_DONE"},
+                          {SDLK_ESCAPE, TI_DONE, "T_DONE"},  {SDLK_TAB, TI_DONE, "T_DONE"}};
+                used_pad(0);
+                if (k == SDLK_V && (e.key.mod & SDL_KMOD_CTRL)) {  /* paste */
+                    char *clip = SDL_GetClipboardText();
+                    if (clip && *clip) textin_type(clip), yw4_hid_note_text(clip);
+                    SDL_free(clip);
+                    break;
+                }
+                for (size_t i = 0; i < sizeof ek / sizeof *ek; i++)
+                    if (k == ek[i].key && !(e.key.repeat && ek[i].op == TI_DONE)) {
+                        textin_edit(ek[i].op), yw4_hid_note_key(ek[i].name);
+                        if (ek[i].op == TI_DONE) gamemenu_refresh();
+                    }
+                break;
+            }
             if (!settings_open()) {
                 /* held keys repeat only to move and change (the arrows, W A S D), never to select or go back */
                 SDL_Keycode k = e.key.key;

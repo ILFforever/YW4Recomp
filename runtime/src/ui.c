@@ -306,6 +306,73 @@ float ui_text_wrap(const UiCanvas *c, int f, float px, float track_em, float x, 
     return ty - y;
 }
 
+/* the width of str[from, to) */
+static float span_w(int f, float px, const char *str, int from, int to) {
+    char buf[1024];
+    int n = to - from < (int)sizeof buf - 1 ? to - from : (int)sizeof buf - 1;
+    memcpy(buf, str + from, (size_t)n), buf[n] = 0;
+    return text_run(NULL, f, px, 0, 0, buf, 0, 0);
+}
+
+float ui_text_edit(const UiCanvas *c, int f, float px, float x, float y, float w, float lh, int max_lines,
+                   const char *str, int cursor, uint32_t rgb, uint32_t caret) {
+    enum { MAXL = 64 };
+    int start[MAXL], end[MAXL], n = 0, len = (int)strlen(str);
+    /* lines: words (with the spaces after them) while they fit; a word wider than the box breaks between letters */
+    int ls = 0, i = 0;
+    while (n < MAXL) {
+        int le = ls;  /* the line so far: [ls, le) */
+        i = ls;
+        while (i < len) {
+            int we = i;
+            while (we < len && str[we] != ' ') we++;
+            while (we < len && str[we] == ' ') we++;
+            if (span_w(f, px, str, ls, we) <= w || le == ls) {
+                if (le == ls && span_w(f, px, str, ls, we) > w) {  /* one long word: as many letters as fit */
+                    int k = ls;
+                    while (k < we) {
+                        int nk = k + 1;
+                        while (nk < we && (str[nk] & 0xC0) == 0x80) nk++;
+                        if (k > ls && span_w(f, px, str, ls, nk) > w) break;
+                        k = nk;
+                    }
+                    le = k;
+                    break;
+                }
+                le = we, i = we;
+            } else break;
+        }
+        start[n] = ls, end[n] = le, n++;
+        if (le >= len) break;
+        ls = le;
+    }
+    /* the caret's line: the last whose range holds it (at a break, the next line's start) */
+    int cl = n - 1;
+    if (cursor >= 0)
+        for (int k = 0; k < n; k++)
+            if (cursor >= start[k] && (cursor < end[k] || k == n - 1)) {
+                cl = k;
+                break;
+            }
+    int first = 0;  /* the lines shown: the caret's always among them */
+    if (max_lines > 0 && cl >= max_lines) first = cl - max_lines + 1;
+    int shown = 0;
+    for (int k = first; k < n && (max_lines <= 0 || shown < max_lines); k++, shown++) {
+        float ly = y + (float)shown * lh;
+        if (c) {
+            char buf[1024];
+            int m = end[k] - start[k] < (int)sizeof buf - 1 ? end[k] - start[k] : (int)sizeof buf - 1;
+            memcpy(buf, str + start[k], (size_t)m), buf[m] = 0;
+            ui_text(c, f, px, x, ly, lh, buf, rgb);
+            if (cursor >= 0 && k == cl) {
+                float cx = x + span_w(f, px, str, start[k], cursor);
+                ui_rect(c, cx, ly + lh * 0.15f, 2, lh * 0.7f, caret, 1);
+            }
+        }
+    }
+    return (float)(shown ? shown : 1) * lh;
+}
+
 /* ---- images */
 
 void ui_image(const UiCanvas *c, const uint8_t *rgba, int iw, int ih, float x, float y, float w, float h, float r) {

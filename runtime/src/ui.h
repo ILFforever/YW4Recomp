@@ -47,6 +47,11 @@ void ui_text_in(const UiCanvas *c, int f, float px, float x, float y, float w, f
  * letter-spacing in ems), aligned as ui_text_in; returns its height. c NULL: only measures. */
 float ui_text_wrap(const UiCanvas *c, int f, float px, float track_em, float x, float y, float w, float lh, int align,
                    const char *str, uint32_t rgb);
+/* Text being typed (textin.h): broken into lines to fit w (at spaces, a long word between letters), each lh high,
+ * at most max_lines (0: all; more: the ones round the caret), with a caret (2 units wide, colour caret) before the
+ * byte `cursor` (-1: none). Returns its height. c NULL: only measures. */
+float ui_text_edit(const UiCanvas *c, int f, float px, float x, float y, float w, float lh, int max_lines,
+                   const char *str, int cursor, uint32_t rgb, uint32_t caret);
 /* An RGBA image (iw x ih) drawn into the box at (x, y), w x h units, its corners rounded by r. */
 void ui_image(const UiCanvas *c, const uint8_t *rgba, int iw, int ih, float x, float y, float w, float h, float r);
 /* A line icon: SVG elements (path, circle...) of a 24 x 24 view box drawn `size` units square at (x, y), stroked
