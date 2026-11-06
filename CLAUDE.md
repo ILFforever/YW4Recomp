@@ -69,6 +69,16 @@ Goal: understand what we're dealing with before writing a recompiler.
   `python -m tools.dev.decisions --check` before committing docs (dead links, `decision NNNN` mentions of records
   that don't exist, code paths that are gone).
 
+## Disk space (C: filled up on 2026-11-07: 55 GB of test captures + 42 GB of Claude temp files)
+- Test captures (screenshots, frame dumps, A/B images, perf CSVs, logs) go in **one** folder per task under
+  `work/` (gitignored), named `shots_<task>`. Do not scatter dozens of `shots_*` folders.
+- **Delete them when the task is done** (once the owner has seen the result or the numbers are in a decision record
+  or memory note). Keep only the few files a doc or decision record names, copied into `docs/`.
+- Never run long screenshot sweeps or dump every frame. A few frames per question is enough.
+- Temp and scratch files belong in the session scratchpad, and are deleted at the end of the task. Delete old
+  `%LOCALAPPDATA%\Temp\claude\*` folders (keep the current session's) when starting a session if C: has under 50 GB free.
+- Check free space (`Get-PSDrive C`) before any big capture run. Under 30 GB free: stop and clean up first.
+
 ## How to work with Dean
 - He prefers practical, direct answers and will push back if something's off.
 - Explain the "why" for anything non-obvious. He wants to be able to explain every subsystem himself.
