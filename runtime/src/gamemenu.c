@@ -51,6 +51,50 @@ static int prompt_enough(void) { return prompt_body[0] || prompt_chars() >= (pro
 
 void gamemenu_prompt_options(int min_chars, int cancel) { prompt_min = min_chars, prompt_cancel = cancel; }
 
+/* The on-screen keyboard (owner, 2026-11-07: "make it simple"): a letter grid in the popup while a controller is in
+ * use (the hints follow the last device), as the Switch's own keyboard. D-pad moves, A types, B deletes (on an
+ * empty field: Cancel where offered), Y capitals on or off, Done answers. The first letter is a
+ * capital, the next ones small, as names are written. The mouse can press its keys too. */
+enum { OSK_COLS = 10, OSK_ROWS = 5 };
+static const char *const osk_keys[OSK_ROWS - 1] = {"ABCDEFGHIJ", "KLMNOPQRST", "UVWXYZ-.'!", "1234567890"};
+enum { OSK_SHIFT, OSK_SPACE, OSK_DELETE, OSK_DONE };  /* the last row: its keys and the columns they cover */
+static const int osk_last[4][2] = {{0, 2}, {2, 6}, {6, 8}, {8, 10}};
+static int osk_row, osk_col, osk_caps = 1, osk_shown;
+
+static int osk_last_key(int col) {
+    for (int k = 0; k < 4; k++)
+        if (col >= osk_last[k][0] && col < osk_last[k][1]) return k;
+    return OSK_DONE;
+}
+
+static void prompt_finish(void);
+static void osk_press(void) {
+    if (osk_row < OSK_ROWS - 1) {
+        char ch[2] = {osk_keys[osk_row][osk_col], 0};
+        if (!osk_caps && ch[0] >= 'A' && ch[0] <= 'Z') ch[0] = (char)(ch[0] + 32);
+        textin_focus(&prompt_text);
+        textin_type(ch);
+        if (ch[0] != ' ') osk_caps = 0;  /* a capital first, then small letters */
+        return;
+    }
+    switch (osk_last_key(osk_col)) {
+    case OSK_SHIFT: osk_caps ^= 1; break;
+    case OSK_SPACE: textin_focus(&prompt_text), textin_type(" "); break;
+    case OSK_DELETE: textin_focus(&prompt_text), textin_edit(TI_BACK); break;
+    case OSK_DONE: prompt_finish(); break;
+    }
+}
+
+static void osk_move(int a) {
+    if (a == GM_UP) osk_row = (osk_row + OSK_ROWS - 1) % OSK_ROWS;
+    else if (a == GM_DOWN) osk_row = (osk_row + 1) % OSK_ROWS;
+    else if (osk_row == OSK_ROWS - 1) {  /* the last row moves key by key */
+        int k = osk_last_key(osk_col);
+        k = a == GM_LEFT ? (k + 3) % 4 : (k + 1) % 4;
+        osk_col = osk_last[k][0];
+    } else osk_col = a == GM_LEFT ? (osk_col + OSK_COLS - 1) % OSK_COLS : (osk_col + 1) % OSK_COLS;
+}
+
 void gamemenu_prompt_begin(const char *title, int max_chars, const char *fallback) {
     snprintf(prompt_title, sizeof prompt_title, "%s", title && *title ? title : "Enter a name");
     snprintf(prompt_fallback, sizeof prompt_fallback, "%s", fallback ? fallback : "");
@@ -64,6 +108,7 @@ void gamemenu_prompt_begin(const char *title, int max_chars, const char *fallbac
     prompt_label = strstr(low, "password") ? "Password" : strstr(low, "code") ? "Code" : "Name";
     textin_clear(&prompt_text);
     prompt_text.max_chars = max_chars > 0 ? max_chars : 0;
+    osk_row = 0, osk_col = 0, osk_caps = 1;
     __atomic_store_n(&prompt_finished, 0, __ATOMIC_RELEASE);
     __atomic_store_n(&prompting, 1, __ATOMIC_RELEASE);
     __atomic_store_n(&open_, 1, __ATOMIC_RELEASE);
@@ -419,6 +464,16 @@ void gamemenu_action(int a) {
     if (!gamemenu_open() || settings_open()) return;
     changed();
     if (gamemenu_prompting()) {  /* the name popup: A / Enter is OK (typing has ended), the rest nothing */
+        if (osk_shown && !prompt_body[0]) {  /* the on-screen keyboard (a controller) */
+            char t[8];
+            textin_read(&prompt_text, t, sizeof t, NULL);
+            if (a == GM_UP || a == GM_DOWN || a == GM_LEFT || a == GM_RIGHT) osk_move(a);
+            else if (a == GM_ACCEPT) osk_press();
+            else if (a == GM_ALT) osk_caps ^= 1;
+            else if ((a == GM_BACK || a == GM_LEAVE || a == GM_CLEAR) && t[0]) textin_focus(&prompt_text), textin_edit(TI_BACK);
+            else if (a == GM_BACK || a == GM_LEAVE) gamemenu_prompt_cancel();
+            return;
+        }
         if (a == GM_ACCEPT) prompt_finish();
         else if (a == GM_BACK || a == GM_LEAVE) gamemenu_prompt_cancel();  /* B: Cancel where offered; a message: OK */
         return;
@@ -466,7 +521,7 @@ void gamemenu_refresh(void) { changed(); }
 enum { HIT_SIDE, HIT_SECTION, HIT_ROW, HIT_ROW_PREV, HIT_ROW_NEXT, HIT_BIND, HIT_MODE, HIT_CORNER, HIT_CORNER_BOX,
        HIT_PART, HIT_SLIDER, HIT_POPUP, HIT_HINT, HIT_BIND_STEP, HIT_PREVIEW,
        HIT_BUG_KIND, HIT_BUG_TEXT, HIT_BUG_OFTEN, HIT_BUG_NEXT, HIT_BUG_TICK, HIT_BUG_BTN, HIT_BUG_DONE,
-       HIT_PROMPT_FIELD, HIT_PROMPT_OK, HIT_PROMPT_CANCEL };
+       HIT_PROMPT_FIELD, HIT_PROMPT_OK, HIT_PROMPT_CANCEL, HIT_OSK_KEY };
 #define HINT_CLOSE (-1)  /* a key hint's action: close the overlay */
 typedef struct {
     float x, y, w, h;
@@ -500,6 +555,10 @@ void gamemenu_mouse(float x, float y, int button) {
         if (button == 1 && found && h.kind == HIT_PROMPT_FIELD) textin_focus(&prompt_text), changed();
         if (button == 1 && found && h.kind == HIT_PROMPT_OK) prompt_finish();
         if (button == 1 && found && h.kind == HIT_PROMPT_CANCEL) gamemenu_prompt_cancel();
+        if (found && h.kind == HIT_OSK_KEY && (button == 0 || button == 1)) {  /* the on-screen keyboard's keys */
+            if (osk_row != h.a || osk_col != h.b) osk_row = h.a, osk_col = h.b, changed();
+            if (button == 1) osk_press(), changed();
+        }
         return;
     }
     if (button == 3) {  /* the right button: back, as Escape */
@@ -1489,7 +1548,11 @@ void gamemenu_draw(const UiCanvas *c, const GameMenuInfo *in) {
         float pw = 650, bar = 18 + 22 * 1.3f + 16, fh = 72, llh = 16 * 1.45f;
         float blh = 17 * 1.5f, msg_h = prompt_body[0] ? ui_text_wrap(NULL, UI_GOTHIC_500, 17, 0, 0, 0, pw - 56, blh, 0,
                                                                       prompt_body, 0) : 0;
-        float body = prompt_body[0] ? 24 + msg_h + 24 : 24 + llh + 8 + fh + 12 + llh + 22;
+        static int osk_force = -1;  /* YW4_OSK=1: the keyboard with any device (tests, touch screens) */
+        if (osk_force < 0) osk_force = getenv("YW4_OSK") && *getenv("YW4_OSK") == '1';
+        osk_shown = (in->pad || osk_force) && !prompt_body[0];
+        float kh = 50, kgap = 8, osk_h = osk_shown ? 14 + OSK_ROWS * (kh + kgap) : 0;
+        float body = prompt_body[0] ? 24 + msg_h + 24 : 24 + llh + 8 + fh + 12 + llh + osk_h + 22;
         float tray = 16 + 52 + 16, ph = bar + 3 + body + tray;
         float px = (W - pw) / 2, py = (H - 56 - ph) / 2;
         ui_shadow(c, px, py + 14, pw, ph, 16, 40, POP_SHADOW, 0.45f);
@@ -1526,9 +1589,34 @@ void gamemenu_draw(const UiCanvas *c, const GameMenuInfo *in) {
         y += fh + 12;
         char help[128], limit[32] = "";
         if (prompt_text.max_chars > 0) snprintf(limit, sizeof limit, " Up to %d letters.", prompt_text.max_chars);
-        snprintf(help, sizeof help, "Type with %s keyboard.%s%s%s%s", in->pad ? "a" : "your", limit,
+        snprintf(help, sizeof help, "%s%s%s%s%s", osk_shown ? "Pick the letters below." : "Type with your keyboard.", limit,
                  prompt_fallback[0] ? " Leave it empty for " : "", prompt_fallback, prompt_fallback[0] ? "." : "");
         ui_text(c, UI_GOTHIC_500, 16, bx, y, llh, help, MUTED);
+        if (osk_shown) {  /* the on-screen keyboard: ten columns, the chosen key gold */
+            float ky = y + llh + 14, kw = (bw - (OSK_COLS - 1) * kgap) / OSK_COLS;
+            for (int r = 0; r < OSK_ROWS; r++, ky += kh + kgap) {
+                int nkeys = r < OSK_ROWS - 1 ? OSK_COLS : 4;
+                for (int k = 0; k < nkeys; k++) {
+                    int c0 = r < OSK_ROWS - 1 ? k : osk_last[k][0], c1 = r < OSK_ROWS - 1 ? k + 1 : osk_last[k][1];
+                    float kx = bx + (float)c0 * (kw + kgap), w2 = (float)(c1 - c0) * (kw + kgap) - kgap;
+                    int on = osk_row == r && osk_col >= c0 && osk_col < c1;
+                    char label[16];
+                    if (r < OSK_ROWS - 1) {
+                        label[0] = osk_keys[r][k], label[1] = 0;
+                        if (!osk_caps && label[0] >= 'A' && label[0] <= 'Z') label[0] = (char)(label[0] + 32);
+                    } else {
+                        static const char *const names[4] = {"Shift", "Space", "Delete", "Done"};
+                        snprintf(label, sizeof label, "%s", names[k]);
+                    }
+                    int shift_on = r == OSK_ROWS - 1 && k == OSK_SHIFT && osk_caps, done = r == OSK_ROWS - 1 && k == OSK_DONE;
+                    uint32_t fill = on ? GOLD : done ? PLUM : shift_on ? LILAC : WHITE;
+                    ui_box(c, kx, ky, w2, kh, 10, fill, on ? 0 : 2, LINE);
+                    ui_text_in(c, UI_ROUNDED_800, r < OSK_ROWS - 1 ? 22 : 17, kx, ky, w2, kh, 1, label,
+                               on ? ON_GOLD : done ? SNOW : PLUM);
+                    hit_add(kx, ky, w2, kh, HIT_OSK_KEY, r, c0);
+                }
+            }
+        }
     prompt_ok:;
         float okw = ui_text_w(UI_ROUNDED_800, 18, "OK") + 2 * 32, okx = px + pw - 16 - okw, oky = ty + 16;
         int ok_on = prompt_enough();  /* a password with nothing typed: OK greyed out until there is a letter */
@@ -1545,7 +1633,13 @@ void gamemenu_draw(const UiCanvas *c, const GameMenuInfo *in) {
         }
         ui_rect(c, 0, H - 56, W, 56, NIGHT, 1);  /* the key hints, the whole width */
         float hx = 48;
-        if (in->pad) {
+        if (in->pad && osk_shown) {  /* the on-screen keyboard */
+            int ps = in->pad == 2;
+            hx += hint(c, hx, H - 56, "D-pad", "Move") + 28;
+            hx += hint(c, hx, H - 56, ps ? "Cross" : "A", "Type") + 28;
+            hx += hint(c, hx, H - 56, ps ? "Circle" : "B", can_cancel ? "Delete / Cancel" : "Delete") + 28;
+            hint(c, hx, H - 56, ps ? "Triangle" : "Y", "Capitals");
+        } else if (in->pad) {
             hx += hint(c, hx, H - 56, in->pad == 2 ? "Cross" : "A", "OK") + 28;
             if (can_cancel) hint(c, hx, H - 56, in->pad == 2 ? "Circle" : "B", "Cancel");
         } else {
