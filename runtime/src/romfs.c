@@ -188,6 +188,8 @@ static void apply_mods(Dir *root) {
             overlay(root, romfs, 0);
             fprintf(stderr, "yw4: mods: %s: %d files replaced, %d added (%s)\n", names[i], mod_replaced, mod_added,
                     romfs);
+        } else {
+            fprintf(stderr, "yw4: mods: %s has no romfs folder (looked for %s): left out\n", names[i], romfs);
         }
         free(names[i]);
     }

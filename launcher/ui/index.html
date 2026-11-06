@@ -182,8 +182,16 @@
   <!-- Settings (the top bar's gear): playing, where things are kept, shortcuts, disk space, downloads, updates -->
   <main class="screen setup" data-screen="settings" hidden>
     <div class="setup-body settings-body">
-      <h1>Settings</h1>
-      <div class="settings-grid">
+      <div class="settings-head">
+        <h1>Settings</h1>
+        <!-- two pages (no scrolling): the arrows switch, the middle says which one is shown -->
+        <div class="pager" role="group" aria-label="Settings page">
+          <button class="pager-btn" type="button" id="page-prev" aria-label="Previous page">&lsaquo;</button>
+          <span id="page-num">1 / 2</span>
+          <button class="pager-btn" type="button" id="page-next" aria-label="Next page">&rsaquo;</button>
+        </div>
+      </div>
+      <div class="settings-grid two" data-page="1">
         <div class="settings-col">
         <section class="card look-host">
           <h2>Playing</h2>
@@ -205,6 +213,11 @@
             <button type="button" class="radio" role="radio" data-onplay="keep"><span class="dot" aria-hidden="true"></span><span><b>Keep it open</b></span></button>
             <button type="button" class="radio" role="radio" data-onplay="close"><span class="dot" aria-hidden="true"></span><span><b>Close it</b><small>Play time isn't counted</small></span></button>
           </div>
+        </section>
+        </div>
+        <div class="settings-col">
+        <section class="card">
+          <h2>In the game</h2>
           <div class="switch-row">
             <span><b>Start in full screen</b><small>Same as F11 in the game</small></span>
             <button class="toggle" type="button" role="switch" aria-label="Start in full screen" id="set-full"></button>
@@ -213,8 +226,14 @@
             <span><b>Mods</b><small id="set-mods-line">The mods folder, e.g. the English patch</small></span>
             <button class="toggle" type="button" role="switch" aria-label="Mods" id="set-mods"></button>
           </div>
+          <div class="switch-row">
+            <span><b>Show log while playing</b><small>A console window opens next to the game</small></span>
+            <button class="toggle" type="button" role="switch" aria-label="Show log while playing" id="set-showlog"></button>
+          </div>
         </section>
         </div>
+      </div>
+      <div class="settings-grid two" data-page="2" hidden>
         <div class="settings-col">
         <section class="card">
           <h2>Where things are kept</h2>

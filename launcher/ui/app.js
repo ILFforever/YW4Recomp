@@ -622,7 +622,7 @@ async function afterBuild() {
   inst = { install: options.install, mode, paths: { ...chosen[mode] }, saves: options.saves, fsr: options.fsr,
     dlss: options.dlss && rtx, freeUp: options.freeUp, desktop: options.desktop, startMenu: options.startMenu,
     originalsOffered: inst && inst.install === options.install ? !!inst.originalsOffered : false,
-    onPlay: (inst && inst.onPlay) || 'hide', mods: !(inst && inst.mods === false) };  // Settings' choices stay
+    onPlay: (inst && inst.onPlay) || 'hide', mods: !(inst && inst.mods === false), showLog: !!(inst && inst.showLog) };  // Settings' choices stay
   syncSettingsButton();
   try { await invoke('save_state', { state: inst }); } catch (e) { logLine('could not remember the install: ' + e); }
   if (options.desktop || options.startMenu) {
@@ -794,7 +794,7 @@ $('crash-yes').addEventListener('click', async () => {
 
 $('play').addEventListener('click', async () => {
   try {
-    await invoke('play', { install: inst.install, mods: inst.mods !== false, onPlay: inst.onPlay || 'hide',
+    await invoke('play', { install: inst.install, mods: inst.mods !== false, showLog: !!inst.showLog, onPlay: inst.onPlay || 'hide',
       theme: THEMES[themeAt] ? THEMES[themeAt].id : 'recomp' });
     $('stat-last').textContent = 'Today';
   } catch (e) { popup('Something went wrong', String(e)); }
@@ -816,6 +816,7 @@ async function showSettings() {
   foundFrom = null;
   renderFound();
   show('settings');
+  settingsPage(1);
   $('set-install').textContent = inst.install;
   $('set-install').title = inst.install;  // one line, cut off when long: the whole of it on hover
   document.querySelectorAll('[data-move]').forEach((b) => b.setAttribute('aria-checked', String(b.dataset.move === inst.saves)));
@@ -823,6 +824,7 @@ async function showSettings() {
   document.querySelectorAll('[data-onplay]').forEach((b) =>
     b.setAttribute('aria-checked', String(b.dataset.onplay === (inst.onPlay || 'hide'))));
   setToggle('set-mods', inst.mods !== false);
+  setToggle('set-showlog', !!inst.showLog);
   try { setToggle('set-full', await invoke('game_full_screen', { install: inst.install, saves: inst.saves })); } catch (e) { /* off */ }
   setToggle('set-desktop', inst.desktop);
   setToggle('set-startmenu', inst.startMenu);
@@ -834,6 +836,17 @@ async function showSettings() {
   $('set-free-size').textContent = reclaimable > 0.05 * GB ? `${gb(reclaimable)} the game doesn't need to run` : 'Already freed up';
   $('set-free').disabled = reclaimable <= 0.05 * GB;
 }
+// Settings has two pages (no scrolling): Playing, then Files; the arrows on the heading row switch
+function settingsPage(n) {
+  document.querySelectorAll('.settings-grid[data-page]').forEach((g) => { g.hidden = g.dataset.page !== String(n); });
+  $('page-num').textContent = `${n} / 2`;
+  $('page-prev').disabled = n === 1;
+  $('page-next').disabled = n === 2;
+  $('page-prev').title = n === 1 ? '' : 'Back: playing';
+  $('page-next').title = n === 2 ? '' : 'Next: where things are kept';
+}
+$('page-prev').addEventListener('click', () => settingsPage(1));
+$('page-next').addEventListener('click', () => settingsPage(2));
 $('settings-back').addEventListener('click', () => showReady());
 
 // Uninstall: the popup lists what goes (sizes from the install); kept by default: saves and screenshots
@@ -890,6 +903,7 @@ document.querySelectorAll('[data-onplay]').forEach((b) => b.addEventListener('cl
   await saveInst();
 }));
 $('set-mods').addEventListener('click', async () => { inst.mods = inst.mods === false; setToggle('set-mods', inst.mods); await saveInst(); });
+$('set-showlog').addEventListener('click', async () => { inst.showLog = !inst.showLog; setToggle('set-showlog', inst.showLog); await saveInst(); });
 $('set-full').addEventListener('click', async () => {
   const full = $('set-full').getAttribute('aria-checked') !== 'true';
   try {

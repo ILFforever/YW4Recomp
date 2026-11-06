@@ -29,6 +29,9 @@ pub struct State {
     /// Settings: start the game with the mods folder (false: none, e.g. Japanese without the English patch)
     #[serde(default = "yes")]
     mods: bool,
+    /// Settings: show the game's console window with its log while playing (off by default)
+    #[serde(rename = "showLog", default)]
+    show_log: bool,
 }
 
 fn default_on_play() -> String { "hide".into() }
@@ -140,12 +143,15 @@ fn mod_names(mods: &Path) -> Vec<String> {
     let mut out = Vec::new();
     let read = |d: &Path| std::fs::read_dir(d).into_iter().flatten().flatten().filter(|e| e.path().is_dir())
         .map(|e| e.file_name().to_string_lossy().into_owned()).collect::<Vec<_>>();
+    // only a folder with a romfs inside is a mod: the game skips the others (a mod put one folder too deep, say)
+    let valid = |d: &Path, name: &str| d.join(name).join("romfs").is_dir();
     for name in read(mods) {
         if name.eq_ignore_ascii_case("contents") {  // contents\<title id>\<mod>
             for tid in read(&mods.join(&name)) {
-                out.extend(read(&mods.join(&name).join(&tid)));
+                let dir = mods.join(&name).join(&tid);
+                out.extend(read(&dir).into_iter().filter(|m| valid(&dir, m)));
             }
-        } else {
+        } else if valid(mods, &name) {
             out.push(name);
         }
     }
@@ -193,11 +199,15 @@ pub async fn install_info(install: String) -> Info {
 /// Settings (Play): with `mods` off the game starts with none (YW4_MODS=none: an environment variable wins over
 /// game.ini's line); `on_play` says what the launcher's window does meanwhile, and "hide" brings it back afterwards.
 #[tauri::command]
-pub fn play(app: tauri::AppHandle, install: String, mods: Option<bool>, on_play: Option<String>, theme: Option<String>) -> Result<(), String> {
+pub fn play(app: tauri::AppHandle, install: String, mods: Option<bool>, on_play: Option<String>, theme: Option<String>, show_log: Option<bool>) -> Result<(), String> {
     use tauri::{Emitter, Manager};
+    crate::buildrun::ensure_dlc_extracted(&app, Path::new(&install));
     let e = exe(&install);
     let mut cmd = Command::new(&e);
     cmd.current_dir(e.parent().unwrap());
+    // the game is a console program: its window shows the log live. Off unless Settings asks for it (the log file is written either way)
+    #[cfg(windows)]
+    if show_log != Some(true) { use std::os::windows::process::CommandExt; cmd.creation_flags(0x0800_0000); }  // CREATE_NO_WINDOW
     if mods == Some(false) { cmd.env("YW4_MODS", "none"); }
     // the game reads the launcher's theme files (decision 0055): its folder, so an installed game finds them
     if let Some(dir) = crate::themes::themes_dir(&app) { cmd.env("YW4_THEMES_DIR", dir); }
