@@ -74,6 +74,9 @@ body.pointer :focus-visible { outline: none; }
 .icon-btn { display: grid; place-items: center; width: 44px; height: 44px; border-radius: 12px; border: 0;
   background: var(--bar-btn); color: var(--bar-ink); cursor: pointer; }
 .icon-btn:hover { background: var(--bar-btn-hover); color: var(--white); }
+/* a button that can't be used yet (the gear before the game is built): grey, no hover, not-allowed cursor */
+.icon-btn:disabled { filter: grayscale(1); cursor: not-allowed; }
+.icon-btn:disabled:hover { background: var(--bar-btn); color: var(--bar-ink); }
 /* the window strip above the bar (the launcher draws its own title bar): darker and thinner than the bar, with
    Windows-shaped buttons (wide, square, full height) so they don't read as the launcher's round chips; close goes
    red on hover like Windows' own */

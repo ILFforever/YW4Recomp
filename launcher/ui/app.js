@@ -38,11 +38,13 @@ $('help-back').addEventListener('click', () => show(helpFrom));
 $('help-logs').addEventListener('click', () => invoke('open_folder', { install: inst.install, which: 'logs', saves: inst.saves }));
 $('help-licences').addEventListener('click', () => invoke('licences_folder', { open: true }));
 document.querySelectorAll('[data-link]').forEach((b) => b.addEventListener('click', () => invoke('open_link', { which: b.dataset.link })));
-// the top bar's gear: the Settings page once the game is built; before that there is nothing to set
-$('top-settings').addEventListener('click', () => {
-  if (typeof inst !== 'undefined' && inst) showSettings();
-  else popup('Settings', 'Settings are here once your game is built.');
-});
+// the top bar's gear: the Settings page once the game is built. Until then it is disabled (syncSettingsButton).
+$('top-settings').addEventListener('click', () => showSettings());
+function syncSettingsButton() {  // inst is the built install's state, null before a build
+  const gear = $('top-settings');
+  gear.disabled = !inst;
+  gear.title = inst ? 'Settings' : 'Settings are here once your game is built';
+}
 if (T && T.window) {
   const win = T.window.getCurrentWindow();
   $('win-min').addEventListener('click', () => win.minimize());
@@ -621,6 +623,7 @@ async function afterBuild() {
     dlss: options.dlss && rtx, freeUp: options.freeUp, desktop: options.desktop, startMenu: options.startMenu,
     originalsOffered: inst && inst.install === options.install ? !!inst.originalsOffered : false,
     onPlay: (inst && inst.onPlay) || 'hide', mods: !(inst && inst.mods === false) };  // Settings' choices stay
+  syncSettingsButton();
   try { await invoke('save_state', { state: inst }); } catch (e) { logLine('could not remember the install: ' + e); }
   if (options.desktop || options.startMenu) {
     try { await invoke('make_shortcuts', { state: inst }); } catch (e) { logLine(String(e)); }
@@ -861,6 +864,7 @@ $('un-yes').addEventListener('click', async () => {
   }
   unDlg.close();  // (with "Remove the launcher too" the launcher has closed by now)
   inst = null;
+  syncSettingsButton();
   setGameVersion(null);
   $('game-version').textContent = 'YW4 Recomp · not built yet';
   show('home');
@@ -1122,6 +1126,7 @@ $('welcome-close').addEventListener('click', closeWelcome);
   if (screen && screen !== 'ready') { show(screen); return; }
   // a built install: straight to Play (the welcome popup is for the first run)
   try { inst = invoke ? await invoke('load_state') : null; } catch (e) { inst = null; }
+  syncSettingsButton();
   if (inst) { showReady(); return; }
   show('home');
   let hidden = false;
