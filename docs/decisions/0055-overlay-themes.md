@@ -1,14 +1,14 @@
 # 0055 — Overlay and HUD themes: the launcher's theme files, read when the game starts
 <!-- decision
-state: proposed
+state: accepted
 date: 2026-11-06
 replaces: none
-code: runtime/src/theme.c, runtime/src/theme.h, runtime/src/gamemenu.c, runtime/src/hud_style.c, runtime/src/settings.c
+code: runtime/src/theme.c, runtime/src/theme.h, runtime/src/gamemenu.c, runtime/src/hud_style.c, runtime/src/settings.c, launcher/src-tauri/src/ready.rs
 -->
 
-Status: **proposed** (2026-11-06). The owner asked for themes for the in-game overlay and the HUD, switched live
+Status: **accepted** (2026-11-07: the owner OK'd it, "push all", and asked for the sync below). The owner asked for themes for the in-game overlay and the HUD, switched live
 from the overlay's Settings. The question of reading the files at run time or building them in was put to the
-owner, who went to bed and left the job to finish; run time was picked as below. Waiting for the owner's OK.
+owner, who went to bed and left the job to finish; run time was picked as below.
 
 ## Context
 
@@ -31,10 +31,13 @@ that folder. The overlay and the HUD had their colours fixed in the code (the ov
   built-in colour.
 - **Where the folder is:** `YW4_THEMES_DIR`, else `themes` next to yw4.exe, else the repo's
   `launcher/ui/themes` (a build in `work/build`). An installed game is in `<install>\work\build`, so the launcher
-  should pass `YW4_THEMES_DIR` (its own themes folder) when it starts the game: asked of the launcher session.
+  passes `YW4_THEMES_DIR` (its own themes folder) when it starts the game.
 - **The choice:** the overlay's Settings > Look > Theme (Left / Right step through them, as any row; Preview shows
-  them on the bar), saved as `YW4_THEME=<id>` in settings.ini. The game keeps its own choice: the launcher's and the
-  game's can differ.
+  them on the bar), saved as `YW4_THEME=<id>` in settings.ini.
+- **Synced with the launcher** (owner, 2026-11-07): on Play the launcher passes its theme (`YW4_THEME`, which wins
+  over settings.ini) and its themes folder (`YW4_THEMES_DIR`); when the game closes, the launcher reads the game's
+  settings.ini line back and takes that theme (`launcher/src-tauri/src/ready.rs` game_theme, the `game-theme`
+  event). A theme picked in either place is the other's too.
 
 ## Why not build them in
 
@@ -43,5 +46,4 @@ start costs nothing measurable.
 
 ## Open
 
-- The launcher passing `YW4_THEMES_DIR` (and maybe offering "use the launcher's theme in the game").
 - The old F1 panel stays in its own colours (its pixel font and look are separate).

@@ -420,8 +420,9 @@ shows or hides the performance HUD.
 
 ![The in-game overlay: Settings with the display options; Preview: the game running under a bar with the shadow settings; Controls with a DualSense's buttons; Overlay: the detailed performance HUD with a live preview](docs/screenshots/97-overlay.jpg)
 
-**Themes:** Settings › Look › Theme gives the overlay and the performance HUD the colours of a Yo-kai, the same
-themes as the launcher's (a theme file added to the launcher's themes folder shows up in both).
+**Themes:** Settings › Look › Theme gives the overlay and the performance HUD the colours of a Yo-kai, synced with
+the launcher: the game opens in the launcher's theme, and a theme picked in the game is the launcher's too after it
+closes (a theme file added to the launcher's themes folder shows up in both).
 
 ![Overlay themes: Jibanyan, Komasan, Shmoopie and Whisper](docs/screenshots/98-overlay-themes.jpg)
 
@@ -433,7 +434,7 @@ themes as the launcher's (a theme file added to the launcher's themes folder sho
 The launcher takes your game files (NSP, XCI or extracted folders), checks them, builds the game on your PC once
 (about 10 to 15 minutes) and starts it. After that it opens on **Play**, with what's new, your screenshots, mods,
 DLC, saves and logs. Its settings choose what happens when the game starts, where saves are kept, shortcuts and
-updates. It has the same themes as the in-game overlay.
+updates. Its theme is synced with the in-game overlay's.
 
 ![The launcher: the first start with the welcome popup; your game files; Play with what's new; Settings](docs/screenshots/99-launcher.jpg)
 
