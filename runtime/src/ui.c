@@ -214,6 +214,22 @@ static float text_run(const UiCanvas *c, int f, float px, float x, float base, c
         if (prev) pen += (float)stbtt_GetCodepointKernAdvance(fi, prev, cp) * sc;
         int adv, lsb;
         stbtt_GetCodepointHMetrics(fi, cp, &adv, &lsb);
+        if (cp > 32 && !stbtt_FindGlyphIndex(fi, cp)) {
+            /* a letter the built-in fonts don't have (they hold Western letters only, third_party/fonts): a small
+             * box in its place, so typed text never turns into blank space. TODO: other scripts from the system's
+             * fonts (docs/known-issues.md). */
+            float bw = px * 0.55f;
+            if (c) {
+                float bx0 = floorf(pen + px * 0.08f), by0 = floorf(base - px * 0.68f + 0.5f), bh = px * 0.68f;
+                float t = px * 0.07f > 1 ? px * 0.07f : 1;
+                for (int j = 0; j < (int)bh; j++)
+                    for (int i = 0; i < (int)bw; i++)
+                        if (i < t || j < t || i >= (int)bw - t || j >= (int)bh - t) blend(c, (int)bx0 + i, (int)by0 + j, rgb, 0.7f);
+            }
+            pen += bw + px * 0.16f + track;
+            prev = 0;
+            continue;
+        }
         if (c && cp > 32) {
             float fx = floorf(pen);
             int sub = (int)((pen - fx) * GLYPH_SUBPIXELS + 0.5f);

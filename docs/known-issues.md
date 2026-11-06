@@ -58,6 +58,19 @@ What is known to be missing or wrong, roughly in the order it is likely to matte
 
 - **C++ exceptions are not supported**: nothing in `main` throws ([decision 0012](decisions/0012-musl-startup-tls-exceptions-libc.md)).
 
+## Overlay
+
+- **Only Western letters show in the overlay** (owner, 2026-11-07: TODO, after the bug report works). Its built-in
+  fonts hold Latin and Latin-1 only (`third_party/fonts/README.md`): English, French, Spanish, German... show;
+  Polish, Czech, Vietnamese, Cyrillic, Greek, Japanese, Chinese, Korean, Thai, Arabic and emoji show as small boxes
+  (`runtime/src/ui.c` `text_run`). Plan: draw missing letters with Windows' own fonts (Segoe UI, Yu Gothic, Microsoft
+  YaHei, Malgun Gothic), loaded when first needed; right-to-left scripts (Arabic, Hebrew) would still not join or
+  run right to left (stb_truetype has no shaping), and Linux needs its own font lookup.
+- **IME word-choice popup position** (TODO, with the above): typing Japanese or Chinese uses the system's popup, which
+  isn't yet told where the text box is (`SDL_SetTextInputArea`), so it may show in a corner.
+- **The game's name entry still answers a fixed name** ("Nate", `runtime/src/swkbd.c`): typing it is planned with
+  the overlay's text fields (`runtime/src/textin.h`).
+
 ## Tools
 
 - `tests/test_kernel.py::test_threads` fails now and then with "cannot reserve the heap and thread-local
