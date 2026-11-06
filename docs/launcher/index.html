@@ -63,7 +63,7 @@ kbd { font: 700 .82em/1 var(--display); background: var(--lilac-1); border: 1px 
 .btn:hover { color: var(--violet-deep); background: oklch(85% 0.12 85); }
 .btn.ghost { background: transparent; color: var(--gold); }
 .btn.ghost:hover { color: var(--gold); background: oklch(80% 0.12 85 / .12); }
-.shot { background: var(--white); border-radius: var(--r); padding: 8px; box-shadow: 0 18px 40px oklch(15% 0.08 295 / .5); margin: 0; }
+.shot { background: var(--gold); border-radius: var(--r); padding: 8px; box-shadow: 0 18px 40px oklch(15% 0.08 295 / .5); margin: 0; }
 .shot img { display: block; width: 100%; height: auto; border-radius: 8px; }
 .shot figcaption { color: var(--ink-2); font-size: .8rem; margin: 8px 6px 2px; }
 
@@ -136,15 +136,14 @@ footer a { color: var(--gold); }
         <div class="stat"><b>11 themes</b><span>synced with the in-game overlay</span></div>
       </div>
       <div class="links">
-        <a class="btn" href="#first-start">See how it works</a>
         <a class="btn ghost" href="../">Home</a>
         <a class="btn ghost" href="../compare/">Comparisons</a>
         <a class="btn ghost" href="https://github.com/ILFforever/YW4Recomp">Project on GitHub</a>
       </div>
     </div>
     <figure class="shot">
-      <img src="img/play.jpg" alt="The launcher's Play screen: the game's icon, Play, play time, what's new in this version, screenshots, mods and DLC">
-      <figcaption>Play: after the first build the launcher opens here</figcaption>
+      <img src="img/home.jpg" alt="The launcher's Home screen: the slideshow, a Welcome card with Get started, and what you need before you start">
+      <figcaption>Home: the first screen when you open the launcher</figcaption>
     </figure>
   </div>
 </header>
@@ -239,6 +238,18 @@ footer a { color: var(--gold); }
             <dt>Record</dt><dd><a href="https://github.com/ILFforever/YW4Recomp/blob/master/docs/decisions/0050-launcher-and-install-layout.md">decision 0050</a></dd>
           </dl></div>
         </div>
+        <figure class="whole">
+          <img src="img/check.jpg" loading="lazy" alt="The Check screen, all set: base game, update, keys, DLC and version each with a green tick, and Continue">
+          <figcaption>Check: all set, with the files found</figcaption>
+        </figure>
+        <figure class="whole">
+          <img src="img/options.jpg" loading="lazy" alt="The Options screen: the install folder, saves in the game folder or AppData, AMD FSR, NVIDIA DLSS, shortcuts, and the download and disk size">
+          <figcaption>Options: where the game goes, and the downloads</figcaption>
+        </figure>
+        <figure class="whole">
+          <img src="img/build.jpg" loading="lazy" alt="The Build screen: Building your game, 0% with a progress bar, Show details and Cancel">
+          <figcaption>Build: the progress bar, once, about 10 to 15 minutes</figcaption>
+        </figure>
       </div>
     </article>
 
