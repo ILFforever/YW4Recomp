@@ -10,7 +10,10 @@
 #include <stdio.h>
 #include <stdlib.h>
 
+#include "gamemenu.h"
 #include "host.h"
+#include "textin.h"
+#include "window.h"
 #include "yw4load.h"
 
 #define DEFAULT_NAME "Nate"
@@ -72,7 +75,33 @@ void yw4_swkbd_ShowKeyboard(CPUState *c) {
                              *(const uint16_t *)(a + 0x28 + 2 * i) == 'r' && *(const uint16_t *)(a + 0x2a + 2 * i) == 'l'))
             girl = 1;
     }
-    if (!name || !*name) name = initial[0] ? initial : girl ? DEFAULT_GIRL : DEFAULT_NAME;
+    const char *fallback = initial[0] ? initial : girl ? DEFAULT_GIRL : DEFAULT_NAME;
+    /* The player types it (board N1): the overlay's popup over the game's last frame, which this thread shows again
+     * while it waits (the game waits here too, as on the Switch). Not in replays (their clock counts frames, which
+     * stop here) or with YW4_PLAYER_NAME: those answer at once. */
+    static char typed[TEXTIN_MAX];
+    const char *replay = getenv("YW4_REPLAY"), *force = getenv("YW4_NAME_PROMPT");  /* =1: the popup in replays too */
+    if ((!name || !*name) && (!(replay && *replay) || (force && *force == '1')) && window_repaint(1) == 0) {
+        char title[200];
+        int n = 0;
+        for (int i = 0; i < 64 && n < (int)sizeof title - 4; i++) {  /* the game's question, UTF-16 to UTF-8 */
+            uint16_t ch = *(const uint16_t *)(a + 0x24 + 2 * i);
+            if (!ch) break;
+            if (ch < 0x80) title[n++] = (char)ch;
+            else if (ch < 0x800) title[n++] = (char)(0xC0 | ch >> 6), title[n++] = (char)(0x80 | (ch & 63));
+            else title[n++] = (char)(0xE0 | ch >> 12), title[n++] = (char)(0x80 | (ch >> 6 & 63)),
+                 title[n++] = (char)(0x80 | (ch & 63));
+        }
+        title[n] = 0;
+        gamemenu_prompt_begin(title, max, fallback);
+        while (!gamemenu_prompt_take(typed, sizeof typed)) {
+            window_repaint(0);
+            host_sleep_ns(16 * 1000000LL);
+        }
+        window_repaint(0);  /* the popup gone before the game goes on */
+        name = typed;
+    }
+    if (!name || !*name) name = fallback;
     /* At most `max` characters (0: no limit), and what the game asked for: UTF-8 when the config says so (the game
      * does, 2026-11-07: before, a UTF-16 answer made the name its first letter, "N"), else UTF-16. */
     uint64_t chars = 0, n = 0;

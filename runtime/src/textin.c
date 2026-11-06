@@ -61,6 +61,13 @@ void textin_type(const char *s) {
         n = room;
         while (n > 0 && cont((unsigned char)add[n])) n--;
     }
+    if (f->max_chars > 0) {  /* a field with a letter limit (a name: 8): what goes past it is left out */
+        int have = 0, k = 0;
+        for (int i = 0; i < f->len; i++) have += !cont((unsigned char)f->text[i]);
+        for (int left = f->max_chars - have; k < n; k++)
+            if (!cont((unsigned char)add[k]) && left-- <= 0) break;
+        n = k;
+    }
     if (n > 0) {
         memmove(f->text + f->cursor + n, f->text + f->cursor, (size_t)(f->len - f->cursor + 1));
         memcpy(f->text + f->cursor, add, (size_t)n);

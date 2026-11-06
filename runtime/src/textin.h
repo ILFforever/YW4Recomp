@@ -17,6 +17,7 @@ typedef struct {
     char text[TEXTIN_MAX];
     int len;     /* bytes */
     int cursor;  /* a byte offset at the start of a character */
+    int max_chars;  /* at most this many characters (0: no limit beyond TEXTIN_MAX) */
 } TextField;
 
 enum { TI_LEFT, TI_RIGHT, TI_HOME, TI_END, TI_BACK, TI_DEL, TI_DONE, TI_CLEAR };

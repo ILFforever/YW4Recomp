@@ -10,6 +10,7 @@
 #ifndef YW4_GAMEMENU_H
 #define YW4_GAMEMENU_H
 
+#include <stddef.h>
 #include <stdint.h>
 
 #include "ui.h"
@@ -29,6 +30,14 @@ enum { GM_UP, GM_DOWN, GM_LEFT, GM_RIGHT, GM_ACCEPT, GM_BACK, GM_LEAVE, GM_PREV,
  * the live picture. */
 int gamemenu_previewing(void);
 void gamemenu_preview_rect(float r[4]);
+
+/* Name entry (2026-11-07, canvas board N1): the game's software keyboard (swkbd.c) asks for a name and waits; the
+ * overlay shows only a popup with the game's question (title), a field of at most max_chars letters and OK. Typing
+ * starts at once; Enter, OK or a pad's A finishes it (empty: fallback). gamemenu_prompt_take: 1 and the name once
+ * it is finished (the overlay is closed again then). While it shows, gamemenu_open() is 1. */
+void gamemenu_prompt_begin(const char *title, int max_chars, const char *fallback);
+int gamemenu_prompt_take(char *out, size_t n);
+int gamemenu_prompting(void);
 
 int gamemenu_open(void);       /* the overlay is open (its panel shows, or a page it opened) */
 int gamemenu_selected(void);   /* GM_* */

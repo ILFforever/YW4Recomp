@@ -68,8 +68,8 @@ What is known to be missing or wrong, roughly in the order it is likely to matte
   run right to left (stb_truetype has no shaping), and Linux needs its own font lookup.
 - **IME word-choice popup position** (TODO, with the above): typing Japanese or Chinese uses the system's popup, which
   isn't yet told where the text box is (`SDL_SetTextInputArea`), so it may show in a corner.
-- **The game's name entry still answers a fixed name** ("Nate", `runtime/src/swkbd.c`): typing it is planned with
-  the overlay's text fields (`runtime/src/textin.h`).
+- **The name popup doesn't run the game's own name check** (`runtime/src/swkbd.c`): the game passes a text-check
+  callback (to refuse some names); our popup only keeps the game's 8-letter limit.
 
 ## Tools
 

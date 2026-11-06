@@ -27,6 +27,46 @@ static int preview, preview_hidden;  /* Preview: the game runs under the bar; th
 static float pv_rect[4];             /* the part of the overlay the window shows while previewing (design units) */
 static int bug_page, brow;           /* Report a bug: its page and chosen row (below, with the rest of it) */
 
+/* name entry (gamemenu.h): the popup's state; the game's thread waits in swkbd.c meanwhile */
+static int prompting, prompt_finished;
+static TextField prompt_text;
+static char prompt_title[256], prompt_fallback[64], prompt_answer[TEXTIN_MAX];
+static void changed(void);
+
+int gamemenu_prompting(void) { return __atomic_load_n(&prompting, __ATOMIC_ACQUIRE); }
+
+void gamemenu_prompt_begin(const char *title, int max_chars, const char *fallback) {
+    snprintf(prompt_title, sizeof prompt_title, "%s", title && *title ? title : "Enter a name");
+    snprintf(prompt_fallback, sizeof prompt_fallback, "%s", fallback ? fallback : "");
+    textin_clear(&prompt_text);
+    prompt_text.max_chars = max_chars > 0 ? max_chars : 0;
+    __atomic_store_n(&prompt_finished, 0, __ATOMIC_RELEASE);
+    __atomic_store_n(&prompting, 1, __ATOMIC_RELEASE);
+    __atomic_store_n(&open_, 1, __ATOMIC_RELEASE);
+    textin_focus(&prompt_text);  /* typing starts at once */
+    changed();
+    fprintf(stderr, "yw4: overlay: name entry \"%s\" (at most %d letters)\n", prompt_title, max_chars);
+}
+
+static void prompt_finish(void) {
+    if (!gamemenu_prompting()) return;
+    textin_read(&prompt_text, prompt_answer, sizeof prompt_answer, NULL);
+    if (!prompt_answer[0]) snprintf(prompt_answer, sizeof prompt_answer, "%s", prompt_fallback);
+    textin_focus(NULL);
+    __atomic_store_n(&prompting, 0, __ATOMIC_RELEASE);
+    __atomic_store_n(&open_, 0, __ATOMIC_RELEASE);
+    __atomic_store_n(&prompt_finished, 1, __ATOMIC_RELEASE);
+    changed();
+}
+
+int gamemenu_prompt_take(char *out, size_t n) {
+    /* Enter, Escape or Tab end the typing (window.c): that is OK here, as is the pad's A or the OK button */
+    if (gamemenu_prompting() && !textin_has(&prompt_text)) prompt_finish();
+    if (!__atomic_exchange_n(&prompt_finished, 0, __ATOMIC_ACQ_REL)) return 0;
+    snprintf(out, n, "%s", prompt_answer);
+    return 1;
+}
+
 int gamemenu_open(void) { return __atomic_load_n(&open_, __ATOMIC_ACQUIRE); }
 int gamemenu_previewing(void) { return __atomic_load_n(&preview, __ATOMIC_ACQUIRE); }
 void gamemenu_preview_rect(float r[4]) { memcpy(r, pv_rect, sizeof pv_rect); }
@@ -55,6 +95,7 @@ static void close_and_resume(void) {
 }
 
 void gamemenu_toggle(void) {
+    if (gamemenu_prompting()) return;  /* the name popup stays until it is answered */
     if (gamemenu_open()) {
         close_and_resume();
         return;
@@ -328,6 +369,10 @@ static void bug_page_action(int a) {
 void gamemenu_action(int a) {
     if (!gamemenu_open() || settings_open()) return;
     changed();
+    if (gamemenu_prompting()) {  /* the name popup: A / Enter is OK (typing has ended), the rest nothing */
+        if (a == GM_ACCEPT) prompt_finish();
+        return;
+    }
     hover_kind = -1;  /* the keys or the pad took over: no hover look until the mouse moves again */
     if (confirm) {
         if (a == GM_LEFT) choice = 0;
@@ -370,7 +415,8 @@ void gamemenu_refresh(void) { changed(); }
 
 enum { HIT_SIDE, HIT_SECTION, HIT_ROW, HIT_ROW_PREV, HIT_ROW_NEXT, HIT_BIND, HIT_MODE, HIT_CORNER, HIT_CORNER_BOX,
        HIT_PART, HIT_SLIDER, HIT_POPUP, HIT_HINT, HIT_BIND_STEP, HIT_PREVIEW,
-       HIT_BUG_KIND, HIT_BUG_TEXT, HIT_BUG_OFTEN, HIT_BUG_NEXT, HIT_BUG_TICK, HIT_BUG_BTN, HIT_BUG_DONE };
+       HIT_BUG_KIND, HIT_BUG_TEXT, HIT_BUG_OFTEN, HIT_BUG_NEXT, HIT_BUG_TICK, HIT_BUG_BTN, HIT_BUG_DONE,
+       HIT_PROMPT_FIELD, HIT_PROMPT_OK };
 #define HINT_CLOSE (-1)  /* a key hint's action: close the overlay */
 typedef struct {
     float x, y, w, h;
@@ -398,12 +444,17 @@ static int hit_find(float x, float y, Hit *out) {
 
 void gamemenu_mouse(float x, float y, int button) {
     if (!gamemenu_open() || settings_open() || bindings_capturing()) return;
+    Hit h;
+    int found = hit_find(x, y, &h);
+    if (gamemenu_prompting()) {  /* the name popup: its field takes the typing again, OK finishes */
+        if (button == 1 && found && h.kind == HIT_PROMPT_FIELD) textin_focus(&prompt_text), changed();
+        if (button == 1 && found && h.kind == HIT_PROMPT_OK) prompt_finish();
+        return;
+    }
     if (button == 3) {  /* the right button: back, as Escape */
         gamemenu_action(GM_BACK);
         return;
     }
-    Hit h;
-    int found = hit_find(x, y, &h);
     if (button == 0 || button == 4) {  /* what is under the mouse now: its hover look */
         int k = found ? h.kind : -1, ha = found ? h.a : 0, hb = found ? h.b : 0;
         if (k != hover_kind || ha != hover_a || hb != hover_b) hover_kind = k, hover_a = ha, hover_b = hb, changed();
@@ -1381,6 +1432,61 @@ void gamemenu_draw(const UiCanvas *c, const GameMenuInfo *in) {
             toast("Couldn't save the report");
         }
         changed();
+    }
+    if (gamemenu_prompting()) {  /* name entry (board N1): only the popup, over the game's waiting picture */
+        ui_rect(c, 0, 0, W, H, POP_BACKDROP, 0.45f);
+        float pw = 650, bar = 18 + 22 * 1.3f + 16, fh = 72, llh = 16 * 1.45f;
+        float body = 24 + llh + 8 + fh + 12 + llh + 22, tray = 16 + 52 + 16, ph = bar + 3 + body + tray;
+        float px = (W - pw) / 2, py = (H - 56 - ph) / 2;
+        ui_shadow(c, px, py + 14, pw, ph, 16, 40, POP_SHADOW, 0.45f);
+        ui_box_alpha(c, px - 1, py - 1, pw + 2, ph + 2, 17, POP_BORDER, 0.5f);
+        ui_box(c, px, py, pw, ph, 16, POP_WHITE, 0, 0);
+        ui_box(c, px, py, pw, bar + 16, 16, POP_DEEP, 0, 0);
+        ui_rect(c, px, py + bar, pw, 3, POP_GOLD, 1);
+        float ty = py + ph - tray;
+        ui_box(c, px, ty - 16, pw, tray + 16, 16, POP_LILAC, 0, 0);
+        ui_rect(c, px, py + bar + 3, pw, ty - (py + bar + 3), POP_WHITE, 1);
+        ui_rect(c, px, ty, pw, 1, POP_LINE, 1);
+        ui_text(c, UI_ROUNDED_800, 22, px + 28, py + 18, 22 * 1.3f, prompt_title, POP_WHITE);
+        float bx = px + 28, bw = pw - 56, y = py + bar + 3 + 24;
+        ui_text(c, UI_GOTHIC_700, 16, bx, y, llh, "Name", MUTED);
+        y += llh + 8;
+        int typing = textin_has(&prompt_text);
+        char text[TEXTIN_MAX];
+        int cur, chars = 0;
+        textin_read(&prompt_text, text, sizeof text, &cur);
+        for (const char *p = text; *p; p++) chars += ((unsigned char)*p & 0xC0) != 0x80;
+        ui_box(c, bx, y, bw, fh, 14, WHITE, typing ? 3 : 2, typing ? PLUM : LINE);
+        hit_add(bx, y, bw, fh, HIT_PROMPT_FIELD, 0, 0);
+        char count[24] = "";
+        if (prompt_text.max_chars > 0) snprintf(count, sizeof count, "%d / %d", chars, prompt_text.max_chars);
+        float cw = ui_text_w(UI_GOTHIC_700, 17, count);
+        ui_text_in(c, UI_GOTHIC_700, 17, bx + bw - 20 - cw, y, cw, fh, 2, count, MUTED);
+        if (!text[0]) ui_text_in(c, UI_ROUNDED_800, 32, bx + 20 + 6, y, 0, fh, 0, prompt_fallback, LILAC);  /* the default */
+        ui_text_edit(c, UI_ROUNDED_800, 32, bx + 20, y + (fh - 32 * 1.3f) / 2, bw - 40 - cw - 16, 32 * 1.3f, 1, text,
+                     typing ? cur : -1, INK, PLUM);
+        y += fh + 12;
+        char help[128], limit[32] = "";
+        if (prompt_text.max_chars > 0) snprintf(limit, sizeof limit, " Up to %d letters.", prompt_text.max_chars);
+        snprintf(help, sizeof help, "Type with %s keyboard.%s%s%s%s", in->pad ? "a" : "your", limit,
+                 prompt_fallback[0] ? " Leave it empty for " : "", prompt_fallback, prompt_fallback[0] ? "." : "");
+        ui_text(c, UI_GOTHIC_500, 16, bx, y, llh, help, MUTED);
+        float okw = ui_text_w(UI_ROUNDED_800, 18, "OK") + 2 * 32, okx = px + pw - 16 - okw, oky = ty + 16;
+        if (!typing) ui_box(c, okx - 4, oky - 4, okw + 8, 60, 15, RING, 0, 0);
+        ui_box(c, okx, oky, okw, 52, 12, GOLD, 0, 0);
+        ui_text_in(c, UI_ROUNDED_800, 18, okx, oky, okw, 52, 1, "OK", ON_GOLD);
+        hit_add(okx, oky, okw, 52, HIT_PROMPT_OK, 0, 0);
+        ui_rect(c, 0, H - 56, W, 56, NIGHT, 1);  /* the key hints, the whole width */
+        float hx = 48;
+        if (in->pad) {
+            hint(c, hx, H - 56, in->pad == 2 ? "Cross" : "A", "OK");
+        } else {
+            hx += hint(c, hx, H - 56, "Enter", "OK") + 28;
+            hx += hint(c, hx, H - 56, "Backspace", "Delete") + 28;
+            hint(c, hx, H - 56, "Ctrl V", "Paste");
+        }
+        __atomic_store_n(&hit_front, hk, __ATOMIC_RELEASE);
+        return;
     }
     if (preview) {  /* only the bar, over the running game */
         draw_preview(c, in);

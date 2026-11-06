@@ -1569,9 +1569,36 @@ void window_present_rgba(const uint8_t *rgba, uint32_t w, uint32_t h, uint64_t n
     host_unlock(&present_lock);
 }
 
+/* the game's last frame, for window_repaint (present_lock) */
+static VkImage last_image;
+static VkFormat last_format;
+static VkRect2D last_rect;
+static uint64_t last_n;
+
+/* While the game waits on the player (its software keyboard, swkbd.c): its last frame shown again with the overlay
+ * over it, from the waiting thread. The first call keeps that frame as the overlay's background, as a pause does.
+ * -1 when there is nothing to show (no window or no frame yet). */
+int window_repaint(int keep) {
+    if (!have_vulkan) return -1;
+    host_lock(&present_lock);
+    if (!last_image) {
+        host_unlock(&present_lock);
+        return -1;
+    }
+    if (keep) pause_keep_request = 1, kept.valid = 0, ov.uploaded = 0;
+    if (swap_free != free_running() || swap_dlssg != dlssg_chosen()) swapchain_stale = 1;
+    if (!(swapchain_stale && create_swapchain(last_n)) && !frame_resources(last_rect.extent.width, last_rect.extent.height))
+        present_image(last_image, VK_IMAGE_LAYOUT_GENERAL, last_rect, 0);
+    host_unlock(&present_lock);
+    return 0;
+}
+
 void window_present_image(VkImage image, VkFormat format, VkRect2D rect, uint64_t n) {
     uint32_t w = rect.extent.width, h = rect.extent.height;
     if (!have_vulkan || !w || !h) return;
+    host_lock(&present_lock);
+    last_image = image, last_format = format, last_rect = rect, last_n = n;
+    host_unlock(&present_lock);
     int shot = screenshot_wanted(n);
     if (shot && getenv("YW4_DT_LOG")) {  /* testing frame pacing: the game's time step with each screenshot */
         static int64_t last;

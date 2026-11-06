@@ -42,6 +42,9 @@ void window_mouse_motion(float *dx, float *dy);
 
 /* The same as pressing F12 (a screenshot of the next frame), for replays. */
 void window_request_screenshot(void);
+/* While the game waits on the player (the name entry, swkbd.c): its last frame again with the overlay over it;
+ * keep: first call, the frame becomes the overlay's background. -1 when nothing can be shown. */
+int window_repaint(int keep);
 /* The performance HUD (F3, the in-game overlay's Performance page): on or off (back to its last mode); its mode
  * (0 off, 1 detailed, 2 compact), corner (0 top left, 1 top right, 2 bottom left, 3 bottom right) and parts in the
  * detailed one (hud.h HUD_PART_*); a preview of it drawn into an RGBA image (w x h), and the part drawn. */
