@@ -1,14 +1,15 @@
 /* nn::swkbd, the software keyboard, as an override of the sdk's ShowKeyboard (decision 0022).
  *
  * On the Switch ShowKeyboard launches the keyboard library applet and waits for its answer.
- * We have no applets, so the call answers at once with a fixed name: YW4_PLAYER_NAME, else "Nate" (or "Katie" when
- * the question is the girl's name). The game's name entry calls it with String = { buffer; size_t size } (size =
+ * We have no applets: the player types the name in the overlay's popup (gamemenu.h), or in replays the call
+ * answers at once: YW4_PLAYER_NAME, else the character's default name (below). The game's name entry calls it with String = { buffer; size_t size } (size =
  * GetRequiredStringBufferSize) and its KeyboardConfig asks for UTF-8 (offset 0x3bd) and at most 8 characters
  * (0x3ac); offsets from the sdk's keyboardConfig2kbdConfig, values measured 2026-11-07. Until then the answer was
  * UTF-16, which the game read as one letter: new saves named the boy "N". Typing a name: next (textin.h).
  */
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 
 #include "gamemenu.h"
 #include "host.h"
@@ -65,7 +66,21 @@ void yw4_swkbd_ShowKeyboard(CPUState *c) {
     const char *name = getenv("YW4_PLAYER_NAME");
     /* the game's starting text is a width placeholder at name entry ("<NAME_KETA_8888>", measured 2026-11-07), not a
      * name: one in <...> is left out */
-    if (initial[0] == '<') initial[0] = 0;
+    char token[96];
+    snprintf(token, sizeof token, "%s", initial);  /* as the game gave it, for the log */
+    if (initial[0] == '<') {
+        /* The game's starting text is a name's token (the one its texts use for that character's name), e.g.
+         * "<NAME_KETA_8888>" for the boy: each main character's default name in the English patch (system_text,
+         * 2026-11-07); "My name is..." asks three times, so the token, not the question, tells them apart. Other
+         * tokens: no default. A Yo-kai's nickname or a My Set's name starts with real text, kept as is. */
+        static const struct { const char *token, *name; } names[] = {
+            {"<NAME_KETA", "Nate"},       {"<NAME_FUMI", "Katie"},     {"<NAME_NATSUME", "Natsume"},
+            {"<NAME_TOUMA", "Touma"},     {"<NAME_AKINORI", "Akinori"}, {"<NAME_SHIN", "Shin"}};
+        const char *known = NULL;
+        for (size_t i = 0; i < sizeof names / sizeof *names; i++)
+            if (!strncmp(initial, names[i].token, strlen(names[i].token))) known = names[i].name;
+        snprintf(initial, sizeof initial, "%s", known ? known : "");
+    }
     /* a new game asks twice: the boy's name, then "the girl he loves" (English header; 女 in Japanese) */
     int girl = 0;
     for (int i = 0; i < 64; i++) {
@@ -127,6 +142,6 @@ void yw4_swkbd_ShowKeyboard(CPUState *c) {
         if (buf && room) buf[n] = 0;
     }
     fprintf(stderr, "yw4: swkbd: answered with \"%s\" (%s, %llu characters, buffer %llu bytes; the game's text \"%s\")\n",
-            name, utf8 ? "UTF-8" : "UTF-16", (unsigned long long)chars, (unsigned long long)size, initial);
+            name, utf8 ? "UTF-8" : "UTF-16", (unsigned long long)chars, (unsigned long long)size, token);
     c->x[0] = 0;
 }
