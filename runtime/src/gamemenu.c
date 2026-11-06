@@ -8,6 +8,7 @@
 #include "gamemenu.h"
 #include "bindings.h"
 #include "settings.h"
+#include "textin.h"
 #include "theme.h"
 #include "window.h"
 
@@ -17,12 +18,13 @@ static int srow;              /* the chosen row on the settings page (settings_p
 static int in_rows;           /* the settings page: 0 the sections list has the focus, 1 the chosen section's rows */
 static int prow;              /* the chosen row on the performance page: mode, corner, the four parts */
 static uint32_t changes;      /* counts every change of what shows */
-static int toast_wanted;      /* the note (Report a bug: coming soon) starts at the next look */
+static int toast_wanted;      /* the note (toast_msg, top right) starts at the next look */
 static uint64_t toast_until;  /* ms */
 static int hover_kind = -1, hover_a, hover_b;  /* what the mouse is over (HIT_*, -1 nothing), for the hover looks */
 static int ctrl_first, ctrl_rows, ctrl_visible;  /* the Controls table: its first row shown, rows, rows that fit */
 static int preview, preview_hidden;  /* Preview: the game runs under the bar; the bar hidden (only its chip shows) */
 static float pv_rect[4];             /* the part of the overlay the window shows while previewing (design units) */
+static int bug_page, brow;           /* Report a bug: its page and chosen row (below, with the rest of it) */
 
 int gamemenu_open(void) { return __atomic_load_n(&open_, __ATOMIC_ACQUIRE); }
 int gamemenu_previewing(void) { return __atomic_load_n(&preview, __ATOMIC_ACQUIRE); }
@@ -35,12 +37,14 @@ static void changed(void) { __atomic_add_fetch(&changes, 1, __ATOMIC_RELEASE); }
 uint32_t gamemenu_look(uint64_t now) {
     if (__atomic_exchange_n(&toast_wanted, 0, __ATOMIC_ACQ_REL)) toast_until = now + 1600;
     /* also when a key capture ends by itself (five seconds) */
-    return __atomic_load_n(&changes, __ATOMIC_ACQUIRE) * 4u + (now < toast_until) + 2u * (uint32_t)bindings_capturing();
+    return (__atomic_load_n(&changes, __ATOMIC_ACQUIRE) + textin_changes()) * 4u + (now < toast_until) +
+           2u * (uint32_t)bindings_capturing();
 }
 
 static void close_and_resume(void) {
     if (settings_open()) settings_toggle();
     bindings_cancel();
+    textin_focus(NULL);  /* no typing into a closed overlay (what was typed stays for next time) */
     confirm = 0, focus = 0;
     __atomic_store_n(&preview, 0, __ATOMIC_RELEASE);  /* the overlay button in the preview: the game runs on */
     __atomic_store_n(&open_, 0, __ATOMIC_RELEASE);
@@ -67,7 +71,7 @@ static void accept(void) {
     case GM_SETTINGS: focus = 1, in_rows = 0; break;  /* into its page: its sections first */
     case GM_CONTROLS: focus = 1; break;
     case GM_PERF: focus = 1; break;
-    case GM_BUG: __atomic_store_n(&toast_wanted, 1, __ATOMIC_RELEASE); break;  /* not built yet: says so */
+    case GM_BUG: focus = 1, bug_page = 0, brow = 0; break;  /* the report's first page (below) */
     case GM_EXIT: confirm = 1, choice = 0; break;  /* "keep playing" chosen first */
     }
 }
@@ -212,6 +216,79 @@ static void perf_page_action(int a) {
     }
 }
 
+/* ---- Report a bug (owner, 2026-11-07, canvas https://claude.ai/artifact/FiVFwHh4mEGWk3dCcYcZ85 board D): two short
+ * pages the player fills in. Page 1: what's wrong (chips), what happened (typed, textin.h), how often (chips), Next.
+ * Page 2: the paused picture, what to attach (ticks), Back, Save only, Send to GitHub. */
+static const char *const bug_kinds[] = {"Graphics", "Slow or stutters", "Sound", "Controls", "Game got stuck", "Other"};
+static const char *const bug_oftens[] = {"Every time", "Sometimes", "Once"};
+enum { BUG_KINDS = 6, BUG_OFTENS = 3, BUG_ROWS = 4 };
+static int bug_page;            /* 0 the first page, 1 the second */
+static int brow;                /* the chosen row: page 1 kind, text, how often, Next; page 2 three ticks, the buttons */
+static int bug_kind = -1, bug_often = -1;  /* -1: none picked */
+static int bug_btn = 2;         /* page 2's buttons: 0 Back, 1 Save only, 2 Send to GitHub */
+static unsigned bug_attach = 7; /* bits: 1 the screenshot, 2 the log and settings, 4 the save */
+static TextField bug_text;
+static const char *toast_msg = "";
+
+static void toast(const char *msg) {
+    toast_msg = msg;
+    __atomic_store_n(&toast_wanted, 1, __ATOMIC_RELEASE);
+}
+
+static void bug_finish(int send) {  /* the zip and GitHub come next (steps 4 and 5): says so for now */
+    (void)send;
+    toast("Saving reports comes next");
+}
+
+static void bug_page_action(int a) {
+    if (textin_has(&bug_text)) {  /* typing: a pad's A or B ends it (the keyboard's keys are window.c's) */
+        if (a == GM_BACK || a == GM_LEAVE || a == GM_ACCEPT) textin_edit(TI_DONE);
+        return;
+    }
+    if (a == GM_PREV || a == GM_NEXT || a == GM_ALT) return;
+    if (a == GM_UP) {
+        brow = brow > 0 ? brow - 1 : 0;
+        return;
+    }
+    if (a == GM_DOWN) {
+        brow = brow < BUG_ROWS - 1 ? brow + 1 : BUG_ROWS - 1;
+        return;
+    }
+    int d = a == GM_LEFT ? -1 : a == GM_RIGHT ? 1 : 0;
+    if (bug_page == 0) {
+        if (a == GM_BACK || a == GM_LEAVE) {
+            focus = 0, sel = GM_RESUME;
+        } else if (brow == 0 && d) {
+            bug_kind = bug_kind < 0 ? 0 : (bug_kind + d + BUG_KINDS) % BUG_KINDS;
+        } else if (brow == 0 && a == GM_ACCEPT) {
+            if (bug_kind < 0) bug_kind = 0;
+            brow = 1;
+        } else if (brow == 1 && a == GM_ACCEPT) {
+            textin_focus(&bug_text);
+        } else if (brow == 1 && a == GM_CLEAR) {
+            textin_clear(&bug_text);
+        } else if (brow == 2 && d) {
+            bug_often = bug_often < 0 ? 0 : (bug_often + d + BUG_OFTENS) % BUG_OFTENS;
+        } else if (brow == 2 && a == GM_ACCEPT) {
+            if (bug_often < 0) bug_often = 0;
+            brow = 3;
+        } else if (brow == 3 && a == GM_ACCEPT) {
+            bug_page = 1, brow = 0;
+        }
+        return;
+    }
+    if (a == GM_BACK || a == GM_LEAVE) {
+        bug_page = 0, brow = 3;
+    } else if (brow < 3 && (a == GM_ACCEPT || d)) {
+        bug_attach ^= 1u << brow;
+    } else if (brow == 3 && d) {
+        bug_btn = bug_btn + d < 0 ? 0 : bug_btn + d > 2 ? 2 : bug_btn + d;
+    } else if (brow == 3 && a == GM_ACCEPT) {
+        if (bug_btn == 0) bug_page = 0, brow = 3;
+        else bug_finish(bug_btn == 2);
+    }
+}
+
 void gamemenu_action(int a) {
     if (!gamemenu_open() || settings_open()) return;
     changed();
@@ -238,12 +315,14 @@ void gamemenu_action(int a) {
     if (focus) {
         if (sel == GM_CONTROLS) controls_page_action(a);
         else if (sel == GM_PERF) perf_page_action(a);
+        else if (sel == GM_BUG) bug_page_action(a);
         else settings_page_action(a);
         return;
     }
     if (a == GM_UP) sel = sel > 0 ? sel - 1 : 0;
     else if (a == GM_DOWN) sel = sel < GM_ITEMS - 1 ? sel + 1 : GM_ITEMS - 1;
-    else if (a == GM_ACCEPT || (a == GM_RIGHT && (sel == GM_SETTINGS || sel == GM_CONTROLS || sel == GM_PERF)))
+    else if (a == GM_ACCEPT ||
+             (a == GM_RIGHT && (sel == GM_SETTINGS || sel == GM_CONTROLS || sel == GM_PERF || sel == GM_BUG)))
         accept();
     else if (a == GM_BACK) close_and_resume();  /* Escape, Backspace, B on the side panel: back to the game */
 }
@@ -254,7 +333,8 @@ void gamemenu_refresh(void) { changed(); }
  * thread reads: two lists, the drawing fills the one not being read, then swaps. */
 
 enum { HIT_SIDE, HIT_SECTION, HIT_ROW, HIT_ROW_PREV, HIT_ROW_NEXT, HIT_BIND, HIT_MODE, HIT_CORNER, HIT_CORNER_BOX,
-       HIT_PART, HIT_SLIDER, HIT_POPUP, HIT_HINT, HIT_BIND_STEP, HIT_PREVIEW };
+       HIT_PART, HIT_SLIDER, HIT_POPUP, HIT_HINT, HIT_BIND_STEP, HIT_PREVIEW,
+       HIT_BUG_KIND, HIT_BUG_TEXT, HIT_BUG_OFTEN, HIT_BUG_NEXT, HIT_BUG_TICK, HIT_BUG_BTN };
 #define HINT_CLOSE (-1)  /* a key hint's action: close the overlay */
 typedef struct {
     float x, y, w, h;
@@ -293,9 +373,10 @@ void gamemenu_mouse(float x, float y, int button) {
         if (k != hover_kind || ha != hover_a || hb != hover_b) hover_kind = k, hover_a = ha, hover_b = hb, changed();
     }
     if (confirm && (!found || h.kind != HIT_POPUP)) return;  /* the popup covers the rest */
+    if (button == 1 && textin_has(&bug_text) && (!found || h.kind != HIT_BUG_TEXT)) textin_edit(TI_DONE), changed();
     if (!found) return;
     int click = button == 1, drag = button == 4;  /* 4: moved with the left button held (a slider's thumb) */
-    int before = sel * 1000 + focus * 100 + srow + prow * 37 + choice * 7 + in_rows * 500;
+    int before = sel * 1000 + focus * 100 + srow + prow * 37 + choice * 7 + in_rows * 500 + brow * 11 + bug_page * 3;
     switch (h.kind) {
     case HIT_SIDE:
         /* hovering chooses on the side panel; on a page, only a click goes to another item */
@@ -348,8 +429,32 @@ void gamemenu_mouse(float x, float y, int button) {
         focus = 1, bindings_select(h.a, -1);
         if (click) bindings_action(h.b < 0 ? SETTINGS_LEFT : SETTINGS_RIGHT);
         break;
+    /* the report's pages: hovering only shows where the mouse is; a click picks, ticks, types or presses */
+    case HIT_BUG_KIND:
+        if (click) focus = 1, brow = 0, bug_kind = h.a;
+        break;
+    case HIT_BUG_TEXT:
+        if (click) focus = 1, brow = 1, textin_focus(&bug_text);
+        break;
+    case HIT_BUG_OFTEN:
+        if (click) focus = 1, brow = 2, bug_often = h.a;
+        break;
+    case HIT_BUG_NEXT:
+        if (click) focus = 1, bug_page = 1, brow = 0;
+        break;
+    case HIT_BUG_TICK:
+        if (click) focus = 1, brow = h.a, bug_attach ^= 1u << h.a;
+        break;
+    case HIT_BUG_BTN:
+        if (click) {
+            focus = 1, brow = 3, bug_btn = h.a;
+            if (h.a == 0) bug_page = 0, brow = 3;
+            else bug_finish(h.a == 2);
+        }
+        break;
     }
-    if (click || sel * 1000 + focus * 100 + srow + prow * 37 + choice * 7 + in_rows * 500 != before) changed();
+    if (click || sel * 1000 + focus * 100 + srow + prow * 37 + choice * 7 + in_rows * 500 + brow * 11 + bug_page * 3 != before)
+        changed();
 }
 
 void gamemenu_wheel(int dy) {
@@ -976,6 +1081,109 @@ static void draw_perf_page(const UiCanvas *c, const GameMenuInfo *in) {
     perf_slider(c, px, py + lh + 10 + 52 + 22, 360, "Opacity", lh, 1, focus && prow == 7);
 }
 
+/* A gold button (page 2's Send, page 1's Next) or a white one; ringed where the focus is. Returns its width. */
+static float bug_button(const UiCanvas *c, float x, float y, const char *label, int gold, int ring, int measure) {
+    float w = ui_text_w(UI_ROUNDED_800, 18, label) + 2 * 28;
+    if (measure) return w;
+    if (ring) ui_box(c, x - 4, y - 4, w + 8, 64, 16, RING, 0, 0);
+    ui_box(c, x, y, w, 56, 12, gold ? GOLD : WHITE, gold ? 0 : 2, LINE);
+    ui_text_in(c, UI_ROUNDED_800, 18, x, y, w, 56, 1, label, gold ? ON_GOLD : PLUM);
+    return w;
+}
+
+/* Report a bug (canvas board D): page 1 what's wrong, what happened, how often; page 2 the picture and the ticks */
+static void draw_bug_page(const UiCanvas *c, const GameMenuInfo *in) {
+    ui_box(c, 448, 40, 1104, 764, 20, PAPER, 0, 0);
+    float th = 34 * 1.25f, x = 488, w = 1024, lh = 16 * 1.45f;
+    ui_text(c, UI_ROUNDED_800, 34, x, 76, th, "Report a bug", NIGHT);
+    ui_text_in(c, UI_ROUNDED_700, 16, x, 76, w, th, 2, bug_page ? "2 of 2" : "1 of 2", MUTED);
+    float y = 76 + th + 24;
+    int on = focus;  /* rings only while the page has the focus */
+    if (bug_page == 0) {
+        ui_text(c, UI_GOTHIC_700, 16, x, y, lh, "What's wrong?", PLUM);
+        y += lh + 10;
+        float cw = (w - (BUG_KINDS - 1) * 10) / BUG_KINDS;
+        for (int i = 0; i < BUG_KINDS; i++) {
+            float cx = x + (float)i * (cw + 10);
+            hit_add(cx, y, cw, 52, HIT_BUG_KIND, i, 0);
+            chip(c, cx, y, cw, bug_kinds[i], bug_kind == i, on && brow == 0 && (bug_kind == i || (bug_kind < 0 && i == 0)));
+        }
+        y += 52 + 26;
+        ui_text(c, UI_GOTHIC_700, 16, x, y, lh, "What happened?", PLUM);
+        ui_text(c, UI_GOTHIC_500, 15, x + ui_text_w(UI_GOTHIC_700, 16, "What happened?") + 12, y, lh,
+                "You can also write it on GitHub", MUTED);
+        y += lh + 10;
+        float bh = 200;
+        int typing = textin_has(&bug_text), ring = on && brow == 1;
+        if (ring) ui_box(c, x - 4, y - 4, w + 8, bh + 8, 16, RING, 0, 0);
+        ui_box(c, x, y, w, bh, 12, WHITE, typing ? 3 : 2, typing ? PLUM : LINE);
+        hit_add(x, y, w, bh, HIT_BUG_TEXT, 0, 0);
+        char text[TEXTIN_MAX];
+        int cur;
+        textin_read(&bug_text, text, sizeof text, &cur);
+        float tlh = 18 * 1.5f;
+        if (!text[0] && !typing) {
+            ui_text(c, UI_GOTHIC_500, 18, x + 20, y + 16, tlh, "For example: Whisper has no shadow on the school field.",
+                    MUTED);
+            if (ring)
+                ui_text(c, UI_GOTHIC_700, 15, x + 20, y + bh - 16 - lh, lh,
+                        in->pad ? "Press A to type with a keyboard" : "Press Enter to type", PLUM);
+        } else {
+            ui_text_edit(c, UI_GOTHIC_500, 18, x + 20, y + 16, w - 40, tlh, (int)((bh - 32) / tlh), text,
+                         typing ? cur : -1, INK, PLUM);
+        }
+        y += bh + 26;
+        ui_text(c, UI_GOTHIC_700, 16, x, y, lh, "How often?", PLUM);
+        y += lh + 10;
+        float ow = 200;
+        for (int i = 0; i < BUG_OFTENS; i++) {
+            float ox = x + (float)i * (ow + 10);
+            hit_add(ox, y, ow, 52, HIT_BUG_OFTEN, i, 0);
+            chip(c, ox, y, ow, bug_oftens[i], bug_often == i, on && brow == 2 && (bug_often == i || (bug_often < 0 && i == 0)));
+        }
+        float nw = bug_button(c, 0, 0, "Next", 1, 0, 1), ny = 804 - 40 - 56;
+        hit_add(x + w - nw, ny, nw, 56, HIT_BUG_NEXT, 0, 0);
+        bug_button(c, x + w - nw, ny, "Next", 1, on && brow == 3, 0);
+        return;
+    }
+    /* page 2: the paused picture on the left, the ticks on the right */
+    float pw = 480, ph = 270;
+    if (in->picture) ui_image(c, in->picture, in->picture_w, in->picture_h, x, y, pw, ph, 16);
+    else ui_box(c, x, y, pw, ph, 16, NIGHT, 0, 0);
+    if (!(bug_attach & 1)) {
+        ui_box_alpha(c, x, y, pw, ph, 16, NIGHT, 0.6f);
+        ui_text_in(c, UI_GOTHIC_700, 16, x, y, pw, ph, 1, "Not attached", SNOW);
+    }
+    float rx = x + pw + 32, rw = w - pw - 32, ry = y;
+    ui_text(c, UI_GOTHIC_700, 16, rx, ry, lh, "Attach", PLUM);
+    ry += lh + 10;
+    static const char *const ticks[3] = {"Screenshot", "Game log and settings", "My save"};
+    for (int i = 0; i < 3; i++, ry += 56 + 10) {
+        int tick = bug_attach >> i & 1, ring = on && brow == i;
+        if (ring) ui_box(c, rx - 4, ry - 4, rw + 8, 64, 16, RING, 0, 0);
+        ui_box(c, rx, ry, rw, 56, 12, WHITE, 2, LINE);
+        hit_add(rx, ry, rw, 56, HIT_BUG_TICK, i, 0);
+        ui_box(c, rx + 18, ry + 15, 26, 26, 7, tick ? PLUM : WHITE, 2, tick ? PLUM : EDGE);
+        if (tick) ui_text_in(c, UI_ROUNDED_800, 16, rx + 18, ry + 15, 26, 26, 1, "\xe2\x9c\x93", SNOW);  /* ✓ */
+        float lx = rx + 18 + 26 + 14;
+        lx += ui_text(c, UI_GOTHIC_700, 17, lx, ry, 56, ticks[i], PLUM);
+        if (i == 2) ui_text(c, UI_GOTHIC_500, 15, lx + 8, ry, 56, "so we can load the same place", MUTED);
+    }
+    y += ph + 30;
+    ui_text_wrap(c, UI_GOTHIC_500, 16, 0, x, y, w, lh, 0,
+                 "Send to GitHub saves a zip and opens GitHub with your answers filled in. Drag the zip in and post it.",
+                 MUTED);
+    float by = 804 - 40 - 56;
+    hit_add(x, by, bug_button(c, 0, 0, "Back", 0, 0, 1), 56, HIT_BUG_BTN, 0, 0);
+    bug_button(c, x, by, "Back", 0, on && brow == 3 && bug_btn == 0, 0);
+    float sw = bug_button(c, 0, 0, "Send to GitHub", 1, 0, 1), ow2 = bug_button(c, 0, 0, "Save only", 0, 0, 1);
+    float sx = x + w - sw, ox2 = sx - 12 - ow2;
+    hit_add(ox2, by, ow2, 56, HIT_BUG_BTN, 1, 0);
+    hit_add(sx, by, sw, 56, HIT_BUG_BTN, 2, 0);
+    bug_button(c, ox2, by, "Save only", 0, on && brow == 3 && bug_btn == 1, 0);
+    bug_button(c, sx, by, "Send to GitHub", 1, on && brow == 3 && bug_btn == 2, 0);
+}
+
 /* The preview's bar (canvas board B): over the running game at the bottom, the section's name and the frame rate,
  * its rows (the chosen one ringed in gold, the value between arrows), the chosen row's description in a dark box,
  * the key hints. Hidden (GM_ALT): only a chip saying how to show it again. Sets pv_rect, the part the window shows. */
@@ -1098,11 +1306,12 @@ void gamemenu_draw(const UiCanvas *c, const GameMenuInfo *in) {
         __atomic_store_n(&hit_front, hk, __ATOMIC_RELEASE);
         return;
     }
-    int page = (sel == GM_SETTINGS || sel == GM_CONTROLS || sel == GM_PERF) && !confirm;  /* these show a page */
+    int page = (sel == GM_SETTINGS || sel == GM_CONTROLS || sel == GM_PERF || sel == GM_BUG) && !confirm;  /* these show a page */
     ui_rect(c, 0, 0, W, H, SHADE, page ? 0.62f : 0.35f);  /* the tint over the game, darker behind a page */
     if (page && sel == GM_SETTINGS) draw_settings_page(c, in);
     if (page && sel == GM_CONTROLS) draw_controls_page(c, in);
     if (page && sel == GM_PERF) draw_perf_page(c, in);
+    if (page && sel == GM_BUG) draw_bug_page(c, in);
 
     /* the side panel: 400 wide with a 4 px gold edge towards the game */
     ui_rect(c, 0, 0, 400, H, PAPER, 1);
@@ -1137,7 +1346,14 @@ void gamemenu_draw(const UiCanvas *c, const GameMenuInfo *in) {
     /* the key hints along the bottom */
     ui_rect(c, 400, H - 56, W - 400, 56, NIGHT, 1);
     float hx = 448;
-    if (focus && sel == GM_CONTROLS) {  /* the controls page */
+    if (focus && sel == GM_BUG && textin_has(&bug_text)) {  /* typing in the report */
+        if (in->pad) {
+            hint(c, hx, H - 56, in->pad == 2 ? "Circle" : "B", "Done typing");
+        } else {
+            hx += hint(c, hx, H - 56, "Enter", "Done") + 28;
+            hint(c, hx, H - 56, "Ctrl V", "Paste");
+        }
+    } else if (focus && sel == GM_CONTROLS) {  /* the controls page */
         int ps = in->pad == 2;
         hx += hint(c, hx, H - 56, in->pad ? "D-pad" : "W S", "Choose") + 28;
         if (!in->pad) hx += hint(c, hx, H - 56, "A D", "Navigate") + 28;  /* across: a key, the other key, the pad */
@@ -1174,9 +1390,9 @@ void gamemenu_draw(const UiCanvas *c, const GameMenuInfo *in) {
         hint(c, hx, H - 56, "Esc", "Close overlay");
     }
 
-    /* the note after Report a bug (not built yet): top right */
+    /* a short note (toast_msg): top right */
     if (in->now < toast_until) {
-        const char *t = "Bug reports are coming soon";
+        const char *t = toast_msg;
         float tw = ui_text_w(UI_GOTHIC_700, 17, t), bw = tw + 44 + 6, bh = 17 * 1.45f + 28 + 6;
         ui_box(c, W - 48 - bw, 40, bw, bh, 14, SNOW, 3, RING);
         ui_text_in(c, UI_GOTHIC_700, 17, W - 48 - bw, 40, bw, bh, 1, t, NIGHT);

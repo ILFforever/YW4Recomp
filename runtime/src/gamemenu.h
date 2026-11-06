@@ -2,7 +2,8 @@
  * the touchpad on PlayStation pads, Share on Xbox Series, Capture on Switch Pro; Back + Start on any pad). Its
  * items: Resume; Settings, Controls and Overlay, each with its page beside the panel (the player's settings by
  * section, settings.h; the bindings as a table, bindings.h; the performance HUD's form, corner and parts, with a
- * preview); Report a bug (not built yet: a note says so; F12 takes screenshots); Exit game (with a popup to confirm). Opening it pauses the game (the game's own
+ * preview); Report a bug (two pages the player fills in: what's wrong, what happened, how often, what to attach;
+ * saving and sending come next); Exit game (with a popup to confirm). Opening it pauses the game (the game's own
  * pause, its screen hidden: pause.c), Resume or the overlay button again resumes. Its look is the design on the
  * canvas https://claude.ai/artifact/DpV5n3eHezBdAMY2aQUgPg (Main.dc.html), drawn 1:1 in the design's units by
  * gamemenu_draw (ui.h); window.c puts it over the paused picture and feeds it input. Why so: decision 0053. */
