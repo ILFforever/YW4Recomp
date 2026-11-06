@@ -52,11 +52,12 @@ static int prompt_enough(void) { return prompt_body[0] || prompt_chars() >= (pro
 void gamemenu_prompt_options(int min_chars, int cancel) { prompt_min = min_chars, prompt_cancel = cancel; }
 
 /* The on-screen keyboard (owner, 2026-11-07: "make it simple"): a letter grid in the popup while a controller is in
- * use (the hints follow the last device), as the Switch's own keyboard. D-pad moves, A types, B deletes (on an
+ * use (the hints follow the last device), as the Switch's own keyboard; QWERTY. D-pad moves, A types, B deletes (on an
  * empty field: Cancel where offered), Y capitals on or off, Done answers. The first letter is a
  * capital, the next ones small, as names are written. The mouse can press its keys too. */
 enum { OSK_COLS = 10, OSK_ROWS = 5 };
-static const char *const osk_keys[OSK_ROWS - 1] = {"ABCDEFGHIJ", "KLMNOPQRST", "UVWXYZ-.'!", "1234567890"};
+/* QWERTY (owner, 2026-11-07), the numbers on top as on a keyboard */
+static const char *const osk_keys[OSK_ROWS - 1] = {"1234567890", "QWERTYUIOP", "ASDFGHJKL'", "ZXCVBNM-.!"};
 enum { OSK_SHIFT, OSK_SPACE, OSK_DELETE, OSK_DONE };  /* the last row: its keys and the columns they cover */
 static const int osk_last[4][2] = {{0, 2}, {2, 6}, {6, 8}, {8, 10}};
 static int osk_row, osk_col, osk_caps = 1, osk_shown;
@@ -108,7 +109,7 @@ void gamemenu_prompt_begin(const char *title, int max_chars, const char *fallbac
     prompt_label = strstr(low, "password") ? "Password" : strstr(low, "code") ? "Code" : "Name";
     textin_clear(&prompt_text);
     prompt_text.max_chars = max_chars > 0 ? max_chars : 0;
-    osk_row = 0, osk_col = 0, osk_caps = 1;
+    osk_row = 1, osk_col = 0, osk_caps = 1;  /* on Q */
     __atomic_store_n(&prompt_finished, 0, __ATOMIC_RELEASE);
     __atomic_store_n(&prompting, 1, __ATOMIC_RELEASE);
     __atomic_store_n(&open_, 1, __ATOMIC_RELEASE);
