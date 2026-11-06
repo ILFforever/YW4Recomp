@@ -37,6 +37,7 @@
 #define FS_OUT_OF_RANGE 0x3EA02u       /* description 3001 */
 
 static char save_root[1024];
+const char *savefs_root(void) { return save_root; }
 
 int savefs_init(const char *dir) {
     if (strlen(dir) >= sizeof save_root - 200) return -1;

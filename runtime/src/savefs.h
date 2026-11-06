@@ -10,6 +10,8 @@
 
 /* The folder all saves go under (yw4's third argument). 0 on success. */
 int savefs_init(const char *dir);
+/* The folder the saves are in (savefs_init's): the bug report copies it. */
+const char *savefs_root(void);
 
 /* The save of (program, user): with create = 0, an IFileSystem in *out, or fs
  * ResultTargetNotFound if it doesn't exist; with create = 1, makes it (out unused). */

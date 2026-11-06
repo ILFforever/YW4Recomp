@@ -1,0 +1,53 @@
+name: Bug report
+description: Something is wrong in the game or the launcher
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting. The game's **Report a bug** button fills in the version and PC fields and saves a zip
+        (log, settings, screenshot): drag that zip into the box at the bottom.
+        Please don't attach game files (dumps, ExeFS, RomFS, keys).
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: What you saw. A screenshot or a short video helps.
+    validations:
+      required: true
+  - type: input
+    id: often
+    attributes:
+      label: How often
+      description: Every time, sometimes, or once.
+  - type: textarea
+    id: expected
+    attributes:
+      label: What you expected
+  - type: input
+    id: where
+    attributes:
+      label: Where in the game
+      description: The area, a battle, a menu, a cutscene...
+  - type: textarea
+    id: steps
+    attributes:
+      label: How to make it happen again
+      description: If you know. "It happened once" is fine too.
+  - type: input
+    id: version
+    attributes:
+      label: Version
+      description: In the overlay's corner or the launcher's Settings, like "0.7.0 (8ea483d)".
+    validations:
+      required: true
+  - type: input
+    id: pc
+    attributes:
+      label: PC
+      description: Graphics card and Windows version.
+  - type: textarea
+    id: files
+    attributes:
+      label: Report zip and other files
+      description: Drag the zip from the reports folder here.

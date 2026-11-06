@@ -7,6 +7,7 @@
 
 #include "gamemenu.h"
 #include "bindings.h"
+#include "bugreport.h"
 #include "settings.h"
 #include "textin.h"
 #include "theme.h"
@@ -235,9 +236,37 @@ static void toast(const char *msg) {
     __atomic_store_n(&toast_wanted, 1, __ATOMIC_RELEASE);
 }
 
-static void bug_finish(int send) {  /* the zip and GitHub come next (steps 4 and 5): says so for now */
-    (void)send;
-    toast("Saving reports comes next");
+/* Save only / Send: the zip is written at the next drawing (on the present's thread, which has the paused picture);
+ * then the page "Report saved" (bug_page 2) shows, with its own three buttons */
+static int bug_request;               /* 1 save, 2 save and open GitHub */
+static char bug_zip[1024];            /* the last report's zip */
+static char bug_sent_text[TEXTIN_MAX];
+static int bug_sent_kind = -1, bug_sent_often = -1;
+static int bug_done_btn;              /* the saved page: 0 Show the zip, 1 Open GitHub again, 2 Back to the game */
+static int bug_sent_github;           /* the saved page: GitHub was opened (Send), not only saved */
+
+static void bug_finish(int send) { __atomic_store_n(&bug_request, send ? 2 : 1, __ATOMIC_RELEASE); }
+
+static BugReport bug_report_of(const char *text, int kind, int often) {
+    return (BugReport){.kind = kind >= 0 ? bug_kinds[kind] : "", .often = often >= 0 ? bug_oftens[often] : "",
+                       .text = text, .attach = bug_attach};
+}
+
+static void bug_reset(void) {  /* a new report starts empty */
+    bug_page = 0, brow = 0, bug_kind = -1, bug_often = -1, bug_btn = 2, bug_attach = 7;
+    textin_clear(&bug_text);
+}
+
+static void bug_done_press(int b) {
+    if (b == 0) bugreport_show_folder(bug_zip);
+    else if (b == 1) {
+        BugReport r = bug_report_of(bug_sent_text, bug_sent_kind, bug_sent_often);
+        bugreport_open_github(&r);
+        bug_sent_github = 1;
+    } else {
+        bug_reset();
+        close_and_resume();
+    }
 }
 
 static void bug_page_action(int a) {
@@ -246,6 +275,13 @@ static void bug_page_action(int a) {
         return;
     }
     if (a == GM_PREV || a == GM_NEXT || a == GM_ALT) return;
+    if (bug_page == 2) {  /* saved: Left / Right (or Up / Down) choose a button; Back leaves, the form emptied */
+        if (a == GM_UP || a == GM_LEFT) bug_done_btn = bug_done_btn > 0 ? bug_done_btn - 1 : 0;
+        else if (a == GM_DOWN || a == GM_RIGHT) bug_done_btn = bug_done_btn < 2 ? bug_done_btn + 1 : 2;
+        else if (a == GM_ACCEPT) bug_done_press(bug_done_btn);
+        else if (a == GM_BACK || a == GM_LEAVE) bug_reset(), focus = 0, sel = GM_RESUME;
+        return;
+    }
     if (a == GM_UP) {
         brow = brow > 0 ? brow - 1 : 0;
         return;
@@ -334,7 +370,7 @@ void gamemenu_refresh(void) { changed(); }
 
 enum { HIT_SIDE, HIT_SECTION, HIT_ROW, HIT_ROW_PREV, HIT_ROW_NEXT, HIT_BIND, HIT_MODE, HIT_CORNER, HIT_CORNER_BOX,
        HIT_PART, HIT_SLIDER, HIT_POPUP, HIT_HINT, HIT_BIND_STEP, HIT_PREVIEW,
-       HIT_BUG_KIND, HIT_BUG_TEXT, HIT_BUG_OFTEN, HIT_BUG_NEXT, HIT_BUG_TICK, HIT_BUG_BTN };
+       HIT_BUG_KIND, HIT_BUG_TEXT, HIT_BUG_OFTEN, HIT_BUG_NEXT, HIT_BUG_TICK, HIT_BUG_BTN, HIT_BUG_DONE };
 #define HINT_CLOSE (-1)  /* a key hint's action: close the overlay */
 typedef struct {
     float x, y, w, h;
@@ -451,6 +487,9 @@ void gamemenu_mouse(float x, float y, int button) {
             if (h.a == 0) bug_page = 0, brow = 3;
             else bug_finish(h.a == 2);
         }
+        break;
+    case HIT_BUG_DONE:
+        if (click) focus = 1, bug_done_btn = h.a, bug_done_press(h.a);
         break;
     }
     if (click || sel * 1000 + focus * 100 + srow + prow * 37 + choice * 7 + in_rows * 500 + brow * 11 + bug_page * 3 != before)
@@ -1096,9 +1135,35 @@ static void draw_bug_page(const UiCanvas *c, const GameMenuInfo *in) {
     ui_box(c, 448, 40, 1104, 764, 20, PAPER, 0, 0);
     float th = 34 * 1.25f, x = 488, w = 1024, lh = 16 * 1.45f;
     ui_text(c, UI_ROUNDED_800, 34, x, 76, th, "Report a bug", NIGHT);
-    ui_text_in(c, UI_ROUNDED_700, 16, x, 76, w, th, 2, bug_page ? "2 of 2" : "1 of 2", MUTED);
+    if (bug_page < 2) ui_text_in(c, UI_ROUNDED_700, 16, x, 76, w, th, 2, bug_page ? "2 of 2" : "1 of 2", MUTED);
     float y = 76 + th + 24;
     int on = focus;  /* rings only while the page has the focus */
+    if (bug_page == 2) {  /* saved: where the zip is, what comes next, three buttons */
+        ui_box(c, x, y, w, 96, 14, TAGFILL, 0, 0);
+        ui_box(c, x + 24, y + 24, 48, 48, 24, PLUM, 0, 0);
+        ui_text_in(c, UI_ROUNDED_800, 26, x + 24, y + 24, 48, 48, 1, "\xe2\x9c\x93", SNOW);  /* ✓ */
+        ui_text(c, UI_ROUNDED_800, 22, x + 96, y + 16, 22 * 1.3f, "Report saved", NIGHT);
+        const char *name = strrchr(bug_zip, '\\') ? strrchr(bug_zip, '\\') + 1 : strrchr(bug_zip, '/') ? strrchr(bug_zip, '/') + 1 : bug_zip;
+        char where[400];
+        snprintf(where, sizeof where, "reports\\%s", name);
+        ui_text(c, UI_GOTHIC_500, 16, x + 96, y + 16 + 22 * 1.3f + 4, lh, where, INK);
+        y += 96 + 30;
+        float blh = 18 * 1.6f;
+        ui_text(c, UI_GOTHIC_500, 18, x, y, blh,
+                bug_sent_github ? "GitHub opened in your browser with your answers filled in."
+                    : "Open GitHub to post it, or share the zip another way.", INK);
+        ui_text(c, UI_GOTHIC_500, 18, x, y + blh, blh, "Drag the zip into the last box and post it.", INK);
+        float by = y + 2 * blh + 30, bx = x;
+        static const char *const labels[3] = {"Show the zip", "Open GitHub again", "Back to the game"};
+        for (int i = 0; i < 3; i++) {
+            const char *l = i == 1 && !bug_sent_github ? "Open GitHub" : labels[i];
+            float bw = bug_button(c, 0, 0, l, i == 0, 0, 1);
+            hit_add(bx, by, bw, 56, HIT_BUG_DONE, i, 0);
+            bug_button(c, bx, by, l, i == 0, on && bug_done_btn == i, 0);
+            bx += bw + 12;
+        }
+        return;
+    }
     if (bug_page == 0) {
         ui_text(c, UI_GOTHIC_700, 16, x, y, lh, "What's wrong?", PLUM);
         y += lh + 10;
@@ -1301,6 +1366,22 @@ void gamemenu_draw(const UiCanvas *c, const GameMenuInfo *in) {
     float W = (float)c->w / c->s, H = 900;
     int hk = hit_back();
     hit_n[hk] = 0;  /* the mouse's list, filled as things are drawn */
+    int req = __atomic_exchange_n(&bug_request, 0, __ATOMIC_ACQ_REL);
+    if (req) {  /* Save only / Send (bug_finish): here, where the paused picture is */
+        textin_read(&bug_text, bug_sent_text, sizeof bug_sent_text, NULL);
+        bug_sent_kind = bug_kind, bug_sent_often = bug_often;
+        BugReport r = bug_report_of(bug_sent_text, bug_kind, bug_often);
+        r.picture = in->picture, r.picture_w = in->picture_w, r.picture_h = in->picture_h;
+        r.window_w = c->w, r.window_h = c->h;
+        if (bugreport_save(&r, bug_zip, sizeof bug_zip) == 0) {
+            if (req == 2) bugreport_open_github(&r);
+            bug_sent_github = req == 2;
+            bug_page = 2, bug_done_btn = req == 2 ? 2 : 0;
+        } else {
+            toast("Couldn't save the report");
+        }
+        changed();
+    }
     if (preview) {  /* only the bar, over the running game */
         draw_preview(c, in);
         __atomic_store_n(&hit_front, hk, __ATOMIC_RELEASE);

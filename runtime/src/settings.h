@@ -40,6 +40,8 @@ int settings_page(void);
 void settings_show(int page);
 /* Writes the settings file (the settings and the controls); every change calls it. */
 void settings_save(void);
+/* The settings file's path ("" with YW4_SETTINGS_FILE=none): the bug report copies it. */
+const char *settings_file_name(void);
 /* One of the actions above, from the window's key presses while the panel is open. */
 void settings_action(int action);
 /* The rows as they are now, and the selected one; returns the count. */

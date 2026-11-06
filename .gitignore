@@ -107,6 +107,8 @@ Thumbs.db
 
 # Screenshots saved by older runs launched outside work/ (images of the game)
 /screenshots/
+# Bug reports (the overlay's Report a bug): they can hold saves, logs and pictures of the game
+/reports/
 
 # The launcher (decision 0050): Node and Rust build output
 launcher/node_modules/

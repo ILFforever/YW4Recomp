@@ -23,6 +23,10 @@
 
 static int pipe_fds[2], saved_stderr;
 static FILE *logfile;
+static char log_name[600];
+
+/* The log file being written ("" when there is none): the bug report copies it. */
+const char *yw4_log_path(void) { return log_name; }
 
 static void copy_thread(void *arg) {
     (void)arg;
@@ -73,6 +77,7 @@ void yw4_log_start(void) {
     snprintf(name, sizeof name, "%s/yw4_%s.log", path, when);
     logfile = fopen(name, "wb");
     if (!logfile) return;
+    snprintf(log_name, sizeof log_name, "%s", name);
 #ifdef _WIN32
     saved_stderr = _dup(2);
     if (PIPE(pipe_fds) != 0 || saved_stderr < 0 || _dup2(pipe_fds[1], 2) != 0) return;

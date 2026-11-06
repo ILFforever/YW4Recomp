@@ -302,6 +302,9 @@ static int panel_open, page, developer_page, selected[2];  /* selected: on the p
 
 static char file_path[1024];
 
+static const char *settings_file(void);
+const char *settings_file_name(void) { return settings_file(); }
+
 static const char *settings_file(void) {
     if (!file_path[0]) {
         const char *e = getenv("YW4_SETTINGS_FILE");
