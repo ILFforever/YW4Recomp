@@ -110,11 +110,38 @@ def copy_tree(src: Path, dst: Path) -> None:
         progress.report("copy", done, total, every=0.25)
 
 
+def old_files(d: Path) -> Path:
+    return d.with_name(d.name + ".previous")
+
+
+def put_files_back(cfg: config.Config) -> None:
+    """After a stopped --fresh-files build: the game files it set aside back in place, over what it left there. The
+    installed game reads them directly (game.ini), so without this it wouldn't run any more."""
+    for d in (cfg.exefs_dir, cfg.romfs_dir):
+        if old_files(d).is_dir():
+            shutil.rmtree(d, ignore_errors=True)
+            old_files(d).rename(d)
+
+
 def game_files(cfg: config.Config, args: argparse.Namespace) -> None:
     exefs, romfs = cfg.exefs_dir, cfg.romfs_dir
-    if (exefs / "main").is_file() and folder_size(romfs) == romfs_bytes():
+    if args.fresh_files:
+        if args.mode == "folders" and any(Path(p).resolve() in (exefs.resolve(), romfs.resolve()) for p in (args.exefs, args.romfs)):
+            raise RuntimeError("those are this install's own game files: choose your original folders")
+        for d in (exefs, romfs):  # set aside, not deleted: dropped only once the new ones are in place
+            if d.is_dir():
+                shutil.rmtree(old_files(d), ignore_errors=True)
+                d.rename(old_files(d))
+    elif (exefs / "main").is_file() and folder_size(romfs) == romfs_bytes():
         say("game files already here: skipped")
         return
+    new_game_files(cfg, args)
+    for d in (exefs, romfs):
+        shutil.rmtree(old_files(d), ignore_errors=True)
+
+
+def new_game_files(cfg: config.Config, args: argparse.Namespace) -> None:
+    exefs, romfs = cfg.exefs_dir, cfg.romfs_dir
     if args.mode == "folders":
         copy_tree(Path(args.exefs), exefs)
         copy_tree(Path(args.romfs), romfs)
@@ -191,6 +218,8 @@ def main() -> int:
     ap.add_argument("--romfs")
     ap.add_argument("--saves", choices=("install", "appdata"), default="install")
     ap.add_argument("--toolchain", help="download the compiler into this folder first")
+    ap.add_argument("--fresh-files", action="store_true",
+                    help="extract or copy the game files again, even if this install already has them")
     ap.add_argument("--no-fsr", action="store_true")
     ap.add_argument("--no-dlss", action="store_true")
     ap.add_argument("--protocol", action="store_true", help="print the protocol number and stop")
@@ -201,7 +230,9 @@ def main() -> int:
         print(PROTOCOL)
         return 0
     if args.recover:
-        if Previous(config.load(require_exefs=False).work_dir).put_back():
+        cfg = config.load(require_exefs=False)
+        put_files_back(cfg)
+        if Previous(cfg.work_dir).put_back():
             say("the game you had is back and still plays")
         return 0
     args = ap.parse_args()
@@ -214,6 +245,7 @@ def main() -> int:
     say("@steps " + json.dumps(plan))
     cfg = config.load(require_exefs=False)
     prev = Previous(cfg.work_dir)
+    put_files_back(cfg)
     if prev.put_back():  # a stopped build's leftovers first: the kept game is the one that works
         say("a stopped build had set the game aside: it is back")
     build_args = [*(["--no-fsr"] if args.no_fsr else []), *(["--no-dlss"] if args.no_dlss else [])]
@@ -236,10 +268,12 @@ def main() -> int:
     except (RuntimeError, OSError, config.ConfigError) as e:
         say(f"@step {current} failed")
         print(f"error: {e}", file=sys.stderr, flush=True)
+        put_files_back(cfg)
         if prev.put_back():
             say("the build failed: the game you had is back and still plays")
         return 1
     except KeyboardInterrupt:  # the launcher's Cancel ends the whole process tree; a terminal's Ctrl+C lands here
+        put_files_back(cfg)
         prev.put_back()
         raise
     prev.drop()
