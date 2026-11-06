@@ -773,6 +773,22 @@ if (T && T.event) T.event.listen('game-theme', async ({ payload }) => {
   if (i >= 0 && (THEMES[themeAt] || {}).id !== payload) await applyTheme(i);
 });
 
+// the game crashed or stopped (it ended with an exit code other than 0): offer to report it (report_crash)
+let crash = null;
+if (T && T.event) T.event.listen('game-crashed', ({ payload }) => {
+  crash = payload;
+  const dlg = $('crash-dlg');
+  if (!dlg.open) dlg.showModal();
+  $('crash-yes').focus();
+});
+$('crash-no').addEventListener('click', () => $('crash-dlg').close());
+$('crash-yes').addEventListener('click', async () => {
+  $('crash-dlg').close();
+  try {
+    await invoke('report_crash', { install: inst.install, code: crash ? crash.code : -1, log: crash ? crash.log : '' });
+  } catch (e) { popup('Something went wrong', String(e)); }
+});
+
 $('play').addEventListener('click', async () => {
   try {
     await invoke('play', { install: inst.install, mods: inst.mods !== false, onPlay: inst.onPlay || 'hide',

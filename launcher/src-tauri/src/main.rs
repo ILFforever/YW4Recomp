@@ -97,7 +97,7 @@ fn main() {
         .invoke_handler(tauri::generate_handler![launcher_version, open_project_page, open_link, licences_folder, start_screen, test_paths, check::check_game, check::extracted_files,
             themes::list_themes, themes::read_theme, options::gpu_names, options::disk_space, buildrun::start_build, buildrun::cancel_build, buildrun::builder_bundled, update::check_updates, update::download_game_update, update::open_release_page,
             ready::load_state, ready::save_state, ready::install_info, ready::play, ready::open_folder, ready::open_shot,
-            ready::free_space, ready::originals, ready::delete_originals, ready::make_shortcuts, ready::move_saves, ready::game_full_screen, ready::set_game_full_screen, ready::uninstall_info, ready::uninstall])
+            ready::free_space, ready::originals, ready::delete_originals, ready::make_shortcuts, ready::move_saves, ready::game_full_screen, ready::set_game_full_screen, ready::uninstall_info, ready::uninstall, ready::report_crash])
         .run(tauri::generate_context!())
         .expect("the launcher window could not start");
 }

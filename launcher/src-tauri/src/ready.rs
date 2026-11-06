@@ -219,7 +219,7 @@ pub fn play(app: tauri::AppHandle, install: String, mods: Option<bool>, on_play:
         _ => {}
     }
     std::thread::spawn(move || {
-        let _ = child.wait();
+        let status = child.wait();
         let mut p = load_played(&install);
         p.seconds += now().saturating_sub(start);
         save_played(&p);
@@ -228,8 +228,107 @@ pub fn play(app: tauri::AppHandle, install: String, mods: Option<bool>, on_play:
         }
         if let Some(id) = game_theme(&install, started) { let _ = app.emit("game-theme", id); }
         let _ = app.emit("played", ());
+        // the game ends with 0 when the player quits (or closes the window); anything else is a crash or a stop
+        // (3: the recompiled code stopped, kernel.c): offer to report it, with this play's log (report_crash)
+        if let Ok(s) = status {
+            if !s.success() {
+                let code = s.code().unwrap_or(-1);
+                let log = newest_log(&install, started).map(|p| p.to_string_lossy().into_owned()).unwrap_or_default();
+                let _ = app.emit("game-crashed", serde_json::json!({ "code": code, "log": log }));
+            }
+        }
     });
     Ok(())
+}
+
+/// A path from game.ini (`key`, relative to work\build or absolute), if game.ini has it.
+fn game_ini_path(install: &str, key: &str) -> Option<PathBuf> {
+    let build = PathBuf::from(install).join("work").join("build");
+    let ini = std::fs::read_to_string(build.join("game.ini")).ok()?;
+    let rel = ini.lines().find_map(|l| l.strip_prefix(key).and_then(|r| r.strip_prefix('=')))?.trim().to_string();
+    Some(if Path::new(&rel).is_absolute() { PathBuf::from(&rel) } else { build.join(&rel) })
+}
+
+/// The log the game wrote during the play that started at `since` (the newest yw4_*.log in its log folder).
+fn newest_log(install: &str, since: std::time::SystemTime) -> Option<PathBuf> {
+    let dir = game_ini_path(install, "YW4_LOG_DIR").unwrap_or_else(|| PathBuf::from(install).join("logs"));
+    std::fs::read_dir(dir).ok()?
+        .filter_map(|e| e.ok())
+        .filter(|e| e.file_name().to_string_lossy().starts_with("yw4_"))
+        .filter_map(|e| Some((e.metadata().ok()?.modified().ok()?, e.path())))
+        .filter(|(t, _)| *t >= since)
+        .max_by_key(|(t, _)| *t)
+        .map(|(_, p)| p)
+}
+
+/// A zip that stores its files (no compression): the crash report is a log and a settings file.
+fn stored_zip(files: &[(&str, Vec<u8>)]) -> Vec<u8> {
+    fn crc32(d: &[u8]) -> u32 {
+        let mut c = 0xFFFF_FFFFu32;
+        for &b in d {
+            c ^= b as u32;
+            for _ in 0..8 { c = if c & 1 != 0 { 0xEDB8_8320 ^ (c >> 1) } else { c >> 1 }; }
+        }
+        !c
+    }
+    let (mut out, mut central) = (Vec::new(), Vec::new());
+    let le16 = |v: &mut Vec<u8>, x: u16| v.extend_from_slice(&x.to_le_bytes());
+    let le32 = |v: &mut Vec<u8>, x: u32| v.extend_from_slice(&x.to_le_bytes());
+    for (name, data) in files {
+        let (crc, size, at) = (crc32(data), data.len() as u32, out.len() as u32);
+        le32(&mut out, 0x0403_4b50); le16(&mut out, 20); le16(&mut out, 0x0800); le16(&mut out, 0);
+        le16(&mut out, 0); le16(&mut out, 0x21);  // time, date: 1980-01-01 (not needed)
+        le32(&mut out, crc); le32(&mut out, size); le32(&mut out, size);
+        le16(&mut out, name.len() as u16); le16(&mut out, 0);
+        out.extend_from_slice(name.as_bytes()); out.extend_from_slice(data);
+        le32(&mut central, 0x0201_4b50); le16(&mut central, 20); le16(&mut central, 20); le16(&mut central, 0x0800);
+        le16(&mut central, 0); le16(&mut central, 0); le16(&mut central, 0x21);
+        le32(&mut central, crc); le32(&mut central, size); le32(&mut central, size);
+        le16(&mut central, name.len() as u16); for _ in 0..4 { le16(&mut central, 0); }
+        le32(&mut central, 0); le32(&mut central, at);
+        central.extend_from_slice(name.as_bytes());
+    }
+    let start = out.len() as u32;
+    out.extend_from_slice(&central);
+    le32(&mut out, 0x0605_4b50); le16(&mut out, 0); le16(&mut out, 0);
+    le16(&mut out, files.len() as u16); le16(&mut out, files.len() as u16);
+    le32(&mut out, central.len() as u32); le32(&mut out, start); le16(&mut out, 0);
+    out
+}
+
+/// Percent-encoding for a link's value.
+fn url_value(s: &str) -> String {
+    s.bytes().map(|b| if b.is_ascii_alphanumeric() || b"-_.~".contains(&b) { (b as char).to_string() } else { format!("%{b:02X}") }).collect()
+}
+
+/// After a crash (the 'game-crashed' event, Report it): a zip in the install's reports folder with a short
+/// report.txt (exit code, version and GPU from the log), the play's log and settings.ini; the folder shown, and
+/// GitHub's bug form opened with the version and GPU filled in. Nothing is uploaded: the player drags the zip in.
+#[tauri::command]
+pub fn report_crash(install: String, code: i32, log: String) -> Result<String, String> {
+    let log_text = std::fs::read(&log).unwrap_or_default();
+    let text = String::from_utf8_lossy(&log_text);
+    let find = |prefix: &str| text.lines().find_map(|l| l.strip_prefix(prefix)).map(|s| s.trim().to_string());
+    let version = find("yw4: YW4 Recomp ").unwrap_or_else(|| "unknown".into());
+    let gpu = find("yw4: window: Vulkan on ").map(|g| g.split(" (API").next().unwrap_or("").to_string()).unwrap_or_default();
+    let last: Vec<&str> = text.lines().rev().take(12).collect::<Vec<_>>().into_iter().rev().collect();
+    let report = format!("YW4 Recomp crash report\r\n\r\nThe game closed unexpectedly (exit code {code}).\r\nVersion: {version}\r\nGPU: {gpu}\r\n\r\nThe log's last lines:\r\n{}\r\n",
+        last.join("\r\n"));
+    let mut files: Vec<(&str, Vec<u8>)> = vec![("report.txt", report.into_bytes())];
+    if !log_text.is_empty() { files.push(("log.txt", log_text.clone())); }
+    if let Some(s) = game_ini_path(&install, "YW4_SETTINGS_FILE").and_then(|p| std::fs::read(p).ok()) { files.push(("settings.ini", s)); }
+    let dir = PathBuf::from(&install).join("reports");
+    std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+    let zip = dir.join(format!("yw4_crash_{}.zip", now()));
+    std::fs::write(&zip, stored_zip(&files)).map_err(|e| format!("couldn't save the report ({e})"))?;
+    let url = format!("https://github.com/ILFforever/YW4Recomp/issues/new?template=bug.yml&title={}&what={}&version={}&pc={}",
+        url_value("Crash: the game closed unexpectedly"), url_value(&format!("The game closed unexpectedly (exit code {code}).")),
+        url_value(&version), url_value(&gpu));
+    if std::env::var("YW4_REPORT_OPEN").as_deref() != Ok("0") {
+        let _ = Command::new("explorer").arg(format!("/select,{}", zip.display())).spawn();
+        let _ = Command::new("explorer").arg(&url).spawn();
+    }
+    Ok(zip.to_string_lossy().into_owned())
 }
 
 /// The theme the game saved (its settings.ini line YW4_THEME=<id>), if the game's settings file can be found: the
