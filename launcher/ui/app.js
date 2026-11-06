@@ -766,10 +766,17 @@ async function showReady() {
 let reclaimable = 0;
 // the game closed: new play time, maybe new screenshots
 if (T && T.event) T.event.listen('played', () => { if (inst && !document.querySelector('[data-screen="ready"]').hidden) showReady(); });
+// a theme chosen in the game comes back here when it closes (game-theme: its settings.ini's YW4_THEME)
+if (T && T.event) T.event.listen('game-theme', async ({ payload }) => {
+  await refreshThemes();
+  const i = THEMES.findIndex((t) => t.id === payload);
+  if (i >= 0 && (THEMES[themeAt] || {}).id !== payload) await applyTheme(i);
+});
 
 $('play').addEventListener('click', async () => {
   try {
-    await invoke('play', { install: inst.install, mods: inst.mods !== false, onPlay: inst.onPlay || 'hide' });
+    await invoke('play', { install: inst.install, mods: inst.mods !== false, onPlay: inst.onPlay || 'hide',
+      theme: THEMES[themeAt] ? THEMES[themeAt].id : 'recomp' });
     $('stat-last').textContent = 'Today';
   } catch (e) { popup('Something went wrong', String(e)); }
 });

@@ -15,7 +15,7 @@ pub struct ThemeInfo {
 
 /// The themes folder: next to the installed launcher (the installer copies launcher/ui/themes there), or the repo's
 /// own folder when the launcher runs from a build of the repo.
-fn themes_dir(app: &AppHandle) -> Option<PathBuf> {
+pub fn themes_dir(app: &AppHandle) -> Option<PathBuf> {
     let installed = app.path().resource_dir().ok()?.join("themes");
     if installed.is_dir() {
         return Some(installed);

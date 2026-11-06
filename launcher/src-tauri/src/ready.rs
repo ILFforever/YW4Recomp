@@ -193,12 +193,17 @@ pub async fn install_info(install: String) -> Info {
 /// Settings (Play): with `mods` off the game starts with none (YW4_MODS=none: an environment variable wins over
 /// game.ini's line); `on_play` says what the launcher's window does meanwhile, and "hide" brings it back afterwards.
 #[tauri::command]
-pub fn play(app: tauri::AppHandle, install: String, mods: Option<bool>, on_play: Option<String>) -> Result<(), String> {
+pub fn play(app: tauri::AppHandle, install: String, mods: Option<bool>, on_play: Option<String>, theme: Option<String>) -> Result<(), String> {
     use tauri::{Emitter, Manager};
     let e = exe(&install);
     let mut cmd = Command::new(&e);
     cmd.current_dir(e.parent().unwrap());
     if mods == Some(false) { cmd.env("YW4_MODS", "none"); }
+    // the game reads the launcher's theme files (decision 0055): its folder, so an installed game finds them
+    if let Some(dir) = crate::themes::themes_dir(&app) { cmd.env("YW4_THEMES_DIR", dir); }
+    // the theme goes both ways: the game opens in the launcher's theme, and a theme chosen in the game comes back
+    // to the launcher when the game closes (the 'game-theme' event)
+    if let Some(t) = theme.as_deref().filter(|t| !t.is_empty()) { cmd.env("YW4_THEME", t); }
     let mut child = cmd.spawn().map_err(|e| format!("couldn't start the game ({e})"))?;
     let start = now();
     let mut p = load_played(&install);
@@ -220,9 +225,22 @@ pub fn play(app: tauri::AppHandle, install: String, mods: Option<bool>, on_play:
         if on_play == "hide" {
             if let Some(w) = app.get_webview_window("main") { let _ = w.show(); let _ = w.unminimize(); let _ = w.set_focus(); }
         }
+        if let Some(id) = game_theme(&install) { let _ = app.emit("game-theme", id); }
         let _ = app.emit("played", ());
     });
     Ok(())
+}
+
+/// The theme the game saved (its settings.ini line YW4_THEME=<id>), if the game's settings file can be found: the
+/// game.ini next to it says where (YW4_SETTINGS_FILE, relative to work\build or absolute in AppData).
+fn game_theme(install: &str) -> Option<String> {
+    let build = PathBuf::from(install).join("work").join("build");
+    let ini = std::fs::read_to_string(build.join("game.ini")).ok()?;
+    let rel = ini.lines().find_map(|l| l.strip_prefix("YW4_SETTINGS_FILE="))?.trim().to_string();
+    let path = if Path::new(&rel).is_absolute() { PathBuf::from(&rel) } else { build.join(&rel) };
+    let settings = std::fs::read_to_string(path).ok()?;
+    let id = settings.lines().find_map(|l| l.trim().strip_prefix("YW4_THEME="))?.trim().to_string();
+    (!id.is_empty() && id.chars().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-')).then_some(id)
 }
 
 /// Opens one of the install's folders in Explorer (a fixed set: nothing else can be named).
