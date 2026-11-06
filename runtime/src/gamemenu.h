@@ -36,6 +36,10 @@ void gamemenu_preview_rect(float r[4]);
  * starts at once; Enter, OK or a pad's A finishes it (empty: fallback). gamemenu_prompt_take: 1 and the name once
  * it is finished (the overlay is closed again then). While it shows, gamemenu_open() is 1. */
 void gamemenu_prompt_begin(const char *title, int max_chars, const char *fallback);
+/* Before begin: at least min_chars letters (OK greyed out until then); cancel: a Cancel button (Esc, B). */
+void gamemenu_prompt_options(int min_chars, int cancel);
+void gamemenu_prompt_cancel(void);
+/* 0 still open, 1 answered (out), 2 cancelled */
 int gamemenu_prompt_take(char *out, size_t n);
 /* The same popup with a message instead of a field, and OK (a pad's A or B, Enter, Escape); taken the same way. */
 void gamemenu_message_begin(const char *title, const char *body);

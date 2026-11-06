@@ -28,14 +28,28 @@ static float pv_rect[4];             /* the part of the overlay the window shows
 static int bug_page, brow;           /* Report a bug: its page and chosen row (below, with the rest of it) */
 
 /* name entry (gamemenu.h): the popup's state; the game's thread waits in swkbd.c meanwhile */
-static int prompting, prompt_finished;
+static int prompting, prompt_finished;  /* prompt_finished: 1 answered, 2 cancelled */
 static TextField prompt_text;
 static char prompt_title[256], prompt_fallback[64], prompt_answer[TEXTIN_MAX];
 static char prompt_body[512];  /* a message instead of a field ("" for a field) */
 static const char *prompt_label = "Name";
+static int prompt_min, prompt_cancel;  /* letters the game needs at least; Cancel offered */
 static void changed(void);
 
 int gamemenu_prompting(void) { return __atomic_load_n(&prompting, __ATOMIC_ACQUIRE); }
+
+/* letters in the field, or in the default when it is empty */
+static int prompt_chars(void) {
+    char t[TEXTIN_MAX];
+    textin_read(&prompt_text, t, sizeof t, NULL);
+    const char *s = t[0] ? t : prompt_fallback;
+    int n = 0;
+    for (; *s; s++) n += ((unsigned char)*s & 0xC0) != 0x80;
+    return n;
+}
+static int prompt_enough(void) { return prompt_body[0] || prompt_chars() >= (prompt_min > 0 ? prompt_min : 1); }
+
+void gamemenu_prompt_options(int min_chars, int cancel) { prompt_min = min_chars, prompt_cancel = cancel; }
 
 void gamemenu_prompt_begin(const char *title, int max_chars, const char *fallback) {
     snprintf(prompt_title, sizeof prompt_title, "%s", title && *title ? title : "Enter a name");
@@ -70,23 +84,36 @@ void gamemenu_message_begin(const char *title, const char *body) {
     fprintf(stderr, "yw4: overlay: message \"%s\"\n", prompt_title);
 }
 
-static void prompt_finish(void) {
-    if (!gamemenu_prompting()) return;
-    textin_read(&prompt_text, prompt_answer, sizeof prompt_answer, NULL);
-    if (!prompt_answer[0]) snprintf(prompt_answer, sizeof prompt_answer, "%s", prompt_fallback);
+static void prompt_close(int how) {
     textin_focus(NULL);
     __atomic_store_n(&prompting, 0, __ATOMIC_RELEASE);
     __atomic_store_n(&open_, 0, __ATOMIC_RELEASE);
-    __atomic_store_n(&prompt_finished, 1, __ATOMIC_RELEASE);
+    __atomic_store_n(&prompt_finished, how, __ATOMIC_RELEASE);
     changed();
 }
 
+static void prompt_finish(void) {
+    if (!gamemenu_prompting()) return;
+    if (!prompt_enough()) {  /* too short for the game (a password needs a letter): keep typing */
+        textin_focus(&prompt_text);
+        changed();
+        return;
+    }
+    textin_read(&prompt_text, prompt_answer, sizeof prompt_answer, NULL);
+    if (!prompt_answer[0]) snprintf(prompt_answer, sizeof prompt_answer, "%s", prompt_fallback);
+    prompt_close(1);
+}
+
+void gamemenu_prompt_cancel(void) {
+    if (gamemenu_prompting() && (prompt_cancel || prompt_body[0])) prompt_close(prompt_body[0] ? 1 : 2);
+}
+
 int gamemenu_prompt_take(char *out, size_t n) {
-    /* Enter, Escape or Tab end the typing (window.c): that is OK here, as is the pad's A or the OK button */
+    /* Enter or Tab end the typing (window.c): that is OK here, as is the pad's A or the OK button */
     if (gamemenu_prompting() && !prompt_body[0] && !textin_has(&prompt_text)) prompt_finish();
-    if (!__atomic_exchange_n(&prompt_finished, 0, __ATOMIC_ACQ_REL)) return 0;
-    snprintf(out, n, "%s", prompt_answer);
-    return 1;
+    int how = __atomic_exchange_n(&prompt_finished, 0, __ATOMIC_ACQ_REL);
+    if (how == 1) snprintf(out, n, "%s", prompt_answer);
+    return how;
 }
 
 int gamemenu_open(void) { return __atomic_load_n(&open_, __ATOMIC_ACQUIRE); }
@@ -392,7 +419,8 @@ void gamemenu_action(int a) {
     if (!gamemenu_open() || settings_open()) return;
     changed();
     if (gamemenu_prompting()) {  /* the name popup: A / Enter is OK (typing has ended), the rest nothing */
-        if (a == GM_ACCEPT || (prompt_body[0] && (a == GM_BACK || a == GM_LEAVE))) prompt_finish();  /* a message: B too */
+        if (a == GM_ACCEPT) prompt_finish();
+        else if (a == GM_BACK || a == GM_LEAVE) gamemenu_prompt_cancel();  /* B: Cancel where offered; a message: OK */
         return;
     }
     hover_kind = -1;  /* the keys or the pad took over: no hover look until the mouse moves again */
@@ -438,7 +466,7 @@ void gamemenu_refresh(void) { changed(); }
 enum { HIT_SIDE, HIT_SECTION, HIT_ROW, HIT_ROW_PREV, HIT_ROW_NEXT, HIT_BIND, HIT_MODE, HIT_CORNER, HIT_CORNER_BOX,
        HIT_PART, HIT_SLIDER, HIT_POPUP, HIT_HINT, HIT_BIND_STEP, HIT_PREVIEW,
        HIT_BUG_KIND, HIT_BUG_TEXT, HIT_BUG_OFTEN, HIT_BUG_NEXT, HIT_BUG_TICK, HIT_BUG_BTN, HIT_BUG_DONE,
-       HIT_PROMPT_FIELD, HIT_PROMPT_OK };
+       HIT_PROMPT_FIELD, HIT_PROMPT_OK, HIT_PROMPT_CANCEL };
 #define HINT_CLOSE (-1)  /* a key hint's action: close the overlay */
 typedef struct {
     float x, y, w, h;
@@ -471,6 +499,7 @@ void gamemenu_mouse(float x, float y, int button) {
     if (gamemenu_prompting()) {  /* the name popup: its field takes the typing again, OK finishes */
         if (button == 1 && found && h.kind == HIT_PROMPT_FIELD) textin_focus(&prompt_text), changed();
         if (button == 1 && found && h.kind == HIT_PROMPT_OK) prompt_finish();
+        if (button == 1 && found && h.kind == HIT_PROMPT_CANCEL) gamemenu_prompt_cancel();
         return;
     }
     if (button == 3) {  /* the right button: back, as Escape */
@@ -1502,16 +1531,26 @@ void gamemenu_draw(const UiCanvas *c, const GameMenuInfo *in) {
         ui_text(c, UI_GOTHIC_500, 16, bx, y, llh, help, MUTED);
     prompt_ok:;
         float okw = ui_text_w(UI_ROUNDED_800, 18, "OK") + 2 * 32, okx = px + pw - 16 - okw, oky = ty + 16;
-        if (!typing) ui_box(c, okx - 4, oky - 4, okw + 8, 60, 15, RING, 0, 0);
-        ui_box(c, okx, oky, okw, 52, 12, GOLD, 0, 0);
-        ui_text_in(c, UI_ROUNDED_800, 18, okx, oky, okw, 52, 1, "OK", ON_GOLD);
+        int ok_on = prompt_enough();  /* a password with nothing typed: OK greyed out until there is a letter */
+        if (!typing && ok_on) ui_box(c, okx - 4, oky - 4, okw + 8, 60, 15, RING, 0, 0);
+        ui_box(c, okx, oky, okw, 52, 12, ok_on ? GOLD : LINE, 0, 0);
+        ui_text_in(c, UI_ROUNDED_800, 18, okx, oky, okw, 52, 1, "OK", ok_on ? ON_GOLD : MUTED);
         hit_add(okx, oky, okw, 52, HIT_PROMPT_OK, 0, 0);
+        int can_cancel = prompt_cancel && !prompt_body[0];
+        if (can_cancel) {  /* Cancel (a password, a nickname): the game is told the keyboard was closed */
+            float cw2 = ui_text_w(UI_ROUNDED_800, 18, "Cancel") + 2 * 28, cx2 = okx - 10 - cw2;
+            ui_box(c, cx2, oky, cw2, 52, 12, POP_WHITE, 2, POP_LINE);
+            ui_text_in(c, UI_ROUNDED_800, 18, cx2, oky, cw2, 52, 1, "Cancel", POP_INK);
+            hit_add(cx2, oky, cw2, 52, HIT_PROMPT_CANCEL, 0, 0);
+        }
         ui_rect(c, 0, H - 56, W, 56, NIGHT, 1);  /* the key hints, the whole width */
         float hx = 48;
         if (in->pad) {
-            hint(c, hx, H - 56, in->pad == 2 ? "Cross" : "A", "OK");
+            hx += hint(c, hx, H - 56, in->pad == 2 ? "Cross" : "A", "OK") + 28;
+            if (can_cancel) hint(c, hx, H - 56, in->pad == 2 ? "Circle" : "B", "Cancel");
         } else {
             hx += hint(c, hx, H - 56, "Enter", "OK") + 28;
+            if (can_cancel) hx += hint(c, hx, H - 56, "Esc", "Cancel") + 28;
             if (!prompt_body[0]) {
                 hx += hint(c, hx, H - 56, "Backspace", "Delete") + 28;
                 hint(c, hx, H - 56, "Ctrl V", "Paste");

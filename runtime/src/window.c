@@ -2128,6 +2128,10 @@ void window_run(void (*guest)(void *), void *arg) {
                     SDL_free(clip);
                     break;
                 }
+                if (k == SDLK_ESCAPE && !e.key.repeat && gamemenu_prompting()) {  /* the game's popup: Cancel where offered */
+                    gamemenu_prompt_cancel();
+                    if (!gamemenu_prompting()) break;
+                }
                 for (size_t i = 0; i < sizeof ek / sizeof *ek; i++)
                     if (k == ek[i].key && !(e.key.repeat && ek[i].op == TI_DONE)) {
                         textin_edit(ek[i].op), yw4_hid_note_key(ek[i].name);

@@ -90,7 +90,10 @@ void yw4_swkbd_ShowKeyboard(CPUState *c) {
                              *(const uint16_t *)(a + 0x28 + 2 * i) == 'r' && *(const uint16_t *)(a + 0x2a + 2 * i) == 'l'))
             girl = 1;
     }
+    /* the popup's default: only what the game gave (a character's name, a Yo-kai's name...); a password has none.
+     * Replays answer at once: there "Nate" (or "Katie") when the game gave nothing. */
     const char *fallback = initial[0] ? initial : girl ? DEFAULT_GIRL : DEFAULT_NAME;
+    int min = *(const int32_t *)(a + 0x3b0), main_name = token[0] == '<';
     /* The player types it (board N1): the overlay's popup over the game's last frame, which this thread shows again
      * while it waits (the game waits here too, as on the Switch). Not in replays (their clock counts frames, which
      * stop here) or with YW4_PLAYER_NAME: those answer at once. */
@@ -108,12 +111,22 @@ void yw4_swkbd_ShowKeyboard(CPUState *c) {
                  title[n++] = (char)(0x80 | (ch & 63));
         }
         title[n] = 0;
-        gamemenu_prompt_begin(title, max, fallback);
-        while (!gamemenu_prompt_take(typed, sizeof typed)) {
+        /* Cancel everywhere but a main character's name (the start of a new game: how the game takes a cancelled
+         * name there isn't known, so it isn't offered) */
+        gamemenu_prompt_options(min, !main_name);
+        gamemenu_prompt_begin(title, max, initial);
+        int how;
+        while (!(how = gamemenu_prompt_take(typed, sizeof typed))) {
             window_repaint(0);
             host_sleep_ns(16 * 1000000LL);
         }
         window_repaint(0);  /* the popup gone before the game goes on */
+        if (how == 2) {  /* Cancel: what the sdk returns when the keyboard is closed (nn::swkbd's 0x29f, read from
+                          * ShowKeyboard), the string left as it is */
+            fprintf(stderr, "yw4: swkbd: cancelled\n");
+            c->x[0] = 0x29f;
+            return;
+        }
         name = typed;
     }
     if (!name || !*name) name = fallback;
