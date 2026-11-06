@@ -204,6 +204,7 @@ pub fn play(app: tauri::AppHandle, install: String, mods: Option<bool>, on_play:
     // the theme goes both ways: the game opens in the launcher's theme, and a theme chosen in the game comes back
     // to the launcher when the game closes (the 'game-theme' event)
     if let Some(t) = theme.as_deref().filter(|t| !t.is_empty()) { cmd.env("YW4_THEME", t); }
+    let started = std::time::SystemTime::now();
     let mut child = cmd.spawn().map_err(|e| format!("couldn't start the game ({e})"))?;
     let start = now();
     let mut p = load_played(&install);
@@ -225,7 +226,7 @@ pub fn play(app: tauri::AppHandle, install: String, mods: Option<bool>, on_play:
         if on_play == "hide" {
             if let Some(w) = app.get_webview_window("main") { let _ = w.show(); let _ = w.unminimize(); let _ = w.set_focus(); }
         }
-        if let Some(id) = game_theme(&install) { let _ = app.emit("game-theme", id); }
+        if let Some(id) = game_theme(&install, started) { let _ = app.emit("game-theme", id); }
         let _ = app.emit("played", ());
     });
     Ok(())
@@ -233,11 +234,14 @@ pub fn play(app: tauri::AppHandle, install: String, mods: Option<bool>, on_play:
 
 /// The theme the game saved (its settings.ini line YW4_THEME=<id>), if the game's settings file can be found: the
 /// game.ini next to it says where (YW4_SETTINGS_FILE, relative to work\build or absolute in AppData).
-fn game_theme(install: &str) -> Option<String> {
+/// Only a file written since `since` counts: the game writes settings.ini only when a setting changes, so after a
+/// play with no change its line is still an older play's theme, and taking it would undo the launcher's choice.
+fn game_theme(install: &str, since: std::time::SystemTime) -> Option<String> {
     let build = PathBuf::from(install).join("work").join("build");
     let ini = std::fs::read_to_string(build.join("game.ini")).ok()?;
     let rel = ini.lines().find_map(|l| l.strip_prefix("YW4_SETTINGS_FILE="))?.trim().to_string();
     let path = if Path::new(&rel).is_absolute() { PathBuf::from(&rel) } else { build.join(&rel) };
+    if std::fs::metadata(&path).ok()?.modified().ok()? < since { return None; }
     let settings = std::fs::read_to_string(path).ok()?;
     let id = settings.lines().find_map(|l| l.trim().strip_prefix("YW4_THEME="))?.trim().to_string();
     (!id.is_empty() && id.chars().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-')).then_some(id)
