@@ -40,6 +40,9 @@
 
 ## Status
 
+> [!TIP]
+> **1.0.0 releasing soon:** the first release, with the launcher. Until then, [build from source](#building-from-source).
+
 Work in progress: not playable from start to finish yet. What runs so far: from boot through the start of a new
 game (logos, title menu, name entry, the opening cutscenes, the Amano house and town, the Yo-kai Pad menus, the
 diary and autosave), and from late-game saves: towns at night, the bamboo forest, the Yo-kai World, and battles.
