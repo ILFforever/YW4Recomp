@@ -83,7 +83,7 @@ module = "sdk"
 symbol = "_ZN2nn2os33AttachReadableHandleToSystemEventEPNS0_15SystemEventTypeEjbNS0_14EventClearModeE"
 
 # nn::swkbd, the software keyboard: a library applet on the Switch, which we don't have.
-# The call answers at once with a name (YW4_PLAYER_NAME, default "Nate").
+# The player types the answer in the overlay's popup (names, passwords); replays answer at once (swkbd.c).
 [[override]]
 module = "sdk"
 symbol = "_ZN2nn5swkbd12ShowKeyboardEPNS0_6StringERKNS0_15ShowKeyboardArgE"
@@ -97,6 +97,14 @@ module = "sdk"
 symbol = "_ZN2nn2ec24ShowShopAddOnContentListERKNS_7account10UserHandleE"
 native = "yw4_ec_ShowShopAddOnContentList"
 why = "nn::ec::ShowShopAddOnContentList opens the eShop applet; there is no shop to show"
+
+# Delivery's "Download Code": the shop's enter-code page, another eShop applet. A popup says it needs the eShop,
+# then it returns (before, the sdk's code asked for a library applet, which stops the run).
+[[override]]
+module = "sdk"
+symbol = "_ZN2nn2ec22ShowShopEnterCodeSceneERKNS_7account10UserHandleE"
+native = "yw4_ec_ShowShopEnterCodeScene"
+why = "nn::ec::ShowShopEnterCodeScene opens the eShop applet; download codes can't be redeemed here"
 
 # The C library's memory and string basics: the recompiled versions run the ARM code word
 # by word; the host's are vectorised and give the same results (decision 0011's natives).
