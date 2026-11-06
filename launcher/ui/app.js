@@ -636,7 +636,7 @@ let inst = null;  // the launcher's state of the install (Rust: ready.rs, %AppDa
 
 // What's new: written for each release (the launcher ships with the notes of the version it builds)
 const NEWS = {
-  version: '0.7.0',
+  version: '0.8.0',
   items: ['Contact shadows: soft shadows where things touch', 'Fewer stutters in menus and towns',
     'XCI cartridge dumps work', 'Version numbers, shown in the game and here'],
 };

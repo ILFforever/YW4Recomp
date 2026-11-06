@@ -4320,7 +4320,7 @@ dependencies = [
 
 [[package]]
 name = "yw4-recomp-launcher"
-version = "0.5.0"
+version = "0.6.0"
 dependencies = [
  "serde",
  "serde_json",
