@@ -766,9 +766,10 @@ static void hud_draw(VkImage dst, uint32_t index, int32_t x0, int32_t y0, uint32
     if (!hud_enabled() || hb_resources() || index >= 8 || !swap_views[index]) return;
     VkPipeline pipe = hb_pipeline(swap_format);
     if (!pipe) return;
-    /* Drawn again 10 times a second, or at once when its form, parts or size change; the frames between show the
-     * last picture. Drawing it costs the present 0.9 ms (detailed), about 10% of a frame at 120 frames/s: too much
-     * for what measures the game. It also keeps the numbers readable. */
+    /* Drawn again 4 times a second, or at once when its form, parts or size change; the frames between show the
+     * last picture. Drawing it costs the present 0.6 ms (detailed, 0.9 before letters were kept: ui.c), about 7% of
+     * a frame at 120 frames/s: too much for what measures the game. It also keeps the numbers readable. The owner
+     * (2026-11-07): it doesn't have to draw that often (was 10 a second). */
     static HudContent content;
     static int w, h, last_form = -1;
     static unsigned last_parts;
@@ -779,7 +780,7 @@ static void hud_draw(VkImage dst, uint32_t index, int32_t x0, int32_t y0, uint32
     float s = overlay_scale(swap_extent.height);
     uint64_t now = SDL_GetTicks();
     int64_t t0 = host_now_ns();
-    int redraw = compact != last_form || parts != last_parts || s != last_s || now - last_at >= 100;
+    int redraw = compact != last_form || parts != last_parts || s != last_s || now - last_at >= 250;
     if (redraw) {
         last_form = compact, last_parts = parts, last_s = s, last_at = now;
         yw4_perf_hud(&content, compact, parts);
@@ -788,13 +789,14 @@ static void hud_draw(VkImage dst, uint32_t index, int32_t x0, int32_t y0, uint32
             memcpy((uint8_t *)hb.ptr + (size_t)j * HUD_W * 4, hb.cpu + (size_t)j * HUD_W * 4, (size_t)w * 4);
     }
     {  /* YW4_HUD_TIME=1: what the HUD's drawing costs per frame, redraws shared out, every 600 frames in the log */
-        static int on = -1, n;
+        static int on = -1, n, redraws;
         static double sum, worst;
         if (on < 0) on = getenv("YW4_HUD_TIME") != NULL;
         double ms = (double)(host_now_ns() - t0) / 1e6;
-        if (on && (sum += ms, worst = ms > worst ? ms : worst, ++n == 600)) {
-            fprintf(stderr, "yw4: hud: %.3f ms per frame on average, %.3f ms at most (600 frames)\n", sum / n, worst);
-            n = 0, sum = worst = 0;
+        if (on && (sum += ms, worst = ms > worst ? ms : worst, redraws += redraw, ++n == 600)) {
+            fprintf(stderr, "yw4: hud: %.3f ms per frame on average, %.3f ms at most (600 frames, %d redraws, "
+                    "%.3f ms each)\n", sum / n, worst, redraws, redraws ? sum / redraws : 0.0);
+            n = redraws = 0, sum = worst = 0;
         }
     }
     hud_shown_w = w, hud_shown_h = h;

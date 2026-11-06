@@ -156,6 +156,51 @@ static int utf8_next(const char **s) {
     return cp;
 }
 
+/* Letters drawn once and kept: the HUD redraws its numbers several times a second and the overlay its pages, and
+ * making a letter from the font's outlines is most of what text costs. A letter is kept per font, size, character
+ * and a quarter-pixel position (where it starts between two pixels: drawn at the nearest quarter, as font
+ * renderers do). Only the present thread draws text (window.c: the HUD and the overlay), so there is no lock. When
+ * the table fills (sizes change with the window), it is emptied and fills again. */
+enum { GLYPH_SLOTS = 4096, GLYPH_SUBPIXELS = 4 };
+typedef struct {
+    float px;
+    int cp;
+    uint8_t font, sub, used;
+    int16_t x0, y0, w, h;  /* the letter's box from the pen on the baseline; w or h 0: nothing to draw */
+    uint8_t *bm;
+} Glyph;
+static Glyph glyphs[GLYPH_SLOTS];
+static int glyphs_used;
+
+static const Glyph *glyph_get(const stbtt_fontinfo *fi, int f, float px, float sc, int cp, int sub) {
+    uint32_t bits;
+    memcpy(&bits, &px, sizeof bits);
+    uint32_t h = (uint32_t)cp * 2654435761u ^ bits * 40503u ^ (uint32_t)(f * GLYPH_SUBPIXELS + sub) * 2246822519u;
+    for (;;) {
+        for (uint32_t k = 0; k < GLYPH_SLOTS; k++) {
+            Glyph *g = &glyphs[(h + k) & (GLYPH_SLOTS - 1)];
+            if (g->used && g->cp == cp && g->px == px && g->font == f && g->sub == sub) return g;
+            if (g->used) continue;
+            if (glyphs_used >= GLYPH_SLOTS * 3 / 4) break;  /* full enough: empty it below */
+            float sx = (float)sub / GLYPH_SUBPIXELS;
+            int x0, y0, x1, y1;
+            stbtt_GetCodepointBitmapBoxSubpixel(fi, cp, sc, sc, sx, 0, &x0, &y0, &x1, &y1);
+            int gw = x1 - x0, gh = y1 - y0;
+            *g = (Glyph){.px = px, .cp = cp, .font = (uint8_t)f, .sub = (uint8_t)sub, .used = 1,
+                         .x0 = (int16_t)x0, .y0 = (int16_t)y0};
+            if (gw > 0 && gh > 0 && gw <= 512 && gh <= 512 && (g->bm = malloc((size_t)gw * (size_t)gh))) {
+                stbtt_MakeCodepointBitmapSubpixel(fi, g->bm, gw, gh, gw, sc, sc, sx, 0, cp);
+                g->w = (int16_t)gw, g->h = (int16_t)gh;
+            }
+            glyphs_used++;
+            return g;
+        }
+        for (int i = 0; i < GLYPH_SLOTS; i++) free(glyphs[i].bm);
+        memset(glyphs, 0, sizeof glyphs);
+        glyphs_used = 0;
+    }
+}
+
 /* draws (c not NULL) or measures str from x on baseline base, image pixels; track: extra space after each letter */
 static float text_run(const UiCanvas *c, int f, float px, float x, float base, const char *str, uint32_t rgb,
                       float track) {
@@ -164,23 +209,23 @@ static float text_run(const UiCanvas *c, int f, float px, float x, float base, c
     float sc = stbtt_ScaleForMappingEmToPixels(fi, px);
     float pen = x;
     int prev = 0;
-    static unsigned char bm[512 * 512];
     for (const char *p = str; *p;) {
         int cp = utf8_next(&p);
         if (prev) pen += (float)stbtt_GetCodepointKernAdvance(fi, prev, cp) * sc;
         int adv, lsb;
         stbtt_GetCodepointHMetrics(fi, cp, &adv, &lsb);
         if (c && cp > 32) {
-            float sx = pen - floorf(pen);
-            int x0, y0, x1, y1;
-            stbtt_GetCodepointBitmapBoxSubpixel(fi, cp, sc, sc, sx, 0, &x0, &y0, &x1, &y1);
-            int gw = x1 - x0, gh = y1 - y0;
-            if (gw > 0 && gh > 0 && gw <= 512 && gh <= 512) {
-                stbtt_MakeCodepointBitmapSubpixel(fi, bm, gw, gh, gw, sc, sc, sx, 0, cp);
-                int gx = (int)floorf(pen) + x0, gy = (int)floorf(base + 0.5f) + y0;
-                for (int j = 0; j < gh; j++)
-                    for (int i = 0; i < gw; i++)
-                        if (bm[j * gw + i]) blend(c, gx + i, gy + j, rgb, (float)bm[j * gw + i] / 255.0f);
+            float fx = floorf(pen);
+            int sub = (int)((pen - fx) * GLYPH_SUBPIXELS + 0.5f);
+            if (sub == GLYPH_SUBPIXELS) sub = 0, fx += 1;  /* rounds up to the next whole pixel */
+            const Glyph *g = glyph_get(fi, f, px, sc, cp, sub);
+            if (g->w > 0) {
+                int gx = (int)fx + g->x0, gy = (int)floorf(base + 0.5f) + g->y0;
+                for (int j = 0; j < g->h; j++)
+                    for (int i = 0; i < g->w; i++) {
+                        uint8_t a = g->bm[j * g->w + i];
+                        if (a) blend(c, gx + i, gy + j, rgb, (float)a / 255.0f);
+                    }
             }
         }
         pen += (float)adv * sc + track;
