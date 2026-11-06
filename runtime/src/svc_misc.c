@@ -5,6 +5,9 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
+
+#include <SDL3/SDL_filesystem.h>
 
 #include "dlc_known.h"
 #include "ipc_simple.h"
@@ -19,6 +22,8 @@ static uint32_t aoc[64];
 static uint32_t naoc = UINT32_MAX;
 
 #ifdef _WIN32
+#include <io.h>
+#include <wchar.h>
 #define seek64(f, o) _fseeki64(f, (long long)(o), SEEK_SET)
 #else
 #define seek64(f, o) fseeko(f, (off_t)(o), SEEK_SET)
@@ -38,9 +43,61 @@ static int ends_with(const char *s, const char *tail) {
     return 1;
 }
 
+/* A content NCA's name is the first half of its SHA-256 (decision 0049): only one named like a known add-on's is
+ * hashed, so the base game's and update's NCAs (when they share the folder) are never read. */
+static int known_name(const char *name) {
+    for (size_t k = 0; k < yw4_ndlc_known; k++) {
+        size_t i = 0;
+        while (i < 32 && tolower((unsigned char)name[i]) == yw4_dlc_known[k].sha256[i]) i++;
+        if (i == 32 && !strcmp(name + 32, ".nca")) return 1;
+    }
+    return 0;
+}
+
+/* SHA-256 of `size` bytes at `at`, read in pieces (the 4++ Upgrade Pack's NCA is 222 MiB). 0, or -1 on a short read. */
+static int hash_part(FILE *f, uint64_t at, uint64_t size, char hex[65]) {
+    enum { CHUNK = 1 << 20 };
+    uint8_t *buf = malloc(CHUNK);
+    Yw4Sha256 c;
+    yw4_sha256_init(&c);
+    int ok = buf && !seek64(f, at);
+    while (ok && size) {
+        size_t k = size < CHUNK ? (size_t)size : CHUNK;
+        ok = fread(buf, 1, k, f) == k;
+        yw4_sha256_update(&c, buf, k);
+        size -= k;
+    }
+    free(buf);
+    yw4_sha256_final_hex(&c, hex);
+    return ok ? 0 : -1;
+}
+
+/* Hashing a 222 MiB NCA in C takes ~1.1 s; once a >1 MiB NCA's full SHA-256 is verified, remember `(name, size,
+ * first-4-KiB SHA-256) -> full SHA-256` in aoc.cache next to yw4.exe so later boots only hash the 4 KiB header. */
+static int hash_nca(FILE *f, const char *name, uint64_t at, uint64_t size, char hex[65]) {
+    if (size <= (1u << 20)) return hash_part(f, at, size, hex);
+    char spot[65], path[1100], cname[64], cspot[65], chex[65];
+    if (hash_part(f, at, 4096, spot)) return -1;
+    const char *base = SDL_GetBasePath();
+    snprintf(path, sizeof path, "%saoc.cache", base ? base : "");
+    FILE *cf = fopen(path, "r");
+    for (unsigned long long csize; cf && fscanf(cf, "%63s %llu %64s %64s", cname, &csize, cspot, chex) == 4;)
+        if (!strcmp(cname, name) && csize == size && !strcmp(cspot, spot)) {
+            memcpy(hex, chex, 65);
+            fclose(cf);
+            return 0;
+        }
+    if (cf) fclose(cf);
+    if (hash_part(f, at, size, hex)) return -1;
+    if ((cf = fopen(path, "a")) != NULL) {
+        fprintf(cf, "%s %llu %s %s\n", name, (unsigned long long)size, spot, hex);
+        fclose(cf);
+    }
+    return 0;
+}
+
 /* One NSP (a PFS0 archive): the add-on index of its content NCA, or -1. */
-static long aoc_nsp(const char *path) {
-    FILE *f = fopen(path, "rb");
+static long aoc_nsp(FILE *f) {
     if (!f) return -1;
     long found = -1;
     uint8_t head[16];
@@ -58,15 +115,11 @@ static long aoc_nsp(const char *path) {
                 memcpy(&off, table + i * 0x18, 8), memcpy(&size, table + i * 0x18 + 8, 8);
                 memcpy(&name_off, table + i * 0x18 + 16, 4);
                 const char *name = name_off < strtab ? names + name_off : "";
-                if (!ends_with(name, ".nca") || ends_with(name, ".cnmt.nca") || size > (16u << 20)) continue;
-                uint8_t *nca = malloc(size ? (size_t)size : 1);
+                if (!known_name(name) || size > (256u << 20)) continue;
                 char hex[65];
-                if (nca && !seek64(f, data + off) &&fread(nca, 1, (size_t)size, f) == size) {
-                    yw4_sha256_hex(nca, (size_t)size, hex);
+                if (!hash_nca(f, name, data + off, size, hex))
                     for (size_t k = 0; k < yw4_ndlc_known; k++)
                         if (!strcmp(hex, yw4_dlc_known[k].sha256)) found = yw4_dlc_known[k].index;
-                }
-                free(nca);
             }
         }
         free(table);
@@ -92,13 +145,45 @@ static void aoc_load(void) {
     }
     const char *dir = getenv("YW4_DLC_DIR");
     if (!dir || !*dir) dir = "work/dlc";
-    DIR *d = opendir(dir);
+    struct timespec t0, t1;
+    timespec_get(&t0, TIME_UTC);
     uint32_t files = 0, unknown = 0;
+#ifdef _WIN32
+    /* _wfindfirst64 / _wfopen: add-on NSPs often have Japanese titles in their file names, and UCRT's narrow
+     * readdir turns characters outside the active code page into '?' before fopen sees them. */
+    wchar_t wdir[1024], pat[1040];
+    size_t wn = mbstowcs(wdir, dir, 1024);
+    if (wn != (size_t)-1 && wn < 1024) {
+        swprintf(pat, 1040, L"%ls\\*", wdir);
+        struct _wfinddata64_t fd;
+        intptr_t h = _wfindfirst64(pat, &fd);
+        for (int more = h != -1; more; more = _wfindnext64(h, &fd) == 0) {
+            size_t len = wcslen(fd.name);
+            char name[512] = "";
+            for (size_t i = 0; i < len && i + 1 < sizeof name; i++)
+                name[i] = fd.name[i] < 128 ? (char)fd.name[i] : '?', name[i + 1] = 0;
+            if (!ends_with(name, ".nsp")) continue;
+            wchar_t wpath[1536];
+            swprintf(wpath, 1536, L"%ls\\%ls", wdir, fd.name);
+            long index = aoc_nsp(_wfopen(wpath, L"rb"));
+            files++;
+            if (index >= 0) {
+                aoc_add((uint32_t)index);
+                fprintf(stderr, "yw4: aoc: %s: add-on %ld\n", name, index);
+            } else {
+                unknown++;
+                fprintf(stderr, "yw4: aoc: %s is not a known add-on (left out)\n", name);
+            }
+        }
+        if (h != -1) _findclose(h);
+    }
+#else
+    DIR *d = opendir(dir);
     for (struct dirent *e; d && (e = readdir(d));) {
         if (!ends_with(e->d_name, ".nsp")) continue;
         char path[1024];
         snprintf(path, sizeof path, "%s/%s", dir, e->d_name);
-        long index = aoc_nsp(path);
+        long index = aoc_nsp(fopen(path, "rb"));
         files++;
         if (index >= 0) {
             aoc_add((uint32_t)index);
@@ -109,8 +194,18 @@ static void aoc_load(void) {
         }
     }
     if (d) closedir(d);
-    fprintf(stderr, "yw4: aoc: %u add-on content item(s) from %u file(s) in %s%s\n", naoc, files, dir,
-            unknown ? "; unknown files left out" : "");
+#endif
+    timespec_get(&t1, TIME_UTC);
+    fprintf(stderr, "yw4: aoc: %u add-on content item(s) from %u file(s) in %s%s (%.0f ms)\n", naoc, files, dir,
+            unknown ? "; unknown files left out" : "",
+            (double)(t1.tv_sec - t0.tv_sec) * 1e3 + (double)(t1.tv_nsec - t0.tv_nsec) / 1e6);
+}
+
+int aoc_owned(uint32_t index) {
+    aoc_load();
+    for (uint32_t i = 0; i < naoc; i++)
+        if (aoc[i] == index) return 1;
+    return 0;
 }
 
 void svc_aoc_u(Service *s, IpcRequest *req, IpcResponse *resp) {

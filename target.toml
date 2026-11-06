@@ -26,6 +26,7 @@ romfs_bytes = 9081468053  # the RomFS alone (4518 files): the launcher checks ex
 # 0x1000) = SHA-256 of the add-on's content NCA. That file is the same for every owner (its name is the start of
 # this hash); the NSP's ticket is not, so the whole NSP is never hashed. The versions are the latest ones.
 [dlc]
+"2" = "dae2b64bdbb7ff1d953d1d0da97aae2b2d27c7ff7c6ff0f007328781cd0d44e9"   # 010086C00AF7D002 v0
 "3" = "9d025c2abeac23134c0e35efb3baaa3410a4ba2b49b12877ebc1b638a9996cf3"   # 010086C00AF7D003 v0
 "4" = "0f01cb004b33b3d726f07a499a6876094b3c734d66fbc41a774bd7ada3f4d313"   # 010086C00AF7D004 v0
 "5" = "d0eaf5510810ea614d9c93128cccea3785663314e2c0c9f85d115462ef8b415b"   # 010086C00AF7D005 v0
@@ -37,3 +38,5 @@ romfs_bytes = 9081468053  # the RomFS alone (4518 files): the launcher checks ex
 "12" = "e15bec397a76be91bbd0337e54fa7eb642958e3640ad7821d6de15c18b6429ca"  # 010086C00AF7D00C v131072
 "13" = "d281d7f26b46f07427a855c0fba3e6301596c3a7aab48355696e306dcb6019f8"  # 010086C00AF7D00D v262144
 "14" = "6944fdb0fe9d5a5dfc19ccec087950530756141bf6307404967327b2516caab6"  # 010086C00AF7D00E v262144
+# The 4++ Upgrade Pack: its content NCA is 222 MiB, a RomFS holding the opening movie the game reads (decision 0056)
+"100" = "f6aca79790478db59b951d13ebe1400feebd6eec6d17d39f28b9d6b8a53172ab" # 010086C00AF7D064 v196608

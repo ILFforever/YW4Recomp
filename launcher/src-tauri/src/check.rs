@@ -145,9 +145,15 @@ pub fn folder_size(dir: &Path) -> (u64, u64) {
 fn dlc_index(path: &Path, t: &Target) -> Option<u32> {
     let (entries, _) = contents(path).ok()?;
     let mut f = File::open(path).ok()?;
-    for e in entries.iter().filter(|e| e.name.ends_with(".nca") && !e.name.ends_with(".cnmt.nca") && e.size < 16 << 20) {
-        let data = read_at(&mut f, e.offset, e.size as usize).ok()?;
-        let hex: String = Sha256::digest(&data).iter().map(|b| format!("{b:02x}")).collect();
+    for e in entries.iter().filter(|e| e.name.ends_with(".nca") && !e.name.ends_with(".cnmt.nca") && e.size <= 256 << 20) {
+        let prefix = e.name.strip_suffix(".nca")?.to_lowercase();
+        if !t.dlc.keys().any(|h| h.starts_with(&prefix)) {
+            continue;
+        }
+        f.seek(SeekFrom::Start(e.offset)).ok()?;
+        let mut h = Sha256::new();
+        std::io::copy(&mut (&mut f).take(e.size), &mut h).ok()?;
+        let hex: String = h.finalize().iter().map(|b| format!("{b:02x}")).collect();
         if let Some(&i) = t.dlc.get(&hex) {
             return Some(i);
         }

@@ -1,5 +1,5 @@
-/* SHA-256 (FIPS 180-4), only for the version lock: the runtime refuses any main that isn't
- * the build in target.toml (CLAUDE.md rule 3). */
+/* SHA-256 (FIPS 180-4), for the version lock: the runtime refuses any main that isn't
+ * the build in target.toml (CLAUDE.md rule 3); and for the add-on check (svc_misc.c, decision 0049). */
 #include <stdio.h>
 #include <string.h>
 
@@ -36,19 +36,44 @@ static void block(uint32_t h[8], const uint8_t *p) {
     h[0] += a; h[1] += b; h[2] += c; h[3] += d; h[4] += e; h[5] += f; h[6] += g; h[7] += k;
 }
 
-void yw4_sha256_hex(const uint8_t *data, size_t len, char out[65]) {
-    uint32_t h[8] = {0x6a09e667, 0xbb67ae85, 0x3c6ef372, 0xa54ff53a, 0x510e527f, 0x9b05688c, 0x1f83d9ab, 0x5be0cd19};
-    size_t i = 0;
-    for (; i + 64 <= len; i += 64) block(h, data + i);
+void yw4_sha256_init(Yw4Sha256 *c) {
+    static const uint32_t h0[8] = {0x6a09e667, 0xbb67ae85, 0x3c6ef372, 0xa54ff53a,
+                                   0x510e527f, 0x9b05688c, 0x1f83d9ab, 0x5be0cd19};
+    memcpy(c->h, h0, sizeof h0);
+    c->len = 0;
+}
+
+void yw4_sha256_update(Yw4Sha256 *c, const uint8_t *data, size_t len) {
+    size_t have = (size_t)(c->len % 64);
+    c->len += len;
+    if (have) {  /* fill the block left over from the last piece first */
+        size_t k = 64 - have < len ? 64 - have : len;
+        memcpy(c->buf + have, data, k);
+        data += k, len -= k;
+        if (have + k < 64) return;
+        block(c->h, c->buf);
+    }
+    for (; len >= 64; data += 64, len -= 64) block(c->h, data);
+    memcpy(c->buf, data, len);
+}
+
+void yw4_sha256_final_hex(Yw4Sha256 *c, char out[65]) {
     uint8_t tail[128] = {0};
-    size_t rest = len - i;
-    memcpy(tail, data + i, rest);
+    size_t rest = (size_t)(c->len % 64);
+    memcpy(tail, c->buf, rest);
     tail[rest] = 0x80;
     size_t tlen = rest + 1 + 8 <= 64 ? 64 : 128;
-    uint64_t bits = (uint64_t)len * 8;
+    uint64_t bits = c->len * 8;
     for (int k = 0; k < 8; k++) tail[tlen - 1 - k] = (uint8_t)(bits >> (8 * k));
-    block(h, tail);
-    if (tlen == 128) block(h, tail + 64);
-    for (int k = 0; k < 8; k++) sprintf(out + 8 * k, "%08x", h[k]);
+    block(c->h, tail);
+    if (tlen == 128) block(c->h, tail + 64);
+    for (int k = 0; k < 8; k++) sprintf(out + 8 * k, "%08x", c->h[k]);
     out[64] = 0;
+}
+
+void yw4_sha256_hex(const uint8_t *data, size_t len, char out[65]) {
+    Yw4Sha256 c;
+    yw4_sha256_init(&c);
+    yw4_sha256_update(&c, data, len);
+    yw4_sha256_final_hex(&c, out);
 }

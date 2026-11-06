@@ -231,6 +231,27 @@ fn copy_dlc(app: &AppHandle, plan: &Plan, inst: &Path) -> Result<(), String> {
     Ok(())
 }
 
+/// If data\dlc has a recognised add-on whose RomFS isn't in data\dlc-romfs\<index>\ yet (added after building),
+/// runs `python -m tools.yw4.extract --dlc-only` so the game can read it (decision 0056).
+pub fn ensure_dlc_extracted(app: &AppHandle, inst: &Path) {
+    let dlc = inst.join("data").join("dlc");
+    let romfs = inst.join("data").join("dlc-romfs");
+    let needed = std::fs::read_dir(&dlc).into_iter().flatten().flatten().map(|e| e.path()).any(|p| {
+        p.extension().map_or(false, |x| x.eq_ignore_ascii_case("nsp"))
+            && crate::check::dlc_index_of(&p).map_or(false, |i| !romfs.join(i.to_string()).is_dir())
+    });
+    let cfg = inst.join("config.toml");
+    if !needed || !cfg.is_file() { return; }
+    let b = builder(app, inst);
+    let mut cmd = Command::new(&b.python);
+    cmd.args(["-u", "-c", BOOT]).arg(&b.src).args(["tools.yw4.extract", "--dlc-only"]).current_dir(&b.src)
+        .env("YW4_CONFIG", &cfg).env("PYTHONIOENCODING", "utf-8");
+    if b.tools.is_some() { cmd.env("PYTHONPYCACHEPREFIX", inst.join("work").join("pycache")); }
+    #[cfg(windows)]
+    { use std::os::windows::process::CommandExt; cmd.creation_flags(0x0800_0000); }
+    let _ = cmd.status();
+}
+
 /// The whole build: the game code's own steps (tools.yw4.build_install, decision 0054), then the DLC copy. The
 /// launcher knows no step of the game's; a game update can change them.
 fn run_all(app: &AppHandle, run: &Running, plan: &Plan) -> Result<(), String> {
@@ -262,7 +283,7 @@ fn run_all(app: &AppHandle, run: &Running, plan: &Plan) -> Result<(), String> {
         return Err(e);
     }
     let _ = app.emit("build-step", StepEvent { id: "dlc".into(), state: "start".into() });
-    let r = copy_dlc(app, plan, &inst);
+    let r = copy_dlc(app, plan, &inst).and_then(|()| python(app, run, &b, &cfg, "tools.yw4.extract", &["--dlc-only".into()]));
     let _ = app.emit("build-step", StepEvent { id: "dlc".into(), state: if r.is_ok() { "done" } else { "failed" }.into() });
     if r.is_ok() && b.tools.is_some() {
         crate::update::drop_other_game_code(&inst, &b.src);  // older downloaded game code isn't needed any more

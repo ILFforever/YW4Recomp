@@ -97,5 +97,15 @@ void *yw4_host_data(void);
 
 /* SHA-256 of a buffer as 64 lowercase hex digits + NUL. */
 void yw4_sha256_hex(const uint8_t *data, size_t len, char out[65]);
+/* The same in pieces, for files too big to hold at once (add-on NCAs, svc_misc.c): init, update with each chunk
+ * in order, then final writes the hex digest. */
+typedef struct {
+    uint32_t h[8];
+    uint64_t len;     /* bytes so far */
+    uint8_t buf[64];  /* the start of a block not yet full */
+} Yw4Sha256;
+void yw4_sha256_init(Yw4Sha256 *c);
+void yw4_sha256_update(Yw4Sha256 *c, const uint8_t *data, size_t len);
+void yw4_sha256_final_hex(Yw4Sha256 *c, char out[65]);
 
 #endif

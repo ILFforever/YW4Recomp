@@ -165,8 +165,8 @@ def game_ini(cfg: config.Config, saves: str) -> None:
     (cfg.work_dir / "build" / "game.ini").write_text(
         "# Written by the YW4 Recomp launcher: how yw4.exe runs on its own (decision 0050).\n"
         f"YW4_EXEFS=../exefs\nYW4_ROMFS=../../data/romfs\nYW4_SAVE={save}\nYW4_SETTINGS_FILE={settings}\n"
-        "YW4_DLC_DIR=../../data/dlc\nYW4_MODS=../../mods\nYW4_SCREENSHOT_DIR=../../screenshots\n"
-        "YW4_LOG_DIR=../../logs\nYW4_PERF_DIR=../../logs\nYW4_RECORD=0\n")
+        "YW4_DLC_DIR=../../data/dlc\nYW4_DLCROMFS_DIR=../../data/dlc-romfs\nYW4_MODS=../../mods\n"
+        "YW4_SCREENSHOT_DIR=../../screenshots\nYW4_LOG_DIR=../../logs\nYW4_PERF_DIR=../../logs\nYW4_RECORD=0\n")
 
 
 class Previous:

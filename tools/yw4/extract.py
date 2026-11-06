@@ -28,6 +28,7 @@ Why the steps look like this:
 from __future__ import annotations
 
 import argparse
+import hashlib
 import os
 import re
 import shutil
@@ -147,13 +148,80 @@ def find_programs(hactool: Path, home: Path, ncas: list[Path], app_id: int) -> t
     return found.get("base"), found.get("update")
 
 
+def extract_dlc(cfg: config.Config) -> int:
+    """Extract each recognised add-on's RomFS into <romfs_dir>/../dlc-romfs/<index>/ (decision 0056)."""
+    if not cfg.dlc_dir or not cfg.dlc_dir.is_dir():
+        return 0
+    if cfg.hactool_exe is None or not cfg.hactool_exe.is_file():
+        return 0
+    if cfg.keys_dir is None or not (cfg.keys_dir / "prod.keys").is_file():
+        return 0
+    known = {h.lower(): i for i, h in tomllib.loads(TARGET.read_text()).get("dlc", {}).items()}
+    prefixes = {h[:32] for h in known}
+    out_root = cfg.romfs_dir.parent / "dlc-romfs"
+    done = 0
+    with tempfile.TemporaryDirectory() as tmp:
+        tdir = Path(tmp)
+        for nsp in sorted(cfg.dlc_dir.glob("*.nsp")):
+            try:
+                with nsp.open("rb") as f:
+                    entries = pfs0.read_entries(f)
+                    rids = {e.name[:-4].lower() for e in entries if e.name.endswith(".tik")}
+                    for e in entries:
+                        if not e.name.endswith(".nca") or e.name.endswith(".cnmt.nca") or e.size > (256 << 20):
+                            continue
+                        if e.name[:-4].lower() not in prefixes:
+                            continue
+                        f.seek(e.offset)
+                        sha = hashlib.sha256()
+                        left = e.size
+                        while left:
+                            chunk = f.read(min(left, 1 << 20))
+                            if not chunk:
+                                break
+                            sha.update(chunk)
+                            left -= len(chunk)
+                        idx = known.get(sha.hexdigest())
+                        if idx is None:
+                            continue
+                        dest_dir = out_root / idx
+                        if dest_dir.is_dir() and any(dest_dir.iterdir()):
+                            done += 1
+                            continue
+                        home = tdir / f"home_{idx}"
+                        home.mkdir(exist_ok=True)
+                        try:
+                            write_temp_keys(cfg.keys_dir, rids, home)
+                        except ExtractError as ex:
+                            print(f"dlc {idx} ({nsp.name}): skipped ({ex})")
+                            continue
+                        nca_path = tdir / e.name
+                        pfs0.extract(f, e, nca_path)
+                        stage = tdir / f"romfs_{idx}"
+                        run_hactool(cfg.hactool_exe, home, [f"--romfsdir={stage}", str(nca_path)])
+                        nca_path.unlink(missing_ok=True)
+                        if stage.is_dir() and any(stage.iterdir()):
+                            shutil.rmtree(dest_dir, ignore_errors=True)
+                            out_root.mkdir(parents=True, exist_ok=True)
+                            shutil.move(str(stage), str(dest_dir))
+                            print(f"dlc {idx}: extracted RomFS to {dest_dir}")
+                            done += 1
+            except (ExtractError, pfs0.Pfs0Error, OSError) as ex:
+                print(f"dlc ({nsp.name}): {ex}", file=sys.stderr)
+    return done
+
+
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--keep-nca", action="store_true", help="keep the unpacked NCAs in work/nca/")
+    ap.add_argument("--dlc-only", action="store_true", help="extract recognised DLC RomFS folders only")
     args = ap.parse_args(argv)
 
     try:
         cfg = config.load(require_exefs=False)
+        if args.dlc_only:
+            extract_dlc(cfg)
+            return 0
         for name in ("base_nsp", "hactool_exe"):
             if getattr(cfg, name) is None or not getattr(cfg, name).is_file():
                 raise config.ConfigError(f"{name} is not set or not a file")
@@ -209,6 +277,7 @@ def main(argv: list[str] | None = None) -> int:
             except (icon.IconError, ExtractError) as e:
                 print(f"icon: none ({e})")
             progress.report("icon", 1, 1)
+            extract_dlc(cfg)
     except (ExtractError, pfs0.Pfs0Error, xci.XciError) as e:
         print(f"extract failed: {e}", file=sys.stderr)
         return 1

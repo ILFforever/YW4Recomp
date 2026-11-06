@@ -40,9 +40,12 @@ class Config:
     dlc_dir: Path | None = None
 
     def dlc_env(self) -> dict[str, str]:
-        """Where the game looks for the owner's DLC on boot (decision 0049): YW4_DLC_DIR = [input] dlc_dir, when
-        set. The game checks each NSP itself (its content NCA's hash against target.toml [dlc])."""
-        return {"YW4_DLC_DIR": str(self.dlc_dir)} if self.dlc_dir and self.dlc_dir.is_dir() else {}
+        """Where the game looks for the owner's DLC on boot (decision 0049) and its extracted RomFS folders
+        (decision 0056): YW4_DLC_DIR = [input] dlc_dir, YW4_DLCROMFS_DIR = <romfs_dir>/../dlc-romfs."""
+        env = {"YW4_DLCROMFS_DIR": str(self.romfs_dir.parent / "dlc-romfs")}
+        if self.dlc_dir and self.dlc_dir.is_dir():
+            env["YW4_DLC_DIR"] = str(self.dlc_dir)
+        return env
 
 
 def _resolve(value: str) -> Path:

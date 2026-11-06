@@ -195,21 +195,31 @@ static void apply_mods(Dir *root) {
     }
 }
 
-/* Table order: a directory's files, then its subdirectories, then each subdirectory's. */
-static Dir **dirs;
-static File **files;
-static int ndirs, nfiles, cap_dirs, cap_files;
+/* One image: the flat tables below, its header (0..0x200), file data, then `tables` (from tables_off). The game's
+ * RomFS is one; each add-on's is another (fsp-srv OpenDataStorageByDataId, decision 0056). */
+struct RomfsImage {
+    /* Table order: a directory's files, then its subdirectories, then each subdirectory's. */
+    Dir **dirs;
+    File **files;
+    int ndirs, nfiles, cap_dirs, cap_files;
+    uint8_t header[DATA_START];
+    uint8_t *tables;
+    uint64_t tables_off, tables_size, image_size, data_size;
+};
+static RomfsImage game;
 
-static void flatten(Dir *d) {
+static void flatten(RomfsImage *m, Dir *d) {
     for (int i = 0; i < d->nfiles; i++) {
-        if (nfiles == cap_files) files = realloc(files, sizeof *files * (size_t)(cap_files = cap_files ? 2 * cap_files : 256));
-        files[nfiles++] = d->files[i];
+        if (m->nfiles == m->cap_files)
+            m->files = realloc(m->files, sizeof *m->files * (size_t)(m->cap_files = m->cap_files ? 2 * m->cap_files : 256));
+        m->files[m->nfiles++] = d->files[i];
     }
     for (int i = 0; i < d->ndirs; i++) {
-        if (ndirs == cap_dirs) dirs = realloc(dirs, sizeof *dirs * (size_t)(cap_dirs = cap_dirs ? 2 * cap_dirs : 64));
-        dirs[ndirs++] = d->dirs[i];
+        if (m->ndirs == m->cap_dirs)
+            m->dirs = realloc(m->dirs, sizeof *m->dirs * (size_t)(m->cap_dirs = m->cap_dirs ? 2 * m->cap_dirs : 64));
+        m->dirs[m->ndirs++] = d->dirs[i];
     }
-    for (int i = 0; i < d->ndirs; i++) flatten(d->dirs[i]);
+    for (int i = 0; i < d->ndirs; i++) flatten(m, d->dirs[i]);
 }
 
 /* The RomFS name hash and bucket count, as the game's RomFS code computes them. */
@@ -230,36 +240,29 @@ static uint32_t align4(uint32_t x) { return (x + 3) & ~3u; }
 static void put32(uint8_t *p, uint32_t v) { memcpy(p, &v, 4); }
 static void put64(uint8_t *p, uint64_t v) { memcpy(p, &v, 8); }
 
-/* The image: header (0..0x200), file data, then `tables` (from tables_off). */
-static uint8_t header[DATA_START];
-static uint8_t *tables;
-static uint64_t tables_off, tables_size, image_size, data_size;
-
-int romfs_open(const char *dir) {
-    Dir *root = scan(dir, "", NULL, 0);
-    if (!root) {
-        fprintf(stderr, "yw4: cannot read the RomFS folder %s\n", dir);
-        return -1;
-    }
-    apply_mods(root);
-    dirs = realloc(dirs, sizeof *dirs * (size_t)(cap_dirs = 64));
-    dirs[ndirs++] = root;
-    flatten(root);
+/* The tables and header of the image of `root` (scanned from `dir`). */
+static void build(RomfsImage *m, Dir *root, const char *dir) {
+    m->dirs = realloc(m->dirs, sizeof *m->dirs * (size_t)(m->cap_dirs = 64));
+    m->dirs[m->ndirs++] = root;
+    flatten(m, root);
+    Dir **dirs = m->dirs;
+    File **files = m->files;
+    int ndirs = m->ndirs, nfiles = m->nfiles;
 
     uint32_t dsize = 0, fsize = 0;
     for (int i = 0; i < ndirs; i++) dirs[i]->entry = dsize, dsize += 0x18 + align4((uint32_t)strlen(dirs[i]->name));
     for (int i = 0; i < nfiles; i++) files[i]->entry = fsize, fsize += 0x20 + align4((uint32_t)strlen(files[i]->name));
     for (int i = 0; i < nfiles; i++) {
-        data_size = (data_size + 15) & ~15ull;
-        files[i]->data_off = data_size;
-        data_size += files[i]->size;
+        m->data_size = (m->data_size + 15) & ~15ull;
+        files[i]->data_off = m->data_size;
+        m->data_size += files[i]->size;
     }
 
     uint32_t nbd = bucket_count((uint32_t)ndirs), nbf = bucket_count((uint32_t)nfiles);
-    tables_off = (DATA_START + data_size + 3) & ~3ull;
+    m->tables_off = (DATA_START + m->data_size + 3) & ~3ull;
     uint64_t dhash = 0, dmeta = 4ull * nbd, fhash = dmeta + dsize, fmeta = fhash + 4ull * nbf;
-    tables_size = fmeta + fsize;
-    tables = malloc(tables_size);
+    m->tables_size = fmeta + fsize;
+    uint8_t *tables = m->tables = malloc(m->tables_size);
     if (!tables) exit(3);
     for (uint32_t i = 0; i < nbd; i++) put32(tables + dhash + 4 * i, EMPTY);
     for (uint32_t i = 0; i < nbf; i++) put32(tables + fhash + 4 * i, EMPTY);
@@ -300,16 +303,36 @@ int romfs_open(const char *dir) {
         put32(bucket, f->entry);
     }
 
-    uint64_t hv[10] = {0x50, tables_off + dhash, 4ull * nbd, tables_off + dmeta, dsize,
-                       tables_off + fhash, 4ull * nbf, tables_off + fmeta, fsize, DATA_START};
-    memcpy(header, hv, sizeof hv);
-    image_size = tables_off + tables_size;
+    uint64_t hv[10] = {0x50, m->tables_off + dhash, 4ull * nbd, m->tables_off + dmeta, dsize,
+                       m->tables_off + fhash, 4ull * nbf, m->tables_off + fmeta, fsize, DATA_START};
+    memcpy(m->header, hv, sizeof hv);
+    m->image_size = m->tables_off + m->tables_size;
     fprintf(stderr, "yw4: RomFS: %d files, %d directories, %.1f GiB of data (from %s)\n", nfiles, ndirs - 1,
-            (double)data_size / (1 << 30), dir);
+            (double)m->data_size / (1 << 30), dir);
+}
+
+int romfs_open(const char *dir) {
+    Dir *root = scan(dir, "", NULL, 0);
+    if (!root) {
+        fprintf(stderr, "yw4: cannot read the RomFS folder %s\n", dir);
+        return -1;
+    }
+    apply_mods(root);
+    build(&game, root, dir);
     return 0;
 }
 
-uint64_t romfs_size(void) { return image_size; }
+RomfsImage *romfs_image_open(const char *dir) {
+    Dir *root = scan(dir, "", NULL, 0);
+    if (!root) return NULL;
+    RomfsImage *m = calloc(1, sizeof *m);
+    if (!m) exit(3);
+    build(m, root, dir);
+    return m;
+}
+
+uint64_t romfs_size(void) { return game.image_size; }
+uint64_t romfs_image_size(const RomfsImage *m) { return m->image_size; }
 
 /* A few open files: reads come in long runs from the same file. */
 #define OPEN_FILES 32
@@ -353,8 +376,12 @@ static int read_file_part(const File *f, uint64_t at, uint8_t *out, uint64_t n) 
     return 0;
 }
 
-int romfs_read(uint64_t offset, void *out_, uint64_t size) {
+int romfs_image_read(RomfsImage *m, uint64_t offset, void *out_, uint64_t size) {
     uint8_t *out = out_;
+    const uint8_t *header = m->header, *tables = m->tables;
+    File *const *files = m->files;
+    int nfiles = m->nfiles;
+    uint64_t image_size = m->image_size, tables_off = m->tables_off;
     if (offset > image_size || size > image_size - offset) return -1;
     while (size) {
         uint64_t n;
@@ -398,3 +425,5 @@ int romfs_read(uint64_t offset, void *out_, uint64_t size) {
     }
     return 0;
 }
+
+int romfs_read(uint64_t offset, void *out, uint64_t size) { return romfs_image_read(&game, offset, out, size); }

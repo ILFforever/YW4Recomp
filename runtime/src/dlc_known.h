@@ -11,3 +11,6 @@ typedef struct {
 
 extern const Yw4DlcKnown yw4_dlc_known[];
 extern const size_t yw4_ndlc_known;
+
+/* 1 if the game owns add-on `index` (found on boot or in YW4_AOC; svc_misc.c). */
+int aoc_owned(uint32_t index);

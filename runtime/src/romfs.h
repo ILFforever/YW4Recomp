@@ -17,4 +17,11 @@ uint64_t romfs_size(void);
 /* Reads [offset, offset + size) of the image; returns 0, or -1 on a host read error. */
 int romfs_read(uint64_t offset, void *out, uint64_t size);
 
+/* Another image built the same way, without mods: an add-on's RomFS (fsp-srv OpenDataStorageByDataId, decision
+ * 0056). NULL if `dir` can't be read. */
+typedef struct RomfsImage RomfsImage;
+RomfsImage *romfs_image_open(const char *dir);
+uint64_t romfs_image_size(const RomfsImage *m);
+int romfs_image_read(RomfsImage *m, uint64_t offset, void *out, uint64_t size);
+
 #endif
