@@ -91,6 +91,8 @@ def load(path: Path = CONFIG_PATH, require_exefs: bool = True) -> Config:
 
     for name in ("exefs_dir", "romfs_dir"):
         d = getattr(cfg, name)
+        if not require_exefs and not d.exists():
+            d.mkdir(parents=True)  # a clean PC has no folders yet: the extract step fills them
         if not d.is_dir():
             raise ConfigError(f"[input] {name} does not exist or is not a folder: {d}")
     if require_exefs and not (cfg.exefs_dir / "main").is_file():
