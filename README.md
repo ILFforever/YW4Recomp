@@ -395,13 +395,18 @@ get yours from [GameBanana](https://gamebanana.com/mods/480884)):
 **Settings**
 
 <details>
-<summary><b>In-game overlay</b>: pause for settings, controls, the HUD, screenshots and quitting (Escape)</summary>
+<summary><b>In-game overlay</b>: a PC menu over the game, like Steam's overlay, with full mouse and keyboard (Escape)</summary>
 
-Press **Escape** to pause and open the overlay. On a controller: the **touchpad** on PlayStation, **Share** on Xbox
+A menu of the PC version's own, drawn over the game the way the Steam overlay is: it's not part of the Switch game,
+so it works the way a PC game's menus do. **Point and click with the mouse** (hover, click, drag the sliders,
+right-click to go back), use the keyboard, or a controller; the button hints change to match. Press **Escape** to
+pause and open it. On a controller: the **touchpad** on PlayStation, **Share** on Xbox
 Series, **Capture** on a Switch Pro controller, or **Back + Start** together on any controller. The game pauses the
 way its own pause does (the whole world stops), without its pause screen. From the side panel:
 
-- **Settings**: every option of the settings panel, by section, with what each choice means.
+- **Settings**: every option of the settings panel, by section, with what each choice means. **Preview** (P, or Y /
+  △) lets the game run again with a bar at the bottom holding that section's settings, so you see each change live
+  and what it does to the frame rate; Escape pauses again.
 - **Controls**: the keys and controller buttons for every Switch button. Choose one, then press the new key or button.
 - **Overlay**: the performance HUD off, compact (the frame rate only) or detailed, which corner it sits in, its size and opacity, and
   what the detailed one shows.
@@ -413,7 +418,26 @@ panel it goes back to the game, as Resume does. The mouse works too: hover to ch
 slider, right-click to go back. The key hints follow whatever you used last. On a DualSense the **mic button**
 shows or hides the performance HUD.
 
-![The in-game overlay: Settings with the display options; Controls with a DualSense; Performance: the HUD detailed, top right, with a live preview; Exit game asks first](docs/screenshots/97-overlay.jpg)
+![The in-game overlay: Settings with the display options; Preview: the game running under a bar with the shadow settings; Controls with a DualSense's buttons; Overlay: the detailed performance HUD with a live preview](docs/screenshots/97-overlay.jpg)
+
+**Themes:** Settings › Look › Theme gives the overlay and the performance HUD the colours of a Yo-kai, the same
+themes as the launcher's (a theme file added to the launcher's themes folder shows up in both).
+
+![Overlay themes: Jibanyan, Komasan, Shmoopie and Whisper](docs/screenshots/98-overlay-themes.jpg)
+
+</details>
+
+<details>
+<summary><b>Launcher</b>: your game files in, the game built and started, with mods, DLC, saves and screenshots</summary>
+
+The launcher takes your game files (NSP, XCI or extracted folders), checks them, builds the game on your PC once
+(about 10 to 15 minutes) and starts it. After that it opens on **Play**, with what's new, your screenshots, mods,
+DLC, saves and logs. Its settings choose what happens when the game starts, where saves are kept, shortcuts and
+updates. It has the same themes as the in-game overlay.
+
+![The launcher: the first start with the welcome popup; your game files; Play with what's new; Settings](docs/screenshots/99-launcher.jpg)
+
+![Launcher themes: Jibanyan and Whisper](docs/screenshots/99-launcher-themes.jpg)
 
 </details>
 
@@ -499,7 +523,7 @@ shadows here are our own pass with no graphical improvements applied (SHADOW PAS
 | **Better shadows** | Bigger shadow maps, PCSS soft shadows and contact shadows done; steadier cascades next |
 | **Better anti-aliasing** | FXAA, SMAA and TAA (steady thin edges: fences, nets, leaves) on the 3D scene before the UI is drawn, so text stays crisp; per-object motion for TAA next (a first version is in, off by default) |
 | **Keyboard, mouse and controllers** | Bindings on the panel's CONTROLS page, saved, with separate keys for battles and your controller's own button names; tested with a DualSense. On-screen button icons follow what you play with and your bindings (keyboard, Xbox, PlayStation or Nintendo, [decision 0042](docs/decisions/0042-button-icons-and-mouse.md)). The mouse turns the camera through the game's own unused mouse code. Pointing and clicking in menus has started: the Yo-kai Pad's icon grid works, other menus not yet |
-| **In-game overlay** | Escape or a controller button pauses the game and opens a side panel: settings, controls, the performance HUD's options, screenshots and exit, drawn like its design ([decision 0053](docs/decisions/0053-in-game-overlay.md)). Next: testing on more controllers |
+| **In-game overlay** | Escape or a controller button pauses the game and opens a side panel: settings, controls, the performance HUD's options, screenshots and exit, drawn like its design ([decision 0053](docs/decisions/0053-in-game-overlay.md)); Preview shows graphics changes live, and themes match the launcher's ([decision 0055](docs/decisions/0055-overlay-themes.md)). Next: testing on more controllers |
 | **Launcher** | A Windows app that takes your game files, checks them, builds the game and starts it, with mods, DLC, saves and screenshots in one place. Works from start to finish on the developer's PC, but it still needs this repo's tools, so for now [build from source](#building-from-source). Next: an installer and a portable zip ([decision 0052](docs/decisions/0052-launcher-packaging.md)), then a test on a clean PC |
 
 </details>
