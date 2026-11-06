@@ -434,7 +434,7 @@ closes (a theme file added to the launcher's themes folder shows up in both).
 The launcher takes your game files (NSP, XCI or extracted folders), checks them, builds the game on your PC once
 (about 10 to 15 minutes) and starts it. After that it opens on **Play**, with what's new, your screenshots, mods,
 DLC, saves and logs. Its settings choose what happens when the game starts, where saves are kept, shortcuts and
-updates. Its theme is synced with the in-game overlay's.
+updates. Its theme is synced with the in-game overlay's. Every step and screen: [the launcher's page](https://ilfforever.github.io/YW4Recomp/launcher/).
 
 ![The launcher: the first start with the welcome popup; your game files; Play with what's new; Settings](docs/screenshots/99-launcher.jpg)
 
