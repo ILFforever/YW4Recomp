@@ -1,14 +1,16 @@
 # 0054 — Game updates and launcher updates, each on its own
 <!-- decision
-state: plan
+state: accepted
 date: 2026-11-05
 replaces: 0052 (part)
 code: launcher/VERSION, launcher/package.py, launcher/src-tauri/src/buildrun.rs, tools/yw4/build_install.py
 -->
 
-Status: **accepted** (2026-11-05, the owner's answers below). Built so far: the launcher's own number (0.5.0) and
-the build steps in the game code with the old game kept during an update (`tools/yw4/build_install.py`). Not yet:
-the game zip, the update check and the Play screen band. Changes decision
+Status: **accepted** (2026-11-05, the owner's answers below). **Built** (2026-11-05, tested end to end with a fake
+0.7.1 game update and a fake launcher 0.6.0 on a test install): the launcher's own number, the build steps in the
+game code with the old game kept during an update (`tools/yw4/build_install.py`), the game zip (`package.py game`),
+the update check (`update.rs`). The Play screen band became a popup with the release's change log (owner). Not yet:
+a real public release (game v0.8.0 and launcher-v0.6.0; the owner's call). Changes decision
 0052 (the game's build code no longer lives only inside the launcher's installer) and carries out decision 0047's
 "the launcher has its own number".
 

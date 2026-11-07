@@ -3,16 +3,30 @@
 How the recompiled game got where it is. Newest first. Numbers in brackets are the decision records in
 [decisions/](decisions/) that explain each step.
 
-**Current state (2026-10-27):** playable from boot through a new game (logos, title menu, name entry, the opening
-cutscenes, the Amano house and town, Yo-kai Pad menus, diary and autosave) and from late-game saves (towns at night,
-the bamboo forest, the Yo-kai World), at the game's 30 frames/s in most places tested, with sound. Our own renderer
-draws the shadow casters, the G-buffer and the lit material pass from the game's data; the 3D view renders at up to
-4K, with sharper textures, better shadows and anti-aliasing, all in a settings panel (F1). Open gaps are in
-[known-issues.md](known-issues.md).
+**Current state (2026-11-08):** game 0.8.0, launcher 0.6.0. Playable from boot through a new game and from
+late-game saves, at 30 to 144 frames/s or unlimited (the game is variable-timestep), with sound, the English patch
+as a mod and the 4++ Upgrade Pack's content. Our own renderer draws the shadow casters, the shadow mask, the
+G-buffer, the lit material pass, bloom, distance blur and the screen passes; the 3D view renders at up to 4K or
+ultrawide, with FSR or DLSS upscaling and frame generation. Settings, controls, the performance HUD and bug reports
+live in an in-game overlay (Escape) that pauses the game. A launcher (Windows) checks the player's files, builds
+the game on their PC, updates it and starts it. Open gaps are in [known-issues.md](known-issues.md).
 
 | Date | Step | Result |
 |---|---|---|
+| 2026-11-08 | F1, F2 and F3 open the overlay's Settings, Controls and Overlay pages; LEGACY MENUS (the old panels) off by default; the launcher's fonts ship with it | One menu for everything; the launcher looks the same offline |
+| 2026-11-07 | DLC content: the 4++ Upgrade Pack's RomFS extracted at build time and served on `fsp-srv` 202 (0056); the launcher asks for `prod.keys` only for that pack | **The "4++" title logo, opening movie and its quests** |
+| 2026-11-06 | Typing in the overlay (keyboard, paste, IME); name entry and Lambert Post codes in a popup over the game, an on-screen keyboard for controllers; Report a bug (a zip and a prefilled GitHub form); the launcher offers a report after a crash | **New saves get the player's own name**; bugs reported from inside the game |
+| 2026-11-06 | Overlay: Preview (the game runs under a bar of graphics settings), the launcher's themes in the overlay and HUD (0055), full mouse and repeat-on-hold controls; HUD redrawn 4 times a second from cached letters (0.27 → 0.09 ms) | Settings changes visible live |
+| 2026-11-05 | The in-game overlay (0053): the game's own pause with its screen hidden, a side panel drawn on the CPU from its design; Settings, Controls, Overlay (HUD), Exit | **A PC menu over the paused game** |
+| 2026-11-05 | Launcher packaging (0052): an installer and a zip, Python and tools bundled, the compiler fetched on the first build; game and launcher updates apart (0054); Settings, Help, Uninstall | **A game build on a clean PC from one download** (tested on a second PC) |
+| 2026-11-03 – 04 | The launcher (Tauri, 0050): Home, Where is your game, Check, Options, Build, Ready; versions (0047); the exe finds its files from anywhere (0048); DLC found and checked on boot (0049); translation without Ghidra (0051) | The game builds from the launcher in ~6 minutes |
+| 2026-11-04 | Shadows: the game copies each layer to a second map; our pass now runs before that, so cutscenes use our pass again; a stale sampler slot after menus fixed; mouse in the Yo-kai Pad (prototype) | No flicker in cutscenes or after menus |
+| 2026-11-02 | Screen passes: our programs in the engine's 11 screen-space draws (0046); hitches: images in shared blocks, textures de-tiled on the GPU, unused images freed a few a frame; DLSS preset K; no hitch when a menu closes with DLSS frame generation | Area-load hitch 180 → under 50 ms; menu hitch ~190 ms → gone |
+| 2026-11-01 | HUD drawn with a TrueType font and a scale slider; cutscenes' character shadows | |
 | 2026-11-01 | Contact shadows in our own shadow mask program: a short march toward the sun across the depth, on by default, a row in the settings panel (0045) | **Small shadows the shadow map is too coarse for**: under taps, balconies and awnings, inside hedges. Screen space only; the earlier try's ring of dots is gone |
+| 2026-10-30 – 31 | Our shadow mask program (0044) with two speed-ups; button icons that follow the device, mouse camera and sensitivity (0042); mods as LayeredFS, the English patch runs (0043); replays repeat exactly (a frame clock) | **English text**; keyboard and mouse play |
+| 2026-10-29 | Frame rate 30 / 60 / 120 / 144 / unlimited, live; AMD FSR (0039) and NVIDIA DLSS (0040) upscaling; frame generation with FSR or DLSS, and Reflex (0041); short sleeps no longer oversleep | Busy spot 61 → 77 frames/s; DLSS quality 81, performance 112 frames/s at 4K |
+| 2026-10-28 | Our own bloom (0037) and distance blur (0038) passes, identical to the game's; PCSS one blocker search per pixel (shadow mask 14.2 → 7.6 ms at 4K 21:9); native skeleton matrices (0036); CPU target and register caching tried (0034, 0035) | Main thread 15% faster, bit-identical |
 | 2026-10-28 | Widescreen in battles: the battle's opening zoom renders at sizes between 1600×900 and 1920×1080; they are now widened (at the game's resolution: at 4K they ran out of video memory) (0033) | **No swirl left at the sides** when a battle starts |
 | 2026-10-28 | Widescreen: UI layers over the whole screen found from the vertex program's position (written by the shader translator) and the draw's corners; one-colour layers stretched, 16:9 pictures kept in the middle with black bars (0033) | **Dialog dimming and the loading screen reach the sides** (loading screen checked at 16:10, 21:9 and 32:9; dimming at 21:9); map backdrops get black sides |
 | 2026-10-27 | Model detail at a distance: the engine's level-of-detail class (`gmdCObjModelLodInfo`) found, but never set up in the town, the bamboo forest or the Yo-kai World ([frame.md](frame.md)) | Nothing to push further there; the distance drop-off was the blur and the filtering (above) |
