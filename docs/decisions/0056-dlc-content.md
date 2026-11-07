@@ -46,9 +46,11 @@ the unimplemented IPC command.
     Upgrade Pack) need only `prod.keys`; ticket-encrypted add-ons whose title key is absent from `title.keys` are
     skipped with a note (the game never opens the small add-ons' RomFS).
   - Run `extract_dlc` during `python -m tools.yw4.extract`, during the launcher's DLC step (`copy_dlc` in `buildrun.rs`,
-    after copying checked NSPs into `data/dlc`), and before starting the game in `ready.rs` (`play`) whenever a
-    recognised NSP in `data/dlc` does not yet have its `data/dlc-romfs/<index>/` folder extracted. That keeps the
-    launcher's promise that players can drop DLC into `data/dlc` later without rebuilding.
+    after copying checked NSPs into `data/dlc`), and in `ready.rs` (`install_info` and `play`) whenever the 4++ Upgrade
+    Pack NSP is in `data/dlc` without `data/dlc-romfs/100/` unpacked yet. If `data/dlc-romfs/100/` is still missing
+    (for instance after an "Extracted folders" setup with no `prod.keys`), the Ready screen's DLC tab shows a
+    **Choose prod.keys…** banner (`set_dlc_keys` in `ready.rs`, `save_keys_dir` in `buildrun.rs`) that saves `keys_dir`
+    to `config.toml` and unpacks the pack on the spot.
   - `game.ini` (`tools/yw4/build_install.py`) and `cfg.dlc_env()` (`tools/yw4/config.py`) set `YW4_DLCROMFS_DIR` to
     `<romfs_dir>/../dlc-romfs` (`../../data/dlc-romfs` in an install).
 - **Serving add-on RomFS at run time (`runtime/src/romfs.c`, `runtime/src/svc_fs.c`)**:

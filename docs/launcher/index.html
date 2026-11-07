@@ -65,7 +65,7 @@ kbd { font: 700 .82em/1 var(--display); background: var(--lilac-1); border: 1px 
 .btn.ghost:hover { color: var(--gold); background: oklch(80% 0.12 85 / .12); }
 .shot { background: var(--gold); border-radius: var(--r); padding: 8px; box-shadow: 0 18px 40px oklch(15% 0.08 295 / .5); margin: 0; }
 .shot img { display: block; width: 100%; height: auto; border-radius: 8px; }
-.shot figcaption { color: var(--ink-2); font-size: .8rem; margin: 8px 6px 2px; }
+.shot figcaption { color: var(--violet-deep); font-size: .8rem; margin: 8px 6px 2px; }
 
 .shell { max-width: 1280px; margin: 0 auto; padding: 40px 20px 72px; display: grid; grid-template-columns: 236px minmax(0, 1fr); gap: 40px; align-items: start; }
 .shell > * { min-width: 0; }
@@ -96,6 +96,7 @@ article { background: var(--white); border-radius: var(--r); border: 1px solid v
 .spec dd { font-weight: 700; }
 .spec dt:last-of-type, .spec dd:last-of-type { border-bottom: 0; }
 .whole { margin: 0; }
+.whole + .whole { margin-top: 14px; }
 .whole img { display: block; width: 100%; height: auto; border-radius: 10px; border: 1px solid var(--lilac-2); }
 .whole figcaption { margin: 6px 2px 0; font-size: var(--step--1); color: var(--ink-2); }
 .pair { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 320px), 1fr)); gap: 14px; }
@@ -129,14 +130,14 @@ footer a { color: var(--gold); }
       <span class="eyebrow">YW4 Recomp · fan PC port</span>
       <h1>The launcher</h1>
       <p>A Windows app for the PC version of <i>Yo-kai Watch 4++</i>. Point it at your own game files: it checks them,
-        builds the game on your PC once and starts it, with mods, DLC, saves and screenshots in one place.</p>
+        builds YW4Recomp on your PC once and starts it, with mods, DLC, saves and screenshots all in one place.</p>
       <div class="stats">
         <div class="stat"><b>5 steps</b><span>game files, check, options, build, play</span></div>
         <div class="stat"><b>10–15 min</b><span>to build the game, once, on your PC</span></div>
         <div class="stat"><b>11 themes</b><span>synced with the in-game overlay</span></div>
       </div>
       <div class="links">
-        <a class="btn ghost" href="../">Home</a>
+        <a class="btn" href="../">Home</a>
         <a class="btn ghost" href="../compare/">Comparisons</a>
         <a class="btn ghost" href="https://github.com/ILFforever/YW4Recomp">Project on GitHub</a>
       </div>
@@ -168,14 +169,15 @@ footer a { color: var(--gold); }
       <div class="body">
         <div class="top">
           <div class="prose">
-            <p>The first time, a welcome popup says what's going to happen:</p>
+            <p>Follow the steps below to build your own copy of YW4Recomp:</p>
             <ol class="steps">
               <li><span><b>Point it at your game files.</b> NSP, XCI or extracted folders of version 2.2.0.</span></li>
-              <li><span><b>It checks and builds the game.</b> On this PC, once: about 10 to 15 minutes.</span></li>
+              <li><span><b>It checks, extracts and builds the game.</b> locally, once: about 10 to 15 minutes.</span></li>
               <li><span><b>Play.</b> From the launcher, or from a shortcut.</span></li>
             </ol>
-            <p>Next to it the launcher lists what you need before you start: the game and its 2.2.0 update, the keys
-              for NSP and XCI files, a graphics card with Vulkan 1.3, and the free disk space.</p>
+            <p>What you need before you start: the game and its 2.2.0 update, the keys
+              for NSP and XCI files, a graphics card with Vulkan 1.3, and the free disk space. 
+              The launcher checks your files before beginning the build process.</p>
           </div>
           <div class="spec"><dl>
             <dt>Needs</dt><dd>Windows, x86-64</dd>
@@ -198,14 +200,13 @@ footer a { color: var(--gold); }
             <p>Choose how your copy is stored: <b>NSP or XCI</b> files, or <b>extracted folders</b> (ExeFS and RomFS,
               the update applied). Then point it at the base game, the 2.2.0 update, the keys folder and, if you have
               them, the DLC.</p>
-            <p><b>Nothing from the game comes with the launcher.</b> Your files stay on your PC and are only read; the
-              launcher never downloads games or keys.</p>
+            <p><b>Nothing from the game comes with the launcher.</b> The YKW4 Recomp launcher does not ship with any game files nor assets and we do not condone piracy or unauthorized distribution of copyrighted materials.</p>
           </div>
           <div class="spec"><dl>
             <dt>Formats</dt><dd>NSP, XCI, or extracted folders</dd>
-            <dt>Version</dt><dd>2.2.0, checked</dd>
+            <dt>Version</dt><dd>2.2.0 (Final version)</dd>
             <dt>Keys</dt><dd>prod.keys for NSP and XCI; an NSP also needs title.keys</dd>
-            <dt>DLC</dt><dd>Optional</dd>
+            <dt>DLC</dt><dd>Optional (can be added later)</dd>
           </dl></div>
         </div>
         <figure class="whole">
@@ -221,14 +222,13 @@ footer a { color: var(--gold); }
         <div class="top">
           <div class="prose">
             <ul>
-              <li><b>Check</b> (a few seconds, nothing changed): the files are the right game and the right version,
+              <li><b>Check</b> launcher checks if the files are the right game and the right version,
                 and the keys open them.</li>
-              <li><b>Options</b>: where the game goes, whether saves and settings stay in the game's folder (one
-                folder, easy to back up) or in AppData (kept if the folder is deleted), shortcuts, and the AMD FSR and
-                NVIDIA DLSS downloads. It names your graphics card; DLSS is greyed out without an NVIDIA RTX card. The
+              <li><b>Options</b>: where the build goes, whether saves and settings stay in the game's folder or in AppData, shortcuts, and your option to download AMD FSR or
+                NVIDIA DLSS. It names your graphics card; DLSS is greyed out without an NVIDIA RTX card. The
                 graphics settings themselves (resolution, shadows...) are in the game.</li>
-              <li><b>Build</b>: the game's code is translated and compiled into a Windows program on your PC, about
-                10 to 15 minutes, once. The launcher shows how far it is.</li>
+              <li><b>Build</b>: the game's code is being translated and compiled into a Windows program on your PC, about
+                10 to 15 minutes, once. You can follow along using the progress bar on screen.</li>
             </ul>
           </div>
           <div class="spec"><dl>
@@ -243,12 +243,12 @@ footer a { color: var(--gold); }
           <figcaption>Check: all set, with the files found</figcaption>
         </figure>
         <figure class="whole">
-          <img src="img/options.jpg" loading="lazy" alt="The Options screen: the install folder, saves in the game folder or AppData, AMD FSR, NVIDIA DLSS, shortcuts, and the download and disk size">
-          <figcaption>Options: where the game goes, and the downloads</figcaption>
+          <img src="img/options.jpg" loading="lazy" alt="The Options screen: your graphics card named, the install folder, saves in the game folder or AppData, AMD FSR, NVIDIA DLSS, free up space after building, shortcuts, and the download and disk size">
+          <figcaption>Options: where the game goes, and what to download</figcaption>
         </figure>
         <figure class="whole">
           <img src="img/build.jpg" loading="lazy" alt="The Build screen: Building your game, 0% with a progress bar, Show details and Cancel">
-          <figcaption>Build: the progress bar, once, about 10 to 15 minutes</figcaption>
+          <figcaption>Build: the progress bar, initial build, about 10 to 15 minutes</figcaption>
         </figure>
       </div>
     </article>
@@ -258,12 +258,12 @@ footer a { color: var(--gold); }
       <div class="body">
         <div class="top">
           <div class="prose">
-            <p>Once the game is built, the launcher opens on <b>Play</b>. Around the button:</p>
+            <p>Once the game is built, the launcher opens on <b>Play</b>. With options:</p>
             <ul>
               <li><b>Overview</b>: what's new in this version, and your latest screenshots (<kbd>F12</kbd> in the game).</li>
               <li><b>Screenshots</b>, <b>Mods</b> (the English patch and other Switch mods) and <b>DLC</b> tabs.</li>
               <li>Last played, play time, and shortcuts to the saves and the logs.</li>
-              <li><b>Free up space</b>: the build files the game doesn't need to run.</li>
+              <li><b>Free up space</b>: you can remove the build files the game doesn't need to run.</li>
             </ul>
           </div>
           <div class="spec"><dl>
@@ -294,9 +294,9 @@ footer a { color: var(--gold); }
             </ul>
           </div>
           <div class="spec"><dl>
-            <dt>On Play</dt><dd>Hide, minimise, keep open, close</dd>
-            <dt>Saves</dt><dd>Game folder or AppData</dd>
-            <dt>Uninstall</dt><dd>Asks what to keep</dd>
+            <dt>On Play</dt><dd>Hiding while running behaves like Ubisoft Connect</dd>
+            <dt>Saves</dt><dd>choose Game folder or AppData</dd>
+            <dt>Uninstall</dt><dd>with detailed selection</dd>
           </dl></div>
         </div>
         <figure class="whole">
