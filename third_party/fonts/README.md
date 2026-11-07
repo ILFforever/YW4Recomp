@@ -13,5 +13,8 @@ python -m fontTools.subset <font>.ttf --unicodes="U+0020-007E,U+00A0-00FF,U+2010
     --layout-features='kern,liga' --no-hinting --desubroutinize --output-file=<font>.ttf
 ```
 
+The launcher uses the same files: copies sit in `launcher/ui/fonts/` (with the licences), because Tauri only
+serves files from `launcher/ui/`. Change both places together.
+
 The OFL lets a modified version keep the font's name unless the name is a Reserved Font Name; neither font
 declares one.

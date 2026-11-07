@@ -1,4 +1,12 @@
 /* The launcher's look: the website's (docs/index.html), the game's menus: Yo-kai Pad lilac and violet, gold. */
+/* The fonts ship with the launcher (fonts/: the overlay's Latin subsets from third_party/fonts, SIL OFL 1.1), so it
+ * looks the same offline; letters outside the subset fall back to Segoe UI. */
+@font-face { font-family: "M PLUS Rounded 1c"; font-weight: 500; src: url(fonts/MPLUSRounded1c-Medium.ttf); }
+@font-face { font-family: "M PLUS Rounded 1c"; font-weight: 700; src: url(fonts/MPLUSRounded1c-Bold.ttf); }
+@font-face { font-family: "M PLUS Rounded 1c"; font-weight: 800; src: url(fonts/MPLUSRounded1c-ExtraBold.ttf); }
+@font-face { font-family: "Zen Kaku Gothic New"; font-weight: 400; src: url(fonts/ZenKakuGothicNew-Regular.ttf); }
+@font-face { font-family: "Zen Kaku Gothic New"; font-weight: 500; src: url(fonts/ZenKakuGothicNew-Medium.ttf); }
+@font-face { font-family: "Zen Kaku Gothic New"; font-weight: 700; src: url(fonts/ZenKakuGothicNew-Bold.ttf); }
 :root {
   --lilac-0: oklch(97.5% 0.012 305); --lilac-1: oklch(94% 0.025 305); --lilac-2: oklch(89% 0.04 305);
   --lilac-3: oklch(80% 0.06 305);
