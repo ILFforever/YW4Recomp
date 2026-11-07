@@ -119,7 +119,7 @@ static int legacy_keys = -1;
 int settings_legacy_keys(void) {
     if (legacy_keys < 0) {
         const char *e = getenv("YW4_LEGACY_KEYS");
-        legacy_keys = !(e && !strcmp(e, "0"));
+        legacy_keys = e && !strcmp(e, "1");  /* off by default (owner, 2026-11-08) */
     }
     return legacy_keys;
 }
@@ -221,9 +221,10 @@ static const Setting player[] = {
      gpu_contact_toggle, "YW4_CONTACT", {"0", "1"}, contact_disabled},
     {"ADVANCED", "LEGACY MENUS",
      "THE OLD KEYS: F1 OPENS THE OLD SETTINGS PANEL AND ITS DEVELOPER OPTIONS, F2 THE OLD CONTROLS PAGE, F3 SHOWS OR "
-     "HIDES THE PERFORMANCE HUD. OFF, THE THREE KEYS DO NOTHING: THIS MENU HAS ALL OF IT BUT THE DEVELOPER OPTIONS.",
+     "HIDES THE PERFORMANCE HUD. OFF, THE THREE KEYS OPEN THIS MENU'S SETTINGS, CONTROLS AND OVERLAY PAGES: IT HAS ALL "
+     "OF IT BUT THE DEVELOPER OPTIONS.",
      {"OFF", "ON"},
-     {"F1, F2 AND F3 DO NOTHING", "F1, F2 AND F3 WORK"}, 2, settings_legacy_keys, legacy_keys_toggle,
+     {"F1, F2 AND F3 OPEN THIS MENU'S PAGES", "F1, F2 AND F3 OPEN THE OLD MENUS"}, 2, settings_legacy_keys, legacy_keys_toggle,
      "YW4_LEGACY_KEYS", {"0", "1"}},
 };
 /* The developer page (DEVELOPER OPTIONS): behind-the-scenes switches for testing the port, which the picture

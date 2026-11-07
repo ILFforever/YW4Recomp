@@ -250,6 +250,9 @@ static int replay_state(uint64_t tick, uint64_t *buttons, int32_t sticks[4]) {
         else if (!strcmp(k, "FULLSCR")) window_fullscreen_cycle();  /* F11 now (names are cut to 7 letters); "F11" in recordings is the trace */
         else if (!strcmp(k, "PAUSE")) window_pause_toggle();  /* the overlay's pause, as F4 */
         else if (!strcmp(k, "MENU")) gamemenu_toggle();  /* the in-game overlay, as Escape */
+        else if (!strcmp(k, "M_SET")) gamemenu_open_page(GM_SETTINGS);  /* F1 with LEGACY MENUS off */
+        else if (!strcmp(k, "M_CTRL")) gamemenu_open_page(GM_CONTROLS);  /* F2 */
+        else if (!strcmp(k, "M_PERF")) gamemenu_open_page(GM_PERF);  /* F3 */
         else if (!strcmp(k, "M_UP")) gamemenu_action(GM_UP);
         else if (!strcmp(k, "M_DOWN")) gamemenu_action(GM_DOWN);
         else if (!strcmp(k, "M_LEFT")) gamemenu_action(GM_LEFT);

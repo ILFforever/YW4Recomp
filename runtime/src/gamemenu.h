@@ -49,6 +49,9 @@ int gamemenu_open(void);       /* the overlay is open (its panel shows, or a pag
 int gamemenu_selected(void);   /* GM_* */
 int gamemenu_confirming(void); /* the exit popup shows */
 void gamemenu_toggle(void);    /* the overlay button: open, or close and resume */
+/* LEGACY MENUS off (settings.h): F1, F2 and F3 open the overlay straight on GM_SETTINGS, GM_CONTROLS or GM_PERF
+ * (pausing the game); the same key on its own page closes it and resumes. */
+void gamemenu_open_page(int item);
 void gamemenu_action(int action);  /* GM_UP... while it is open and no settings page covers it */
 /* The mouse at (x, y) in the design's units (1600 x 900 for 16:9): button 0 moved (hovering chooses), 1 the left
  * button pressed (as Enter on what is under it), 3 the right one (back, as Escape), 4 moved with the left one held

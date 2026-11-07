@@ -240,6 +240,26 @@ static void preview_stop(void) {
     fprintf(stderr, "yw4: overlay: preview ends\n");
 }
 
+void gamemenu_open_page(int item) {
+    if (gamemenu_prompting() || item <= GM_RESUME || item >= GM_EXIT) return;
+    if (gamemenu_open() && sel == item && focus && !preview && !confirm) {  /* the same key again: back to the game */
+        close_and_resume();
+        return;
+    }
+    if (preview) preview_stop();
+    if (settings_open()) settings_toggle();  /* a replay's old panel: the overlay's page instead */
+    bindings_cancel();
+    textin_focus(NULL);
+    if (!gamemenu_open()) {
+        if (!window_paused()) window_pause_toggle();
+        __atomic_store_n(&open_, 1, __ATOMIC_RELEASE);
+    }
+    hover_kind = -1, confirm = 0, sel = item;
+    accept();  /* into the page, as Enter on its item */
+    changed();
+    fprintf(stderr, "yw4: overlay: open on item %d\n", item);
+}
+
 /* in the preview: Up / Down the section's rows, Left / Right (Enter) change, PREV / NEXT the graphics sections,
  * ALT hides or shows the bar, Back returns to the Settings page */
 static void preview_action(int a) {

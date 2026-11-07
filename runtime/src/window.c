@@ -2088,6 +2088,17 @@ void window_run(void (*guest)(void *), void *arg) {
             }
             if (e.key.key == SDLK_F10) gpu_request_dump(), yw4_hid_note_key("F10");      /* shadow maps etc.: work/dump/ */
             if (e.key.key == SDLK_F3 && settings_legacy_keys()) window_hud_toggle(), settings_save();  /* the HUD */
+            /* LEGACY MENUS off (the default): F1, F2 and F3 open the overlay on its Settings, Controls and Overlay
+             * pages instead (owner, 2026-11-08); the same key again resumes. Not while the old panel is open: there
+             * F1 and F2 still close it (below). Not while typing: F keys go nowhere then. */
+            if (!settings_legacy_keys() && !settings_open() && !e.key.repeat && !textin_active() &&
+                (e.key.key == SDLK_F1 || e.key.key == SDLK_F2 || e.key.key == SDLK_F3)) {
+                if (window && SDL_GetWindowRelativeMouseMode(window)) SDL_SetWindowRelativeMouseMode(window, false);
+                if (e.key.key == SDLK_F1) gamemenu_open_page(GM_SETTINGS), yw4_hid_note_key("M_SET");
+                else if (e.key.key == SDLK_F2) gamemenu_open_page(GM_CONTROLS), yw4_hid_note_key("M_CTRL");
+                else gamemenu_open_page(GM_PERF), yw4_hid_note_key("M_PERF");
+                break;
+            }
             if (e.key.key == SDLK_F4 && !e.key.repeat) game_pause_toggle();  /* test: the overlay's pause (below) */
             if (e.key.key == SDLK_F5) gpu_passes_toggle();  /* per-pass GPU timing in the log */
             if (e.key.key == SDLK_F7 && !e.key.repeat) screen_passes_toggle();  /* the screen passes: ours or the game's */
