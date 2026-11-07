@@ -78,6 +78,8 @@ pub struct DlcItem {
     index: Option<u32>,       // None: the file isn't a known add-on (the game will leave it out)
     id: Option<String>,       // title ID
     file: String,
+    #[serde(rename = "needsKeys")]
+    needs_keys: bool,         // true when index 100 (4++ Upgrade Pack) hasn't been unpacked to data\dlc-romfs\100 yet
 }
 
 #[derive(Serialize)]
@@ -160,17 +162,20 @@ fn mod_names(mods: &Path) -> Vec<String> {
 }
 
 #[tauri::command]
-pub async fn install_info(install: String) -> Info {
+pub async fn install_info(app: tauri::AppHandle, install: String) -> Info {
     tauri::async_runtime::spawn_blocking(move || {
         let inst = PathBuf::from(&install);
+        crate::buildrun::ensure_dlc_extracted(&app, &inst);
         let version = game_version(&exe(&install));
+        let has_100 = inst.join("data").join("dlc-romfs").join("100").is_dir();
         let mut dlc_list: Vec<DlcItem> = std::fs::read_dir(inst.join("data").join("dlc")).into_iter().flatten().flatten()
             .map(|e| e.path())
             .filter(|p| p.extension().map_or(false, |x| x.eq_ignore_ascii_case("nsp")))
             .map(|p| {
                 let index = crate::check::dlc_index_of(&p);
                 DlcItem { index, id: index.map(crate::check::dlc_title_id),
-                          file: p.file_name().unwrap_or_default().to_string_lossy().into_owned() }
+                          file: p.file_name().unwrap_or_default().to_string_lossy().into_owned(),
+                          needs_keys: index == Some(100) && !has_100 }
             })
             .collect();
         dlc_list.sort_by(|a, b| (a.index.is_none(), a.index, &a.file).cmp(&(b.index.is_none(), b.index, &b.file)));
@@ -192,6 +197,26 @@ pub async fn install_info(install: String) -> Info {
     })
     .await
     .unwrap()
+}
+
+/// Supplies prod.keys on the DLC tab when the 4++ Upgrade Pack was added after a build that had no keys_dir.
+#[tauri::command]
+pub async fn set_dlc_keys(app: tauri::AppHandle, install: String, path: String) -> Result<Info, String> {
+    let inst = PathBuf::from(&install);
+    let p = PathBuf::from(&path);
+    let dir = if p.is_file() { p.parent().unwrap_or(&p).to_path_buf() } else { p };
+    if !dir.join("prod.keys").is_file() {
+        return Err("No prod.keys found in that folder.".into());
+    }
+    crate::buildrun::save_keys_dir(&inst, &dir).map_err(|e| e.to_string())?;
+    let app2 = app.clone();
+    let inst2 = inst.clone();
+    tauri::async_runtime::spawn_blocking(move || crate::buildrun::ensure_dlc_extracted(&app2, &inst2))
+        .await.map_err(|e| e.to_string())?;
+    if !inst.join("data").join("dlc-romfs").join("100").is_dir() {
+        return Err("Couldn't unpack the 4++ Upgrade Pack with that prod.keys file.".into());
+    }
+    Ok(install_info(app, install).await)
 }
 
 /// Starts the game: yw4.exe with no arguments reads game.ini next to it. Notes the start, and when the game

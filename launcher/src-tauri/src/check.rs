@@ -161,7 +161,7 @@ fn dlc_index(path: &Path, t: &Target) -> Option<u32> {
     None
 }
 
-fn dlc_row(dir: Option<&String>, t: &Target) -> Row {
+fn dlc_row(dir: Option<&String>, has_keys: bool, t: &Target) -> Row {
     let Some(dir) = dir.filter(|d| !d.is_empty()) else {
         return row("DLC", "ok", "None chosen. You can add it later without rebuilding");
     };
@@ -179,6 +179,8 @@ fn dlc_row(dir: Option<&String>, t: &Target) -> Row {
     match found.len() {
         0 if nsps == 0 => row("DLC", "warn", "No NSP files in that folder"),
         0 => row("DLC", "warn", "No add-ons of this game found in that folder"),
+        n if found.contains(&100) && !has_keys => row("DLC", "warn",
+            format!("{n} of {} add-ons found · Yo-kai Watch 4++ Upgrade needs prod.keys (choose Keys folder or add later)", t.dlc.len())),
         n => row("DLC", "ok", format!("{n} of {} add-ons found and checked", t.dlc.len())),
     }
 }
@@ -239,8 +241,10 @@ fn check_files(paths: &HashMap<String, String>, t: &Target) -> Vec<Row> {
             rights.extend(titles.into_iter().map(|(_, r)| r));
         }
     }
-    rows.push(keys_row(paths.get("keys"), &rights));
-    rows.push(dlc_row(paths.get("dlc"), t));
+    let krow = keys_row(paths.get("keys"), &rights);
+    let has_keys = krow.state == "ok";
+    rows.push(krow);
+    rows.push(dlc_row(paths.get("dlc"), has_keys, t));
     rows
 }
 
@@ -279,7 +283,13 @@ fn check_folders(paths: &HashMap<String, String>, t: &Target) -> Vec<Row> {
             }
         }
     }
-    rows.push(dlc_row(paths.get("dlc"), t));
+    let mut has_keys = false;
+    if let Some(k) = paths.get("keys").filter(|p| !p.is_empty()) {
+        let r = keys_row(Some(k), &[]);
+        has_keys = r.state == "ok";
+        rows.push(r);
+    }
+    rows.push(dlc_row(paths.get("dlc"), has_keys, t));
     rows
 }
 

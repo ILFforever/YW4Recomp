@@ -231,14 +231,14 @@ fn copy_dlc(app: &AppHandle, plan: &Plan, inst: &Path) -> Result<(), String> {
     Ok(())
 }
 
-/// If data\dlc has a recognised add-on whose RomFS isn't in data\dlc-romfs\<index>\ yet (added after building),
+/// If data\dlc has the 4++ Upgrade Pack (index 100) and data\dlc-romfs\100\ isn't unpacked yet (added after building),
 /// runs `python -m tools.yw4.extract --dlc-only` so the game can read it (decision 0056).
 pub fn ensure_dlc_extracted(app: &AppHandle, inst: &Path) {
     let dlc = inst.join("data").join("dlc");
     let romfs = inst.join("data").join("dlc-romfs");
     let needed = std::fs::read_dir(&dlc).into_iter().flatten().flatten().map(|e| e.path()).any(|p| {
         p.extension().map_or(false, |x| x.eq_ignore_ascii_case("nsp"))
-            && crate::check::dlc_index_of(&p).map_or(false, |i| !romfs.join(i.to_string()).is_dir())
+            && crate::check::dlc_index_of(&p).map_or(false, |i| i == 100 && !romfs.join("100").is_dir())
     });
     let cfg = inst.join("config.toml");
     if !needed || !cfg.is_file() { return; }
@@ -250,6 +250,15 @@ pub fn ensure_dlc_extracted(app: &AppHandle, inst: &Path) {
     #[cfg(windows)]
     { use std::os::windows::process::CommandExt; cmd.creation_flags(0x0800_0000); }
     let _ = cmd.status();
+}
+
+/// Records keys_dir in the install's config.toml when the player supplies prod.keys later on the DLC tab.
+pub fn save_keys_dir(inst: &Path, keys: &Path) -> std::io::Result<()> {
+    let path = inst.join("config.toml");
+    let text = std::fs::read_to_string(&path).unwrap_or_default();
+    let mut lines: Vec<String> = text.lines().filter(|l| !l.trim_start().starts_with("keys_dir")).map(String::from).collect();
+    lines.push(format!("keys_dir = {}", lit(keys)));
+    std::fs::write(&path, lines.join("\n") + "\n")
 }
 
 /// The whole build: the game code's own steps (tools.yw4.build_install, decision 0054), then the DLC copy. The

@@ -109,6 +109,7 @@ const FIELDS = {
     { id: 'exefs', label: 'ExeFS folder', note: 'Has main and sdk', pick: 'folder', required: true },
     { id: 'romfs', label: 'RomFS folder', note: 'Update applied', pick: 'folder', required: true },
     { id: 'dlc', label: 'DLC folder', note: 'Optional', pick: 'folder' },
+    { id: 'keys', label: 'Keys folder', note: 'Optional · for the 4++ Upgrade Pack', pick: 'folder' },
   ],
 };
 const NOTES = {
@@ -690,11 +691,13 @@ function renderModsDlc(info) {
   $('row-mods').textContent = info.mods.length === 1 ? info.mods[0] : info.mods.length ? `${info.mods.length} mods` : 'None';
   const dlcs = $('dlc-list');
   dlcs.textContent = '';
+  const needsKeys = info.dlcList.some((d) => d.needsKeys);
+  $('dlc-keys-box').hidden = !needsKeys;
   for (const d of info.dlcList) {
     const li = document.createElement('li');
     li.className = 'dlc-row';
     const name = document.createElement('b');
-    name.textContent = d.index === null ? d.file : `Add-on ${d.index}`;
+    name.textContent = d.index === null ? d.file : d.index === 100 ? 'Yo-kai Watch 4++ Upgrade' : `Add-on ${d.index}`;
     if (d.index !== null) {
       const id = document.createElement('code');
       id.textContent = d.id;
@@ -703,13 +706,28 @@ function renderModsDlc(info) {
       li.append(name);
     }
     const state = document.createElement('span');
-    state.textContent = d.index === null ? 'Not recognised: the game leaves it out' : 'Checked';
+    state.textContent = d.index === null ? 'Not recognised: the game leaves it out'
+      : d.needsKeys ? 'Needs prod.keys to unpack' : 'Checked';
     li.append(state);
     dlcs.append(li);
   }
   if (!info.dlcList.length) { const li = chip('None. Put DLC NSPs in the DLC folder.'); li.className = 'none'; dlcs.append(li); }
-  $('row-dlc').textContent = info.dlc ? `${info.dlc} checked` : 'None';
+  $('row-dlc').textContent = needsKeys ? 'Needs prod.keys' : info.dlc ? `${info.dlc} checked` : 'None';
 }
+$('dlc-keys-btn').addEventListener('click', async () => {
+  if (!T || !T.dialog) return;
+  const path = await T.dialog.open({ title: 'prod.keys', multiple: false, filters: [{ name: 'prod.keys', extensions: ['keys'] }] });
+  if (typeof path !== 'string' || !path) return;
+  $('dlc-keys-input').value = path;
+  $('dlc-keys-btn').disabled = true;
+  try {
+    renderModsDlc(await invoke('set_dlc_keys', { install: inst.install, path }));
+  } catch (e) {
+    popup('DLC keys', String(e));
+  } finally {
+    $('dlc-keys-btn').disabled = false;
+  }
+});
 document.querySelectorAll('[data-refresh]').forEach((b) => b.addEventListener('click', async () => {
   b.disabled = true;
   b.classList.remove('spinning');
@@ -793,6 +811,11 @@ $('crash-yes').addEventListener('click', async () => {
 });
 
 $('play').addEventListener('click', async () => {
+  if (!$('dlc-keys-box').hidden) {
+    showTab('dlc');
+    popup('Yo-kai Watch 4++ Upgrade needs prod.keys', 'The Yo-kai Watch 4++ Upgrade needs prod.keys once to unpack its files. Choose your prod.keys on the DLC tab.');
+    return;
+  }
   try {
     await invoke('play', { install: inst.install, mods: inst.mods !== false, showLog: !!inst.showLog, onPlay: inst.onPlay || 'hide',
       theme: THEMES[themeAt] ? THEMES[themeAt].id : 'recomp' });
