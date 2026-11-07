@@ -18,7 +18,7 @@ use std::process::Command;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 /// The build protocol this launcher speaks (tools/yw4/build_install.py PROTOCOL).
-pub const PROTOCOL: i64 = 1;
+pub const PROTOCOL: i64 = 2;
 pub const LAUNCHER: &str = include_str!("../../VERSION");
 const RELEASES: &str = "https://api.github.com/repos/ILFforever/YW4Recomp/releases?per_page=30";
 

@@ -110,6 +110,26 @@ fn lit(p: &Path) -> String {
     format!("'{}'", p.display())  // a TOML literal string: no escapes, Windows paths can't contain '
 }
 
+/// The game code's protocol (release.toml, or build_install.py --protocol).
+fn code_protocol(b: &Builder) -> i64 {
+    if let Ok(s) = std::fs::read_to_string(b.src.join("release.toml")) {
+        if let Ok(t) = s.parse::<toml::Table>() {
+            if let Some(p) = t.get("protocol").and_then(|v| v.as_integer()) {
+                return p;
+            }
+        }
+    }
+    let mut cmd = Command::new(&b.python);
+    cmd.arg("-u").arg("-c").arg(BOOT).arg(&b.src).arg("tools.yw4.build_install").arg("--protocol")
+        .current_dir(&b.src).stdout(Stdio::piped()).stderr(Stdio::null());
+    #[cfg(windows)]
+    { use std::os::windows::process::CommandExt; cmd.creation_flags(0x0800_0000); }
+    cmd.output().ok()
+        .and_then(|o| String::from_utf8(o.stdout).ok())
+        .and_then(|s| s.trim().parse::<i64>().ok())
+        .unwrap_or(1)
+}
+
 fn write_config(b: &Builder, plan: &Plan, inst: &Path) -> std::io::Result<PathBuf> {
     let get = |k: &str| plan.paths.get(k).filter(|v| !v.is_empty()).map(PathBuf::from);
     let mut s = String::from("# Written by the YW4 Recomp launcher for this install folder (decision 0050).\n[input]\n");
@@ -279,7 +299,13 @@ fn run_all(app: &AppHandle, run: &Running, plan: &Plan) -> Result<(), String> {
     if b.tools.is_some() {  // a download: the compiler comes on the first build; from the repo, the repo's own
         args.extend(["--toolchain".into(), inst.join("builder").join("toolchain").to_string_lossy().into_owned()]);
     }
-    if plan.fresh { args.push("--fresh-files".into()); }
+    if plan.fresh {
+        if code_protocol(&b) >= 2 {
+            args.push("--fresh-files".into());
+        } else {
+            emit_log(app, "fresh files aren't supported by that game code");
+        }
+    }
     if !plan.fsr { args.push("--no-fsr".into()); }
     if !plan.dlss { args.push("--no-dlss".into()); }
     if let Err(e) = python(app, run, &b, &cfg, "tools.yw4.build_install", &args) {
