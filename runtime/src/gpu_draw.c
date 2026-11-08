@@ -20,6 +20,7 @@
  *
  * Enum values follow LAS Recomp (runtime/nvn/vulkan/exec.c; MIT, see third_party/lasrecomp).
  */
+#include <dirent.h>
 #include <inttypes.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -376,11 +377,55 @@ static Shader *load_shader(uint64_t key, int stage) {
     return s;
 }
 
+/* ---- every translated shader loaded in the background at start (gpu_prebuild_start), so a new area's
+ * first draws find theirs ready: loading one from its files (SPIR-V, interface, GLSL) and making its module
+ * took 5-10 ms on the GPU thread (2026-11-08, town: 12 new shaders = 110 ms, a visible hitch). The slots are
+ * made before the threads start and are read-only after, but for s: NULL not loaded yet, &pre_taken taken
+ * by the GPU thread (shader()), else a loaded Shader waiting to be taken. YW4_SHADER_PRELOAD=0: off. */
+enum { PRE_CAP = 8192 };
+typedef struct {
+    uint64_t key;  /* 0: empty slot */
+    int stage;
+    Shader *s;
+} PreSlot;
+static PreSlot *pre;
+static uint32_t *pre_order;  /* the slots in directory order, for the threads */
+static size_t pre_n, pre_next;
+static Shader pre_taken;
+static int64_t pre_t0;
+static int pre_left;
+
+static size_t pre_hash(uint64_t key, int stage) {
+    return (size_t)(((key ^ (uint64_t)stage * 0x9E3779B97F4A7C15ull) * 0xff51afd7ed558ccdull) >> 40) & (PRE_CAP - 1);
+}
+
+static PreSlot *pre_find(uint64_t key, int stage) {
+    if (!pre || !key) return NULL;
+    for (size_t i = pre_hash(key, stage);; i = (i + 1) & (PRE_CAP - 1)) {
+        if (!pre[i].key) return NULL;
+        if (pre[i].key == key && pre[i].stage == stage) return &pre[i];
+    }
+}
+
+/* The preloaded shader for (key, stage), taken (the slot then stays taken), or NULL: load it here. */
+static Shader *pre_take(uint64_t key, int stage) {
+    PreSlot *p = pre_find(key, stage);
+    if (!p) return NULL;
+    Shader *s = __atomic_exchange_n(&p->s, &pre_taken, __ATOMIC_ACQ_REL);
+    return s == &pre_taken ? NULL : s;
+}
+
 static Shader *shader(uint64_t key, int stage) {
     for (Shader *s = shaders; s; s = s->next)
         if (s->key == key && s->stage == stage) return s;
+    Shader *s = pre_take(key, stage);
+    if (s) {
+        s->next = shaders;
+        shaders = s;
+        return s;
+    }
     int64_t t0 = host_now_ns();
-    Shader *s = load_shader(key, stage);
+    s = load_shader(key, stage);
     gpu_stall_add(STALL_SHADER, host_now_ns() - t0);
     s->next = shaders;
     shaders = s;
@@ -1052,6 +1097,75 @@ static void free_shader(Shader *s) {
     free(s);
 }
 
+static void preload_thread(void *arg) {
+    (void)arg;
+    host_thread_set_priority(NULL, 50);  /* as prebuild_thread: below the game's boot and intro playback (232829c) */
+    for (;;) {
+        size_t i = __atomic_fetch_add(&pre_next, 1, __ATOMIC_RELAXED);
+        if (i >= pre_n) break;
+        PreSlot *p = &pre[pre_order[i]];
+        if (__atomic_load_n(&p->s, __ATOMIC_ACQUIRE)) continue;  /* the GPU thread got there first */
+        Shader *s = load_shader(p->key, p->stage), *expect = NULL;
+        if (!__atomic_compare_exchange_n(&p->s, &expect, s, 0, __ATOMIC_ACQ_REL, __ATOMIC_ACQUIRE)) free_shader(s);
+    }
+    if (__atomic_sub_fetch(&pre_left, 1, __ATOMIC_ACQ_REL) == 0)
+        fprintf(stderr, "yw4: gpu: preloaded %zu shaders in %lld ms\n", pre_n,
+                (long long)((host_now_ns() - pre_t0) / 1000000));
+}
+
+/* The slots from the shader folder's *.spv names (<16 hex>.<stage>.spv) that have their interface file too
+ * (load_shader stops the game without one), then the threads. */
+static void preload_start(void) {
+    const char *e = getenv("YW4_SHADER_PRELOAD");
+    if (e && *e == '0') return;
+    DIR *d = opendir(shader_dir());
+    if (!d) return;
+    pre = calloc(PRE_CAP, sizeof *pre);
+    pre_order = malloc(PRE_CAP * sizeof *pre_order);
+    if (!pre || !pre_order) {
+        closedir(d);
+        free(pre), free(pre_order), pre = NULL;
+        return;
+    }
+    for (struct dirent *de; (de = readdir(d)) != NULL && pre_n < PRE_CAP * 3 / 4;) {
+        const char *n = de->d_name;
+        size_t len = strlen(n);
+        if (len < 22 || strcmp(n + len - 4, ".spv") || n[16] != '.') continue;
+        char hex[17];
+        memcpy(hex, n, 16), hex[16] = 0;
+        char *end;
+        uint64_t key = strtoull(hex, &end, 16);
+        if (*end || !key) continue;
+        int stage = -1;
+        for (int st = 0; st < 4; st++)
+            if (len == 17 + strlen(stage_names[st]) + 4 && !strncmp(n + 17, stage_names[st], strlen(stage_names[st])))
+                stage = st;
+        if (stage < 0 || pre_find(key, stage)) continue;
+        char path[1024];
+        snprintf(path, sizeof path, "%s/%016" PRIx64 ".iface", shader_dir(), key);
+        FILE *f = fopen(path, "rb");
+        if (!f) continue;
+        fclose(f);
+        size_t i = pre_hash(key, stage);
+        while (pre[i].key) i = (i + 1) & (PRE_CAP - 1);
+        pre[i].key = key, pre[i].stage = stage;
+        pre_order[pre_n++] = (uint32_t)i;
+    }
+    closedir(d);
+    if (!pre_n) return;
+    /* 4 threads: the 3D's own threads use about two cores, the 5700X3D's class of CPU has 16 */
+    int n = host_cpu_count() / 4;
+    if (n > 4) n = 4;
+    if (n < 1) n = 1;
+    pre_t0 = host_now_ns();
+    pre_left = n;
+    for (int i = 0; i < n; i++)
+        if (host_thread_start(preload_thread, NULL, 1 << 20)) {
+            fprintf(stderr, "yw4: gpu: cannot start a shader preload thread\n");
+            if (__atomic_sub_fetch(&pre_left, 1, __ATOMIC_ACQ_REL) == 0) break;
+        }
+}
+
 static int64_t warm_t0;
 static int warm_threads_left;
 
@@ -1102,6 +1216,7 @@ void gpu_prebuild_start(void) {
     if (host_thread_start(prebuild_thread, NULL, 1 << 20))
         fprintf(stderr, "yw4: gpu: cannot start the pipeline prebuild thread\n");
     journal_open();
+    preload_start();
     if (!warm_n) return;
     empty_layout();  /* made once here, before the threads share it */
     int n = host_cpu_count() / 2;
