@@ -60,16 +60,25 @@ What is known to be missing or wrong, roughly in the order it is likely to matte
 
 ## Overlay
 
-- **Only Western letters show in the overlay** (owner, 2026-11-07: TODO, after the bug report works). Its built-in
-  fonts hold Latin and Latin-1 only (`third_party/fonts/README.md`): English, French, Spanish, German... show;
-  Polish, Czech, Vietnamese, Cyrillic, Greek, Japanese, Chinese, Korean, Thai, Arabic and emoji show as small boxes
-  (`runtime/src/ui.c` `text_run`). Plan: draw missing letters with Windows' own fonts (Segoe UI, Yu Gothic, Microsoft
-  YaHei, Malgun Gothic), loaded when first needed; right-to-left scripts (Arabic, Hebrew) would still not join or
-  run right to left (stb_truetype has no shaping), and Linux needs its own font lookup.
-- **IME word-choice popup position** (TODO, with the above): typing Japanese or Chinese uses the system's popup, which
-  isn't yet told where the text box is (`SDL_SetTextInputArea`), so it may show in a corner.
-- **The name popup doesn't run the game's own name check** (`runtime/src/swkbd.c`): the game passes a text-check
-  callback (to refuse some names); our popup only keeps the game's 8-letter limit.
+- ~~**Only Western letters show in the overlay**~~: fixed 2026-11-08. Built-in fonts hold Latin and Latin-1 only;
+  missing letters (Japanese kana/kanji, Cyrillic...) fall back to a system font (Yu Gothic, Meiryo, MS Gothic,
+  Segoe UI on Windows, Noto CJK / DejaVu on Linux) loaded at first need and drawn at the same pixel size through
+  the glyph cache. Letters no font has keep the box.
+- ~~**IME word-choice popup position**~~: fixed 2026-11-08. While a text field has the typing focus, its box and
+  caret offset converted to window coordinates are passed to `SDL_SetTextInputArea`, updating whenever the field
+  or caret moves.
+- ~~**The name popup doesn't run the game's own name check**~~: fixed 2026-11-09. `swkbd.c` now executes the
+  game's `SetTextCheckCallback` callback via `yw4_resolve` on candidate strings; if rejected, a message popup
+  explains that the name cannot be used and the prompt re-opens for correction.
+
+## Input and menus
+
+- **Yo-kai Pad mouse support ([decision 0057](decisions/0057-mouse-menu-lists.md))**: open issues from real-mouse testing (owner, 2026-11-08; the rest of the Pad is assumed working):
+  - **Watch skills**: still broken (characters cannot be clicked).
+  - **Soulmate**: page is buggy.
+  - **Slimey marks (Yo-kai Trophies)**: page not working.
+  - **Treasure photos**: only Y axis working.
+  - **Organize Members → Switch moves**: not working.
 
 ## Tools
 

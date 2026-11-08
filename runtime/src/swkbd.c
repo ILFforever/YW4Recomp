@@ -16,9 +16,64 @@
 #include "textin.h"
 #include "window.h"
 #include "yw4load.h"
+#include "yw4rt.h"
 
 #define DEFAULT_NAME "Nate"
 #define DEFAULT_GIRL "Katie"  /* the girl's name (the second question of a new game) */
+
+/* Invokes the game's internal text check callback (SetTextCheckCallback), if registered.
+ * Returns 0 if valid (accepted) or if text checking is inactive; non-zero if rejected by the game. */
+static int check_name(CPUState *c, const uint8_t *a, const char *name, int utf8, int max) {
+    if (!a[0x3d0]) return 0;
+    uint64_t cb = *(const uint64_t *)(a + 0x3d8);
+    if (!cb) return 0;
+
+    uint16_t *buf = (uint16_t *)(uintptr_t)((uint64_t *)(uintptr_t)c->x[0])[0];
+    uint64_t orig_size = ((uint64_t *)(uintptr_t)c->x[0])[1];
+    if (!buf || !orig_size) return 0;
+
+    uint64_t chars = 0, n = 0;
+    if (utf8) {
+        uint8_t *out = (uint8_t *)buf;
+        for (const unsigned char *p = (const unsigned char *)name; *p && n + 4 < orig_size;) {
+            int len = *p < 0x80 ? 1 : *p < 0xE0 ? 2 : *p < 0xF0 ? 3 : 4;
+            if (max > 0 && (int)chars >= max) break;
+            for (int k = 0; k < len && p[k]; k++) out[n++] = p[k];
+            p += len, chars++;
+        }
+        out[n] = 0;
+    } else {
+        uint64_t room = orig_size / 2;
+        for (const unsigned char *p = (const unsigned char *)name; *p && n + 1 < room;) {
+            uint32_t cp = *p;
+            int len = 1;
+            if (cp >= 0xE0) cp = (cp & 15) << 12 | (p[1] & 63) << 6 | (p[2] & 63), len = 3;
+            else if (cp >= 0xC0) cp = (cp & 31) << 6 | (p[1] & 63), len = 2;
+            if (max > 0 && (int)chars >= max) break;
+            buf[n++] = (uint16_t)cp, p += len, chars++;
+        }
+        buf[n] = 0;
+    }
+
+    ((uint64_t *)(uintptr_t)c->x[0])[1] = utf8 ? n : n * 2;
+
+    uint64_t out_len = 0;
+    CPUState call_ctx = *c;
+    call_ctx.x[0] = *(const uint64_t *)(a + 0x4e0);
+    call_ctx.x[1] = (uint64_t)(uintptr_t)&out_len;
+    call_ctx.x[2] = c->x[0];
+    call_ctx.x[30] = 0;
+
+    GuestFn fn = yw4_resolve(cb);
+    fn(&call_ctx);
+
+    ((uint64_t *)(uintptr_t)c->x[0])[1] = orig_size;
+
+    uint32_t result = (uint32_t)call_ctx.x[0];
+    fprintf(stderr, "yw4: swkbd: textcheck \"%s\" (callback 0x%llx) -> result %u\n",
+            name, (unsigned long long)cb, result);
+    return result != 0;
+}
 
 /* ShowKeyboard(String *out, const ShowKeyboardArg &) -> Result */
 void yw4_swkbd_ShowKeyboard(CPUState *c) {
@@ -98,6 +153,7 @@ void yw4_swkbd_ShowKeyboard(CPUState *c) {
      * while it waits (the game waits here too, as on the Switch). Not in replays (their clock counts frames, which
      * stop here) or with YW4_PLAYER_NAME: those answer at once. */
     static char typed[TEXTIN_MAX];
+    int checked = 0;
     const char *replay = getenv("YW4_REPLAY"), *force = getenv("YW4_NAME_PROMPT");  /* =1: the popup in replays too */
     if ((!name || !*name) && (!(replay && *replay) || (force && *force == '1')) && window_repaint(1) == 0) {
         char title[200];
@@ -113,23 +169,40 @@ void yw4_swkbd_ShowKeyboard(CPUState *c) {
         title[n] = 0;
         /* Cancel everywhere but a main character's name (the start of a new game: how the game takes a cancelled
          * name there isn't known, so it isn't offered) */
-        gamemenu_prompt_options(min, !main_name);
-        gamemenu_prompt_begin(title, max, initial);
-        int how;
-        while (!(how = gamemenu_prompt_take(typed, sizeof typed))) {
+        for (;;) {
+            gamemenu_prompt_options(min, !main_name);
+            gamemenu_prompt_begin(title, max, initial);
+            int how;
+            while (!(how = gamemenu_prompt_take(typed, sizeof typed))) {
+                window_repaint(0);
+                host_sleep_ns(16 * 1000000LL);
+            }
+            window_repaint(0);  /* the popup gone before the game goes on */
+            if (how == 2) {  /* Cancel: what the sdk returns when the keyboard is closed (nn::swkbd's 0x29f, read from
+                              * ShowKeyboard), the string left as it is */
+                fprintf(stderr, "yw4: swkbd: cancelled\n");
+                c->x[0] = 0x29f;
+                return;
+            }
+            const char *cand = typed[0] ? typed : fallback;
+            if (!check_name(c, a, cand, utf8, max)) {
+                name = cand;
+                checked = 1;
+                break;
+            }
+            fprintf(stderr, "yw4: swkbd: name \"%s\" rejected by text check callback\n", cand);
+            gamemenu_message_begin(title, "This name cannot be used.");
+            char dummy[16];
+            while (!gamemenu_prompt_take(dummy, sizeof dummy)) {
+                window_repaint(0);
+                host_sleep_ns(16 * 1000000LL);
+            }
             window_repaint(0);
-            host_sleep_ns(16 * 1000000LL);
+            snprintf(initial, sizeof initial, "%s", cand);
         }
-        window_repaint(0);  /* the popup gone before the game goes on */
-        if (how == 2) {  /* Cancel: what the sdk returns when the keyboard is closed (nn::swkbd's 0x29f, read from
-                          * ShowKeyboard), the string left as it is */
-            fprintf(stderr, "yw4: swkbd: cancelled\n");
-            c->x[0] = 0x29f;
-            return;
-        }
-        name = typed;
     }
     if (!name || !*name) name = fallback;
+    if (!checked) check_name(c, a, name, utf8, max);
     /* At most `max` characters (0: no limit), and what the game asked for: UTF-8 when the config says so (the game
      * does, 2026-11-07: before, a UTF-16 answer made the name its first letter, "N"), else UTF-16. */
     uint64_t chars = 0, n = 0;

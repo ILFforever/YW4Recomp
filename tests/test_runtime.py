@@ -299,3 +299,128 @@ class RomfsTest(unittest.TestCase):
                 self.assertEqual(romfs_lookup(img, path), data, path)
             self.assertIsNone(romfs_lookup(img, "dir1/missing"))
             self.assertIsNone(romfs_lookup(img, "nodir/x"))
+
+
+SWKBD_DRIVER = r"""
+#include <stdio.h>
+#include <stdint.h>
+#include <string.h>
+#include <stdlib.h>
+
+#include "yw4cpu.h"
+
+typedef void (*GuestFn)(CPUState *ctx);
+
+static int prompt_step = 0;
+static char last_message_title[128];
+static char last_message_body[128];
+static int message_shown = 0;
+
+void gamemenu_prompt_options(int min_chars, int cancel) {}
+void gamemenu_prompt_begin(const char *title, int max_chars, const char *fallback) {}
+int gamemenu_prompt_take(char *out, size_t n) {
+    if (message_shown) {
+        message_shown = 0;
+        return 1; /* message dismissed */
+    }
+    if (prompt_step == 0) {
+        prompt_step++;
+        if (out) snprintf(out, n, "BadName");
+        return 1;
+    }
+    if (prompt_step == 1) {
+        prompt_step++;
+        if (out) snprintf(out, n, "GoodName");
+        return 1;
+    }
+    return 0;
+}
+void gamemenu_message_begin(const char *title, const char *body) {
+    message_shown = 1;
+    strncpy(last_message_title, title, sizeof(last_message_title) - 1);
+    strncpy(last_message_body, body, sizeof(last_message_body) - 1);
+}
+int window_repaint(int force) { return 0; }
+void host_sleep_ns(int64_t ns) {}
+
+static uint64_t last_user_arg;
+static char last_checked_text[128];
+static uint64_t last_string_size;
+
+static void mock_callback(CPUState *ctx) {
+    last_user_arg = ctx->x[0];
+    void *str_ptr = *(void **)ctx->x[2];
+    last_string_size = *(uint64_t *)((uintptr_t)ctx->x[2] + 8);
+    strncpy(last_checked_text, (const char *)str_ptr, sizeof(last_checked_text) - 1);
+    if (strcmp(last_checked_text, "BadName") == 0) {
+        ctx->x[0] = 1; /* rejected */
+    } else {
+        ctx->x[0] = 0; /* accepted */
+    }
+}
+
+GuestFn yw4_resolve(uint64_t target) {
+    if (target == 0x12345678) return mock_callback;
+    return NULL;
+}
+
+#include "swkbd.c"
+
+int main(void) {
+    CPUState c = {0};
+    uint8_t a[0x500] = {0};
+    char buf[256] = {0};
+    uint64_t out_struct[2] = { (uint64_t)(uintptr_t)buf, sizeof(buf) };
+
+    c.x[0] = (uint64_t)(uintptr_t)out_struct;
+    c.x[1] = (uint64_t)(uintptr_t)a;
+
+    /* 1. With textcheck disabled */
+    a[0x3d0] = 0;
+    *(uint64_t *)(a + 0x3d8) = 0x12345678;
+    if (check_name(&c, a, "BadName", 1, 8) != 0) return 1;
+
+    /* 2. With textcheck enabled, valid name */
+    a[0x3d0] = 1;
+    *(uint64_t *)(a + 0x4e0) = 0xbeefcafe;
+    a[0x3bd] = 1;
+    if (check_name(&c, a, "GoodName", 1, 8) != 0) return 2;
+    if (last_user_arg != 0xbeefcafe) return 3;
+    if (strcmp(last_checked_text, "GoodName") != 0) return 4;
+    if (last_string_size != 8) return 5;
+    if (out_struct[1] != sizeof(buf)) return 6;
+
+    /* 3. With textcheck enabled, rejected name */
+    if (check_name(&c, a, "BadName", 1, 8) != 1) return 7;
+    if (strcmp(last_checked_text, "BadName") != 0) return 8;
+    if (out_struct[1] != sizeof(buf)) return 9;
+
+    /* 4. Full interactive ShowKeyboard flow with initial rejection and retry */
+    prompt_step = 0;
+    memset(buf, 0, sizeof(buf));
+    *(int32_t *)(a + 0x3ac) = 8; /* max */
+    yw4_swkbd_ShowKeyboard(&c);
+    if (c.x[0] != 0) return 10; /* ShowKeyboard should succeed after retry */
+    if (strcmp(buf, "GoodName") != 0) return 11;
+    if (strcmp(last_message_body, "This name cannot be used.") != 0) return 12;
+
+    return 0;
+}
+"""
+
+
+class SwkbdCheckTest(unittest.TestCase):
+    """The software keyboard text check callback (runtime/src/swkbd.c)."""
+
+    def test_text_check_callback(self):
+        with tempfile.TemporaryDirectory() as t:
+            t = Path(t)
+            (t / "drv.c").write_text(SWKBD_DRIVER)
+            exe = t / "swkbd_test.exe"
+            subprocess.run([check.host_cc(), "-std=c17", "-O1", "-Wall",
+                            f"-I{RUNTIME / 'include'}", f"-I{RUNTIME / 'src'}",
+                            f"-I{check.REPO / 'third_party' / 'vulkan' / 'include'}",
+                            f"-I{check.REPO / 'third_party' / 'sdl3' / 'include'}",
+                            "-o", str(exe), str(t / "drv.c")], check=True, capture_output=True)
+            got = subprocess.run([str(exe)], capture_output=True, text=True, check=True)
+            self.assertEqual(got.returncode, 0)
