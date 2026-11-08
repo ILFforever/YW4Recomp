@@ -114,3 +114,6 @@ Thumbs.db
 launcher/node_modules/
 launcher/src-tauri/target/
 launcher/src-tauri/gen/
+
+# Claude Code personal settings
+.claude/settings.local.json

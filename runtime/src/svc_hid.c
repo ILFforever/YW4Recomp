@@ -156,7 +156,7 @@ typedef struct {
 } RecState;
 typedef struct {
     uint64_t tick;
-    char name[8];
+    char name[16];
     char *text;  /* a "t" line: typed text (name "TEXT") */
 } RecKey;
 static RecState *replay_states;
@@ -178,11 +178,11 @@ static void replay_load(void) {
     while (fgets(line, sizeof line, f)) {
         unsigned long long tick, buttons;
         int lx, ly, rx, ry, at = 0;
-        char name[8];
+        char name[16];
         if (sscanf(line, "s %llu %llx %d %d %d %d", &tick, &buttons, &lx, &ly, &rx, &ry) == 6) {
             replay_states = realloc(replay_states, (n_states + 1) * sizeof *replay_states);
             replay_states[n_states++] = (RecState){tick, buttons, {lx, ly, rx, ry}};
-        } else if (sscanf(line, "k %llu %7s", &tick, name) == 2) {
+        } else if (sscanf(line, "k %llu %15s", &tick, name) == 2) {
             replay_keys = realloc(replay_keys, (n_keys + 1) * sizeof *replay_keys);
             replay_keys[n_keys].tick = tick;
             snprintf(replay_keys[n_keys].name, sizeof replay_keys[n_keys].name, "%s", name);
@@ -243,7 +243,10 @@ static int replay_state(uint64_t tick, uint64_t *buttons, int32_t sticks[4]) {
         fprintf(stderr, "yw4: replay: key %s at tick %llu\n", k, (unsigned long long)tick);
         if (!strcmp(k, "TEXT")) textin_type(replay_keys[next_key].text ? replay_keys[next_key].text : "");
         else if (!strncmp(k, "T_", 2)) {  /* the typing keys (textin.h) */
-            static const char *const ops[] = {"T_LEFT", "T_RIGHT", "T_HOME", "T_END", "T_BACK", "T_DEL", "T_DONE"};
+            static const char *const ops[] = {
+                "T_LEFT", "T_RIGHT", "T_HOME", "T_END", "T_BACK", "T_DEL", "T_DONE", "T_CLEAR",
+                "T_SLEFT", "T_SRIGHT", "T_SHOME", "T_SEND", "T_ALL", "T_CUT", "T_COPY"
+            };
             for (int i = 0; i < (int)(sizeof ops / sizeof *ops); i++)
                 if (!strcmp(k, ops[i])) textin_edit(i), gamemenu_refresh();
         } else if (!strcmp(k, "F11")) gpu_request_trace(450);

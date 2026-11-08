@@ -15,23 +15,48 @@ enum { TEXTIN_MAX = 1024 };  /* bytes, with the ending zero */
 
 typedef struct {
     char text[TEXTIN_MAX];
-    int len;     /* bytes */
-    int cursor;  /* a byte offset at the start of a character */
+    int len;        /* bytes */
+    int cursor;     /* a byte offset at the start of a character */
+    int sel_anchor; /* selection anchor; selection is [min(sel_anchor, cursor), max(sel_anchor, cursor)) */
     int max_chars;  /* at most this many characters (0: no limit beyond TEXTIN_MAX) */
 } TextField;
 
-enum { TI_LEFT, TI_RIGHT, TI_HOME, TI_END, TI_BACK, TI_DEL, TI_DONE, TI_CLEAR };
+enum {
+    TI_LEFT,
+    TI_RIGHT,
+    TI_HOME,
+    TI_END,
+    TI_BACK,
+    TI_DEL,
+    TI_DONE,
+    TI_CLEAR,
+    TI_SLEFT,
+    TI_SRIGHT,
+    TI_SHOME,
+    TI_SEND,
+    TI_ALL,
+    TI_CUT,
+    TI_COPY
+};
 
 /* Gives f the typing focus (NULL: none); textin_active: a field has it. */
 void textin_focus(TextField *f);
 int textin_active(void);
 int textin_has(const TextField *f);
 /* Text typed or pasted, at the cursor (control characters dropped, line breaks as spaces; what doesn't fit is
- * cut at a whole character). */
+ * cut at a whole character). Replaces any selection. */
 void textin_type(const char *utf8);
 void textin_edit(int op);
-/* f's text and cursor as they are now, for drawing (the typing runs on the window's thread). */
-void textin_read(const TextField *f, char *out, size_t n, int *cursor);
+/* Moves caret to pos and collapses selection. */
+void textin_set_caret(int pos);
+/* Moves cursor to pos, extending selection from sel_anchor. */
+void textin_drag(int pos);
+/* Selects the word around pos. */
+void textin_select_word(int pos);
+/* Copies the selected substring into out (up to n bytes, null-terminated); returns length (0 if no selection). */
+int textin_get_selection(char *out, size_t n);
+/* f's text, cursor, and selection anchor as they are now, for drawing (the typing runs on the window's thread). */
+void textin_read(const TextField *f, char *out, size_t n, int *cursor, int *sel_anchor);
 /* f emptied (a new report). */
 void textin_clear(TextField *f);
 /* Changes each time a field's text, cursor or focus changes (the overlay draws again then). */

@@ -44,6 +44,9 @@ int gamemenu_prompt_take(char *out, size_t n);
 /* The same popup with a message instead of a field, and OK (a pad's A or B, Enter, Escape); taken the same way. */
 void gamemenu_message_begin(const char *title, const char *body);
 int gamemenu_prompting(void);
+/* The focused text field's box in design units (x, y, w, h) and the caret's x, for the system's IME
+ * (SDL_SetTextInputArea); 0 when no field is focused. */
+int gamemenu_text_rect(float r[4], float *caret_x);
 
 int gamemenu_open(void);       /* the overlay is open (its panel shows, or a page it opened) */
 int gamemenu_selected(void);   /* GM_* */

@@ -49,9 +49,15 @@ float ui_text_wrap(const UiCanvas *c, int f, float px, float track_em, float x, 
                    const char *str, uint32_t rgb);
 /* Text being typed (textin.h): broken into lines to fit w (at spaces, a long word between letters), each lh high,
  * at most max_lines (0: all; more: the ones round the caret), with a caret (2 units wide, colour caret) before the
- * byte `cursor` (-1: none). Returns its height. c NULL: only measures. */
+ * byte `cursor` (-1: none) and selection [min(sel_anchor, cursor), max(sel_anchor, cursor)) highlighted in sel_color.
+ * Returns its height. c NULL: only measures. */
 float ui_text_edit(const UiCanvas *c, int f, float px, float x, float y, float w, float lh, int max_lines,
-                   const char *str, int cursor, uint32_t rgb, uint32_t caret);
+                   const char *str, int cursor, int sel_anchor, uint32_t rgb, uint32_t caret, uint32_t sel_color);
+/* Where ui_text_edit last placed the caret, in design units (0 if no caret was drawn). */
+float ui_text_caret_x(void);
+/* Returns character byte offset into str closest to design point (mx, my) in the text box. */
+int ui_text_offset_at(int f, float px, float x, float y, float w, float lh, int max_lines,
+                      const char *str, int cursor, float mx, float my);
 /* An RGBA image (iw x ih) drawn into the box at (x, y), w x h units, its corners rounded by r. */
 void ui_image(const UiCanvas *c, const uint8_t *rgba, int iw, int ih, float x, float y, float w, float h, float r);
 /* A line icon: SVG elements (path, circle...) of a 24 x 24 view box drawn `size` units square at (x, y), stroked

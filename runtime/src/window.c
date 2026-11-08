@@ -1742,7 +1742,7 @@ static void update_input(void) {
         uint64_t mm = mousemenu_update(mx - px, my - py, (int)(pw + 0.5f), (int)(ph + 0.5f), SDL_GetMouseState(NULL, NULL), &want);
         {
             static uint64_t last_mm;
-            if (mm != last_mm && getenv("YW4_MOUSE_SCRIPT")) fprintf(stderr, "yw4: mouse menus: sends %#llx\n", (unsigned long long)mm);
+            if (mm != last_mm && mousemenu_log_on()) fprintf(stderr, "yw4: mouse menus: sends %#llx\n", (unsigned long long)mm);
             last_mm = mm;
         }
         b |= mm;
@@ -1963,10 +1963,13 @@ void window_run(void (*guest)(void *), void *arg) {
         /* the game's icon, resource 1 in the exe when the build had one (decision 0048); without it Windows' default */
         SDL_SetHint(SDL_HINT_WINDOWS_INTRESOURCE_ICON, "1");
         SDL_SetHint(SDL_HINT_WINDOWS_INTRESOURCE_ICON_SMALL, "1");
+        int win_w = 1280, win_h = 720;
+        const char *ws = getenv("YW4_WINDOW_SIZE");
+        if (ws) sscanf(ws, "%dx%d", &win_w, &win_h);
         if (!SDL_Init(SDL_INIT_VIDEO | SDL_INIT_GAMEPAD)) {
             fprintf(stderr, "yw4: window: SDL_Init: %s; running headless\n", SDL_GetError());
         } else if (snprintf(title, sizeof title, "Yo-kai Watch 4++ (recompiled) · YW4 Recomp %s", yw4_version) < 0 ||
-                   !(window = SDL_CreateWindow(title, 1280, 720, SDL_WINDOW_VULKAN | SDL_WINDOW_RESIZABLE |
+                   !(window = SDL_CreateWindow(title, win_w, win_h, SDL_WINDOW_VULKAN | SDL_WINDOW_RESIZABLE |
                                                (window_fullscreen_index() ? SDL_WINDOW_FULLSCREEN : 0)))) {
             fprintf(stderr, "yw4: window: SDL_CreateWindow: %s; running headless\n", SDL_GetError());
         } else if (vk_init()) {
@@ -1995,11 +1998,47 @@ void window_run(void (*guest)(void *), void *arg) {
         fullscreen_apply();
         {  /* the system's text input (a keyboard layout's letters, an IME) runs while a text field has the focus */
             static int text_on;
+            static SDL_Rect last_rect;
+            static int last_caret = -1;
             int want = window && gamemenu_open() && textin_active();
             if (want != text_on) {
-                if (want) SDL_StartTextInput(window);
-                else if (window) SDL_StopTextInput(window);
+                if (want) {
+                    SDL_StartTextInput(window);
+                } else if (window) {
+                    SDL_StopTextInput(window);
+                    memset(&last_rect, 0, sizeof last_rect);
+                    last_caret = -1;
+                }
                 text_on = want;
+            }
+            if (want) {
+                float r[4], caret_x;
+                if (gamemenu_text_rect(r, &caret_x)) {
+                    int ww = 0, wh = 0;
+                    SDL_GetWindowSize(window, &ww, &wh);
+                    float px = picture_rect[0] * (float)ww, py = picture_rect[1] * (float)wh;
+                    float ph = picture_rect[3] * (float)wh;
+                    if (ph > 0) {
+                        float s = ph / 900.0f;
+                        SDL_Rect rect;
+                        rect.x = (int)roundf(px + r[0] * s);
+                        rect.y = (int)roundf(py + r[1] * s);
+                        rect.w = (int)roundf(r[2] * s);
+                        rect.h = (int)roundf(r[3] * s);
+                        int caret_offset = (int)roundf((caret_x - r[0]) * s);
+                        if (caret_offset < 0) caret_offset = 0;
+                        else if (caret_offset > rect.w) caret_offset = rect.w;
+                        if (rect.x != last_rect.x || rect.y != last_rect.y ||
+                            rect.w != last_rect.w || rect.h != last_rect.h ||
+                            caret_offset != last_caret) {
+                            SDL_SetTextInputArea(window, &rect, caret_offset);
+                            last_rect = rect;
+                            last_caret = caret_offset;
+                            fprintf(stderr, "yw4: text input area: %d,%d %dx%d caret %d (window %dx%d)\n",
+                                    rect.x, rect.y, rect.w, rect.h, caret_offset, ww, wh);
+                        }
+                    }
+                }
             }
         }
         if (!got) continue;
@@ -2046,8 +2085,8 @@ void window_run(void (*guest)(void *), void *arg) {
                 if (bindings_capturing()) bindings_capture_mouse(e.button.button);
                 else if (!settings_open() && (e.button.button == SDL_BUTTON_LEFT || e.button.button == SDL_BUTTON_RIGHT) &&
                          overlay_point(e.button.x, e.button.y, &x, &y))
-                    used_pad(0), gamemenu_mouse(x, y, e.button.button == SDL_BUTTON_LEFT ? 1 : 3);
-            } else if (window && !SDL_GetWindowRelativeMouseMode(window) && !mouse_off()) {
+                    used_pad(0), gamemenu_mouse(x, y, e.button.button == SDL_BUTTON_LEFT ? (e.button.clicks >= 2 ? 2 : 1) : 3);
+            } else if (window && !SDL_GetWindowRelativeMouseMode(window) && !mouse_off() && !mousemenu_open()) {
                 SDL_SetWindowRelativeMouseMode(window, true);
                 mouse_held_off = 1;
             }
@@ -2056,6 +2095,8 @@ void window_run(void (*guest)(void *), void *arg) {
             if (settings_open() || gamemenu_open()) {
                 if (bindings_capturing()) bindings_capture_wheel(e.wheel.y > 0 ? 1 : -1);
                 else if (!settings_open() && e.wheel.y != 0) used_pad(0), gamemenu_wheel(e.wheel.y > 0 ? 1 : -1);
+            } else if (e.wheel.y != 0 && mousemenu_wheel(e.wheel.y > 0 ? 1 : -1)) {
+                used_pad(0);
             } else {
                 host_lock(&mouse_lock);
                 if (e.wheel.y > 0) mouse_wheel_pulses[0] = 3;
@@ -2133,11 +2174,29 @@ void window_run(void (*guest)(void *), void *arg) {
                           {SDLK_RETURN, TI_DONE, "T_DONE"},  {SDLK_KP_ENTER, TI_DONE, "T_DONE"},
                           {SDLK_ESCAPE, TI_DONE, "T_DONE"},  {SDLK_TAB, TI_DONE, "T_DONE"}};
                 used_pad(0);
+                if (k == SDLK_C && (e.key.mod & SDL_KMOD_CTRL)) {  /* copy */
+                    textin_edit(TI_COPY), yw4_hid_note_key("T_COPY");
+                    break;
+                }
+                if (k == SDLK_X && (e.key.mod & SDL_KMOD_CTRL)) {  /* cut */
+                    textin_edit(TI_CUT), yw4_hid_note_key("T_CUT");
+                    break;
+                }
+                if (k == SDLK_A && (e.key.mod & SDL_KMOD_CTRL)) {  /* select all */
+                    textin_edit(TI_ALL), yw4_hid_note_key("T_ALL");
+                    break;
+                }
                 if (k == SDLK_V && (e.key.mod & SDL_KMOD_CTRL)) {  /* paste */
                     char *clip = SDL_GetClipboardText();
                     if (clip && *clip) textin_type(clip), yw4_hid_note_text(clip);
                     SDL_free(clip);
                     break;
+                }
+                if (e.key.mod & SDL_KMOD_SHIFT) {
+                    if (k == SDLK_LEFT) { textin_edit(TI_SLEFT), yw4_hid_note_key("T_SLEFT"); break; }
+                    if (k == SDLK_RIGHT) { textin_edit(TI_SRIGHT), yw4_hid_note_key("T_SRIGHT"); break; }
+                    if (k == SDLK_HOME) { textin_edit(TI_SHOME), yw4_hid_note_key("T_SHOME"); break; }
+                    if (k == SDLK_END) { textin_edit(TI_SEND), yw4_hid_note_key("T_SEND"); break; }
                 }
                 if (k == SDLK_ESCAPE && !e.key.repeat && gamemenu_prompting()) {  /* the game's popup: Cancel where offered */
                     gamemenu_prompt_cancel();

@@ -41,7 +41,7 @@ int gamemenu_prompting(void) { return __atomic_load_n(&prompting, __ATOMIC_ACQUI
 /* letters in the field, or in the default when it is empty */
 static int prompt_chars(void) {
     char t[TEXTIN_MAX];
-    textin_read(&prompt_text, t, sizeof t, NULL);
+    textin_read(&prompt_text, t, sizeof t, NULL, NULL);
     const char *s = t[0] ? t : prompt_fallback;
     int n = 0;
     for (; *s; s++) n += ((unsigned char)*s & 0xC0) != 0x80;
@@ -145,7 +145,7 @@ static void prompt_finish(void) {
         changed();
         return;
     }
-    textin_read(&prompt_text, prompt_answer, sizeof prompt_answer, NULL);
+    textin_read(&prompt_text, prompt_answer, sizeof prompt_answer, NULL, NULL);
     if (!prompt_answer[0]) snprintf(prompt_answer, sizeof prompt_answer, "%s", prompt_fallback);
     prompt_close(1);
 }
@@ -165,6 +165,20 @@ int gamemenu_prompt_take(char *out, size_t n) {
 int gamemenu_open(void) { return __atomic_load_n(&open_, __ATOMIC_ACQUIRE); }
 int gamemenu_previewing(void) { return __atomic_load_n(&preview, __ATOMIC_ACQUIRE); }
 void gamemenu_preview_rect(float r[4]) { memcpy(r, pv_rect, sizeof pv_rect); }
+
+static float focused_text_box[4];
+static float focused_caret_x;
+static int focused_text_valid;
+static float draw_text_box[4];
+static float draw_text_caret;
+static int draw_text_has;
+
+int gamemenu_text_rect(float r[4], float *caret_x) {
+    if (!__atomic_load_n(&focused_text_valid, __ATOMIC_ACQUIRE) || !textin_active()) return 0;
+    if (r) memcpy(r, focused_text_box, 4 * sizeof(float));
+    if (caret_x) *caret_x = focused_caret_x;
+    return 1;
+}
 int gamemenu_selected(void) { return sel; }
 int gamemenu_confirming(void) { return confirm; }
 
@@ -181,6 +195,7 @@ static void close_and_resume(void) {
     if (settings_open()) settings_toggle();
     bindings_cancel();
     textin_focus(NULL);  /* no typing into a closed overlay (what was typed stays for next time) */
+    __atomic_store_n(&focused_text_valid, 0, __ATOMIC_RELEASE);
     confirm = 0, focus = 0;
     __atomic_store_n(&preview, 0, __ATOMIC_RELEASE);  /* the overlay button in the preview: the game runs on */
     __atomic_store_n(&open_, 0, __ATOMIC_RELEASE);
@@ -487,7 +502,7 @@ void gamemenu_action(int a) {
     if (gamemenu_prompting()) {  /* the name popup: A / Enter is OK (typing has ended), the rest nothing */
         if (osk_shown && !prompt_body[0]) {  /* the on-screen keyboard (a controller) */
             char t[8];
-            textin_read(&prompt_text, t, sizeof t, NULL);
+            textin_read(&prompt_text, t, sizeof t, NULL, NULL);
             if (a == GM_UP || a == GM_DOWN || a == GM_LEFT || a == GM_RIGHT) osk_move(a);
             else if (a == GM_ACCEPT) osk_press();
             else if (a == GM_ALT) osk_caps ^= 1;
@@ -573,7 +588,22 @@ void gamemenu_mouse(float x, float y, int button) {
     Hit h;
     int found = hit_find(x, y, &h);
     if (gamemenu_prompting()) {  /* the name popup: its field takes the typing again, OK finishes */
-        if (button == 1 && found && h.kind == HIT_PROMPT_FIELD) textin_focus(&prompt_text), changed();
+        if (found && h.kind == HIT_PROMPT_FIELD) {
+            char text[TEXTIN_MAX]; int cur;
+            textin_read(&prompt_text, text, sizeof text, &cur, NULL);
+            int fh = prompt_body[0] ? 52 : 72;
+            int offset = ui_text_offset_at(UI_ROUNDED_800, 32, h.x + 20, h.y + (fh - 32 * 1.3f) / 2, h.w - 40 - 100, 32 * 1.3f, 1, text, cur, x, y);
+            if (button == 1) textin_focus(&prompt_text), textin_set_caret(offset), changed();
+            else if (button == 2) textin_focus(&prompt_text), textin_select_word(offset), changed();
+        }
+        if (button == 4 && textin_has(&prompt_text) && draw_text_has) {
+            char text[TEXTIN_MAX]; int cur;
+            textin_read(&prompt_text, text, sizeof text, &cur, NULL);
+            int fh = prompt_body[0] ? 52 : 72;
+            int offset = ui_text_offset_at(UI_ROUNDED_800, 32, draw_text_box[0] + 20, draw_text_box[1] + (fh - 32 * 1.3f) / 2,
+                                          draw_text_box[2] - 40 - 100, 32 * 1.3f, 1, text, cur, x, y);
+            textin_drag(offset), changed();
+        }
         if (button == 1 && found && h.kind == HIT_PROMPT_OK) prompt_finish();
         if (button == 1 && found && h.kind == HIT_PROMPT_CANCEL) gamemenu_prompt_cancel();
         if (found && h.kind == HIT_OSK_KEY && (button == 0 || button == 1)) {  /* the on-screen keyboard's keys */
@@ -589,6 +619,15 @@ void gamemenu_mouse(float x, float y, int button) {
     if (button == 0 || button == 4) {  /* what is under the mouse now: its hover look */
         int k = found ? h.kind : -1, ha = found ? h.a : 0, hb = found ? h.b : 0;
         if (k != hover_kind || ha != hover_a || hb != hover_b) hover_kind = k, hover_a = ha, hover_b = hb, changed();
+    }
+    if (button == 4 && textin_has(&bug_text) && draw_text_has) {
+        char text[TEXTIN_MAX]; int cur;
+        textin_read(&bug_text, text, sizeof text, &cur, NULL);
+        float tlh = 18 * 1.5f;
+        int offset = ui_text_offset_at(UI_GOTHIC_500, 18, draw_text_box[0] + 20, draw_text_box[1] + 16,
+                                      draw_text_box[2] - 40, tlh, (int)((draw_text_box[3] - 32) / tlh), text, cur, x, y);
+        textin_drag(offset), changed();
+        return;
     }
     if (confirm && (!found || h.kind != HIT_POPUP)) return;  /* the popup covers the rest */
     if (button == 1 && textin_has(&bug_text) && (!found || h.kind != HIT_BUG_TEXT)) textin_edit(TI_DONE), changed();
@@ -652,7 +691,14 @@ void gamemenu_mouse(float x, float y, int button) {
         if (click) focus = 1, brow = 0, bug_kind = h.a;
         break;
     case HIT_BUG_TEXT:
-        if (click) focus = 1, brow = 1, textin_focus(&bug_text);
+        {
+            char text[TEXTIN_MAX]; int cur;
+            textin_read(&bug_text, text, sizeof text, &cur, NULL);
+            float tlh = 18 * 1.5f;
+            int offset = ui_text_offset_at(UI_GOTHIC_500, 18, h.x + 20, h.y + 16, h.w - 40, tlh, (int)((h.h - 32) / tlh), text, cur, x, y);
+            if (click) focus = 1, brow = 1, textin_focus(&bug_text), textin_set_caret(offset);
+            else if (button == 2) focus = 1, brow = 1, textin_focus(&bug_text), textin_select_word(offset);
+        }
         break;
     case HIT_BUG_OFTEN:
         if (click) focus = 1, brow = 2, bug_often = h.a;
@@ -1366,8 +1412,8 @@ static void draw_bug_page(const UiCanvas *c, const GameMenuInfo *in) {
         ui_box(c, x, y, w, bh, 12, WHITE, typing ? 3 : 2, typing ? PLUM : LINE);
         hit_add(x, y, w, bh, HIT_BUG_TEXT, 0, 0);
         char text[TEXTIN_MAX];
-        int cur;
-        textin_read(&bug_text, text, sizeof text, &cur);
+        int cur, sel;
+        textin_read(&bug_text, text, sizeof text, &cur, &sel);
         float tlh = 18 * 1.5f;
         if (!text[0] && !typing) {
             ui_text(c, UI_GOTHIC_500, 18, x + 20, y + 16, tlh, "For example: Whisper has no shadow on the school field.",
@@ -1377,7 +1423,12 @@ static void draw_bug_page(const UiCanvas *c, const GameMenuInfo *in) {
                         in->pad ? "Press A to type with a keyboard" : "Press Enter to type", PLUM);
         } else {
             ui_text_edit(c, UI_GOTHIC_500, 18, x + 20, y + 16, w - 40, tlh, (int)((bh - 32) / tlh), text,
-                         typing ? cur : -1, INK, PLUM);
+                         typing ? cur : -1, typing ? sel : -1, INK, PLUM, RING);
+        }
+        if (typing) {
+            draw_text_box[0] = x, draw_text_box[1] = y, draw_text_box[2] = w, draw_text_box[3] = bh;
+            draw_text_caret = ui_text_caret_x();
+            draw_text_has = 1;
         }
         y += bh + 26;
         ui_text(c, UI_GOTHIC_700, 16, x, y, lh, "How often?", PLUM);
@@ -1545,12 +1596,13 @@ static void draw_preview(const UiCanvas *c, const GameMenuInfo *in) {
 
 void gamemenu_draw(const UiCanvas *c, const GameMenuInfo *in) {
     TH = theme_colors();
+    draw_text_has = 0;
     float W = (float)c->w / c->s, H = 900;
     int hk = hit_back();
     hit_n[hk] = 0;  /* the mouse's list, filled as things are drawn */
     int req = __atomic_exchange_n(&bug_request, 0, __ATOMIC_ACQ_REL);
     if (req) {  /* Save only / Send (bug_finish): here, where the paused picture is */
-        textin_read(&bug_text, bug_sent_text, sizeof bug_sent_text, NULL);
+        textin_read(&bug_text, bug_sent_text, sizeof bug_sent_text, NULL, NULL);
         bug_sent_kind = bug_kind, bug_sent_often = bug_often;
         BugReport r = bug_report_of(bug_sent_text, bug_kind, bug_often);
         r.picture = in->picture, r.picture_w = in->picture_w, r.picture_h = in->picture_h;
@@ -1595,8 +1647,8 @@ void gamemenu_draw(const UiCanvas *c, const GameMenuInfo *in) {
         ui_text(c, UI_GOTHIC_700, 16, bx, y, llh, prompt_label, MUTED);
         y += llh + 8;
         char text[TEXTIN_MAX];
-        int cur, chars = 0;
-        textin_read(&prompt_text, text, sizeof text, &cur);
+        int cur, sel, chars = 0;
+        textin_read(&prompt_text, text, sizeof text, &cur, &sel);
         for (const char *p = text; *p; p++) chars += ((unsigned char)*p & 0xC0) != 0x80;
         ui_box(c, bx, y, bw, fh, 14, WHITE, typing ? 3 : 2, typing ? PLUM : LINE);
         hit_add(bx, y, bw, fh, HIT_PROMPT_FIELD, 0, 0);
@@ -1606,7 +1658,12 @@ void gamemenu_draw(const UiCanvas *c, const GameMenuInfo *in) {
         ui_text_in(c, UI_GOTHIC_700, 17, bx + bw - 20 - cw, y, cw, fh, 2, count, MUTED);
         if (!text[0]) ui_text_in(c, UI_ROUNDED_800, 32, bx + 20 + 6, y, 0, fh, 0, prompt_fallback, LILAC);  /* the default */
         ui_text_edit(c, UI_ROUNDED_800, 32, bx + 20, y + (fh - 32 * 1.3f) / 2, bw - 40 - cw - 16, 32 * 1.3f, 1, text,
-                     typing ? cur : -1, INK, PLUM);
+                     typing ? cur : -1, typing ? sel : -1, INK, PLUM, RING);
+        if (typing) {
+            draw_text_box[0] = bx, draw_text_box[1] = y, draw_text_box[2] = bw, draw_text_box[3] = fh;
+            draw_text_caret = ui_text_caret_x();
+            draw_text_has = 1;
+        }
         y += fh + 12;
         char help[128], limit[32] = "";
         if (prompt_text.max_chars > 0) snprintf(limit, sizeof limit, " Up to %d letters.", prompt_text.max_chars);
@@ -1792,6 +1849,13 @@ void gamemenu_draw(const UiCanvas *c, const GameMenuInfo *in) {
         float right = px + pw - 16;
         right -= popup_button(c, right, ty + 12, "Quit game", 1, choice == 1) + 10;
         popup_button(c, right, ty + 12, "Keep playing", 0, choice == 0);
+    }
+    if (draw_text_has) {
+        memcpy(focused_text_box, draw_text_box, sizeof focused_text_box);
+        focused_caret_x = draw_text_caret;
+        __atomic_store_n(&focused_text_valid, 1, __ATOMIC_RELEASE);
+    } else {
+        __atomic_store_n(&focused_text_valid, 0, __ATOMIC_RELEASE);
     }
     __atomic_store_n(&hit_front, hk, __ATOMIC_RELEASE);  /* the mouse reads this drawing's list now */
 }

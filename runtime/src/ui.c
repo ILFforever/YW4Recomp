@@ -51,6 +51,47 @@ static const unsigned char font_g700[] = {
 static stbtt_fontinfo fonts[UI_FONTS];
 static int fonts_state;  /* 0 not loaded, 1 loaded, -1 failed */
 
+enum { UI_FALLBACK_FONT = UI_FONTS };
+static stbtt_fontinfo fallback_font;
+static int fallback_state;  /* 0 not tried, 1 loaded, -1 none */
+
+static int fallback_ready(void) {
+    if (fallback_state) return fallback_state > 0;
+    fallback_state = -1;
+    const char *paths[] = {
+        "C:/Windows/Fonts/YuGothM.ttc",
+        "C:/Windows/Fonts/meiryo.ttc",
+        "C:/Windows/Fonts/msgothic.ttc",
+        "C:/Windows/Fonts/segoeui.ttf",
+        "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
+        "/usr/share/fonts/noto-cjk/NotoSansCJK-Regular.ttc",
+        "/usr/share/fonts/truetype/noto/NotoSansCJK-Regular.ttc",
+        "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+        "/usr/share/fonts/TTF/DejaVuSans.ttf",
+        "/usr/share/fonts/dejavu/DejaVuSans.ttf"
+    };
+    for (size_t i = 0; i < sizeof paths / sizeof *paths; i++) {
+        if (!paths[i] || !*paths[i]) continue;
+        FILE *f = fopen(paths[i], "rb");
+        if (!f) continue;
+        fseek(f, 0, SEEK_END);
+        long n = ftell(f);
+        fseek(f, 0, SEEK_SET);
+        unsigned char *d = n > 0 ? malloc((size_t)n) : NULL;
+        int ok = d && fread(d, 1, (size_t)n, f) == (size_t)n;
+        fclose(f);
+        int offset = ok ? stbtt_GetFontOffsetForIndex(d, 0) : -1;
+        if (offset >= 0 && stbtt_InitFont(&fallback_font, d, offset)) {
+            fallback_state = 1;
+            fprintf(stderr, "yw4: ui: fallback font %s\n", paths[i]);
+            return 1;
+        }
+        free(d);
+    }
+    fprintf(stderr, "yw4: ui: no fallback font found\n");
+    return 0;
+}
+
 static int fonts_ready(void) {
     if (fonts_state) return fonts_state > 0;
     const unsigned char *data[UI_FONTS] = {font_r500, font_r700, font_r800, font_g400, font_g500, font_g700};
@@ -215,9 +256,30 @@ static float text_run(const UiCanvas *c, int f, float px, float x, float base, c
         int adv, lsb;
         stbtt_GetCodepointHMetrics(fi, cp, &adv, &lsb);
         if (cp > 32 && !stbtt_FindGlyphIndex(fi, cp)) {
+            if (fallback_ready() && stbtt_FindGlyphIndex(&fallback_font, cp)) {
+                float fsc = stbtt_ScaleForMappingEmToPixels(&fallback_font, px);
+                int fadv, flsb;
+                stbtt_GetCodepointHMetrics(&fallback_font, cp, &fadv, &flsb);
+                if (c) {
+                    float fx = floorf(pen);
+                    int sub = (int)((pen - fx) * GLYPH_SUBPIXELS + 0.5f);
+                    if (sub == GLYPH_SUBPIXELS) sub = 0, fx += 1;  /* rounds up to the next whole pixel */
+                    const Glyph *g = glyph_get(&fallback_font, UI_FALLBACK_FONT, px, fsc, cp, sub);
+                    if (g->w > 0) {
+                        int gx = (int)fx + g->x0, gy = (int)floorf(base + 0.5f) + g->y0;
+                        for (int j = 0; j < g->h; j++)
+                            for (int i = 0; i < g->w; i++) {
+                                uint8_t a = g->bm[j * g->w + i];
+                                if (a) blend(c, gx + i, gy + j, rgb, (float)a / 255.0f);
+                            }
+                    }
+                }
+                pen += (float)fadv * fsc + track;
+                prev = 0;
+                continue;
+            }
             /* a letter the built-in fonts don't have (they hold Western letters only, third_party/fonts): a small
-             * box in its place, so typed text never turns into blank space. TODO: other scripts from the system's
-             * fonts (docs/known-issues.md). */
+             * box in its place, so typed text never turns into blank space. */
             float bw = px * 0.55f;
             if (c) {
                 float bx0 = floorf(pen + px * 0.08f), by0 = floorf(base - px * 0.68f + 0.5f), bh = px * 0.68f;
@@ -330,8 +392,14 @@ static float span_w(int f, float px, const char *str, int from, int to) {
     return text_run(NULL, f, px, 0, 0, buf, 0, 0);
 }
 
+static float last_caret_x;
+
+float ui_text_caret_x(void) { return last_caret_x; }
+
 float ui_text_edit(const UiCanvas *c, int f, float px, float x, float y, float w, float lh, int max_lines,
-                   const char *str, int cursor, uint32_t rgb, uint32_t caret) {
+                   const char *str, int cursor, int sel_anchor, uint32_t rgb, uint32_t caret, uint32_t sel_color) {
+    if (cursor >= 0) last_caret_x = x;
+    else last_caret_x = 0;
     enum { MAXL = 64 };
     int start[MAXL], end[MAXL], n = 0, len = (int)strlen(str);
     /* lines: words (with the spaces after them) while they fit; a word wider than the box breaks between letters */
@@ -373,20 +441,100 @@ float ui_text_edit(const UiCanvas *c, int f, float px, float x, float y, float w
     int first = 0;  /* the lines shown: the caret's always among them */
     if (max_lines > 0 && cl >= max_lines) first = cl - max_lines + 1;
     int shown = 0;
+    int has_sel = sel_anchor >= 0 && cursor >= 0 && sel_anchor != cursor;
+    int sel_min = sel_anchor < cursor ? sel_anchor : cursor;
+    int sel_max = sel_anchor > cursor ? sel_anchor : cursor;
     for (int k = first; k < n && (max_lines <= 0 || shown < max_lines); k++, shown++) {
         float ly = y + (float)shown * lh;
         if (c) {
+            if (has_sel) {
+                int o_start = start[k] > sel_min ? start[k] : sel_min;
+                int o_end = end[k] < sel_max ? end[k] : sel_max;
+                if (o_end > o_start) {
+                    float sx0 = x + span_w(f, px, str, start[k], o_start);
+                    float sx1 = x + span_w(f, px, str, start[k], o_end);
+                    ui_rect(c, sx0, ly, sx1 - sx0, lh, sel_color, 0.35f);
+                }
+            }
             char buf[1024];
             int m = end[k] - start[k] < (int)sizeof buf - 1 ? end[k] - start[k] : (int)sizeof buf - 1;
             memcpy(buf, str + start[k], (size_t)m), buf[m] = 0;
             ui_text(c, f, px, x, ly, lh, buf, rgb);
             if (cursor >= 0 && k == cl) {
                 float cx = x + span_w(f, px, str, start[k], cursor);
+                last_caret_x = cx;
                 ui_rect(c, cx, ly + lh * 0.15f, 2, lh * 0.7f, caret, 1);
             }
         }
     }
     return (float)(shown ? shown : 1) * lh;
+}
+
+int ui_text_offset_at(int f, float px, float x, float y, float w, float lh, int max_lines,
+                      const char *str, int cursor, float mx, float my) {
+    enum { MAXL = 64 };
+    int start[MAXL], end[MAXL], n = 0, len = (int)strlen(str);
+    int ls = 0, i = 0;
+    while (n < MAXL) {
+        int le = ls;
+        i = ls;
+        while (i < len) {
+            int we = i;
+            while (we < len && str[we] != ' ') we++;
+            while (we < len && str[we] == ' ') we++;
+            if (span_w(f, px, str, ls, we) <= w || le == ls) {
+                if (le == ls && span_w(f, px, str, ls, we) > w) {
+                    int k = ls;
+                    while (k < we) {
+                        int nk = k + 1;
+                        while (nk < we && (str[nk] & 0xC0) == 0x80) nk++;
+                        if (k > ls && span_w(f, px, str, ls, nk) > w) break;
+                        k = nk;
+                    }
+                    le = k;
+                    break;
+                }
+                le = we, i = we;
+            } else break;
+        }
+        start[n] = ls, end[n] = le, n++;
+        if (le >= len) break;
+        ls = le;
+    }
+    if (n == 0) return 0;
+    int cl = n - 1;
+    if (cursor >= 0)
+        for (int k = 0; k < n; k++)
+            if (cursor >= start[k] && (cursor < end[k] || k == n - 1)) {
+                cl = k;
+                break;
+            }
+    int first = 0;
+    if (max_lines > 0 && cl >= max_lines) first = cl - max_lines + 1;
+    int visible = max_lines > 0 && n - first > max_lines ? max_lines : n - first;
+    if (visible <= 0) visible = 1;
+
+    int line_idx = (int)floorf((my - y) / lh);
+    if (line_idx < 0) line_idx = 0;
+    if (line_idx >= visible) line_idx = visible - 1;
+    int k = first + line_idx;
+    if (k >= n) k = n - 1;
+
+    float rel_x = mx - x;
+    if (rel_x <= 0) return start[k];
+    int line_start = start[k], line_end = end[k];
+    if (rel_x >= span_w(f, px, str, line_start, line_end)) return line_end;
+
+    int cur_p = line_start;
+    while (cur_p < line_end) {
+        int next_p = cur_p + 1;
+        while (next_p < line_end && (str[next_p] & 0xC0) == 0x80) next_p++;
+        float x0 = span_w(f, px, str, line_start, cur_p);
+        float x1 = span_w(f, px, str, line_start, next_p);
+        if (rel_x < (x0 + x1) * 0.5f) return cur_p;
+        cur_p = next_p;
+    }
+    return line_end;
 }
 
 /* ---- images */
