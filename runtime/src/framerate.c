@@ -37,6 +37,7 @@
 #include "framerate.h"
 #include "host.h"
 #include "kernel.h"
+#include "window.h"
 #include "yw4load.h"
 #include "yw4rt.h"
 
@@ -74,6 +75,31 @@ void framerate_wait(void) {
     if (game_paces) return;     /* the game's limiter and interval did it */
     int hz = framerate_hz();
     yw4_vsync_start();
+    /* YW4_PACE=refresh (off by default; from Quandiy's fork, where it was the default): 30 and 60 by a deadline on
+     * this thread, its period a whole number of the display's refreshes (2 x 8.33 ms on a 120 Hz screen, so every
+     * frame shows for the same two refreshes and the phase doesn't drift). There the wait for the emulated 60 Hz
+     * tick (vi.c's thread) lost a whole tick now and then: ~1 frame in 400 showed for 33 ms with 6 ms of work
+     * (2026-11-09, RX 6650 XT, 120 Hz). Here that thread has had the highest priority since (232829c), and the
+     * two ways have not been measured against each other yet, so the tick wait stays unless this is asked for. */
+    static int pace_refresh = -1;
+    if (pace_refresh < 0) pace_refresh = getenv("YW4_PACE") && !strcmp(getenv("YW4_PACE"), "refresh");
+    if ((hz == 30 || hz == 60) && pace_refresh) {
+        next_flip = 0;
+        double refresh = window_refresh_hz();
+        int64_t period = 1000000000ll / hz;
+        if (refresh > 1.0) {
+            double k = refresh / hz;
+            long whole = (long)(k + 0.5);
+            if (whole >= 1 && k / (double)whole > 0.99 && k / (double)whole < 1.01)
+                period = (int64_t)((double)whole * 1e9 / refresh + 0.5);
+        }
+        int64_t now = host_now_ns();
+        if (!due || now - due > period / 2) due = now;  /* first frame, or late: start again from now, no burst */
+        if (due - now > 1000000) host_sleep_ns(due - now - 1000000);  /* the timer is good to ~1 ms: spin the rest */
+        while (host_now_ns() < due) {}
+        due += period;
+        return;
+    }
     if (hz == 30 || hz == 60) {
         uint64_t now = yw4_vsync_count();
         if (next_flip < now + 1) next_flip = now + 1;
