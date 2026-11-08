@@ -209,7 +209,14 @@ void gpu_compute_trace(uint64_t frame);
  * out by gpu_capture_flush once the GPU has finished them. */
 int gpu_capture_pending(void);
 void gpu_capture_flush(void);
-/* Builds the pipelines listed in gpu_draw.c on a background thread at start-up (YW4_PREBUILD=0: off). */
+/* Builds the pipelines listed in gpu_draw.c, and every pipeline the journal remembers from earlier runs, on
+ * background threads at start-up (YW4_PREBUILD=0: off). */
 void gpu_prebuild_start(void);
+/* The pipeline cache on disk (gpu_pcache.c): pass gpu_pcache() to every vkCreate*Pipelines, call
+ * gpu_pcache_built() after each build so the next save writes it. */
+void gpu_pcache_init(void);
+VkPipelineCache gpu_pcache(void);
+void gpu_pcache_built(void);
+void gpu_pcache_save(void);
 
 #endif

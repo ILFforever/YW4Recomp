@@ -278,7 +278,7 @@ static VkPipeline pipeline(int pass, VkFormat out) {
         .pVertexInputState = &vi, .pInputAssemblyState = &ia, .pViewportState = &vp, .pRasterizationState = &rs,
         .pMultisampleState = &ms, .pDepthStencilState = &ds, .pColorBlendState = &cbs, .pDynamicState = &dy,
         .layout = pipe_layout};
-    CHECK(vkCreateGraphicsPipelines(vk.device, VK_NULL_HANDLE, 1, &pci, NULL, &pipes[n].pipe));
+    CHECK(vkCreateGraphicsPipelines(vk.device, gpu_pcache(), 1, &pci, NULL, &pipes[n].pipe));
     pipes[n].pass = pass, pipes[n].out = out;
     return pipes[n++].pipe;
 }

@@ -155,6 +155,7 @@ void gpu_init(void) {
     }
     ready = 1;
     fprintf(stderr, "yw4: gpu: draw path on (decision 0021)\n");
+    gpu_pcache_init();
     gpu_prebuild_start();
 }
 
@@ -772,7 +773,7 @@ static int detile_ready(void) {
         .stage = {.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO, .stage = VK_SHADER_STAGE_COMPUTE_BIT,
                   .module = gpu_native_shader("detile.comp"), .pName = "main"},
         .layout = detile_layout};
-    CHECK(vkCreateComputePipelines(vk.device, VK_NULL_HANDLE, 1, &ci, NULL, &detile_pipe));
+    CHECK(vkCreateComputePipelines(vk.device, gpu_pcache(), 1, &ci, NULL, &detile_pipe));
     VkBufferCreateInfo bci = {.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO, .size = DETILE_RING,
                               .usage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_TRANSFER_SRC_BIT};
     CHECK(vkCreateBuffer(vk.device, &bci, NULL, &detile_ring));
