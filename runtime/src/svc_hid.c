@@ -14,6 +14,7 @@
  * YW4_INPUT=<tick>:<buttons hex>:<ticks>,... holds buttons from a vsync tick on (60 per
  * second), for testing without a person at the keyboard.
  */
+#include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -347,7 +348,67 @@ static void applet_resource(Service *s, IpcRequest *req, IpcResponse *resp) {
     ipc_unimplemented(s, req, resp);
 }
 
-/* Vibration: accepted and dropped until there is a host controller to rumble. */
+/* Vibration: routed to the active host controller (window_rumble, decision 0058). */
+typedef struct {
+    float amp_low;
+    float freq_low;
+    float amp_high;
+    float freq_high;
+} VibrationValue;
+
+static void send_vibration_values(IpcRequest *req, IpcResponse *resp) {
+    (void)resp;
+    const IpcBuffer *b_h = req->nx >= 1 && req->x[0].size ? &req->x[0] : (req->na >= 1 ? &req->a[0] : NULL);
+    const IpcBuffer *b_v = req->nx >= 2 && req->x[1].size ? &req->x[1] : (req->na >= 2 ? &req->a[1] : NULL);
+    if (!b_h || !b_v || !b_h->addr || !b_v->addr) return;
+
+    uint32_t n_h = (uint32_t)(b_h->size / sizeof(uint32_t));
+    uint32_t n_v = (uint32_t)(b_v->size / sizeof(VibrationValue));
+    uint32_t count = n_h < n_v ? n_h : n_v;
+    if (!count) return;
+
+    const uint32_t *handles = GPTR(b_h->addr);
+    const VibrationValue *values = GPTR(b_v->addr);
+
+    float max_low = 0.0f, max_high = 0.0f;
+    for (uint32_t i = 0; i < count; i++) {
+        uint32_t h = handles[i];
+        uint32_t npad = (h >> 8) & 0xFF;
+        if (npad != 0) continue;  /* Player 1 only */
+
+        float al = values[i].amp_low;
+        float ah = values[i].amp_high;
+        if (al > max_low) max_low = al;
+        if (ah > max_high) max_high = ah;
+    }
+    if (max_low > 1.0f) max_low = 1.0f;
+    if (max_high > 1.0f) max_high = 1.0f;
+    if (max_low < 0.0f || isnan(max_low)) max_low = 0.0f;
+    if (max_high < 0.0f || isnan(max_high)) max_high = 0.0f;
+
+    uint16_t low_u16 = (uint16_t)(max_low * 65535.0f);
+    uint16_t high_u16 = (uint16_t)(max_high * 65535.0f);
+    window_rumble(low_u16, high_u16, (low_u16 || high_u16) ? 1000 : 0);
+}
+
+static void send_vibration_value(IpcRequest *req, IpcResponse *resp) {
+    (void)resp;
+    if (req->data_size < 20) return;
+    uint32_t h = IPC_IN(uint32_t, 0);
+    uint32_t npad = (h >> 8) & 0xFF;
+    if (npad != 0) return;  /* Player 1 only */
+
+    const VibrationValue *v = (const VibrationValue *)(req->data + 4);
+    float al = v->amp_low;
+    float ah = v->amp_high;
+    if (al > 1.0f) al = 1.0f; else if (al < 0.0f || isnan(al)) al = 0.0f;
+    if (ah > 1.0f) ah = 1.0f; else if (ah < 0.0f || isnan(ah)) ah = 0.0f;
+
+    uint16_t low_u16 = (uint16_t)(al * 65535.0f);
+    uint16_t high_u16 = (uint16_t)(ah * 65535.0f);
+    window_rumble(low_u16, high_u16, (low_u16 || high_u16) ? 1000 : 0);
+}
+
 static const SimpleCommand vibration_list_simple[] = {
     {0, SIMPLE_OK, 0, "ActivateVibrationDevice(handle)"},
 };
@@ -360,7 +421,6 @@ static const SimpleCommand hid_simple[] = {
     {100, SIMPLE_OK, 0, "SetSupportedNpadStyleSet(style set, aruid)"},
     {102, SIMPLE_OK, 0, "SetSupportedNpadIdType(aruid, X: ids)"},
     {109, SIMPLE_OK, 0, "ActivateNpadWithRevision(revision, aruid)"},
-    {206, SIMPLE_OK, 0, "SendVibrationValues(aruid, X: handles, X: values): dropped"},
 };
 
 void svc_hid(Service *s, IpcRequest *req, IpcResponse *resp) {
@@ -368,8 +428,16 @@ void svc_hid(Service *s, IpcRequest *req, IpcResponse *resp) {
         ipc_return_object(resp, ipc_service_new("hid:IAppletResource", applet_resource, NULL));
         return;
     }
+    if (req->cmd == 201) {  /* SendVibrationValue(handle, value, aruid) */
+        send_vibration_value(req, resp);
+        return;
+    }
     if (req->cmd == 203) {  /* CreateActiveVibrationDeviceList -> IActiveVibrationDeviceList */
         ipc_return_object(resp, ipc_service_new("hid:IActiveVibrationDeviceList", vibration_list, NULL));
+        return;
+    }
+    if (req->cmd == 206) {  /* SendVibrationValues(aruid, X: handles, X: values) */
+        send_vibration_values(req, resp);
         return;
     }
     if (req->cmd == 200) {  /* GetVibrationDeviceInfo(handle) -> {u32 type, u32 position} */

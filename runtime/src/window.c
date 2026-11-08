@@ -1695,6 +1695,33 @@ void window_input(uint64_t *buttons, int32_t sticks[4]) {
     host_unlock(&input_lock);
 }
 
+void window_rumble(uint16_t low, uint16_t high, uint32_t duration_ms) {
+    static int enabled = -1;
+    static float gain = 1.0f;
+    if (enabled < 0) {
+        const char *e = getenv("YW4_RUMBLE");
+        enabled = !(e && !strcmp(e, "0"));
+        const char *g = getenv("YW4_RUMBLE_GAIN");
+        if (g && *g) {
+            gain = (float)atof(g);
+            if (gain < 0.0f) gain = 0.0f;
+        }
+    }
+    if (!enabled) return;
+
+    if (gain != 1.0f) {
+        float l = (float)low * gain;
+        float h = (float)high * gain;
+        low = l > 65535.0f ? 65535 : (uint16_t)l;
+        high = h > 65535.0f ? 65535 : (uint16_t)h;
+    }
+
+    host_lock(&input_lock);
+    SDL_Gamepad *pad = gamepad;
+    if (pad) SDL_RumbleGamepad(pad, low, high, duration_ms);
+    host_unlock(&input_lock);
+}
+
 /* The keyboard, mouse, and the gamepad through the controls (bindings.c; the settings panel's second page). */
 static void update_input(void) {
     uint64_t b;
@@ -2047,15 +2074,19 @@ void window_run(void (*guest)(void *), void *arg) {
             if (gamemenu_open() && textin_active()) textin_type(e.text.text), yw4_hid_note_text(e.text.text);
             break;
         case SDL_EVENT_GAMEPAD_ADDED:
+            host_lock(&input_lock);
             if (!gamepad && (gamepad = SDL_OpenGamepad(e.gdevice.which)))
                 fprintf(stderr, "yw4: window: gamepad %s\n", SDL_GetGamepadName(gamepad));
+            host_unlock(&input_lock);
             break;
         case SDL_EVENT_GAMEPAD_REMOVED:
+            host_lock(&input_lock);
             if (gamepad && SDL_GetGamepadID(gamepad) == e.gdevice.which) {
                 SDL_CloseGamepad(gamepad);
                 gamepad = NULL;
                 fprintf(stderr, "yw4: window: gamepad removed\n");
             }
+            host_unlock(&input_lock);
             break;
         case SDL_EVENT_GAMEPAD_BUTTON_DOWN:
             if (gamepad && SDL_GetGamepadID(gamepad) == e.gbutton.which) used_pad(1), panel_pad_button(e.gbutton.button);

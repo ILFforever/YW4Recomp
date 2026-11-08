@@ -157,6 +157,8 @@ Saved screenshots get the same sRGB decode as the window, so their colours match
 | `YW4_REPLAY=<file>` | Feed a recording back, so a route can be run without a person. While it plays, the game's main loop runs on a clock of exactly 1/60 s per frame and the recording's ticks are taken as frames, so a route ends in the same place every run (`runtime/src/kernel.c` `yw4_replay_frame_clock`); the game's time then follows its frames, not the wall. When the replay ends, real time again, and the keyboard and gamepad work again, so a short recording can just load the save. Text typed into the overlay's fields is recorded as `t <tick> <text>` lines and its editing keys as `T_LEFT`, `T_RIGHT`, `T_HOME`, `T_END`, `T_BACK`, `T_DEL`, `T_DONE` (`runtime/src/textin.h`). Videos play on real time, so during a replay they blink and stutter against the game's frame time (only then) |
 | `YW4_REPLAY_CLOCK=real` | The replay on the wall clock instead (before 2026-10-31): routes drift with loading and shader-build times |
 | `YW4_MOUSE=0` | The game never takes the mouse: no capture, camera, clicks or wheel (`tools.dev.run` sets it, so the PC can be used during test runs) |
+| `YW4_RUMBLE=0` | Turn off controller vibration/rumble (default 1, on; [decision 0058](decisions/0058-controller-rumble.md)) |
+| `YW4_RUMBLE_GAIN=<float>` | Scale vibration intensity on the host gamepad (default 1.0; e.g. 0.5 for half strength, 1.5 for stronger rumble) |
 | `YW4_INPUT=2400:1:10` | Scripted presses, `tick:buttons(hex):length`, comma separated; `1` is A |
 
 ## Looking inside a frame

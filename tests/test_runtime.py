@@ -424,3 +424,136 @@ class SwkbdCheckTest(unittest.TestCase):
                             "-o", str(exe), str(t / "drv.c")], check=True, capture_output=True)
             got = subprocess.run([str(exe)], capture_output=True, text=True, check=True)
             self.assertEqual(got.returncode, 0)
+
+
+HID_VIBRATION_DRIVER = r"""
+#include <stdio.h>
+#include <stdint.h>
+#include <string.h>
+#include <stdlib.h>
+#include <math.h>
+
+#include "ipc.h"
+#include "hle.h"
+#include "host.h"
+#include "kernel.h"
+
+static uint16_t last_low;
+static uint16_t last_high;
+static uint32_t last_duration;
+static int rumble_calls;
+
+void window_rumble(uint16_t low, uint16_t high, uint32_t duration_ms) {
+    last_low = low;
+    last_high = high;
+    last_duration = duration_ms;
+    rumble_calls++;
+}
+
+void window_input(uint64_t *buttons, int32_t sticks[4]) {}
+void host_lock(HostLock *l) {}
+void host_unlock(HostLock *l) {}
+uint64_t window_input_reads(void) { return 0; }
+void window_input_read_replayed(void) {}
+int window_paused(void) { return 0; }
+uint64_t window_pause_buttons(void) { return 0; }
+void settings_action(int a) {}
+int settings_open(void) { return 0; }
+int gamemenu_open(void) { return 0; }
+void textin_type(const char *t) {}
+int bindings_capture_axis(int axis, int16_t val) { return 0; }
+void used_pad(int p) {}
+void panel_pad_stick(void) {}
+void panel_pad_triggers(void) {}
+KSharedMemory *yw4_shared_memory_new(size_t size, void (*on_map)(KSharedMemory *), uint32_t *handle) { return NULL; }
+void yw4_handle_close(uint32_t handle) {}
+KEvent *yw4_event_new(uint32_t *handle) { return NULL; }
+void gpu_request_trace(int draws) {}
+void gpu_request_dump(void) {}
+void shadow_toggle(void) {}
+
+Service *ipc_service_new(const char *name, ServiceHandler handler, void *state) { return NULL; }
+void ipc_unimplemented(Service *s, IpcRequest *req, IpcResponse *resp) {}
+void ipc_return_object(IpcResponse *resp, Service *s) {}
+
+#include "svc_hid.c"
+
+int main(void) {
+    Service s = {"hid", svc_hid, NULL, 1};
+    IpcResponse resp = {0};
+
+    /* 1. Test SendVibrationValues (cmd 206) with stereo left/right actuators */
+    uint32_t handles[2] = {
+        0x00010001, /* style 1, npad 0 (player 1), device 1 (left) */
+        0x00020001  /* style 1, npad 0 (player 1), device 2 (right) */
+    };
+    VibrationValue vals[2] = {
+        { 0.5f, 160.0f, 0.2f, 320.0f },
+        { 0.8f, 160.0f, 0.4f, 320.0f }
+    };
+    IpcRequest req206 = {0};
+    req206.cmd = 206;
+    req206.nx = 2;
+    req206.x[0].addr = (uint64_t)(uintptr_t)handles;
+    req206.x[0].size = sizeof(handles);
+    req206.x[1].addr = (uint64_t)(uintptr_t)vals;
+    req206.x[1].size = sizeof(vals);
+
+    rumble_calls = 0;
+    svc_hid(&s, &req206, &resp);
+
+    if (rumble_calls != 1) return 1;
+    if (last_low < 52400 || last_low > 52450) return 2;
+    if (last_high < 26200 || last_high > 26250) return 3;
+    if (last_duration != 1000) return 4;
+
+    /* 2. Test stopping vibration (zero amplitude) */
+    vals[0].amp_low = 0.0f; vals[0].amp_high = 0.0f;
+    vals[1].amp_low = 0.0f; vals[1].amp_high = 0.0f;
+    svc_hid(&s, &req206, &resp);
+    if (last_low != 0 || last_high != 0 || last_duration != 0) return 5;
+
+    /* 3. Test player 2 handle ignored */
+    uint32_t p2_handle = 0x00010101; /* npad 1 (player 2) */
+    VibrationValue p2_val = { 1.0f, 160.0f, 1.0f, 320.0f };
+    req206.x[0].addr = (uint64_t)(uintptr_t)&p2_handle;
+    req206.x[0].size = sizeof(p2_handle);
+    req206.x[1].addr = (uint64_t)(uintptr_t)&p2_val;
+    req206.x[1].size = sizeof(p2_val);
+    svc_hid(&s, &req206, &resp);
+    if (last_low != 0 || last_high != 0) return 6;
+
+    /* 4. Test SendVibrationValue (cmd 201, singular) */
+    uint8_t raw201[32] = {0};
+    *(uint32_t *)(raw201 + 0) = 0x00010001; /* player 1, device 1 */
+    VibrationValue *v201 = (VibrationValue *)(raw201 + 4);
+    v201->amp_low = 0.6f;
+    v201->amp_high = 0.3f;
+    IpcRequest req201 = {0};
+    req201.cmd = 201;
+    req201.data = raw201;
+    req201.data_size = 28;
+    svc_hid(&s, &req201, &resp);
+    if (last_low < 39300 || last_low > 39350) return 7;
+    if (last_high < 19650 || last_high > 19700) return 8;
+
+    return 0;
+}
+"""
+
+
+class HidVibrationTest(unittest.TestCase):
+    """The controller vibration handling (runtime/src/svc_hid.c)."""
+
+    def test_vibration_routing(self):
+        with tempfile.TemporaryDirectory() as t:
+            t = Path(t)
+            (t / "drv.c").write_text(HID_VIBRATION_DRIVER)
+            exe = t / "vib_test.exe"
+            subprocess.run([check.host_cc(), "-std=c17", "-O1", "-Wall",
+                            f"-I{RUNTIME / 'include'}", f"-I{RUNTIME / 'src'}",
+                            f"-I{check.REPO / 'third_party' / 'vulkan' / 'include'}",
+                            f"-I{check.REPO / 'third_party' / 'sdl3' / 'include'}",
+                            "-o", str(exe), str(t / "drv.c")], check=True, capture_output=True)
+            got = subprocess.run([str(exe)], capture_output=True, text=True, check=True)
+            self.assertEqual(got.returncode, 0)

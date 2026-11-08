@@ -40,6 +40,9 @@ uint64_t window_pause_buttons(void);  /* the buttons it presses for the player n
 /* Relative mouse motion accumulated since the last call (bindings.c yw4_hook_mouse_look). */
 void window_mouse_motion(float *dx, float *dy);
 
+/* Rumble the active gamepad (low-frequency and high-frequency motors, 0..65535, duration in ms). Any thread. */
+void window_rumble(uint16_t low, uint16_t high, uint32_t duration_ms);
+
 /* The same as pressing F12 (a screenshot of the next frame), for replays. */
 void window_request_screenshot(void);
 /* While the game waits on the player (the name entry, swkbd.c): its last frame again with the overlay over it;
