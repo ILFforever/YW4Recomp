@@ -76,7 +76,16 @@ def unpack_ncas(path: Path, out_dir: Path, tag: str) -> tuple[list[Path], set[st
 def write_temp_keys(keys_dir: Path, rights_ids: set[str], home: Path) -> None:
     switch = home / ".switch"
     switch.mkdir()
-    shutil.copyfile(keys_dir / "prod.keys", switch / "prod.keys")
+    # Only lines hactool 1.4 can read: keys dumped from newer firmware (e.g. mariko_master_kek_source_06, 34 hex
+    # digits) make it refuse the whole file ("must be 32 hex digits"), though none of them is needed here.
+    lines = []
+    with (keys_dir / "prod.keys").open(encoding="utf-8", errors="replace") as f:
+        for line in f:
+            _name, sep, value = line.partition("=")
+            value = value.strip()
+            if sep and len(value) in (32, 64) and all(c in "0123456789abcdefABCDEF" for c in value):
+                lines.append(line if line.endswith("\n") else line + "\n")
+    (switch / "prod.keys").write_text("".join(lines), encoding="utf-8")
     if not rights_ids:  # game-card NCAs only: no title keys needed, title.keys may not exist
         return
     if not (keys_dir / "title.keys").is_file():
