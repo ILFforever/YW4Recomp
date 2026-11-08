@@ -10,9 +10,9 @@
   --violet-soft: #9bcf4a; /* the leaf green, a small accent */
   --ink: #2e2a14;       /* body text */
   --ink-2: #6e6640;     /* secondary text */
-  --gold: #f3dc78;      /* primary buttons: his butter yellow */
+  --gold: #f9e9a2;      /* primary buttons: his butter yellow */
   --gold-deep: #c9a640;
-  --gold-hi: #f9e9a2;
+  --gold-hi: #f3dc78;
   --gold-press: #e6cc60;
   --cream: #fbf6dc;
   --white: #ffffff;
@@ -33,8 +33,8 @@
   --ink-art: #fffdf2;
   --ink-welcome: #f8f0c4;
   --shadow-text: rgb(40 40 10 / .45);
-  --play: #f3dc78;      /* Play: his yellow, dark text */
-  --play-hi: #f9e9a2;
+  --play: #f9e9a2;      /* Play: his yellow, dark text */
+  --play-hi: #f3dc78;
   --play-press: #e6cc60;
   --play-ink: #2e2a14;
 }
