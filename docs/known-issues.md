@@ -27,6 +27,10 @@ What is known to be missing or wrong, roughly in the order it is likely to matte
   after the GPU is done, memory returns to normal). Worst case: changing the aspect ratio every 2-6 frames keeps
   every size in use at once, ~7.3-7.4 GB of 8 GB, gone once the changes stop. A sturdy fix if it comes back: apply a
   size change only once the setting has rested a few frames, so the sizes passed over are never made.
+  **Reappeared** (owner, 2026-11-09, frame 47,804, late-game save, 5120×2160 21:9): switching upscaling mode repeatedly
+  (Quality → Balanced → Performance → Off) at 5120×2160 allocated new native-res render targets and triggered
+  `yw4: gpu: device lost in submission 191219` from video memory exhaustion on the 8 GB laptop GPU. Debouncing the
+  setting change remains the planned fix.
 - **Stutters at 4K ultrawide; to optimize** (owner, 2026-10-28; 4K height at 21:9 = 5120×2160, TAA, full-size effects). From the
   owner's session logs: bamboo forest (late-game save) GPU 23.2 ms per frame on average, 36.4 ms at the 99th
   percentile (budget 33.3), 419 of 27,382 frames over 50 ms; school save GPU 18.2 / 27.6 ms, 134 of 5,620 over
