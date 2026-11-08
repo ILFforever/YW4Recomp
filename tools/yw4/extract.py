@@ -73,7 +73,24 @@ def unpack_ncas(path: Path, out_dir: Path, tag: str) -> tuple[list[Path], set[st
     return ncas, rights_ids
 
 
-def write_temp_keys(keys_dir: Path, rights_ids: set[str], home: Path) -> None:
+def ticket_title_key(data: bytes) -> tuple[str, str] | None:
+    """(rights ID, encrypted title key) from a common ticket (.tik) inside an NSP, else None. hactool's
+    title.keys holds the key as the ticket carries it (it decrypts it with titlekek_<gen> from prod.keys)."""
+    if len(data) < 4:
+        return None
+    sig = int.from_bytes(data[:4], "little")
+    sizes = {0x10000: (0x200, 0x3C), 0x10001: (0x100, 0x3C), 0x10002: (0x3C, 0x40),
+             0x10003: (0x200, 0x3C), 0x10004: (0x100, 0x3C), 0x10005: (0x3C, 0x40)}
+    if sig not in sizes:
+        return None
+    body = 4 + sizes[sig][0] + sizes[sig][1]
+    if len(data) < body + 0x170 or data[body + 0x141] != 0:  # 0: common (the key as is); 1: personalised
+        return None
+    return data[body + 0x160:body + 0x170].hex(), data[body + 0x40:body + 0x50].hex()
+
+
+def write_temp_keys(keys_dir: Path, rights_ids: set[str], home: Path,
+                    ticket_keys: dict[str, str] | None = None) -> None:
     switch = home / ".switch"
     switch.mkdir()
     # Only lines hactool 1.4 can read: keys dumped from newer firmware (e.g. mariko_master_kek_source_06, 34 hex
@@ -88,16 +105,16 @@ def write_temp_keys(keys_dir: Path, rights_ids: set[str], home: Path) -> None:
     (switch / "prod.keys").write_text("".join(lines), encoding="utf-8")
     if not rights_ids:  # game-card NCAs only: no title keys needed, title.keys may not exist
         return
-    if not (keys_dir / "title.keys").is_file():
-        raise ExtractError("the NSP needs title keys, but keys_dir has no title.keys")
-    # Only the keys we need, de-duplicated: hactool 1.4 aborts on repeated rights IDs.
-    found: dict[str, str] = {}
-    with (keys_dir / "title.keys").open(encoding="utf-8") as f:
-        for line in f:
-            rid, sep, key = line.partition("=")
-            rid = rid.strip().lower()
-            if sep and rid in rights_ids:
-                found[rid] = key.strip()
+    # Only the keys we need, de-duplicated: hactool 1.4 aborts on repeated rights IDs. The NSP's own
+    # tickets first (an add-on's key is often not in a dumped title.keys), then title.keys.
+    found: dict[str, str] = {r: k for r, k in (ticket_keys or {}).items() if r in rights_ids}
+    if rights_ids - found.keys() and (keys_dir / "title.keys").is_file():
+        with (keys_dir / "title.keys").open(encoding="utf-8") as f:
+            for line in f:
+                rid, sep, key = line.partition("=")
+                rid = rid.strip().lower()
+                if sep and rid in rights_ids and rid not in found:
+                    found[rid] = key.strip()
     missing = rights_ids - found.keys()
     if missing:
         raise ExtractError(f"title.keys has no key for rights ID(s): {', '.join(sorted(missing))}")
@@ -176,6 +193,13 @@ def extract_dlc(cfg: config.Config) -> int:
                 with nsp.open("rb") as f:
                     entries = pfs0.read_entries(f)
                     rids = {e.name[:-4].lower() for e in entries if e.name.endswith(".tik")}
+                    tkeys: dict[str, str] = {}
+                    for e in entries:
+                        if e.name.endswith(".tik") and e.size <= 0x1000:
+                            f.seek(e.offset)
+                            got = ticket_title_key(f.read(e.size))
+                            if got:
+                                tkeys[got[0]] = got[1]
                     for e in entries:
                         if not e.name.endswith(".nca") or e.name.endswith(".cnmt.nca") or e.size > (256 << 20):
                             continue
@@ -200,7 +224,7 @@ def extract_dlc(cfg: config.Config) -> int:
                         home = tdir / f"home_{idx}"
                         home.mkdir(exist_ok=True)
                         try:
-                            write_temp_keys(cfg.keys_dir, rids, home)
+                            write_temp_keys(cfg.keys_dir, rids, home, tkeys)
                         except ExtractError as ex:
                             print(f"dlc {idx} ({nsp.name}): skipped ({ex})")
                             continue
