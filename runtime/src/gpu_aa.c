@@ -44,17 +44,25 @@ int gpu_aa(void) {
         }
         __atomic_store_n(&aa_mode, m, __ATOMIC_RELEASE);
     }
+    if (m == 5 && vk.device && (!gpu_dlss_built() || !gpu_dlss_available())) {
+        m = gpu_fsr_built() ? 4 : 3;
+        fprintf(stderr, "yw4: aa: DLSS is not available on this GPU: %s instead\n", m == 4 ? "FSR" : "TAA");
+        __atomic_store_n(&aa_mode, m, __ATOMIC_RELEASE);
+    }
     return m;
 }
 
-void gpu_aa_cycle(void) {
-    int m = (gpu_aa() + 1) % 6;
-    while ((m == 5 && !gpu_dlss_built()) || (m == 4 && !gpu_fsr_built()))
-        m = (m + 1) % 6;
+/* One step forward (dir 1) or back (dir -1), skipping FSR and DLSS where they can't run: one switch per step */
+void gpu_aa_step(int dir) {
+    int m = (gpu_aa() + 6 + dir) % 6;
+    while ((m == 5 && (!gpu_dlss_built() || !gpu_dlss_available())) || (m == 4 && !gpu_fsr_built()))
+        m = (m + 6 + dir) % 6;
     __atomic_store_n(&aa_mode, m, __ATOMIC_RELEASE);
     fprintf(stderr, "yw4: gpu: anti-aliasing %s\n",
             m == 5 ? "DLSS" : m == 4 ? "FSR" : m == 3 ? "TAA" : m == 2 ? "SMAA" : m == 1 ? "FXAA" : "off");
 }
+
+void gpu_aa_cycle(void) { gpu_aa_step(1); }
 
 VkShaderModule gpu_native_shader(const char *name) {
     const char *dir = getenv("YW4_NATIVE_SHADER_DIR");

@@ -43,6 +43,7 @@ void gpu_effects_cycle(void);
 /* Anti-aliasing between the scene and the UI (gpu_aa.c): 0 off, 1 FXAA, 2 SMAA, 3 TAA (YW4_AA at start). */
 int gpu_aa(void);
 void gpu_aa_cycle(void);
+void gpu_aa_step(int dir);
 /* Picture shape (widescreen.c): 0 16:9 (the game's), 1 16:10, 2 21:9, 3 32:9 (YW4_ASPECT at start), and
  * the width factor of the screen-sized targets against 16:9. */
 int gpu_wide(void);

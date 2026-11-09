@@ -105,11 +105,15 @@ static const char *reflex_disabled(void) {
 }
 static const char *fg_disabled(void) {
     if (!gpu_fsr_built() && !gpu_dlss_built()) return "NOT IN THIS BUILD";
-    return gpu_aa() >= 3 ? NULL : "NEEDS ANTI-ALIASING SET TO TAA, FSR OR DLSS";
+    if (!gpu_fsr_built() && !dlssg_available()) return "NOT SUPPORTED ON THIS GPU";
+    return gpu_aa() >= 3 ? NULL : (gpu_dlss_available() ? "NEEDS ANTI-ALIASING SET TO TAA, FSR OR DLSS"
+                                                        : "NEEDS ANTI-ALIASING SET TO TAA OR FSR");
 }
 static const char *upscale_disabled(void) {
     if (!gpu_fsr_built() && !gpu_dlss_built()) return "NOT IN THIS BUILD";
-    return gpu_aa() >= 4 ? NULL : "NEEDS ANTI-ALIASING SET TO FSR OR DLSS";
+    if (!gpu_fsr_built() && !gpu_dlss_available()) return "NEEDS AN NVIDIA RTX GPU FOR DLSS";
+    return gpu_aa() >= 4 ? NULL : (gpu_dlss_available() ? "NEEDS ANTI-ALIASING SET TO FSR OR DLSS"
+                                                        : "NEEDS ANTI-ALIASING SET TO FSR");
 }
 
 /* LEGACY MENUS: the keys from before the in-game overlay. Read once, after settings_load has filled the
@@ -391,6 +395,19 @@ void settings_show(int p) {
     __atomic_store_n(&panel_open, 1, __ATOMIC_RELEASE);
 }
 
+static void setting_step(const Setting *s, int dir) {
+    if (!s->noptions) {
+        slider_step(s, dir > 0 ? 1 : -1);
+        return;
+    }
+    /* anti-aliasing and frame generation skip what this GPU or build can't run, and every change starts a real
+     * switch (frame generation's safe frames): they step back themselves, so a step back is one switch */
+    if (s->next == gpu_aa_cycle) { gpu_aa_step(dir > 0 ? 1 : -1); return; }
+    if (s->next == gpu_fg_cycle) { gpu_fg_step(dir > 0 ? 1 : -1); return; }
+    if (dir > 0) { s->next(); return; }
+    for (int i = 0; i < s->noptions - 1; i++) s->next();  /* one step back: the other cycles go forward only */
+}
+
 void settings_action(int action) {
     if (action == SETTINGS_PAGE) {
         bindings_cancel();
@@ -423,16 +440,9 @@ void settings_action(int action) {
     if (!developer_page && *sel == LINK_ROW) return;
     const Setting *s = developer_page ? &developer[*sel] : &player[*sel];
     if ((action == SETTINGS_LEFT || action == SETTINGS_RIGHT) && s->disabled && s->disabled()) return;  /* greyed out */
-    if (!s->noptions) {  /* a slider */
-        if (action == SETTINGS_LEFT || action == SETTINGS_RIGHT) slider_step(s, action == SETTINGS_RIGHT ? 1 : -1), settings_save();
-        return;
-    }
     switch (action) {
-    case SETTINGS_RIGHT: s->next(), settings_save(); break;
-    case SETTINGS_LEFT:  /* one step back: the cycle goes forward only */
-        for (int i = 0; i < s->noptions - 1; i++) s->next();
-        settings_save();
-        break;
+    case SETTINGS_RIGHT: setting_step(s, 1), settings_save(); break;
+    case SETTINGS_LEFT:  setting_step(s, -1), settings_save(); break;
     }
 }
 
@@ -446,6 +456,16 @@ static int fill_rows(SettingRow *rows, int max, const Setting *list, int count) 
         memcpy(rows[i].options, list[i].options, sizeof rows[i].options);
         memcpy(rows[i].notes, list[i].notes, sizeof rows[i].notes);
         rows[i].noptions = list[i].noptions;
+        /* leave out options this GPU or build can't run, only from the end of the list (FSR, then DLSS): an
+         * option in the middle stays listed, as the row's index is the mode (the cycle skips it) */
+        if (list[i].next == gpu_aa_cycle || list[i].next == gpu_fg_cycle) {
+            int aa = list[i].next == gpu_aa_cycle;
+            int dlss_ok = gpu_dlss_built() && (aa ? gpu_dlss_available() : dlssg_available());
+            if (!dlss_ok) {
+                rows[i].noptions = aa ? 5 : 2;                     /* DLSS is last */
+                if (!gpu_fsr_built()) rows[i].noptions = aa ? 4 : 1;  /* and FSR before it */
+            }
+        }
         if (!list[i].noptions) {  /* a slider: its text, its position, and one note for the description */
             float v = list[i].get();
             rows[i].slider = 1;
@@ -549,7 +569,6 @@ void settings_change(int row, int dir) {
         if (!hud_slider_row(&player[i]) && seen++ == row) s = &player[i];
     if (!s) return;
     if (s->disabled && s->disabled()) return;  /* greyed out */
-    if (!s->noptions) slider_step(s, dir > 0 ? 1 : -1);
-    else for (int i = 0; i < (dir > 0 ? 1 : s->noptions - 1); i++) s->next();  /* the cycle goes forward only */
+    setting_step(s, dir);
     settings_save();
 }

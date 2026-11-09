@@ -54,7 +54,10 @@ static int f_quality, f_model, f_failed;
 
 int gpu_dlss_available(void) {
     if (state >= 0) return state;
+    if (!vk.device) return 0;
     state = 0;
+    const char *e = getenv("YW4_DLSS");
+    if (e && *e == '0') return 0;
     if (vk.props.vendorID != 0x10de) return 0;
     PFN_vkGetInstanceProcAddr gipa = dlssg_loader();  /* Streamline's while it runs (DLSS frame generation) */
     if (!gipa) gipa = (PFN_vkGetInstanceProcAddr)SDL_Vulkan_GetVkGetInstanceProcAddr();

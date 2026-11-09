@@ -54,6 +54,12 @@ int gpu_fg(void) {
         }
         __atomic_store_n(&fg_mode, m, __ATOMIC_RELEASE);
     }
+    if (m == 2 && vk.device && (!gpu_dlss_built() || !dlssg_available())) {
+        m = gpu_fsr_built() ? 1 : 0;
+        fprintf(stderr, "yw4: fg: DLSS frame generation not supported on this GPU: %s instead\n",
+                m == 1 ? "FSR" : "off");
+        __atomic_store_n(&fg_mode, m, __ATOMIC_RELEASE);
+    }
     return m;
 }
 
@@ -75,14 +81,17 @@ void gpu_fg_test_switch(uint64_t frame) {
     }
 }
 
-void gpu_fg_cycle(void) {
-    int m = (gpu_fg() + 1) % 3;
+/* One step forward (dir 1) or back (dir -1), skipping FSR and DLSS where they can't run: one switch per step */
+void gpu_fg_step(int dir) {
+    int m = (gpu_fg() + 3 + dir) % 3;
     while ((m == 2 && (!gpu_dlss_built() || !dlssg_available())) || (m == 1 && !gpu_fsr_built()))
-        m = (m + 1) % 3;
+        m = (m + 3 + dir) % 3;
     __atomic_store_n(&fg_mode, m, __ATOMIC_RELEASE);
     switch_started();
     fprintf(stderr, "yw4: gpu: frame generation %s\n", m == 2 ? "DLSS" : m == 1 ? "FSR" : "off");
 }
+
+void gpu_fg_cycle(void) { gpu_fg_step(1); }
 
 #ifdef YW4_FSR
 #include <windows.h>

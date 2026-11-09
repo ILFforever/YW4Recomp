@@ -9,6 +9,7 @@
  * Works with anti-aliasing TAA, FSR or DLSS (they have the game's motion). */
 int gpu_fg(void);
 void gpu_fg_cycle(void);
+void gpu_fg_step(int dir);
 void gpu_fg_test_switch(uint64_t frame);  /* YW4_FG_AT=<frame>:<mode>,... (tests) */
 /* 1 for the frames after a switch of the setting: the window lets the GPU finish all its work before each of
  * them and shows "switching" (FSR's and Streamline's switch freed image views a command buffer still used:
