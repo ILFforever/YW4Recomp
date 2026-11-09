@@ -41,6 +41,7 @@ folder; a variable already in the environment wins. Without it a message says to
 | `YW4_AUDIO=0` | No sound (the game's audio still runs, timed at 48 kHz) |
 | `YW4_AUDIO_DUMP=<file>` | Also save the sound as played: raw PCM16, 48 kHz, the game's channel count (6 = 5.1) |
 | `YW4_HEADLESS=1` | No window, no Vulkan (nothing is drawn) |
+| `YW4_ASLR_RETRY=1` | Set internally on automatic child respawn if guest memory reservation collides with an early ASLR allocation; prevents retry loops |
 | `YW4_WINDOW_SIZE=<w>x<h>` | Window size in pixels at start (default `1280x720`; `runtime/src/window.c`) |
 | `YW4_VULKAN_VALIDATION=1` | Turn on the Vulkan validation layer |
 | `YW4_SHADOW_RECHECK_LOG=1` | Our shadow pass: a line per shadow layer (cascade, target, the game's draws, how many were rechecks, ours) and what was learned of the first rechecked object's submeshes |

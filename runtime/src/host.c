@@ -1,4 +1,6 @@
 /* Host threads, locks, condition variables and a monotonic clock (host.h). */
+#include <errno.h>
+#include <inttypes.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -156,7 +158,44 @@ int host_cpu_count(void) {
 }
 
 void *host_reserve_watched(uint64_t want, size_t size) {
-    return VirtualAlloc((void *)(uintptr_t)want, size, MEM_RESERVE | MEM_WRITE_WATCH, PAGE_NOACCESS);
+    void *p = VirtualAlloc((void *)(uintptr_t)want, size, MEM_RESERVE | MEM_WRITE_WATCH, PAGE_NOACCESS);
+    if (!p) {
+        DWORD err = GetLastError();
+        fprintf(stderr,
+                "yw4: host_reserve_watched: VirtualAlloc at %#" PRIx64 " (%" PRIu64 " bytes) failed: error %lu\n",
+                want, (uint64_t)size, (unsigned long)err);
+        MEMORY_BASIC_INFORMATION mbi;
+        if (VirtualQuery((void *)(uintptr_t)want, &mbi, sizeof mbi)) {
+            char mod[MAX_PATH] = "";
+            if (mbi.Type == MEM_IMAGE && mbi.AllocationBase) {
+                GetModuleFileNameA((HMODULE)mbi.AllocationBase, mod, sizeof mod);
+            }
+            fprintf(stderr,
+                    "yw4:   collision at %#" PRIx64 ": base=%#" PRIx64 " size=%#" PRIx64 " state=%#x type=%#x%s%s\n",
+                    want, (uint64_t)(uintptr_t)mbi.BaseAddress, (uint64_t)mbi.RegionSize,
+                    (unsigned)mbi.State, (unsigned)mbi.Type, mod[0] ? " module=" : "", mod[0] ? mod : "");
+        }
+    }
+    return p;
+}
+
+void host_respawn(int argc, char **argv) {
+    (void)argc;
+    (void)argv;
+    SetEnvironmentVariableA("YW4_ASLR_RETRY", "1");
+    STARTUPINFOA si = {sizeof si};
+    PROCESS_INFORMATION pi = {0};
+    char *cmd = _strdup(GetCommandLineA());
+    if (cmd && CreateProcessA(NULL, cmd, NULL, NULL, TRUE, 0, NULL, NULL, &si, &pi)) {
+        WaitForSingleObject(pi.hProcess, INFINITE);
+        DWORD code = 0;
+        GetExitCodeProcess(pi.hProcess, &code);
+        CloseHandle(pi.hProcess);
+        CloseHandle(pi.hThread);
+        free(cmd);
+        exit((int)code);
+    }
+    free(cmd);
 }
 
 /* Write watchpoint: the watched page is made read-only; a write to it faults on the writing
@@ -357,9 +396,21 @@ void *host_reserve_watched(uint64_t want, size_t size) {
     void *p = mmap((void *)(uintptr_t)want, size, PROT_NONE, MAP_PRIVATE | MAP_ANONYMOUS | MAP_NORESERVE, -1, 0);
     if (p != MAP_FAILED && p != (void *)(uintptr_t)want) {
         munmap(p, size);
+        fprintf(stderr, "yw4: host_reserve_watched: mmap placed at %p instead of %#" PRIx64 "\n", p, want);
         return NULL;
     }
-    return p == MAP_FAILED ? NULL : p;
+    if (p == MAP_FAILED) {
+        fprintf(stderr, "yw4: host_reserve_watched: mmap at %#" PRIx64 " (%" PRIu64 " bytes) failed: %s\n",
+                want, (uint64_t)size, strerror(errno));
+        return NULL;
+    }
+    return p;
+}
+
+void host_respawn(int argc, char **argv) {
+    (void)argc;
+    setenv("YW4_ASLR_RETRY", "1", 1);
+    execv("/proc/self/exe", argv);
 }
 
 long host_written_pages(uint64_t addr, uint64_t size, void (*fn)(uint64_t page, void *arg), void *arg) {

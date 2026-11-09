@@ -16,6 +16,7 @@
 #ifdef _WIN32
 #include <windows.h>
 #else
+#include <errno.h>
 #include <sys/mman.h>
 #endif
 
@@ -28,9 +29,11 @@ uint64_t yw4_sdk_base;
 void *yw4_reserve(uint64_t want, size_t size) {
 #ifdef _WIN32
     void *p = VirtualAlloc((void *)(uintptr_t)want, size, MEM_RESERVE | MEM_COMMIT, PAGE_READWRITE);
+    if (!p && want) p = VirtualAlloc((void *)(uintptr_t)want, size, MEM_COMMIT, PAGE_READWRITE);
     if (!p && want) p = VirtualAlloc(NULL, size, MEM_RESERVE | MEM_COMMIT, PAGE_READWRITE);
     return p;
 #else
+    if (want && mprotect((void *)(uintptr_t)want, size, PROT_READ | PROT_WRITE) == 0) return (void *)(uintptr_t)want;
     void *p = mmap((void *)(uintptr_t)want, size, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
     return p == MAP_FAILED ? NULL : p;
 #endif
@@ -39,14 +42,37 @@ void *yw4_reserve(uint64_t want, size_t size) {
 /* Address space without memory behind it, at exactly `want` (NULL if taken). */
 void *yw4_reserve_range(uint64_t want, size_t size) {
 #ifdef _WIN32
-    return VirtualAlloc((void *)(uintptr_t)want, size, MEM_RESERVE, PAGE_NOACCESS);
+    void *p = VirtualAlloc((void *)(uintptr_t)want, size, MEM_RESERVE, PAGE_NOACCESS);
+    if (!p) {
+        DWORD err = GetLastError();
+        fprintf(stderr, "yw4: yw4_reserve_range: VirtualAlloc at %#" PRIx64 " (%" PRIu64 " bytes) failed: error %lu\n",
+                want, (uint64_t)size, (unsigned long)err);
+        MEMORY_BASIC_INFORMATION mbi;
+        if (VirtualQuery((void *)(uintptr_t)want, &mbi, sizeof mbi)) {
+            char mod[MAX_PATH] = "";
+            if (mbi.Type == MEM_IMAGE && mbi.AllocationBase) {
+                GetModuleFileNameA((HMODULE)mbi.AllocationBase, mod, sizeof mod);
+            }
+            fprintf(stderr,
+                    "yw4:   collision at %#" PRIx64 ": base=%#" PRIx64 " size=%#" PRIx64 " state=%#x type=%#x%s%s\n",
+                    want, (uint64_t)(uintptr_t)mbi.BaseAddress, (uint64_t)mbi.RegionSize,
+                    (unsigned)mbi.State, (unsigned)mbi.Type, mod[0] ? " module=" : "", mod[0] ? mod : "");
+        }
+    }
+    return p;
 #else
     void *p = mmap((void *)(uintptr_t)want, size, PROT_NONE, MAP_PRIVATE | MAP_ANONYMOUS | MAP_NORESERVE, -1, 0);
     if (p != MAP_FAILED && p != (void *)(uintptr_t)want) {
         munmap(p, size);
+        fprintf(stderr, "yw4: yw4_reserve_range: mmap placed at %p instead of %#" PRIx64 "\n", p, want);
         return NULL;
     }
-    return p == MAP_FAILED ? NULL : p;
+    if (p == MAP_FAILED) {
+        fprintf(stderr, "yw4: yw4_reserve_range: mmap at %#" PRIx64 " (%" PRIu64 " bytes) failed: %s\n",
+                want, (uint64_t)size, strerror(errno));
+        return NULL;
+    }
+    return p;
 #endif
 }
 
@@ -63,8 +89,8 @@ int yw4_commit(uint64_t addr, size_t size) {
 }
 
 /* Reserves every free part of [lo, hi), so later commits work at any 4 KiB page: Windows
- * places reservations only at 64 KiB boundaries, but the game picks page-aligned addresses
- * for its mappings. Linux maps pages anywhere, so there is nothing to do there. */
+ * places reservations only at 64 KiB boundaries, but the game maps at 4 KiB ones. Linux
+ * maps pages anywhere, so there is nothing to do there. */
 void yw4_reserve_free(uint64_t lo, uint64_t hi) {
 #ifdef _WIN32
     for (uint64_t a = lo; a < hi;) {
@@ -78,6 +104,18 @@ void yw4_reserve_free(uint64_t lo, uint64_t hi) {
 #else
     (void)lo, (void)hi;
 #endif
+}
+
+static int guest_memory_ready;
+
+int yw4_guest_memory_init(void) {
+    if (guest_memory_ready) return 0;
+    if (!host_reserve_watched(YW4_HEAP_BASE, YW4_HEAP_SIZE) || !yw4_reserve_range(YW4_TLR_BASE, YW4_TLR_SIZE)) {
+        return -1;
+    }
+    yw4_reserve_free(YW4_GUEST_LO, YW4_GUEST_HI);
+    guest_memory_ready = 1;
+    return 0;
 }
 
 /* Give the memory back but keep the range reserved; the next commit reads as zeros. */

@@ -564,14 +564,13 @@ uint32_t yw4_kernel_init(CPUState *ctx, uint64_t stack, uint64_t stack_size) {
     }
     region_add(stack, stack_size, MEM_STACK, PERM_RW);
     /* The heap's and the thread-local regions' ranges first, then everything else that is
-     * free: later mappings are commits. */
+     * free: later mappings are commits (reserved at main() entry if not already). */
     /* the heap with write tracking: the draw path re-uploads textures the CPU wrote (0021) */
-    if (!host_reserve_watched(YW4_HEAP_BASE, YW4_HEAP_SIZE) || !yw4_reserve_range(YW4_TLR_BASE, MAX_THREADS * TLR_STRIDE)) {
+    if (yw4_guest_memory_init()) {
         fprintf(stderr, "yw4: kernel: cannot reserve the heap and thread-local regions\n");
         exit(3);
     }
     region_add(YW4_TLR_BASE, MAX_THREADS * TLR_STRIDE, MEM_THREAD_LOCAL, PERM_RW);
-    yw4_reserve_free(YW4_GUEST_LO, YW4_GUEST_HI);
     yw4_dump_threads_start();
 
     KThread *t = &main_thread;

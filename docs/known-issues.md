@@ -91,8 +91,8 @@ What is known to be missing or wrong, roughly in the order it is likely to matte
 - `tests/test_kernel.py::test_threads` fails now and then with "cannot reserve the heap and thread-local
   regions" (seen once on 2026-10-22, then 4 passes in a row): the test program reserves fixed addresses, which
   something else in the process can occasionally occupy first. Rerun before suspecting a change. The game itself
-  failed the same way once at start (2026-10-29, the run straight after worked): it reserves the guest's fixed
-  addresses too.
+  now pre-reserves the 32 GiB guest window at `main()` entry before SDL/Vulkan, logs the colliding allocation/module
+  if reservation fails, and automatically respawns once with a fresh ASLR layout (`YW4_ASLR_RETRY`).
 
 - ~~`YW4_REPLAY` routes drift~~: fixed 2026-10-31. Replays went by the wall clock while the game moves by its own
   frames, so a slow loading screen or shader build shifted everything after it (the town walk ended in a

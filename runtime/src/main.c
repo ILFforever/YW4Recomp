@@ -26,7 +26,7 @@
 #include <SDL3/SDL_messagebox.h>
 
 #include "game_ini.h"
-
+#include "host.h"
 #include "kernel.h"
 #include "romfs.h"
 #include "savefs.h"
@@ -114,6 +114,15 @@ int main(int argc, char **argv) {
     if (argc == 2 && !strcmp(argv[1], "--version")) {  /* for the launcher and bug reports: one line on stdout */
         printf("YW4 Recomp %s (%s, built %s)\n", yw4_version, yw4_git_commit, yw4_build_date);
         return 0;
+    }
+    if (yw4_guest_memory_init()) {
+        const char *retried = getenv("YW4_ASLR_RETRY");
+        if (!retried || !*retried) {
+            fprintf(stderr, "yw4: guest memory collision; retrying with a fresh ASLR layout...\n");
+            host_respawn(argc, argv);
+        }
+        fprintf(stderr, "yw4: fatal: cannot reserve guest address space (0x7000000000 - 0x7800000000)\n");
+        return 3;
     }
     /* No arguments (a double-click, a shortcut): the folders come from game.ini next to the exe (decision 0050) */
     static char *ini_args[4];

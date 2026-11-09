@@ -72,4 +72,7 @@ int host_readable(uint64_t addr, uint64_t size);
  * [addr, addr + size) (one watch per process; Windows only). 0 if armed. */
 int host_write_watch(uint64_t addr, uint64_t size, void (*report)(uint64_t pc, uint64_t addr));
 
+/* Relaunches the current process with a fresh ASLR layout (one retry on memory collision). */
+void host_respawn(int argc, char **argv);
+
 #endif

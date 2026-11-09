@@ -67,11 +67,16 @@ uint64_t yw4_guest_symbol(const char *name);
 #define YW4_STACK_BASE 0x7000000000ull      /* guest stacks */
 #define YW4_STACK_SIZE 0x0040000000ull
 #define YW4_TLR_BASE 0x7040000000ull        /* thread-local regions (TPIDRRO_EL0) */
+#define YW4_TLR_SIZE 0x0000100000ull        /* 256 threads * 4 KiB */
 #define YW4_HOST_FN_BASE 0x7080000000ull    /* guest addresses of host callbacks */
 #define YW4_HEAP_BASE 0x7200000000ull       /* svcSetHeapSize: reserved, committed as it grows */
 #define YW4_HEAP_SIZE 0x0180000000ull
 #define YW4_ALIAS_BASE 0x7400000000ull      /* svcMapMemory targets */
 #define YW4_ALIAS_SIZE 0x0100000000ull
+
+/* Reserves the 32 GiB guest address space (0x7000000000 - 0x7800000000) early:
+ * heap with write tracking, thread-local regions, and all gaps between them. 0 on success. */
+int yw4_guest_memory_init(void);
 
 /* Zeroed read/write memory, at `want` if that range is free (0 = anywhere), else anywhere. */
 void *yw4_reserve(uint64_t want, size_t size);
