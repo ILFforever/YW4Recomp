@@ -12,6 +12,27 @@
 #include "host.h"
 
 #ifdef _WIN32
+#include <windows.h>
+#endif
+
+void yw4_exit(int code, const char *file, int line) {
+    const char *base = strrchr(file, '/');
+    const char *b2 = strrchr(file, '\\');
+    if (b2 && (!base || b2 > base)) base = b2;
+    base = base ? base + 1 : file;
+#ifdef _WIN32
+    MEMORYSTATUSEX m = {.dwLength = sizeof m};
+    if (GlobalMemoryStatusEx(&m))
+        fprintf(stderr, "yw4: exit %d from %s:%d (memory: %llu MiB of %llu free, commit %llu MiB of %llu free)\n", code,
+                base, line, (unsigned long long)(m.ullAvailPhys >> 20), (unsigned long long)(m.ullTotalPhys >> 20),
+                (unsigned long long)(m.ullAvailPageFile >> 20), (unsigned long long)(m.ullTotalPageFile >> 20));
+    else
+#endif
+        fprintf(stderr, "yw4: exit %d from %s:%d\n", code, base, line);
+    exit(code);
+}
+
+#ifdef _WIN32
 #include <process.h>
 #include <windows.h>
 #include <timeapi.h>
@@ -207,7 +228,7 @@ void host_respawn(int argc, char **argv) {
         CloseHandle(pi.hProcess);
         CloseHandle(pi.hThread);
         free(cmd);
-        exit((int)code);
+        yw4_exit((int)code, __FILE__, __LINE__);
     }
     free(cmd);
 }

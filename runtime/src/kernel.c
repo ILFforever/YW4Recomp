@@ -64,7 +64,7 @@ static int nregions;
 static void region_add(uint64_t addr, uint64_t size, uint32_t type, uint32_t perm) {
     if (nregions == MAX_REGIONS) {
         fprintf(stderr, "yw4: kernel: too many memory regions\n");
-        exit(3);
+        yw4_exit(3, __FILE__, __LINE__);
     }
     int i = nregions++;
     while (i > 0 && regions[i - 1].addr > addr) {  /* kept sorted by address */
@@ -185,7 +185,7 @@ uint32_t yw4_handle_new(KObject *o) {
             return 0x100 + i;
         }
     fprintf(stderr, "yw4: kernel: out of handles\n");
-    exit(3);
+    yw4_exit(3, __FILE__, __LINE__);
 }
 
 KObject *yw4_handle_get(uint32_t h) {
@@ -253,7 +253,7 @@ int yw4_call_stack(const CPUState *ctx, uint64_t *out, int n) {
 static void report_crash(const char *what, uint64_t pc, uint64_t addr) {
     fprintf(stderr, "yw4: crash: %s at host pc %#" PRIx64 ", address %#" PRIx64 "\n", what, pc, addr);
     if (cur) yw4_stop();  /* the guest thread and its backtrace */
-    exit(3);
+    yw4_exit(3, __FILE__, __LINE__);
 }
 
 void yw4_kernel_lock(void) { host_lock(&klock); }
@@ -262,7 +262,7 @@ void yw4_kernel_unlock(void) { host_unlock(&klock); }
 _Noreturn void yw4_stop(void) {
     fprintf(stderr, "     on thread %" PRIu64 "\n", cur->id);
     backtrace(cur->ctx);
-    exit(3);
+    yw4_exit(3, __FILE__, __LINE__);
 }
 
 /* ---- waiting and waking (klock held) */
@@ -318,7 +318,7 @@ static _Noreturn void all_blocked(void) {
         fprintf(stderr, "\n");
         backtrace(t->ctx);
     }
-    exit(3);
+    yw4_exit(3, __FILE__, __LINE__);
 }
 
 /* YW4_DUMP_THREADS_AT=<seconds>[,<seconds>...]: at those times after start, print every
@@ -402,7 +402,7 @@ static uint32_t wait_synchronization(uint64_t handles_addr, int32_t n, int64_t t
         if (!o) return R_INVALID_HANDLE;
         if (o->type != KOBJ_EVENT && o->type != KOBJ_THREAD) {
             fprintf(stderr, "yw4: kernel: WaitSynchronization on a handle of kind %d: not implemented\n", o->type);
-            exit(3);
+            yw4_exit(3, __FILE__, __LINE__);
         }
         t->objs[i] = o;
     }
@@ -493,7 +493,7 @@ static uint32_t create_thread(uint64_t entry, uint64_t arg, uint64_t stack_top, 
     if (core == -2) core = main_thread.core;  /* the process's ideal core */
     if (core < 0 || core > 2) {
         fprintf(stderr, "yw4: kernel: CreateThread on core %d: not implemented\n", core);
-        exit(3);
+        yw4_exit(3, __FILE__, __LINE__);
     }
     KThread *t = calloc(1, sizeof *t);
     CPUState *ctx = calloc(1, sizeof *ctx);
@@ -524,7 +524,7 @@ static uint32_t start_thread(uint32_t handle) {
     nrunnable++;
     if (host_thread_start(thread_main, t, GUEST_THREAD_HOST_STACK)) {
         fprintf(stderr, "yw4: kernel: cannot start a host thread\n");
-        exit(3);
+        yw4_exit(3, __FILE__, __LINE__);
     }
     return R_OK;
 }
@@ -568,7 +568,7 @@ uint32_t yw4_kernel_init(CPUState *ctx, uint64_t stack, uint64_t stack_size) {
     /* the heap with write tracking: the draw path re-uploads textures the CPU wrote (0021) */
     if (yw4_guest_memory_init()) {
         fprintf(stderr, "yw4: kernel: cannot reserve the heap and thread-local regions\n");
-        exit(3);
+        yw4_exit(3, __FILE__, __LINE__);
     }
     region_add(YW4_TLR_BASE, MAX_THREADS * TLR_STRIDE, MEM_THREAD_LOCAL, PERM_RW);
     yw4_dump_threads_start();
@@ -583,7 +583,7 @@ uint32_t yw4_kernel_init(CPUState *ctx, uint64_t stack, uint64_t stack_size) {
     host_cond_init(&t->cond);
     if (tlr_alloc(t)) {
         fprintf(stderr, "yw4: kernel: cannot make the main thread's thread-local region\n");
-        exit(3);
+        yw4_exit(3, __FILE__, __LINE__);
     }
     ctx->tpidrro_el0 = t->tlr;
     threads = t;
@@ -598,7 +598,7 @@ uint32_t yw4_kernel_init(CPUState *ctx, uint64_t stack, uint64_t stack_size) {
 
 KEvent *yw4_event_new(uint32_t *handle) {
     KEvent *e = calloc(1, sizeof *e);
-    if (!e) exit(3);
+    if (!e) yw4_exit(3, __FILE__, __LINE__);
     e->obj.type = KOBJ_EVENT;
     *handle = yw4_handle_new(&e->obj);
     return e;
@@ -625,7 +625,7 @@ static KEvent *event_get(uint32_t h) {
 
 KSharedMemory *yw4_shared_memory_new(uint64_t size, void (*on_map)(KSharedMemory *), uint32_t *handle) {
     KSharedMemory *m = calloc(1, sizeof *m);
-    if (!m) exit(3);
+    if (!m) yw4_exit(3, __FILE__, __LINE__);
     m->obj.type = KOBJ_SHARED_MEMORY;
     m->size = size;
     m->on_map = on_map;
@@ -640,7 +640,7 @@ static uint32_t map_shared_memory(uint32_t handle, uint64_t addr, uint64_t size)
     if (size != m->size || addr & 0xFFF) return R_INVALID_SIZE;
     if (yw4_commit(addr, size)) {  /* the game chose a free range (reserved at start-up): put memory there */
         fprintf(stderr, "yw4: kernel: cannot map shared memory at %#" PRIx64 "\n", addr);
-        exit(3);
+        yw4_exit(3, __FILE__, __LINE__);
     }
     region_add(addr, size, MEM_SHARED, PERM_RW);
     m->guest_addr = addr;
@@ -654,7 +654,7 @@ static uint32_t create_transfer_memory(uint64_t addr, uint64_t size, uint32_t pe
     if ((addr | size) & 0xFFF || !size) return R_INVALID_SIZE;
     if (perm != PERM_NONE && perm != PERM_R && perm != PERM_RW) return R_INVALID_ENUM;  /* InvalidNewMemoryPermission */
     KTransferMemory *m = calloc(1, sizeof *m);
-    if (!m) exit(3);
+    if (!m) yw4_exit(3, __FILE__, __LINE__);
     m->obj.type = KOBJ_TRANSFER_MEMORY;
     m->addr = addr, m->size = size, m->perm = perm;
     *handle = yw4_handle_new(&m->obj);
@@ -843,7 +843,7 @@ static uint32_t get_info(uint32_t id0, uint32_t handle, uint64_t id1, uint64_t *
     case 20: *out = 0; return R_OK;                          /* UserExceptionContextAddress */
     default:
         fprintf(stderr, "yw4: kernel: GetInfo(%u, %#x, %#" PRIx64 ") not implemented\n", id0, handle, id1);
-        exit(3);
+        yw4_exit(3, __FILE__, __LINE__);
     }
 }
 
@@ -864,7 +864,7 @@ static void svc(CPUState *ctx, uint32_t imm) {
             /* Copying is equivalent to aliasing: nothing may touch src until UnmapMemory. */
             if (yw4_commit(dst, size)) {
                 fprintf(stderr, "yw4: kernel: MapMemory: cannot map %#" PRIx64 " bytes at %#" PRIx64 "\n", size, dst);
-                exit(3);
+                yw4_exit(3, __FILE__, __LINE__);
             }
             memcpy(GPTR(dst), GPTR(src), size);
             region_add(dst, size, dst - YW4_STACK_BASE < YW4_STACK_SIZE ? MEM_STACK : MEM_ALIAS, PERM_RW);
@@ -893,7 +893,7 @@ static void svc(CPUState *ctx, uint32_t imm) {
     case 0x0A:  /* ExitThread: does not return */
         if (cur == &main_thread) {
             fprintf(stderr, "yw4: kernel: the main thread called ExitThread: not implemented\n");
-            exit(3);
+            yw4_exit(3, __FILE__, __LINE__);
         }
         thread_exit(cur);
         host_unlock(&klock);
@@ -1017,7 +1017,7 @@ static void svc(CPUState *ctx, uint32_t imm) {
             fprintf(stderr, ", result %#x (module %u, description %u)", *u32p(x[1]), *u32p(x[1]) & 0x1FF, *u32p(x[1]) >> 9);
         fprintf(stderr, " on thread %" PRIu64 "\n", cur->id);
         backtrace(ctx);
-        exit(3);
+        yw4_exit(3, __FILE__, __LINE__);
     }
     case 0x27:  /* OutputDebugString(text, size) */
         fprintf(stderr, "[game debug] %.*s\n", (int)x[1], (const char *)GPTR(x[0]));
@@ -1047,7 +1047,7 @@ static void svc(CPUState *ctx, uint32_t imm) {
         char where[48];
         fprintf(stderr, "yw4: unimplemented SVC %#x at %s on thread %" PRIu64 " (x0=%#" PRIx64 " x1=%#" PRIx64
                         " x2=%#" PRIx64 " x3=%#" PRIx64 ")\n", imm, yw4_describe(x[30], where), cur->id, x[0], x[1], x[2], x[3]);
-        exit(3);
+        yw4_exit(3, __FILE__, __LINE__);
     }
     }
 }
@@ -1183,7 +1183,7 @@ static uint64_t real_cntpct(void) {
 void yw4_msr_fpcr(CPUState *ctx, uint64_t value) {
     if (value != 0) {  /* rounding modes, flush-to-zero, default NaN: not modelled (decision 0008) */
         fprintf(stderr, "yw4: guest sets FPCR to %#" PRIx64 "; only 0 is supported\n", value);
-        exit(3);
+        yw4_exit(3, __FILE__, __LINE__);
     }
     ctx->fpcr = 0;
 }

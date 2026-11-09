@@ -184,7 +184,7 @@ uint64_t yw4_host_function_data(GuestFn fn, void *data) {
     }
     if (!host_fn_base || nhost_fns == MAX_HOST_FNS) {
         fprintf(stderr, "yw4: no room for host callbacks\n");
-        exit(1);
+        yw4_exit(1, __FILE__, __LINE__);
     }
     size_t i = nhost_fns;
     host_fns[i].fn = fn;
@@ -203,7 +203,7 @@ uint64_t yw4_guest_symbol(const char *name) {
         if (!strcmp(yw4_guest_symbols[i].name, name))
             return *yw4_modules[yw4_guest_symbols[i].module].base + yw4_guest_symbols[i].offset;
     fprintf(stderr, "yw4: guest symbol %s is not in recomp/overrides.toml [[guest_symbol]]\n", name);
-    exit(3);
+    yw4_exit(3, __FILE__, __LINE__);
 }
 
 /* ---- modules */

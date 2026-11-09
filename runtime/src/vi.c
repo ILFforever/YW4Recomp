@@ -20,7 +20,7 @@ int yw4_replay_frame_clock(void);      /* kernel.c */
 
 static void *token(void) {
     void *p = calloc(1, 0x100);
-    if (!p) exit(3);
+    if (!p) yw4_exit(3, __FILE__, __LINE__);
     return p;
 }
 
@@ -88,7 +88,7 @@ void yw4_vsync_start(void) {
     if (__atomic_exchange_n(&started, 1, __ATOMIC_ACQ_REL)) return;
     if (host_thread_start(vsync_thread, NULL, 1 << 16)) {
         fprintf(stderr, "yw4: vi: cannot start the vsync thread\n");
-        exit(3);
+        yw4_exit(3, __FILE__, __LINE__);
     }
 }
 

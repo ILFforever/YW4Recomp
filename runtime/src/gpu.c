@@ -86,7 +86,7 @@ static uint64_t present_count;  /* frames presented */
 
 void gpu_fatal(const char *what, VkResult r) {
     fprintf(stderr, "yw4: gpu: %s failed (VkResult %d)\n", what, (int)r);
-    exit(3);
+    yw4_exit(3, __FILE__, __LINE__);
 }
 
 void gpu_stop(const char *fmt, ...) {
@@ -96,7 +96,7 @@ void gpu_stop(const char *fmt, ...) {
     vfprintf(stderr, fmt, ap);
     fprintf(stderr, " (not supported yet)\n");
     va_end(ap);
-    exit(3);
+    yw4_exit(3, __FILE__, __LINE__);
 }
 
 /* Start-up (2026-11-11): the guest boots on its thread while Vulkan and Streamline start on the main one
@@ -279,7 +279,7 @@ static void submit(VkCommandBuffer cb) {
     host_unlock(&vk.queue_lock);
     if (r == VK_ERROR_DEVICE_LOST) {
         fprintf(stderr, "yw4: gpu: device lost in submission %" PRIu64 "\n", seq);
-        exit(3);
+        yw4_exit(3, __FILE__, __LINE__);
     }
     if (r != VK_SUCCESS) gpu_fatal("vkQueueSubmit", r);
     __atomic_store_n(&submitted, seq, __ATOMIC_RELEASE);
@@ -415,7 +415,7 @@ static void pool_import(NvnPool *p) {
     void *host = (void *)(uintptr_t)p->storage;
     if (p->storage % vk.host_import_align || p->size % vk.host_import_align) {
         fprintf(stderr, "yw4: gpu: pool %#" PRIx64 " + %#" PRIx64 " is not aligned for import\n", p->storage, p->size);
-        exit(3);
+        yw4_exit(3, __FILE__, __LINE__);
     }
     if (npools == MAX_POOLS) gpu_stop("more than %d memory pools", MAX_POOLS);
     VkMemoryHostPointerPropertiesEXT hp = {.sType = VK_STRUCTURE_TYPE_MEMORY_HOST_POINTER_PROPERTIES_EXT};
@@ -1958,7 +1958,7 @@ void gpu_execute(uint64_t handle) {
         if (r->op >= CMD_COUNT || r->size < sizeof(CmdRec) || r->size & 7 || n > 10000000) {
             fprintf(stderr, "yw4: gpu: command list %#" PRIx64 " is broken at %#" PRIx64 " (op %u, size %u)\n", handle,
                     at, r->op, r->size);
-            exit(3);
+            yw4_exit(3, __FILE__, __LINE__);
         }
         if (r->op == CMD_END) break;
         if (r->op == CMD_JUMP) {

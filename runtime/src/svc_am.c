@@ -9,6 +9,7 @@
 
 #include "ipc_simple.h"
 #include "savefs.h"
+#include "host.h"
 
 /* ---- the message queue the system uses to tell the application things */
 
@@ -119,7 +120,7 @@ static void storage(Service *s, IpcRequest *req, IpcResponse *resp) {
 
 static Service *storage_new(const void *data, uint64_t size) {
     Storage *st = calloc(1, sizeof *st);
-    if (!st || !(st->data = malloc(size))) exit(3);
+    if (!st || !(st->data = malloc(size))) yw4_exit(3, __FILE__, __LINE__);
     memcpy(st->data, data, size);
     st->size = size;
     return ipc_service_new("IStorage", storage, st);

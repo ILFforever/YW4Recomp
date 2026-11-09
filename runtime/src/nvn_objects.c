@@ -25,7 +25,7 @@ static void *alloc(size_t n) {
     void *p = calloc(1, n);
     if (!p) {
         fprintf(stderr, "yw4: NVN: out of host memory\n");
-        exit(3);
+        yw4_exit(3, __FILE__, __LINE__);
     }
     return p;
 }
@@ -181,7 +181,7 @@ static void show(NvnTexture *t, uint64_t frame, const int crop[4]) {
     if (n > cap) {
         free(texels), free(rgba);
         texels = malloc(n * bpb), rgba = malloc(n * 4);
-        if (!texels || !rgba) exit(3);
+        if (!texels || !rgba) yw4_exit(3, __FILE__, __LINE__);
         cap = n;
     }
     tegra_read_region(&t->layout, (const uint8_t *)(uintptr_t)t->addr, 0, 0, 0, 0, 0, w, h, 1, texels);

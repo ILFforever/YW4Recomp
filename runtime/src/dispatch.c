@@ -305,7 +305,7 @@ const Yw4Target *yw4_resolve_target(uint64_t target) {
     if (targets_n * 2 >= targets_cap) {  /* grow: rehash into twice the room */
         size_t cap = targets_cap ? targets_cap * 2 : 8192;
         Yw4Target **t = calloc(cap, sizeof *t);
-        if (!t) exit(3);
+        if (!t) yw4_exit(3, __FILE__, __LINE__);
         for (size_t i = 0; i < targets_cap; i++)
             if (targets[i]) {
                 size_t j = (targets[i]->addr >> 2) & (cap - 1);
@@ -319,7 +319,7 @@ const Yw4Target *yw4_resolve_target(uint64_t target) {
     while (targets[j] && targets[j]->addr != target) j = (j + 1) & (targets_cap - 1);
     if (!targets[j]) {
         Yw4Target *t = malloc(sizeof *t);
-        if (!t) exit(3);
+        if (!t) yw4_exit(3, __FILE__, __LINE__);
         t->addr = target, t->fn = fn;
         targets[j] = t, targets_n++;
     }

@@ -15,6 +15,7 @@
 #include "textin.h"
 #include "theme.h"
 #include "window.h"
+#include "host.h"
 
 static int open_, sel, confirm, choice;
 static int focus;             /* 0 the side panel, 1 the page it shows (Settings) */
@@ -556,7 +557,7 @@ void gamemenu_action(int a) {
                 return;
             }
             fprintf(stderr, "yw4: overlay: exit game\n");
-            exit(0);  /* as closing the window */
+            yw4_exit(0, __FILE__, __LINE__);  /* as closing the window */
         }
         return;
     }

@@ -79,4 +79,9 @@ int host_write_watch(uint64_t addr, uint64_t size, void (*report)(uint64_t pc, u
 /* Relaunches the current process with a fresh ASLR layout (one retry on memory collision). */
 void host_respawn(int argc, char **argv);
 
+/* exit() that says in the log where it came from (and, on Windows, how much memory was left):
+ * every exit of the runtime goes through it, so a run that ends without a "crash" line still
+ * names what ended it (2026-11-09: a run ended without a word, from one of the silent ones). */
+_Noreturn void yw4_exit(int code, const char *file, int line);
+
 #endif

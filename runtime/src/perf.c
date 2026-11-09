@@ -311,7 +311,7 @@ void yw4_perf_frame(uint64_t frame, int64_t enter, int64_t shown, int64_t exit_,
         rows = realloc(rows, cap * sizeof *rows);
         gpu_busy = realloc(gpu_busy, cap * sizeof *gpu_busy);
         gpu_span = realloc(gpu_span, cap * sizeof *gpu_span);
-        if (!rows || !gpu_busy || !gpu_span) exit(3);
+        if (!rows || !gpu_busy || !gpu_span) yw4_exit(3, __FILE__, __LINE__);
     }
     rows[nrows++] = (Row){.frame = frame, .draws = draws, .t = (double)(exit_ - t0) / 1e9,
                           .interval = (double)(exit_ - last_exit) / 1e6, .work = (double)(enter - last_exit) / 1e6,
