@@ -687,7 +687,7 @@ function renderModsDlc(info) {
   const mods = $('mod-list');
   mods.textContent = '';
   if (info.mods.length) for (const m of info.mods) mods.append(chip(m));
-  else { const li = chip('None. Put mods in the mods folder.'); li.className = 'none'; mods.append(li); }
+  else { const li = chip('None. Put mods in mods/contents/ (as individual mod folders or the game ID folder).'); li.className = 'none'; mods.append(li); }
   $('row-mods').textContent = info.mods.length === 1 ? info.mods[0] : info.mods.length ? `${info.mods.length} mods` : 'None';
   const dlcs = $('dlc-list');
   dlcs.textContent = '';

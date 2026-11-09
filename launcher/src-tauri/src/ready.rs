@@ -143,21 +143,47 @@ fn reclaim_dirs(install: &Path) -> Vec<PathBuf> {
 
 fn mod_names(mods: &Path) -> Vec<String> {
     let mut out = Vec::new();
-    let read = |d: &Path| std::fs::read_dir(d).into_iter().flatten().flatten().filter(|e| e.path().is_dir())
-        .map(|e| e.file_name().to_string_lossy().into_owned()).collect::<Vec<_>>();
-    // only a folder with a romfs inside is a mod: the game skips the others (a mod put one folder too deep, say)
-    let valid = |d: &Path, name: &str| d.join(name).join("romfs").is_dir();
-    for name in read(mods) {
-        if name.eq_ignore_ascii_case("contents") {  // contents\<title id>\<mod>
-            for tid in read(&mods.join(&name)) {
-                let dir = mods.join(&name).join(&tid);
-                out.extend(read(&dir).into_iter().filter(|m| valid(&dir, m)));
+    let read_dirs = |d: &Path| std::fs::read_dir(d).into_iter().flatten().flatten()
+        .filter(|e| e.path().is_dir()).collect::<Vec<_>>();
+    let has_romfs = |p: &Path| p.join("romfs").is_dir();
+
+    if has_romfs(mods) {
+        out.push("romfs".into());
+    }
+    for entry in read_dirs(mods) {
+        let name = entry.file_name().to_string_lossy().into_owned();
+        let path = entry.path();
+        if name.eq_ignore_ascii_case("romfs") {
+            continue;
+        }
+        if name.eq_ignore_ascii_case("contents") {
+            for sub in read_dirs(&path) {
+                let sub_name = sub.file_name().to_string_lossy().into_owned();
+                let sub_path = sub.path();
+                if has_romfs(&sub_path) {
+                    out.push(sub_name);
+                }
+                for sub2 in read_dirs(&sub_path) {
+                    let sub2_name = sub2.file_name().to_string_lossy().into_owned();
+                    if !sub2_name.eq_ignore_ascii_case("romfs") && has_romfs(&sub2.path()) {
+                        out.push(sub2_name);
+                    }
+                }
             }
-        } else if valid(mods, &name) {
-            out.push(name);
+        } else {
+            if has_romfs(&path) {
+                out.push(name);
+            }
+            for sub in read_dirs(&path) {
+                let sub_name = sub.file_name().to_string_lossy().into_owned();
+                if !sub_name.eq_ignore_ascii_case("romfs") && has_romfs(&sub.path()) {
+                    out.push(sub_name);
+                }
+            }
         }
     }
     out.sort();
+    out.dedup();
     out
 }
 
@@ -386,7 +412,12 @@ fn game_theme(install: &str, since: std::time::SystemTime) -> Option<String> {
 pub fn open_folder(install: String, which: String, saves: String) -> Result<(), String> {
     let inst = PathBuf::from(&install);
     let dir = match which.as_str() {
-        "mods" | "screenshots" | "logs" => inst.join(&which),
+        "mods" => {
+            let m = inst.join("mods");
+            let _ = std::fs::create_dir_all(m.join("contents"));
+            m
+        }
+        "screenshots" | "logs" => inst.join(&which),
         "install" => inst.clone(),
         "dlc" => inst.join("data").join("dlc"),
         "save" if saves == "appdata" => PathBuf::from(std::env::var("APPDATA").unwrap_or_default()).join("YW4 Recomp").join("save"),
@@ -684,4 +715,25 @@ fn game_version(exe: &Path) -> String {
     let mut out = String::new();
     if let Some(mut s) = child.stdout.take() { use std::io::Read; let _ = s.read_to_string(&mut out); }
     out.trim().to_string()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_mod_names_variations() {
+        let temp = std::env::temp_dir().join("yw4_test_mods_variations");
+        let _ = std::fs::remove_dir_all(&temp);
+
+        std::fs::create_dir_all(temp.join("contents").join("010086c00af7c000").join("ModA").join("romfs")).unwrap();
+        std::fs::create_dir_all(temp.join("contents").join("ModB").join("romfs")).unwrap();
+        std::fs::create_dir_all(temp.join("contents").join("010086c00af7c000").join("romfs")).unwrap();
+        std::fs::create_dir_all(temp.join("ModC").join("romfs")).unwrap();
+
+        let mods = mod_names(&temp);
+        assert_eq!(mods, vec!["010086c00af7c000", "ModA", "ModB", "ModC"]);
+
+        let _ = std::fs::remove_dir_all(&temp);
+    }
 }

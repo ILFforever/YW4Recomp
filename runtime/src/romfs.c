@@ -10,6 +10,7 @@
  */
 #include "romfs.h"
 
+#include <ctype.h>
 #include <dirent.h>
 #include <inttypes.h>
 #include <stdio.h>
@@ -157,41 +158,106 @@ static void overlay(Dir *dst, const char *path, int depth) {
     if (dst->nfiles) qsort(dst->files, (size_t)dst->nfiles, sizeof *dst->files, by_file_name);
 }
 
-static int by_string(const void *a, const void *b) { return strcmp(*(char *const *)a, *(char *const *)b); }
+typedef struct {
+    char *name, *romfs;
+} DiscoveredMod;
 
-/* Every mod in YW4_MODS (default work/mods; "none": no mods), in name order (a later one wins): the folders with a
- * romfs/ inside, in Atmosphere's layout contents/010086c00af7c000/<mod>/romfs or simply <mod>/romfs. */
+static int by_mod_name(const void *a, const void *b) {
+    return strcmp(((const DiscoveredMod *)a)->name, ((const DiscoveredMod *)b)->name);
+}
+
+static int ieq(const char *a, const char *b) {
+    while (*a && *b) {
+        if (tolower((unsigned char)*a) != tolower((unsigned char)*b)) return 0;
+        a++;
+        b++;
+    }
+    return *a == *b;
+}
+
+static void check_add_mod(DiscoveredMod *mods, int *n, int max, const char *name, const char *dir) {
+    if (*n >= max) return;
+    char romfs[1200];
+    int is_dir = 0;
+    snprintf(romfs, sizeof romfs, "%s/romfs", dir);
+    if (file_size(romfs, &is_dir) >= 0 && is_dir) {
+        for (int i = 0; i < *n; i++) {
+            if (!strcmp(mods[i].romfs, romfs)) return;
+        }
+        mods[*n].name = dup_str(name);
+        mods[*n].romfs = dup_str(romfs);
+        (*n)++;
+    }
+}
+
+static void scan_submods(DiscoveredMod *mods, int *n, int max, const char *dir) {
+    DIR *d = opendir(dir);
+    if (!d) return;
+    struct dirent *e;
+    while ((e = readdir(d)) && *n < max) {
+        if (e->d_name[0] == '.') continue;
+        if (ieq(e->d_name, "romfs")) continue;
+        char sub[1024];
+        snprintf(sub, sizeof sub, "%s/%s", dir, e->d_name);
+        int is_dir = 0;
+        if (file_size(sub, &is_dir) >= 0 && is_dir) {
+            check_add_mod(mods, n, max, e->d_name, sub);
+        }
+    }
+    closedir(d);
+}
+
+/* Every mod in YW4_MODS (default work/mods; "none": no mods), in name order (a later one wins): folders with a
+ * romfs/ inside, in Atmosphere's layout contents/<title_id>/<mod>/romfs, contents/<mod>/romfs or simply <mod>/romfs. */
 static void apply_mods(Dir *root) {
     const char *env = getenv("YW4_MODS"), *base = env && *env ? env : "work/mods";
     if (!strcmp(base, "none")) return;
-    char dir[1024];
-    snprintf(dir, sizeof dir, "%s/contents/010086c00af7c000", base);
-    DIR *d = opendir(dir);
-    if (!d) snprintf(dir, sizeof dir, "%s", base), d = opendir(dir);
+    DIR *d = opendir(base);
     if (!d) {
         if (env && *env) fprintf(stderr, "yw4: mods: cannot read %s\n", base);
         return;
     }
-    char *names[256];
+    DiscoveredMod mods[256];
     int n = 0;
+    check_add_mod(mods, &n, 256, "romfs", base);
     struct dirent *e;
-    while ((e = readdir(d)) && n < 256)
-        if (e->d_name[0] != '.') names[n++] = dup_str(e->d_name);
-    closedir(d);
-    qsort(names, (size_t)n, sizeof *names, by_string);
-    for (int i = 0; i < n; i++) {
-        char romfs[1200];
+    while ((e = readdir(d)) && n < 256) {
+        if (e->d_name[0] == '.') continue;
+        if (ieq(e->d_name, "romfs")) continue;
+        char path[1024];
+        snprintf(path, sizeof path, "%s/%s", base, e->d_name);
         int is_dir = 0;
-        snprintf(romfs, sizeof romfs, "%s/%s/romfs", dir, names[i]);
-        if (file_size(romfs, &is_dir) >= 0 && is_dir) {
-            mod_replaced = mod_added = 0;
-            overlay(root, romfs, 0);
-            fprintf(stderr, "yw4: mods: %s: %d files replaced, %d added (%s)\n", names[i], mod_replaced, mod_added,
-                    romfs);
+        if (file_size(path, &is_dir) < 0 || !is_dir) continue;
+        if (ieq(e->d_name, "contents")) {
+            DIR *dc = opendir(path);
+            if (dc) {
+                struct dirent *ec;
+                while ((ec = readdir(dc)) && n < 256) {
+                    if (ec->d_name[0] == '.') continue;
+                    char sub[1024];
+                    snprintf(sub, sizeof sub, "%s/%s", path, ec->d_name);
+                    int sub_is_dir = 0;
+                    if (file_size(sub, &sub_is_dir) >= 0 && sub_is_dir) {
+                        check_add_mod(mods, &n, 256, ec->d_name, sub);
+                        scan_submods(mods, &n, 256, sub);
+                    }
+                }
+                closedir(dc);
+            }
         } else {
-            fprintf(stderr, "yw4: mods: %s has no romfs folder (looked for %s): left out\n", names[i], romfs);
+            check_add_mod(mods, &n, 256, e->d_name, path);
+            scan_submods(mods, &n, 256, path);
         }
-        free(names[i]);
+    }
+    closedir(d);
+    qsort(mods, (size_t)n, sizeof *mods, by_mod_name);
+    for (int i = 0; i < n; i++) {
+        mod_replaced = mod_added = 0;
+        overlay(root, mods[i].romfs, 0);
+        fprintf(stderr, "yw4: mods: %s: %d files replaced, %d added (%s)\n", mods[i].name, mod_replaced, mod_added,
+                mods[i].romfs);
+        free(mods[i].name);
+        free(mods[i].romfs);
     }
 }
 
