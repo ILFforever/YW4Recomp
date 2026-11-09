@@ -853,3 +853,65 @@ module = "sdk"
 symbol = "_ZN2nn6socket11GetAddrInfoEPKcS2_PKNS0_8AddrInfoEPPS3_"
 native = "yw4_socket_GetAddrInfo"
 why = "nn::socket::GetAddrInfo: native local play (decision 0057)"
+
+# nn::friends, which local play reads first (decision 0057): no Nintendo friends here (runtime/src/ldn.c)
+[[override]]
+module = "sdk"
+symbol = "_ZN2nn7friends13GetFriendListEPiPNS0_6FriendERKNS_7account3UidEiiRKNS0_12FriendFilterE"
+native = "yw4_friends_GetFriendList"
+why = "nn::friends::GetFriendList asks friend:u: an empty list"
+
+[[override]]
+module = "sdk"
+symbol = "_ZN2nn7friends29GetPlayHistoryRegistrationKeyEPNS0_26PlayHistoryRegistrationKeyERKNS_7account3UidEb"
+native = "yw4_friends_GetPlayHistoryRegistrationKey"
+why = "nn::friends::GetPlayHistoryRegistrationKey asks friend:u: a key from the user id"
+
+[[override]]
+module = "sdk"
+symbol = "_ZN2nn7friends14AddPlayHistoryERKNS_7account3UidERKNS0_26PlayHistoryRegistrationKeyERKNS0_15InAppScreenNameESA_"
+native = "yw4_friends_AddPlayHistory"
+why = "nn::friends::AddPlayHistory asks friend:u: accepted, not kept"
+
+# nn::ngc (other players' names) and nn::err (the error window), reached from local play (decision 0057)
+[[override]]
+module = "sdk"
+symbol = "_ZN2nn3ngc15ProfanityFilterC1Ev"
+native = "yw4_ngc_ProfanityFilter_ctor"
+why = "its constructor sets up the ngc:u session"
+
+[[override]]
+module = "sdk"
+symbol = "_ZN2nn3ngc15ProfanityFilterD1Ev"
+native = "yw4_ngc_ProfanityFilter_dtor"
+why = "the counterpart of its constructor"
+
+[[override]]
+module = "sdk"
+symbol = "_ZN2nn3ngc15ProfanityFilter10InitializeEPvm"
+native = "yw4_ngc_ProfanityFilter_Initialize"
+why = "opens ngc:u"
+
+[[override]]
+module = "sdk"
+symbol = "_ZN2nn3ngc15ProfanityFilter17GetContentVersionEv"
+native = "yw4_ngc_ProfanityFilter_GetContentVersion"
+why = "asks ngc:u"
+
+[[override]]
+module = "sdk"
+symbol = "_ZN2nn3ngc15ProfanityFilter24MaskProfanityWordsInTextEPiPcj"
+native = "yw4_ngc_ProfanityFilter_MaskProfanityWordsInText"
+why = "asks ngc:u: masks nothing"
+
+[[override]]
+module = "sdk"
+symbol = "_ZN2nn3err9ShowErrorENS_6ResultE"
+native = "yw4_err_ShowError"
+why = "launches the error applet: logged instead"
+
+[[override]]
+module = "sdk"
+symbol = "_ZN2nn3err9ShowErrorERKNS0_18ErrorResultVariantE"
+native = "yw4_err_ShowErrorVariant"
+why = "launches the error applet: logged instead"

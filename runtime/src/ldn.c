@@ -359,3 +359,51 @@ void yw4_nifm_GetCurrentPrimaryIpAddress(CPUState *c) {
     LOG("nifm GetCurrentPrimaryIpAddress\n");
     c->x[0] = local_mode ? R_OK : (0x6E | (300u << 9));
 }
+
+/* ---- nn::friends: before local play the game reads the friend list and, with the others, records them in the
+ * play history ("recently played with"). Our user has no Nintendo friends and no system to keep the history:
+ * an empty list, the history accepted and not kept (2026-11-10: local play stopped on "friend:u"). */
+
+/* GetFriendList(int *count, Friend *, const account::Uid &, int offset, int max, const FriendFilter &) */
+void yw4_friends_GetFriendList(CPUState *c) {
+    int32_t zero = 0;
+    memcpy(GPTR(c->x[0]), &zero, 4);
+    LOG("friends GetFriendList -> 0 friends\n");
+    c->x[0] = R_OK;
+}
+/* GetPlayHistoryRegistrationKey(PlayHistoryRegistrationKey *, const account::Uid &, bool local_only): a key
+ * (0x40 bytes) that names this player to the others; ours: the user id, then zeros */
+void yw4_friends_GetPlayHistoryRegistrationKey(CPUState *c) {
+    uint8_t *k = GPTR(c->x[0]);
+    memset(k, 0, 0x40);
+    memcpy(k, GPTR(c->x[1]), 16);
+    LOG("friends GetPlayHistoryRegistrationKey\n");
+    c->x[0] = R_OK;
+}
+/* AddPlayHistory(const account::Uid &, const PlayHistoryRegistrationKey &, const InAppScreenName &, same) */
+void yw4_friends_AddPlayHistory(CPUState *c) {
+    LOG("friends AddPlayHistory\n");
+    c->x[0] = R_OK;
+}
+
+/* ---- nn::ngc::ProfanityFilter: masks bad words in other players' names (ngc:u, which we don't have). Ours
+ * masks nothing: names come from friends the player chose to play with. */
+void yw4_ngc_ProfanityFilter_ctor(CPUState *c) { (void)c; }
+void yw4_ngc_ProfanityFilter_dtor(CPUState *c) { (void)c; }
+void yw4_ngc_ProfanityFilter_Initialize(CPUState *c) { c->x[0] = R_OK; }
+void yw4_ngc_ProfanityFilter_GetContentVersion(CPUState *c) { c->x[0] = 1; }
+/* MaskProfanityWordsInText(int *count, char *text, u32 languages) */
+void yw4_ngc_ProfanityFilter_MaskProfanityWordsInText(CPUState *c) {
+    if (c->x[1]) { int32_t zero = 0; memcpy(GPTR(c->x[1]), &zero, 4); }
+    c->x[0] = R_OK;
+}
+
+/* ---- nn::err::ShowError: the system's error applet, which we don't have: the error goes to the log, and the
+ * game goes on as after the player closed the error window */
+void yw4_err_ShowError(CPUState *c) {
+    uint32_t r = (uint32_t)c->x[0];
+    fprintf(stderr, "yw4: err: the game shows error %04u-%04u (result %#x)\n", 2000 + (r & 0x1FF), (r >> 9) & 0x1FFF, r);
+}
+void yw4_err_ShowErrorVariant(CPUState *c) {
+    fprintf(stderr, "yw4: err: the game shows an error (ErrorResultVariant at %#" PRIx64 ")\n", c->x[0]);
+}
