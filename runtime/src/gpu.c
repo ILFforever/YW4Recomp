@@ -565,6 +565,25 @@ int gpu_buffer_at(uint64_t addr, uint64_t size, VkBuffer *buf, VkDeviceSize *off
 
 /* ================================================================== formats */
 
+/* Format 0x35 is NVN_FORMAT_DEPTH24_STENCIL8. AMD GPUs do not support 24-bit depth attachments;
+ * fall back to D32_SFLOAT_S8_UINT so depth testing and writes work. YW4_FORCE_D32S8=1 forces it for tests. */
+static VkFormat d24s8_format(void) {
+    static VkFormat fmt = VK_FORMAT_UNDEFINED;
+    if (fmt != VK_FORMAT_UNDEFINED) return fmt;
+    if (!vk.gpu) return VK_FORMAT_D24_UNORM_S8_UINT;
+    VkFormatProperties fp = {0};
+    vkGetPhysicalDeviceFormatProperties(vk.gpu, VK_FORMAT_D24_UNORM_S8_UINT, &fp);
+    VkFormatFeatureFlags needed = VK_FORMAT_FEATURE_DEPTH_STENCIL_ATTACHMENT_BIT | VK_FORMAT_FEATURE_SAMPLED_IMAGE_BIT;
+    if ((fp.optimalTilingFeatures & needed) == needed && !getenv("YW4_FORCE_D32S8")) {
+        fmt = VK_FORMAT_D24_UNORM_S8_UINT;
+    } else {
+        fmt = VK_FORMAT_D32_SFLOAT_S8_UINT;
+        fprintf(stderr, "yw4: gpu: depth format 0x35 (D24S8) mapped to D32S8%s\n",
+                getenv("YW4_FORCE_D32S8") ? " (forced by YW4_FORCE_D32S8)" : " (D24S8 attachment not supported by GPU)");
+    }
+    return fmt;
+}
+
 VkFormat gpu_format(uint32_t f) {
     switch (f) {
     case 0x01: return VK_FORMAT_R8_UNORM;
@@ -607,7 +626,7 @@ VkFormat gpu_format(uint32_t f) {
     case 0x32: return VK_FORMAT_D16_UNORM;
     case 0x33: return VK_FORMAT_D32_SFLOAT;  /* DEPTH24 */
     case 0x34: return VK_FORMAT_D32_SFLOAT;
-    case 0x35: return VK_FORMAT_D24_UNORM_S8_UINT;
+    case 0x35: return d24s8_format();
     case 0x36: return VK_FORMAT_D32_SFLOAT_S8_UINT;
     case 0x38: return VK_FORMAT_R8G8B8A8_SRGB;
     case 0x3C: return VK_FORMAT_R5G6B5_UNORM_PACK16;

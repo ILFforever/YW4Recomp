@@ -224,7 +224,7 @@ void gpu_ab_flush(void) {
                                                                    * YW4_AB_TOLERANCE (1e-4), not just rounding */
             static float tol = -1.0f;
             if (tol < 0.0f) tol = getenv("YW4_AB_TOLERANCE") ? (float)atof(getenv("YW4_AB_TOLERANCE")) : 1e-4f;
-            if (t->depth && t->g->format == VK_FORMAT_D32_SFLOAT)
+            if (t->depth && (t->g->format == VK_FORMAT_D32_SFLOAT || t->g->format == VK_FORMAT_D32_SFLOAT_S8_UINT))
                 for (uint32_t k = 0; k < t->bytes / 4; k++) {
                     float fa, fb;
                     memcpy(&fa, a + (size_t)k * 4, 4), memcpy(&fb, b + (size_t)k * 4, 4);
@@ -245,7 +245,7 @@ void gpu_ab_flush(void) {
                     " ours and the game's", ab.pass, ab.frame, t->depth ? "depth" : "colour", i, t->g->key.addr, t->g->width,
                     t->g->height, (int)t->g->format, differ, t->g->width * t->g->height * t->g->layers);
             if (first >= 0) fprintf(stderr, " (first at %ld, %ld)", first % t->g->width, first / t->g->width);
-            if (t->depth && t->g->format == VK_FORMAT_D32_SFLOAT) {
+            if (t->depth && (t->g->format == VK_FORMAT_D32_SFLOAT || t->g->format == VK_FORMAT_D32_SFLOAT_S8_UINT)) {
                 fprintf(stderr, "; beyond rounding: %ld", far);
                 if (far_first >= 0)
                     fprintf(stderr, " (first at %ld, %ld, layer %ld)", far_first % t->g->width,
