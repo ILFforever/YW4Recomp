@@ -33,6 +33,7 @@ static const struct {
     {"appletOE", svc_appletOE},
     {"apm", svc_apm},
     {"lm", svc_lm},
+    {"set", svc_set},
     {"aoc:u", svc_aoc_u},
     {"pctl", svc_pctl},
     {"pctl:s", svc_pctl},  /* the same interface with other access rights */

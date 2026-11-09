@@ -36,6 +36,7 @@ typedef int HSock;
 #define hpoll poll
 #endif
 
+#undef GPTR  /* WinBase.h: a GlobalAlloc flag; ours is the guest pointer */
 #include "hle.h"
 #include "host.h"
 #include "yw4load.h"

@@ -86,6 +86,7 @@ void svc_sm(Service *s, IpcRequest *req, IpcResponse *resp);
 void svc_appletOE(Service *s, IpcRequest *req, IpcResponse *resp);
 void svc_apm(Service *s, IpcRequest *req, IpcResponse *resp);
 void svc_lm(Service *s, IpcRequest *req, IpcResponse *resp);
+void svc_set(Service *s, IpcRequest *req, IpcResponse *resp);
 void svc_aoc_u(Service *s, IpcRequest *req, IpcResponse *resp);
 void svc_pctl(Service *s, IpcRequest *req, IpcResponse *resp);
 void svc_time(Service *s, IpcRequest *req, IpcResponse *resp);

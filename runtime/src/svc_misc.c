@@ -268,3 +268,53 @@ void svc_pctl(Service *s, IpcRequest *req, IpcResponse *resp) {
     }
     ipc_unimplemented(s, req, resp);
 }
+
+/* ---- set: the system settings the game asks for (Switchbrew "Settings services", ISettingsServer). Entering
+ * local play, Pia compares languages (nn::settings::operator== on a Language, through MakeLanguageCode). The
+ * console's language is Japanese, as the game itself is (2026-11-10: local play stopped on "set"). */
+
+static const char *const language_codes[] = {"ja", "en-US", "fr", "de", "it", "es", "zh-CN", "ko", "nl", "pt",
+                                             "ru", "zh-TW", "en-GB", "fr-CA", "es-419", "zh-Hans", "zh-Hant", "pt-BR"};
+#define LANGUAGES (sizeof language_codes / sizeof *language_codes)
+
+static uint64_t language_code(const char *s) {
+    uint64_t v = 0;
+    memcpy(&v, s, strlen(s) < 8 ? strlen(s) : 8);
+    return v;
+}
+
+void svc_set(Service *s, IpcRequest *req, IpcResponse *resp) {
+    switch (req->cmd) {
+    case 0:  /* GetLanguageCode -> LanguageCode */
+        IPC_OUT(uint64_t, 0) = language_code("ja");
+        ipc_out_size(resp, 8);
+        return;
+    case 1: case 6: {  /* GetAvailableLanguageCodes (out buffer of LanguageCode; 6: the newer list) -> s32 count */
+        IpcBuffer out = ipc_out_buffer(req, 0);
+        uint32_t n = 0, max = req->cmd == 1 ? 15 : LANGUAGES;
+        for (; n < max && (n + 1) * 8 <= out.size; n++) {
+            uint64_t v = language_code(language_codes[n]);
+            memcpy((uint8_t *)GPTR(out.addr) + 8 * n, &v, 8);
+        }
+        IPC_OUT(int32_t, 0) = (int32_t)n;
+        ipc_out_size(resp, 4);
+        return;
+    }
+    case 2: {  /* MakeLanguageCode(Language) -> LanguageCode */
+        uint32_t lang = IPC_IN(uint32_t, 0);
+        if (lang >= LANGUAGES) break;
+        IPC_OUT(uint64_t, 0) = language_code(language_codes[lang]);
+        ipc_out_size(resp, 8);
+        return;
+    }
+    case 3: case 5:  /* GetAvailableLanguageCodeCount (3: the first 15) -> s32 */
+        IPC_OUT(int32_t, 0) = req->cmd == 3 ? 15 : (int32_t)LANGUAGES;
+        ipc_out_size(resp, 4);
+        return;
+    case 4:  /* GetRegionCode -> s32: Japan */
+        IPC_OUT(int32_t, 0) = 0;
+        ipc_out_size(resp, 4);
+        return;
+    }
+    ipc_unimplemented(s, req, resp);
+}
