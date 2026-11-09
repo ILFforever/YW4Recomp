@@ -25,9 +25,17 @@ static const struct {
 } shapes[] = {{"16:9", 16.0f / 9.0f, 1, 1}, {"16:10", 1.6f, 9, 10}, {"21:9", 64.0f / 27.0f, 4, 3}, {"32:9", 32.0f / 9.0f, 2, 1}};
 enum { SHAPES = sizeof shapes / sizeof *shapes };
 
-static int shape = -1;
+static int shape = -1, shape_used = -1;  /* the choice, and the one the images and cameras use (gpu_sizes_settle) */
 
 int gpu_wide(void) {
+    int s = __atomic_load_n(&shape_used, __ATOMIC_ACQUIRE);
+    if (s < 0) __atomic_store_n(&shape_used, s = gpu_wide_choice(), __ATOMIC_RELEASE);
+    return s;
+}
+
+void gpu_wide_settle(void) { __atomic_store_n(&shape_used, gpu_wide_choice(), __ATOMIC_RELEASE); }
+
+int gpu_wide_choice(void) {
     int s = __atomic_load_n(&shape, __ATOMIC_ACQUIRE);
     if (s < 0) {
         const char *e = getenv("YW4_ASPECT");
@@ -40,7 +48,7 @@ int gpu_wide(void) {
 }
 
 void gpu_wide_cycle(void) {
-    int s = (gpu_wide() + 1) % SHAPES;
+    int s = (gpu_wide_choice() + 1) % SHAPES;
     __atomic_store_n(&shape, s, __ATOMIC_RELEASE);
     fprintf(stderr, "yw4: gpu: aspect ratio %s\n", shapes[s].name);
 }

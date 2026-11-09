@@ -73,7 +73,7 @@ static void slider_step(const Setting *s, int dir) {
 }
 
 static int res_index(void) {
-    int h = gpu_res_height();
+    int h = gpu_res_choice();  /* the choice (the images follow it a few frames later) */
     return h == 1080 ? 1 : h == 1440 ? 2 : h == 2160 ? 3 : 0;
 }
 static int aniso_index(void) {
@@ -148,7 +148,7 @@ static const Setting player[] = {
      "WIDER THAN THE SWITCH'S 16:9 FOR WIDE MONITORS: THE WORLD SHOWS MORE AT THE SIDES, THE MENUS STAY 16:9 IN "
      "THE MIDDLE.",
      {"16:9", "16:10", "21:9", "32:9"},
-     {"THE SWITCH'S DEFAULT", "A LITTLE TALLER: LESS AT THE SIDES", "ULTRAWIDE", "SUPER ULTRAWIDE"}, 4, gpu_wide,
+     {"THE SWITCH'S DEFAULT", "A LITTLE TALLER: LESS AT THE SIDES", "ULTRAWIDE", "SUPER ULTRAWIDE"}, 4, gpu_wide_choice,
      gpu_wide_cycle, "YW4_ASPECT", {"16:9", "16:10", "21:9", "32:9"}},
     {"DISPLAY", "FRAME RATE",
      "HOW MANY PICTURES A SECOND. THE GAME MOVES BY REAL TIME, SO IT PLAYS AT THE SAME SPEED AT ANY RATE. HIGHER "

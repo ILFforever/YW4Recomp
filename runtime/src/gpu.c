@@ -968,9 +968,9 @@ void gpu_shadow_res_cycle(void) {
  * height / 900 times larger: 900 (the game's), 1080, 1440 or 2160. The shaders read them in 0..1
  * coordinates, so they follow; draws into them get their viewport and scissor scaled
  * (gpu_dynamic_state). YW4_RES=<height> at start, the settings panel (F1) while playing. */
-static int res_height = -1;
+static int res_height = -1, res_used = -1;  /* the choice, and what the images are made at (gpu_sizes_settle) */
 
-int gpu_res_height(void) {
+int gpu_res_choice(void) {
     int r = __atomic_load_n(&res_height, __ATOMIC_ACQUIRE);
     if (r < 0) {
         const char *e = getenv("YW4_RES");
@@ -981,8 +981,14 @@ int gpu_res_height(void) {
     return r;
 }
 
+int gpu_res_height(void) {
+    int r = __atomic_load_n(&res_used, __ATOMIC_ACQUIRE);
+    if (r < 0) __atomic_store_n(&res_used, r = gpu_res_choice(), __ATOMIC_RELEASE);
+    return r;
+}
+
 void gpu_res_cycle(void) {
-    int r = gpu_res_height();
+    int r = gpu_res_choice();
     r = r == 900 ? 1080 : r == 1080 ? 1440 : r == 1440 ? 2160 : 900;
     __atomic_store_n(&res_height, r, __ATOMIC_RELEASE);
     fprintf(stderr, "yw4: gpu: 3D view %dx%d\n", r * 16 / 9, r);
@@ -992,7 +998,7 @@ void gpu_res_cycle(void) {
  * window images (presented) and, from the anti-aliasing point to the present, the scene image the UI is drawn
  * into get the output height. The anti-aliasing point (gpu_aa.c) makes the full-size picture: FSR when that is
  * the anti-aliasing, else the chosen anti-aliasing at the render size and a plain stretch. */
-static int upscale_mode = -1;
+static int upscale_mode = -1, upscale_used = -1;  /* the choice, and the one the images are made for */
 static const float upscale_ratio[4] = {1.0f, 1.5f, 1.7f, 2.0f};
 static uint64_t upscaled_scene, upscaled_depth;  /* the scene's colour and depth images' addresses while they
                                                   * name output-sized images (GPU thread) */
@@ -1009,7 +1015,31 @@ int gpu_upscale_setting(void) {
 }
 
 /* Upscaling needs FSR to rebuild the detail; without it the choice is kept but not used (owner, 2026-10-29) */
-int gpu_upscale(void) { return gpu_aa() >= 4 ? gpu_upscale_setting() : 0; }  /* FSR or DLSS */
+int gpu_upscale(void) {  /* FSR or DLSS */
+    int m = __atomic_load_n(&upscale_used, __ATOMIC_ACQUIRE);
+    if (m < 0) __atomic_store_n(&upscale_used, m = gpu_upscale_setting(), __ATOMIC_RELEASE);
+    return gpu_aa() >= 4 ? m : 0;
+}
+
+/* The size settings (resolution, upscaling, aspect ratio) as the panel shows them change at once, but the images
+ * follow only once the choice has rested SETTLE_FRAMES: stepping through upscaling modes made every mode's set of
+ * screen-sized targets and its FSR or DLSS context in turn, at 4K 21:9 several hundred MB each, and the owner's
+ * device-lost crash came right after such a run (Quality, Balanced, Performance, Off in a row with video memory
+ * already high, 2026-11-09). gpu_present, every frame. */
+enum { SETTLE_FRAMES = 15 };
+void gpu_sizes_settle(uint64_t frame) {
+    static int last = -1;
+    static uint64_t since;
+    int choice = gpu_res_choice() << 8 | gpu_upscale_setting() << 4 | gpu_wide_choice();
+    int used = gpu_res_height() << 8 | __atomic_load_n(&upscale_used, __ATOMIC_ACQUIRE) << 4 | gpu_wide();
+    if (choice != last) last = choice, since = frame;
+    if (choice == used || frame < since + SETTLE_FRAMES) return;
+    __atomic_store_n(&res_used, gpu_res_choice(), __ATOMIC_RELEASE);
+    __atomic_store_n(&upscale_used, gpu_upscale_setting(), __ATOMIC_RELEASE);
+    gpu_wide_settle();
+    fprintf(stderr, "yw4: gpu: sizes now %d lines, upscaling %d, aspect ratio %d (the choice rested %d frames)\n",
+            gpu_res_height(), gpu_upscale_setting(), gpu_wide(), SETTLE_FRAMES);
+}
 
 void gpu_upscale_cycle(void) {
     int m = (gpu_upscale_setting() + 1) % 4;
@@ -2264,6 +2294,7 @@ void gpu_present(NvnTexture *t, uint64_t frame, const int crop[4]) {
     gpu_upscale_begin(0, 0);  /* the scene's images are the 3D's again (upscaling) */
     scan_writes();
     if (present_count % 300 == 0) evict_images(300, 0);
+    gpu_sizes_settle(present_count);
     size_change_check();
     if (quick_evict_at && present_count >= quick_evict_at) {
         quick_evict_at = 0;

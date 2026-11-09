@@ -38,6 +38,12 @@ What is known to be missing or wrong, roughly in the order it is likely to matte
   (Quality → Balanced → Performance → Off) at 5120×2160 allocated new native-res render targets and triggered
   `yw4: gpu: device lost in submission 191219` from video memory exhaustion on the 8 GB laptop GPU. Debouncing the
   setting change remains the planned fix.
+  **Done 2026-11-10** (not reproduced here, so made less likely rather than proven fixed): the images now follow
+  a resolution, upscaling or aspect-ratio choice only once it has rested 15 frames (the panel shows it at once), so
+  stepping Quality, Balanced, Performance, Off in a row makes no set in between (40 switches 4 frames apart: 0
+  rebuilds, where each made a set of targets and an FSR or DLSS context before); and the old size's targets are
+  freed before the new size's are made (the aspect-ratio entry above). Tests at 4K 21:9 full screen, FSR and DLSS,
+  DLSS frame generation, 24 and 40 switches: no crash, peak 4.6 GB (5.3 the old way).
 - **Stutters at 4K ultrawide; to optimize** (owner, 2026-10-28; 4K height at 21:9 = 5120×2160, TAA, full-size effects). From the
   owner's session logs: bamboo forest (late-game save) GPU 23.2 ms per frame on average, 36.4 ms at the 99th
   percentile (budget 33.3), 419 of 27,382 frames over 50 ms; school save GPU 18.2 / 27.6 ms, 134 of 5,620 over

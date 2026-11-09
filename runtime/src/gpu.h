@@ -22,7 +22,8 @@ int gpu_shadow_res(void);
 void gpu_shadow_res_cycle(void);
 /* Resolution of the 3D view: the height of the game's 1600x900 targets as made (900 is the game's;
  * YW4_RES at start), and the panel's cycle 900 -> 1080 -> 1440 -> 2160 -> 900. */
-int gpu_res_height(void);
+int gpu_res_height(void);  /* what the images are made at (follows the choice, gpu_sizes_settle) */
+int gpu_res_choice(void);  /* the panel's choice */
 void gpu_res_cycle(void);
 /* Upscaling (decision 0039): the 3D drawn smaller than the output, made full size at the anti-aliasing point.
  * 0 off, 1 quality (1.5x), 2 balanced (1.7x), 3 performance (2x); YW4_UPSCALE, the settings panel. */
@@ -46,8 +47,12 @@ void gpu_aa_cycle(void);
 void gpu_aa_step(int dir);
 /* Picture shape (widescreen.c): 0 16:9 (the game's), 1 16:10, 2 21:9, 3 32:9 (YW4_ASPECT at start), and
  * the width factor of the screen-sized targets against 16:9. */
-int gpu_wide(void);
+int gpu_wide(void);         /* the aspect ratio in use (follows the choice, gpu_sizes_settle) */
+int gpu_wide_choice(void);  /* the panel's choice */
+void gpu_wide_settle(void);
 void gpu_wide_cycle(void);
+/* The images follow the size choices once they have rested a few frames (gpu.c, every present). */
+void gpu_sizes_settle(uint64_t frame);
 void gpu_wide_factor(uint32_t *num, uint32_t *den);
 /* F5: per-pass GPU timing on or off (gpu_passes.c) */
 void gpu_passes_toggle(void);
