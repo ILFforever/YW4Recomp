@@ -166,6 +166,10 @@ def build() -> None:
     if not unwind or not unwind.is_file():
         raise SystemExit("libunwind.dll not found: put llvm-mingw's bin on the PATH")
     shutil.copy(unwind, OUT / "libunwind.dll")
+    # the bundle copies both into target/release; the launcher's own build script runs from there with libunwind.dll
+    # loaded, so a copy left from the last build can't be overwritten (os error 32): start without them
+    for dll in ("WebView2Loader.dll", "libunwind.dll"):
+        (release / dll).unlink(missing_ok=True)
     overrides.write_text(json.dumps({
         "version": version,
         "mainBinaryName": "YW4 Recomp",
