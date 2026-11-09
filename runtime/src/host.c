@@ -1,4 +1,7 @@
 /* Host threads, locks, condition variables and a monotonic clock (host.h). */
+#ifndef _GNU_SOURCE
+#define _GNU_SOURCE
+#endif
 #include <errno.h>
 #include <inttypes.h>
 #include <stdio.h>
@@ -264,7 +267,6 @@ long host_written_pages(uint64_t addr, uint64_t size, void (*fn)(uint64_t page, 
 }
 
 #else
-#define _GNU_SOURCE
 #include <sys/mman.h>
 #include <sys/uio.h>
 #include <unistd.h>

@@ -8,6 +8,9 @@
  *   4. symbolic relocations: the target module's base + value (or 0 for weak symbols
  *      nobody defines)
  */
+#ifndef _GNU_SOURCE
+#define _GNU_SOURCE
+#endif
 #include <inttypes.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -16,7 +19,6 @@
 #ifdef _WIN32
 #include <windows.h>
 #else
-#define _GNU_SOURCE
 #include <errno.h>
 #include <sys/mman.h>
 #ifndef MAP_FIXED_NOREPLACE
