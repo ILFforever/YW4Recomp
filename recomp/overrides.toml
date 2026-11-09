@@ -90,6 +90,68 @@ symbol = "_ZN2nn5swkbd12ShowKeyboardEPNS0_6StringERKNS0_15ShowKeyboardArgE"
 native = "yw4_swkbd_ShowKeyboard"
 why = "nn::swkbd::ShowKeyboard launches the keyboard applet (CreateLibraryApplet), which has no host equivalent"
 
+# nn::ngc::ProfanityFilter: profanity filter for text entry (player & Yo-kai nicknames).
+# On Switch it mounts system data archive 0100000000000823 (NgWord2); on PC it accepts text natively (swkbd.c).
+[[override]]
+module = "sdk"
+symbol = "_ZN2nn3ngc15ProfanityFilter10InitializeEPvm"
+native = "yw4_ngc_ProfanityFilter_Initialize"
+why = "nn::ngc::ProfanityFilter::Initialize mounts the Switch NgWord2 system archive, which is not present on PC"
+
+[[override]]
+module = "sdk"
+symbol = "_ZN2nn3ngc15ProfanityFilter10InitializeEPvmb"
+native = "yw4_ngc_ProfanityFilter_Initialize_b"
+why = "counterpart with bool parameter"
+
+[[override]]
+module = "sdk"
+symbol = "_ZN2nn3ngc15ProfanityFilter8FinalizeEv"
+native = "yw4_ngc_ProfanityFilter_Finalize"
+why = "counterpart of Initialize"
+
+[[override]]
+module = "sdk"
+symbol = "_ZN2nn3ngc15ProfanityFilter17GetContentVersionEv"
+native = "yw4_ngc_ProfanityFilter_GetContentVersion"
+why = "returns dictionary version (checked by game to be non-zero)"
+
+[[override]]
+module = "sdk"
+symbol = "_ZN2nn3ngc15ProfanityFilter24MaskProfanityWordsInTextEPiPcj"
+native = "yw4_ngc_ProfanityFilter_MaskProfanityWordsInText_c"
+why = "masks profanity words in UTF-8 text; reports 0 words masked"
+
+[[override]]
+module = "sdk"
+symbol = "_ZN2nn3ngc15ProfanityFilter24MaskProfanityWordsInTextEPiPDsj"
+native = "yw4_ngc_ProfanityFilter_MaskProfanityWordsInText_ds"
+why = "masks profanity words in UTF-16 text; reports 0 words masked"
+
+[[override]]
+module = "sdk"
+symbol = "_ZN2nn3ngc15ProfanityFilter24MaskProfanityWordsInTextEPiPtj"
+native = "yw4_ngc_ProfanityFilter_MaskProfanityWordsInText_t"
+why = "masks profanity words in uint16_t text; reports 0 words masked"
+
+[[override]]
+module = "sdk"
+symbol = "_ZN2nn3ngc15ProfanityFilter19CheckProfanityWordsEPjjPPKcm"
+native = "yw4_ngc_ProfanityFilter_CheckProfanityWords_c"
+why = "checks word array for profanity; reports clean"
+
+[[override]]
+module = "sdk"
+symbol = "_ZN2nn3ngc15ProfanityFilter19CheckProfanityWordsEPjjPPKDsm"
+native = "yw4_ngc_ProfanityFilter_CheckProfanityWords_ds"
+why = "checks UTF-16 word array for profanity; reports clean"
+
+[[override]]
+module = "sdk"
+symbol = "_ZN2nn3ngc15ProfanityFilter19CheckProfanityWordsEPjjPPKtm"
+native = "yw4_ngc_ProfanityFilter_CheckProfanityWords_t"
+why = "checks uint16_t word array for profanity; reports clean"
+
 # nn::ec, the eShop: a library applet on the Switch, which we don't have. The game's
 # "additional content" menu entry calls this; it returns at once, as if the shop were closed.
 [[override]]

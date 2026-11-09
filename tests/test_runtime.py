@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import random
 import subprocess
+import shutil
 import tempfile
 import unittest
 from pathlib import Path
@@ -404,6 +405,24 @@ int main(void) {
     if (strcmp(buf, "GoodName") != 0) return 11;
     if (strcmp(last_message_body, "This name cannot be used.") != 0) return 12;
 
+    /* 5. Profanity filter native overrides */
+    CPUState pf_ctx = {0};
+    yw4_ngc_ProfanityFilter_Initialize(&pf_ctx);
+    if (pf_ctx.x[0] != 0) return 13;
+    yw4_ngc_ProfanityFilter_GetContentVersion(&pf_ctx);
+    if (pf_ctx.x[0] != 1) return 14;
+    int words_masked = -1;
+    pf_ctx.x[1] = (uint64_t)(uintptr_t)&words_masked;
+    yw4_ngc_ProfanityFilter_MaskProfanityWordsInText_c(&pf_ctx);
+    if (pf_ctx.x[0] != 0 || words_masked != 0) return 15;
+    uint32_t check_res[2] = {99, 99};
+    pf_ctx.x[1] = (uint64_t)(uintptr_t)check_res;
+    pf_ctx.x[4] = 2;
+    yw4_ngc_ProfanityFilter_CheckProfanityWords_c(&pf_ctx);
+    if (pf_ctx.x[0] != 0 || check_res[0] != 0 || check_res[1] != 0) return 16;
+    yw4_ngc_ProfanityFilter_Finalize(&pf_ctx);
+    if (pf_ctx.x[0] != 0) return 17;
+
     return 0;
 }
 """
@@ -555,5 +574,97 @@ class HidVibrationTest(unittest.TestCase):
                             f"-I{check.REPO / 'third_party' / 'vulkan' / 'include'}",
                             f"-I{check.REPO / 'third_party' / 'sdl3' / 'include'}",
                             "-o", str(exe), str(t / "drv.c")], check=True, capture_output=True)
+            got = subprocess.run([str(exe)], capture_output=True, text=True, check=True)
+            self.assertEqual(got.returncode, 0)
+
+    def test_vibration_toggle(self):
+        driver = r"""
+#include <stdio.h>
+#include <stdint.h>
+#include <stdbool.h>
+#include <string.h>
+#include <stdlib.h>
+
+#include <SDL3/SDL.h>
+#include "yw4load.h"
+#include "window.h"
+
+int battle_active(void) { return 0; }
+void settings_save(void) {}
+void window_mouse_motion(float *dx, float *dy) { *dx = 0; *dy = 0; }
+SDL_GamepadType SDL_GetGamepadType(SDL_Gamepad *gamepad) { return SDL_GAMEPAD_TYPE_STANDARD; }
+const Yw4Module yw4_modules[2] = {0};
+
+static int last_low, last_high, last_dur, rumble_called;
+static int rumble_state = 1;
+
+int window_rumble_enabled(void) { return rumble_state; }
+void window_rumble_set_enabled(int on) { rumble_state = on; }
+void window_rumble(uint16_t low, uint16_t high, uint32_t duration_ms) {
+    last_low = low; last_high = high; last_dur = duration_ms; rumble_called++;
+}
+void window_rumble_test(void) { window_rumble(49152, 49152, 1000); }
+
+#include "bindings.c"
+
+int main(void) {
+    BindRow rows[64];
+    int r = 0, c = 0;
+    char help[256];
+    int n = bindings_rows(rows, 64, &r, &c, help, sizeof(help));
+    if (n < 4) return 1;
+    if (strcmp(rows[2].group, "CONTROLLER") != 0) return 2;
+    if (strcmp(rows[2].name, "VIBRATION") != 0) return 3;
+    if (strcmp(rows[2].cells[0], "ON") != 0) return 4;
+    if (strcmp(rows[3].group, "KEYS FOR") != 0) return 20;
+
+    /* select row 2 and toggle off */
+    bindings_select(2, 0);
+    bindings_action(SETTINGS_ACCEPT);
+    if (rumble_state != 0) return 5;
+
+    /* toggle back on: should trigger 1-second rumble test */
+    rumble_called = 0;
+    bindings_action(SETTINGS_ACCEPT);
+    if (rumble_state != 1) return 6;
+    if (rumble_called != 1 || last_dur != 1000 || last_low != 49152 || last_high != 49152) return 7;
+
+    /* test that SETTINGS_RIGHT loops from on to off to on */
+    bindings_action(SETTINGS_RIGHT);
+    if (rumble_state != 0) return 10;
+    rumble_called = 0;
+    bindings_action(SETTINGS_RIGHT);
+    if (rumble_state != 1 || rumble_called != 1) return 11;
+
+    /* test that SETTINGS_LEFT also loops */
+    bindings_action(SETTINGS_LEFT);
+    if (rumble_state != 0) return 12;
+    rumble_called = 0;
+    bindings_action(SETTINGS_LEFT);
+    if (rumble_state != 1 || rumble_called != 1) return 13;
+
+    /* load from ini line */
+    bindings_load_line("YW4_RUMBLE", "0");
+    if (rumble_state != 0) return 8;
+    bindings_load_line("YW4_RUMBLE", "1");
+    if (rumble_state != 1) return 9;
+
+    return 0;
+}
+"""
+        with tempfile.TemporaryDirectory() as t:
+            t = Path(t)
+            (t / "drv_toggle.c").write_text(driver)
+            exe = t / "toggle_test.exe"
+            from tools.yw4 import deps, config
+            cfg = config.load()
+            sdl = deps.fetch_sdl(cfg)
+            shutil.copy2(sdl / "bin" / "SDL3.dll", t / "SDL3.dll")
+            sdl_lib = sdl / "lib" / "libSDL3.dll.a"
+            subprocess.run([check.host_cc(), "-std=c17", "-O1", "-Wall",
+                            f"-I{RUNTIME / 'include'}", f"-I{RUNTIME / 'src'}",
+                            f"-I{check.REPO / 'third_party' / 'vulkan' / 'include'}",
+                            f"-I{sdl / 'include'}",
+                            "-o", str(exe), str(t / "drv_toggle.c"), str(sdl_lib)], check=True, capture_output=True)
             got = subprocess.run([str(exe)], capture_output=True, text=True, check=True)
             self.assertEqual(got.returncode, 0)

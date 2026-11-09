@@ -75,6 +75,36 @@ static int check_name(CPUState *c, const uint8_t *a, const char *name, int utf8,
     return result != 0;
 }
 
+/* nn::ngc::ProfanityFilter: accepts names without requiring the Switch NgWord2 system archive */
+void yw4_ngc_ProfanityFilter_Initialize(CPUState *c) { c->x[0] = 0; }
+void yw4_ngc_ProfanityFilter_Initialize_b(CPUState *c) { c->x[0] = 0; }
+void yw4_ngc_ProfanityFilter_Finalize(CPUState *c) { c->x[0] = 0; }
+void yw4_ngc_ProfanityFilter_GetContentVersion(CPUState *c) { c->x[0] = 1; }
+void yw4_ngc_ProfanityFilter_MaskProfanityWordsInText_c(CPUState *c) {
+    if (c->x[1]) *(int32_t *)(uintptr_t)c->x[1] = 0;
+    c->x[0] = 0;
+}
+void yw4_ngc_ProfanityFilter_MaskProfanityWordsInText_ds(CPUState *c) {
+    if (c->x[1]) *(int32_t *)(uintptr_t)c->x[1] = 0;
+    c->x[0] = 0;
+}
+void yw4_ngc_ProfanityFilter_MaskProfanityWordsInText_t(CPUState *c) {
+    if (c->x[1]) *(int32_t *)(uintptr_t)c->x[1] = 0;
+    c->x[0] = 0;
+}
+void yw4_ngc_ProfanityFilter_CheckProfanityWords_c(CPUState *c) {
+    if (c->x[1]) memset((void *)(uintptr_t)c->x[1], 0, c->x[4] * sizeof(uint32_t));
+    c->x[0] = 0;
+}
+void yw4_ngc_ProfanityFilter_CheckProfanityWords_ds(CPUState *c) {
+    if (c->x[1]) memset((void *)(uintptr_t)c->x[1], 0, c->x[4] * sizeof(uint32_t));
+    c->x[0] = 0;
+}
+void yw4_ngc_ProfanityFilter_CheckProfanityWords_t(CPUState *c) {
+    if (c->x[1]) memset((void *)(uintptr_t)c->x[1], 0, c->x[4] * sizeof(uint32_t));
+    c->x[0] = 0;
+}
+
 /* ShowKeyboard(String *out, const ShowKeyboardArg &) -> Result */
 void yw4_swkbd_ShowKeyboard(CPUState *c) {
     uint16_t *buf = (uint16_t *)(uintptr_t)((uint64_t *)(uintptr_t)c->x[0])[0];

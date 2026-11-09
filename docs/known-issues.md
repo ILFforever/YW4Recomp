@@ -72,8 +72,10 @@ What is known to be missing or wrong, roughly in the order it is likely to matte
   caret offset converted to window coordinates are passed to `SDL_SetTextInputArea`, updating whenever the field
   or caret moves.
 - ~~**The name popup doesn't run the game's own name check**~~: fixed 2026-11-09. `swkbd.c` now executes the
-  game's `SetTextCheckCallback` callback via `yw4_resolve` on candidate strings; if rejected, a message popup
-  explains that the name cannot be used and the prompt re-opens for correction.
+  game's `SetTextCheckCallback` callback via `yw4_resolve` on candidate strings; `nn::ngc::ProfanityFilter` is
+  natively overridden (`recomp/overrides.toml`, `swkbd.c`) so nickname validation succeeds without the Switch's
+  `NgWord2` system archive (`0100000000000823`). If rejected by the game, a message popup explains that the name
+  cannot be used and the prompt re-opens for correction.
 
 ## Input and menus
 
