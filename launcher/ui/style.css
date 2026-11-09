@@ -285,7 +285,9 @@ body.pointer :focus-visible { outline: none; }
 
 .game-main { display: flex; flex-direction: column; min-width: 0; min-height: 0; background: var(--lilac-0); }
 .band { position: relative; height: 128px; flex-shrink: 0; overflow: hidden; background: var(--violet-deep); }
-.band img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
+.band img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; opacity: 0;
+  transition: opacity .8s cubic-bezier(0.2, 0, 0.2, 1); }
+.band img.loaded { opacity: 1; }
 .band img.blurred { inset: -60px; width: calc(100% + 120px); height: calc(100% + 120px); filter: blur(40px) saturate(1.2); }
 .band::after { content: ""; position: absolute; inset: 0; pointer-events: none;
   background: linear-gradient(90deg, var(--scrim-strong), var(--scrim)); }
@@ -342,6 +344,9 @@ p.list-card { padding: 14px 18px; }
 .dlc-row b { font-weight: 700; overflow-wrap: anywhere; }
 .dlc-row code { font: 12px ui-monospace, Consolas, monospace; color: var(--ink-2); }
 .dlc-row span { margin-left: auto; flex: none; color: var(--ink-2); }
+.mod-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.mod-row b { font-weight: 700; overflow-wrap: anywhere; }
+.mod-row.disabled b { color: var(--ink-2); font-weight: 400; }
 .file-list { margin: 0 0 12px; padding: 10px 12px 10px 28px; border-radius: 10px; background: var(--lilac-0);
   font: 12px/1.7 ui-monospace, Consolas, monospace; color: var(--ink-2); max-height: 180px; overflow: auto; overflow-wrap: anywhere; }
 #originals-dlg, #free { width: 520px; }
@@ -549,4 +554,7 @@ kbd { display: inline-block; min-width: 22px; padding: 1px 6px; border-radius: 6
 .icon-btn.small svg { transform: rotate(45deg); }  /* the arrowhead up to the top right (owner) */
 .icon-btn.small.spinning svg { animation: spin-once .45s ease-in-out; }
 @keyframes spin-once { from { transform: rotate(45deg); } to { transform: rotate(405deg); } }
-@media (prefers-reduced-motion: reduce) { .icon-btn.small.spinning svg { animation: none; } }
+@media (prefers-reduced-motion: reduce) {
+  .icon-btn.small.spinning svg { animation: none; }
+  .band img { transition: none; opacity: 1; }
+}

@@ -623,7 +623,8 @@ async function afterBuild() {
   inst = { install: options.install, mode, paths: { ...chosen[mode] }, saves: options.saves, fsr: options.fsr,
     dlss: options.dlss && rtx, freeUp: options.freeUp, desktop: options.desktop, startMenu: options.startMenu,
     originalsOffered: inst && inst.install === options.install ? !!inst.originalsOffered : false,
-    onPlay: (inst && inst.onPlay) || 'hide', mods: !(inst && inst.mods === false), showLog: !!(inst && inst.showLog) };  // Settings' choices stay
+    onPlay: (inst && inst.onPlay) || 'hide', mods: !(inst && inst.mods === false), showLog: !!(inst && inst.showLog),
+    disabledMods: (inst && inst.disabledMods) || [], icon: inst && inst.icon };  // Settings' choices stay
   syncSettingsButton();
   try { await invoke('save_state', { state: inst }); } catch (e) { logLine('could not remember the install: ' + e); }
   if (options.desktop || options.startMenu) {
@@ -682,13 +683,62 @@ function showTab(name) {
 }
 document.querySelectorAll('.ready [data-tab]').forEach((b) => b.addEventListener('click', () => showTab(b.dataset.tab)));
 
+function modsSummary(totalMods, disabledList) {
+  const disabledSet = new Set((disabledList || []).map((s) => s.toLowerCase()));
+  const enabled = totalMods.filter((m) => !disabledSet.has(m.toLowerCase()));
+  if (!totalMods.length) return 'None';
+  if (!disabledSet.size) return totalMods.length === 1 ? totalMods[0] : `${totalMods.length} mods`;
+  return `${enabled.length} of ${totalMods.length} active`;
+}
+
 // the Mods and DLC tabs and their sidebar rows, from install_info (also after their Refresh buttons)
 function renderModsDlc(info) {
   const mods = $('mod-list');
   mods.textContent = '';
-  if (info.mods.length) for (const m of info.mods) mods.append(chip(m));
-  else { const li = chip('None. Put mods in mods/contents/ (as individual mod folders or the game ID folder).'); li.className = 'none'; mods.append(li); }
-  $('row-mods').textContent = info.mods.length === 1 ? info.mods[0] : info.mods.length ? `${info.mods.length} mods` : 'None';
+  const currentDisabled = (info && info.disabledMods) || (inst && inst.disabledMods) || [];
+  if (inst) inst.disabledMods = currentDisabled;
+  const disabled = new Set(currentDisabled.map((s) => s.toLowerCase()));
+  if (info.mods.length) {
+    for (const m of info.mods) {
+      const li = document.createElement('li');
+      li.className = 'mod-row';
+      const name = document.createElement('b');
+      name.textContent = m;
+      const toggle = document.createElement('button');
+      toggle.className = 'toggle';
+      toggle.type = 'button';
+      toggle.setAttribute('role', 'switch');
+      toggle.setAttribute('aria-label', `Toggle ${m}`);
+      const on = !disabled.has(m.toLowerCase());
+      toggle.setAttribute('aria-checked', String(on));
+      if (!on) li.classList.add('disabled');
+      toggle.addEventListener('click', async () => {
+        const current = toggle.getAttribute('aria-checked') === 'true';
+        const next = !current;
+        toggle.setAttribute('aria-checked', String(next));
+        li.classList.toggle('disabled', !next);
+        toggle.disabled = true;
+        try {
+          const updated = await invoke('set_mod_enabled', { modName: m, enabled: next });
+          if (inst) inst.disabledMods = updated;
+          $('row-mods').textContent = modsSummary(info.mods, updated);
+        } catch (e) {
+          toggle.setAttribute('aria-checked', String(current));
+          li.classList.toggle('disabled', !current);
+          popup('Mod toggle failed', String(e));
+        } finally {
+          toggle.disabled = false;
+        }
+      });
+      li.append(name, toggle);
+      mods.append(li);
+    }
+  } else {
+    const li = chip('None. Put mods in mods/contents/ (as individual mod folders or the game ID folder).');
+    li.className = 'none';
+    mods.append(li);
+  }
+  $('row-mods').textContent = modsSummary(info.mods, currentDisabled);
   const dlcs = $('dlc-list');
   dlcs.textContent = '';
   const needsKeys = info.dlcList.some((d) => d.needsKeys);
@@ -741,18 +791,52 @@ document.querySelectorAll('[data-refresh]').forEach((b) => b.addEventListener('c
   }
 }));
 
+function updateBand(src, isBlurred) {
+  const band = $('band-img');
+  if (!src) {
+    band.hidden = true;
+    band.classList.remove('loaded');
+    return;
+  }
+  const prevSrc = band.getAttribute('src');
+  band.classList.toggle('blurred', !!isBlurred);
+  band.hidden = false;
+  if (prevSrc !== src) {
+    band.classList.remove('loaded');
+    band.onload = () => { band.classList.add('loaded'); };
+    band.onerror = () => { band.classList.remove('loaded'); band.hidden = true; };
+    band.src = src;
+    if (band.complete && band.naturalWidth) {
+      requestAnimationFrame(() => band.classList.add('loaded'));
+    }
+  } else {
+    band.classList.add('loaded');
+  }
+}
+
 async function showReady() {
   show('ready');
+  if (!$('stat-last').textContent) $('stat-last').textContent = '--';
+  if (!$('stat-time').textContent) $('stat-time').textContent = '--';
+  if (!$('stat-shots').textContent) $('stat-shots').textContent = '--';
+  const cachedIcon = (inst && inst.icon) || localStorage.getItem('yw4_icon_' + (inst && inst.install));
+  if (cachedIcon) {
+    const src = T.core.convertFileSrc(cachedIcon);
+    $('game-icon').hidden = false;
+    if ($('game-icon').src !== src) $('game-icon').src = src;
+    updateBand(src, true);
+  }
   const info = await invoke('install_info', { install: inst.install });
   const icon = info.icon ? T.core.convertFileSrc(info.icon) : '';
+  if (info.icon) {
+    try { localStorage.setItem('yw4_icon_' + inst.install, info.icon); } catch (_) {}
+    if (inst) inst.icon = info.icon;
+  }
   $('game-icon').hidden = !icon;
-  if (icon) $('game-icon').src = icon;
+  if (icon && $('game-icon').src !== icon) $('game-icon').src = icon;
   // the band: the newest screenshot; before there is one, the icon blurred into colour
-  const band = $('band-img');
   const pic = info.shots[0] ? T.core.convertFileSrc(info.shots[0]) : icon;
-  band.hidden = !pic;
-  if (pic) band.src = pic;
-  band.classList.toggle('blurred', !info.shots[0]);
+  updateBand(pic, !info.shots[0]);
 
   $('stat-last').textContent = lastPlayed(info.lastPlayed);
   $('stat-time').textContent = playTime(info.playSecs);
@@ -818,7 +902,7 @@ $('play').addEventListener('click', async () => {
   }
   try {
     await invoke('play', { install: inst.install, mods: inst.mods !== false, showLog: !!inst.showLog, onPlay: inst.onPlay || 'hide',
-      theme: THEMES[themeAt] ? THEMES[themeAt].id : 'recomp' });
+      theme: THEMES[themeAt] ? THEMES[themeAt].id : 'recomp', disabledMods: (inst && inst.disabledMods) || [] });
     $('stat-last').textContent = 'Today';
   } catch (e) { popup('Something went wrong', String(e)); }
 });

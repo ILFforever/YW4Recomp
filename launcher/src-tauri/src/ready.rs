@@ -32,6 +32,12 @@ pub struct State {
     /// Settings: show the game's console window with its log while playing (off by default)
     #[serde(rename = "showLog", default)]
     show_log: bool,
+    /// Disabled mods by name: skipped during LayeredFS overlay
+    #[serde(rename = "disabledMods", default)]
+    pub disabled_mods: Vec<String>,
+    /// Cached icon path so the launcher can display the game icon instantly on start
+    #[serde(default)]
+    pub icon: Option<String>,
 }
 
 fn default_on_play() -> String { "hide".into() }
@@ -44,10 +50,18 @@ fn state_path() -> PathBuf {
     PathBuf::from(std::env::var("APPDATA").unwrap_or_default()).join("YW4 Recomp").join("launcher.json")
 }
 
+fn read_state() -> Option<State> {
+    serde_json::from_str(&std::fs::read_to_string(state_path()).ok()?).ok()
+}
+
 #[tauri::command]
 pub fn load_state() -> Option<State> {
-    let s: State = serde_json::from_str(&std::fs::read_to_string(state_path()).ok()?).ok()?;
-    exe(&s.install).is_file().then_some(s)  // only an install that's still there
+    let mut s = read_state().filter(|s| exe(&s.install).is_file())?;
+    if s.icon.is_none() {
+        let dir = Path::new(&s.install).join("work").join("icon");
+        s.icon = ensure_icon_image(&dir).map(|p| p.display().to_string());
+    }
+    Some(s)
 }
 
 #[tauri::command]
@@ -89,6 +103,8 @@ pub struct Info {
     #[serde(rename = "dlcList")]
     dlc_list: Vec<DlcItem>,   // every NSP there: the checked ones by index, then the others
     mods: Vec<String>,        // mod folders in mods\ (Atmosphère's layout or plain)
+    #[serde(rename = "disabledMods")]
+    disabled_mods: Vec<String>, // disabled mod names from state
     icon: Option<String>,     // the game's icon, from the player's own files (the build makes it)
     shots: Vec<String>,       // screenshots, newest first (at most SHOTS)
     #[serde(rename = "shotCount")]
@@ -187,6 +203,37 @@ fn mod_names(mods: &Path) -> Vec<String> {
     out
 }
 
+/// The game's picture for the launcher. An existing icon.jpg or icon.png is preferred; if only yw4.ico
+/// exists, extracts the 256x256 PNG packed inside it so WebView2 displays it reliably.
+fn ensure_icon_image(dir: &Path) -> Option<PathBuf> {
+    for name in ["icon.jpg", "icon.png"] {
+        let p = dir.join(name);
+        if p.is_file() { return Some(p); }
+    }
+    let ico = dir.join("yw4.ico");
+    if ico.is_file() {
+        let png = dir.join("icon.png");
+        if let Ok(bytes) = std::fs::read(&ico) {
+            if bytes.len() >= 22 {
+                let count = u16::from_le_bytes([bytes[4], bytes[5]]) as usize;
+                for i in 0..count {
+                    let entry = 6 + i * 16;
+                    if entry + 16 <= bytes.len() {
+                        let size = u32::from_le_bytes([bytes[entry + 8], bytes[entry + 9], bytes[entry + 10], bytes[entry + 11]]) as usize;
+                        let offset = u32::from_le_bytes([bytes[entry + 12], bytes[entry + 13], bytes[entry + 14], bytes[entry + 15]]) as usize;
+                        if offset + size <= bytes.len() && bytes[offset..].starts_with(b"\x89PNG\r\n\x1a\n") {
+                            let _ = std::fs::write(&png, &bytes[offset..offset + size]);
+                            return Some(png);
+                        }
+                    }
+                }
+            }
+        }
+        return Some(ico);
+    }
+    None
+}
+
 #[tauri::command]
 pub async fn install_info(app: tauri::AppHandle, install: String) -> Info {
     tauri::async_runtime::spawn_blocking(move || {
@@ -213,12 +260,13 @@ pub async fn install_info(app: tauri::AppHandle, install: String) -> Info {
         shots.sort_by(|a, b| b.0.cmp(&a.0));
         let shot_count = shots.len();
         let shots = shots.into_iter().take(SHOTS).map(|(_, p)| p.display().to_string()).collect();
-        // icon.jpg is the game's own picture; installs built before it existed have only the .ico
+        // icon.jpg / icon.png is the game's own picture; installs with only yw4.ico get icon.png extracted from it
         let dir = inst.join("work").join("icon");
-        let icon = [dir.join("icon.jpg"), dir.join("yw4.ico")].into_iter().find(|p| p.is_file()).map(|p| p.display().to_string());
+        let icon = ensure_icon_image(&dir).map(|p| p.display().to_string());
         let reclaimable = reclaim_dirs(&inst).iter().map(|d| dir_size(d)).sum();
         let played = load_played(&install);
-        Info { version, dlc, dlc_list, mods: mod_names(&inst.join("mods")), icon, shots, shot_count, reclaimable,
+        let disabled_mods = load_state().map(|s| s.disabled_mods).unwrap_or_default();
+        Info { version, dlc, dlc_list, mods: mod_names(&inst.join("mods")), disabled_mods, icon, shots, shot_count, reclaimable,
                last_played: played.last_played, play_secs: played.seconds }
     })
     .await
@@ -245,12 +293,25 @@ pub async fn set_dlc_keys(app: tauri::AppHandle, install: String, path: String) 
     Ok(install_info(app, install).await)
 }
 
+/// Enables or disables an individual mod by name; updates and saves the launcher's state.
+#[tauri::command]
+pub fn set_mod_enabled(mod_name: String, enabled: bool) -> Result<Vec<String>, String> {
+    let mut state = read_state().unwrap_or_default();
+    if enabled {
+        state.disabled_mods.retain(|m| !m.eq_ignore_ascii_case(&mod_name));
+    } else if !state.disabled_mods.iter().any(|m| m.eq_ignore_ascii_case(&mod_name)) {
+        state.disabled_mods.push(mod_name);
+    }
+    save_state(state.clone())?;
+    Ok(state.disabled_mods)
+}
+
 /// Starts the game: yw4.exe with no arguments reads game.ini next to it. Notes the start, and when the game
 /// exits adds the time played and tells the screens ("played"), so the Ready screen's numbers update.
 /// Settings (Play): with `mods` off the game starts with none (YW4_MODS=none: an environment variable wins over
 /// game.ini's line); `on_play` says what the launcher's window does meanwhile, and "hide" brings it back afterwards.
 #[tauri::command]
-pub fn play(app: tauri::AppHandle, install: String, mods: Option<bool>, on_play: Option<String>, theme: Option<String>, show_log: Option<bool>) -> Result<(), String> {
+pub fn play(app: tauri::AppHandle, install: String, mods: Option<bool>, on_play: Option<String>, theme: Option<String>, show_log: Option<bool>, disabled_mods: Option<Vec<String>>) -> Result<(), String> {
     use tauri::{Emitter, Manager};
     crate::buildrun::ensure_dlc_extracted(&app, Path::new(&install));
     let e = exe(&install);
@@ -259,7 +320,14 @@ pub fn play(app: tauri::AppHandle, install: String, mods: Option<bool>, on_play:
     // the game is a console program: its window shows the log live. Off unless Settings asks for it (the log file is written either way)
     #[cfg(windows)]
     if show_log != Some(true) { use std::os::windows::process::CommandExt; cmd.creation_flags(0x0800_0000); }  // CREATE_NO_WINDOW
-    if mods == Some(false) { cmd.env("YW4_MODS", "none"); }
+    if mods == Some(false) {
+        cmd.env("YW4_MODS", "none");
+    } else {
+        let disabled = disabled_mods.or_else(|| read_state().map(|s| s.disabled_mods));
+        if let Some(d) = disabled.filter(|d| !d.is_empty()) {
+            cmd.env("YW4_MODS_DISABLED", d.join(";"));
+        }
+    }
     // the game reads the launcher's theme files (decision 0055): its folder, so an installed game finds them
     if let Some(dir) = crate::themes::themes_dir(&app) { cmd.env("YW4_THEMES_DIR", dir); }
     // the theme goes both ways: the game opens in the launcher's theme, and a theme chosen in the game comes back
@@ -735,5 +803,24 @@ mod tests {
         assert_eq!(mods, vec!["010086c00af7c000", "ModA", "ModB", "ModC"]);
 
         let _ = std::fs::remove_dir_all(&temp);
+    }
+
+    #[test]
+    fn test_set_mod_enabled() {
+        let temp_state = std::env::temp_dir().join("yw4_test_state_mod_enabled.json");
+        let _ = std::fs::remove_file(&temp_state);
+        std::env::set_var("YW4_LAUNCHER_STATE", &temp_state);
+
+        let res = set_mod_enabled("Spanish Patch".into(), false).unwrap();
+        assert_eq!(res, vec!["Spanish Patch"]);
+
+        let res = set_mod_enabled("English Patch".into(), false).unwrap();
+        assert_eq!(res, vec!["Spanish Patch", "English Patch"]);
+
+        let res = set_mod_enabled("spanish patch".into(), true).unwrap();
+        assert_eq!(res, vec!["English Patch"]);
+
+        let _ = std::fs::remove_file(&temp_state);
+        std::env::remove_var("YW4_LAUNCHER_STATE");
     }
 }

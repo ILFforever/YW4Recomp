@@ -134,10 +134,8 @@ fn write_config(b: &Builder, plan: &Plan, inst: &Path) -> std::io::Result<PathBu
     let get = |k: &str| plan.paths.get(k).filter(|v| !v.is_empty()).map(PathBuf::from);
     let mut s = String::from("# Written by the YW4 Recomp launcher for this install folder (decision 0050).\n[input]\n");
     s += &format!("exefs_dir = {}\nromfs_dir = {}\n", lit(&inst.join("data/exefs")), lit(&inst.join("data/romfs")));
-    if plan.mode == "files" {
-        if let Some(b) = get("base") { s += &format!("base_nsp = {}\n", lit(&b)); }
-        if let Some(u) = get("update") { s += &format!("update_nsp = {}\n", lit(&u)); }
-    }
+    if let Some(b) = get("base") { s += &format!("base_nsp = {}\n", lit(&b)); }
+    if let Some(u) = get("update") { s += &format!("update_nsp = {}\n", lit(&u)); }
     s += &format!("dlc_dir = {}\n[output]\nwork_dir = {}\n[tools]\n", lit(&inst.join("data/dlc")), lit(&inst.join("work")));
     if let Some(tools) = &b.tools {
         s += &format!("cc = {}\n", lit(&inst.join("builder/toolchain/llvm-mingw/bin/clang.exe")));
@@ -289,6 +287,16 @@ fn run_all(app: &AppHandle, run: &Running, plan: &Plan) -> Result<(), String> {
         std::fs::create_dir_all(inst.join(d)).map_err(|e| format!("can't create {}: {e}", inst.join(d).display()))?;
     }
     let b = builder(app, &inst);
+    let icon_src = b.src.join("work").join("icon");
+    let icon_dst = inst.join("work").join("icon");
+    if icon_src.is_dir() && !icon_dst.is_dir() {
+        let _ = std::fs::create_dir_all(&icon_dst);
+        for name in ["icon.jpg", "yw4.ico", "icon.png"] {
+            if icon_src.join(name).is_file() {
+                let _ = std::fs::copy(icon_src.join(name), icon_dst.join(name));
+            }
+        }
+    }
     emit_log(app, &format!("game code: {}", b.src.display()));
     let cfg = write_config(&b, plan, &inst).map_err(|e| e.to_string())?;
     let mut args: Vec<String> = vec!["--mode".into(), plan.mode.clone(), "--saves".into(), plan.saves.clone()];

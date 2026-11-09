@@ -109,6 +109,13 @@ def main(argv: list[str] | None = None) -> int:
     try:
         cfg = config.load(require_exefs=False)
         files = [p for p in (cfg.update_nsp, cfg.base_nsp) if p is not None]  # the update's icon first
+        if not files and cfg.dlc_dir and cfg.dlc_dir.is_dir():
+            for p in sorted(cfg.dlc_dir.glob("*.nsp")):
+                name = p.name.upper()
+                if "010086C00AF7C800" in name or "[UPD]" in name:
+                    files.insert(0, p)
+                elif "010086C00AF7C000" in name or "[BASE]" in name:
+                    files.append(p)
         if not files or cfg.hactool_exe is None or cfg.keys_dir is None:
             raise config.ConfigError("needs base_nsp (or update_nsp), hactool_exe and keys_dir: the icon is only "
                                      "in an NSP or XCI, not in extracted folders")

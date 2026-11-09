@@ -175,6 +175,31 @@ static int ieq(const char *a, const char *b) {
     return *a == *b;
 }
 
+static int is_mod_disabled(const char *name, const char *disabled_list) {
+    if (!disabled_list || !*disabled_list) return 0;
+    const char *p = disabled_list;
+    size_t nlen = strlen(name);
+    while (*p) {
+        while (*p == ';' || *p == ',' || *p == ' ') p++;
+        if (!*p) break;
+        const char *end = p;
+        while (*end && *end != ';' && *end != ',') end++;
+        size_t len = (size_t)(end - p);
+        if (len == nlen) {
+            int match = 1;
+            for (size_t i = 0; i < len; i++) {
+                if (tolower((unsigned char)p[i]) != tolower((unsigned char)name[i])) {
+                    match = 0;
+                    break;
+                }
+            }
+            if (match) return 1;
+        }
+        p = end;
+    }
+    return 0;
+}
+
 static void check_add_mod(DiscoveredMod *mods, int *n, int max, const char *name, const char *dir) {
     if (*n >= max) return;
     char romfs[1200];
@@ -250,8 +275,15 @@ static void apply_mods(Dir *root) {
         }
     }
     closedir(d);
+    const char *disabled_env = getenv("YW4_MODS_DISABLED");
     qsort(mods, (size_t)n, sizeof *mods, by_mod_name);
     for (int i = 0; i < n; i++) {
+        if (is_mod_disabled(mods[i].name, disabled_env)) {
+            fprintf(stderr, "yw4: mods: %s: disabled, skipped\n", mods[i].name);
+            free(mods[i].name);
+            free(mods[i].romfs);
+            continue;
+        }
         mod_replaced = mod_added = 0;
         overlay(root, mods[i].romfs, 0);
         fprintf(stderr, "yw4: mods: %s: %d files replaced, %d added (%s)\n", mods[i].name, mod_replaced, mod_added,

@@ -176,7 +176,8 @@ class Previous:
         self.work, self.dir, self.moved = work, work / "previous", []
 
     def keep(self, rels: list[str]) -> None:
-        if not (self.work / "build" / "yw4.exe").is_file() and not self.moved:
+        exe_name = "yw4.exe" if sys.platform == "win32" else "yw4"
+        if not (self.work / "build" / exe_name).is_file() and not self.moved:
             return  # nothing playable yet: a first build has nothing to keep
         for rel in rels:
             src = self.work / rel
@@ -205,9 +206,27 @@ class Previous:
         shutil.rmtree(self.dir, ignore_errors=True)
 
 
+def ensure_install_icon(cfg: config.Config) -> None:
+    dst = cfg.work_dir / "icon"
+    if (dst / "yw4.ico").is_file():
+        return
+    src = config.REPO_ROOT / "work" / "icon"
+    if (src / "yw4.ico").is_file():
+        dst.mkdir(parents=True, exist_ok=True)
+        for name in ("icon.jpg", "yw4.ico", "icon.png"):
+            if (src / name).is_file():
+                shutil.copy2(src / name, dst / name)
+        return
+    try:
+        run("tools.yw4.icon")
+    except Exception:
+        pass
+
+
 def game_runtime_files(work: Path) -> list[str]:
     b = work / "build"
-    names = ["yw4.exe", "game.ini", "shaders"] + [p.name for p in b.glob("*.dll")] if b.is_dir() else []
+    exe_name = "yw4.exe" if sys.platform == "win32" else "yw4"
+    names = [exe_name, "game.ini", "shaders"] + [p.name for p in b.glob("*.dll")] if b.is_dir() else []
     return [f"build/{n}" for n in names]
 
 
@@ -255,7 +274,7 @@ def main() -> int:
         "version": lambda: run("tools.yw4.ingest"),
         "translate": lambda: run("recomp.translate"),
         "shaders": lambda: (prev.keep(["shaders/glsl"]), run("tools.yw4.shaders"), run("recomp.shader", "--check")),
-        "compile": lambda: (prev.keep(game_runtime_files(cfg.work_dir)), run("recomp.build", *build_args)),
+        "compile": lambda: (ensure_install_icon(cfg), prev.keep(game_runtime_files(cfg.work_dir)), run("recomp.build", *build_args)),
         "finish": lambda: game_ini(cfg, args.saves),
     }
     current = None
