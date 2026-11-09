@@ -89,6 +89,24 @@ def ticket_title_key(data: bytes) -> tuple[str, str] | None:
     return data[body + 0x160:body + 0x170].hex(), data[body + 0x40:body + 0x50].hex()
 
 
+def ticket_keys_of(path: Path) -> dict[str, str]:
+    """{rights ID: encrypted title key} from the common tickets inside an NSP (an XCI's NCAs need none). The base
+    game and its update use these as add-ons do: a dumped title.keys often lacks the update's key (2026-11-09: a
+    friend's build stopped at "title.keys has no key for rights ID(s): 010086c00af7c800...", the update NSP
+    carrying it in its own ticket)."""
+    keys: dict[str, str] = {}
+    with path.open("rb") as f:
+        if xci.is_xci(f):
+            return keys
+        for e in pfs0.read_entries(f):
+            if e.name.endswith(".tik") and e.size <= 0x1000:
+                f.seek(e.offset)
+                got = ticket_title_key(f.read(e.size))
+                if got:
+                    keys[got[0]] = got[1]
+    return keys
+
+
 def write_temp_keys(keys_dir: Path, rights_ids: set[str], home: Path,
                     ticket_keys: dict[str, str] | None = None) -> None:
     switch = home / ".switch"
@@ -277,13 +295,15 @@ def main(argv: list[str] | None = None) -> int:
         app_id = int(tomllib.loads(TARGET.read_text())["title"]["application_id"], 16)
         print("unpacking the game's files ...")
         ncas, rids = unpack_ncas(cfg.base_nsp, nca_dir, "base")
+        tkeys = ticket_keys_of(cfg.base_nsp)
         if cfg.update_nsp is not None:
             upd_ncas, upd_rids = unpack_ncas(cfg.update_nsp, nca_dir, "upd")
             ncas, rids = ncas + upd_ncas, rids | upd_rids
+            tkeys |= ticket_keys_of(cfg.update_nsp)
 
         with tempfile.TemporaryDirectory() as tmp:
             home = Path(tmp)
-            write_temp_keys(cfg.keys_dir, rids, home)
+            write_temp_keys(cfg.keys_dir, rids, home, tkeys)
             base_prog, upd_prog = find_programs(cfg.hactool_exe, home, ncas, app_id)
             if base_prog is None:
                 raise ExtractError(f"no base game ({app_id:016X}) in base_nsp" +

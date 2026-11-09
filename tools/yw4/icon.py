@@ -121,13 +121,14 @@ def main(argv: list[str] | None = None) -> int:
                                      "in an NSP or XCI, not in extracted folders")
         nca_dir = cfg.work_dir / "icon" / "nca"
         nca_dir.mkdir(parents=True, exist_ok=True)
-        ncas, rids = [], set()
+        ncas, rids, tkeys = [], set(), {}
         for tag, p in zip(("upd", "base"), files):
             n, r = unpack_small(p, nca_dir, tag)
             ncas, rids = ncas + n, rids | r
+            tkeys |= extract.ticket_keys_of(p)
         with tempfile.TemporaryDirectory() as t:
             home = Path(t)
-            extract.write_temp_keys(cfg.keys_dir, rids, home)
+            extract.write_temp_keys(cfg.keys_dir, rids, home, tkeys)
             ico = make(cfg, home, ncas)
         shutil.rmtree(nca_dir)
     except (config.ConfigError, IconError, extract.ExtractError, pfs0.Pfs0Error, xci.XciError) as e:
