@@ -151,18 +151,25 @@ def build() -> None:
     version = (REPO / "launcher" / "VERSION").read_text().strip()  # the launcher's own number (0054)
     # only for this build: a plain `cargo build` has no stage and must keep working without one
     overrides = OUT / "tauri.package.json"
+    # the GNU Rust build links WebView2 through WebView2Loader.dll (an MSVC build links it in): it has to sit next to
+    # the launcher, or Windows refuses to start it (2026-11-09: a friend's fresh install said the DLL was missing).
+    # Cargo's build puts it in target/release; a first build makes it, so build once before bundling.
+    release = launcher / "src-tauri" / "target" / "release"
+    loader = release / "WebView2Loader.dll"
+    if not loader.is_file():
+        subprocess.run(["cargo", "build", "--release"], cwd=launcher / "src-tauri", check=True)
+    shutil.copy(loader, OUT / "WebView2Loader.dll")
     overrides.write_text(json.dumps({
         "version": version,
         "mainBinaryName": "YW4 Recomp",
         # the launcher's themes (themes.rs): files anyone can copy into this folder, so they ship next to the launcher
-        "bundle": {"resources": {STAGE.as_posix() + "/": "builder/", (REPO / "launcher" / "ui" / "themes").as_posix() + "/": "themes/"}},
+        "bundle": {"resources": {(OUT / "WebView2Loader.dll").as_posix(): "WebView2Loader.dll", STAGE.as_posix() + "/": "builder/", (REPO / "launcher" / "ui" / "themes").as_posix() + "/": "themes/"}},
     }, indent=2))
     npx = shutil.which("npx")
     if not npx:
         raise SystemExit("npx not found: install Node.js")
     subprocess.run([npx, "tauri", "build", "--config", str(overrides)], cwd=launcher, check=True)
 
-    release = launcher / "src-tauri" / "target" / "release"
     shutil.rmtree(DIST, ignore_errors=True)
     DIST.mkdir(parents=True)
     installers = list((release / "bundle" / "nsis").glob(f"*{version}*.exe"))
@@ -172,6 +179,7 @@ def build() -> None:
 
     with zipfile.ZipFile(DIST / f"YW4-Recomp-Launcher-{version}-portable.zip", "w", zipfile.ZIP_DEFLATED) as z:
         z.write(release / "YW4 Recomp.exe", "YW4 Recomp/YW4 Recomp.exe")
+        z.write(loader, "YW4 Recomp/WebView2Loader.dll")
         for p in (release / "builder").rglob("*"):
             if p.is_file():
                 z.write(p, Path("YW4 Recomp") / p.relative_to(release))
