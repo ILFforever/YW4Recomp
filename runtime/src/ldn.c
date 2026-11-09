@@ -108,7 +108,12 @@ static void put_node(int i, uint32_t addr, const uint8_t *user, uint16_t version
 }
 
 static void make_network(const uint8_t *nc, const uint8_t *sc, const uint8_t *uc) {
+    /* the game sets its advertise data in AccessPoint, before CreateNetwork: it stays (2026-11-10: lost here, the
+     * room reached the others without it and their game left it out of the list) */
+    uint8_t adv[2 + 0x180];
+    memcpy(adv, network + 0x50 + 0x21A, sizeof adv);
     memset(network, 0, sizeof network);
+    memcpy(network + 0x50 + 0x21A, adv, sizeof adv);
     memcpy(net_config, nc, 0x20);
     memcpy(network, nc, 0x10);  /* IntentId */
     for (int i = 0; i < 16; i++) network[0x10 + i] = (uint8_t)rand();  /* SessionId */
@@ -221,7 +226,12 @@ static void transition(CPUState *c, const char *name, uint32_t from_a, uint32_t 
     host_unlock(&lock);
 }
 
-void yw4_ldn_OpenAccessPoint(CPUState *c) { transition(c, "OpenAccessPoint", ST_INITIALIZED, ST_INITIALIZED, ST_ACCESS_POINT); }
+void yw4_ldn_OpenAccessPoint(CPUState *c) {
+    host_lock(&lock);
+    memset(network + 0x50 + 0x21A, 0, 2 + 0x180);  /* a new access point starts without advertise data */
+    host_unlock(&lock);
+    transition(c, "OpenAccessPoint", ST_INITIALIZED, ST_INITIALIZED, ST_ACCESS_POINT);
+}
 void yw4_ldn_CloseAccessPoint(CPUState *c) { transition(c, "CloseAccessPoint", ST_ACCESS_POINT, ST_AP_CREATED, ST_INITIALIZED); }
 void yw4_ldn_DestroyNetwork(CPUState *c) { transition(c, "DestroyNetwork", ST_AP_CREATED, ST_AP_CREATED, ST_ACCESS_POINT); }
 void yw4_ldn_OpenStation(CPUState *c) { transition(c, "OpenStation", ST_INITIALIZED, ST_INITIALIZED, ST_STATION); }
