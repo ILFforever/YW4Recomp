@@ -394,6 +394,7 @@ static int vk_init(void) {
     VK_DEVICE_FNS(LOAD_DEVICE)
     vkGetDeviceQueue(vk.device, vk.queue_family, 0, &vk.queue);
     if (sl) dlssg_available();  /* checked and logged once, Reflex set up */
+    gpu_dlss_available();
 
     VkCommandPoolCreateInfo pci = {.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO,
                                    .flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT,
@@ -1759,9 +1760,19 @@ void window_rumble(uint16_t low, uint16_t high, uint32_t duration_ms) {
         high = h > 65535.0f ? 65535 : (uint16_t)h;
     }
 
+    /* The game may send the same value every frame; each send can be a controller write (Bluetooth pads), so
+     * only changes go out, plus a refresh of a running rumble before its duration runs out. */
+    static uint16_t last_low, last_high;
+    static SDL_Gamepad *last_pad;
+    static uint64_t last_ms;
+    uint64_t now = SDL_GetTicks();
     host_lock(&input_lock);
     SDL_Gamepad *pad = gamepad;
-    if (pad) SDL_RumbleGamepad(pad, low, high, duration_ms);
+    int same = pad == last_pad && low == last_low && high == last_high;
+    if (pad && (!same || ((low || high) && now - last_ms >= duration_ms / 2))) {
+        SDL_RumbleGamepad(pad, low, high, duration_ms);
+        last_pad = pad, last_low = low, last_high = high, last_ms = now;
+    }
     host_unlock(&input_lock);
 }
 
@@ -2049,7 +2060,6 @@ void window_run(void (*guest)(void *), void *arg) {
     const char *dir = getenv("YW4_SCREENSHOT_DIR");
     if (dir && *dir) snprintf(screenshot_dir, sizeof screenshot_dir, "%s", dir);
     const char *headless = getenv("YW4_HEADLESS");
-    char title[96];  /* the window's title, with the version (decision 0047) */
     if (!(headless && *headless && *headless != '0')) {
         /* the game's icon, resource 1 in the exe when the build had one (decision 0048); without it Windows' default */
         SDL_SetHint(SDL_HINT_WINDOWS_INTRESOURCE_ICON, "1");
@@ -2062,8 +2072,8 @@ void window_run(void (*guest)(void *), void *arg) {
         if (ws) sscanf(ws, "%dx%d", &win_w, &win_h);
         if (!SDL_Init(SDL_INIT_VIDEO | SDL_INIT_GAMEPAD)) {
             fprintf(stderr, "yw4: window: SDL_Init: %s; running headless\n", SDL_GetError());
-        } else if (snprintf(title, sizeof title, "Yo-kai Watch 4++ (recompiled) · YW4 Recomp %s", yw4_version) < 0 ||
-                   !(window = SDL_CreateWindow(title, win_w, win_h, SDL_WINDOW_VULKAN | SDL_WINDOW_RESIZABLE |
+        } else if (!(window = SDL_CreateWindow("Yo-kai Watch 4++", win_w, win_h, SDL_WINDOW_VULKAN |
+                                               SDL_WINDOW_RESIZABLE |
                                                (window_fullscreen_index() ? SDL_WINDOW_FULLSCREEN : 0)))) {
             fprintf(stderr, "yw4: window: SDL_CreateWindow: %s; running headless\n", SDL_GetError());
         } else if (vk_init()) {
