@@ -57,8 +57,12 @@ static const Input inputs[] = {
     {"RIGHT STICK", "LEFT", "RS_LEFT", -1, 2, -1, {SDL_SCANCODE_J}, AXIS(SDL_GAMEPAD_AXIS_RIGHTX, 0)},
     {"RIGHT STICK", "RIGHT", "RS_RIGHT", -1, 2, 1, {SDL_SCANCODE_L}, AXIS(SDL_GAMEPAD_AXIS_RIGHTX, 1)},
 };
-/* The controls page's rows: which set is shown, the mouse's two sensitivities, the inputs, the reset row. */
-enum { NINPUTS = sizeof inputs / sizeof *inputs, NMOUSE = 2, SET_ROW = 0, SENS_ROW = 1, FIRST_INPUT = SENS_ROW + NMOUSE,
+/* The controls page's rows: the mouse's two sensitivities, the vibration toggle, which set is shown, the inputs, the reset row. */
+enum { NINPUTS = sizeof inputs / sizeof *inputs, NMOUSE = 2,
+       SENS_ROW = 0,
+       RUMBLE_ROW = SENS_ROW + NMOUSE,
+       SET_ROW = RUMBLE_ROW + 1,
+       FIRST_INPUT = SET_ROW + 1,
        RESET_ROW = FIRST_INPUT + NINPUTS, NROWS };
 
 /* Two sets of keys: one while exploring, one in battles (battle.c says which), so a key can do one thing on the
@@ -747,9 +751,14 @@ void bindings_action(int action) {
     case SETTINGS_RIGHT:
         if (row == SET_ROW) {
             edit_set = !edit_set;
-        } else if (row < FIRST_INPUT) {
+        } else if (row >= SENS_ROW && row < SENS_ROW + NMOUSE) {
             if (action == SETTINGS_LEFT && sens_index(sens) > 0) sens_choice[sens]--, settings_save();
             if (action == SETTINGS_RIGHT && sens_index(sens) < NSENS - 1) sens_choice[sens]++, settings_save();
+        } else if (row == RUMBLE_ROW) {
+            int next = !window_rumble_enabled();
+            window_rumble_set_enabled(next);
+            if (next) window_rumble_test();
+            settings_save();
         } else {
             col = action == SETTINGS_LEFT ? (col > 0 ? col - 1 : 0) : (col < BIND_COLS - 1 ? col + 1 : BIND_COLS - 1);
         }
@@ -757,8 +766,13 @@ void bindings_action(int action) {
     case SETTINGS_ACCEPT:
         if (row == SET_ROW) {
             edit_set = !edit_set;
-        } else if (row < FIRST_INPUT) {
+        } else if (row >= SENS_ROW && row < SENS_ROW + NMOUSE) {
             sens_choice[sens] = (sens_index(sens) + 1) % NSENS, settings_save();
+        } else if (row == RUMBLE_ROW) {
+            int next = !window_rumble_enabled();
+            window_rumble_set_enabled(next);
+            if (next) window_rumble_test();
+            settings_save();
         } else if (row == RESET_ROW) {
             /* the exploring set back to the starting keys; the battle set to a copy of the exploring set */
             if (edit_set == SET_BATTLE) memcpy(sets[SET_BATTLE], sets[SET_FIELD], sizeof sets[SET_FIELD]);
@@ -769,7 +783,12 @@ void bindings_action(int action) {
         }
         break;
     case SETTINGS_CLEAR:
-        if (row >= SENS_ROW && row < FIRST_INPUT) sens_choice[sens] = SENS_DEFAULT, settings_save();
+        if (row >= SENS_ROW && row < SENS_ROW + NMOUSE) sens_choice[sens] = SENS_DEFAULT, settings_save();
+        if (row == RUMBLE_ROW) {
+            window_rumble_set_enabled(1);
+            window_rumble_test();
+            settings_save();
+        }
         if (row < FIRST_INPUT || row == RESET_ROW) break;
         if (col < BIND_KEYS) bound[row - FIRST_INPUT].keys[col] = 0;
         else bound[row - FIRST_INPUT].pad = PAD_NONE;
@@ -860,18 +879,24 @@ static void input_title(int i, char *s, size_t n) {
 int bindings_rows(BindRow *rows, int max, int *sel_row, int *sel_col, char *help, int help_size) {
     sets_ready();
     int n = 0;
-    if (n < max) {
-        BindRow *r = &rows[n++];
-        memset(r, 0, sizeof *r);
-        r->group = "KEYS FOR", r->name = "SET", r->value = 1;
-        snprintf(r->cells[0], BIND_NAME, "%s", edit_set ? "BATTLES" : "EXPLORING");
-    }
     static const char *const sens_names[NMOUSE] = {"HORIZONTAL", "VERTICAL"};
     for (int a = 0; a < NMOUSE && n < max; a++) {
         BindRow *r = &rows[n++];
         memset(r, 0, sizeof *r);
         r->group = "MOUSE", r->name = sens_names[a], r->value = 1;
         snprintf(r->cells[0], BIND_NAME, "%sX", sens_values[sens_index(a)]);
+    }
+    if (n < max) {
+        BindRow *r = &rows[n++];
+        memset(r, 0, sizeof *r);
+        r->group = "CONTROLLER", r->name = "VIBRATION", r->value = 1;
+        snprintf(r->cells[0], BIND_NAME, "%s", window_rumble_enabled() ? "ON" : "OFF");
+    }
+    if (n < max) {
+        BindRow *r = &rows[n++];
+        memset(r, 0, sizeof *r);
+        r->group = "KEYS FOR", r->name = "SET", r->value = 1;
+        snprintf(r->cells[0], BIND_NAME, "%s", edit_set ? "BATTLES" : "EXPLORING");
     }
     for (int i = 0; i < NINPUTS && n < max; i++, n++) {
         BindRow *r = &rows[n];
@@ -890,20 +915,27 @@ int bindings_rows(BindRow *rows, int max, int *sel_row, int *sel_col, char *help
     }
     *sel_row = row, *sel_col = col;
     char title[48], other[48];
+    if (row >= SENS_ROW && row < SENS_ROW + NMOUSE) {
+        int a = row - SENS_ROW;
+        snprintf(help, (size_t)help_size,
+                 "HOW FAST THE CAMERA TURNS %s WITH THE MOUSE: %sX (1.0X TO START), IN BOTH SETS. LEFT/RIGHT: CHANGE. "
+                 "DELETE OR X: BACK TO 1.0X. A CLICK IN THE WINDOW GIVES THE MOUSE TO THE GAME, ALT TAKES IT BACK.",
+                 a ? "UP AND DOWN" : "LEFT AND RIGHT", sens_values[sens_index(a)]);
+        return n;
+    }
+    if (row == RUMBLE_ROW) {
+        snprintf(help, (size_t)help_size,
+                 "WHETHER CONTROLLER VIBRATION AND HAPTICS ARE ENABLED: %s. LEFT/RIGHT OR ENTER/A: TOGGLE. "
+                 "WHEN TURNED ON, THE CONTROLLER RUMBLES FOR A SECOND AS A TEST.",
+                 window_rumble_enabled() ? "ON" : "OFF");
+        return n;
+    }
     if (row == SET_ROW) {
         snprintf(help, (size_t)help_size,
                  "WHICH KEYS THIS PAGE SHOWS AND CHANGES: THE ONES FOR EXPLORING OR THE ONES FOR BATTLES. THE GAME "
                  "USES EACH SET BY ITSELF, SO A KEY CAN DO ONE THING ON THE FIELD AND ANOTHER IN A BATTLE. "
                  "LEFT/RIGHT: SWITCH.%s",
                  battle_active() ? " A BATTLE IS ON NOW." : "");
-        return n;
-    }
-    if (row < FIRST_INPUT) {
-        int a = row - SENS_ROW;
-        snprintf(help, (size_t)help_size,
-                 "HOW FAST THE CAMERA TURNS %s WITH THE MOUSE: %sX (1.0X TO START), IN BOTH SETS. LEFT/RIGHT: CHANGE. "
-                 "DELETE OR X: BACK TO 1.0X. A CLICK IN THE WINDOW GIVES THE MOUSE TO THE GAME, ALT TAKES IT BACK.",
-                 a ? "UP AND DOWN" : "LEFT AND RIGHT", sens_values[sens_index(a)]);
         return n;
     }
     if (row == RESET_ROW) {
@@ -943,6 +975,10 @@ int bindings_load_line(const char *name, const char *value) {
     if (!strcmp(name, "YW4_MOUSE_SENS")) {  /* the older single setting: both, unless set on their own */
         if (!getenv(name) && !getenv(sens_env[0])) sens_choice[0] = sens_from(value);
         if (!getenv(name) && !getenv(sens_env[1])) sens_choice[1] = sens_from(value);
+        return 1;
+    }
+    if (!strcmp(name, "YW4_RUMBLE")) {
+        if (!getenv(name)) window_rumble_set_enabled(!strcmp(value, "1") || !strcmp(value, "ON") || !strcmp(value, "on"));
         return 1;
     }
     ready();
@@ -986,4 +1022,5 @@ void bindings_save(FILE *f) {
             fprintf(f, "%sPAD_%s=%s\n", pre, inputs[i].id, pad_name(sets[s][i].pad));
         }
     for (int a = 0; a < NMOUSE; a++) fprintf(f, "%s=%s\n", sens_env[a], sens_values[sens_index(a)]);
+    fprintf(f, "YW4_RUMBLE=%d\n", window_rumble_enabled());
 }

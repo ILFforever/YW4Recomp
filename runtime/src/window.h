@@ -42,6 +42,9 @@ void window_mouse_motion(float *dx, float *dy);
 
 /* Rumble the active gamepad (low-frequency and high-frequency motors, 0..65535, duration in ms). Any thread. */
 void window_rumble(uint16_t low, uint16_t high, uint32_t duration_ms);
+void window_rumble_test(void);
+int window_rumble_enabled(void);
+void window_rumble_set_enabled(int on);
 
 /* The same as pressing F12 (a screenshot of the next frame), for replays. */
 void window_request_screenshot(void);

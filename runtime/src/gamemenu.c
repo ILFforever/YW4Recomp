@@ -1187,6 +1187,30 @@ static void draw_controls_page(const UiCanvas *c, const GameMenuInfo *in) {
         sentence_case(u, t, sizeof t);
         ui_text_in(c, UI_GOTHIC_400, 17, x + 22, y, 0, rh, 0, t, INK);
         if (!r->group) continue;
+        if (r->value && !strcmp(r->group, "CONTROLLER") && !strcmp(r->name, "VIBRATION")) {
+            int on_state = !strcmp(r->cells[0], "ON");
+            const char *label = on_state ? "On" : "Off";
+            float sx = x + cw[0] + 22, sh = rh - 16, sy = y + 8, aw = 24;
+            float nw = 48, sw = 16 + aw + nw + aw + 16;
+            int hv_pill = hovered(HIT_BIND, i, 0);
+            if (on_state) {
+                ui_box(c, sx, sy, sw, sh, sh / 2, PLUM, 0, 0);
+                ui_text_in(c, UI_GOTHIC_700, 15, sx + 16 + aw, sy, nw, sh, 1, label, SNOW);
+            } else {
+                ui_box(c, sx, sy, sw, sh, sh / 2, hv_pill ? LILAC : WHITE, 2, PLUM);
+                ui_text_in(c, UI_GOTHIC_700, 15, sx + 16 + aw, sy, nw, sh, 1, label, PLUM);
+            }
+            hit_add(sx, sy, sw, sh, HIT_BIND, i, 0);
+            for (int k = 0; k < 2; k++) {
+                float ix = k ? sx + sw - 12 - aw : sx + 12, iy = sy + (sh - aw) / 2;
+                int hv = hovered(HIT_BIND_STEP, i, k ? 1 : -1);
+                if (hv) ui_box(c, ix, iy, aw, aw, aw / 2, on_state ? VSOFT : LILAC, 0, 0);
+                ui_icon(c, k ? ICON_NEXT : ICON_PREV, ix + 4, iy + 4, aw - 8, 2.6f,
+                        on_state ? (hv ? SNOW : ON_DARK) : (hv ? PLUM : MUTED));
+                hit_add(k ? sx + sw - 16 - aw : sx, sy, 16 + aw, sh, HIT_BIND_STEP, i, k ? 1 : -1);
+            }
+            continue;
+        }
         if (r->value && !strcmp(r->group, "KEYS FOR")) {  /* which set the page shows: one coloured pill, its name */
             const char *set = !strcmp(r->cells[0], "BATTLES") ? "Battles" : "Exploring";
             /* ‹ name ›: the arrows inside the pill, as the value Left / Right change */

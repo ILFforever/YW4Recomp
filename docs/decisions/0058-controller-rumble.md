@@ -4,7 +4,7 @@
 state: accepted
 date: 2026-11-09
 replaces: none
-code: runtime/src/svc_hid.c, runtime/src/window.c, runtime/src/window.h, docs/debugging.md
+code: runtime/src/svc_hid.c, runtime/src/window.c, runtime/src/window.h, runtime/src/bindings.c, docs/debugging.md
 -->
 
 Status: accepted (2026-11-09). Translates guest Switch HD Rumble IPC commands to the host controller via SDL3.
@@ -48,3 +48,10 @@ with success so the game wouldn't fail, but the vibration data was dropped and n
 2. **`svc_hid.c` dispatch**:
    `runtime/src/svc_hid.c` handles commands 201 and 206, parses the `VibrationValue` entries for Player 1, and routes them to
    `window_rumble`.
+3. **Controls overlay toggle**:
+   `runtime/src/bindings.c` adds a "Controller vibration" toggle row on the Controls page right under the mouse
+   sensitivity rows (with the battle/explore set toggle positioned beneath it so it directly heads the key bindings
+   table). In `runtime/src/gamemenu.c`, the toggle renders as a full coloured pill when active (`On`) and a border-only
+   pill when inactive (`Off`). Toggling vibration on triggers a 1-second rumble burst (`window_rumble_test`), which is
+   protected in `runtime/src/window.c` against premature cancellation by the guest engine's 60 Hz zero-amplitude idle
+   vibration updates. Choices are saved to `settings.ini` (`YW4_RUMBLE=1` / `0`).

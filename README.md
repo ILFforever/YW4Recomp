@@ -524,14 +524,14 @@ shadows here are our own pass with no graphical improvements applied (SHADOW PAS
 | **Our own renderer** | Replace the game's renderer pass by pass: the base for the graphics features above; shadows, surfaces, the shadow mask, bloom, distance blur and most screen passes (lighting, sky, tone mapping) are ours already |
 | **Better shadows** | Bigger shadow maps, PCSS soft shadows and contact shadows done; steadier cascades next |
 | **Better anti-aliasing** | FXAA, SMAA and TAA (steady thin edges: fences, nets, leaves) on the 3D scene before the UI is drawn, so text stays crisp; per-object motion for TAA next (a first version is in, off by default) |
-| **Keyboard, mouse and controllers** | Bindings on the panel's CONTROLS page, saved, with separate keys for battles and your controller's own button names; tested with a DualSense. Controller rumble and haptics supported ([decision 0058](docs/decisions/0058-controller-rumble.md)). On-screen button icons follow what you play with and your bindings (keyboard, Xbox, PlayStation or Nintendo, [decision 0042](docs/decisions/0042-button-icons-and-mouse.md)). The mouse turns the camera through the game's own unused mouse code. Pointing and clicking in menus has started: the Yo-kai Pad's icon grid works, other menus not yet |
+| **Mouse control for the Yo-kai Pad** | Pointing and clicking in menus has started: the Yo-kai Pad's icon grid works; full mouse control across the entire Yo-kai Pad (apps and sub-menus) is in progress |
 | **In-game overlay** | Escape or a controller button pauses the game and opens a side panel: settings, controls, the performance HUD's options, screenshots and exit, drawn like its design ([decision 0053](docs/decisions/0053-in-game-overlay.md)); Preview shows graphics changes live, and themes match the launcher's ([decision 0055](docs/decisions/0055-overlay-themes.md)). Next: testing on more controllers |
 | **Launcher** | A Windows app that takes your game files, checks them, builds the game and starts it, with mods, DLC, saves and screenshots in one place. Works from start to finish on the developer's PC, but it still needs this repo's tools, so for now [build from source](#building-from-source). Next: an installer and a portable zip ([decision 0052](docs/decisions/0052-launcher-packaging.md)), then a test on a clean PC |
 
 </details>
 
 <details>
-<summary><b>Finished</b> (8)</summary>
+<summary><b>Finished</b> (9)</summary>
 
 | Goal | Where it stands |
 |---|---|
@@ -542,6 +542,7 @@ shadows here are our own pass with no graphical improvements applied (SHADOW PAS
 | **Ultrawide and other aspect ratios** | 16:10, 21:9 and 32:9 in the panel: a wider view of the world with the UI kept 16:9 in the middle; exploring, battles and cutscenes work; dialog dimming and the loading screen cover the full width |
 | **Upscaling (NVIDIA DLSS, AMD FSR)** | The world drawn smaller and rebuilt at full size, menus and text kept full size. **DLSS for the cleanest picture (NVIDIA RTX), FSR for the most frames (any GPU).** At 4K 21:9 on an RTX 4070 laptop, instead of ~81 frames/s with TAA: DLSS ~85 / ~92 / ~82 (quality / balanced / performance), FSR ~94 / ~106 / ~118. DLSS keeps fine patterns (far nets, perforated fences) clean where FSR gets grainy ([decisions 0039](docs/decisions/0039-fsr-upscaling.md), [0040](docs/decisions/0040-dlss-upscaling.md)) |
 | **Frame generation (NVIDIA DLSS, AMD FSR)** | A frame made between each two of the game's: about twice as many on screen, the menus kept still. **On RTX 40 and newer use DLSS**: more game frames left and cleaner moving characters. In a busy town at 4K 21:9 on an RTX 4070 laptop, instead of ~70 frames/s: DLSS ~150 shown (~75 game), FSR ~126 shown (~63 game, any GPU). NVIDIA Reflex in the panel too ([decision 0041](docs/decisions/0041-frame-generation.md)) |
+| **Keyboard, mouse and controllers** | Bindings on the panel's CONTROLS page, saved, with separate keys for battles and your controller's own button names; tested with a DualSense. Controller rumble and haptics supported ([decision 0058](docs/decisions/0058-controller-rumble.md)). On-screen button icons follow what you play with and your bindings (keyboard, Xbox, PlayStation or Nintendo, [decision 0042](docs/decisions/0042-button-icons-and-mouse.md)). The mouse turns the camera through the game's own unused mouse code |
 | **Mod support** | Mods in the Switch's layout are laid over your game files at start, as on a modded Switch, without touching your dump: the English translation patch runs (see [Features](#features), [decision 0043](docs/decisions/0043-mods-layeredfs.md)) |
 
 </details>

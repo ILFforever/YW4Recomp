@@ -1695,23 +1695,63 @@ void window_input(uint64_t *buttons, int32_t sticks[4]) {
     host_unlock(&input_lock);
 }
 
-void window_rumble(uint16_t low, uint16_t high, uint32_t duration_ms) {
-    static int enabled = -1;
-    static float gain = 1.0f;
-    if (enabled < 0) {
+static int rumble_enabled = -1;
+static float rumble_gain = 1.0f;
+static uint64_t rumble_test_until;
+
+static void rumble_init_env(void) {
+    if (rumble_enabled < 0) {
         const char *e = getenv("YW4_RUMBLE");
-        enabled = !(e && !strcmp(e, "0"));
+        rumble_enabled = !(e && !strcmp(e, "0"));
         const char *g = getenv("YW4_RUMBLE_GAIN");
         if (g && *g) {
-            gain = (float)atof(g);
-            if (gain < 0.0f) gain = 0.0f;
+            rumble_gain = (float)atof(g);
+            if (rumble_gain < 0.0f) rumble_gain = 0.0f;
         }
     }
-    if (!enabled) return;
+}
 
-    if (gain != 1.0f) {
-        float l = (float)low * gain;
-        float h = (float)high * gain;
+int window_rumble_enabled(void) {
+    rumble_init_env();
+    return rumble_enabled;
+}
+
+void window_rumble_set_enabled(int on) {
+    rumble_init_env();
+    rumble_enabled = on ? 1 : 0;
+    rumble_test_until = 0;
+    if (!rumble_enabled) {
+        host_lock(&input_lock);
+        SDL_Gamepad *pad = gamepad;
+        if (pad) SDL_RumbleGamepad(pad, 0, 0, 0);
+        host_unlock(&input_lock);
+    }
+}
+
+void window_rumble_test(void) {
+    rumble_init_env();
+    if (!rumble_enabled) return;
+    rumble_test_until = SDL_GetTicks() + 1000;
+    host_lock(&input_lock);
+    SDL_Gamepad *pad = gamepad;
+    if (pad) {
+        SDL_RumbleGamepad(pad, 0, 0, 0);
+        SDL_RumbleGamepad(pad, 49152, 49152, 1000);
+    }
+    host_unlock(&input_lock);
+}
+
+void window_rumble(uint16_t low, uint16_t high, uint32_t duration_ms) {
+    rumble_init_env();
+    if (!rumble_enabled) return;
+    if (rumble_test_until) {
+        if (SDL_GetTicks() < rumble_test_until) return;
+        rumble_test_until = 0;
+    }
+
+    if (rumble_gain != 1.0f) {
+        float l = (float)low * rumble_gain;
+        float h = (float)high * rumble_gain;
         low = l > 65535.0f ? 65535 : (uint16_t)l;
         high = h > 65535.0f ? 65535 : (uint16_t)h;
     }
@@ -1990,6 +2030,9 @@ void window_run(void (*guest)(void *), void *arg) {
         /* the game's icon, resource 1 in the exe when the build had one (decision 0048); without it Windows' default */
         SDL_SetHint(SDL_HINT_WINDOWS_INTRESOURCE_ICON, "1");
         SDL_SetHint(SDL_HINT_WINDOWS_INTRESOURCE_ICON_SMALL, "1");
+        SDL_SetHint("SDL_JOYSTICK_HIDAPI_PS5_RUMBLE", "1");
+        SDL_SetHint("SDL_JOYSTICK_HIDAPI_PS4_RUMBLE", "1");
+        SDL_SetHint(SDL_HINT_JOYSTICK_ENHANCED_REPORTS, "1");
         int win_w = 1280, win_h = 720;
         const char *ws = getenv("YW4_WINDOW_SIZE");
         if (ws) sscanf(ws, "%dx%d", &win_w, &win_h);
@@ -2017,6 +2060,7 @@ void window_run(void (*guest)(void *), void *arg) {
         fprintf(stderr, "yw4: window: cannot start the guest's thread\n");
         exit(1);
     }
+    host_thread_set_priority(NULL, 39);  /* event pump and input polling: stay responsive under CPU load */
     for (;;) {
         SDL_Event e;
         int got = SDL_WaitEventTimeout(&e, 8);
