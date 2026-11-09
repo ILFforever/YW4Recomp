@@ -127,6 +127,9 @@ void *host_thread_self(void) {
 }
 
 void host_thread_set_priority(void *thread, int guest_priority) {
+    static int on = -1;  /* YW4_THREAD_PRIO=0: every thread stays at normal priority (tests, A/B) */
+    if (on < 0) on = !(getenv("YW4_THREAD_PRIO") && getenv("YW4_THREAD_PRIO")[0] == '0');
+    if (!on) return;
     HANDLE h = thread ? (HANDLE)thread : GetCurrentThread();
     int p = THREAD_PRIORITY_NORMAL;
     if (guest_priority < 38) p = THREAD_PRIORITY_HIGHEST;
@@ -261,7 +264,9 @@ long host_written_pages(uint64_t addr, uint64_t size, void (*fn)(uint64_t page, 
 }
 
 #else
+#define _GNU_SOURCE
 #include <sys/mman.h>
+#include <sys/uio.h>
 #include <unistd.h>
 #include <sched.h>
 #include <signal.h>
@@ -423,9 +428,19 @@ int host_write_watch(uint64_t addr, uint64_t size, void (*report)(uint64_t pc, u
     return -1;  /* to do: mprotect + SIGSEGV + single step */
 }
 
-int host_readable(uint64_t addr, uint64_t size) {  /* msync on unmapped pages fails with ENOMEM */
+int host_readable(uint64_t addr, uint64_t size) {
+    if (!size) return 1;
+    if (addr + size < addr) return 0;
     long page = sysconf(_SC_PAGESIZE);
-    uint64_t a = addr & ~(uint64_t)(page - 1);
-    return msync((void *)(uintptr_t)a, (size_t)(addr + size - a), MS_ASYNC) == 0;
+    uint64_t start_page = addr & ~(uint64_t)(page - 1);
+    uint64_t end_page = (addr + size - 1) & ~(uint64_t)(page - 1);
+    pid_t pid = getpid();
+    char dummy;
+    struct iovec local = {.iov_base = &dummy, .iov_len = 1};
+    for (uint64_t p = start_page; p <= end_page; p += (uint64_t)page) {
+        struct iovec remote = {.iov_base = (void *)(uintptr_t)p, .iov_len = 1};
+        if (process_vm_readv(pid, &local, 1, &remote, 1, 0) != 1) return 0;
+    }
+    return 1;
 }
 #endif

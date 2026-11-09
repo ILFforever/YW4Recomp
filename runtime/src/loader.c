@@ -16,8 +16,12 @@
 #ifdef _WIN32
 #include <windows.h>
 #else
+#define _GNU_SOURCE
 #include <errno.h>
 #include <sys/mman.h>
+#ifndef MAP_FIXED_NOREPLACE
+#define MAP_FIXED_NOREPLACE 0x100000
+#endif
 #endif
 
 #include "host.h"
@@ -110,10 +114,16 @@ static int guest_memory_ready;
 
 int yw4_guest_memory_init(void) {
     if (guest_memory_ready) return 0;
+#ifdef _WIN32
     if (!host_reserve_watched(YW4_HEAP_BASE, YW4_HEAP_SIZE) || !yw4_reserve_range(YW4_TLR_BASE, YW4_TLR_SIZE)) {
         return -1;
     }
     yw4_reserve_free(YW4_GUEST_LO, YW4_GUEST_HI);
+#else
+    if (!yw4_reserve_range(YW4_GUEST_LO, (size_t)(YW4_GUEST_HI - YW4_GUEST_LO))) {
+        return -1;
+    }
+#endif
     guest_memory_ready = 1;
     return 0;
 }
