@@ -5,9 +5,10 @@
  * SecurityParameter 0x20, UserConfig 0x30, ScanFilter 0x60. Addresses (Ipv4Address) are u32 in host order, as
  * nn::ldn::MakeIpv4Address makes them.
  *
- * Phase 0 (now): a Switch alone in a room. Scan finds nobody, Connect fails as with no network in reach, a host's
- * network holds only itself (169.254.1.1). Every call is logged with its arguments ("yw4: ldn: ..."), so one try
- * of the game's local play shows what Pia asks for. The relay (phase 1) fills in the other players.
+ * With YW4_RELAY (host:port of tools/relay/relay.py): rooms are made, found and joined on the relay, which keeps
+ * the node table and tells every member when it changes (the state-change event fires then, as on a Switch when
+ * a station comes or goes). Without it: a Switch alone in a room (Scan finds nobody, a host's network holds only
+ * itself). Every call is logged ("yw4: ldn: ...") unless YW4_LDN_LOG=0.
  */
 #include <inttypes.h>
 #include <stdio.h>
@@ -17,6 +18,7 @@
 #include "hle.h"
 #include "host.h"
 #include "kernel.h"
+#include "relay.h"
 #include "yw4load.h"
 
 /* nn::ldn result codes: module 203 */
@@ -41,6 +43,11 @@ static uint8_t net_config[0x20];
 static uint8_t security_param[0x20];
 static uint8_t accept_policy;
 static KEvent *state_event;
+static uint32_t my_addr;     /* ours in the network, 0 when in none */
+static int via_relay;        /* the network we host or joined is on the relay */
+
+uint32_t ldn_my_address(void) { return __atomic_load_n(&my_addr, __ATOMIC_ACQUIRE); }
+static void leave_network(void);
 
 static int verbose(void) {
     static int v = -1;
@@ -128,6 +135,30 @@ static void make_network(const uint8_t *nc, const uint8_t *sc, const uint8_t *uc
     memcpy(security_param + 16, network + 0x10, 16);
 }
 
+/* the network we just made, opened on the relay (lock held): its node table and our address come back. Without
+ * a relay, or if it can't be reached, the network stays on this PC alone. */
+static void host_on_relay(void) {
+    __atomic_store_n(&my_addr, HOST_ADDR, __ATOMIC_RELEASE);
+    if (!relay_enabled()) return;
+    uint8_t ans[4 + 0x480];
+    long n = relay_request(RELAY_CREATE, network, sizeof network, ans, sizeof ans, 5000);
+    if (n < (long)sizeof ans) {
+        LOG("  the relay didn't answer: the room stays on this PC\n");
+        return;
+    }
+    uint32_t a;
+    memcpy(&a, ans, 4);
+    memcpy(network, ans + 4, 0x480);
+    __atomic_store_n(&my_addr, a, __ATOMIC_RELEASE);
+    via_relay = 1;
+    LOG("  room open on the relay\n");
+}
+
+/* the host's network changed (advertise data, accept policy): the others learn it from the relay */
+static void host_update(void) {
+    if (via_relay && state == ST_AP_CREATED) relay_send(RELAY_UPDATE, network, sizeof network);
+}
+
 /* ---- the overrides: arguments in x0.., Result in x0 */
 
 void yw4_ldn_Initialize(CPUState *c) {
@@ -141,6 +172,7 @@ void yw4_ldn_Initialize(CPUState *c) {
 void yw4_ldn_Finalize(CPUState *c) {
     host_lock(&lock);
     LOG("Finalize\n");
+    leave_network();
     set_state(ST_NONE);
     host_unlock(&lock);
     (void)c;
@@ -169,10 +201,18 @@ void yw4_ldn_AttachStateChangeEvent(CPUState *c) {
     c->x[30] = lr;
 }
 
+/* out of the network we were in (lock held) */
+static void leave_network(void) {
+    if (via_relay) relay_send(RELAY_LEAVE, NULL, 0);
+    via_relay = 0;
+    __atomic_store_n(&my_addr, 0, __ATOMIC_RELEASE);
+}
+
 static void transition(CPUState *c, const char *name, uint32_t from_a, uint32_t from_b, uint32_t to) {
     host_lock(&lock);
     LOG("%s (in %s)\n", name, state_names[state < 7 ? state : 6]);
     if (state == from_a || state == from_b) {
+        if ((state == ST_AP_CREATED || state == ST_STATION_CONNECTED) && to != state) leave_network();
         set_state(to);
         c->x[0] = R_OK;
     } else {
@@ -200,6 +240,7 @@ void yw4_ldn_CreateNetwork(CPUState *c) {
         c->x[0] = R_INVALID_STATE;
     } else {
         make_network(nc, sc, uc);
+        host_on_relay();
         set_state(ST_AP_CREATED);
         c->x[0] = R_OK;
     }
@@ -221,6 +262,7 @@ void yw4_ldn_CreateNetworkPrivate(CPUState *c) {
         memcpy(network + 0x50, sp, 16);       /* the given ServerRandom */
         memcpy(network + 0x10, sp + 16, 16);  /* and SessionId */
         memcpy(security_param, sp, 0x20);
+        host_on_relay();
         set_state(ST_AP_CREATED);
         c->x[0] = R_OK;
     }
@@ -240,21 +282,26 @@ void yw4_ldn_SetAdvertiseData(CPUState *c) {
         memset(network + 0x50 + 0x21C, 0, 0x180);
         if (n) memcpy(network + 0x50 + 0x21C, GPTR(c->x[0]), n);
         hex_line("advertise data", network + 0x50 + 0x21C, n);
+        host_update();
         c->x[0] = R_OK;
     }
     host_unlock(&lock);
 }
 
 void yw4_ldn_SetStationAcceptPolicy(CPUState *c) {
+    host_lock(&lock);
     accept_policy = (uint8_t)c->x[0];
     network[0x50 + 0x12] = accept_policy;
     LOG("SetStationAcceptPolicy %u\n", accept_policy);
+    host_update();
+    host_unlock(&lock);
     c->x[0] = R_OK;
 }
 
 void yw4_ldn_Reject(CPUState *c) {
     uint32_t a = (uint32_t)c->x[0];
     LOG("Reject %u.%u.%u.%u\n", a >> 24, (a >> 16) & 255, (a >> 8) & 255, a & 255);
+    if (via_relay) relay_send(RELAY_REJECT, &a, 4);
     c->x[0] = R_OK;
 }
 
@@ -267,19 +314,73 @@ static void scan(CPUState *c, const char *name) {
     memcpy(&flag, f + 0x5C, 4);
     LOG("%s (room for %d, channel %d, filter flags %#x, local communication id %016" PRIx64 ")\n", name,
         (int)c->x[2], (int)c->x[4], flag, lcid);
-    int32_t zero = 0;
-    memcpy(GPTR(c->x[1]), &zero, 4);
+    int32_t found = 0;
+    int cap = (int)c->x[2];
+    if (relay_enabled() && cap > 0) {
+        static uint8_t ans[4 + 24 * 0x480];
+        static HostLock scan_lock = HOST_LOCK_INIT;
+        host_lock(&scan_lock);
+        long n = relay_request(RELAY_SCAN, &lcid, 8, ans, sizeof ans, 3000);
+        if (n >= 4) {
+            uint32_t total;
+            memcpy(&total, ans, 4);
+            for (uint32_t i = 0; i < total && found < cap && 4 + (i + 1) * 0x480 <= (uint32_t)n; i++)
+                memcpy((uint8_t *)GPTR(c->x[0]) + 0x480 * (size_t)found++, ans + 4 + 0x480 * i, 0x480);
+        }
+        host_unlock(&scan_lock);
+        LOG("  %d room(s) found on the relay\n", found);
+    }
+    memcpy(GPTR(c->x[1]), &found, 4);
     c->x[0] = state == ST_STATION || state == ST_STATION_CONNECTED || state == ST_AP_CREATED ? R_OK : R_INVALID_STATE;
 }
 void yw4_ldn_Scan(CPUState *c) { scan(c, "Scan"); }
 void yw4_ldn_ScanPrivate(CPUState *c) { scan(c, "ScanPrivate"); }
 
-/* Connect(const NetworkInfo&, SecurityConfig&, UserConfig&, int version, ConnectOption): nobody to join yet */
+/* joins the room with this session id on the relay as a station (lock not held): Result */
+static uint32_t join(const uint8_t *session, const uint8_t *user, int version) {
+    if (!relay_enabled()) return R_CONNECTION_FAILED;
+    uint8_t req[16 + 0x40] = {0};
+    memcpy(req, session, 16);
+    memcpy(req + 16 + 0xC, user, 0x20);  /* NodeInfo: the relay fills in address, MAC and index */
+    uint16_t v = (uint16_t)version;
+    memcpy(req + 16 + 0x2E, &v, 2);
+    uint8_t ans[5 + 0x480];
+    long n = relay_request(RELAY_JOIN, req, sizeof req, ans, sizeof ans, 5000);
+    if (n < (long)sizeof ans || !ans[0]) {
+        LOG("  the relay refused (room full, gone, or closed to newcomers)\n");
+        return R_CONNECTION_FAILED;
+    }
+    host_lock(&lock);
+    uint32_t r = R_INVALID_STATE;
+    if (state == ST_STATION) {
+        uint32_t a;
+        memcpy(&a, ans + 1, 4);
+        memcpy(network, ans + 5, 0x480);
+        memcpy(security_param, network + 0x50, 16);
+        memcpy(security_param + 16, network + 0x10, 16);
+        memcpy(net_config, network, 0x10);
+        memcpy(net_config + 0x10, network + 0x20 + 0x28, 2);
+        net_config[0x12] = network[0x50 + 0x16];
+        __atomic_store_n(&my_addr, a, __ATOMIC_RELEASE);
+        via_relay = 1;
+        disconnect_reason = 0;
+        LOG("  joined as %u.%u.%u.%u\n", a >> 24, (a >> 16) & 255, (a >> 8) & 255, a & 255);
+        set_state(ST_STATION_CONNECTED);
+        r = R_OK;
+    } else {
+        relay_send(RELAY_LEAVE, NULL, 0);
+    }
+    host_unlock(&lock);
+    return r;
+}
+
+/* Connect(const NetworkInfo&, SecurityConfig&, UserConfig&, int version, ConnectOption) */
 void yw4_ldn_Connect(CPUState *c) {
     LOG("Connect (version %d, option %#x)\n", (int)c->x[3], (unsigned)c->x[4]);
     log_security(GPTR(c->x[1]));
     log_user(GPTR(c->x[2]));
-    c->x[0] = R_CONNECTION_FAILED;
+    const uint8_t *info = GPTR(c->x[0]);
+    c->x[0] = join(info + 0x10, GPTR(c->x[2]), (int)c->x[3]);
 }
 /* ConnectPrivate(NetworkConfig&, SecurityConfig&, SecurityParameter&, UserConfig&, int version, ConnectOption) */
 void yw4_ldn_ConnectPrivate(CPUState *c) {
@@ -287,7 +388,8 @@ void yw4_ldn_ConnectPrivate(CPUState *c) {
     log_network_config(GPTR(c->x[0]));
     log_security(GPTR(c->x[1]));
     log_user(GPTR(c->x[3]));
-    c->x[0] = R_CONNECTION_FAILED;
+    const uint8_t *sp = GPTR(c->x[2]);
+    c->x[0] = join(sp + 16, GPTR(c->x[3]), (int)c->x[4]);
 }
 
 void yw4_ldn_GetNetworkInfo(CPUState *c) {
@@ -313,16 +415,41 @@ void yw4_ldn_GetSecurityParameter(CPUState *c) {
 
 /* GetIpv4Address(Ipv4Address *, SubnetMask *) */
 void yw4_ldn_GetIpv4Address(CPUState *c) {
-    uint32_t a = HOST_ADDR, m = SUBNET;
+    uint32_t a = ldn_my_address(), m = SUBNET;
     memcpy(GPTR(c->x[0]), &a, 4);
     memcpy(GPTR(c->x[1]), &m, 4);
-    LOG("GetIpv4Address -> 169.254.1.1/24\n");
+    LOG("GetIpv4Address -> %u.%u.%u.%u/24\n", a >> 24, (a >> 16) & 255, (a >> 8) & 255, a & 255);
     c->x[0] = state == ST_AP_CREATED || state == ST_STATION_CONNECTED ? R_OK : R_INVALID_STATE;
 }
 
 void yw4_ldn_GetDisconnectReason(CPUState *c) {
     LOG("GetDisconnectReason -> %d\n", disconnect_reason);
     c->x[0] = (uint64_t)(int64_t)disconnect_reason;
+}
+
+/* ---- what the relay tells (its reader thread) */
+
+void ldn_relay_netinfo(const uint8_t *info) {
+    host_lock(&lock);
+    if (via_relay && (state == ST_AP_CREATED || state == ST_STATION_CONNECTED)) {
+        memcpy(network, info, 0x480);
+        LOG("the room changed: %u player(s)\n", network[0x50 + 0x17]);
+        if (state_event) yw4_event_signal_from_host(state_event);
+    }
+    host_unlock(&lock);
+}
+
+void ldn_relay_closed(uint8_t reason) {
+    host_lock(&lock);
+    if (via_relay) {
+        via_relay = 0;
+        __atomic_store_n(&my_addr, 0, __ATOMIC_RELEASE);
+        disconnect_reason = (int16_t)reason;
+        LOG("the room is gone for us (reason %u)\n", reason);
+        if (state == ST_STATION_CONNECTED) set_state(ST_STATION);
+        else if (state == ST_AP_CREATED && state_event) yw4_event_signal_from_host(state_event);
+    }
+    host_unlock(&lock);
 }
 
 /* ---- nn::nifm: the game asks for a network before local play too. A local network request (SetLocalNetworkMode

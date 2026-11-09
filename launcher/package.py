@@ -60,7 +60,7 @@ HACTOOL_LICENSE = ("https://raw.githubusercontent.com/SciresM/hactool/1.4.0/LICE
                    "bde8a8c9f1fdcecaec2dd6f4733ed939a5ff2317a72126668e61ecae049eb5ab")
 
 # what the build steps read: everything else in the repo (docs, tests, dev tools, the launcher itself) stays out
-SOURCES = ["VERSION", "LICENSE", "target.toml", "recomp", "runtime", "third_party", "tools/yw4"]
+SOURCES = ["VERSION", "LICENSE", "target.toml", "recomp", "runtime", "third_party", "tools/yw4", "tools/relay"]
 GAME_DATA = {".nso", ".nca", ".nsp", ".xci", ".nsz", ".keys", ".ncz", ".istorage"}
 
 

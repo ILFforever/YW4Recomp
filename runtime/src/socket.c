@@ -6,9 +6,12 @@
  *  - poll events and errno: the Switch uses Linux's numbers (POLLIN 1, POLLOUT 4; EAGAIN 11, ...);
  *  - descriptors: the game's are small numbers of ours, each naming a host socket.
  *
- * Phase 0: addresses of the local-play network (169.254.0.0/16, nn::ldn) stay on this PC: a bind there binds
- * 127.0.0.1 with the same port, and packets to other players (nobody yet) are dropped as sent. The relay
- * (phase 1) carries them. Every call is logged ("yw4: socket: ...") unless YW4_LDN_LOG=0.
+ * UDP is the local-play network's (169.254.0.0/16, nn::ldn): every UDP socket is a host socket on 127.0.0.1 with
+ * a port of the host's choosing, and the port the game asked for is only remembered, so two games on one PC
+ * don't collide. Packets to another player go to the relay (relay.c); packets from the relay are handed to the
+ * socket bound to their port through a loopback "doorbell" socket, with their sender in front (6 bytes), which
+ * RecvFrom takes off again. So Poll and blocking reads work on the host socket as they are.
+ * Every call is logged ("yw4: socket: ...") unless YW4_LDN_LOG=0.
  */
 #include <inttypes.h>
 #include <stdio.h>
@@ -40,6 +43,7 @@ typedef int HSock;
 #include "hle.h"
 #include "host.h"
 #include "yw4load.h"
+#include "relay.h"
 
 /* the Switch's errno numbers (Linux's) */
 enum { G_EPERM = 1, G_EINTR = 4, G_EBADF = 9, G_EAGAIN = 11, G_ENOMEM = 12, G_EACCES = 13, G_EFAULT = 14,
@@ -65,8 +69,13 @@ typedef struct {
     HSock h;
     int used, nonblock, type;
     uint32_t guest_addr;  /* the address the game bound (network order), as GetSockName reports it */
-    uint16_t guest_port;  /* network order */
+    uint16_t guest_port;  /* network order: the port the game asked for, which the relay's packets name */
+    int bound;
+    uint32_t peer_addr;   /* a UDP socket's Connect: the default destination (network order) */
+    uint16_t peer_port;
 } Fd;
+static HSock bell = HBAD;   /* loopback socket the relay's packets are rung through */
+static HostLock bell_lock = HOST_LOCK_INIT;
 static Fd fds[MAX_FDS];
 static HostLock fd_lock = HOST_LOCK_INIT;
 
@@ -150,6 +159,86 @@ static void set_nonblock(Fd *f, int on) {
 #endif
 }
 
+/* an unbound UDP socket that sends gets a port, as bind(0) would give it */
+static void autobind(Fd *f) {
+    if (f->bound) return;
+    struct sockaddr_in a = {0};
+    a.sin_family = AF_INET;
+    a.sin_addr.s_addr = htonl(0x7F000001);
+    if (bind(f->h, (struct sockaddr *)&a, sizeof a) == 0) {
+        socklen_t l = sizeof a;
+        getsockname(f->h, (struct sockaddr *)&a, &l);
+        f->guest_port = a.sin_port;
+        f->bound = 1;
+    }
+}
+
+static HSock bell_socket(void) {
+    host_lock(&bell_lock);
+    if (bell == HBAD) {
+        HSock b = socket(AF_INET, SOCK_DGRAM, 17);
+        struct sockaddr_in a = {0};
+        a.sin_family = AF_INET;
+        a.sin_addr.s_addr = htonl(0x7F000001);
+        if (b != HBAD && bind(b, (struct sockaddr *)&a, sizeof a) == 0) bell = b;
+        else if (b != HBAD) hclose(b);
+    }
+    HSock b = bell;
+    host_unlock(&bell_lock);
+    return b;
+}
+static uint16_t bell_port(void) {
+    static uint16_t port;
+    if (!port && bell_socket() != HBAD) {
+        struct sockaddr_in a;
+        socklen_t l = sizeof a;
+        getsockname(bell, (struct sockaddr *)&a, &l);
+        port = a.sin_port;
+    }
+    return port;
+}
+
+/* a packet for the game (relay.c's reader, or our own to ourselves): rung into the socket bound to its port,
+ * its sender in front. Addresses and ports in host order. */
+void socket_relay_packet(uint32_t dst, uint16_t dport, uint32_t src, uint16_t sport, const uint8_t *data, size_t n) {
+    (void)dst;
+    struct sockaddr_in to = {0};
+    to.sin_family = AF_INET;
+    to.sin_addr.s_addr = htonl(0x7F000001);
+    host_lock(&fd_lock);
+    for (int i = 0; i < MAX_FDS; i++)
+        if (fds[i].used && fds[i].type == 2 && fds[i].bound && ntohs(fds[i].guest_port) == dport) {
+            struct sockaddr_in a;
+            socklen_t l = sizeof a;
+            getsockname(fds[i].h, (struct sockaddr *)&a, &l);
+            to.sin_port = a.sin_port;
+            break;
+        }
+    host_unlock(&fd_lock);
+    if (!to.sin_port || n > 65000) return;
+    HSock b = bell_socket();
+    if (b == HBAD) return;
+    uint8_t *buf = malloc(n + 6);
+    if (!buf) return;
+    memcpy(buf, &src, 4);
+    memcpy(buf + 4, &sport, 2);
+    memcpy(buf + 6, data, n);
+    sendto(b, (const char *)buf, (int)(n + 6), 0, (struct sockaddr *)&to, sizeof to);
+    free(buf);
+}
+
+/* UDP to the local-play network (addresses network order): to the relay, or to ourselves */
+static int send_local(Fd *f, uint32_t dst_be, uint16_t port_be, const void *data, size_t n) {
+    autobind(f);
+    uint32_t me = ldn_my_address(), dst = ntohl(dst_be);
+    if (dst == me) {
+        socket_relay_packet(dst, ntohs(port_be), me, ntohs(f->guest_port), data, n);
+        return 0;
+    }
+    if (!me) return -1;  /* in no network */
+    return relay_send_packet(dst, ntohs(port_be), me, ntohs(f->guest_port), data, n);
+}
+
 /* ---- the overrides */
 
 void yw4_socket_Initialize(CPUState *c) {
@@ -220,14 +309,19 @@ void yw4_socket_Bind(CPUState *c) {
     uint32_t gip = 0;
     char b[32];
     if (!f || from_guest(c->x[1], (uint32_t)c->x[2], &a, &gip)) { ret(c, -1, f ? G_EINVAL : G_EBADF); return; }
-    if (is_local_net(gip)) a.sin_addr.s_addr = htonl(0x7F000001);  /* phase 0: the local-play network is this PC */
+    uint16_t want_port = a.sin_port;
+    if (f->type == 2 || is_local_net(gip)) {  /* the local-play network: this PC, a port of the host's choosing */
+        a.sin_addr.s_addr = htonl(0x7F000001);
+        if (f->type == 2) a.sin_port = 0;
+    }
     int r = bind(f->h, (struct sockaddr *)&a, sizeof a);
     if (r == 0) {
         struct sockaddr_in got;
         socklen_t gl = sizeof got;
         getsockname(f->h, (struct sockaddr *)&got, &gl);
         f->guest_addr = gip;
-        f->guest_port = got.sin_port;
+        f->guest_port = want_port ? want_port : got.sin_port;
+        f->bound = 1;
     }
     LOG("Bind(%d, %s)%s\n", (int)c->x[0], ip_str(gip, a.sin_port, b), r ? " failed" : "");
     ret(c, r, host_errno());
@@ -236,7 +330,8 @@ void yw4_socket_Bind(CPUState *c) {
 void yw4_socket_GetSockName(CPUState *c) {
     Fd *f = get((int)c->x[0]);
     if (!f) { ret(c, -1, G_EBADF); return; }
-    to_guest(c->x[1], c->x[2], f->guest_addr, f->guest_port);
+    uint32_t me = htonl(ldn_my_address());
+    to_guest(c->x[1], c->x[2], f->guest_addr ? f->guest_addr : me, f->guest_port);
     c->x[0] = 0;
 }
 
@@ -247,7 +342,13 @@ void yw4_socket_Connect(CPUState *c) {
     char b[32];
     if (!f || from_guest(c->x[1], (uint32_t)c->x[2], &a, &gip)) { ret(c, -1, f ? G_EINVAL : G_EBADF); return; }
     LOG("Connect(%d, %s)\n", (int)c->x[0], ip_str(gip, a.sin_port, b));
-    if (is_local_net(gip)) { ret(c, -1, G_ECONNREFUSED); return; }  /* phase 0: nobody there */
+    if (f->type == 2) {  /* UDP: only remembers the destination */
+        f->peer_addr = gip, f->peer_port = a.sin_port;
+        autobind(f);
+        c->x[0] = 0;
+        return;
+    }
+    if (is_local_net(gip)) { ret(c, -1, G_ECONNREFUSED); return; }  /* TCP in the local network: not carried */
     int r = connect(f->h, (struct sockaddr *)&a, sizeof a);
     ret(c, r, host_errno());
 }
@@ -268,20 +369,26 @@ void yw4_socket_SendTo(CPUState *c) {
     Fd *f = get((int)c->x[0]);
     size_t n = c->x[2];
     if (!f) { ret(c, -1, G_EBADF); return; }
+    struct sockaddr_in a = {0};
+    uint32_t gip = 0;
     if (!c->x[4]) {  /* connected socket */
-        int r = send(f->h, GPTR(c->x[1]), (int)n, 0);
-        ret(c, r, host_errno());
+        if (f->type != 2 || !f->peer_port) {
+            int r = send(f->h, GPTR(c->x[1]), (int)n, 0);
+            ret(c, r, host_errno());
+            return;
+        }
+        gip = f->peer_addr, a.sin_port = f->peer_port;
+    } else if (from_guest(c->x[4], (uint32_t)c->x[5], &a, &gip)) {
+        ret(c, -1, G_EINVAL);
         return;
     }
-    struct sockaddr_in a;
-    uint32_t gip = 0;
-    if (from_guest(c->x[4], (uint32_t)c->x[5], &a, &gip)) { ret(c, -1, G_EINVAL); return; }
-    if (is_local_net(gip) || gip == 0xFFFFFFFFu) {
+    if (f->type == 2 && (is_local_net(gip) || gip == 0xFFFFFFFFu)) {
         static int logged;
         char b[32];
-        if (logged++ < 20) LOG("SendTo(%d, %zu bytes, %s): to the local-play network, nobody there yet\n",
-                               (int)c->x[0], n, ip_str(gip, a.sin_port, b));
-        c->x[0] = n;  /* sent into the air */
+        int r = send_local(f, gip == 0xFFFFFFFFu ? htonl(0xA9FE01FF) : gip, a.sin_port, GPTR(c->x[1]), n);
+        if (logged++ < 30) LOG("SendTo(%d, %zu bytes, %s)%s\n", (int)c->x[0], n, ip_str(gip, a.sin_port, b),
+                               r ? ": in no room, dropped" : "");
+        c->x[0] = n;  /* UDP: sent, whether anyone hears it or not */
         return;
     }
     int r = sendto(f->h, GPTR(c->x[1]), (int)n, 0, (struct sockaddr *)&a, sizeof a);
@@ -307,9 +414,39 @@ void yw4_socket_RecvFrom(CPUState *c) {
     }
     struct sockaddr_in a;
     socklen_t al = sizeof a;
-    int r = recvfrom(f->h, GPTR(c->x[1]), (int)c->x[2], flags & 0x2 /* MSG_PEEK */, (struct sockaddr *)&a, &al);
-    if (r >= 0 && c->x[4]) to_guest(c->x[4], c->x[5], a.sin_addr.s_addr, a.sin_port);
-    ret(c, r, host_errno());
+    if (f->type != 2) {
+        int r = recvfrom(f->h, GPTR(c->x[1]), (int)c->x[2], flags & 0x2 /* MSG_PEEK */, (struct sockaddr *)&a, &al);
+        if (r >= 0 && c->x[4]) to_guest(c->x[4], c->x[5], a.sin_addr.s_addr, a.sin_port);
+        ret(c, r, host_errno());
+        return;
+    }
+    /* UDP: what the doorbell rang in carries its sender in front */
+    static _Thread_local uint8_t *buf;
+    if (!buf && !(buf = malloc(65536 + 6))) { ret(c, -1, G_ENOMEM); return; }
+    size_t want = c->x[2] < 65536 ? c->x[2] : 65536;
+    int r = recvfrom(f->h, (char *)buf, (int)want + 6, flags & 0x2 /* MSG_PEEK */, (struct sockaddr *)&a, &al);
+    if (r < 0) {
+#ifdef _WIN32
+        if (WSAGetLastError() == WSAEMSGSIZE) r = (int)want + 6;  /* truncated, as on the Switch */
+        else
+#endif
+        { ret(c, -1, host_errno()); return; }
+    }
+    uint32_t src_be = a.sin_addr.s_addr;
+    uint16_t sport_be = a.sin_port;
+    const uint8_t *data = buf;
+    if (a.sin_port == bell_port() && r >= 6) {
+        uint32_t src;
+        uint16_t sport;
+        memcpy(&src, buf, 4);
+        memcpy(&sport, buf + 4, 2);
+        src_be = htonl(src), sport_be = htons(sport);
+        data += 6, r -= 6;
+    }
+    if ((size_t)r > want) r = (int)want;
+    memcpy(GPTR(c->x[1]), data, (size_t)r);
+    if (c->x[4]) to_guest(c->x[4], c->x[5], src_be, sport_be);
+    c->x[0] = (uint64_t)r;
 }
 void yw4_socket_Recv(CPUState *c) {
     c->x[4] = 0, c->x[5] = 0;
