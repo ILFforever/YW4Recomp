@@ -159,11 +159,18 @@ def build() -> None:
     if not loader.is_file():
         subprocess.run(["cargo", "build", "--release"], cwd=launcher / "src-tauri", check=True)
     shutil.copy(loader, OUT / "WebView2Loader.dll")
+    # the same build links Rust's unwinder from llvm-mingw's libunwind.dll (the toolchain's bin, on the PATH for the
+    # build): it ships next to the launcher as well
+    clang = shutil.which("clang")
+    unwind = Path(clang).parent / "libunwind.dll" if clang else None
+    if not unwind or not unwind.is_file():
+        raise SystemExit("libunwind.dll not found: put llvm-mingw's bin on the PATH")
+    shutil.copy(unwind, OUT / "libunwind.dll")
     overrides.write_text(json.dumps({
         "version": version,
         "mainBinaryName": "YW4 Recomp",
         # the launcher's themes (themes.rs): files anyone can copy into this folder, so they ship next to the launcher
-        "bundle": {"resources": {(OUT / "WebView2Loader.dll").as_posix(): "WebView2Loader.dll", STAGE.as_posix() + "/": "builder/", (REPO / "launcher" / "ui" / "themes").as_posix() + "/": "themes/"}},
+        "bundle": {"resources": {(OUT / "WebView2Loader.dll").as_posix(): "WebView2Loader.dll", (OUT / "libunwind.dll").as_posix(): "libunwind.dll", STAGE.as_posix() + "/": "builder/", (REPO / "launcher" / "ui" / "themes").as_posix() + "/": "themes/"}},
     }, indent=2))
     npx = shutil.which("npx")
     if not npx:
@@ -180,6 +187,7 @@ def build() -> None:
     with zipfile.ZipFile(DIST / f"YW4-Recomp-Launcher-{version}-portable.zip", "w", zipfile.ZIP_DEFLATED) as z:
         z.write(release / "YW4 Recomp.exe", "YW4 Recomp/YW4 Recomp.exe")
         z.write(loader, "YW4 Recomp/WebView2Loader.dll")
+        z.write(OUT / "libunwind.dll", "YW4 Recomp/libunwind.dll")
         for p in (release / "builder").rglob("*"):
             if p.is_file():
                 z.write(p, Path("YW4 Recomp") / p.relative_to(release))
