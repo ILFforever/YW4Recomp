@@ -246,6 +246,9 @@ def find_jump_table(code: Code, br_off: int, reg: int, lowest: int, window: int 
             lo_cmp = max(br_off - 4 * 8 * window, lowest)    # the compiler can schedule much code in between
             while o >= lo_cmp:                               # the flag-setting compare before it
                 e = code.word(o)
+                if e & 0x7FE00C10 == 0x7A400800 and not eq:  # ccmp xN/wN, #imm, #nzcv, cond
+                    bound = bits(e, 20, 16)                  # `cmp a, #0; ccmp idx, #N, #2, ne; b.hi`:
+                    break                                    # the last compare is the index's bound
                 if e & 0x7F80001F == 0x7100001F and not bits(e, 22, 22):
                     bound = bits(e, 21, 10) - eq             # cmp xN/wN, #imm (subs xzr, ..)
                     if bound < 0:
