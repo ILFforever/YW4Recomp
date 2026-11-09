@@ -55,3 +55,34 @@ with success so the game wouldn't fail, but the vibration data was dropped and n
    pill when inactive (`Off`). Toggling vibration on triggers a 1-second rumble burst (`window_rumble_test`), which is
    protected in `runtime/src/window.c` against premature cancellation by the guest engine's 60 Hz zero-amplitude idle
    vibration updates. Choices are saved to `settings.ini` (`YW4_RUMBLE=1` / `0`).
+
+## Shaping for PC pads (2026-11-10)
+
+Played as the game sends it, the rumble was weak on a DualSense: most effects are too faint to start a spinning
+motor. Gemini proposed a minimum speed with a curve, a split of the low band by frequency, and the Xbox trigger
+motors. Measured first (late-game save, `YW4_RUMBLE_LOG=1`, a few minutes of play):
+
+- Effects are smooth swells of about 0.4 s (rise ~10 frames, fall ~13), often back to back. Amplitudes are mostly faint:
+  median 0.04 (low band) and 0.07 (high band), peaks 0.12 and 0.6.
+- **The frequencies carry no pitch.** The game scales all four values of a `VibrationValue` with the swell's envelope:
+  frequency / amplitude stays constant through a swell (e.g. 12 Hz at 0.024 up to 150 Hz at 0.12, high band). The
+  split by frequency was dropped.
+- A minimum speed with a curve made it stronger, but the motors never stopped between swells (owner: "BUZZZ BUZZZ
+  BUZZZ": strong, not sharp).
+
+What `window_vibration` (`runtime/src/window.c`) does now, per motor (low band to the heavy motor, high band to the
+light one), as force-feedback drivers do with such motors:
+
+1. Below 0.04: off. This drops the faint texture and leaves a gap between back-to-back swells.
+2. A swell's start: a 50 ms kick at 70% speed, so the motor spins up at once. This is the sharp edge.
+3. While it holds: 0.10 + 0.90 × a^0.75.
+4. While it falls: 55% of that, so the motor stops before the next swell.
+5. Xbox One / Series pads also get the high band's kicks on their trigger motors (45%).
+
+In the run after the change the motors stopped 46 times between swells and 54 swells got the kick. Owner
+(DualSense): "better, good enough", more tuning after 1.0. Switches: `YW4_RUMBLE_SHAPE=0` (as sent, linear),
+`YW4_RUMBLE_TRIGGERS=0`, `YW4_RUMBLE_LOG=1`.
+
+Open: the kick is the same for every swell (its peak isn't known when it starts); a weak swell may feel as punchy as
+a strong one. Xbox trigger motors are untested (no Xbox pad here). The DualSense's own haptics (audio-driven, USB
+only) are not used: SDL's rumble emulation drives them as two motors.

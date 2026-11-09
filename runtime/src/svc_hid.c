@@ -348,13 +348,34 @@ static void applet_resource(Service *s, IpcRequest *req, IpcResponse *resp) {
     ipc_unimplemented(s, req, resp);
 }
 
-/* Vibration: routed to the active host controller (window_rumble, decision 0058). */
+/* Vibration: routed to the active host controller (window_vibration, decision 0058). The game sends the Switch's
+ * HD rumble values: two bands, each an amplitude and a frequency; window.c turns them into motor speeds. */
 typedef struct {
     float amp_low;
     float freq_low;
     float amp_high;
     float freq_high;
 } VibrationValue;
+
+static float amp01(float a) { return a > 1.0f ? 1.0f : (a > 0.0f ? a : 0.0f); }  /* NaN -> 0 */
+
+/* Player 1's devices (a pair of Joy-Cons is two): the stronger amplitude per band, and that band's frequency
+ * weighted by amplitude. */
+typedef struct {
+    float al, fl, ah, fh, wl, wh;
+} Mix;
+
+static void mix_add(Mix *m, const VibrationValue *v) {
+    float al = amp01(v->amp_low), ah = amp01(v->amp_high);
+    if (al > m->al) m->al = al;
+    if (ah > m->ah) m->ah = ah;
+    if (al > 0.0f && v->freq_low > 0.0f) m->fl += al * v->freq_low, m->wl += al;
+    if (ah > 0.0f && v->freq_high > 0.0f) m->fh += ah * v->freq_high, m->wh += ah;
+}
+
+static void mix_send(const Mix *m) {
+    window_vibration(m->al, m->wl > 0.0f ? m->fl / m->wl : 160.0f, m->ah, m->wh > 0.0f ? m->fh / m->wh : 320.0f);
+}
 
 static void send_vibration_values(IpcRequest *req, IpcResponse *resp) {
     (void)resp;
@@ -369,44 +390,20 @@ static void send_vibration_values(IpcRequest *req, IpcResponse *resp) {
 
     const uint32_t *handles = GPTR(b_h->addr);
     const VibrationValue *values = GPTR(b_v->addr);
-
-    float max_low = 0.0f, max_high = 0.0f;
-    for (uint32_t i = 0; i < count; i++) {
-        uint32_t h = handles[i];
-        uint32_t npad = (h >> 8) & 0xFF;
-        if (npad != 0) continue;  /* Player 1 only */
-
-        float al = values[i].amp_low;
-        float ah = values[i].amp_high;
-        if (al > max_low) max_low = al;
-        if (ah > max_high) max_high = ah;
-    }
-    if (max_low > 1.0f) max_low = 1.0f;
-    if (max_high > 1.0f) max_high = 1.0f;
-    if (max_low < 0.0f || isnan(max_low)) max_low = 0.0f;
-    if (max_high < 0.0f || isnan(max_high)) max_high = 0.0f;
-
-    uint16_t low_u16 = (uint16_t)(max_low * 65535.0f);
-    uint16_t high_u16 = (uint16_t)(max_high * 65535.0f);
-    window_rumble(low_u16, high_u16, (low_u16 || high_u16) ? 1000 : 0);
+    Mix m = {0};
+    for (uint32_t i = 0; i < count; i++)
+        if (((handles[i] >> 8) & 0xFF) == 0) mix_add(&m, &values[i]);  /* Player 1 only */
+    mix_send(&m);
 }
 
 static void send_vibration_value(IpcRequest *req, IpcResponse *resp) {
     (void)resp;
     if (req->data_size < 20) return;
     uint32_t h = IPC_IN(uint32_t, 0);
-    uint32_t npad = (h >> 8) & 0xFF;
-    if (npad != 0) return;  /* Player 1 only */
-
-    const VibrationValue *v = (const VibrationValue *)(req->data + 4);
-    float al = v->amp_low;
-    float ah = v->amp_high;
-    if (al > 1.0f) al = 1.0f; else if (al < 0.0f || isnan(al)) al = 0.0f;
-    if (ah > 1.0f) ah = 1.0f; else if (ah < 0.0f || isnan(ah)) ah = 0.0f;
-
-    uint16_t low_u16 = (uint16_t)(al * 65535.0f);
-    uint16_t high_u16 = (uint16_t)(ah * 65535.0f);
-    window_rumble(low_u16, high_u16, (low_u16 || high_u16) ? 1000 : 0);
+    if (((h >> 8) & 0xFF) != 0) return;  /* Player 1 only */
+    Mix m = {0};
+    mix_add(&m, (const VibrationValue *)(req->data + 4));
+    mix_send(&m);
 }
 
 static const SimpleCommand vibration_list_simple[] = {

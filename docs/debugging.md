@@ -164,6 +164,9 @@ Saved screenshots get the same sRGB decode as the window, so their colours match
 | `YW4_MOUSE=0` | The game never takes the mouse: no capture, camera, clicks or wheel (`tools.dev.run` sets it, so the PC can be used during test runs) |
 | `YW4_RUMBLE=0` | Turn off controller vibration/rumble (default 1, on; [decision 0058](decisions/0058-controller-rumble.md)) |
 | `YW4_RUMBLE_GAIN=<float>` | Scale vibration intensity on the host gamepad (default 1.0; e.g. 0.5 for half strength, 1.5 for stronger rumble) |
+| `YW4_RUMBLE_SHAPE=0` | The game's vibration as sent (linear), instead of shaped for PC pads' motors: faint texture dropped, a kick at each swell's start, cut while it fades ([decision 0058](decisions/0058-controller-rumble.md), 2026-11-10) |
+| `YW4_RUMBLE_TRIGGERS=0` | Xbox One / Series pads: no trigger-motor kicks for the high band (default on) |
+| `YW4_RUMBLE_LOG=1` | A log line per change: what the game asked (both bands' amplitude and frequency) and the motor and trigger speeds sent |
 | `YW4_INPUT=2400:1:10` | Scripted presses, `tick:buttons(hex):length`, comma separated; `1` is A |
 
 ## Looking inside a frame

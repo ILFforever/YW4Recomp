@@ -42,6 +42,8 @@ void window_mouse_motion(float *dx, float *dy);
 
 /* Rumble the active gamepad (low-frequency and high-frequency motors, 0..65535, duration in ms). Any thread. */
 void window_rumble(uint16_t low, uint16_t high, uint32_t duration_ms);
+/* The game's HD rumble (amplitudes 0..1, frequencies in Hz) shaped for a PC pad's motors (window.c). Any thread. */
+void window_vibration(float amp_low, float freq_low, float amp_high, float freq_high);
 void window_rumble_test(void);
 int window_rumble_enabled(void);
 void window_rumble_set_enabled(int on);

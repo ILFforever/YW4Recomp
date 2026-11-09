@@ -1727,7 +1727,7 @@ void window_rumble_set_enabled(int on) {
     if (!rumble_enabled) {
         host_lock(&input_lock);
         SDL_Gamepad *pad = gamepad;
-        if (pad) SDL_RumbleGamepad(pad, 0, 0, 0);
+        if (pad) SDL_RumbleGamepad(pad, 0, 0, 0), SDL_RumbleGamepadTriggers(pad, 0, 0, 0);
         host_unlock(&input_lock);
     }
 }
@@ -1774,6 +1774,96 @@ void window_rumble(uint16_t low, uint16_t high, uint32_t duration_ms) {
         last_pad = pad, last_low = low, last_high = high, last_ms = now;
     }
     host_unlock(&input_lock);
+}
+
+/* ---- the Switch's HD rumble on a PC pad (decision 0058). The game sends two bands, each an amplitude (0..1) and a
+ * frequency, for the Joy-Cons' linear actuators, which follow any strength at once. Measured 2026-11-10 (late-game
+ * save, YW4_RUMBLE_LOG=1): the effects are smooth swells of ~0.4 s (rise ~10 frames, fall ~13), often back to back,
+ * mostly faint (median 0.04 low, 0.07 high band; peaks 0.12 / 0.6); and the game scales the frequencies with the
+ * amplitude (frequency / amplitude stays constant through a swell), so they say nothing about pitch and are not used.
+ * A PC pad's motors are spinning weights: slow to start, and they coast. Played as given (YW4_RUMBLE_SHAPE=0, as
+ * before 2026-11-10) faint swells don't start them; lifted evenly they become one long buzz (owner: "BUZZZ BUZZZ").
+ * So each motor follows its band as force-feedback drivers do with such motors:
+ *   - faint texture (below RUMBLE_GATE) is dropped, which also leaves a gap between back-to-back swells;
+ *   - a swell's start kicks the motor (RUMBLE_KICK for RUMBLE_KICK_MS) so it spins up at once: the sharp edge;
+ *   - while it holds, a curve lifts it a little (a^0.75 over a low floor);
+ *   - as it fades the motor is cut to RUMBLE_FADE of that, so it stops before the next one.
+ * Xbox One / Series pads also get the high band's kicks on their trigger motors, which start almost at once
+ * (YW4_RUMBLE_TRIGGERS=0: off). YW4_RUMBLE_LOG=1 logs each change of what the game asked and what the motors got. */
+#define RUMBLE_GATE 0.04f      /* below this: off */
+#define RUMBLE_FLOOR 0.10f     /* the lowest speed while a swell holds (the motor already spins from the kick) */
+#define RUMBLE_KICK 0.70f      /* a swell's first moment */
+#define RUMBLE_KICK_MS 50
+#define RUMBLE_FADE 0.55f      /* while a swell falls */
+#define RUMBLE_TRIGGER 0.45f   /* the trigger motors are strong under a finger */
+static int rumble_shape = -1, rumble_triggers = -1, rumble_log = -1;
+
+static void rumble_init_shape(void) {
+    if (rumble_shape >= 0) return;
+    const char *e = getenv("YW4_RUMBLE_SHAPE"), *t = getenv("YW4_RUMBLE_TRIGGERS"), *l = getenv("YW4_RUMBLE_LOG");
+    rumble_shape = !(e && *e == '0');
+    rumble_triggers = !(t && *t == '0');
+    rumble_log = l && *l == '1';
+}
+
+typedef struct {
+    float prev;
+    int on;
+    uint64_t kick_until;
+} RumbleBand;
+
+/* One motor's speed (0..1) for its band's amplitude now; *kick: in a swell's first moment. */
+static float rumble_band(RumbleBand *b, float a, uint64_t now, int *kick) {
+    *kick = 0;
+    if (a > 1.0f) a = 1.0f;
+    if (!rumble_shape) return a < 0.02f ? 0.0f : a;
+    if (a < RUMBLE_GATE) {
+        b->on = 0, b->prev = a;
+        return 0.0f;
+    }
+    if (!b->on) b->on = 1, b->kick_until = now + RUMBLE_KICK_MS;
+    float out = RUMBLE_FLOOR + (1.0f - RUMBLE_FLOOR) * powf(a, 0.75f);
+    if (now < b->kick_until) out = fmaxf(out, RUMBLE_KICK), *kick = 1;
+    else if (a < b->prev - 0.001f) out *= RUMBLE_FADE;
+    b->prev = a;
+    return out;
+}
+
+static uint16_t rumble_u16(float a) { return (uint16_t)(a * 65535.0f + 0.5f); }
+
+/* The trigger motors (Xbox One / Series), only changes sent as window_rumble does. */
+static void rumble_triggers_set(uint16_t v) {
+    static uint16_t last;
+    static SDL_Gamepad *last_pad;
+    host_lock(&input_lock);
+    SDL_Gamepad *pad = gamepad;
+    if (pad && (pad != last_pad || v != last) &&
+        SDL_GetBooleanProperty(SDL_GetGamepadProperties(pad), SDL_PROP_GAMEPAD_CAP_TRIGGER_RUMBLE_BOOLEAN, false)) {
+        SDL_RumbleGamepadTriggers(pad, v, v, v ? 200 : 0);
+        last_pad = pad, last = v;
+    }
+    host_unlock(&input_lock);
+}
+
+void window_vibration(float amp_low, float freq_low, float amp_high, float freq_high) {
+    rumble_init_env();
+    rumble_init_shape();
+    if (!rumble_enabled) return;
+    static RumbleBand lo, hi;
+    uint64_t now = SDL_GetTicks();
+    int kick_l, kick_h;
+    uint16_t l = rumble_u16(rumble_band(&lo, amp_low, now, &kick_l));
+    uint16_t h = rumble_u16(rumble_band(&hi, amp_high, now, &kick_h));
+    uint16_t trig = rumble_triggers && kick_h ? rumble_u16(RUMBLE_TRIGGER * fmaxf(amp_high, 0.5f)) : 0;
+    if (rumble_log) {
+        static float last[2] = {-1, -1};
+        if (amp_low != last[0] || amp_high != last[1])
+            fprintf(stderr, "yw4: rumble: game low %.3f @ %.0f Hz, high %.3f @ %.0f Hz -> motors %u / %u, triggers %u\n",
+                    amp_low, freq_low, amp_high, freq_high, l, h, trig);
+        last[0] = amp_low, last[1] = amp_high;
+    }
+    window_rumble(l, h, (l || h) ? 1000 : 0);
+    if (rumble_triggers && !rumble_test_until) rumble_triggers_set(trig);
 }
 
 /* The keyboard, mouse, and the gamepad through the controls (bindings.c; the settings panel's second page). */
