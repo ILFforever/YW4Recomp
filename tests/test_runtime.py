@@ -668,3 +668,120 @@ int main(void) {
                             "-o", str(exe), str(t / "drv_toggle.c"), str(sdl_lib)], check=True, capture_output=True)
             got = subprocess.run([str(exe)], capture_output=True, text=True, check=True)
             self.assertEqual(got.returncode, 0)
+
+
+class BattleScrollTest(unittest.TestCase):
+    """Mouse scroll in battle selects character (D-pad up/down) by default."""
+
+    def test_battle_wheel_bindings(self):
+        driver = r"""
+#include <stdio.h>
+#include <stdint.h>
+#include <stdbool.h>
+#include <string.h>
+#include <stdlib.h>
+
+#include <SDL3/SDL.h>
+#include "yw4load.h"
+#include "window.h"
+
+static int battle_state;
+int battle_active(void) { return battle_state; }
+void settings_save(void) {}
+void window_mouse_motion(float *dx, float *dy) { *dx = 0; *dy = 0; }
+SDL_GamepadType SDL_GetGamepadType(SDL_Gamepad *gamepad) { return SDL_GAMEPAD_TYPE_STANDARD; }
+const Yw4Module yw4_modules[2] = {0};
+
+int window_rumble_enabled(void) { return 1; }
+void window_rumble_set_enabled(int on) { (void)on; }
+void window_rumble(uint16_t low, uint16_t high, uint32_t duration_ms) { (void)low; (void)high; (void)duration_ms; }
+void window_rumble_test(void) {}
+
+#include "bindings.c"
+
+int main(void) {
+    uint64_t b = 0;
+    int32_t s[4] = {0};
+
+    /* 1. Exploring: wheel up/down does NOT press D-pad up (bit 13) or down (bit 15) */
+    battle_state = 0;
+    bindings_read(NULL, 0, 1, 0, NULL, &b, s);
+    if (b & (1ull << 13)) return 1;
+    b = 0;
+    bindings_read(NULL, 0, 0, 1, NULL, &b, s);
+    if (b & (1ull << 15)) return 2;
+
+    /* 2. In battle: wheel up presses D-pad up (bit 13) */
+    battle_state = 1;
+    b = 0;
+    bindings_read(NULL, 0, 1, 0, NULL, &b, s);
+    if (!(b & (1ull << 13))) return 3;
+    if (b & (1ull << 15)) return 4;
+
+    /* 3. In battle: wheel down presses D-pad down (bit 15) */
+    b = 0;
+    bindings_read(NULL, 0, 0, 1, NULL, &b, s);
+    if (!(b & (1ull << 15))) return 5;
+    if (b & (1ull << 13)) return 6;
+
+    /* 4. Upgrade older settings lines where KEY2 was '-' */
+    bindings_load_line("BATTLE_KEY1_DPAD_UP", "Up");
+    bindings_load_line("BATTLE_KEY2_DPAD_UP", "-");
+    bindings_load_line("BATTLE_KEY1_DPAD_DOWN", "Down");
+    bindings_load_line("BATTLE_KEY2_DPAD_DOWN", "-");
+
+    b = 0;
+    bindings_read(NULL, 0, 1, 0, NULL, &b, s);
+    if (!(b & (1ull << 13))) return 7;
+
+    b = 0;
+    bindings_read(NULL, 0, 0, 1, NULL, &b, s);
+    if (!(b & (1ull << 15))) return 8;
+
+    /* 5. Both Arrow Keys and D-pad remain fully active default options */
+    bool kbd[SDL_SCANCODE_COUNT] = {0};
+    battle_state = 1;
+    kbd[SDL_SCANCODE_UP] = true;
+    b = 0;
+    bindings_read(kbd, 0, 0, 0, NULL, &b, s);
+    if (!(b & (1ull << 13))) return 9;
+    kbd[SDL_SCANCODE_UP] = false;
+
+    kbd[SDL_SCANCODE_DOWN] = true;
+    b = 0;
+    bindings_read(kbd, 0, 0, 0, NULL, &b, s);
+    if (!(b & (1ull << 15))) return 10;
+    kbd[SDL_SCANCODE_DOWN] = false;
+
+    battle_state = 0;
+    kbd[SDL_SCANCODE_UP] = true;
+    b = 0;
+    bindings_read(kbd, 0, 0, 0, NULL, &b, s);
+    if (!(b & (1ull << 13))) return 11;
+    kbd[SDL_SCANCODE_UP] = false;
+
+    kbd[SDL_SCANCODE_DOWN] = true;
+    b = 0;
+    bindings_read(kbd, 0, 0, 0, NULL, &b, s);
+    if (!(b & (1ull << 15))) return 12;
+    kbd[SDL_SCANCODE_DOWN] = false;
+
+    return 0;
+}
+"""
+        with tempfile.TemporaryDirectory() as t:
+            t = Path(t)
+            (t / "drv_battle_scroll.c").write_text(driver)
+            exe = t / "battle_scroll_test.exe"
+            from tools.yw4 import deps, config
+            cfg = config.load()
+            sdl = deps.fetch_sdl(cfg)
+            shutil.copy2(sdl / "bin" / "SDL3.dll", t / "SDL3.dll")
+            sdl_lib = sdl / "lib" / "libSDL3.dll.a"
+            subprocess.run([check.host_cc(), "-std=c17", "-O1", "-Wall",
+                            f"-I{RUNTIME / 'include'}", f"-I{RUNTIME / 'src'}",
+                            f"-I{check.REPO / 'third_party' / 'vulkan' / 'include'}",
+                            f"-I{sdl / 'include'}",
+                            "-o", str(exe), str(t / "drv_battle_scroll.c"), str(sdl_lib)], check=True, capture_output=True)
+            got = subprocess.run([str(exe)], capture_output=True, text=True, check=True)
+            self.assertEqual(got.returncode, 0)

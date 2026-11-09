@@ -1662,7 +1662,10 @@ static HostLock input_lock = HOST_LOCK_INIT;
 static HostLock mouse_lock = HOST_LOCK_INIT;
 static float mouse_accum_x;
 static float mouse_accum_y;
-static int mouse_wheel_pulses[2];  /* [0] wheel up, [1] wheel down */
+static int wheel_queue[2];                   /* queued wheel notches [0] up, [1] down */
+static int wheel_active[2];                  /* currently pulsing [0] up or [1] down */
+static uint64_t wheel_press_until_reads;     /* input_reads until active pulse ends */
+static uint64_t wheel_gap_until_reads;       /* input_reads until release gap ends */
 static int mouse_held_off;         /* the click that gave the game the mouse: no press until it is let go */
 
 /* YW4_MOUSE=0: the game never takes the mouse (no capture, no camera, no clicks or wheel): for test runs, so the
@@ -1772,10 +1775,31 @@ static void update_input(void) {
     /* clicks are buttons only while the game has the mouse */
     if (mouse_held_off || !window || !SDL_GetWindowRelativeMouseMode(window) || mouse_off()) mb = 0;
     int wup = 0, wdwn = 0;
+    uint64_t reads = window_input_reads();
     host_lock(&mouse_lock);
-    if (mouse_off()) mouse_wheel_pulses[0] = mouse_wheel_pulses[1] = 0;
-    if (mouse_wheel_pulses[0] > 0) { wup = 1; mouse_wheel_pulses[0]--; }
-    if (mouse_wheel_pulses[1] > 0) { wdwn = 1; mouse_wheel_pulses[1]--; }
+    if (mouse_held_off || mouse_off() || (window && !SDL_GetWindowRelativeMouseMode(window))) {
+        wheel_queue[0] = wheel_queue[1] = 0;
+        wheel_active[0] = wheel_active[1] = 0;
+        wheel_press_until_reads = wheel_gap_until_reads = 0;
+    }
+    for (int d = 0; d < 2; d++) {
+        if (wheel_active[d] && reads >= wheel_press_until_reads) {
+            wheel_active[d] = 0;
+            wheel_gap_until_reads = reads + 2;  /* release gap: at least 2 game reads */
+        }
+    }
+    if (!wheel_active[0] && !wheel_active[1] && reads >= wheel_gap_until_reads) {
+        for (int d = 0; d < 2; d++) {
+            if (wheel_queue[d] > 0) {
+                wheel_queue[d]--;
+                wheel_active[d] = 1;
+                wheel_press_until_reads = reads + 2;  /* active pulse: at least 2 game reads */
+                break;
+            }
+        }
+    }
+    wup = wheel_active[0];
+    wdwn = wheel_active[1];
     host_unlock(&mouse_lock);
 
     bindings_read(SDL_GetKeyboardState(NULL), mb, wup, wdwn, gamepad, &b, s);
@@ -2172,10 +2196,14 @@ void window_run(void (*guest)(void *), void *arg) {
                 else if (!settings_open() && e.wheel.y != 0) used_pad(0), gamemenu_wheel(e.wheel.y > 0 ? 1 : -1);
             } else if (e.wheel.y != 0 && mousemenu_wheel(e.wheel.y > 0 ? 1 : -1)) {
                 used_pad(0);
-            } else {
+            } else if (e.wheel.y != 0) {
                 host_lock(&mouse_lock);
-                if (e.wheel.y > 0) mouse_wheel_pulses[0] = 3;
-                else if (e.wheel.y < 0) mouse_wheel_pulses[1] = 3;
+                int dir = e.wheel.y > 0 ? 0 : 1;
+                int notches = e.wheel.y > 0 ? (e.wheel.y >= 1.0f ? (int)e.wheel.y : 1)
+                                            : (e.wheel.y <= -1.0f ? -(int)e.wheel.y : 1);
+                wheel_queue[!dir] = 0;  /* scrolling the other way cancels pending opposite steps */
+                wheel_queue[dir] += notches;
+                if (wheel_queue[dir] > 8) wheel_queue[dir] = 8;
                 host_unlock(&mouse_lock);
             }
             break;

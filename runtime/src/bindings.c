@@ -66,7 +66,8 @@ enum { NINPUTS = sizeof inputs / sizeof *inputs, NMOUSE = 2,
        RESET_ROW = FIRST_INPUT + NINPUTS, NROWS };
 
 /* Two sets of keys: one while exploring, one in battles (battle.c says which), so a key can do one thing on the
- * field and another in a battle. The battle set starts as a copy of the exploring one; saved with a BATTLE_ prefix. */
+ * field and another in a battle. The battle set starts as a copy of the exploring one, with mouse wheel up and
+ * down bound to character selection (D-pad up and down); saved with a BATTLE_ prefix. */
 enum { SET_FIELD, SET_BATTLE, NSETS };
 typedef struct {
     int keys[BIND_KEYS];  /* SDL_Scancode or MOUSE_BIND_*, 0 for none */
@@ -77,11 +78,19 @@ static int edit_set;  /* the set the controls page shows and changes */
 #define bound (sets[edit_set])
 static int bound_ready, battle_set_known;  /* the battle set was read from the settings file or copied */
 
+static void apply_battle_defaults(void) {
+    for (int i = 0; i < NINPUTS; i++) {
+        if (!strcmp(inputs[i].id, "DPAD_UP")) sets[SET_BATTLE][i].keys[1] = MOUSE_BIND_WHEEL_UP;
+        else if (!strcmp(inputs[i].id, "DPAD_DOWN")) sets[SET_BATTLE][i].keys[1] = MOUSE_BIND_WHEEL_DOWN;
+    }
+}
+
 static void reset_set(int set) {
     for (int i = 0; i < NINPUTS; i++) {
         for (int k = 0; k < BIND_KEYS; k++) sets[set][i].keys[k] = inputs[i].keys[k];
         sets[set][i].pad = inputs[i].pad;
     }
+    if (set == SET_BATTLE) apply_battle_defaults();
 }
 static void reset(void) {
     for (int s = 0; s < NSETS; s++) reset_set(s);
@@ -95,6 +104,7 @@ static void sets_ready(void) {
     ready();
     if (!battle_set_known) {
         memcpy(sets[SET_BATTLE], sets[SET_FIELD], sizeof sets[SET_FIELD]);
+        apply_battle_defaults();
         battle_set_known = 1;
     }
 }
@@ -278,7 +288,8 @@ static int32_t pad_amount(SDL_Gamepad *g, int pad) {
 void bindings_read(const bool *keyboard, uint32_t mouse_buttons, int wheel_up, int wheel_down,
                    struct SDL_Gamepad *gamepad, uint64_t *buttons, int32_t sticks[4]) {
     sets_ready();
-    const Bound *use = sets[battle_active() ? SET_BATTLE : SET_FIELD];
+    int battle = battle_active();
+    const Bound *use = sets[battle ? SET_BATTLE : SET_FIELD];
     if (gamepad) {
         SDL_GamepadType t = SDL_GetGamepadType(gamepad);
         pad_style = t == SDL_GAMEPAD_TYPE_PS3 || t == SDL_GAMEPAD_TYPE_PS4 || t == SDL_GAMEPAD_TYPE_PS5 ? STYLE_PLAYSTATION
@@ -292,6 +303,14 @@ void bindings_read(const bool *keyboard, uint32_t mouse_buttons, int wheel_up, i
     uint64_t b = 0;
     int32_t key_stick[4] = {0, 0, 0, 0}, pad_stick[4] = {0, 0, 0, 0};
     int any_key = 0, any_pad = 0;
+    int has_wheel[2] = {0, 0};
+    if (battle) {
+        for (int i = 0; i < NINPUTS; i++)
+            for (int k = 0; k < BIND_KEYS; k++) {
+                if (use[i].keys[k] == MOUSE_BIND_WHEEL_UP) has_wheel[0] = 1;
+                if (use[i].keys[k] == MOUSE_BIND_WHEEL_DOWN) has_wheel[1] = 1;
+            }
+    }
     for (int i = 0; i < NINPUTS; i++) {
         int key = 0;
         for (int k = 0; k < BIND_KEYS; k++) {
@@ -305,6 +324,10 @@ void bindings_read(const bool *keyboard, uint32_t mouse_buttons, int wheel_up, i
             else if (sc == MOUSE_BIND_WHEEL_UP) key |= wheel_up != 0;
             else if (sc == MOUSE_BIND_WHEEL_DOWN) key |= wheel_down != 0;
             else if (keyboard && sc < SDL_SCANCODE_COUNT) key |= keyboard[sc];
+        }
+        if (battle) {
+            if (!has_wheel[0] && wheel_up && !strcmp(inputs[i].id, "DPAD_UP")) key = 1;
+            if (!has_wheel[1] && wheel_down && !strcmp(inputs[i].id, "DPAD_DOWN")) key = 1;
         }
         any_key |= key;
         int32_t amount = pad_amount(gamepad, use[i].pad);
@@ -775,8 +798,10 @@ void bindings_action(int action) {
             settings_save();
         } else if (row == RESET_ROW) {
             /* the exploring set back to the starting keys; the battle set to a copy of the exploring set */
-            if (edit_set == SET_BATTLE) memcpy(sets[SET_BATTLE], sets[SET_FIELD], sizeof sets[SET_FIELD]);
-            else reset_set(SET_FIELD);
+            if (edit_set == SET_BATTLE) {
+                memcpy(sets[SET_BATTLE], sets[SET_FIELD], sizeof sets[SET_FIELD]);
+                apply_battle_defaults();
+            } else reset_set(SET_FIELD);
             settings_save();
         } else {
             capturing = 1, capture_since = SDL_GetTicks();
@@ -984,7 +1009,11 @@ int bindings_load_line(const char *name, const char *value) {
     ready();
     int set = SET_FIELD;
     if (!strncmp(name, "BATTLE_", 7)) {
-        if (!battle_set_known) memcpy(sets[SET_BATTLE], sets[SET_FIELD], sizeof sets[SET_FIELD]), battle_set_known = 1;
+        if (!battle_set_known) {
+            memcpy(sets[SET_BATTLE], sets[SET_FIELD], sizeof sets[SET_FIELD]);
+            apply_battle_defaults();
+            battle_set_known = 1;
+        }
         set = SET_BATTLE, name += 7;
     }
     Bound *b = sets[set];
@@ -994,6 +1023,14 @@ int bindings_load_line(const char *name, const char *value) {
             snprintf(want, sizeof want, "KEY%d_%s", k + 1, inputs[i].id);
             if (!strcmp(name, want)) {
                 b[i].keys[k] = key_from_name(value);
+                /* Upgrade older settings files where the battle D-pad secondary key was unassigned (-)
+                 * so that mouse scroll to select character in battle works by default. */
+                if (set == SET_BATTLE && k == 1 && !strcmp(value, "-")) {
+                    if (!strcmp(inputs[i].id, "DPAD_UP") && b[i].keys[0] == SDL_SCANCODE_UP)
+                        b[i].keys[1] = MOUSE_BIND_WHEEL_UP;
+                    else if (!strcmp(inputs[i].id, "DPAD_DOWN") && b[i].keys[0] == SDL_SCANCODE_DOWN)
+                        b[i].keys[1] = MOUSE_BIND_WHEEL_DOWN;
+                }
                 return 1;
             }
         }
