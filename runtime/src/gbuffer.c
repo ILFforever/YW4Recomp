@@ -503,15 +503,35 @@ static int is_item(uint64_t p) {
     return guest_ptr(p) && readable(p, 0x48) && U64(p) == cur.geometry &&
            U64(p + 0x10) + 0x50ull * U16(p + 0x40) == cur.submesh;
 }
+/* How much of the 8 KiB above sp is mapped. A worker thread's stack can end within it, and the
+ * per-64-KiB answer of readable() doesn't see a stack's last page (three job threads crashed in a
+ * battle reading past theirs), so this asks per 4 KiB page: at most three system calls. */
+static uint64_t stack_span(uint64_t sp) {
+    /* Per thread: [lo, hi) is known mapped, and hi is the stack's end when `ends` (a thread's
+     * stack stays mapped while it runs), so most calls make no system call. */
+    static _Thread_local uint64_t lo, hi;
+    static _Thread_local int ends;
+    uint64_t end = sp + 0x2000;
+    if (sp >= lo && sp < hi && (end <= hi || ends)) return (end < hi ? end : hi) - sp;
+    uint64_t top = sp & ~0xFFFull;
+    int stop = 0;
+    for (; top < end; top += 0x1000)
+        if (!host_readable(top, 0x1000)) { stop = 1; break; }
+    lo = sp & ~0xFFFull, hi = top, ends = stop;
+    return (end < top ? end : top) - sp;
+}
 static uint64_t find_item(uint64_t sp, int site) {
     static int where[2] = {-1, -1};  /* stack offset, +1 bit: 1 the slot holds a pointer, 0 the item is there */
+    if (!guest_ptr(sp)) return 0;
+    uint64_t span = stack_span(sp);
     int w = __atomic_load_n(&where[site], __ATOMIC_RELAXED);
-    if (w >= 0) {
+    if (w >= 0 && (uint64_t)(w & ~1) + 0x48 <= span) {
         uint64_t p = w & 1 ? U64(sp + (w & ~1)) : sp + (uint64_t)w;
         if (is_item(p)) return p;
     }
-    for (int off = 0; off < 0x2000; off += 8) {
-        if (is_item(sp + off)) return __atomic_store_n(&where[site], off, __ATOMIC_RELAXED), sp + off;
+    for (int off = 0; (uint64_t)off + 8 <= span; off += 8) {
+        if ((uint64_t)off + 0x48 <= span && is_item(sp + off))
+            return __atomic_store_n(&where[site], off, __ATOMIC_RELAXED), sp + off;
         uint64_t p = U64(sp + off);
         if (is_item(p)) return __atomic_store_n(&where[site], off | 1, __ATOMIC_RELAXED), p;
     }
