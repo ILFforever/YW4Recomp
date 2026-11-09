@@ -413,8 +413,9 @@ def main(argv: list[str] | None = None) -> int:
     feature_stamp.write_text(features_now + "\n")
     source_stamp.write_text(sources_now + "\n")
     exe = cfg.work_dir / "build" / ("yw4.exe" if sys.platform == "win32" else "yw4")
-    # winmm: timeBeginPeriod; gdi32: the game icon read back for the in-game overlay (gamelogo.c); math on Linux
-    libs = [*sdl_libs, "-pthread"] + (["-lwinmm", "-lpsapi", "-lgdi32"] if sys.platform == "win32" else ["-lm"])
+    # winmm: timeBeginPeriod; gdi32: the game icon read back for the in-game overlay (gamelogo.c); ws2_32: sockets
+    # for local play (socket.c); math on Linux
+    libs = [*sdl_libs, "-pthread"] + (["-lwinmm", "-lpsapi", "-lgdi32", "-lws2_32"] if sys.platform == "win32" else ["-lm"])
     if sys.platform == "win32":
         shutil.copy2(sdl / "bin" / "SDL3.dll", exe.parent / "SDL3.dll")  # found next to yw4.exe
         if not args.no_fsr:
