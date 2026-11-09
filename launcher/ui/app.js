@@ -45,6 +45,20 @@ function syncSettingsButton() {  // inst is the built install's state, null befo
   gear.disabled = !inst;
   gear.title = inst ? 'Settings' : 'Settings are here once your game is built';
 }
+// Locate an installed game (a folder built earlier, or moved): the folder picker, the folder checked and kept as this
+// launcher's install (locate_installed_game), then its Ready screen. Any button with data-locate does this.
+async function locateGame() {
+  let found;
+  try { found = await invoke('locate_installed_game', {}); } catch (e) {
+    if (!/No folder chosen/.test(String(e))) popup('No game found there', String(e));
+    return;
+  }
+  inst = found;
+  syncSettingsButton();
+  showReady();
+}
+document.querySelectorAll('[data-locate]').forEach((b) => b.addEventListener('click', locateGame));
+
 if (T && T.window) {
   const win = T.window.getCurrentWindow();
   $('win-min').addEventListener('click', () => win.minimize());
