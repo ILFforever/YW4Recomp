@@ -34,6 +34,7 @@ static const struct {
     {"apm", svc_apm},
     {"lm", svc_lm},
     {"set", svc_set},
+    {"csrng", svc_csrng},
     {"aoc:u", svc_aoc_u},
     {"pctl", svc_pctl},
     {"pctl:s", svc_pctl},  /* the same interface with other access rights */

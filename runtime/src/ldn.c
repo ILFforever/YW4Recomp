@@ -423,7 +423,9 @@ void yw4_ldn_GetIpv4Address(CPUState *c) {
 }
 
 void yw4_ldn_GetDisconnectReason(CPUState *c) {
-    LOG("GetDisconnectReason -> %d\n", disconnect_reason);
+    static int16_t logged = -2;  /* the game asks every frame: only changes */
+    if (logged != disconnect_reason) LOG("GetDisconnectReason -> %d\n", disconnect_reason);
+    logged = disconnect_reason;
     c->x[0] = (uint64_t)(int64_t)disconnect_reason;
 }
 
