@@ -72,7 +72,109 @@ pub fn save_state(state: State) -> Result<(), String> {
 }
 
 fn exe(install: &str) -> PathBuf {
-    Path::new(install).join("work").join("build").join("yw4.exe")
+    let p = Path::new(install);
+    let wb = p.join("work").join("build").join("yw4.exe");
+    if wb.is_file() {
+        return wb;
+    }
+    let gm = p.join("game").join("yw4.exe");
+    if gm.is_file() {
+        return gm;
+    }
+    let rt = p.join("yw4.exe");
+    if rt.is_file() {
+        return rt;
+    }
+    wb
+}
+
+fn normalize_path(p: PathBuf) -> PathBuf {
+    let s = p.to_string_lossy();
+    if let Some(stripped) = s.strip_prefix(r"\\?\") {
+        PathBuf::from(stripped)
+    } else {
+        p
+    }
+}
+
+pub fn resolve_install_dir(path: &Path) -> Option<PathBuf> {
+    let p = if path.is_file() {
+        if path.file_name().map_or(false, |n| n.eq_ignore_ascii_case("yw4.exe")) {
+            let parent = path.parent()?;
+            if parent.file_name().map_or(false, |n| n.eq_ignore_ascii_case("build"))
+                && parent.parent().and_then(|gp| gp.file_name()).map_or(false, |n| n.eq_ignore_ascii_case("work"))
+            {
+                if let Some(root) = parent.parent().and_then(|gp| gp.parent()) {
+                    return Some(root.to_path_buf());
+                }
+            }
+            if parent.file_name().map_or(false, |n| n.eq_ignore_ascii_case("game")) {
+                if let Some(root) = parent.parent() {
+                    return Some(root.to_path_buf());
+                }
+            }
+            return Some(parent.to_path_buf());
+        }
+        path.parent()?
+    } else {
+        path
+    };
+
+    // 1. Root folder containing work/build/yw4.exe or game/yw4.exe
+    if p.join("work").join("build").join("yw4.exe").is_file() || p.join("game").join("yw4.exe").is_file() {
+        return Some(p.to_path_buf());
+    }
+
+    // 2. Subfolder work/build
+    if p.file_name().map_or(false, |n| n.eq_ignore_ascii_case("build"))
+        && p.parent().and_then(|gp| gp.file_name()).map_or(false, |n| n.eq_ignore_ascii_case("work"))
+    {
+        if let Some(root) = p.parent().and_then(|gp| gp.parent()) {
+            if root.join("work").join("build").join("yw4.exe").is_file() {
+                return Some(root.to_path_buf());
+            }
+        }
+    }
+
+    // 3. Subfolder game
+    if p.file_name().map_or(false, |n| n.eq_ignore_ascii_case("game")) {
+        if let Some(root) = p.parent() {
+            if root.join("game").join("yw4.exe").is_file()
+                || root.join("work").join("build").join("yw4.exe").is_file()
+            {
+                return Some(root.to_path_buf());
+            }
+        }
+    }
+
+    // 4. Flat root folder containing yw4.exe directly
+    if p.join("yw4.exe").is_file() {
+        return Some(p.to_path_buf());
+    }
+
+    // 5. Subfolder data
+    if p.file_name().map_or(false, |n| n.eq_ignore_ascii_case("data")) {
+        if let Some(root) = p.parent() {
+            if root.join("work").join("build").join("yw4.exe").is_file()
+                || root.join("game").join("yw4.exe").is_file()
+                || root.join("yw4.exe").is_file()
+            {
+                return Some(root.to_path_buf());
+            }
+        }
+    }
+
+    // 6. Generic child directory of the root
+    if let Some(root) = p.parent() {
+        if root.join("work").join("build").join("yw4.exe").is_file()
+            || root.join("game").join("yw4.exe").is_file()
+            || root.join("yw4.exe").is_file()
+        {
+            return Some(root.to_path_buf());
+        }
+    }
+
+    None
 }
 
 fn hidden(cmd: &mut Command) -> &mut Command {
@@ -358,7 +460,7 @@ pub fn play(app: tauri::AppHandle, install: String, mods: Option<bool>, on_play:
         if let Some(id) = game_theme(&install, started) { let _ = app.emit("game-theme", id); }
         let _ = app.emit("played", ());
         // the game ends with 0 when the player quits (or closes the window); anything else is a crash or a stop
-        // (3: the recompiled code stopped, kernel.c): offer to report it, with this play's log (report_crash)
+        // (3: the recompiled code stopped, kernel.c): offer to report it, with this play's log (the Report a bug form, save_report)
         if let Ok(s) = status {
             if !s.success() {
                 let code = s.code().unwrap_or(-1);
@@ -373,7 +475,10 @@ pub fn play(app: tauri::AppHandle, install: String, mods: Option<bool>, on_play:
 /// A path from game.ini (`key`, relative to work\build or absolute), if game.ini has it.
 fn game_ini_path(install: &str, key: &str) -> Option<PathBuf> {
     let build = PathBuf::from(install).join("work").join("build");
-    let ini = std::fs::read_to_string(build.join("game.ini")).ok()?;
+    let ini = std::fs::read_to_string(build.join("game.ini"))
+        .or_else(|_| std::fs::read_to_string(Path::new(install).join("game").join("game.ini")))
+        .or_else(|_| std::fs::read_to_string(Path::new(install).join("game.ini")))
+        .ok()?;
     let rel = ini.lines().find_map(|l| l.strip_prefix(key).and_then(|r| r.strip_prefix('=')))?.trim().to_string();
     Some(if Path::new(&rel).is_absolute() { PathBuf::from(&rel) } else { build.join(&rel) })
 }
@@ -390,8 +495,8 @@ fn newest_log(install: &str, since: std::time::SystemTime) -> Option<PathBuf> {
         .map(|(_, p)| p)
 }
 
-/// A zip that stores its files (no compression): the crash report is a log and a settings file.
-fn stored_zip(files: &[(&str, Vec<u8>)]) -> Vec<u8> {
+/// A zip that stores its files (no compression): a report is a few text files and a small save.
+fn stored_zip(files: &[(String, Vec<u8>)]) -> Vec<u8> {
     fn crc32(d: &[u8]) -> u32 {
         let mut c = 0xFFFF_FFFFu32;
         for &b in d {
@@ -430,34 +535,150 @@ fn url_value(s: &str) -> String {
     s.bytes().map(|b| if b.is_ascii_alphanumeric() || b"-_.~".contains(&b) { (b as char).to_string() } else { format!("%{b:02X}") }).collect()
 }
 
-/// After a crash (the 'game-crashed' event, Report it): a zip in the install's reports folder with a short
-/// report.txt (exit code, version and GPU from the log), the play's log and settings.ini; the folder shown, and
-/// GitHub's bug form opened with the version and GPU filled in. Nothing is uploaded: the player drags the zip in.
-#[tauri::command]
-pub fn report_crash(install: String, code: i32, log: String) -> Result<String, String> {
-    let log_text = std::fs::read(&log).unwrap_or_default();
-    let text = String::from_utf8_lossy(&log_text);
-    let find = |prefix: &str| text.lines().find_map(|l| l.strip_prefix(prefix)).map(|s| s.trim().to_string());
+/// The launcher's Report a bug form (the game overlay's two pages, decision 0053): what's wrong, what happened, how
+/// often, and what to attach. After a crash the form comes with that play's log and exit code.
+#[derive(Deserialize)]
+pub struct ReportForm {
+    kind: String,
+    often: String,
+    text: String,
+    /// attach: the game's log (the crash's, else the newest) and settings.ini; the save; the last build's log
+    log: bool,
+    save: bool,
+    #[serde(rename = "buildLog")]
+    build_log: bool,
+    #[serde(rename = "crashLog", default)]
+    crash_log: Option<String>,
+    #[serde(rename = "crashCode", default)]
+    crash_code: Option<i32>,
+}
+
+/// The game log a report means: the crash's, else the newest yw4_*.log.
+fn report_log(install: &str, form: &ReportForm) -> Option<PathBuf> {
+    form.crash_log.as_deref().filter(|l| !l.is_empty()).map(PathBuf::from)
+        .or_else(|| newest_log(install, std::time::UNIX_EPOCH))
+}
+
+/// The game's version and GPU, from its log's start lines ("unknown" and "" without a log).
+fn version_gpu(log: &str) -> (String, String) {
+    let find = |prefix: &str| log.lines().find_map(|l| l.strip_prefix(prefix)).map(|s| s.trim().to_string());
     let version = find("yw4: YW4 Recomp ").unwrap_or_else(|| "unknown".into());
     let gpu = find("yw4: window: Vulkan on ").map(|g| g.split(" (API").next().unwrap_or("").to_string()).unwrap_or_default();
-    let last: Vec<&str> = text.lines().rev().take(12).collect::<Vec<_>>().into_iter().rev().collect();
-    let report = format!("YW4 Recomp crash report\r\n\r\nThe game closed unexpectedly (exit code {code}).\r\nVersion: {version}\r\nGPU: {gpu}\r\n\r\nThe log's last lines:\r\n{}\r\n",
-        last.join("\r\n"));
-    let mut files: Vec<(&str, Vec<u8>)> = vec![("report.txt", report.into_bytes())];
-    if !log_text.is_empty() { files.push(("log.txt", log_text.clone())); }
-    if let Some(s) = game_ini_path(&install, "YW4_SETTINGS_FILE").and_then(|p| std::fs::read(p).ok()) { files.push(("settings.ini", s)); }
+    (version, gpu)
+}
+
+/// GitHub's bug form (.github/ISSUE_TEMPLATE/bug.yml) with the answers filled in, as the game's (bugreport.c).
+fn report_url(form: &ReportForm, version: &str, gpu: &str) -> String {
+    let kind = if form.kind.is_empty() { "Bug" } else { form.kind.as_str() };
+    let mut what = form.text.clone();
+    if let Some(code) = form.crash_code {
+        what = format!("The game closed unexpectedly (exit code {code}).{}{what}", if what.is_empty() { "" } else { "\n\n" });
+    }
+    let start: String = form.text.chars().take(80).collect();
+    let title = if start.is_empty() { kind.to_string() } else { format!("{kind}: {start}") };
+    let what: String = what.chars().take(4000).collect();
+    format!("https://github.com/ILFforever/YW4Recomp/issues/new?template=bug.yml&title={}&what={}&often={}&version={}&pc={}",
+        url_value(&title), url_value(&what), url_value(&form.often), url_value(version), url_value(gpu))
+}
+
+/// `secs` (Unix time) as UTC "2026-11-10 14:35:12" and, for file names, "2026-11-10_143512" (the game's names are
+/// the same shape, in local time).
+fn utc_stamp(secs: u64) -> (String, String) {
+    let (days, rest) = ((secs / 86400) as i64, secs % 86400);
+    let (h, m, s) = (rest / 3600, rest % 3600 / 60, rest % 60);
+    // days since 1970-01-01 to a date (Howard Hinnant's civil_from_days)
+    let z = days + 719468;
+    let era = z.div_euclid(146097);
+    let doe = z - era * 146097;
+    let yoe = (doe - doe / 1460 + doe / 36524 - doe / 146096) / 365;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let mp = (5 * doy + 2) / 153;
+    let d = doy - (153 * mp + 2) / 5 + 1;
+    let mo = if mp < 10 { mp + 3 } else { mp - 9 };
+    let y = yoe + era * 400 + if mo <= 2 { 1 } else { 0 };
+    (format!("{y:04}-{mo:02}-{d:02} {h:02}:{m:02}:{s:02}"), format!("{y:04}-{mo:02}-{d:02}_{h:02}{m:02}{s:02}"))
+}
+
+fn open_url(url: &str) {
+    if std::env::var("YW4_REPORT_OPEN").as_deref() != Ok("0") { let _ = Command::new("explorer").arg(url).spawn(); }
+}
+
+/// Every file under `dir`, named `prefix/<path inside>` (the save folder, a few files).
+fn dir_files(dir: &Path, prefix: &str, out: &mut Vec<(String, Vec<u8>)>) {
+    let Ok(entries) = std::fs::read_dir(dir) else { return };
+    for e in entries.flatten() {
+        let name = format!("{prefix}/{}", e.file_name().to_string_lossy());
+        let p = e.path();
+        if p.is_dir() { dir_files(&p, &name, out); } else if let Ok(d) = std::fs::read(&p) { out.push((name, d)); }
+    }
+}
+
+/// Report a bug (Save only, Send to GitHub): a zip in the install's reports folder with report.txt (the answers,
+/// version, GPU, launcher version) and what the player ticked; with `send`, GitHub's bug form opened with the
+/// answers filled in. Nothing is uploaded: the player drags the zip in. Returns the zip's path.
+#[tauri::command]
+pub fn save_report(install: String, saves: String, form: ReportForm, send: bool) -> Result<String, String> {
+    let log_path = report_log(&install, &form);
+    let log_bytes = log_path.as_ref().and_then(|p| std::fs::read(p).ok()).unwrap_or_default();
+    let log_text = String::from_utf8_lossy(&log_bytes);
+    let (version, gpu) = version_gpu(&log_text);
+    let dash = |s: &str| if s.is_empty() { "-".to_string() } else { s.to_string() };
+    let mut report = format!("YW4 Recomp bug report (from the launcher)\r\n\r\nWhat's wrong: {}\r\nHow often: {}\r\nWhat happened:\r\n{}\r\n\r\n",
+        dash(&form.kind), dash(&form.often), form.text.replace('\n', "\r\n"));
+    let (when, stamp) = utc_stamp(now());
+    report += &format!("Version: {version}\r\nGPU: {}\r\nLauncher: {}\r\nTime: {when} UTC\r\n", dash(&gpu), env!("CARGO_PKG_VERSION"));
+    let mut files: Vec<(String, Vec<u8>)> = Vec::new();
+    let mut attached = Vec::new();
+    if form.log && !log_bytes.is_empty() {
+        files.push(("log.txt".into(), log_bytes.clone()));
+        attached.push("log");
+        let settings = game_ini_path(&install, "YW4_SETTINGS_FILE").filter(|p| p.is_file())
+            .unwrap_or_else(|| saves_place(Path::new(&install), &saves).1);
+        if let Ok(s) = std::fs::read(settings) { files.push(("settings.ini".into(), s)); attached.push("settings"); }
+    }
+    if form.save {
+        let n = files.len();
+        let save = game_ini_path(&install, "YW4_SAVE").filter(|p| p.is_dir())
+            .unwrap_or_else(|| saves_place(Path::new(&install), &saves).0);
+        dir_files(&save, "save", &mut files);
+        if files.len() > n { attached.push("save"); }
+    }
+    if form.build_log {
+        if let Ok(b) = std::fs::read(Path::new(&install).join("logs").join("build_last.log")) {
+            files.push(("build_log.txt".into(), b));
+            attached.push("build log");
+        }
+    }
+    report += &format!("Attached: {}\r\n", if attached.is_empty() { "-".to_string() } else { attached.join(", ") });
+    if let Some(code) = form.crash_code {
+        let last: Vec<&str> = log_text.lines().rev().take(12).collect::<Vec<_>>().into_iter().rev().collect();
+        report += &format!("\r\nThe game closed unexpectedly (exit code {code}). The log's last lines:\r\n{}\r\n", last.join("\r\n"));
+    }
+    files.insert(0, ("report.txt".into(), report.into_bytes()));
     let dir = PathBuf::from(&install).join("reports");
     std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
-    let zip = dir.join(format!("yw4_crash_{}.zip", now()));
+    let zip = dir.join(format!("yw4_report_{stamp}.zip"));
     std::fs::write(&zip, stored_zip(&files)).map_err(|e| format!("couldn't save the report ({e})"))?;
-    let url = format!("https://github.com/ILFforever/YW4Recomp/issues/new?template=bug.yml&title={}&what={}&version={}&pc={}",
-        url_value("Crash: the game closed unexpectedly"), url_value(&format!("The game closed unexpectedly (exit code {code}).")),
-        url_value(&version), url_value(&gpu));
-    if std::env::var("YW4_REPORT_OPEN").as_deref() != Ok("0") {
-        let _ = Command::new("explorer").arg(format!("/select,{}", zip.display())).spawn();
-        let _ = Command::new("explorer").arg(&url).spawn();
-    }
+    if send { open_url(&report_url(&form, &version, &gpu)); }
     Ok(zip.to_string_lossy().into_owned())
+}
+
+/// The saved page's Open GitHub (again): the same filled-in form.
+#[tauri::command]
+pub fn open_report_github(install: String, form: ReportForm) {
+    let log = report_log(&install, &form).and_then(|p| std::fs::read(p).ok()).unwrap_or_default();
+    let (version, gpu) = version_gpu(&String::from_utf8_lossy(&log));
+    open_url(&report_url(&form, &version, &gpu));
+}
+
+/// The saved page's Show the zip: Explorer with the zip selected (only a zip in the install's reports folder).
+#[tauri::command]
+pub fn show_report(install: String, zip: String) -> Result<(), String> {
+    let p = PathBuf::from(&zip);
+    if p.parent() != Some(Path::new(&install).join("reports").as_path()) || !p.is_file() {
+        return Err("not a report".into());
+    }
+    Command::new("explorer").arg(format!("/select,{}", p.display())).spawn().map(|_| ()).map_err(|e| e.to_string())
 }
 
 /// The theme the game saved (its settings.ini line YW4_THEME=<id>), if the game's settings file can be found: the
@@ -485,7 +706,7 @@ pub fn open_folder(install: String, which: String, saves: String) -> Result<(), 
             let _ = std::fs::create_dir_all(m.join("contents"));
             m
         }
-        "screenshots" | "logs" => inst.join(&which),
+        "screenshots" | "logs" | "reports" => inst.join(&which),
         "install" => inst.clone(),
         "dlc" => inst.join("data").join("dlc"),
         "save" if saves == "appdata" => PathBuf::from(std::env::var("APPDATA").unwrap_or_default()).join("YW4 Recomp").join("save"),
@@ -785,9 +1006,185 @@ fn game_version(exe: &Path) -> String {
     out.trim().to_string()
 }
 
+/// Verifies an install folder, writes launcher.json, and returns the resulting state.
+pub fn locate_installed_game_path(raw_path: PathBuf) -> Result<State, String> {
+    let norm_path = if let Ok(c) = raw_path.canonicalize() {
+        normalize_path(c)
+    } else {
+        raw_path.clone()
+    };
+
+    let Some(install_dir) = resolve_install_dir(&norm_path).or_else(|| resolve_install_dir(&raw_path)) else {
+        return Err(format!("No Yo-kai Watch 4 game found in '{}'.", raw_path.display()));
+    };
+
+    let install_str = install_dir.display().to_string();
+    let exe_file = exe(&install_str);
+    if !exe_file.is_file() {
+        return Err(format!("No yw4.exe found in '{}'.", install_str));
+    }
+
+    let ver = game_version(&exe_file);
+    if !ver.is_empty() && !ver.to_lowercase().contains("yw4") && !ver.to_lowercase().contains("recomp") {
+        return Err(format!("'{}' is not Yo-kai Watch 4 Recomp.", exe_file.display()));
+    }
+
+    // Build or update state
+    let mut state = read_state().unwrap_or_default();
+    let prev_install = std::mem::replace(&mut state.install, install_str.clone());
+
+    if prev_install != install_str {
+        state.install = install_str.clone();
+        state.originals_offered = true;
+        state.free_up = false;
+        state.desktop = false;
+        state.start_menu = false;
+        state.paths.clear();
+        state.disabled_mods.clear();
+    }
+
+    // Read config.toml if present
+    let cfg_path = install_dir.join("config.toml");
+    if let Ok(content) = std::fs::read_to_string(&cfg_path) {
+        if let Ok(t) = content.parse::<toml::Value>() {
+            if let Some(input) = t.get("input").and_then(|i| i.as_table()) {
+                if let Some(b) = input.get("base_nsp").and_then(|v| v.as_str()) {
+                    state.paths.insert("base".into(), b.into());
+                    state.mode = "files".into();
+                }
+                if let Some(u) = input.get("update_nsp").and_then(|v| v.as_str()) {
+                    state.paths.insert("update".into(), u.into());
+                }
+                if let Some(k) = input.get("keys_dir").and_then(|v| v.as_str()) {
+                    state.paths.insert("keys".into(), k.into());
+                }
+                if let Some(d) = input.get("dlc_dir").and_then(|v| v.as_str()) {
+                    state.paths.insert("dlc".into(), d.into());
+                }
+                if let Some(e) = input.get("exefs_dir").and_then(|v| v.as_str()) {
+                    state.paths.insert("exefs".into(), e.into());
+                }
+                if let Some(r) = input.get("romfs_dir").and_then(|v| v.as_str()) {
+                    state.paths.insert("romfs".into(), r.into());
+                }
+            }
+        }
+    }
+
+    if state.mode.is_empty() {
+        state.mode = "folders".into();
+    }
+    if !state.paths.contains_key("exefs") && install_dir.join("data").join("exefs").is_dir() {
+        state.paths.insert("exefs".into(), install_dir.join("data").join("exefs").display().to_string());
+    }
+    if !state.paths.contains_key("romfs") && install_dir.join("data").join("romfs").is_dir() {
+        state.paths.insert("romfs".into(), install_dir.join("data").join("romfs").display().to_string());
+    }
+    if !state.paths.contains_key("dlc") && install_dir.join("data").join("dlc").is_dir() {
+        state.paths.insert("dlc".into(), install_dir.join("data").join("dlc").display().to_string());
+    }
+
+    // Determine saves place
+    if state.saves.is_empty() {
+        state.saves = "install".into();
+        if let Some(ini_save) = game_ini_path(&install_str, "YW4_SAVE") {
+            let s = ini_save.to_string_lossy();
+            if s.contains("APPDATA") || s.contains("AppData") || (ini_save.is_absolute() && !ini_save.starts_with(&install_dir)) {
+                state.saves = "appdata".into();
+            }
+        }
+    }
+
+    state.fsr = true;
+    state.dlss = install_dir.join("work").join("build").join("nvngx_dlss.dll").is_file()
+        || install_dir.join("game").join("nvngx_dlss.dll").is_file()
+        || install_dir.join("nvngx_dlss.dll").is_file();
+
+    let dir = install_dir.join("work").join("icon");
+    state.icon = ensure_icon_image(&dir)
+        .or_else(|| ensure_icon_image(&install_dir.join("icon")))
+        .map(|p| p.display().to_string());
+
+    // Ensure common folders exist
+    let _ = std::fs::create_dir_all(install_dir.join("mods").join("contents"));
+    let _ = std::fs::create_dir_all(install_dir.join("screenshots"));
+    let _ = std::fs::create_dir_all(install_dir.join("logs"));
+    let _ = std::fs::create_dir_all(install_dir.join("data").join("dlc"));
+
+    // Ensure game.ini exists next to yw4.exe
+    if let Some(parent) = exe_file.parent() {
+        let ini_path = parent.join("game.ini");
+        if !ini_path.is_file() {
+            let (save, settings) = if state.saves == "appdata" {
+                ("%APPDATA%/YW4 Recomp/save", "%APPDATA%/YW4 Recomp/settings.ini")
+            } else {
+                ("../../save", "../../settings.ini")
+            };
+            let text = format!(
+                "# Written by the YW4 Recomp launcher: how yw4.exe runs on its own (decision 0050).\n\
+                 YW4_EXEFS=../exefs\nYW4_ROMFS=../../data/romfs\nYW4_SAVE={save}\nYW4_SETTINGS_FILE={settings}\n\
+                 YW4_MOUSE=1\nYW4_AUDIO=1\nYW4_RUMBLE=1\nYW4_RECORD=0\n"
+            );
+            let _ = std::fs::write(&ini_path, text);
+        }
+    }
+
+    save_state(state.clone())?;
+    Ok(state)
+}
+
+fn locate_game_sync(app: &tauri::AppHandle, target: Option<String>) -> Result<State, String> {
+    let chosen_path = match target {
+        Some(p) if !p.trim().is_empty() => Some(PathBuf::from(p.trim())),
+        _ => {
+            use tauri_plugin_dialog::DialogExt;
+            app.dialog()
+                .file()
+                .set_title("Locate installed game")
+                .blocking_pick_folder()
+                .and_then(|fp| fp.as_path().map(|p| p.to_path_buf()))
+        }
+    };
+    let Some(raw_path) = chosen_path else {
+        return Err("No folder chosen.".into());
+    };
+    locate_installed_game_path(raw_path)
+}
+
+async fn locate_game_impl(app: tauri::AppHandle, target: Option<String>) -> Result<State, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        locate_game_sync(&app, target)
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+/// Locates an already installed game on disk, verifies it, saves it to launcher.json, and returns the state.
+/// If `path` is omitted (or empty), prompts the user to select the game folder via a folder picker dialog.
+#[tauri::command]
+pub async fn locate_installed_game(
+    app: tauri::AppHandle,
+    path: Option<String>,
+    install: Option<String>,
+) -> Result<State, String> {
+    locate_game_impl(app, path.or(install)).await
+}
+
+/// Alias for `locate_installed_game`.
+#[tauri::command]
+pub async fn locate_game(
+    app: tauri::AppHandle,
+    path: Option<String>,
+    install: Option<String>,
+) -> Result<State, String> {
+    locate_game_impl(app, path.or(install)).await
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    static TEST_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
     #[test]
     fn test_mod_names_variations() {
@@ -806,7 +1203,15 @@ mod tests {
     }
 
     #[test]
+    fn test_utc_stamp() {
+        assert_eq!(utc_stamp(0).0, "1970-01-01 00:00:00");
+        assert_eq!(utc_stamp(951782400).0, "2000-02-29 00:00:00");  // a leap day
+        assert_eq!(utc_stamp(1794261793), ("2026-11-09 22:03:13".into(), "2026-11-09_220313".into()));
+    }
+
+    #[test]
     fn test_set_mod_enabled() {
+        let _guard = TEST_LOCK.lock().unwrap();
         let temp_state = std::env::temp_dir().join("yw4_test_state_mod_enabled.json");
         let _ = std::fs::remove_file(&temp_state);
         std::env::set_var("YW4_LAUNCHER_STATE", &temp_state);
@@ -820,6 +1225,134 @@ mod tests {
         let res = set_mod_enabled("spanish patch".into(), true).unwrap();
         assert_eq!(res, vec!["English Patch"]);
 
+        let _ = std::fs::remove_file(&temp_state);
+        std::env::remove_var("YW4_LAUNCHER_STATE");
+    }
+
+    #[test]
+    fn test_resolve_install_dir_work_build() {
+        let temp = std::env::temp_dir().join("yw4_test_resolve_wb");
+        let _ = std::fs::remove_dir_all(&temp);
+
+        let wb = temp.join("work").join("build");
+        std::fs::create_dir_all(&wb).unwrap();
+        std::fs::create_dir_all(temp.join("data")).unwrap();
+        std::fs::write(wb.join("yw4.exe"), b"").unwrap();
+
+        assert_eq!(resolve_install_dir(&temp), Some(temp.clone()));
+        assert_eq!(resolve_install_dir(&wb), Some(temp.clone()));
+        assert_eq!(resolve_install_dir(&wb.join("yw4.exe")), Some(temp.clone()));
+        assert_eq!(resolve_install_dir(&temp.join("data")), Some(temp.clone()));
+        assert_eq!(exe(&temp.display().to_string()), wb.join("yw4.exe"));
+
+        let _ = std::fs::remove_dir_all(&temp);
+    }
+
+    #[test]
+    fn test_resolve_install_dir_game_folder() {
+        let temp = std::env::temp_dir().join("yw4_test_resolve_game");
+        let _ = std::fs::remove_dir_all(&temp);
+
+        let gm = temp.join("game");
+        std::fs::create_dir_all(&gm).unwrap();
+        std::fs::write(gm.join("yw4.exe"), b"").unwrap();
+
+        assert_eq!(resolve_install_dir(&temp), Some(temp.clone()));
+        assert_eq!(resolve_install_dir(&gm), Some(temp.clone()));
+        assert_eq!(resolve_install_dir(&gm.join("yw4.exe")), Some(temp.clone()));
+        assert_eq!(exe(&temp.display().to_string()), gm.join("yw4.exe"));
+
+        let _ = std::fs::remove_dir_all(&temp);
+    }
+
+    #[test]
+    fn test_locate_installed_game_path_success_and_fail() {
+        let _guard = TEST_LOCK.lock().unwrap();
+        let temp = std::env::temp_dir().join("yw4_test_locate_game");
+        let _ = std::fs::remove_dir_all(&temp);
+
+        let temp_state = std::env::temp_dir().join("yw4_test_locate_state.json");
+        let _ = std::fs::remove_file(&temp_state);
+        std::env::set_var("YW4_LAUNCHER_STATE", &temp_state);
+
+        // 1. Empty folder fails
+        std::fs::create_dir_all(&temp).unwrap();
+        let fail = locate_installed_game_path(temp.clone());
+        assert!(fail.is_err());
+
+        // 2. Mock valid install
+        let wb = temp.join("work").join("build");
+        std::fs::create_dir_all(&wb).unwrap();
+        std::fs::write(wb.join("yw4.exe"), b"").unwrap();
+        std::fs::create_dir_all(temp.join("data").join("exefs")).unwrap();
+        std::fs::create_dir_all(temp.join("data").join("romfs")).unwrap();
+        std::fs::write(temp.join("config.toml"), "[input]\nbase_nsp = \"C:\\\\dump\\\\base.nsp\"\n").unwrap();
+
+        let res = locate_installed_game_path(temp.clone()).unwrap();
+        assert_eq!(res.install, temp.display().to_string());
+        assert_eq!(res.mode, "files");
+        assert_eq!(res.paths.get("base").map(|s| s.as_str()), Some("C:\\dump\\base.nsp"));
+        assert!(res.originals_offered);
+
+        // State was saved and can be loaded
+        let loaded = load_state().expect("state should be loadable");
+        assert_eq!(loaded.install, temp.display().to_string());
+
+        // game.ini was created next to yw4.exe
+        assert!(wb.join("game.ini").is_file());
+
+        // Locating from subfolder work/build also works
+        let res_sub = locate_installed_game_path(wb).unwrap();
+        assert_eq!(res_sub.install, temp.display().to_string());
+
+        // Locating by selecting yw4.exe file directly also works
+        let res_exe = locate_installed_game_path(temp.join("work").join("build").join("yw4.exe")).unwrap();
+        assert_eq!(res_exe.install, temp.display().to_string());
+
+        let _ = std::fs::remove_dir_all(&temp);
+        let _ = std::fs::remove_file(&temp_state);
+        std::env::remove_var("YW4_LAUNCHER_STATE");
+    }
+
+    #[test]
+    fn test_locate_installed_game_current_repo() {
+        if !Path::new("work").join("build").join("yw4.exe").is_file() {
+            return;
+        }
+        let _guard = TEST_LOCK.lock().unwrap();
+        let temp_state = std::env::temp_dir().join("yw4_test_locate_state_repo.json");
+        let _ = std::fs::remove_file(&temp_state);
+        std::env::set_var("YW4_LAUNCHER_STATE", &temp_state);
+
+        let res = locate_installed_game_path(PathBuf::from(".")).unwrap();
+        let cur_dir = std::env::current_dir().unwrap();
+        assert_eq!(res.install, cur_dir.display().to_string());
+        assert_eq!(res.saves, "install");
+
+        let _ = std::fs::remove_file(&temp_state);
+        std::env::remove_var("YW4_LAUNCHER_STATE");
+    }
+
+    #[test]
+    fn test_locate_installed_game_flat_and_appdata() {
+        let _guard = TEST_LOCK.lock().unwrap();
+        let temp = std::env::temp_dir().join("yw4_test_locate_flat");
+        let _ = std::fs::remove_dir_all(&temp);
+
+        let temp_state = std::env::temp_dir().join("yw4_test_locate_state_flat.json");
+        let _ = std::fs::remove_file(&temp_state);
+        std::env::set_var("YW4_LAUNCHER_STATE", &temp_state);
+
+        std::fs::create_dir_all(&temp).unwrap();
+        std::fs::write(temp.join("yw4.exe"), b"").unwrap();
+        std::fs::write(temp.join("game.ini"), "YW4_SAVE=%APPDATA%/YW4 Recomp/save\nYW4_SETTINGS_FILE=%APPDATA%/YW4 Recomp/settings.ini\n").unwrap();
+
+        let res = locate_installed_game_path(temp.clone()).unwrap();
+        assert_eq!(res.install, temp.display().to_string());
+        assert_eq!(res.saves, "appdata");
+        assert_eq!(res.mode, "folders");
+
+        let _ = std::fs::remove_dir_all(&temp);
         let _ = std::fs::remove_file(&temp_state);
         std::env::remove_var("YW4_LAUNCHER_STATE");
     }

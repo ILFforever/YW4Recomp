@@ -339,14 +339,15 @@
         </div>
         <div class="settings-col">
         <section class="card">
-          <h2>Report a problem</h2>
+          <h2>Report a bug</h2>
           <div class="set-row">
-            <span><b>Logs</b><small>Add the newest log file to your report</small></span>
-            <button class="btn small" type="button" id="help-logs">Open</button>
+            <span><b>Report a bug</b><small>A short form, then a zip for GitHub</small></span>
+            <button class="btn small primary" type="button" id="help-report">Report</button>
           </div>
           <div class="set-row">
-            <span><b>Report a problem</b><small>On GitHub</small></span>
-            <button class="btn small" type="button" data-link="issues">Open</button>
+            <span><b>Reports and logs</b><small>Saved report zips and the game's logs</small></span>
+            <span class="row-btns"><button class="btn small" type="button" id="help-reports">Reports</button>
+            <button class="btn small" type="button" id="help-logs">Logs</button></span>
           </div>
         </section>
         <section class="card">
@@ -563,10 +564,47 @@
 
 <dialog id="crash-dlg" aria-labelledby="crash-title">
   <h2 id="crash-title">The game closed unexpectedly</h2>
-  <p>Report it? This saves the log in a zip and opens GitHub. Drag the zip in and post it.</p>
+  <p>Report it? A short form, then a zip with this play's log for GitHub.</p>
   <div class="dialog-buttons">
     <button class="btn" type="button" id="crash-no">Not now</button>
     <button class="btn primary" type="button" id="crash-yes">Report it</button>
+  </div>
+</dialog>
+
+<!-- Report a bug: the game overlay's two pages (gamemenu.c), then Report saved -->
+<dialog id="report-dlg" aria-labelledby="report-title">
+  <h2 id="report-title">Report a bug<span class="step" id="report-step">1 of 2</span></h2>
+  <div class="report-page" id="report-p1">
+    <span class="q">What's wrong?</span>
+    <div class="picks" id="report-kinds" role="group" aria-label="What's wrong?"></div>
+    <div class="q-line"><label class="q" for="report-text">What happened?</label><span class="fine">You can also write it on GitHub</span></div>
+    <textarea id="report-text" maxlength="4000" placeholder="For example: Whisper has no shadow on the school field."></textarea>
+    <span class="q">How often?</span>
+    <div class="picks" id="report-oftens" role="group" aria-label="How often?"></div>
+  </div>
+  <div class="report-page" id="report-p2" hidden>
+    <span class="q">Attach</span>
+    <label class="check"><input type="checkbox" id="report-log" checked> <span id="report-log-label">Game log and settings</span></label>
+    <label class="check"><input type="checkbox" id="report-save" checked> My save <span class="fine">so we can load the same place</span></label>
+    <label class="check"><input type="checkbox" id="report-build"> Last build's log <span class="fine">for build problems</span></label>
+    <p class="fine report-note">Send to GitHub saves a zip and opens GitHub with your answers filled in. Drag the zip in and post it.</p>
+  </div>
+  <div class="report-page" id="report-p3" hidden>
+    <div class="report-done">
+      <span class="done-mark" aria-hidden="true"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg></span>
+      <div>
+        <code id="report-zip"></code>
+        <p id="report-sent"></p>
+        <p>Drag the zip into the last box and post it.</p>
+      </div>
+    </div>
+  </div>
+  <div class="dialog-buttons">
+    <button class="btn" type="button" id="report-back">Cancel</button>
+    <span class="spacer" id="report-gap1"></span>
+    <button class="btn" type="button" id="report-alt" hidden>Save only</button>
+    <span class="spacer" id="report-gap3" hidden></span>
+    <button class="btn primary" type="button" id="report-go">Next</button>
   </div>
 </dialog>
 

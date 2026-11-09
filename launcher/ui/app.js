@@ -887,12 +887,96 @@ if (T && T.event) T.event.listen('game-crashed', ({ payload }) => {
   $('crash-yes').focus();
 });
 $('crash-no').addEventListener('click', () => $('crash-dlg').close());
-$('crash-yes').addEventListener('click', async () => {
-  $('crash-dlg').close();
+$('crash-yes').addEventListener('click', () => { $('crash-dlg').close(); openReport(crash); });
+
+// ---- Report a bug: the game overlay's form (gamemenu.c) as a popup. Page 1 what's wrong, what happened, how often;
+// page 2 what to attach, Save only or Send to GitHub (save_report: a zip in reports\, GitHub's form filled in);
+// page 3 Report saved. From a crash it comes with Game closed picked and that play's log.
+const REPORT_KINDS = ['Graphics', 'Slow or stutters', 'Sound', 'Controls', 'Game got stuck', 'Game closed', 'Build or launcher', 'Other'];
+const REPORT_OFTENS = ['Every time', 'Sometimes', 'Once'];
+const report = { page: 1, kind: '', often: '', crash: null, zip: '', sent: false };
+
+function reportPicks(box, list, key) {
+  box.textContent = '';
+  for (const name of list) {
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.className = 'pick';
+    b.textContent = name;
+    b.setAttribute('aria-pressed', String(report[key] === name));
+    b.addEventListener('click', () => {
+      report[key] = report[key] === name ? '' : name;
+      for (const o of box.children) o.setAttribute('aria-pressed', String(report[key] === o.textContent));
+      if (key === 'kind') $('report-build').checked = report.kind === 'Build or launcher';
+    });
+    box.append(b);
+  }
+}
+
+function reportForm() {
+  return { kind: report.kind, often: report.often, text: $('report-text').value.trim(), log: $('report-log').checked,
+    save: $('report-save').checked, buildLog: $('report-build').checked,
+    crashLog: report.crash ? report.crash.log || null : null, crashCode: report.crash ? report.crash.code : null };
+}
+
+function reportPage(n) {
+  report.page = n;
+  for (const i of [1, 2, 3]) $('report-p' + i).hidden = i !== n;
+  $('report-step').textContent = n < 3 ? `${n} of 2` : '';
+  $('report-title').firstChild.textContent = n < 3 ? 'Report a bug' : 'Report saved';
+  $('report-back').textContent = n === 1 ? 'Cancel' : n === 2 ? 'Back' : 'Show the zip';
+  $('report-alt').hidden = n === 1;
+  $('report-gap1').hidden = n === 3;  // pages 1-2: the back button alone on the left; page 3: Show the zip and Open GitHub
+  $('report-gap3').hidden = n !== 3;
+  $('report-alt').textContent = n === 2 ? 'Save only' : report.sent ? 'Open GitHub again' : 'Open GitHub';
+  $('report-go').textContent = n === 1 ? 'Next' : n === 2 ? 'Send to GitHub' : 'Done';
+}
+
+function openReport(fromCrash) {
+  report.kind = fromCrash ? 'Game closed' : '';
+  report.often = '';
+  report.crash = fromCrash || null;
+  report.zip = '';
+  report.sent = false;
+  $('report-text').value = '';
+  $('report-log').checked = true;
+  $('report-save').checked = true;
+  $('report-build').checked = false;
+  $('report-log-label').textContent = fromCrash ? "This play's log and settings" : 'Game log and settings';
+  reportPicks($('report-kinds'), REPORT_KINDS, 'kind');
+  reportPicks($('report-oftens'), REPORT_OFTENS, 'often');
+  reportPage(1);
+  $('report-dlg').showModal();
+  $('report-text').focus();
+}
+
+async function reportSave(send) {
   try {
-    await invoke('report_crash', { install: inst.install, code: crash ? crash.code : -1, log: crash ? crash.log : '' });
-  } catch (e) { popup('Something went wrong', String(e)); }
+    report.zip = await invoke('save_report', { install: inst.install, saves: inst.saves || 'install', form: reportForm(), send });
+    report.sent = send;
+    $('report-zip').textContent = 'reports\\' + report.zip.split(/[\\/]/).pop();
+    $('report-sent').textContent = send ? 'GitHub opened in your browser with your answers filled in.'
+      : 'Open GitHub to post it, or share the zip another way.';
+    reportPage(3);
+  } catch (e) { $('report-dlg').close(); popup('Something went wrong', String(e)); }
+}
+
+$('report-back').addEventListener('click', () => {
+  if (report.page === 1) $('report-dlg').close();
+  else if (report.page === 2) reportPage(1);
+  else invoke('show_report', { install: inst.install, zip: report.zip }).catch((e) => popup('Something went wrong', String(e)));
 });
+$('report-alt').addEventListener('click', () => {
+  if (report.page === 2) reportSave(false);
+  else { invoke('open_report_github', { install: inst.install, form: reportForm() }); report.sent = true; reportPage(3); }
+});
+$('report-go').addEventListener('click', () => {
+  if (report.page === 1) reportPage(2);
+  else if (report.page === 2) reportSave(true);
+  else $('report-dlg').close();
+});
+$('help-report').addEventListener('click', () => { if (inst) openReport(null); });
+$('help-reports').addEventListener('click', () => invoke('open_folder', { install: inst.install, which: 'reports', saves: inst.saves }));
 
 $('play').addEventListener('click', async () => {
   if (!$('dlc-keys-box').hidden) {

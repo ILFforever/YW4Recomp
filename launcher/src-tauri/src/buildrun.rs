@@ -94,7 +94,13 @@ pub fn builder_bundled(app: AppHandle) -> bool {
     bundled_dir(&app).is_some()
 }
 
+/// The current build's log file (<install>\logsuild_last.log), so a bug report can attach the last build's log.
+static BUILD_LOG: Mutex<Option<std::fs::File>> = Mutex::new(None);
+
 fn emit_log(app: &AppHandle, line: &str) {
+    if let Ok(mut f) = BUILD_LOG.lock() {
+        if let Some(f) = f.as_mut() { use std::io::Write; let _ = writeln!(f, "{line}"); }
+    }
     let _ = app.emit("build-log", line.to_string());
 }
 
@@ -286,6 +292,7 @@ fn run_all(app: &AppHandle, run: &Running, plan: &Plan) -> Result<(), String> {
     for d in ["data", "work", "mods", "screenshots", "logs"] {
         std::fs::create_dir_all(inst.join(d)).map_err(|e| format!("can't create {}: {e}", inst.join(d).display()))?;
     }
+    if let Ok(mut f) = BUILD_LOG.lock() { *f = std::fs::File::create(inst.join("logs").join("build_last.log")).ok(); }
     let b = builder(app, &inst);
     let icon_src = b.src.join("work").join("icon");
     let icon_dst = inst.join("work").join("icon");
