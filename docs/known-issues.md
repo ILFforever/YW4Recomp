@@ -19,6 +19,13 @@ What is known to be missing or wrong, roughly in the order it is likely to matte
   frames/s with the GPU busy ~400 ms per frame for a while, then it recovered. Likely cause: each aspect ratio's set
   of screen-sized targets (7680×2160 at 32:9) stayed in video memory until 300 frames unused, so cycling through all
   of them overflowed it. Fix in testing: the old size's targets are freed 8 frames after a size setting changes.
+  **Fixed 2026-11-10** (it came back with DLSS: owner, "performance chugs after switching ultrawide modes"): 4K, DLSS,
+  21:9 -> 32:9 still gave ~25 frames of 200+ ms GPU time (~6 s; video memory 5.8 GB against 4.5 settled), with or
+  without DLSS frame generation; TAA had none. Both sizes' targets were in memory together for the 8 frames. Now
+  the old size's 3D targets are freed at once, before the first image of the new size is made (after waiting for
+  the GPU; with frame generation, for the whole device): 0 slow frames without frame generation, 2 with DLSS frame
+  generation, peak 4.9 GB (`YW4_SIZE_FREE=0`: the old way). Still open: FSR frame generation with DLSS at 32:9 4K is
+  slow after the switch either way (~80 frames of 200-660 ms "present", the same with the old freeing).
 - **Crash (GPU device lost) after switching the upscaling mode several times in a row** (owner, 2026-10-29, DLSS,
   4K 21:9, right after the aspect-ratio cycling above): `vkWaitSemaphores failed (VkResult -4)`. Memory peaked at
   5.0 GB against ~3.3 GB normally, so video memory running out is a suspect. Not reproduced since the 8-frame freeing

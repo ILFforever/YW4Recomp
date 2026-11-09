@@ -45,6 +45,8 @@ folder; a variable already in the environment wins. Without it a message says to
 | `YW4_WINDOW_SIZE=<w>x<h>` | Window size in pixels at start (default `1280x720`; `runtime/src/window.c`) |
 | `YW4_VULKAN_VALIDATION=1` | Turn on the Vulkan validation layer |
 | `YW4_THREAD_PRIO=0` | Every thread at normal Windows priority, instead of following the game's thread priorities (and the runtime's audio, pacing and GPU-queue threads raised); for A/B tests |
+| `YW4_SET_AT=<frame>:<NAME>=<value>,...` | Tests: at those presented frames a panel setting changes as the panel would change it (one step at a time until it shows that value; not saved), e.g. `YW4_SET_AT=4000:YW4_ASPECT=32:9,4600:YW4_UPSCALE=1` (`runtime/src/settings.c`) |
+| `YW4_SIZE_FREE=0` | Tests: after a resolution, upscaling or aspect-ratio change, free the old size's targets only 8 frames later (the way before 2026-11-10), not at once before the new size's are made |
 | `YW4_FORCE_D32S8=1` | Force depth format 0x35 (D24S8) to map to D32S8 even on GPUs that support D24S8; for testing the AMD depth fallback path |
 | `YW4_SHADOW_RECHECK_LOG=1` | Our shadow pass: a line per shadow layer (cascade, target, the game's draws, how many were rechecks, ours) and what was learned of the first rechecked object's submeshes |
 | `YW4_SHADOWS=game` | The game's own shadow-caster draws; the default is our pass ([decision 0024](decisions/0024-shadow-pass.md), default since 2026-10-29: faster). The settings panel (F1, SHADOW PASS) switches while playing |

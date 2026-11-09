@@ -29,6 +29,7 @@
 #include "post.h"
 #include "gpu_internal.h"
 #include "host.h"
+#include "settings.h"
 #include "shadow.h"
 #include "tegra.h"
 #include "window.h"
@@ -1359,6 +1360,63 @@ static void evict_images(uint64_t unused_frames, int scaled_only) {
     if (freed && nvn_stats_enabled()) fprintf(stderr, "yw4: gpu: %d unused images to free\n", freed);
 }
 
+/* A size setting just changed: takes out every image made at the old picture size (the 3D's scale or the aspect
+ * ratio's width) at once, before the new size's are made, so the two sets never take video memory together.
+ * Not: the shadow maps (square, their own size setting) and the images the window may still be showing (the
+ * presented ones; they go with the 8-frame eviction). The caller has waited for the GPU. gpu_lock held. */
+static int evict_resized_images(void) {
+    uint64_t done = completed();  /* not one the command buffer being recorded uses */
+    int freed = 0;
+    for (int b = 0; b < IMAGE_BUCKETS; b++)
+        for (GpuImage **pp = &images[b]; *pp;) {
+            GpuImage *g = *pp;
+            int resized = g->key.wide_den || (g->key.scale_den && g->key.width != g->key.height);
+            if (resized && g->last_seq <= done && !gpu_is_presented(g->key.addr)) {
+                *pp = g->next;
+                g->next = dying;
+                dying = g;
+                freed++;
+            } else {
+                pp = &g->next;
+            }
+        }
+    if (freed) image_epoch++;
+    return freed;
+}
+
+/* A size setting changed (resolution, upscaling, aspect ratio): the old size's screen-sized targets go 8 frames
+ * later (unused for 4), not after 300 unused frames: cycling through the aspect ratios kept every size's set
+ * (7680x2160 at 32:9) and overflowed video memory, ~400 ms frames until they went (2026-10-29). And the old size's
+ * 3D targets go at once, once the GPU is done (with frame generation, the whole device), before the first image of
+ * the new size is made: with DLSS at 4K, 21:9 -> 32:9 still had both sets in video memory (5.8 GB against
+ * 4.5 settled) and ~25 frames of 200+ ms GPU time, ~6 s (2026-11-10). Called before an image is made and at each
+ * present. gpu_lock held. */
+static uint64_t quick_evict_at;
+static void destroy_some(int n);
+static void size_change_check(void) {
+    static int last_sizes = -1;
+    int sizes = gpu_res_height() << 8 | gpu_upscale() << 4 | gpu_wide();
+    if (sizes == last_sizes) return;
+    static int at_once = -1;  /* YW4_SIZE_FREE=0: only the 8-frame eviction (A/B tests) */
+    if (at_once < 0) at_once = !(getenv("YW4_SIZE_FREE") && *getenv("YW4_SIZE_FREE") == '0');
+    if (last_sizes >= 0) quick_evict_at = present_count + 8;
+    if (last_sizes >= 0 && at_once) {
+        gpu_wait(gpu_submitted(), UINT64_MAX);
+        if (gpu_fg()) {
+            /* frame generation: the last frame's depth and motion were tagged for Streamline until its present
+             * (synchronous, gpu_present -> window_present_image, done by now) and FSR's work is on the queue too:
+             * all of it finishes first, as when frame generation switches (window.c) */
+            host_lock(&vk.queue_lock);
+            vkDeviceWaitIdle(vk.device);
+            host_unlock(&vk.queue_lock);
+        }
+        int n = evict_resized_images();
+        destroy_some(INT_MAX);
+        fprintf(stderr, "yw4: gpu: size setting changed: %d images of the old size freed at once\n", n);
+    }
+    last_sizes = sizes;
+}
+
 /* gpu_present: destroys a few of the images evict_images took out. gpu_lock held. */
 static void destroy_some(int n) {
     while (dying && n-- > 0) {
@@ -1378,6 +1436,7 @@ GpuImage *image_of(VkCommandBuffer cb, NvnTexture *t) {
         }
         return g;
     }
+    size_change_check();  /* the old size's images go before the new size's are made */
     int64_t made_at = host_now_ns();  /* a new image: timed for the stall report (its upload included) */
     VkFormat fmt = gpu_format(t->format);
     if (fmt == VK_FORMAT_UNDEFINED || t->target == TARGET_BUFFER || t->samples > 1)
@@ -2205,16 +2264,7 @@ void gpu_present(NvnTexture *t, uint64_t frame, const int crop[4]) {
     gpu_upscale_begin(0, 0);  /* the scene's images are the 3D's again (upscaling) */
     scan_writes();
     if (present_count % 300 == 0) evict_images(300, 0);
-    /* A size setting changed (resolution, upscaling, aspect ratio): the old size's screen-sized targets go
-     * a few frames later, not after 300 unused frames. Cycling through the aspect ratios kept every size's
-     * set (7680x2160 at 32:9) and overflowed video memory: ~400 ms frames until they went (2026-10-29). */
-    static int last_sizes = -1;
-    static uint64_t quick_evict_at;
-    int sizes = gpu_res_height() << 8 | gpu_upscale() << 4 | gpu_wide();
-    if (sizes != last_sizes) {
-        if (last_sizes >= 0) quick_evict_at = present_count + 8;
-        last_sizes = sizes;
-    }
+    size_change_check();
     if (quick_evict_at && present_count >= quick_evict_at) {
         quick_evict_at = 0;
         evict_images(4, 1);
@@ -2250,6 +2300,7 @@ void gpu_present(NvnTexture *t, uint64_t frame, const int crop[4]) {
         gpu_compute_trace(present_count);
     }
     gpu_fg_test_switch(present_count);
+    settings_test_at(present_count);
     int fg_slot = -1;  /* frame generation (gpu_fg.c): the frames go to its pacing thread */
     if (gpu_fg()) {
         VkCommandBuffer cb = begin();

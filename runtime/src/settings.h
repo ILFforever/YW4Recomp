@@ -6,6 +6,8 @@
 #ifndef YW4_SETTINGS_H
 #define YW4_SETTINGS_H
 
+#include <stdint.h>
+
 enum { SETTINGS_MAX_OPTIONS = 6 };
 
 typedef struct {
@@ -50,6 +52,8 @@ int settings_rows(SettingRow *rows, int max, int *selected);
  * `row` one option forward (dir 1) or back (-1), as Right / Left on it. */
 int settings_player_rows(SettingRow *rows, int max);
 void settings_change(int row, int dir);
+/* YW4_SET_AT=<frame>:<NAME>=<value>,...: tests change settings at those presented frames (gpu.c calls it). */
+void settings_test_at(uint64_t frame);
 /* The overlay's Overlay page: the HUD's scale (opacity 0) or opacity (1) slider: its position 0..1 and its text, and
  * one step up (dir 1) or down (-1), saved. */
 void settings_hud_slider(int opacity, float *frac, char *text, size_t n);

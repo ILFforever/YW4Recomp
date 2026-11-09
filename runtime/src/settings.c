@@ -556,6 +556,33 @@ void settings_hud_set(int opacity, float frac) {
     settings_save();
 }
 
+/* YW4_SET_AT=<frame>:<NAME>=<value>,... (tests): at those presented frames a setting changes as the panel would change
+ * it, one step at a time until it shows that value (not saved), e.g. YW4_SET_AT=3000:YW4_ASPECT=32:9,3300:YW4_UPSCALE=1. */
+void settings_test_at(uint64_t frame) {
+    static const char *e = (const char *)1;
+    if (e == (const char *)1) e = getenv("YW4_SET_AT");
+    for (const char *p = e; p && *p;) {
+        char *end;
+        unsigned long long f = strtoull(p, &end, 10);
+        if (*end != ':') return;
+        const char *name = end + 1, *eq = strchr(name, '='), *next = strchr(name, ',');
+        if (!eq || (next && next < eq)) return;
+        size_t vlen = next ? (size_t)(next - eq - 1) : strlen(eq + 1);
+        if (f == frame)
+            for (int i = 0; i < NSETTINGS; i++) {
+                const Setting *s = setting(i);
+                if (!s->env || strlen(s->env) != (size_t)(eq - name) || strncmp(s->env, name, (size_t)(eq - name))) continue;
+                for (int k = 0; k < s->noptions && s->noptions; k++) {
+                    const char *v = s->values[s->current()];
+                    if (v && strlen(v) == vlen && !strncmp(v, eq + 1, vlen)) break;
+                    setting_step(s, 1);
+                }
+                fprintf(stderr, "yw4: settings: %s is %s at frame %llu (YW4_SET_AT)\n", s->env, s->values[s->current()], f);
+            }
+        p = next ? next + 1 : NULL;
+    }
+}
+
 void settings_change(int row, int dir) {
     int at = theme_row();
     if (row == at) {  /* Look > Theme */
