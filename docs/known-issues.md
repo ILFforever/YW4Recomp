@@ -61,6 +61,11 @@ What is known to be missing or wrong, roughly in the order it is likely to matte
 ## Game and system
 
 - **C++ exceptions are not supported**: nothing in `main` throws ([decision 0012](decisions/0012-musl-startup-tls-exceptions-libc.md)).
+- **Startup boot / loading screen (Switch-style)**: During the ~6.5 s between process launch and the first presented
+  frame (milestone Frame 1), the window is created but displays an unpresented blank surface while Vulkan, DLSS/Streamline,
+  and guest engine constructors initialize. A Switch-style startup screen in `window.c` should clear the swapchain to
+  black and render an animated indicator or the game logo (`game_logo` in `gamelogo.c`, decision 0048) in the bottom corner
+  during the event pump until Frame 1 arrives, fading seamlessly into the game's presentation without blocking guest startup.
 
 ## Overlay
 

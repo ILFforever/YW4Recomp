@@ -57,6 +57,8 @@ game can't write to):
 
 ## Consequences
 
-- Install size: ~11 GB with the RomFS copy, plus mods; ~8.8 GB after freeing up space.
+- Install size: ~11.3 GB with the RomFS copy and DLC; ~9.3 GB after freeing up space (~2.0 GB reclaimed, measured
+  2026-11-10; see [docs/disk-usage.md](../disk-usage.md)). Peak disk space during building is 11.4 GB (folders) or
+  ~20.7 GB (NSP extraction).
 - The order of work: `game.ini` in `yw4.exe`; progress lines in the build steps; the launcher screens with real
   logic, one at a time; packaging, tested on a clean PC.

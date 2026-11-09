@@ -19,6 +19,10 @@ the decompressed `main`).
   where the build looks for it, for example `work/deps/fsr-2.4.0-dl/FidelityFX-SDK-v2.4.0.zip` or
   `work/deps/streamline-2.14.16-dl/streamline-sdk-v2.14.16.zip` (URLs and hashes in `tools/yw4/deps.py`); the
   hash is checked either way. NVIDIA's files are under NVIDIA's own licence, so they are never committed.
+- Disk space: an install takes ~11.3 GB uncleaned, or ~9.3 GB after "Free up space" (reclaims ~2.0 GB). Peak disk
+  space during building is ~11.4 GB when copying from folders, or ~20.7 GB when extracting from NSP/XCI (due to
+  temporary NCAs). Building the launcher itself from source takes ~10.3 GB in `launcher/src-tauri/target/`. Details
+  and folder breakdown in [disk-usage.md](disk-usage.md).
 
 ## One-time setup
 
