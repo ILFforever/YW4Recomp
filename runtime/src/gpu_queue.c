@@ -66,6 +66,7 @@ static void run(const Job *j) {
 
 static void worker(void *arg) {
     (void)arg;
+    host_thread_set_priority(NULL, 39);  /* same priority as guest render workers */
     for (;;) {
         host_lock(&lock);
         while (done == queued) host_cond_wait(&work, &lock, -1);

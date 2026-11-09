@@ -56,6 +56,8 @@ int host_cpu_count(void);
 /* A handle to the calling thread, and the CPU time (user + kernel) a thread has used so far. */
 void *host_thread_self(void);
 int64_t host_thread_cpu_ns(void *thread);
+/* Sets the host priority of `thread` (or calling thread if NULL) based on guest priority (0..63). */
+void host_thread_set_priority(void *thread, int guest_priority);
 
 /* Address space at exactly `want` with no memory behind it yet, in which the host tracks
  * which pages get written (Windows: MEM_WRITE_WATCH). NULL if the range is taken. */

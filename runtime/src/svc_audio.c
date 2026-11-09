@@ -88,6 +88,7 @@ static SDL_AudioStream *open_stream(uint32_t channels) {
 
 static void player_thread(void *arg) {
     AudioOut *o = arg;
+    host_thread_set_priority(NULL, 36);
     int64_t next = host_now_ns();
     const int ahead = SAMPLE_RATE / 1000 * AUDIO_AHEAD_MS * (int)o->channels * 2;  /* bytes */
     for (;;) {

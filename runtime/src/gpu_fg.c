@@ -407,6 +407,7 @@ float gpu_fg_shown_per_frame(void) {
 
 static void pacer(void *arg) {
     (void)arg;
+    host_thread_set_priority(NULL, 36);  /* presentation pacing: wake up with minimal jitter */
     double interval_ms = 16.7;
     int64_t last_ns = 0;
     for (;;) {

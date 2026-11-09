@@ -476,6 +476,7 @@ static void thread_main(void *p) {
     jmp_buf jump;
     cur = t;
     t->host = host_thread_self();
+    host_thread_set_priority(t->host, t->priority);
     exit_jump = &jump;
     if (setjmp(jump) == 0) {
         yw4_resolve(t->entry)(t->ctx);
@@ -590,6 +591,7 @@ uint32_t yw4_kernel_init(CPUState *ctx, uint64_t stack, uint64_t stack_size) {
     nrunnable = 1;
     cur = t;
     t->host = host_thread_self();
+    host_thread_set_priority(t->host, t->priority);
     return yw4_handle_new(&t->obj);
 }
 
@@ -908,7 +910,10 @@ static void svc(CPUState *ctx, uint32_t imm) {
     }
     case 0x0D: {  /* SetThreadPriority(handle, priority) */
         KThread *t = thread_get((uint32_t)x[0]);
-        if (t) t->priority = (int32_t)x[1];
+        if (t) {
+            t->priority = (int32_t)x[1];
+            if (t->host) host_thread_set_priority(t->host, t->priority);
+        }
         x[0] = t ? R_OK : R_INVALID_HANDLE;
         return;
     }

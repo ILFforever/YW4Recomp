@@ -119,9 +119,19 @@ int64_t host_now_ns(void) {
 
 void *host_thread_self(void) {
     HANDLE h = NULL;
-    DuplicateHandle(GetCurrentProcess(), GetCurrentThread(), GetCurrentProcess(), &h, THREAD_QUERY_LIMITED_INFORMATION,
-                    FALSE, 0);
+    DuplicateHandle(GetCurrentProcess(), GetCurrentThread(), GetCurrentProcess(), &h,
+                    THREAD_QUERY_LIMITED_INFORMATION | THREAD_SET_INFORMATION, FALSE, 0);
     return h;
+}
+
+void host_thread_set_priority(void *thread, int guest_priority) {
+    HANDLE h = thread ? (HANDLE)thread : GetCurrentThread();
+    int p = THREAD_PRIORITY_NORMAL;
+    if (guest_priority < 38) p = THREAD_PRIORITY_HIGHEST;
+    else if (guest_priority <= 40) p = THREAD_PRIORITY_ABOVE_NORMAL;
+    else if (guest_priority >= 58) p = THREAD_PRIORITY_LOWEST;
+    else if (guest_priority >= 50) p = THREAD_PRIORITY_BELOW_NORMAL;
+    SetThreadPriority(h, p);
 }
 
 int64_t host_thread_cpu_ns(void *thread) {
@@ -316,6 +326,11 @@ int64_t host_thread_cpu_ns(void *thread) {
     struct timespec ts;
     if (!thread || clock_gettime(*(clockid_t *)thread, &ts)) return 0;
     return (int64_t)ts.tv_sec * 1000000000 + ts.tv_nsec;
+}
+
+void host_thread_set_priority(void *thread, int guest_priority) {
+    (void)thread;
+    (void)guest_priority;
 }
 
 void host_process_usage(int64_t *cpu_ns, uint64_t *rss_bytes) {

@@ -66,6 +66,7 @@ void yw4_wait_vsync(uint64_t n) {
 
 static void vsync_thread(void *arg) {
     (void)arg;
+    host_thread_set_priority(NULL, 36);
     int64_t next = host_now_ns();
     for (;;) {
         next += VSYNC_PERIOD_NS;

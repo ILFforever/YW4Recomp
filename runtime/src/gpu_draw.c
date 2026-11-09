@@ -744,6 +744,7 @@ static const struct {
 
 static void prebuild_thread(void *arg) {
     (void)arg;
+    host_thread_set_priority(NULL, 50);  /* background shader warmup: yield to boot/intro playback */
     for (size_t i = 0; i < sizeof prebuilt / sizeof *prebuilt; i++) {
         /* both stages translated (load_shader stops the game on a missing file), else nothing to warm */
         int have = 1;

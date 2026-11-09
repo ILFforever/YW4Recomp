@@ -30,6 +30,7 @@ const char *yw4_log_path(void) { return log_name; }
 
 static void copy_thread(void *arg) {
     (void)arg;
+    host_thread_set_priority(NULL, 60);  /* background disk logging: yield to gameplay and rendering */
     char buf[4096];
     for (;;) {
 #ifdef _WIN32
