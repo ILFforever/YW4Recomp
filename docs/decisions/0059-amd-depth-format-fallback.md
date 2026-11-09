@@ -51,3 +51,9 @@ The opening prologue scene in Nate's room exhibited:
 3. **A/B comparison support**:
    `runtime/src/gpu_ab.c` recognises `VK_FORMAT_D32_SFLOAT_S8_UINT` alongside `VK_FORMAT_D32_SFLOAT` for floating-point
    depth comparisons.
+
+## Tested
+
+- 2026-11-10 (owner): an ASUS Zenbook with a Ryzen 5 7530U (integrated Radeon graphics), clean install through the
+  launcher: the picture is right, about 40 frames/s at native resolution, where the Eden emulator gets 25-30.
+- On NVIDIA (RTX 4070 laptop), `YW4_FORCE_D32S8=1` runs the fallback without problems; the D24S8 path is unchanged.

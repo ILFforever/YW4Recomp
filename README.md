@@ -30,7 +30,9 @@
 
 > [!NOTE]
 > Platforms:
-> - Windows - x86-64, Vulkan graphics backend (this is what is built and tested)
+> - Windows - x86-64, Vulkan graphics backend (this is what is built and tested): NVIDIA RTX, and AMD Radeon
+>   ([decision 0059](docs/decisions/0059-amd-depth-format-fallback.md)): a Ryzen 5 7530U laptop's integrated graphics
+>   runs it at about 40 frames/s at native resolution, where the Eden emulator gets 25-30
 > - Linux - x86-64, Vulkan: planned; the runtime is written to be portable but has not been tested yet
 
 > [!NOTE]
@@ -44,11 +46,11 @@
 > **1.0.0 releasing soon:** the first release, with the launcher. See [How to play](#how-to-play).
 
 Work in progress: not tested from start to finish yet. What runs so far: from boot through the start of a new
-game (logos, title menu, name entry, the opening cutscenes, the Amano house and town, the Yo-kai Pad menus, the
-diary and autosave), and from late-game saves: towns at night, the bamboo forest, the Yo-kai World, and battles.
+game (logos, title menu, name entry in a popup, Yo-kai nicknames included, the opening cutscenes, the Amano house
+and town, the Yo-kai Pad menus, the diary and autosave), and from late-game saves: towns at night, the bamboo forest, the Yo-kai World, and battles.
 Most of the game has not been tried.
 
-- **Frame rate**: the game's 30 frames/s, or 60, 120, 144 or no limit (FRAME RATE in the settings panel, F1). The game
+- **Frame rate**: the game's 30 frames/s, or 60, 120, 144 or no limit (FRAME RATE in Settings, F1). The game
   moves by real time, so walking, battles, menus and cutscenes all work at any rate. The game's own 30 holds
   everywhere tested.
 - **Graphics**: up to 4K and ultrawide, sharper shadows and textures, TAA, and upscaling with NVIDIA DLSS or AMD FSR
@@ -372,12 +374,14 @@ FSR is AMD's, under the MIT licence.
 yours (A B X Y and LB/RT on Xbox; × ○ □ △ and L1-R3 on PlayStation; ZL/ZR on Nintendo). By default the game's
 confirm is your controller's own confirm: × on a DualSense, A on Xbox. **Haptics and vibration** work through the
 controller's motors ([decision 0058](docs/decisions/0058-controller-rumble.md)), downmixing dual actuators to low/high rumble.
+It is on by default; a **CONTROLLER VIBRATION** switch on the overlay's Controls page turns it off.
 Tested by playing with a **DualSense (PS5)**, battles included, and with the controls page.
 
 **Mouse:** the game's code still has a mouse camera that the Switch version never feeds; we feed it, so the mouse
-turns the camera. A click in the
-window gives the mouse to the game, Alt or opening the panel or the overlay gives it back. Mouse buttons and the wheel can be bound
-on the CONTROLS page; none are by default.
+turns the camera. A click in the window gives the mouse to the game, Alt or opening the panel or the overlay gives it
+back. The mouse also works in the Yo-kai Pad and its pages: hover, click, and the wheel scrolls lists (work in
+progress, [decision 0057](docs/decisions/0057-mouse-menu-lists.md)). In battles the wheel selects characters. Mouse
+buttons can be bound on the CONTROLS page; none are by default.
 
 </details>
 
@@ -399,7 +403,8 @@ show those instead of the Switch buttons. Below, the shortcut wheel and the mini
 
 Put a mod in `work/mods`, in the layout a modded Switch uses: `work/mods/contents/010086c00af7c000/<mod name>/romfs/...`
 (or simply `work/mods/<mod name>/romfs/...`). At start its files replace the game's at the same paths and its new
-files are added, as on a Switch; your dump is not changed. The log names each mod it loaded. `YW4_MODS` points to
+files are added, as on a Switch; your dump is not changed. The log names each mod it loaded. The launcher has an
+on/off switch for each mod. `YW4_MODS` points to
 another folder, `YW4_MODS=none` turns mods off. The fan **English translation patch** works this way (not included,
 get yours from [GameBanana](https://gamebanana.com/mods/480884)):
 
@@ -419,13 +424,15 @@ pause and open it. On a controller: the **touchpad** on PlayStation, **Share** o
 Series, **Capture** on a Switch Pro controller, or **Back + Start** together on any controller. The game pauses the
 way its own pause does (the whole world stops), without its pause screen. From the side panel:
 
-- **Settings**: every option of the settings panel, by section, with what each choice means. **Preview** (P, or Y /
+- **Settings**: every option of the settings panel, by section, with what each choice means (the developer options
+  need LEGACY MENUS on, see below). **Preview** (P, or Y /
   △) lets the game run again with a bar at the bottom holding that section's settings, so you see each change live
   and what it does to the frame rate; Escape pauses again.
 - **Controls**: the keys and controller buttons for every Switch button. Choose one, then press the new key or button.
 - **Overlay**: the performance HUD off, compact (the frame rate only) or detailed, which corner it sits in, its size and opacity, and
   what the detailed one shows.
-- **Report a bug** (coming soon), and **Exit game** (it asks first). F12 takes screenshots, in the overlay or not.
+- **Report a bug**: describe the problem, then save a zip with a screenshot and the log, or send it to GitHub (it
+  opens the form). **Exit game** (it asks first). F12 takes screenshots, in the overlay or not.
 
 W/S or the arrow keys choose, A/D or ←/→ change a setting, Enter selects, Q/E jump between sections (LB/RB or
 LT/RT on a controller). Holding a direction keeps moving. Escape, Backspace or B goes back one step; from the side
@@ -444,16 +451,20 @@ closes (a theme file added to the launcher's themes folder shows up in both).
 </details>
 
 <details>
-<summary><b>Settings panel</b>: every option in game (F1), the controls on F2, the performance HUD on F3</summary>
+<summary><b>Settings</b>: every option in game, F1 for settings, F2 for controls, F3 for the performance HUD</summary>
 
-Press **F1** in game for the settings panel: every option with all its choices, and what each one does (arrow keys or
-D-pad to choose and change). Its last row, **DEVELOPER OPTIONS**, opens the switches players don't need: which parts
-of the picture the game draws and which our own renderer does (the picture is the same), and speed-ups that look the
-same. **F2** opens the **CONTROLS** page: two keys or mouse buttons and one gamepad button for every Switch
-button and stick direction, changed by pressing the new one, and at the top the mouse's camera sensitivity, left-right and up-down. On a
-controller, open them from the in-game overlay (above). Your choices are saved in
+**F1** opens the overlay's **Settings** page: every option with all its choices, and what each one does (arrow keys or
+D-pad to choose and change). **F2** opens the overlay's **Controls** page: two keys or mouse buttons and one gamepad
+button for every Switch button and stick direction, changed by pressing the new one, and at the top the mouse's camera
+sensitivity, left-right and up-down. **F3** opens its **Overlay** page (the performance HUD). Each key pauses the game
+while its page is open; the same key again goes back to the game. On a controller, open them from the in-game overlay (above).
+
+**LEGACY MENUS** (Settings, ADVANCED) turns the keys back to the older panels: F1 opens the old settings panel, F2 the
+old controls page, F3 shows or hides the HUD. Only the old panel has **DEVELOPER OPTIONS**, the switches players
+don't need: which parts of the picture the game draws and which our own renderer does (the picture is the same), and
+speed-ups that look the same. Your choices are saved in
 `settings.ini` next to `yw4.exe` and kept for the next start. **F11** switches between full screen and a window (also
-the panel's WINDOW MODE row). Settings are in the panel and the overlay; the other function keys except F11 are debugging tools ([docs/debugging.md](docs/debugging.md)).
+the panel's WINDOW MODE row). **F12** takes a screenshot. The other function keys are debugging tools ([docs/debugging.md](docs/debugging.md)).
 
 ![Settings (F1): The settings panel: display, anti-aliasing and upscaling, frame generation and latency, detail, shadows; Developer options: The developer options: shadow pass, G-buffer, bloom, distance blur pass, battle blur](docs/screenshots/91-settings-panels.png)
 
@@ -481,7 +492,7 @@ the panel's WINDOW MODE row). Settings are in the panel and the overlay; the oth
 | Shadow pass, G-buffer, bloom, distance blur pass | The game's renderer or ours draws that part of the picture; the same picture. Ours by default |
 | Battle blur | The game's or fast (default): the blur as a battle starts with a quarter of the rounds, the same look, ~3 ms less GPU time |
 
-F3 shows a performance HUD in the window's corner: frame time, CPU and GPU cost and memory; with frame generation on,
+The performance HUD sits in the window's corner (F3 shows or hides it with LEGACY MENUS on): frame time, CPU and GPU cost and memory; with frame generation on,
 the big number is the frames on screen with DLSS or FSR beside it, and the game's own FPS goes small. The overlay's Overlay page chooses compact
 or detailed, the corner, the parts, the size and how solid its background is.
 
@@ -524,9 +535,9 @@ shadows here are our own pass with no graphical improvements applied (SHADOW PAS
 | **Our own renderer** | Replace the game's renderer pass by pass: the base for the graphics features above; shadows, surfaces, the shadow mask, bloom, distance blur and most screen passes (lighting, sky, tone mapping) are ours already |
 | **Better shadows** | Bigger shadow maps, PCSS soft shadows and contact shadows done; steadier cascades next |
 | **Better anti-aliasing** | FXAA, SMAA and TAA (steady thin edges: fences, nets, leaves) on the 3D scene before the UI is drawn, so text stays crisp; per-object motion for TAA next (a first version is in, off by default) |
-| **Mouse control for the Yo-kai Pad** | Pointing and clicking in menus has started: the Yo-kai Pad's icon grid works; full mouse control across the entire Yo-kai Pad (apps and sub-menus) is in progress |
+| **Mouse control for the Yo-kai Pad** | Pointing, clicking and wheel scrolling work on the Yo-kai Pad and the pages opened from it, such as the item and quest lists, Ukiukipedia and Members ([decision 0057](docs/decisions/0057-mouse-menu-lists.md)). On 2026-11-08 some pages still had open issues (Watch skills, Soulmate, Trophies, Treasure photos, Switch moves) |
 | **In-game overlay** | Escape or a controller button pauses the game and opens a side panel: settings, controls, the performance HUD's options, screenshots and exit, drawn like its design ([decision 0053](docs/decisions/0053-in-game-overlay.md)); Preview shows graphics changes live, and themes match the launcher's ([decision 0055](docs/decisions/0055-overlay-themes.md)). Next: testing on more controllers |
-| **Launcher** | A Windows app that takes your game files, checks them, builds the game and starts it, with mods, DLC, saves and screenshots in one place. Works from start to finish on the developer's PC, but it still needs this repo's tools, so for now [build from source](#building-from-source). Next: an installer and a portable zip ([decision 0052](docs/decisions/0052-launcher-packaging.md)), then a test on a clean PC |
+| **Launcher** | A Windows app that takes your game files, checks them, builds the game and starts it, with mods, DLC, saves and screenshots in one place. Works from start to finish. The installer and the portable zip are built ([decision 0052](docs/decisions/0052-launcher-packaging.md)), and a game build was tested on a second PC. Not released yet: until it is, [build from source](#building-from-source) |
 
 </details>
 
@@ -542,7 +553,7 @@ shadows here are our own pass with no graphical improvements applied (SHADOW PAS
 | **Ultrawide and other aspect ratios** | 16:10, 21:9 and 32:9 in the panel: a wider view of the world with the UI kept 16:9 in the middle; exploring, battles and cutscenes work; dialog dimming and the loading screen cover the full width |
 | **Upscaling (NVIDIA DLSS, AMD FSR)** | The world drawn smaller and rebuilt at full size, menus and text kept full size. **DLSS for the cleanest picture (NVIDIA RTX), FSR for the most frames (any GPU).** At 4K 21:9 on an RTX 4070 laptop, instead of ~81 frames/s with TAA: DLSS ~85 / ~92 / ~82 (quality / balanced / performance), FSR ~94 / ~106 / ~118. DLSS keeps fine patterns (far nets, perforated fences) clean where FSR gets grainy ([decisions 0039](docs/decisions/0039-fsr-upscaling.md), [0040](docs/decisions/0040-dlss-upscaling.md)) |
 | **Frame generation (NVIDIA DLSS, AMD FSR)** | A frame made between each two of the game's: about twice as many on screen, the menus kept still. **On RTX 40 and newer use DLSS**: more game frames left and cleaner moving characters. In a busy town at 4K 21:9 on an RTX 4070 laptop, instead of ~70 frames/s: DLSS ~150 shown (~75 game), FSR ~126 shown (~63 game, any GPU). NVIDIA Reflex in the panel too ([decision 0041](docs/decisions/0041-frame-generation.md)) |
-| **Keyboard, mouse and controllers** | Bindings on the panel's CONTROLS page, saved, with separate keys for battles and your controller's own button names; tested with a DualSense. Controller rumble and haptics supported ([decision 0058](docs/decisions/0058-controller-rumble.md)). On-screen button icons follow what you play with and your bindings (keyboard, Xbox, PlayStation or Nintendo, [decision 0042](docs/decisions/0042-button-icons-and-mouse.md)). The mouse turns the camera through the game's own unused mouse code |
+| **Keyboard, mouse and controllers** | Bindings on the panel's CONTROLS page, saved, with separate keys for battles and your controller's own button names; tested with a DualSense. Controller rumble and haptics, on by default, with an on/off switch on the overlay's Controls page ([decision 0058](docs/decisions/0058-controller-rumble.md)). On-screen button icons follow what you play with and your bindings (keyboard, Xbox, PlayStation or Nintendo, [decision 0042](docs/decisions/0042-button-icons-and-mouse.md)). The mouse turns the camera through the game's own unused mouse code |
 | **Mod support** | Mods in the Switch's layout are laid over your game files at start, as on a modded Switch, without touching your dump: the English translation patch runs (see [Features](#features), [decision 0043](docs/decisions/0043-mods-layeredfs.md)) |
 
 </details>
@@ -566,6 +577,9 @@ Requirements: Python 3.11+, Git, a C compiler (Clang recommended:
 [llvm-mingw](https://github.com/mstorsjo/llvm-mingw) on Windows; GCC also works), a GPU with Vulkan 1.3, and
 `glslangValidator` (from the [Vulkan SDK](https://vulkan.lunarg.com/), or a standalone glslang). SDL3 is fetched
 automatically on Windows. Full steps in [docs/setup.md](docs/setup.md).
+
+Disk space: an install takes about 11.3 GB, or 9.3 GB after "Free up space". Building from an NSP or XCI peaks near
+20.7 GB; from extracted folders, about 11.4 GB ([disk usage](docs/disk-usage.md)).
 
 1. If you will commit: install the guard that keeps game data out of commits, `python -m tools.yw4.guard --install`.
 2. Copy `config.example.toml` to `config.local.toml`. Point `exefs_dir` and `romfs_dir` at your extracted ExeFS and
