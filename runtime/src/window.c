@@ -890,7 +890,8 @@ static void menu_draw(VkImage dst, int32_t x0, int32_t y0, uint32_t bw, uint32_t
 
 /* The in-game overlay's design is 900 units high and at least 1600 wide (16:9; wider pictures give it more width).
  * A picture narrower than 16:9 (the 16:10 aspect ratio) would cut its right side off: there the 1600 x 900 is
- * fitted to the picture's width and centred top to bottom, as the game's UI is (gpu_draw.c). For a picture of
+ * fitted to the picture's width and centred top to bottom, as the game's UI is (gpu_draw.c). gamemenu_draw moves its
+ * frame (tint, side panel, bars) out over the strips above and below, to the picture's edges. For a picture of
  * pw x ph (any units): s, its units per design unit, and (ox, oy), where the design's (0, 0) is. */
 static void overlay_fit(float pw, float ph, float *s, float *ox, float *oy) {
     float k = ph / 900.0f;

@@ -108,6 +108,14 @@ white) covers the whole image. A 16:9 picture (the copyright notice) gets its bl
 of at the sides. The wider shapes take the old branch unchanged. Checked by the owner from screenshots: the
 copyright and autosave notices, loading, the town HUD and the Yo-kai Pad.
 
+**16:10, the in-game overlay's frame (2026-11-11).** The overlay (decision 0053) fits its 1600 x 900 design to
+the picture's width at 16:10 and centres it, so a strip above and below it showed the game undimmed, with the
+side panel and the key hints ending short (owner). Its frame now reaches the picture's edges (`gamemenu_draw`,
+gamemenu.c): the tint and the side panel cover the strips, the header and the side buttons sit at the top, Exit
+game, the version and the key hints (and Preview's bar) at the bottom; the pages and popups stay centred. The
+mouse's click areas move with what is drawn. Checked by the owner at 16:10; 16:9 and wider have no strips and
+are unchanged.
+
 **World markers take the full width (2026-11-11).** The owner saw the icons that float over things (the "!"
 above a yo-kai, the icon on a pole) drift away from their objects at 21:9, more the further from the middle.
 A traced frame showed why: they are not UI. The game draws them after the composite as small quads placed with

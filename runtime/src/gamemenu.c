@@ -1518,8 +1518,10 @@ static void draw_bug_page(const UiCanvas *c, const GameMenuInfo *in) {
 /* The preview's bar (canvas board B): over the running game at the bottom, the section's name and the frame rate,
  * its rows (the chosen one ringed in gold, the value between arrows), the chosen row's description in a dark box,
  * the key hints. Hidden (GM_ALT): only a chip saying how to show it again. Sets pv_rect, the part the window shows. */
+static float edge;  /* gamemenu_draw's E: the strip above and below the design in a picture narrower than 16:9 */
+
 static void draw_preview(const UiCanvas *c, const GameMenuInfo *in) {
-    float W = (float)c->w / c->s, H = 900;
+    float W = (float)c->w / c->s, H = 900 + edge;  /* the bar sits at the picture's bottom */
     SettingRow rows[32];
     int n = settings_player_rows(rows, 32);
     if (n <= 0) return;
@@ -1631,6 +1633,12 @@ void gamemenu_draw(const UiCanvas *c, const GameMenuInfo *in) {
     TH = theme_colors();
     draw_text_has = 0;
     float W = (float)c->w / c->s, H = 900;
+    /* a picture narrower than 16:9 (the 16:10 aspect ratio): the design is fitted to its width and centred, with
+     * a strip of E design units above and below it (window.c, overlay_fit). The frame reaches the picture's
+     * edges: the tint and the side panel cover the strips, the header and the side buttons sit at the top (T),
+     * Exit game, the version and the key hints at the bottom (by). The pages and popups stay centred */
+    float E = c->oy > 0 ? c->oy / c->s : 0, T = -E, by = H - 56 + E;
+    edge = E;
     int hk = hit_back();
     hit_n[hk] = 0;  /* the mouse's list, filled as things are drawn */
     int req = __atomic_exchange_n(&bug_request, 0, __ATOMIC_ACQ_REL);
@@ -1650,7 +1658,7 @@ void gamemenu_draw(const UiCanvas *c, const GameMenuInfo *in) {
         changed();
     }
     if (gamemenu_prompting()) {  /* name entry (board N1): only the popup, over the game's waiting picture */
-        ui_rect(c, 0, 0, W, H, POP_BACKDROP, 0.45f);
+        ui_rect(c, 0, T - 1, W, H + 2 * E + 2, POP_BACKDROP, 0.45f);
         float pw = 650, bar = 18 + 22 * 1.3f + 16, fh = 72, llh = 16 * 1.45f;
         float blh = 17 * 1.5f, msg_h = prompt_body[0] ? ui_text_wrap(NULL, UI_GOTHIC_500, 17, 0, 0, 0, pw - 56, blh, 0,
                                                                       prompt_body, 0) : 0;
@@ -1742,23 +1750,23 @@ void gamemenu_draw(const UiCanvas *c, const GameMenuInfo *in) {
             ui_text_in(c, UI_ROUNDED_800, 18, cx2, oky, cw2, 52, 1, "Cancel", POP_INK);
             hit_add(cx2, oky, cw2, 52, HIT_PROMPT_CANCEL, 0, 0);
         }
-        ui_rect(c, 0, H - 56, W, 56, NIGHT, 1);  /* the key hints, the whole width */
+        ui_rect(c, 0, by, W, 56 + 1, NIGHT, 1);  /* the key hints, the whole width */
         float hx = 48;
         if (in->pad && osk_shown) {  /* the on-screen keyboard */
             int ps = in->pad == 2;
-            hx += hint(c, hx, H - 56, "D-pad", "Move") + 28;
-            hx += hint(c, hx, H - 56, ps ? "Cross" : "A", "Type") + 28;
-            hx += hint(c, hx, H - 56, ps ? "Circle" : "B", can_cancel ? "Delete / Cancel" : "Delete") + 28;
-            hint(c, hx, H - 56, ps ? "Triangle" : "Y", "Capitals");
+            hx += hint(c, hx, by, "D-pad", "Move") + 28;
+            hx += hint(c, hx, by, ps ? "Cross" : "A", "Type") + 28;
+            hx += hint(c, hx, by, ps ? "Circle" : "B", can_cancel ? "Delete / Cancel" : "Delete") + 28;
+            hint(c, hx, by, ps ? "Triangle" : "Y", "Capitals");
         } else if (in->pad) {
-            hx += hint(c, hx, H - 56, in->pad == 2 ? "Cross" : "A", "OK") + 28;
-            if (can_cancel) hint(c, hx, H - 56, in->pad == 2 ? "Circle" : "B", "Cancel");
+            hx += hint(c, hx, by, in->pad == 2 ? "Cross" : "A", "OK") + 28;
+            if (can_cancel) hint(c, hx, by, in->pad == 2 ? "Circle" : "B", "Cancel");
         } else {
-            hx += hint(c, hx, H - 56, "Enter", "OK") + 28;
-            if (can_cancel) hx += hint(c, hx, H - 56, "Esc", "Cancel") + 28;
+            hx += hint(c, hx, by, "Enter", "OK") + 28;
+            if (can_cancel) hx += hint(c, hx, by, "Esc", "Cancel") + 28;
             if (!prompt_body[0]) {
-                hx += hint(c, hx, H - 56, "Backspace", "Delete") + 28;
-                hint(c, hx, H - 56, "Ctrl V", "Paste");
+                hx += hint(c, hx, by, "Backspace", "Delete") + 28;
+                hint(c, hx, by, "Ctrl V", "Paste");
             }
         }
         __atomic_store_n(&hit_front, hk, __ATOMIC_RELEASE);
@@ -1770,23 +1778,23 @@ void gamemenu_draw(const UiCanvas *c, const GameMenuInfo *in) {
         return;
     }
     int page = (sel == GM_SETTINGS || sel == GM_CONTROLS || sel == GM_PERF || sel == GM_BUG) && !confirm;  /* these show a page */
-    ui_rect(c, 0, 0, W, H, SHADE, page ? 0.62f : 0.35f);  /* the tint over the game, darker behind a page */
+    ui_rect(c, 0, T - 1, W, H + 2 * E + 2, SHADE, page ? 0.62f : 0.35f);  /* the tint over the game, darker behind a page */
     if (page && sel == GM_SETTINGS) draw_settings_page(c, in);
     if (page && sel == GM_CONTROLS) draw_controls_page(c, in);
     if (page && sel == GM_PERF) draw_perf_page(c, in);
     if (page && sel == GM_BUG) draw_bug_page(c, in);
 
     /* the side panel: 400 wide with a 4 px gold edge towards the game */
-    ui_rect(c, 0, 0, 400, H, PAPER, 1);
-    ui_rect(c, 396, 0, 4, H, GOLD, 1);
-    ui_rect(c, 0, 0, 396, 108, NIGHT, 1);  /* the header: padding 28 / 24 around the 56 px logo */
+    ui_rect(c, 0, T - 1, 400, H + 2 * E + 2, PAPER, 1);
+    ui_rect(c, 396, T - 1, 4, H + 2 * E + 2, GOLD, 1);
+    ui_rect(c, 0, T - 1, 396, 108 + 1, NIGHT, 1);  /* the header: padding 28 / 24 around the 56 px logo */
     if (in->logo) {  /* the game's own icon (gamelogo.c), else the design's clock */
-        ui_image(c, in->logo, in->logo_w, in->logo_h, 28, 28, 56, 56, 14);
+        ui_image(c, in->logo, in->logo_w, in->logo_h, 28, T + 28, 56, 56, 14);
     } else {
-        ui_box(c, 28, 28, 56, 56, 14, GOLD, 0, 0);
-        ui_icon(c, ICON_CLOCK, 28 + 13, 28 + 13, 30, 2.2f, NIGHT);
+        ui_box(c, 28, T + 28, 56, 56, 14, GOLD, 0, 0);
+        ui_icon(c, ICON_CLOCK, 28 + 13, T + 28 + 13, 30, 2.2f, NIGHT);
     }
-    float th = 21 * 1.2f, sh = 14 * 1.45f, ty = 28 + (56 - (th + 4 + sh)) / 2;
+    float th = 21 * 1.2f, sh = 14 * 1.45f, ty = T + 28 + (56 - (th + 4 + sh)) / 2;
     ui_text(c, UI_ROUNDED_800, 21, 100, ty, th, "Yo-kai Watch 4 Recomp", SNOW);
     ui_text(c, UI_GOTHIC_400, 14, 100, ty + th + 4, sh, "Game version " GAME_VERSION, ON_DARK);
 
@@ -1794,11 +1802,11 @@ void gamemenu_draw(const UiCanvas *c, const GameMenuInfo *in) {
     const char *icons[] = {ICON_RESUME, ICON_SETTINGS, ICON_CONTROLS, ICON_PERF, ICON_BUG};
     for (int i = 0; i < 5; i++) {
         const char *l = labels[i];
-        side_button(c, 20, 128 + i * 66, 356, icons[i], l, sel == i, PLUM);
-        hit_add(20, 128 + i * 66, 356, 56, HIT_SIDE, i, 0);
+        side_button(c, 20, T + 128 + i * 66, 356, icons[i], l, sel == i, PLUM);
+        hit_add(20, T + 128 + i * 66, 356, 56, HIT_SIDE, i, 0);
     }
     /* Exit game at the bottom, under a line; the version under it */
-    float vy = H - 20 - 19, ey = vy - 14 - 56;
+    float vy = H + E - 20 - 19, ey = vy - 14 - 56;
     ui_rect(c, 20, ey - 14 - 2, 356, 2, LINE, 1);
     side_button(c, 20, ey, 356, ICON_EXIT, "Exit game", sel == GM_EXIT, WINE);
     hit_add(20, ey, 356, 56, HIT_SIDE, GM_EXIT, 0);
@@ -1807,64 +1815,64 @@ void gamemenu_draw(const UiCanvas *c, const GameMenuInfo *in) {
     ui_text(c, UI_GOTHIC_400, 13, 20, vy, 19, ver, MUTED);
 
     /* the key hints along the bottom */
-    ui_rect(c, 400, H - 56, W - 400, 56, NIGHT, 1);
+    ui_rect(c, 400, by, W - 400, 56 + 1, NIGHT, 1);
     float hx = 448;
     if (focus && sel == GM_BUG && textin_has(&bug_text)) {  /* typing in the report */
         if (in->pad) {
-            hint(c, hx, H - 56, in->pad == 2 ? "Circle" : "B", "Done typing");
+            hint(c, hx, by, in->pad == 2 ? "Circle" : "B", "Done typing");
         } else {
-            hx += hint(c, hx, H - 56, "Enter", "Done") + 28;
-            hint(c, hx, H - 56, "Ctrl V", "Paste");
+            hx += hint(c, hx, by, "Enter", "Done") + 28;
+            hint(c, hx, by, "Ctrl V", "Paste");
         }
     } else if (focus && sel == GM_CONTROLS) {  /* the controls page */
         int ps = in->pad == 2;
-        hx += hint(c, hx, H - 56, in->pad ? "D-pad" : "W S", "Choose") + 28;
-        if (!in->pad) hx += hint(c, hx, H - 56, "A D", "Navigate") + 28;  /* across: a key, the other key, the pad */
-        hx += hint(c, hx, H - 56, in->pad ? (ps ? "Cross" : "A") : "Enter", "Change") + 28;
-        hx += hint(c, hx, H - 56, in->pad ? (ps ? "Square" : "X") : "Del", "Clear") + 28;
-        hx += hint(c, hx, H - 56, in->pad ? (ps ? "Circle" : "B") : "Esc", "Back") + 28;
-        if (in->pad) hint(c, hx, H - 56, in->close, "Close overlay");
+        hx += hint(c, hx, by, in->pad ? "D-pad" : "W S", "Choose") + 28;
+        if (!in->pad) hx += hint(c, hx, by, "A D", "Navigate") + 28;  /* across: a key, the other key, the pad */
+        hx += hint(c, hx, by, in->pad ? (ps ? "Cross" : "A") : "Enter", "Change") + 28;
+        hx += hint(c, hx, by, in->pad ? (ps ? "Square" : "X") : "Del", "Clear") + 28;
+        hx += hint(c, hx, by, in->pad ? (ps ? "Circle" : "B") : "Esc", "Back") + 28;
+        if (in->pad) hint(c, hx, by, in->close, "Close overlay");
     } else if (focus && sel == GM_SETTINGS && !in_rows) {  /* the settings page's sections */
-        hx += hint(c, hx, H - 56, in->pad ? "D-pad" : "W S", "Choose section") + 28;
-        hx += hint(c, hx, H - 56, in->pad ? (in->pad == 2 ? "Cross" : "A") : "Enter", "Open") + 28;
-        if (can_preview()) hx += hint(c, hx, H - 56, in->pad ? alt_button(in) : "P", "Preview") + 28;
-        hx += hint(c, hx, H - 56, in->pad ? (in->pad == 2 ? "Circle" : "B") : "Esc", "Back") + 28;
-        if (in->pad) hint(c, hx, H - 56, in->close, "Close overlay");
+        hx += hint(c, hx, by, in->pad ? "D-pad" : "W S", "Choose section") + 28;
+        hx += hint(c, hx, by, in->pad ? (in->pad == 2 ? "Cross" : "A") : "Enter", "Open") + 28;
+        if (can_preview()) hx += hint(c, hx, by, in->pad ? alt_button(in) : "P", "Preview") + 28;
+        hx += hint(c, hx, by, in->pad ? (in->pad == 2 ? "Circle" : "B") : "Esc", "Back") + 28;
+        if (in->pad) hint(c, hx, by, in->close, "Close overlay");
     } else if (focus && in->pad) {  /* on a page */
-        hx += hint(c, hx, H - 56, "D-pad", "Choose and change") + 28;
-        hx += hint(c, hx, H - 56, in->pad == 2 ? "Cross" : "A", "Select") + 28;
-        if (sel == GM_SETTINGS) hx += hint(c, hx, H - 56, in->pad == 2 ? "L1 R1" : "LB RB", "Section") + 28;
-        if (sel == GM_SETTINGS && can_preview()) hx += hint(c, hx, H - 56, alt_button(in), "Preview") + 28;
-        hx += hint(c, hx, H - 56, in->pad == 2 ? "Circle" : "B", "Back") + 28;
-        hint(c, hx, H - 56, in->close, "Close overlay");
+        hx += hint(c, hx, by, "D-pad", "Choose and change") + 28;
+        hx += hint(c, hx, by, in->pad == 2 ? "Cross" : "A", "Select") + 28;
+        if (sel == GM_SETTINGS) hx += hint(c, hx, by, in->pad == 2 ? "L1 R1" : "LB RB", "Section") + 28;
+        if (sel == GM_SETTINGS && can_preview()) hx += hint(c, hx, by, alt_button(in), "Preview") + 28;
+        hx += hint(c, hx, by, in->pad == 2 ? "Circle" : "B", "Back") + 28;
+        hint(c, hx, by, in->close, "Close overlay");
     } else if (focus) {  /* on a page, with the keyboard: Escape goes back to the side panel, again closes */
-        hx += hint(c, hx, H - 56, "W S", "Move") + 28;
-        hx += hint(c, hx, H - 56, "A D", "Change") + 28;
-        hx += hint(c, hx, H - 56, "Enter", "Select") + 28;
-        if (sel == GM_SETTINGS) hx += hint(c, hx, H - 56, "Q E", "Section") + 28;
-        if (sel == GM_SETTINGS && can_preview()) hx += hint(c, hx, H - 56, "P", "Preview") + 28;
-        hint(c, hx, H - 56, "Esc", "Back");
+        hx += hint(c, hx, by, "W S", "Move") + 28;
+        hx += hint(c, hx, by, "A D", "Change") + 28;
+        hx += hint(c, hx, by, "Enter", "Select") + 28;
+        if (sel == GM_SETTINGS) hx += hint(c, hx, by, "Q E", "Section") + 28;
+        if (sel == GM_SETTINGS && can_preview()) hx += hint(c, hx, by, "P", "Preview") + 28;
+        hint(c, hx, by, "Esc", "Back");
     } else if (in->pad) {
-        hx += hint(c, hx, H - 56, in->pad == 2 ? "Cross" : "A", "Select") + 28;
-        hint(c, hx, H - 56, in->pad == 2 ? "Circle" : "B", "Close overlay");
+        hx += hint(c, hx, by, in->pad == 2 ? "Cross" : "A", "Select") + 28;
+        hint(c, hx, by, in->pad == 2 ? "Circle" : "B", "Close overlay");
     } else {
-        hx += hint(c, hx, H - 56, "W S", "Move") + 28;
-        hx += hint(c, hx, H - 56, "Enter", "Select") + 28;
-        hint(c, hx, H - 56, "Esc", "Close overlay");
+        hx += hint(c, hx, by, "W S", "Move") + 28;
+        hx += hint(c, hx, by, "Enter", "Select") + 28;
+        hint(c, hx, by, "Esc", "Close overlay");
     }
 
     /* a short note (toast_msg): top right */
     if (in->now < toast_until) {
         const char *t = toast_msg;
         float tw = ui_text_w(UI_GOTHIC_700, 17, t), bw = tw + 44 + 6, bh = 17 * 1.45f + 28 + 6;
-        ui_box(c, W - 48 - bw, 40, bw, bh, 14, SNOW, 3, RING);
-        ui_text_in(c, UI_GOTHIC_700, 17, W - 48 - bw, 40, bw, bh, 1, t, NIGHT);
+        ui_box(c, W - 48 - bw, T + 40, bw, bh, 14, SNOW, 3, RING);
+        ui_text_in(c, UI_GOTHIC_700, 17, W - 48 - bw, T + 40, bw, bh, 1, t, NIGHT);
     }
 
     /* the exit popup: a small window as the launcher's popups (launcher/ui/style.css "dialog", 2026-11-05): a
      * violet title bar over a gold rule, the text on white, the buttons in a lilac tray at the bottom */
     if (confirm) {
-        ui_rect(c, 0, 0, W, H, POP_BACKDROP, 0.6f);
+        ui_rect(c, 0, T - 1, W, H + 2 * E + 2, POP_BACKDROP, 0.6f);
         const float k = POP_K, r = 14 * k, gold = 3 * k;
         float pw = 460 * k, lh_title = 17 * k * 1.3f, bar = (15 + 13) * k + lh_title, lh = 14 * k * 1.5f;
         float tray = (12 + 40 + 12) * k, gap = 18 * k, pad = 22 * k;
