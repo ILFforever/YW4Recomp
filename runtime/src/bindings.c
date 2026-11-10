@@ -663,8 +663,9 @@ static float icon_scale(int sheet) {
     return scale[sheet];
 }
 
-/* The keyboard sheet's mouse icons fill a little more of their cell than its keys, so at the keys' scale they
- * looked 1.3% too large (owner, 2026-11-04): they get this much more, as a fraction (YW4_MOUSE_ICON_SCALE). */
+/* The keyboard sheet's mouse icons fill more of their cell than its keys: at the keys' scale they looked too large
+ * (owner, 2026-11-04: 1.3% smaller, 0.987; 2026-11-11: "still too large", 30% smaller again, 0.987 x 0.7). They get
+ * this much of the keys' scale (YW4_MOUSE_ICON_SCALE); centred in the same place. */
 static float mouse_icon_scale(uint32_t crc) {
     static uint32_t crcs[7];
     static float k;
@@ -673,7 +674,7 @@ static float mouse_icon_scale(uint32_t crc) {
                                    MOUSE_BIND_WHEEL_UP, MOUSE_BIND_WHEEL_DOWN};
         for (int i = 0; i < 7; i++) crcs[i] = gaiji_crc(key_gaiji(ids[i]));
         const char *e = getenv("YW4_MOUSE_ICON_SCALE");
-        k = e && atof(e) > 0 ? (float)atof(e) : 0.987f;
+        k = e && atof(e) > 0 ? (float)atof(e) : 0.69f;
     }
     for (int i = 0; i < 7; i++)
         if (crcs[i] == crc) return k;
@@ -728,9 +729,10 @@ int yw4_hook_gaiji_render(CPUState *ctx) {
         if (sheet != SHEET_NX) {
             float mk = sheet == SHEET_KEY ? mouse_icon_scale(shown) : 1.0f;
             float k = icon_scale(sheet) * mk;
-            /* the box is whole pixels of the HUD's 1080-line space: the mouse icons' 1.3% is under half a pixel at
-             * their size (24 -> 35.5), so they are rounded down, a pixel smaller than the keys' rounding */
-            float round_add = mk != 1.0f ? 0.0f : 0.5f;
+            /* the box is whole pixels of the HUD's 1080-line space: rounded to the nearest (the mouse icons were
+             * rounded down while they were only 1.3% smaller, under half a pixel) */
+            float round_add = 0.5f;
+            (void)mk;
             shown_box.h = (int32_t)((float)game_box.h * k + round_add);
             shown_box.w = (int32_t)((float)game_box.w * k + round_add);
             shown_box.x = game_box.x - (shown_box.w - game_box.w) / 2;
