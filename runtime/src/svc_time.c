@@ -5,11 +5,13 @@
  * Time on the Switch: the steady clock counts seconds since boot (here: since the runtime
  * started, from CNTPCT); a system clock is "steady clock + offset", so its context stores
  * the offset and the steady time point it was taken at. */
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
 
 #include "ipc_simple.h"
+#include "yw4rt.h"
 
 /* Identifies "this boot's" steady clock; any fixed value works. */
 static const uint8_t clock_source[16] = {'y', 'w', '4', 'r', 'e', 'c', 'o', 'm', 'p', 1, 2, 3, 4, 5, 6, 7};
@@ -129,11 +131,13 @@ void svc_time(Service *s, IpcRequest *req, IpcResponse *resp) {
         resp->copy_handles[resp->ncopy++] = shared_memory_handle;
         return;
     case 500: {  /* CalculateStandardUserSystemClockDifferenceByUser(snapshot a, snapshot b) -> TimeSpan ns */
+        /* How far the user moved the console's clock between two snapshots; on a Switch 0 unless they did.
+         * The game asks it with the snapshot kept in the save and one of now (main+0x3bd260) and, on anything
+         * but 0, warns that the time was changed and counts towards its Crank-a-Kai penalty. A PC has no
+         * console clock to set, so: never. (Until 2026-11-11 this returned the time between the snapshots,
+         * the real time since the save, and the warning showed on every load.) */
         if (req->nx < 2 || req->x[0].size < 0xD0 || req->x[1].size < 0xD0) break;
-        int64_t a, b;
-        memcpy(&a, (uint8_t *)GPTR(req->x[0].addr) + 0x40, 8);
-        memcpy(&b, (uint8_t *)GPTR(req->x[1].addr) + 0x40, 8);
-        IPC_OUT(int64_t, 0) = (b - a) * 1000000000;
+        IPC_OUT(int64_t, 0) = 0;
         ipc_out_size(resp, 8);
         return;
     }
@@ -146,4 +150,29 @@ void svc_time(Service *s, IpcRequest *req, IpcResponse *resp) {
     default:
         ipc_unimplemented(s, req, resp);
     }
+}
+
+/* hook on f_3bd260 (recomp/overrides.toml), instead of its body: the game's "the console's time was changed"
+ * check. It answers yes when any of three things differ between the snapshot kept in the save (this + 0x160)
+ * and one of now: the clock difference by the user (command 500 above), the time zone's name, or a CRC-32 of
+ * the console's pseudo device id (this + 0x230). On yes the game warns and counts towards its Crank-a-Kai
+ * penalty. A save brought over from a Switch or an emulator differs in the last two the first time it is
+ * loaded, through no doing of the player, and a PC has no console clock to cheat with: the answer is no.
+ * The first call logs what the save holds, to tell which of the three it would have been. */
+int yw4_hook_time_changed(CPUState *ctx) {
+    static int logged;
+    if (!logged) {
+        const uint8_t *snap = (const uint8_t *)(uintptr_t)(ctx->x[0] + 0x160);
+        char zone[0x25];
+        uint32_t crc;
+        memcpy(zone, snap + 0xA8, 0x24), zone[0x24] = 0;
+        memcpy(&crc, (const uint8_t *)(uintptr_t)(ctx->x[0] + 0x230), 4);
+        for (char *c = zone; *c; c++)
+            if (*c < 0x20 || *c > 0x7E) *c = '?';
+        fprintf(stderr, "yw4: time: the game's time-change check is answered \"not changed\" (the save's snapshot: "
+                        "time zone \"%s\", device id CRC %08x)\n", zone, (unsigned)crc);
+        logged = 1;
+    }
+    ctx->x[0] = 0;
+    return 1;
 }

@@ -330,3 +330,9 @@ module = "main"
 offset = "0x812e90"
 native = "yw4_hook_battle_frame"
 why = "yw::CSceneBattle's own vtable function (main+0x14cbcf0 slot 8) that runs once every battle frame and never outside one: tells the controls which set of keys to use (runtime/src/battle.c)"
+
+[[hook]]
+module = "main"
+offset = "0x3bd260"
+native = "yw4_hook_time_changed"
+why = "the game's \"the console's time was changed\" check (clock moved by the user, time zone or device id differ from the save's): answered no, a PC has no console clock and imported saves differ through no doing of the player (runtime/src/svc_time.c)"
