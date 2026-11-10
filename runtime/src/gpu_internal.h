@@ -193,6 +193,7 @@ int gpu_zoom_step(uint32_t w, uint32_t h);
  * output-sized image (the UI and the copy into the window image draw there); gpu_present ends it. */
 void gpu_upscale_begin(uint64_t color, uint64_t depth);  /* the scene's colour and depth images; 0, 0 ends it */
 int gpu_upscaled(const NvnTexture *t);
+void gpu_upscale_also(const NvnTexture *t);  /* a colour target drawn into after the anti-aliasing point */
 void gpu_taa_targets_end(VkCommandBuffer cb);
 /* gpu_shadow.c: the first draw into s's targets since they were set; depth-only ones are
  * remembered with the state the game draws with, so a shadow pass can draw into its layer after

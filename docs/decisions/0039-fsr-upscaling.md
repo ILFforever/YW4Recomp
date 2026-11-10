@@ -90,3 +90,21 @@ known limit of the hand-written FSR versions; machine-learned upscalers do bette
 - Whether the fence's own draws get the per-frame shift (decode one frame's draws).
 - Testing switches: `YW4_FSR_DEBUG`, `YW4_FSR_DEBUG_VIEW`, `YW4_FSR_LOG`, `YW4_FSR_TEST_RATIO`, `YW4_FSR_MV_SIGN`,
   `YW4_FSR_JITTER_SIGN`, `YW4_FSR_NEAR` / `YW4_FSR_FAR`, `YW4_FSR_SHARPNESS`, `YW4_FSR_MIP_BIAS` (docs/debugging.md).
+
+## Fix 2026-11-10: the game's second full-size image
+
+Upscaled pictures (FSR and DLSS alike) had looked no sharper than a plain 1.5x stretch of the native frame
+(owner: "very bad graphical downgrade"). The upscalers were fine. After the anti-aliasing point the game draws a
+few UI draws into the scene image, then copies the scene into a second full-size image (`0x72664e3000`), draws
+most of the UI there and copies that one into the window's image. Only the scene's colour and depth were treated
+as output-sized, so the second image stayed at the render size: the upscaler's 4K result was shrunk to 1440p and
+stretched again by the present. Found with a synthetic hard-edged input: the upscaler's own output had 1-pixel
+edges, the screenshot of the same frame 4-5-pixel ramps; a GPU trace showed the 2560x1440 target between the
+3840x2160 scene and the window image.
+
+Now every full-size screen image (the 1600x900 or 1920x1080 layout, not presented) drawn into after the composite
+is output-sized too until the present (`gpu_upscale_also`, `runtime/src/gpu.c`, called from `begin_rendering` in
+`runtime/src/gpu_draw.c`). Same-run sharpness at 4K 16:9 (Laplacian variance, bamboo forest): DLSS quality 21 ->
+46 (native 62, plain stretch 18), FSR quality ~16 -> 97 (native 137); the UI is sharp in upscaled modes too. 21:9
+with DLSS frame generation and the Vulkan validation layer: no errors. Not yet checked with upscaling: battles,
+menus, cutscenes. Found by a Fable 5.2 session; the earlier mip-bias fix (per draw) was right but not the cause.

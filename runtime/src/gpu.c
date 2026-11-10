@@ -1002,6 +1002,11 @@ static int upscale_mode = -1, upscale_used = -1;  /* the choice, and the one the
 static const float upscale_ratio[4] = {1.0f, 1.5f, 1.7f, 2.0f};
 static uint64_t upscaled_scene, upscaled_depth;  /* the scene's colour and depth images' addresses while they
                                                   * name output-sized images (GPU thread) */
+/* ... and the other full-size images drawn into between the anti-aliasing point and the present
+ * (gpu_upscale_also): the game copies the finished scene into a second image, draws most of the UI there and
+ * copies that one into the window's image. */
+enum { UPSCALED_MORE = 4 };
+static uint64_t upscaled_more[UPSCALED_MORE];
 
 int gpu_upscale_setting(void) {
     int m = __atomic_load_n(&upscale_mode, __ATOMIC_ACQUIRE);
@@ -1056,11 +1061,35 @@ int gpu_render_height(void) {
 void gpu_upscale_begin(uint64_t color, uint64_t depth) {
     __atomic_store_n(&upscaled_depth, depth, __ATOMIC_RELEASE);
     __atomic_store_n(&upscaled_scene, color, __ATOMIC_RELEASE);
+    for (int i = 0; i < UPSCALED_MORE; i++) __atomic_store_n(&upscaled_more[i], 0, __ATOMIC_RELEASE);
 }
 
 int gpu_upscaled(const NvnTexture *t) {
     uint64_t a = __atomic_load_n(&upscaled_scene, __ATOMIC_ACQUIRE), d = __atomic_load_n(&upscaled_depth, __ATOMIC_ACQUIRE);
-    return t && t->addr && (t->addr == a || t->addr == d);
+    if (!t || !t->addr || !a) return 0;
+    if (t->addr == a || t->addr == d) return 1;
+    for (int i = 0; i < UPSCALED_MORE; i++)
+        if (__atomic_load_n(&upscaled_more[i], __ATOMIC_ACQUIRE) == t->addr) return 1;
+    return 0;
+}
+
+static int screen_sized(const NvnTexture *t);
+
+/* A colour target of a draw that follows the anti-aliasing point (the caller checks). While the scene image is
+ * the output-sized one, a full-size screen image drawn into is output-sized too until the present: without
+ * this the game's copy of the upscaled scene into its second image shrank it back to the render size, and the
+ * copy into the window's image stretched that (DLSS and FSR quality looked like a plain 1.5x stretch,
+ * 2026-11-10). Smaller images (the game's half-size copies) keep the render size's ratio. */
+void gpu_upscale_also(const NvnTexture *t) {
+    if (!t || !t->addr || !__atomic_load_n(&upscaled_scene, __ATOMIC_ACQUIRE) || gpu_upscaled(t)) return;
+    if (!screen_sized(t) || gpu_is_presented(t->addr)) return;
+    if (!((t->layout.width == 1600 && t->layout.height == 900) || (t->layout.width == 1920 && t->layout.height == 1080)))
+        return;
+    for (int i = 0; i < UPSCALED_MORE; i++)
+        if (!__atomic_load_n(&upscaled_more[i], __ATOMIC_ACQUIRE)) {
+            __atomic_store_n(&upscaled_more[i], t->addr, __ATOMIC_RELEASE);
+            return;
+        }
 }
 
 /* The screen-sized targets: GPU-only 2D images of one of these sizes. The window image (1920x1080)

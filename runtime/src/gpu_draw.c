@@ -828,6 +828,7 @@ static int begin_rendering(VkCommandBuffer cb, GpuState *s, VkFormat color[8], V
     for (uint32_t i = 0; i < n; i++) {
         ca[i].sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO;
         if (!s->rt.color[i]) continue;
+        if (s->after_composite) gpu_upscale_also(s->rt.color[i]);  /* upscaling: the UI's images are output-sized */
         uint32_t tw, th;
         ca[i].imageView = gpu_render_view(cb, s->rt.color[i], &s->rt.views[i], s->rt.has_view[i], &tw, &th);
         ca[i].imageLayout = VK_IMAGE_LAYOUT_GENERAL;
