@@ -2317,7 +2317,7 @@ void window_run(void (*guest)(void *), void *arg) {
             /* F11: full screen, like most PC games (saved like the panel's row); Shift+F11: the draws of the next
              * frame, in the log (still "F11" in recordings) */
             if (e.key.key == SDLK_F11 && !e.key.repeat) {
-                if (e.key.mod & SDL_KMOD_SHIFT) gpu_request_trace(450), yw4_hid_note_key("F11");
+                if (e.key.mod & SDL_KMOD_SHIFT) gpu_request_trace(12000), yw4_hid_note_key("F11");
                 else window_fullscreen_cycle(), settings_save();
             }
             if (e.key.key == SDLK_F10) gpu_request_dump(), yw4_hid_note_key("F10");      /* shadow maps etc.: work/dump/ */

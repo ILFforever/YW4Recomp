@@ -1678,7 +1678,12 @@ void gpu_dynamic_state(VkCommandBuffer cb, const GpuState *s, VkFormat depth, ui
     int64_t xn = kn * (tg ? tg->wide_num : 1), xd = kd * (tg ? tg->wide_den : 1), yn = kn, yd = kd;
     float xoff = 0, yoff = 0;
     int full = dyn_full_screen && tg && whole_width(s, tg);
-    if (tg && tg->wide_num != tg->wide_den && s->after_composite && !dyn_reads_screen && !full &&
+    /* world markers (the "!" above a yo-kai, the icon on a pole): quads the game places with the camera's
+     * projection and tests against the scene's depth, drawn after the composite. They belong to the 3D
+     * picture, so they take its full width: kept in the middle they sat too near the centre (by 1/4 of
+     * their distance from it at 21:9) and were as much narrower (owner, 2026-11-11) */
+    int world = td && s->depth_stencil[0];
+    if (tg && tg->wide_num != tg->wide_den && s->after_composite && !dyn_reads_screen && !full && !world &&
         !gpu_is_presented(tg->key.addr)) {
         if (tg->wide_num < tg->wide_den) {
             /* an image narrower than 16:9 (16:10): the UI at the game's width would stick out at both sides.

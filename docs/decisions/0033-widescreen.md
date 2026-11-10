@@ -108,13 +108,24 @@ white) covers the whole image. A 16:9 picture (the copyright notice) gets its bl
 of at the sides. The wider shapes take the old branch unchanged. Checked by the owner from screenshots: the
 copyright and autosave notices, loading, the town HUD and the Yo-kai Pad.
 
+**World markers take the full width (2026-11-11).** The owner saw the icons that float over things (the "!"
+above a yo-kai, the icon on a pole) drift away from their objects at 21:9, more the further from the middle.
+A traced frame showed why: they are not UI. The game draws them after the composite as small quads placed with
+the camera's (wide) projection, into the scene's image with the scene's depth attached and the depth test on, so
+that walls hide them. Our UI rule kept them at the game's width in the middle like the HUD, which put each one
+a quarter of its distance nearer the centre at 21:9 and made the icon as much narrower. Now a draw after the
+composite that tests against a bound depth target is left out of the UI rule and gets the image's full width,
+like the 3D (`gpu_dynamic_state`, gpu_draw.c). The HUD, the compass and the quest text use no depth and stay
+in the middle. Checked by the owner at 21:9: markers on a pole and on a yo-kai sit on their objects. Not
+checked: battles, 16:10 and 32:9, and other late draws with depth (a 3D model in a menu would now take the
+full width too). The trace key (Shift+F11) records 12000 draws instead of 450: a frame in the forest is over
+4000 and the markers come last.
+
 ## Not done yet
 
 - 16:10: dialog dimming and battles not checked yet; bars at a menu's edge (the Yo-kai Pad's bottom bar) end
   45 px above the image's bottom, and the strip below shows the layer's edge colour.
 
-- On-screen markers: `f_53b3a0` projects with the camera's (now wider) aspect into the 16:9 UI, so markers away
-  from the middle may sit a little off their targets. Not seen in the frames checked; to look at.
 - Full-screen layers seen so far: the ones above; the owner checked the Yo-kai Pad and both maps at 21:9 / 4K.
   Other menus (Yo-kai Pad apps, battle results) not checked yet: one of one colour stretches, a 16:9 picture
   gets black bars.
