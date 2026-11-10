@@ -77,6 +77,10 @@ static Shader *shaders;
 static int dyn_reads_screen;
 /* the draw being bound is a UI layer over the game's whole screen: stretched, not kept 16:9 (widescreen) */
 static int dyn_full_screen;
+/* ... in an image narrower than 16:9 (16:10), where the UI is fitted to the width with a strip left above and
+ * below: the next gpu_dynamic_state is for a whole-screen layer's second or third drawing, which fills the strip
+ * at the top (1) or the bottom (2) from the layer's edge */
+static int dyn_edge;
 
 /* Distance blur (depth of field): the game blurs the scene by distance. Fragment shader 27b63a2b... reads
  * depth, turns it into an amount with cbuf 6 row 0 (a, b, c, w: clamp((a / (b z + cam) + c) w)) and draws
@@ -1671,36 +1675,58 @@ void gpu_dynamic_state(VkCommandBuffer cb, const GpuState *s, VkFormat depth, ui
     /* widescreen: across, also times the image's width factor; the UI (what follows the composite in its
      * command list, but the copy into the window's image, draws that read a screen-sized image, like the
      * finished 3D picture's copy, and layers over the whole screen) keeps the game's width in the middle */
-    int64_t xn = kn * (tg ? tg->wide_num : 1), xd = kd * (tg ? tg->wide_den : 1);
-    float xoff = 0;
+    int64_t xn = kn * (tg ? tg->wide_num : 1), xd = kd * (tg ? tg->wide_den : 1), yn = kn, yd = kd;
+    float xoff = 0, yoff = 0;
     int full = dyn_full_screen && tg && whole_width(s, tg);
     if (tg && tg->wide_num != tg->wide_den && s->after_composite && !dyn_reads_screen && !full &&
         !gpu_is_presented(tg->key.addr)) {
-        xn = kn, xd = kd;
-        xoff = ((float)tg->width - (float)tg->key.width * (float)kn / (float)kd) * 0.5f;
+        if (tg->wide_num < tg->wide_den) {
+            /* an image narrower than 16:9 (16:10): the UI at the game's width would stick out at both sides.
+             * It is fitted to the image's width instead (across: the image's factor, as the 3D), shrunk by
+             * the same factor down, and moved to the middle from top to bottom */
+            yn = xn, yd = xd;
+            yoff = ((float)tg->height - (float)tg->key.height * (float)yn / (float)yd) * 0.5f;
+        } else {
+            xn = kn, xd = kd;
+            xoff = ((float)tg->width - (float)tg->key.width * (float)kn / (float)kd) * 0.5f;
+        }
     }
-    float vx = 0, vy = 0, vw = (float)w, vh = (float)h, kf = (float)kn / (float)kd, xf = (float)xn / (float)xd;
-    if (s->have_viewport) vx = xoff + (float)s->viewport[0] * xf, vy = (float)s->viewport[1] * kf,
-                          vw = (float)s->viewport[2] * xf, vh = (float)s->viewport[3] * kf;
+    float vx = 0, vy = 0, vw = (float)w, vh = (float)h, xf = (float)xn / (float)xd, yf = (float)yn / (float)yd;
+    if (s->have_viewport) vx = xoff + (float)s->viewport[0] * xf, vy = yoff + (float)s->viewport[1] * yf,
+                          vw = (float)s->viewport[2] * xf, vh = (float)s->viewport[3] * yf;
     d.viewport = (VkViewport){vx, flip ? vy + vh : vy, vw, flip ? -vh : vh, s->depth_range[0], s->depth_range[1]};
     float jx, jy;
     if (dyn_model && !s->after_composite && gpu_taa_jitter(w, h, &jx, &jy)) d.viewport.x += jx, d.viewport.y += jy;
     dyn_model = dyn_reads_screen = dyn_full_screen = 0;
+    int edge = yoff > 0 ? dyn_edge : 0;
+    dyn_edge = 0;
+    if (edge) {
+        /* the strip above or below the fitted UI: the layer 8 times as tall with its top (bottom) edge at the
+         * image's, so the strip shows the layer's outermost rows only (its edge drawn out, as a clamp would;
+         * the whole layer stretched instead would put its bands where the fitted content's are not) */
+        float big = d.viewport.height * 8, top = edge == 1 ? vy - yoff : vy + vh + yoff - vh * 8;
+        d.viewport.y = flip ? top + vh * 8 : top, d.viewport.height = big;
+    }
     d.scissor = (VkRect2D){{0, 0}, {w, h}};
     if (s->have_scissor) {
         /* edges scaled: left and top down, right and bottom up, so the scissor covers what it did */
         int64_t x0 = s->scissor[0] < 0 ? 0 : s->scissor[0], y0 = s->scissor[1] < 0 ? 0 : s->scissor[1];
         int64_t x1 = x0 + (s->scissor[2] > 0 ? s->scissor[2] : 0), y1 = y0 + (s->scissor[3] > 0 ? s->scissor[3] : 0);
-        int64_t x = x0 * xn / xd, y = y0 * kn / kd;
-        int64_t sw = (x1 * xn + xd - 1) / xd - x, sh = (y1 * kn + kd - 1) / kd - y;
-        x += (int64_t)xoff;
-        if (kn != kd || xn != xd || xoff) {  /* the game's "whole target" scissor can be huge: keep it inside */
+        int64_t x = x0 * xn / xd, y = y0 * yn / yd;
+        int64_t sw = (x1 * xn + xd - 1) / xd - x, sh = (y1 * yn + yd - 1) / yd - y;
+        x += (int64_t)xoff, y += (int64_t)yoff;
+        if (kn != kd || xn != xd || yn != yd || xoff || yoff) {  /* the game's "whole target" scissor can be huge: keep it inside */
             if (x > w) x = w;
             if (y > h) y = h;
             if (sw > w - x) sw = w - x;
             if (sh > h - y) sh = h - y;
         }
         d.scissor = (VkRect2D){{(int32_t)x, (int32_t)y}, {(uint32_t)sw, (uint32_t)sh}};
+    }
+    if (edge) {
+        uint32_t strip = (uint32_t)(yoff + 0.5f);
+        if (strip > h) strip = h;
+        d.scissor = (VkRect2D){{0, edge == 1 ? 0 : (int32_t)(h - strip)}, {w, strip}};
     }
     cull_of(s->polygon[0], s->polygon[1], &d.cull, &d.front);
     const uint8_t *ds = s->depth_stencil;
@@ -2052,17 +2078,34 @@ static void draw(VkCommandBuffer cb, GpuState *s, const CmdRec *r) {
                     bars ? "kept 16:9 with black bars" : "stretched", vs->key,
                     g->sh[ST_FRAG] ? g->sh[ST_FRAG]->key : 0, gpu_frames());
     }
+    /* an image narrower than 16:9 (16:10): the UI is fitted to the width, smaller, with a strip left above and
+     * below (gpu_dynamic_state). A layer over the whole screen is fitted like the rest, so its bands stay where
+     * the content on them is, and drawn twice more for the strips (dyn_edge); a band across the width is
+     * simply fitted (across, fitting and stretching are the same there) */
+    int edges = 0;
+    if (dyn_full_screen && ti && ti->wide_num < ti->wide_den && !gpu_is_presented(ti->key.addr) &&
+        s->have_viewport && whole_width(s, ti)) {
+        dyn_full_screen = 0;
+        edges = full ? 2 : 0;
+    }
     gpu_dynamic_state(cb, s, k.depth, w, h);
     if (bars) {  /* the sides black, then the picture in the middle */
         uint32_t inner = gpu_scaled(ti->key.width, ti->scale_num, ti->scale_den), side = w > inner ? (w - inner) / 2 : 0;
         VkClearAttachment ca = {.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT, .colorAttachment = 0,
                                 .clearValue.color = {{0, 0, 0, 1}}};
         VkClearRect cr[2] = {{{{0, 0}, {side, h}}, 0, 1}, {{{(int32_t)(w - side), 0}, {side, h}}, 0, 1}};
+        if (ti->wide_num < ti->wide_den) {  /* narrower than 16:9: the picture is fitted to the width, bars above and below */
+            inner = gpu_scaled(gpu_scaled(ti->key.height, ti->scale_num, ti->scale_den), ti->wide_num, ti->wide_den);
+            side = h > inner ? (h - inner) / 2 : 0;
+            cr[0].rect = (VkRect2D){{0, 0}, {w, side}}, cr[1].rect = (VkRect2D){{0, (int32_t)(h - side)}, {w, side}};
+        }
         if (side) vkCmdClearAttachments(cb, 1, &ca, 2, cr);
     }
     uint32_t pos_fix = nvn_depth_mode == 0 ? (g->sh[ST_GEOM] ? 2u : 1u) : 0u;
     vkCmdPushConstants(cb, g->layout, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_GEOMETRY_BIT, 0, 4, &pos_fix);
 
+    for (int pass = 0; pass <= edges; pass++) {  /* edges: the strips above and below too (16:10) */
+    if (pass) dyn_edge = pass, gpu_dynamic_state(cb, s, k.depth, w, h);
     if (quads) {  /* (primitive, first, count, base instance, instances) */
         uint32_t nquads = (uint32_t)r->x[2] / 4;
         if (nquads > QUADS) gpu_stop("%u quads in one draw", nquads);
@@ -2082,6 +2125,7 @@ static void draw(VkCommandBuffer cb, GpuState *s, const CmdRec *r) {
         vkCmdBindIndexBuffer(cb, buf, off, type == 1 ? VK_INDEX_TYPE_UINT16 : VK_INDEX_TYPE_UINT32);
         vkCmdDrawIndexed(cb, (uint32_t)r->x[2], (uint32_t)r->x[6] ? (uint32_t)r->x[6] : 1, 0, (int32_t)r->x[4],
                          (uint32_t)r->x[5]);
+    }
     }
     capture_after_draw(cb, s, g);
     /* the bloom composite, the last 3D pass before the UI: anti-aliasing here (gpu_aa.c) */

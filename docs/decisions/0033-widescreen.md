@@ -97,7 +97,21 @@ movie, the autosave notice and the diary stay 16:9 with black sides, as before. 
 screen and the copyright notice behave the same (the dialog had closed by then in those runs). 16:9 is unchanged
 (nothing is checked there).
 
+**16:10, the UI fitted (2026-11-11).** 16:10 is the only shape narrower than 16:9 (factor 9/10), so a UI kept at
+the game's width stuck out of the image and lost both sides (the HUD and the Yo-kai Pad cut left and right).
+Now, when the factor is below 1, `gpu_dynamic_state` (gpu_draw.c) fits the UI to the image's width: across it
+takes the image's factor like the 3D, down it is shrunk by the same factor and moved to the middle, with a
+45 px strip left above and below at 1600×900. Scissors follow. A whole-screen layer is fitted like the rest (so
+its bands stay where the content on them is) and drawn twice more into the strips, showing only its outermost
+rows (the layer 8 times as tall with its edge at the image's edge): a plain colour (dimming, loading black or
+white) covers the whole image. A 16:9 picture (the copyright notice) gets its black bars above and below instead
+of at the sides. The wider shapes take the old branch unchanged. Checked by the owner from screenshots: the
+copyright and autosave notices, loading, the town HUD and the Yo-kai Pad.
+
 ## Not done yet
+
+- 16:10: dialog dimming and battles not checked yet; bars at a menu's edge (the Yo-kai Pad's bottom bar) end
+  45 px above the image's bottom, and the strip below shows the layer's edge colour.
 
 - On-screen markers: `f_53b3a0` projects with the camera's (now wider) aspect into the 16:9 UI, so markers away
   from the middle may sit a little off their targets. Not seen in the frames checked; to look at.
