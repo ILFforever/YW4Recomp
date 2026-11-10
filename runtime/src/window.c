@@ -888,6 +888,17 @@ int window_hud_shown(void) { return hud_enabled(); }
 
 static void menu_draw(VkImage dst, int32_t x0, int32_t y0, uint32_t bw, uint32_t bh);  /* below, with the pause */
 
+/* The in-game overlay's design is 900 units high and at least 1600 wide (16:9; wider pictures give it more width).
+ * A picture narrower than 16:9 (the 16:10 aspect ratio) would cut its right side off: there the 1600 x 900 is
+ * fitted to the picture's width and centred top to bottom, as the game's UI is (gpu_draw.c). For a picture of
+ * pw x ph (any units): s, its units per design unit, and (ox, oy), where the design's (0, 0) is. */
+static void overlay_fit(float pw, float ph, float *s, float *ox, float *oy) {
+    float k = ph / 900.0f;
+    *ox = 0, *oy = 0;
+    if (pw < 1600.0f * k) k = pw / 1600.0f, *oy = (ph - 900.0f * k) * 0.5f;
+    *s = k;
+}
+
 /* ---- the overlay's pause (2026-11-05, F4 for now): the game's own pause (Plus: the world, timers and sound
  * stop) with its pause screen hidden (pause.c). Pausing presses Plus for the player and keeps the picture of that
  * moment; while paused the window shows that picture, so the game's "Paused" screen under it never shows, and the
@@ -1132,7 +1143,9 @@ static void menu_draw(VkImage dst, int32_t x0, int32_t y0, uint32_t bw, uint32_t
     if (!ov.uploaded || look != ov.look) {  /* draw it again: on the CPU, then one copy into the upload buffer */
         if (!ov.px && !(ov.px = malloc((size_t)bw * bh * 4))) return;
         if (!pv) memcpy(ov.px, ov.bg, (size_t)bw * bh * 4);  /* the bar is opaque: drawn over anything */
-        UiCanvas c = {ov.px, (int)bw, (int)bh, (float)bh / 900.0f, 0, 0};
+        float fs, fx, fy;
+        overlay_fit((float)bw, (float)bh, &fs, &fx, &fy);
+        UiCanvas c = {ov.px, (int)bw, (int)bh, fs, fx, fy};
         const char *close = "Esc";
         GameMenuInfo info = {hud_enabled(), yw4_version, pad_hints(&close), close, NULL, 0, 0, now};
         info.logo = game_logo(&info.logo_w, &info.logo_h);
@@ -1156,9 +1169,11 @@ static void menu_draw(VkImage dst, int32_t x0, int32_t y0, uint32_t bw, uint32_t
             VK_ACCESS_TRANSFER_WRITE_BIT);
     int32_t rx = 0, ry = 0, rw = (int32_t)bw, rh = (int32_t)bh;  /* the part shown: all, or the preview's bar */
     if (pv) {
-        float r[4], s = (float)bh / 900.0f;
+        float r[4], s, fx, fy;
+        overlay_fit((float)bw, (float)bh, &s, &fx, &fy);
         gamemenu_preview_rect(r);
-        rx = (int32_t)(r[0] * s), ry = (int32_t)(r[1] * s), rw = (int32_t)(r[2] * s + 0.5f), rh = (int32_t)(r[3] * s + 0.5f);
+        rx = (int32_t)(fx + r[0] * s), ry = (int32_t)(fy + r[1] * s), rw = (int32_t)(r[2] * s + 0.5f),
+        rh = (int32_t)(r[3] * s + 0.5f);
         if (rx < 0) rx = 0;
         if (ry < 0) ry = 0;
         if (rx + rw > (int32_t)bw) rw = (int32_t)bw - rx;
@@ -1218,13 +1233,15 @@ static void hud_onto(uint8_t *rgba, uint32_t w, uint32_t h) {
     if (shot_menu < 0) shot_menu = getenv("YW4_SHOT_MENU") != NULL;
     if (!shot_menu || !gamemenu_open() || settings_open() || !ov.px || !ov.uploaded) return;
     /* the part shown: all, or in the preview only its bar (the rest of ov.px is an older drawing), as menu_draw */
-    float r[4] = {0, 0, (float)ov.img.w * 900.0f / (float)ov.img.h, 900};
+    float fs, fx, fy, f = (float)h / (float)ov.img.h;  /* f: the overlay's pixels to the frame's */
+    overlay_fit((float)ov.img.w, (float)ov.img.h, &fs, &fx, &fy);
+    float r[4] = {-fx / fs, -fy / fs, (float)ov.img.w / fs, (float)ov.img.h / fs};  /* all of it */
     if (gamemenu_previewing()) gamemenu_preview_rect(r);
-    float k = (float)h / 900.0f;  /* design units to the frame's pixels */
+    float k = fs * f;  /* design units to the frame's pixels */
+    float l = (fx + r[0] * fs) * f, t = (fy + r[1] * fs) * f, rgt = l + r[2] * k, bot = t + r[3] * k;
     for (uint32_t y = 0; y < h; y++)  /* the overlay's picture (the window's size) scaled to the frame's */
         for (uint32_t x = 0; x < w; x++) {
-            if ((float)x < r[0] * k || (float)x >= (r[0] + r[2]) * k || (float)y < r[1] * k || (float)y >= (r[1] + r[3]) * k)
-                continue;
+            if ((float)x < l || (float)x >= rgt || (float)y < t || (float)y >= bot) continue;
             memcpy(rgba + ((size_t)y * w + x) * 4,
                    ov.px + ((size_t)(y * ov.img.h / h) * ov.img.w + x * ov.img.w / w) * 4, 4);
         }
@@ -1967,7 +1984,9 @@ static int overlay_point(float mx, float my, float *x, float *y) {
     float px = picture_rect[0] * (float)ww, py = picture_rect[1] * (float)wh;
     float pw = picture_rect[2] * (float)ww, ph = picture_rect[3] * (float)wh;
     if (ph <= 0 || mx < px || my < py || mx >= px + pw || my >= py + ph) return 0;
-    *x = (mx - px) * 900.0f / ph, *y = (my - py) * 900.0f / ph;
+    float s, ox, oy;
+    overlay_fit(pw, ph, &s, &ox, &oy);
+    *x = (mx - px - ox) / s, *y = (my - py - oy) / s;
     return 1;
 }
 
@@ -2202,12 +2221,13 @@ void window_run(void (*guest)(void *), void *arg) {
                     int ww = 0, wh = 0;
                     SDL_GetWindowSize(window, &ww, &wh);
                     float px = picture_rect[0] * (float)ww, py = picture_rect[1] * (float)wh;
-                    float ph = picture_rect[3] * (float)wh;
+                    float pw = picture_rect[2] * (float)ww, ph = picture_rect[3] * (float)wh;
                     if (ph > 0) {
-                        float s = ph / 900.0f;
+                        float s, ox, oy;
+                        overlay_fit(pw, ph, &s, &ox, &oy);
                         SDL_Rect rect;
-                        rect.x = (int)roundf(px + r[0] * s);
-                        rect.y = (int)roundf(py + r[1] * s);
+                        rect.x = (int)roundf(px + ox + r[0] * s);
+                        rect.y = (int)roundf(py + oy + r[1] * s);
                         rect.w = (int)roundf(r[2] * s);
                         rect.h = (int)roundf(r[3] * s);
                         int caret_offset = (int)roundf((caret_x - r[0]) * s);
