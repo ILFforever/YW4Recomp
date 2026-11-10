@@ -101,7 +101,8 @@ static int reflex_index(void) { return dlssg_reflex(); }  /* what runs: on while
 static const char *reflex_disabled(void) {
     if (!gpu_dlss_built()) return "NOT IN THIS BUILD";
     if (!dlssg_reflex_available()) return "NEEDS AN NVIDIA GPU";
-    return gpu_fg() == 2 && dlssg_available() ? "ON WHILE FRAME GENERATION IS DLSS: NVIDIA REQUIRES IT" : NULL;
+    /* locked on, not off: the panels show a reason starting "ALWAYS ON" without their "Off for now" */
+    return gpu_fg() == 2 && dlssg_available() ? "ALWAYS ON WITH DLSS FRAME GENERATION. NVIDIA REQUIRES IT" : NULL;
 }
 static const char *fg_disabled(void) {
     if (!gpu_fsr_built() && !gpu_dlss_built()) return "NOT IN THIS BUILD";

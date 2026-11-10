@@ -867,17 +867,25 @@ static float hint(const UiCanvas *c, float x, float y, const char *key, const ch
 /* A popup button (Keep playing / Quit game): 56 high, radius 14; the chosen one ringed in gold. */
 /* A popup button, as the launcher's (style.css dialog): 40 high, pill-shaped, 20 at the sides; the chosen one
  * ringed in gold. */
+/* The exit popup's size against the launcher's popup it copies: bigger, since it is read from the couch
+ * (owner, 2026-11-11: "the current one is small"). */
+#define POP_K 1.4f
+
 static float popup_button(const UiCanvas *c, float right, float y, const char *label, int quit, int on) {
     int f = quit ? UI_ROUNDED_800 : UI_ROUNDED_700;
-    float w = ui_text_w(f, 14, label) + 40;
+    float fs = 14 * POP_K, bh = 40 * POP_K, ring = 4 * POP_K;
+    float w = ui_text_w(f, fs, label) + 40 * POP_K;
     float x = right - w;
-    hit_add(x, y, w, 40, HIT_POPUP, quit, 0);
-    if (on) ui_box(c, x - 4, y - 4, w + 8, 48, 24, RING, 0, 0);
-    if (quit) ui_box(c, x, y, w, 40, 20, WINE, 0, 0);
-    else ui_box(c, x, y, w, 40, 20, WHITE, 1, POP_LINE);
-    ui_text_in(c, f, 14, x, y, w, 40, 1, label, quit ? SNOW : PLUM);
+    hit_add(x, y, w, bh, HIT_POPUP, quit, 0);
+    if (on) ui_box(c, x - ring, y - ring, w + 2 * ring, bh + 2 * ring, bh / 2 + ring, RING, 0, 0);
+    if (quit) ui_box(c, x, y, w, bh, bh / 2, WINE, 0, 0);
+    else ui_box(c, x, y, w, bh, bh / 2, WHITE, 1, POP_LINE);
+    ui_text_in(c, f, fs, x, y, w, bh, 1, label, quit ? SNOW : PLUM);
     return w;
 }
+
+/* A greyed-out row's reason that keeps the setting on (Reflex with DLSS frame generation), not off. */
+static int locked_on(const char *why) { return !strncmp(why, "ALWAYS ON", 9); }
 
 /* The settings' texts are upper case (the F1 panel's pixel font has no lower case); the design writes names,
  * options and sections in sentence case and keeps acronyms: "WINDOW MODE" -> "Window mode", "X16" -> "x16". */
@@ -1088,7 +1096,8 @@ static void draw_settings_page(const UiCanvas *c, const GameMenuInfo *in) {
     /* the chosen row's description */
     const SettingRow *r = &rows[cur];
     char desc[600], dprose[600], dname[160];
-    if (r->disabled) snprintf(desc, sizeof desc, "%s OFF FOR NOW: %s", r->help, r->disabled);
+    if (r->disabled) snprintf(desc, sizeof desc, "%s %s%s", r->help, locked_on(r->disabled) ? "" : "OFF FOR NOW: ",
+                              r->disabled);
     else snprintf(desc, sizeof desc, "%s", r->help);
     prose_case(desc, dprose, sizeof dprose);
     sentence_case(r->name, dname, sizeof dname);
@@ -1596,7 +1605,7 @@ static void draw_preview(const UiCanvas *c, const GameMenuInfo *in) {
         if (tags & TAG_RECOMMENDED) tag(c, tx, ty, "Recommended", GOLD, ON_GOLD, 0);
         ty += 18 + 6;
     }
-    if (r->disabled) snprintf(desc, sizeof desc, "OFF FOR NOW: %s.", r->disabled);
+    if (r->disabled) snprintf(desc, sizeof desc, "%s%s.", locked_on(r->disabled) ? "" : "OFF FOR NOW: ", r->disabled);
     else if (*rest) snprintf(desc, sizeof desc, "%s. %s", rest, r->help);
     else snprintf(desc, sizeof desc, "%s", r->help);
     prose_case(desc, prose, sizeof prose);
@@ -1856,23 +1865,26 @@ void gamemenu_draw(const UiCanvas *c, const GameMenuInfo *in) {
      * violet title bar over a gold rule, the text on white, the buttons in a lilac tray at the bottom */
     if (confirm) {
         ui_rect(c, 0, 0, W, H, POP_BACKDROP, 0.6f);
-        float pw = 460, lh_title = 17 * 1.3f, bar = 15 + lh_title + 13, lh = 14 * 1.5f, tray = 12 + 40 + 12;
-        float ph = bar + 3 + 18 + lh + 18 + tray;
+        const float k = POP_K, r = 14 * k, gold = 3 * k;
+        float pw = 460 * k, lh_title = 17 * k * 1.3f, bar = (15 + 13) * k + lh_title, lh = 14 * k * 1.5f;
+        float tray = (12 + 40 + 12) * k, gap = 18 * k, pad = 22 * k;
+        float ph = bar + gold + gap + lh + gap + tray;
         float px = (W - pw) / 2, py = (H - ph) / 2;
-        ui_shadow(c, px, py + 14, pw, ph, 14, 36, POP_SHADOW, 0.45f);
-        ui_box_alpha(c, px - 1, py - 1, pw + 2, ph + 2, 15, POP_BORDER, 0.5f);  /* the 1 px border, half seen */
-        ui_box(c, px, py, pw, ph, 14, POP_WHITE, 0, 0);
-        ui_box(c, px, py, pw, bar + 14, 14, POP_DEEP, 0, 0);  /* the title bar (its lower corners covered below) */
-        ui_rect(c, px, py + bar, pw, 3, POP_GOLD, 1);
+        ui_shadow(c, px, py + r, pw, ph, r, 36 * k, POP_SHADOW, 0.45f);
+        ui_box_alpha(c, px - 1, py - 1, pw + 2, ph + 2, r + 1, POP_BORDER, 0.5f);  /* the 1 px border, half seen */
+        ui_box(c, px, py, pw, ph, r, POP_WHITE, 0, 0);
+        ui_box(c, px, py, pw, bar + r, r, POP_DEEP, 0, 0);  /* the title bar (its lower corners covered below) */
+        ui_rect(c, px, py + bar, pw, gold, POP_GOLD, 1);
         float ty = py + ph - tray;
-        ui_box(c, px, ty - 14, pw, tray + 14, 14, POP_LILAC, 0, 0);  /* the tray (its upper corners covered) */
-        ui_rect(c, px, py + bar + 3, pw, ty - (py + bar + 3), POP_WHITE, 1);
+        ui_box(c, px, ty - r, pw, tray + r, r, POP_LILAC, 0, 0);  /* the tray (its upper corners covered) */
+        ui_rect(c, px, py + bar + gold, pw, ty - (py + bar + gold), POP_WHITE, 1);
         ui_rect(c, px, ty, pw, 1, POP_LINE, 1);
-        ui_text(c, UI_ROUNDED_800, 17, px + 22, py + 15, lh_title, "Quit the game?", POP_WHITE);
-        ui_text(c, UI_GOTHIC_400, 14, px + 22, py + bar + 3 + 18, lh, "Progress since your last save is lost.", POP_INK);
-        float right = px + pw - 16;
-        right -= popup_button(c, right, ty + 12, "Quit game", 1, choice == 1) + 10;
-        popup_button(c, right, ty + 12, "Keep playing", 0, choice == 0);
+        ui_text(c, UI_ROUNDED_800, 17 * k, px + pad, py + 15 * k, lh_title, "Quit the game?", POP_WHITE);
+        ui_text(c, UI_GOTHIC_400, 14 * k, px + pad, py + bar + gold + gap, lh, "Progress since your last save is lost.",
+                POP_INK);
+        float right = px + pw - 16 * k;
+        right -= popup_button(c, right, ty + 12 * k, "Quit game", 1, choice == 1) + 10 * k;
+        popup_button(c, right, ty + 12 * k, "Keep playing", 0, choice == 0);
     }
     if (draw_text_has) {
         memcpy(focused_text_box, draw_text_box, sizeof focused_text_box);
