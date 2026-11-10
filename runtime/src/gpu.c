@@ -1485,8 +1485,47 @@ static void destroy_some(int n) {
     }
 }
 
+/* A screen-sized target with no image under its key: the image the same address has under another layout, when
+ * the Vulkan image would be the same (format, real size), under the new key instead of a new one. The engine
+ * keeps two layouts of its screen targets at the same addresses, 1600x900 and its fractions in the field and
+ * 1920x1080 and its fractions in battles, and we make both the chosen size: every battle start and every return
+ * to the field made the ~24 images again (at 5120x2160: 240 ms in one frame, then ~2 s of slow frames, owner
+ * 2026-11-10) while the other layout's set stayed in video memory until unused for 300 frames. On the console
+ * the two layouts share the memory, so the contents staying is as there. gpu_lock held. */
+static GpuImage *image_relayout(const NvnTexture *t) {
+    ImageKey k = key_of(t);
+    if (!(k.scale_den || k.wide_den) || !screen_sized(t)) return NULL;
+    uint32_t sn = k.scale_den ? k.scale_num : 1, sd = k.scale_den ? k.scale_den : 1;
+    uint32_t wn = k.wide_den ? k.wide_num : 1, wd = k.wide_den ? k.wide_den : 1;
+    uint32_t w = gpu_scaled(gpu_scaled(t->layout.width, sn, sd), wn, wd), h = gpu_scaled(t->layout.height, sn, sd);
+    VkFormat fmt = gpu_format(t->format);
+    for (int b = 0; b < IMAGE_BUCKETS; b++)
+        for (GpuImage **pp = &images[b]; *pp; pp = &(*pp)->next) {
+            GpuImage *g = *pp;
+            if (g->key.addr != k.addr || g->format != fmt || g->width != w || g->height != h) continue;
+            if (g->key.target != k.target || g->key.depth != k.depth || g->key.layers != k.layers ||
+                g->key.levels != k.levels || !(g->key.scale_den || g->key.wide_den))
+                continue;
+            static int logged;
+            if (logged++ < 48)
+                fprintf(stderr, "yw4: gpu: target at %#" PRIx64 " (%ux%u) kept for the game's %ux%u layout (was %ux%u)\n",
+                        k.addr, w, h, k.width, k.height, g->key.width, g->key.height);
+            *pp = g->next;
+            g->key = k;
+            g->scale_num = sn, g->scale_den = sd, g->wide_num = wn, g->wide_den = wd;
+            uint32_t bucket = key_hash(&k);
+            g->next = images[bucket];
+            images[bucket] = g;
+            image_epoch++;
+            return g;
+        }
+    return NULL;
+}
+
 GpuImage *image_of(VkCommandBuffer cb, NvnTexture *t) {
     GpuImage *g = image_find(t);
+    if (!g && t->pool_flags & POOL_CPU_NO_ACCESS && (g = image_relayout(t)) != NULL)
+        ((NvnTexture *)t)->found = g, ((NvnTexture *)t)->found_epoch = image_epoch;
     if (g) {
         g->last_frame = present_count, g->last_seq = cur ? cur->seq : g->last_seq;
         if (reupload_due(t, g) || t->cpu_written) {
