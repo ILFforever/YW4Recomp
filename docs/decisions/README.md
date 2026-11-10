@@ -68,3 +68,4 @@ lists later records that replace a record, or part of it.
 | 0057 | [Mouse support in Yo-kai Pad pages and scrolling lists](0057-mouse-menu-lists.md) | accepted | 2026-11-08 |  | `runtime/src/mousemenu.c`, `runtime/src/mousemenu.h`, `runtime/src/window.c`, `docs/debugging.md` |
 | 0058 | [Controller rumble and haptic feedback](0058-controller-rumble.md) | accepted | 2026-11-09 |  | `runtime/src/svc_hid.c`, `runtime/src/window.c`, `runtime/src/window.h`, `runtime/src/bindings.c`, `docs/debugging.md` |
 | 0059 | [AMD Vulkan depth format fallback (D24S8 to D32S8)](0059-amd-depth-format-fallback.md) | accepted | 2026-11-10 |  | `runtime/src/gpu.c`, `runtime/src/gpu_ab.c`, `docs/debugging.md` |
+| 0060 | [The launcher's icon: the owner's own Whisper silhouette](0060-launcher-icon.md) | accepted | 2026-11-10 |  | `launcher/icon-source.png`, `launcher/src-tauri/icons` |
