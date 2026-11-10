@@ -116,6 +116,9 @@ VkImageView gpu_sample_view(VkCommandBuffer cb, NvnTexture *t, const NvnTextureV
                             VkImageViewType type);
 VkImageView gpu_dummy_view(VkCommandBuffer cb, VkImageViewType type);
 VkSampler gpu_sampler(const NvnSamplerDesc *d);
+/* The sampler being asked for is a 3D draw's, before the anti-aliasing point: it gets upscaling's mip bias. Set
+ * per draw by the thread recording it (gpu_draw.c), 0 otherwise. */
+extern _Thread_local int gpu_sampler_scene;
 
 /* ---- gpu_draw.c: the state a command list builds up, and its draws */
 

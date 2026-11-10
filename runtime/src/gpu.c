@@ -1722,9 +1722,14 @@ void gpu_aniso_cycle(void) {
  * mipmapped textures are read as at the output's size, and one level finer as AMD recommends: log2(render /
  * output) - 1 (quality -1.58, balanced -1.77, performance -2). Not for the draws after the anti-aliasing point
  * (the UI, drawn at the output's size). YW4_FSR_MIP_BIAS=<x> replaces the -1. */
+/* Which draws get it is said per draw (gpu_sampler_scene, from the draw's own "before the composite"), not by the
+ * scene being upscaled at the moment (upscaled_scene): the 3D of the next frame is recorded on another thread while
+ * this frame's UI is, so with that test the 3D's samplers had no bias at all (2026-11-10: -1 and -4 gave the same
+ * picture; DLSS and FSR quality no sharper than a plain stretch on textured surfaces). */
+_Thread_local int gpu_sampler_scene;
 static float upscale_lod_bias(void) {
     int m = gpu_upscale();
-    if (!m || __atomic_load_n(&upscaled_scene, __ATOMIC_ACQUIRE)) return 0.0f;
+    if (!m || !gpu_sampler_scene) return 0.0f;
     static float extra = 1.0f;  /* 1.0: not read yet */
     if (extra > 0.5f) extra = getenv("YW4_FSR_MIP_BIAS") ? (float)atof(getenv("YW4_FSR_MIP_BIAS")) : -1.0f;
     return log2f(upscale_ratio[m] > 0.0f ? 1.0f / upscale_ratio[m] : 1.0f) + extra;

@@ -913,7 +913,9 @@ int gpu_handle_texture(VkCommandBuffer cb, const GpuState *s, uint64_t handle, i
     NvnSamplerDesc d = sd ? *sd : (NvnSamplerDesc){.min_filter = 1, .mag_filter = 1, .lod_max = 1000};
     d.compare_mode = 0;
     ii->imageView = gpu_sample_view(cb, e->tex, &e->view, e->has_view, VK_IMAGE_VIEW_TYPE_2D);
+    gpu_sampler_scene = !s->after_composite;  /* upscaling's mip bias: the 3D's, not the UI's */
     ii->sampler = gpu_sampler(&d);
+    gpu_sampler_scene = 0;
     ii->imageLayout = VK_IMAGE_LAYOUT_GENERAL;
     return 1;
 }
@@ -1301,7 +1303,9 @@ static int bind_stage_set(VkCommandBuffer cb, const GpuState *s, const Shader *s
                     const GpuImage *ti = image_find(e->tex);
                     if (ti && ti->wide_num != ti->wide_den) dyn_reads_screen = 1;
                 }
+                gpu_sampler_scene = !s->after_composite;  /* upscaling's mip bias: the 3D's, not the UI's */
                 ii[i].sampler = gpu_sampler(&d);
+                gpu_sampler_scene = 0;
                 ii[i].imageLayout = VK_IMAGE_LAYOUT_GENERAL;
                 w[i].dstBinding = (b->kind == 'd' ? 96 : 16) + b->slot;
                 w[i].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
