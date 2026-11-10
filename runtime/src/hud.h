@@ -62,8 +62,6 @@ void hud_scale_set(float v);
 float hud_opacity_get(void);
 void hud_opacity_set(float v);
 
-/* One line of text in the HUD's box, at scale s (a notice shown in the middle of the screen). */
-void notice_render(uint8_t *rgba, int w, int h, const char *msg, float s, int *used_w, int *used_h);
 /* The settings panel (settings.h) the same way: every row with all its options, the current one boxed. */
 void panel_render(uint8_t *rgba, int w, int h, const SettingRow *rows, int n, int selected, int developer,
                   int *used_w, int *used_h);

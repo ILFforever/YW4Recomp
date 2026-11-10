@@ -102,7 +102,8 @@ typedef struct {
     void *ptr;
 } Overlay;
 enum { HUD_W = 256 * 4, HUD_H = 128 * 4 };  /* the HUD drawn at its scale: up to 4x its 1x size */
-static Overlay panel = {480, 480}, notice = {1024, 160};
+/* (the "SWITCHING FRAME GENERATION..." notice is gone: owner, 2026-11-11; the switch's safe frames still run) */
+static Overlay panel = {480, 480};
 /* The performance HUD (F3; the in-game overlay's Performance page): hud_on 0 off, 1 detailed, 2 compact (-1:
  * not read yet, YW4_HUD); its corner (0 top left, 1 top right, 2 bottom left, 3 bottom right, YW4_HUD_CORNER)
  * and in the detailed one its parts (HUD_PART_*, YW4_HUD_PARTS). Saved with the settings. */
@@ -1172,16 +1173,6 @@ static void menu_draw(VkImage dst, int32_t x0, int32_t y0, uint32_t bw, uint32_t
                    &blit, VK_FILTER_NEAREST);  /* a blit: the window's format may order the channels differently */
 }
 
-/* A notice in the middle of the picture: "Switching frame generation" while the switch's safe frames last
- * (gpu_fg.h). F4's test pause shows none (owner, 2026-11-06: the picture stays clean). */
-static void notice_draw(VkImage dst, int32_t x0, int32_t y0, uint32_t bw, uint32_t bh) {
-    const char *msg = gpu_fg_switching() ? "SWITCHING FRAME GENERATION..." : NULL;
-    if (!msg || overlay_resources(&notice)) return;
-    float s = overlay_scale(swap_extent.height);
-    int w, h;
-    notice_render(notice.ptr, (int)notice.w, (int)notice.h, msg, s, &w, &h);
-    overlay_show(&notice, dst, w, h, x0 + ((int32_t)bw - w) / 2, y0 + ((int32_t)bh - h) / 2, 1.0f);
-}
 
 /* An overlay's drawn cw x ch part pasted 1:1 into rgba (the w x h frame) at (x, y), clipped. */
 static void paste(uint8_t *rgba, uint32_t w, uint32_t h, const Overlay *o, int cw, int ch, uint32_t x, uint32_t y,
@@ -1529,7 +1520,6 @@ static int present_image(VkImage src, VkImageLayout layout, VkRect2D r0, int rea
     hud_draw(dst, index, x0, y0, bw, bh);
     menu_draw(dst, x0, y0, bw, bh);
     panel_draw(dst, x0, y0, bw, bh);
-    notice_draw(dst, x0, y0, bw, bh);
     barrier(dst, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR, VK_ACCESS_TRANSFER_WRITE_BIT, 0);
     vkEndCommandBuffer(cmd);
 

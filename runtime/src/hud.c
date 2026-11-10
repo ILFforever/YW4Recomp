@@ -1,14 +1,12 @@
-/* The HUD (hud.h) drawn into an RGBA image: its lines, then the frame-time graph. The lines are drawn at the
- * HUD's size with a monospaced font of the system (Consolas on Windows, DejaVu Sans Mono elsewhere; YW4_HUD_FONT
- * names another .ttf) through stb_truetype, so they stay sharp at any scale; without one, in a 5x7 font of the
- * characters they use (lower case drawn as upper case, characters without a glyph as blanks). The settings panel
- * keeps the 5x7 font. */
+/* The F1 settings panel (hud.h) drawn into an RGBA image in a 5x7 pixel font of the characters it uses (lower
+ * case drawn as upper case, characters without a glyph as blanks). stb_truetype's code is compiled here for
+ * ui.c, which draws the overlay's text. */
 #include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
-#define STB_TRUETYPE_IMPLEMENTATION
+#define STB_TRUETYPE_IMPLEMENTATION  /* for ui.c */
 #include "stb_truetype.h"
 
 #include "hud.h"
@@ -86,105 +84,6 @@ static void text(const Canvas *cv, int x0, int y0, const char *s, const uint8_t 
             for (int c = 0; c < 5; c++)
                 if (g[r] >> (4 - c) & 1) put(cv, x0 + c, y0 + r, col);
     }
-}
-
-/* ---- the HUD at a scale: x, y and sizes in the 1x layout's units, drawn s times larger */
-
-/* A filled rectangle of the 1x layout (x, y, w, h) at scale s, edges rounded to whole pixels. */
-static void rect_s(const Canvas *cv, float s, float x, float y, float w, float h, const uint8_t col[3]) {
-    int x0 = (int)floorf(x * s + 0.5f), y0 = (int)floorf(y * s + 0.5f);
-    int x1 = (int)floorf((x + w) * s + 0.5f), y1 = (int)floorf((y + h) * s + 0.5f);
-    if (x1 <= x0) x1 = x0 + 1;
-    if (y1 <= y0) y1 = y0 + 1;
-    for (int j = y0; j < y1; j++)
-        for (int i = x0; i < x1; i++) put(cv, i, j, col);
-}
-
-static stbtt_fontinfo font;  /* its file stays loaded: stb_truetype reads it in place */
-static int font_state;  /* 0 not tried, 1 loaded, -1 none */
-
-static int font_ready(void) {
-    if (font_state) return font_state > 0;
-    font_state = -1;
-    const char *paths[] = {getenv("YW4_HUD_FONT"), "C:/Windows/Fonts/consolab.ttf", "C:/Windows/Fonts/consola.ttf",
-                           "C:/Windows/Fonts/CascadiaMono.ttf", "/usr/share/fonts/truetype/dejavu/DejaVuSansMono-Bold.ttf",
-                           "/usr/share/fonts/TTF/DejaVuSansMono-Bold.ttf", "/usr/share/fonts/dejavu/DejaVuSansMono-Bold.ttf",
-                           "/usr/share/fonts/truetype/dejavu/DejaVuSansMono.ttf"};
-    for (size_t i = 0; i < sizeof paths / sizeof *paths; i++) {
-        if (!paths[i] || !*paths[i]) continue;
-        FILE *f = fopen(paths[i], "rb");
-        if (!f) continue;
-        fseek(f, 0, SEEK_END);
-        long n = ftell(f);
-        fseek(f, 0, SEEK_SET);
-        unsigned char *d = n > 0 ? malloc((size_t)n) : NULL;
-        int ok = d && fread(d, 1, (size_t)n, f) == (size_t)n;
-        fclose(f);
-        if (ok && stbtt_InitFont(&font, d, stbtt_GetFontOffsetForIndex(d, 0))) {
-            font_state = 1;
-            fprintf(stderr, "yw4: hud: font %s\n", paths[i]);
-            return 1;
-        }
-        free(d);
-    }
-    fprintf(stderr, "yw4: hud: no system font found: the pixel font\n");
-    return 0;
-}
-
-/* A line of text with its top-left at the 1x layout's (x, y), each character one cell wide, at scale s: with the
- * system font, sized so a digit fills the cell's width; else the 5x7 font's pixels as rectangles. Blended over the
- * box's colour (the HUD's text sits on it). */
-static void text_s(const Canvas *cv, float s, float x, float y, const char *str, const uint8_t col[3],
-                   const uint8_t bg[3]) {
-    if (!font_ready()) {
-        for (int k = 0; str[k]; k++) {
-            const uint8_t *g = glyph(str[k]);
-            if (!g) continue;
-            for (int r = 0; r < 7; r++)
-                for (int c = 0; c < 5; c++)
-                    if (g[r] >> (4 - c) & 1) rect_s(cv, s, x + k * CELL_W + c, y + r, 1, 1, col);
-        }
-        return;
-    }
-    int adv, lsb;
-    stbtt_GetCodepointHMetrics(&font, '0', &adv, &lsb);
-    float cell = CELL_W * s, fs = cell / (float)adv;  /* a digit's advance = one cell */
-    float base = y * s + 7.0f * s;                      /* the 5x7 font's baseline: its bottom row */
-    for (int k = 0; str[k]; k++) {
-        unsigned char ch = (unsigned char)str[k];
-        if (ch < 32) continue;
-        float px = x * s + k * cell;
-        int x0, y0, x1, y1;
-        stbtt_GetCodepointBitmapBoxSubpixel(&font, ch, fs, fs, px - floorf(px), 0, &x0, &y0, &x1, &y1);
-        int gw = x1 - x0, gh = y1 - y0;
-        if (gw <= 0 || gh <= 0 || gw > 256 || gh > 256) continue;
-        unsigned char bm[256 * 256];
-        stbtt_MakeCodepointBitmapSubpixel(&font, bm, gw, gh, gw, fs, fs, px - floorf(px), 0, ch);
-        int ox = (int)floorf(px) + x0, oy = (int)floorf(base + 0.5f) + y0;
-        for (int j = 0; j < gh; j++)
-            for (int i = 0; i < gw; i++) {
-                int a = bm[j * gw + i];
-                if (!a) continue;
-                uint8_t c[3];
-                for (int q = 0; q < 3; q++) c[q] = (uint8_t)((col[q] * a + bg[q] * (255 - a)) / 255);
-                put(cv, ox + i, oy + j, c);
-            }
-    }
-}
-
-static const uint8_t WHITE[3] = {235, 235, 235}, BOX[3] = {16, 16, 20};
-
-/* One line of text in the HUD's box (a notice in the middle of the screen, e.g. while frame generation switches). */
-void notice_render(uint8_t *rgba, int w, int h, const char *msg, float s, int *used_w, int *used_h) {
-    int len = (int)strlen(msg);
-    int bw1 = 2 * (MARGIN + 4) + len * CELL_W - 1, bh1 = 2 * (MARGIN + 2) + CELL_H - 2;
-    Canvas cv = {rgba, w, h, (int)ceilf(bw1 * s), (int)ceilf(bh1 * s)};
-    if (cv.bw > w) cv.bw = w;
-    if (cv.bh > h) cv.bh = h;
-    for (int y = 0; y < cv.bh; y++)
-        for (int x = 0; x < cv.bw; x++) put(&cv, x, y, BOX);
-    text_s(&cv, s, MARGIN + 4, MARGIN + 2, msg, WHITE, BOX);
-    *used_w = cv.bw, *used_h = cv.bh;
 }
 
 /* ---- the settings panel, in the style of the game's own menus: a cream card with a dark outline and
