@@ -914,7 +914,7 @@ static void panel_draw(VkImage dst, int32_t x0, int32_t y0, uint32_t bw, uint32_
         int row, col, n = bindings_rows(rows, 32, &row, &col, help, sizeof help);
         controls_render(panel.ptr, (int)panel.w, (int)panel.h, rows, n, row, col, bindings_capturing(), help, &w, &h);
     } else {
-        SettingRow rows[32];
+        SettingRow rows[48];
         int sel, n = settings_rows(rows, 32, &sel);
         panel_render(panel.ptr, (int)panel.w, (int)panel.h, rows, n, sel, settings_developer(), &w, &h);
     }

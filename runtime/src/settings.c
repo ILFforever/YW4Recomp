@@ -227,7 +227,7 @@ static const Setting player[] = {
     {"ADVANCED", "LEGACY MENUS",
      "THE OLD KEYS: F1 OPENS THE OLD SETTINGS PANEL AND ITS DEVELOPER OPTIONS, F2 THE OLD CONTROLS PAGE, F3 SHOWS OR "
      "HIDES THE PERFORMANCE HUD. OFF, THE THREE KEYS OPEN THIS MENU'S SETTINGS, CONTROLS AND OVERLAY PAGES: IT HAS ALL "
-     "OF IT BUT THE DEVELOPER OPTIONS.",
+     "OF IT, THE DEVELOPER OPTIONS AT THE END OF ADVANCED.",
      {"OFF", "ON"},
      {"F1, F2 AND F3 OPEN THIS MENU'S PAGES", "F1, F2 AND F3 OPEN THE OLD MENUS"}, 2, settings_legacy_keys, legacy_keys_toggle,
      "YW4_LEGACY_KEYS", {"0", "1"}},
@@ -517,11 +517,17 @@ static void fill_theme_row(SettingRow *r) {
     r->options[0] = theme_name(theme_index()), r->notes[0] = note, r->noptions = 1, r->current = 0;
 }
 
+/* The overlay's Advanced section also lists the developer page's settings after its own (owner, 2026-11-11: the
+ * renderer switches and speed-ups were only on the old panel); in the overlay they are under ADVANCED. */
 int settings_player_rows(SettingRow *rows, int max) {
     int n = 0, at = theme_row();
     for (int i = 0; i < NPLAYER && n < max; i++) {
         if (n == at && !strcmp(player[i].category, "ADVANCED")) fill_theme_row(&rows[n++]);
         if (n < max && !hud_slider_row(&player[i])) n += fill_rows(rows + n, 1, &player[i], 1);
+    }
+    for (int i = 0; i < NDEVELOPER && n < max; i++) {
+        n += fill_rows(rows + n, 1, &developer[i], 1);
+        rows[n - 1].category = "ADVANCED";
     }
     return n;
 }
@@ -593,8 +599,10 @@ void settings_change(int row, int dir) {
     }
     if (row > at) row--;
     const Setting *s = NULL;
-    for (int i = 0, seen = 0; i < NPLAYER && !s; i++)
+    int seen = 0;
+    for (int i = 0; i < NPLAYER && !s; i++)
         if (!hud_slider_row(&player[i]) && seen++ == row) s = &player[i];
+    if (!s && row - seen >= 0 && row - seen < NDEVELOPER) s = &developer[row - seen];  /* Advanced's developer rows */
     if (!s) return;
     if (s->disabled && s->disabled()) return;  /* greyed out */
     setting_step(s, dir);

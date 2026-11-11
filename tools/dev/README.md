@@ -100,3 +100,13 @@ wrong for posed parts and moving objects.
   reading it.
 - The owner can reach any place in the game faster than a replay can, and is a good judge of flicker: for
   visual checks, launch the game for them with the right settings and ask.
+- `--shots`, `YW4_FLASH_SAVE` and `YW4_SET_AT` count **presented frames**, and `run.py` runs without a settings
+  file, so at **30 frames/s**: 60 s of run reach about frame 1700, not 3600. A shot at a frame the run never
+  reaches is silently not taken (2026-11-11: "screenshots broken" was only this). Give `--seconds` enough, or pass
+  the owner's settings (`YW4_SETTINGS_FILE` with the FULL path to `work/build/settings.ini`: a bare `settings.ini`
+  is looked for in the home folder, the repo root, and a new default one is made there).
+- Replay keys `F1`, `F2`, `UP`, `DOWN`, `LEFT`, `RIGHT`, `ENTER` work the **old** panel, whatever LEGACY MENUS is.
+  The in-game overlay has its own: `MENU` (Escape), `M_SET` / `M_CTRL` / `M_PERF` (its pages), `M_UP`, `M_DOWN`,
+  `M_LEFT`, `M_RIGHT`, `M_OK`, `M_BACK`, `M_ALT` (`runtime/src/svc_hid.c`). `F12` in a replay takes a screenshot;
+  `YW4_SHOT_MENU=1` keeps the overlay in it. Example: settings page, Advanced, its last rows:
+  `k 3300 M_SET`, six `M_DOWN`, `M_RIGHT`, twelve `M_DOWN`, then `F12` (run 240 s at 30 frames/s).

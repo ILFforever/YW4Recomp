@@ -17,6 +17,8 @@ static int open_, sel, confirm, choice;
 static int focus;             /* 0 the side panel, 1 the page it shows (Settings) */
 static int srow;              /* the chosen row on the settings page (settings_player_rows) */
 static int in_rows;           /* the settings page: 0 the sections list has the focus, 1 the chosen section's rows */
+/* the settings page's rows as last drawn: the first shown of the section, how many it has and fit, their rows */
+static int set_first, set_count, set_visible, set_idx[48];
 static int prow;              /* the chosen row on the performance page: mode, corner, the four parts */
 static uint32_t changes;      /* counts every change of what shows */
 static int toast_wanted;      /* the note (toast_msg, top right) starts at the next look */
@@ -232,14 +234,14 @@ static void accept(void) {
 static int previewable(const char *category) { return strcmp(category, "ADVANCED") != 0; }
 
 static int can_preview(void) {  /* the Settings page's chosen section has something to see */
-    SettingRow rows[32];
-    int n = settings_player_rows(rows, 32);
+    SettingRow rows[48];
+    int n = settings_player_rows(rows, 48);
     return n > 0 && previewable(rows[srow < n ? srow : n - 1].category);
 }
 
 static void preview_start(void) {
-    SettingRow rows[32];
-    int n = settings_player_rows(rows, 32);
+    SettingRow rows[48];
+    int n = settings_player_rows(rows, 48);
     if (n <= 0) return;
     if (srow >= n) srow = n - 1;
     if (!previewable(rows[srow].category)) return;
@@ -278,8 +280,8 @@ void gamemenu_open_page(int item) {
 /* in the preview: Up / Down the section's rows, Left / Right (Enter) change, PREV / NEXT the graphics sections,
  * ALT hides or shows the bar, Back returns to the Settings page */
 static void preview_action(int a) {
-    SettingRow rows[32];
-    int n = settings_player_rows(rows, 32);
+    SettingRow rows[48];
+    int n = settings_player_rows(rows, 48);
     if (n <= 0) return;
     if (srow >= n) srow = n - 1;
     int first = srow, last = srow;
@@ -306,8 +308,8 @@ static void preview_action(int a) {
 
 /* the settings page: rows run on from one section into the next; PREV / NEXT jump to a section's first row */
 static void settings_page_action(int a) {
-    SettingRow rows[32];
-    int n = settings_player_rows(rows, 32);
+    SettingRow rows[48];
+    int n = settings_player_rows(rows, 48);
     if (n <= 0) return;
     if (srow >= n) srow = n - 1;
     int first = srow;  /* this section's first row */
@@ -727,7 +729,24 @@ void gamemenu_mouse(float x, float y, int button) {
 void gamemenu_wheel(int dy) {
     /* only a page that scrolls takes the wheel (the Controls table): its rows shown, one a notch; elsewhere it does
      * nothing (owner, 2026-11-06: the wheel scrolls, it doesn't choose) */
-    if (!gamemenu_open() || settings_open() || bindings_capturing() || confirm || sel != GM_CONTROLS) return;
+    if (!gamemenu_open() || settings_open() || bindings_capturing() || confirm) return;
+    if (sel == GM_SETTINGS) {  /* a section longer than the space (Advanced): its rows, one a notch */
+        if (set_visible <= 0 || set_count <= set_visible) return;
+        int f = set_first + (dy > 0 ? -1 : 1);
+        if (f > set_count - set_visible) f = set_count - set_visible;
+        if (f < 0) f = 0;
+        set_first = f;
+        /* the chosen row stays among the ones shown, when the rows have the focus (else the drawing scrolls back) */
+        int pos = -1;
+        for (int k = 0; k < set_count; k++)
+            if (set_idx[k] == srow) pos = k;
+        if (in_rows && pos >= 0 && pos < f) srow = set_idx[f];
+        else if (in_rows && pos >= f + set_visible) srow = set_idx[f + set_visible - 1];
+        hover_kind = -1;
+        changed();
+        return;
+    }
+    if (sel != GM_CONTROLS) return;
     if (ctrl_visible <= 0 || ctrl_rows <= ctrl_visible) return;  /* not drawn yet, or it all fits */
     int f = ctrl_first + (dy > 0 ? -1 : 1);  /* one row a notch (owner: no fast scroll) */
     if (f > ctrl_rows - ctrl_visible) f = ctrl_rows - ctrl_visible;
@@ -1007,8 +1026,8 @@ static float tag(const UiCanvas *c, float x, float y, const char *label, uint32_
 /* The settings page (the design's isSettings section): the sections on the left (the chosen row's lit), its
  * section's rows with the value, its note and arrows, the chosen row's description at the bottom. */
 static void draw_settings_page(const UiCanvas *c, const GameMenuInfo *in) {
-    SettingRow rows[32];
-    int n = settings_player_rows(rows, 32);
+    SettingRow rows[48];
+    int n = settings_player_rows(rows, 48);
     if (n <= 0) return;
     int cur = srow < n ? srow : n - 1;
     const char *sec = rows[cur].category;
@@ -1048,11 +1067,37 @@ static void draw_settings_page(const UiCanvas *c, const GameMenuInfo *in) {
                      on ? SNOW : PLUM);
         y += 52 + 8;
     }
-    /* its rows */
+    /* the chosen row's description (drawn last): its height first, so the rows stop above it */
     float x = 812, w = 700;
+    const SettingRow *dr = &rows[cur];
+    char desc[600], dprose[600], dname[160];
+    if (dr->disabled) snprintf(desc, sizeof desc, "%s %s%s", dr->help, locked_on(dr->disabled) ? "" : "OFF FOR NOW: ",
+                               dr->disabled);
+    else snprintf(desc, sizeof desc, "%s", dr->help);
+    prose_case(desc, dprose, sizeof dprose);
+    sentence_case(dr->name, dname, sizeof dname);
+    float lh = 15 * 1.5f, dh = lh + 4 + ui_text_wrap(NULL, UI_GOTHIC_500, 15, 0, 0, 0, w - 40, lh, 0, dprose, 0) + 32;
+    /* its rows: as many as fit above the description; a longer section (Advanced, with the developer options)
+     * scrolls to keep the chosen row in view, and the mouse wheel scrolls it (gamemenu_wheel) */
+    int idx[48], cnt = 0, pos = 0;
+    for (int i = 0; i < n; i++)
+        if (!strcmp(rows[i].category, sec)) {
+            if (i == cur) pos = cnt;
+            idx[cnt++] = i;
+        }
+    int visible = (int)((bottom - dh - 12 - top + 10) / (72 + 10));
+    if (visible < 1) visible = 1;
+    static const char *shown_sec;
+    if (shown_sec != sec) set_first = 0, shown_sec = sec;  /* another section: from its top */
+    if (in_rows && pos < set_first) set_first = pos;
+    if (in_rows && pos >= set_first + visible) set_first = pos - visible + 1;
+    if (set_first > cnt - visible) set_first = cnt - visible;
+    if (set_first < 0) set_first = 0;
+    set_count = cnt, set_visible = visible;
+    memcpy(set_idx, idx, sizeof idx);
     y = top;
-    for (int i = 0; i < n; i++) {
-        if (strcmp(rows[i].category, sec)) continue;
+    for (int k = set_first; k < cnt && k < set_first + visible; k++) {
+        int i = idx[k];
         const SettingRow *r = &rows[i];
         int on = focus && in_rows && i == cur, off = r->disabled != NULL;
         ui_box(c, x, y, w, 72, 14, WHITE, on ? 3 : 2, on ? RING : LINE);
@@ -1093,16 +1138,13 @@ static void draw_settings_page(const UiCanvas *c, const GameMenuInfo *in) {
         if (nh) ui_text_wrap(c, UI_GOTHIC_500, 13, 0, vx + 10, ny, 280, 13 * 1.3f, 1, prose, MUTED);  /* clear of the arrows */
         y += 72 + 10;
     }
-    /* the chosen row's description */
-    const SettingRow *r = &rows[cur];
-    char desc[600], dprose[600], dname[160];
-    if (r->disabled) snprintf(desc, sizeof desc, "%s %s%s", r->help, locked_on(r->disabled) ? "" : "OFF FOR NOW: ",
-                              r->disabled);
-    else snprintf(desc, sizeof desc, "%s", r->help);
-    prose_case(desc, dprose, sizeof dprose);
-    sentence_case(r->name, dname, sizeof dname);
+    /* more rows above or below the ones shown: a short line in the gap under the rows */
+    if (cnt > visible) {
+        snprintf(t, sizeof t, "%d-%d of %d. %s", set_first + 1, set_first + visible < cnt ? set_first + visible : cnt, cnt,
+                 in->pad ? "Up and down to see the rest" : "Scroll or use W and S to see the rest");
+        ui_text_in(c, UI_GOTHIC_500, 13, x, y - 6, w, 18, 1, t, MUTED);
+    }
     /* the setting's name in bold white, then what it does as sentences (no gold text: the owner's rule) */
-    float lh = 15 * 1.5f, dh = lh + 4 + ui_text_wrap(NULL, UI_GOTHIC_500, 15, 0, 0, 0, w - 40, lh, 0, dprose, 0) + 32;
     ui_box(c, x, bottom - dh, w, dh, 14, NIGHT, 0, 0);
     ui_text(c, UI_ROUNDED_800, 15, x + 20, bottom - dh + 16, lh, dname, SNOW);
     ui_text_wrap(c, UI_GOTHIC_500, 15, 0, x + 20, bottom - dh + 16 + lh + 4, w - 40, lh, 0, dprose, ON_DARK);
@@ -1522,8 +1564,8 @@ static float edge;  /* gamemenu_draw's E: the strip above and below the design i
 
 static void draw_preview(const UiCanvas *c, const GameMenuInfo *in) {
     float W = (float)c->w / c->s, H = 900 + edge;  /* the bar sits at the picture's bottom */
-    SettingRow rows[32];
-    int n = settings_player_rows(rows, 32);
+    SettingRow rows[48];
+    int n = settings_player_rows(rows, 48);
     if (n <= 0) return;
     int cur = srow < n ? srow : n - 1;
     int first = cur, last = cur;
