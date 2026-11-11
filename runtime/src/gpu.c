@@ -98,7 +98,37 @@ void gpu_stop(const char *fmt, ...) {
     exit(3);
 }
 
-int gpu_ready(void) { return ready; }
+/* Start-up (2026-11-11): the guest boots on its thread while Vulkan and Streamline start on the main one
+ * (window.c), ~2 s of each that used to run one after the other. The guest needs nothing of the GPU until its
+ * first command list, except that it makes memory pools; so gpu_ready(), which every guest path into the draw
+ * path asks first, waits until the start is over (gpu_start_done: with or without a GPU), and pools made before
+ * that are kept in a list and imported then. */
+static HostLock start_lock = HOST_LOCK_INIT;
+static HostCond start_cond = HOST_COND_INIT;
+static int start_done;
+enum { EARLY_POOLS = 64 };
+static NvnPool *early_pools[EARLY_POOLS];
+static int nearly;
+
+int gpu_ready(void) {
+    if (!__atomic_load_n(&start_done, __ATOMIC_ACQUIRE)) {
+        host_lock(&start_lock);
+        while (!start_done) host_cond_wait(&start_cond, &start_lock, -1);
+        host_unlock(&start_lock);
+    }
+    return ready;
+}
+
+static void pool_import(NvnPool *p);
+
+void gpu_start_done(void) {
+    host_lock(&start_lock);
+    for (int i = 0; ready && i < nearly; i++) pool_import(early_pools[i]);
+    nearly = 0;
+    __atomic_store_n(&start_done, 1, __ATOMIC_RELEASE);
+    host_cond_broadcast(&start_cond);
+    host_unlock(&start_lock);
+}
 
 void gpu_init(void) {
     if (!vk.host_import) return;
@@ -366,7 +396,21 @@ static int cpu_changed(const NvnTexture *t, GpuImage *g) {
 
 
 void gpu_pool_init(NvnPool *p) {
-    if (!ready || !p->size) return;
+    if (!p->size) return;
+    if (!__atomic_load_n(&start_done, __ATOMIC_ACQUIRE)) {  /* Vulkan is still starting: imported when it is up */
+        host_lock(&start_lock);
+        if (!start_done) {
+            if (nearly == EARLY_POOLS) gpu_stop("more than %d memory pools before Vulkan is up", EARLY_POOLS);
+            early_pools[nearly++] = p;
+            host_unlock(&start_lock);
+            return;
+        }
+        host_unlock(&start_lock);
+    }
+    if (ready) pool_import(p);
+}
+
+static void pool_import(NvnPool *p) {
     void *host = (void *)(uintptr_t)p->storage;
     if (p->storage % vk.host_import_align || p->size % vk.host_import_align) {
         fprintf(stderr, "yw4: gpu: pool %#" PRIx64 " + %#" PRIx64 " is not aligned for import\n", p->storage, p->size);
@@ -1763,7 +1807,7 @@ static VkCompareOp compare_op(uint32_t f) {
 static int aniso = -1;
 
 int gpu_aniso(void) {
-    if (!vk.device) return 0;  /* asked before the device exists: decide later */
+    if (!__atomic_load_n(&vk.up, __ATOMIC_ACQUIRE)) return 0;  /* asked before the device exists: decide later */
     int a = __atomic_load_n(&aniso, __ATOMIC_ACQUIRE);
     if (a < 0) {
         const char *e = getenv("YW4_ANISO");

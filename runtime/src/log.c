@@ -49,6 +49,11 @@ static void copy_thread(void *arg) {
     }
 }
 
+/* Start-up timing: where the time from launch to the first frame goes (grep "boot:" in the log). */
+void yw4_boot_mark(const char *what) {
+    fprintf(stderr, "yw4: boot: %6.0f ms: %s\n", (double)host_process_age_ns() / 1e6, what);
+}
+
 /* At exit, give the copying thread a moment to drain the last messages (the stop message of a crash). */
 static void drain(void) { host_sleep_ns(150 * 1000000LL); }
 

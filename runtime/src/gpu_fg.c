@@ -54,7 +54,7 @@ int gpu_fg(void) {
         }
         __atomic_store_n(&fg_mode, m, __ATOMIC_RELEASE);
     }
-    if (m == 2 && vk.device && (!gpu_dlss_built() || !dlssg_available())) {
+    if (m == 2 && __atomic_load_n(&vk.up, __ATOMIC_ACQUIRE) && (!gpu_dlss_built() || !dlssg_available())) {
         m = gpu_fsr_built() ? 1 : 0;
         fprintf(stderr, "yw4: fg: DLSS frame generation not supported on this GPU: %s instead\n",
                 m == 1 ? "FSR" : "off");

@@ -11,7 +11,8 @@
 #include "nvn.h"
 
 void gpu_init(void);  /* window.c, once the Vulkan device exists */
-int gpu_ready(void);
+int gpu_ready(void);  /* waits until the start is over (gpu_start_done) */
+void gpu_start_done(void);  /* window.c: Vulkan is up, or there is none; the guest's GPU work may begin */
 /* From the window's key presses: Shift+F11 describes the draws of the next frame in the log (gpu_draw.c),
  * F10 dumps every multi-layer depth image (shadow maps) at the next present (gpu.c). */
 void gpu_request_trace(int draws);

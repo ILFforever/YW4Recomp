@@ -48,6 +48,7 @@ static int queue_on(void) {
     host_lock(&lock);
     if (on < 0) {
         const char *e = getenv("YW4_GPU_THREAD");
+        yw4_boot_mark("the game's first GPU work (waits here for Vulkan)");
         int v = gpu_ready() && (!e || atoi(e));
         if (v) fprintf(stderr, "yw4: gpu: command lists translated on a worker thread (decision 0029)\n");
         __atomic_store_n(&on, v, __ATOMIC_RELEASE);

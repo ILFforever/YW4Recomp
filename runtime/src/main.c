@@ -40,6 +40,7 @@ static void init_module(CPUState *ctx, size_t i) {
     fprintf(stderr, "yw4: running %s DT_INIT (%s+%#" PRIx64 ")\n", m->name, m->name, m->dt_init);
     yw4_resolve(*m->base + m->dt_init)(ctx);
     fprintf(stderr, "yw4: %s DT_INIT returned\n", m->name);
+    yw4_boot_mark(i == YW4_SDK ? "sdk's constructors done" : "main's constructors done");
 }
 static void init_sdk(CPUState *ctx) { init_module(ctx, YW4_SDK); }
 static void init_main(CPUState *ctx) { init_module(ctx, YW4_MAIN); }
@@ -154,12 +155,18 @@ int main(int argc, char **argv) {
 #endif
     }
     if (from_ini) fprintf(stderr, "yw4: folders from game.ini\n");
+    yw4_boot_mark("main() running, guest memory reserved, log open");
     settings_load();
     if (argc != 4) {
         fprintf(stderr, "usage: yw4 <exefs work directory with main.bin and sdk.bin> <romfs folder> <save data folder>\n");
         return 1;
     }
-    if (yw4_load_modules(argv[1]) || romfs_open(argv[2]) || savefs_init(argv[3])) return 1;
+    window_prestart();
+    if (yw4_load_modules(argv[1])) return 1;
+    yw4_boot_mark("main and sdk loaded");
+    if (romfs_open(argv[2])) return 1;
+    yw4_boot_mark("RomFS and mods scanned");
+    if (savefs_init(argv[3])) return 1;
     yw4_probe_init();
     yw4_watch_init();
 

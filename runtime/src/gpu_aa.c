@@ -44,7 +44,7 @@ int gpu_aa(void) {
         }
         __atomic_store_n(&aa_mode, m, __ATOMIC_RELEASE);
     }
-    if (m == 5 && vk.device && (!gpu_dlss_built() || !gpu_dlss_available())) {
+    if (m == 5 && __atomic_load_n(&vk.up, __ATOMIC_ACQUIRE) && (!gpu_dlss_built() || !gpu_dlss_available())) {
         m = gpu_fsr_built() ? 4 : 3;
         fprintf(stderr, "yw4: aa: DLSS is not available on this GPU: %s instead\n", m == 4 ? "FSR" : "TAA");
         __atomic_store_n(&aa_mode, m, __ATOMIC_RELEASE);

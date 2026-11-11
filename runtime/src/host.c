@@ -122,6 +122,14 @@ int64_t host_now_ns(void) {
     return (int64_t)((unsigned __int128)now.QuadPart * 1000000000u / (uint64_t)freq.QuadPart);
 }
 
+int64_t host_process_age_ns(void) {
+    FILETIME created, exited, kernel, user, now;
+    if (!GetProcessTimes(GetCurrentProcess(), &created, &exited, &kernel, &user)) return 0;
+    GetSystemTimePreciseAsFileTime(&now);
+    return (int64_t)((((uint64_t)now.dwHighDateTime << 32 | now.dwLowDateTime) -
+                      ((uint64_t)created.dwHighDateTime << 32 | created.dwLowDateTime)) * 100);  /* 100 ns units */
+}
+
 void *host_thread_self(void) {
     HANDLE h = NULL;
     DuplicateHandle(GetCurrentProcess(), GetCurrentThread(), GetCurrentProcess(), &h,
@@ -360,6 +368,13 @@ int64_t host_now_ns(void) {
     struct timespec ts;
     clock_gettime(CLOCK_MONOTONIC, &ts);
     return (int64_t)ts.tv_sec * 1000000000 + ts.tv_nsec;
+}
+
+int64_t host_process_age_ns(void) {
+    static int64_t first;
+    int64_t now = host_now_ns();
+    if (!first) first = now;
+    return now - first;
 }
 
 void *host_thread_self(void) {

@@ -48,6 +48,10 @@ void host_timer_init(void);
 
 /* Nanoseconds from an arbitrary start, never going backwards. */
 int64_t host_now_ns(void);
+/* Nanoseconds since this process was created (Windows: before its DLLs loaded; elsewhere: since the first call). */
+int64_t host_process_age_ns(void);
+/* Start-up timing (log.c): a "yw4: boot: <ms since the process was created> ms: <what>" line. */
+void yw4_boot_mark(const char *what);
 
 /* This process's CPU time so far (user + kernel, all threads) and its memory in use (working set), for the performance log. */
 void host_process_usage(int64_t *cpu_ns, uint64_t *rss_bytes);

@@ -175,8 +175,9 @@ static int reflex_ok = -1;  /* Reflex runs on this GPU (GeForce 900 and newer) *
 
 static void check_features(void) {
     if (avail >= 0) return;
+    if (!vk.device) return;  /* asked before the device exists (the guest boots while Vulkan starts): decide later */
     avail = reflex_ok = 0;
-    if (started != 1 || !vk.device) return;
+    if (started != 1) return;
     sl::AdapterInfo a{};
     a.vkPhysicalDevice = vk.gpu;
     sl::Result r = slIsFeatureSupported(sl::kFeatureReflex, a);

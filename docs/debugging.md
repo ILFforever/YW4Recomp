@@ -136,6 +136,7 @@ folder; a variable already in the environment wins. Without it a message says to
 | `YW4_DLCROMFS_DIR=<folder>` | Where the game reads extracted add-on RomFS folders `<folder>/<index>/` when it opens an add-on's data storage (`fsp-srv` 202; default `work/dlc-romfs`; `python -m tools.yw4.extract` writes `<romfs_dir>/../dlc-romfs` and the dev tools and `game.ini` point to it, [decision 0056](decisions/0056-dlc-content.md)) |
 | `YW4_AOC=<indices>` | Tests: these add-on indices (comma separated) are owned, instead of the scan above |
 | `YW4_PREBUILD=0` | Don't build the listed pipelines (the PCSS shadow mask) on a background thread at start-up |
+| `YW4_BOOT_PARALLEL=0` | Tests: the start-up steps one after the other, as before 2026-11-11. By default Streamline starts on its own thread from the beginning of `main()`, and the game's own boot (~2 s before its first GPU work) runs while Vulkan starts; it waits at its first GPU call (`gpu_ready`, `runtime/src/gpu.c`; `window_prestart`, `runtime/src/window.c`). Launch to the first presented frame: 6.2 s before, 3.7 s after (RTX 4070 laptop, warm). The log's `yw4: boot: <ms> ms: <step>` lines give the time since the process was created at each step |
 
 Saved screenshots get the same sRGB decode as the window, so their colours match what is on screen.
 

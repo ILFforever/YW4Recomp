@@ -36,6 +36,7 @@ NVN(nvnDeviceBuilderSetDefaults) { G(uint32_t, A(0), 0) = 0; }
 NVN(nvnDeviceBuilderSetFlags) { G(uint32_t, A(0), 0) = (uint32_t)A(1); }
 NVN(nvnDeviceInitialize) {
     fprintf(stderr, "yw4: NVN device initialised (flags %#x), headless\n", G(uint32_t, A(1), 0));
+    yw4_boot_mark("the game makes its NVN device");
     RET(1);
 }
 /* Window origin (lower/upper left) and clip-space depth (-w..w or 0..w): the draw path
@@ -225,6 +226,7 @@ NVN(nvnQueuePresentTexture) {  /* (queue, window, texture index) */
         fprintf(stderr, "yw4: NVN frame %" PRIu64 " presented (texture %d, %" PRIu64 " draws, %.1f frames/s)\n", frames,
                 (int)A(2), draws, fps);
         last_log = now, last_frames = frames;
+        if (frames == 1) yw4_boot_mark("first frame presented");
     }
 }
 

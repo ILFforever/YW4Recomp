@@ -54,6 +54,8 @@ typedef struct {
     VkInstance instance;
     VkPhysicalDevice gpu;
     VkDevice device;
+    int up;                        /* the device, its functions and the DLSS checks are done (set once, in vk_init):
+                                      until then the guest's threads, which boot meanwhile, get "decide later" */
     VkQueue queue;
     uint32_t queue_family;
     HostLock queue_lock;

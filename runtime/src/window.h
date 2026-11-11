@@ -10,6 +10,8 @@
  * thread then handles window events until the window is closed, and the process exits.
  * With YW4_HEADLESS=1, or if no window can be made, guest(arg) runs here with no window. */
 void window_run(void (*guest)(void *), void *arg);
+/* Early in main(), once the settings are read: starts what the window needs later and takes long (Streamline). */
+void window_prestart(void);
 
 /* Shows a frame: w x h pixels, RGBA8 rows of w * 4 bytes, the top row first. Called from
  * a guest thread (NVN's present). Does nothing without a window. Also saves it as a

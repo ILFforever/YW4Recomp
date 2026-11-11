@@ -218,9 +218,43 @@ static int create_swapchain(uint64_t frame) {  /* frame: the game frame being pr
     return 0;
 }
 
+/* Start-up order (2026-11-11). Streamline's start (slInit, ~1.4 s) needs nothing of ours, so it runs on a thread
+ * of its own from the beginning of main(), beside the loading of the game's code, the RomFS scan and SDL's start;
+ * vk_init waits for it. And the guest's thread starts as soon as the window exists, beside vk_init: the game boots
+ * for ~2 s before its first command list (gpu.c, gpu_ready). YW4_BOOT_PARALLEL=0: one after the other, as before. */
+static HostLock sl_lock = HOST_LOCK_INIT;
+static HostCond sl_cond = HOST_COND_INIT;
+static int sl_state;  /* 0 not on a thread, 1 starting, 2 done */
+
+static int boot_parallel(void) {
+    const char *e = getenv("YW4_BOOT_PARALLEL");
+    return !(e && *e == '0');
+}
+
+static void sl_thread(void *arg) {
+    (void)arg;
+    dlssg_start();
+    host_lock(&sl_lock);
+    sl_state = 2;
+    host_cond_broadcast(&sl_cond);
+    host_unlock(&sl_lock);
+}
+
+void window_prestart(void) {
+    const char *headless = getenv("YW4_HEADLESS");
+    if ((headless && *headless && *headless != '0') || !boot_parallel()) return;
+    sl_state = 1;
+    if (host_thread_start(sl_thread, NULL, 4 << 20)) sl_state = 0;
+}
+
 static int vk_init(void) {
     /* DLSS frame generation (gpu_dlssg.cpp): Vulkan through Streamline, which adds what it needs */
+    yw4_boot_mark("SDL and the window ready");
+    host_lock(&sl_lock);  /* Streamline is starting on its own thread since main() (window_prestart) */
+    while (sl_state == 1) host_cond_wait(&sl_cond, &sl_lock, -1);
+    host_unlock(&sl_lock);
     int sl = dlssg_start();
+    yw4_boot_mark("Streamline started (or left out)");
     PFN_vkGetInstanceProcAddr gipa =
         sl ? dlssg_loader() : (PFN_vkGetInstanceProcAddr)SDL_Vulkan_GetVkGetInstanceProcAddr();
     if (!gipa) {
@@ -251,6 +285,7 @@ static int vk_init(void) {
                                 .enabledLayerCount = nlayers, .ppEnabledLayerNames = layers};
     VkResult r = vkCreateInstance(&ici, NULL, &vk.instance);
     if (r != VK_SUCCESS) return vk_fail("vkCreateInstance", r);
+    yw4_boot_mark("Vulkan instance");
 #define LOAD_INSTANCE(f) f = (PFN_##f)gipa(vk.instance, #f);
     VK_INSTANCE_FNS(LOAD_INSTANCE)
     if (sl)  /* the surface through Streamline too (SDL would make it with its own loader) */
@@ -391,11 +426,15 @@ static int vk_init(void) {
                               .pQueueCreateInfos = &qci, .enabledExtensionCount = ndexts, .ppEnabledExtensionNames = dexts};
     r = vkCreateDevice(vk.gpu, &dci, NULL, &vk.device);
     if (r != VK_SUCCESS) return vk_fail("vkCreateDevice", r);
+    yw4_boot_mark("Vulkan device");
 #define LOAD_DEVICE(f) f = (PFN_##f)vkGetDeviceProcAddr(vk.device, #f);
     VK_DEVICE_FNS(LOAD_DEVICE)
     vkGetDeviceQueue(vk.device, vk.queue_family, 0, &vk.queue);
     if (sl) dlssg_available();  /* checked and logged once, Reflex set up */
+    yw4_boot_mark("DLSS frame generation and Reflex checked");
     gpu_dlss_available();
+    yw4_boot_mark("DLSS (NGX) checked");
+    __atomic_store_n(&vk.up, 1, __ATOMIC_RELEASE);
 
     VkCommandPoolCreateInfo pci = {.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO,
                                    .flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT,
@@ -408,7 +447,9 @@ static int vk_init(void) {
     vkCreateFence(vk.device, &fci, NULL, &fence);
     VkSemaphoreCreateInfo sci = {.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO};
     vkCreateSemaphore(vk.device, &sci, NULL, &acquired);
-    return create_swapchain(0);
+    int failed = create_swapchain(0);
+    yw4_boot_mark("swapchain");
+    return failed;
 }
 
 /* The staging buffer and the image a w x h frame goes through. */
@@ -2156,6 +2197,16 @@ static void guest_main(void *p) {
 
 void window_request_screenshot(void) { __atomic_store_n(&screenshot_requested, screenshot_burst(), __ATOMIC_RELEASE); }
 
+static void start_guest_thread(void (*guest)(void *), void *arg) {
+    static Guest g;
+    g.fn = guest, g.arg = arg;
+    yw4_boot_mark("the guest starts");
+    if (host_thread_start(guest_main, &g, GUEST_HOST_STACK)) {
+        fprintf(stderr, "yw4: window: cannot start the guest's thread\n");
+        exit(1);
+    }
+}
+
 void window_run(void (*guest)(void *), void *arg) {
     const char *dir = getenv("YW4_SCREENSHOT_DIR");
     if (dir && *dir) snprintf(screenshot_dir, sizeof screenshot_dir, "%s", dir);
@@ -2170,30 +2221,31 @@ void window_run(void (*guest)(void *), void *arg) {
         int win_w = 1280, win_h = 720;
         const char *ws = getenv("YW4_WINDOW_SIZE");
         if (ws) sscanf(ws, "%dx%d", &win_w, &win_h);
+        yw4_boot_mark("save folder ready; starting SDL");
         if (!SDL_Init(SDL_INIT_VIDEO | SDL_INIT_GAMEPAD)) {
             fprintf(stderr, "yw4: window: SDL_Init: %s; running headless\n", SDL_GetError());
         } else if (!(window = SDL_CreateWindow("Yo-kai Watch 4++", win_w, win_h, SDL_WINDOW_VULKAN |
                                                SDL_WINDOW_RESIZABLE |
                                                (window_fullscreen_index() ? SDL_WINDOW_FULLSCREEN : 0)))) {
             fprintf(stderr, "yw4: window: SDL_CreateWindow: %s; running headless\n", SDL_GetError());
-        } else if (vk_init()) {
-            fprintf(stderr, "yw4: window: no Vulkan; the window stays empty\n");
         } else {
-            have_vulkan = 1;
-            gpu_init();
-            if (!mouse_off()) SDL_SetWindowRelativeMouseMode(window, true);
+            if (boot_parallel()) start_guest_thread(guest, arg);  /* it boots while Vulkan starts */
+            if (vk_init()) {
+                fprintf(stderr, "yw4: window: no Vulkan; the window stays empty\n");
+            } else {
+                have_vulkan = 1;
+                gpu_init();
+                yw4_boot_mark("draw path ready");
+                if (!mouse_off()) SDL_SetWindowRelativeMouseMode(window, true);
+            }
         }
     }
+    gpu_start_done();
     if (!window) {
         guest(arg);
         return;
     }
-    static Guest g;
-    g.fn = guest, g.arg = arg;
-    if (host_thread_start(guest_main, &g, GUEST_HOST_STACK)) {
-        fprintf(stderr, "yw4: window: cannot start the guest's thread\n");
-        exit(1);
-    }
+    if (!boot_parallel()) start_guest_thread(guest, arg);
     host_thread_set_priority(NULL, 39);  /* event pump and input polling: stay responsive under CPU load */
     for (;;) {
         SDL_Event e;
