@@ -456,12 +456,12 @@ closes (a theme file added to the launcher's themes folder shows up in both).
 **F1** opens the overlay's **Settings** page: every option with all its choices, and what each one does (arrow keys or
 D-pad to choose and change). **F2** opens the overlay's **Controls** page: two keys or mouse buttons and one gamepad
 button for every Switch button and stick direction, changed by pressing the new one, and at the top the mouse's camera
-sensitivity, left-right and up-down. **F3** opens its **Overlay** page (the performance HUD). Each key pauses the game
-while its page is open; the same key again goes back to the game. On a controller, open them from the in-game overlay (above).
+sensitivity, left-right and up-down. **F3** steps the performance HUD: off, compact, detailed. F1 and F2 pause the
+game while their page is open; the same key again goes back to the game. On a controller, open them from the in-game overlay (above).
 
 **LEGACY MENUS** (Settings, ADVANCED) turns the keys back to the older panels: F1 opens the old settings panel, F2 the
-old controls page, F3 shows or hides the HUD. Only the old panel has **DEVELOPER OPTIONS**, the switches players
-don't need: which parts of the picture the game draws and which our own renderer does (the picture is the same), and
+old controls page, F3 shows or hides the HUD. The **developer options**, the switches players don't need, are at the
+end of Settings, ADVANCED: which parts of the picture the game draws and which our own renderer does (the picture is the same), and
 speed-ups that look the same. Your choices are saved in
 `settings.ini` next to `yw4.exe` and kept for the next start. **F11** switches between full screen and a window (also
 the panel's WINDOW MODE row). **F12** takes a screenshot. The other function keys are debugging tools ([docs/debugging.md](docs/debugging.md)).

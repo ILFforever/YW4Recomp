@@ -1110,6 +1110,15 @@ static void panel_draw(VkImage dst, int32_t x0, int32_t y0, uint32_t bw, uint32_
 }
 
 void window_hud_toggle(void) { __atomic_store_n(&hud_on, hud_enabled() ? 0 : hud_last, __ATOMIC_RELEASE); }
+
+/* F3 (owner, 2026-11-11: it cycles the HUD instead of opening the overlay's Overlay page): off, compact, detailed,
+ * off again. */
+void window_hud_cycle(void) {
+    int m = hud_mode_read(), next = m == 0 ? 2 : m == 2 ? 1 : 0;
+    window_hud_set_mode(next);
+    settings_save();
+    fprintf(stderr, "yw4: hud: %s (F3)\n", next == 0 ? "off" : next == 2 ? "compact" : "detailed");
+}
 int window_hud_shown(void) { return hud_enabled(); }
 
 static void menu_draw(VkImage dst, int32_t x0, int32_t y0, uint32_t bw, uint32_t bh);  /* below, with the pause */
@@ -2591,15 +2600,19 @@ void window_run(void (*guest)(void *), void *arg) {
             }
             if (e.key.key == SDLK_F10) gpu_request_dump(), yw4_hid_note_key("F10");      /* shadow maps etc.: work/dump/ */
             if (e.key.key == SDLK_F3 && settings_legacy_keys()) window_hud_toggle(), settings_save();  /* the HUD */
-            /* LEGACY MENUS off (the default): F1, F2 and F3 open the overlay on its Settings, Controls and Overlay
-             * pages instead (owner, 2026-11-08); the same key again resumes. Not while the old panel is open: there
-             * F1 and F2 still close it (below). Not while typing: F keys go nowhere then. */
+            /* LEGACY MENUS off (the default): F1 and F2 open the overlay on its Settings and Controls pages instead
+             * (owner, 2026-11-08); the same key again resumes. F3 cycles the HUD (owner, 2026-11-11). Not while the
+             * old panel is open: there F1 and F2 still close it (below). Not while typing: F keys go nowhere then. */
             if (!settings_legacy_keys() && !settings_open() && !e.key.repeat && !textin_active() &&
-                (e.key.key == SDLK_F1 || e.key.key == SDLK_F2 || e.key.key == SDLK_F3)) {
+                e.key.key == SDLK_F3) {
+                window_hud_cycle(), yw4_hid_note_key("HUDCYC");
+                break;
+            }
+            if (!settings_legacy_keys() && !settings_open() && !e.key.repeat && !textin_active() &&
+                (e.key.key == SDLK_F1 || e.key.key == SDLK_F2)) {
                 if (window && SDL_GetWindowRelativeMouseMode(window)) SDL_SetWindowRelativeMouseMode(window, false);
                 if (e.key.key == SDLK_F1) gamemenu_open_page(GM_SETTINGS), yw4_hid_note_key("M_SET");
-                else if (e.key.key == SDLK_F2) gamemenu_open_page(GM_CONTROLS), yw4_hid_note_key("M_CTRL");
-                else gamemenu_open_page(GM_PERF), yw4_hid_note_key("M_PERF");
+                else gamemenu_open_page(GM_CONTROLS), yw4_hid_note_key("M_CTRL");
                 break;
             }
             if (e.key.key == SDLK_F4 && !e.key.repeat) game_pause_toggle();  /* test: the overlay's pause (below) */
