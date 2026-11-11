@@ -54,6 +54,9 @@ int settings_player_rows(SettingRow *rows, int max);
 void settings_change(int row, int dir);
 /* YW4_SET_AT=<frame>:<NAME>=<value>,...: tests change settings at those presented frames (gpu.c calls it). */
 void settings_test_at(uint64_t frame);
+/* A new install's first start (no settings file yet): picks the graphics for the GPU once (low: an integrated GPU
+ * or under 4 GB of video memory) and writes the file. 1 when it ran. */
+int settings_first_run(int low);
 /* The overlay's Overlay page: the HUD's scale (opacity 0) or opacity (1) slider: its position 0..1 and its text, and
  * one step up (dir 1) or down (-1), saved. */
 void settings_hud_slider(int opacity, float *frac, char *text, size_t n);

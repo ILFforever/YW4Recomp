@@ -329,10 +329,17 @@ static void set_env(const char *name, const char *value) {
 #endif
 }
 
+/* A new install: a settings file is in use (not YW4_SETTINGS_FILE=none) but doesn't exist yet. settings_first_run
+ * then picks the graphics for the GPU once and writes the file. */
+static int first_run;
+
 void settings_load(void) {
     const char *path = settings_file();
     FILE *f = *path ? fopen(path, "r") : NULL;
-    if (!f) return;
+    if (!f) {
+        first_run = *path != 0;
+        return;
+    }
     char line[256];
     int n = 0;
     while (fgets(line, sizeof line, f)) {
@@ -561,6 +568,40 @@ void settings_hud_set(int opacity, float frac) {
     v = (float)(int)(v / s->step + 0.5f) * s->step;  /* on the steps */
     s->set(v < s->lo ? s->lo : v > s->hi ? s->hi : v);
     settings_save();
+}
+
+/* A setting by its variable's name stepped until it shows `value` (as the panel would change it); 0 when found. */
+static int set_value(const char *env, const char *value, size_t vlen) {
+    for (int i = 0; i < NSETTINGS; i++) {
+        const Setting *s = setting(i);
+        if (!s->env || strcmp(s->env, env) || !s->noptions) continue;
+        for (int k = 0; k < s->noptions; k++) {
+            const char *v = s->values[s->current()];
+            if (v && strlen(v) == vlen && !strncmp(v, value, vlen)) break;
+            setting_step(s, 1);
+        }
+        return 0;
+    }
+    return -1;
+}
+
+/* First start of a new install (owner, 2026-11-11: integrated GPUs crawled with the high defaults): `low` (an
+ * integrated GPU, or under 4 GB of video memory) sets the shadows and effects to the Switch's; else the defaults
+ * stay (they are the high ones). A variable set in the environment is left alone. The file is written either way,
+ * so this runs once. YW4_FIRST_RUN_LEVEL=low|high (tests) overrides the GPU's level. 1 when it ran. */
+int settings_first_run(int low) {
+    if (!first_run) return 0;
+    first_run = 0;
+    const char *force = getenv("YW4_FIRST_RUN_LEVEL");
+    if (force && *force) low = !strcmp(force, "low");
+    static const char *const lowered[][2] = {
+        {"YW4_SHADOW_RES", "1024"}, {"YW4_PCSS", "0"}, {"YW4_CONTACT", "0"}, {"YW4_EFFECTS", "0"}};
+    for (size_t i = 0; low && i < sizeof lowered / sizeof *lowered; i++)
+        if (!getenv(lowered[i][0])) set_value(lowered[i][0], lowered[i][1], strlen(lowered[i][1]));
+    settings_save();
+    fprintf(stderr, "yw4: settings: first start: %s graphics for this GPU, written to %s\n", low ? "lighter" : "high",
+            settings_file());
+    return 1;
 }
 
 /* YW4_SET_AT=<frame>:<NAME>=<value>,... (tests): at those presented frames a setting changes as the panel would change

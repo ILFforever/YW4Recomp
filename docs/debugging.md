@@ -22,6 +22,7 @@ folder; a variable already in the environment wins. Without it a message says to
 | Variable | What it does |
 |---|---|
 | `YW4_SETTINGS_FILE=<file>` (`none`) | Where the settings panel's choices are kept (default `settings.ini` next to `yw4.exe`): read at start, written on every change in the panel, one `YW4_...=value` line per setting. A variable set in the environment wins over its line. `tools.dev.run` sets `none`, so test runs neither read nor change the owner's file |
+| `YW4_FIRST_RUN_LEVEL=low` (`high`) | Tests: a new install's first start (no settings file yet: point `YW4_SETTINGS_FILE` at a file that doesn't exist) as on that kind of GPU. Without it the GPU decides: integrated, or under 4 GB of video memory, is low (shadow map 1024, soft and contact shadows off, effects half); else the high defaults stay. The file is then written, so it runs once, and a notice fades in at the top for about 6 s (`YW4_SHOT_MENU=1` puts it in screenshots). [Decision 0062](decisions/0062-first-start-graphics.md) |
 | `YW4_SCREENSHOTS=600,2500` | Save a screenshot at these frame numbers (also F12 at any time) |
 | `YW4_SCREENSHOT_DIR=path` | Where screenshots go (default `<work_dir>/screenshots/`) |
 | `YW4_THEME=id` | The overlay's and the HUD's theme (Settings > Look > Theme, saved in settings.ini): `recomp` (built in) or a file's name in the themes folder, e.g. `jibanyan` ([decision 0055](decisions/0055-overlay-themes.md)) |

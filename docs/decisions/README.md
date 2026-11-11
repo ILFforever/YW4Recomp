@@ -70,3 +70,4 @@ lists later records that replace a record, or part of it.
 | 0059 | [AMD Vulkan depth format fallback (D24S8 to D32S8)](0059-amd-depth-format-fallback.md) | accepted | 2026-11-10 |  | `runtime/src/gpu.c`, `runtime/src/gpu_ab.c`, `docs/debugging.md` |
 | 0060 | [The launcher's icon: the owner's own Whisper silhouette](0060-launcher-icon.md) | accepted | 2026-11-10 |  | `launcher/icon-source.png`, `launcher/src-tauri/icons` |
 | 0061 | [The game's "time was changed" check is answered "not changed"](0061-time-change-check.md) | accepted | 2026-11-11 |  | `runtime/src/svc_time.c`, `recomp/overrides.toml` |
+| 0062 | [First start: graphics picked for the GPU, two levels](0062-first-start-graphics.md) | accepted | 2026-11-11 |  | `runtime/src/settings.c`, `runtime/src/window.c` |

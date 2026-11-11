@@ -12,6 +12,7 @@
  */
 #include <inttypes.h>
 #include <math.h>
+#include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -40,6 +41,8 @@
 #include "mousemenu.h"
 #include "settings.h"
 #include "textin.h"
+#include "theme.h"
+#include "ui.h"
 #include "version.h"
 #include "vk.h"
 #include "window.h"
@@ -63,6 +66,7 @@ static HostLock present_lock = HOST_LOCK_INIT;
 static VkSurfaceKHR surface;
 static VkCommandPool pool;
 static VkCommandBuffer cmd;
+static void window_notice(int high, const char *title, const char *fmt, ...);  /* a fading card (below, with the HUD) */
 static VkFence fence;
 static VkSemaphore acquired;
 
@@ -435,6 +439,24 @@ static int vk_init(void) {
     gpu_dlss_available();
     yw4_boot_mark("DLSS (NGX) checked");
     __atomic_store_n(&vk.up, 1, __ATOMIC_RELEASE);
+    {  /* a new install's first start: graphics for this GPU (settings_first_run), told in a notice */
+        VkPhysicalDeviceMemoryProperties mp;
+        vkGetPhysicalDeviceMemoryProperties(vk.gpu, &mp);
+        VkDeviceSize vram = 0;
+        for (uint32_t i = 0; i < mp.memoryHeapCount; i++)
+            if (mp.memoryHeaps[i].flags & VK_MEMORY_HEAP_DEVICE_LOCAL_BIT && mp.memoryHeaps[i].size > vram)
+                vram = mp.memoryHeaps[i].size;
+        int integrated = vk.props.deviceType != VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU;
+        int low = integrated || vram < (VkDeviceSize)4 << 30;
+        fprintf(stderr, "yw4: window: %s GPU, %.1f GB of video memory\n", integrated ? "an integrated" : "a dedicated",
+                (double)vram / (1 << 30));
+        if (settings_first_run(low)) {
+            const char *force = getenv("YW4_FIRST_RUN_LEVEL");
+            if (force && *force) low = !strcmp(force, "low");
+            window_notice(!low, low ? "Lighter graphics for this PC" : "High graphics for this PC",
+                          "%s \xc2\xb7 Change them in Settings", vk.props.deviceName);
+        }
+    }
 
     VkCommandPoolCreateInfo pci = {.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO,
                                    .flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT,
@@ -803,6 +825,169 @@ static VkPipeline hb_pipeline(VkFormat format) {
     hb.pipes[hb.npipes].format = format, hb.pipes[hb.npipes].pipe = pipe;
     hb.npipes++;
     return pipe;
+}
+
+/* ---- a notice over the game (window_notice): a small card at the top of the picture that fades in, stays about six
+ * seconds and fades out. Used for the first start's graphics (settings_first_run). Drawn with the HUD's blend
+ * pipeline (its layout, sampler and pipelines) from an image of its own. */
+enum { NOTE_W = 2048, NOTE_H = 256 };
+static struct {
+    VkBuffer buf;
+    VkDeviceMemory buf_mem;
+    void *ptr;
+    uint8_t *cpu;  /* the card at full strength (premultiplied RGBA); faded into ptr each frame */
+    VkImage image;
+    VkDeviceMemory mem;
+    VkImageView view;
+    VkDescriptorPool pool;
+    VkDescriptorSet set;
+    int failed, w, h;  /* w x h: the card's pixels, at its top-left */
+    float s;           /* the scale it was drawn at */
+} nb;
+static char note_title[96], note_text[256];
+static int note_on, note_high;
+static uint64_t note_start;  /* SDL ticks of its first frame (0: not shown yet) */
+static int note_bottom;      /* pixels from the card's image top to the card's bottom (a shadow margin below) */
+
+static void window_notice(int high, const char *title, const char *fmt, ...) {
+    snprintf(note_title, sizeof note_title, "%s", title);
+    va_list ap;
+    va_start(ap, fmt);
+    vsnprintf(note_text, sizeof note_text, fmt, ap);
+    va_end(ap);
+    note_high = high, note_start = 0, nb.s = 0, note_on = 1;
+    fprintf(stderr, "yw4: window: notice: %s. %s\n", note_title, note_text);
+}
+
+static int nb_resources(void) {
+    if (nb.set) return 0;
+    if (nb.failed) return -1;
+    nb.failed = 1;
+    VkBufferCreateInfo bci = {.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO, .size = (VkDeviceSize)NOTE_W * NOTE_H * 4,
+                              .usage = VK_BUFFER_USAGE_TRANSFER_SRC_BIT};
+    if (vkCreateBuffer(vk.device, &bci, NULL, &nb.buf) != VK_SUCCESS) return -1;
+    VkMemoryRequirements mr;
+    vkGetBufferMemoryRequirements(vk.device, nb.buf, &mr);
+    VkMemoryAllocateInfo mai = {.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO, .allocationSize = mr.size,
+                                .memoryTypeIndex = vk_memory_type(mr.memoryTypeBits, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT |
+                                                                                      VK_MEMORY_PROPERTY_HOST_COHERENT_BIT)};
+    if (vkAllocateMemory(vk.device, &mai, NULL, &nb.buf_mem) != VK_SUCCESS) return -1;
+    vkBindBufferMemory(vk.device, nb.buf, nb.buf_mem, 0);
+    vkMapMemory(vk.device, nb.buf_mem, 0, VK_WHOLE_SIZE, 0, &nb.ptr);
+    if (!(nb.cpu = calloc((size_t)NOTE_W * NOTE_H, 4))) return -1;
+    VkImageCreateInfo ici = {.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO, .imageType = VK_IMAGE_TYPE_2D,
+                             .format = VK_FORMAT_R8G8B8A8_UNORM, .extent = {NOTE_W, NOTE_H, 1}, .mipLevels = 1,
+                             .arrayLayers = 1, .samples = VK_SAMPLE_COUNT_1_BIT, .tiling = VK_IMAGE_TILING_OPTIMAL,
+                             .usage = VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT};
+    if (vkCreateImage(vk.device, &ici, NULL, &nb.image) != VK_SUCCESS) return -1;
+    vkGetImageMemoryRequirements(vk.device, nb.image, &mr);
+    mai.allocationSize = mr.size;
+    mai.memoryTypeIndex = vk_memory_type(mr.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
+    if (vkAllocateMemory(vk.device, &mai, NULL, &nb.mem) != VK_SUCCESS) return -1;
+    vkBindImageMemory(vk.device, nb.image, nb.mem, 0);
+    VkImageViewCreateInfo vi = {.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO, .image = nb.image,
+                                .viewType = VK_IMAGE_VIEW_TYPE_2D, .format = VK_FORMAT_R8G8B8A8_UNORM,
+                                .subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1}};
+    if (vkCreateImageView(vk.device, &vi, NULL, &nb.view) != VK_SUCCESS) return -1;
+    VkDescriptorPoolSize ps = {VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 1};
+    VkDescriptorPoolCreateInfo pci = {.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO, .maxSets = 1,
+                                      .poolSizeCount = 1, .pPoolSizes = &ps};
+    if (vkCreateDescriptorPool(vk.device, &pci, NULL, &nb.pool) != VK_SUCCESS) return -1;
+    VkDescriptorSetAllocateInfo dai = {.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO, .descriptorPool = nb.pool,
+                                       .descriptorSetCount = 1, .pSetLayouts = &hb.dsl};
+    VkDescriptorSet set;
+    if (vkAllocateDescriptorSets(vk.device, &dai, &set) != VK_SUCCESS) return -1;
+    VkDescriptorImageInfo ii = {hb.sampler, nb.view, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL};
+    VkWriteDescriptorSet wr = {.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET, .dstSet = set, .dstBinding = 0,
+                               .descriptorCount = 1, .descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+                               .pImageInfo = &ii};
+    vkUpdateDescriptorSets(vk.device, 1, &wr, 0, NULL);
+    nb.set = set, nb.failed = 0;
+    return 0;
+}
+
+/* The card, at scale s, into nb.cpu (the owner's pick, option C of the mockup, 2026-11-11): a corner toast, a
+ * coloured tile on the left with a gauge (gold: lighter graphics, green: high), then a bold title over a softer
+ * second line, on the theme's deep violet, with a soft shadow. A margin around it holds the shadow. */
+static void note_render(float s) {
+    const Theme *th = theme_colors();
+    const float m = 24, tile = 84, t1 = 26, l1 = t1 * 1.2f, t2 = 19, l2 = t2 * 1.35f, pt = 16, pl = 22, pr = 28;
+    float tw = ui_text_w(UI_ROUNDED_800, t1, note_title), tw2 = ui_text_w(UI_GOTHIC_500, t2, note_text);
+    float cw = tile + pl + (tw > tw2 ? tw : tw2) + pr, ch = pt + l1 + l2 + pt;
+    if ((cw + 2 * m) * s > NOTE_W) s = NOTE_W / (cw + 2 * m);  /* a long GPU name: smaller rather than cut */
+    if ((ch + 2 * m) * s > NOTE_H) s = NOTE_H / (ch + 2 * m);
+    memset(nb.cpu, 0, (size_t)NOTE_W * NOTE_H * 4);
+    UiCanvas c = {nb.cpu, NOTE_W, NOTE_H, s, 0, 0};
+    uint32_t tint = note_high ? 0x4cc38a : th->pop_gold;  /* green: high; gold: lighter */
+    ui_shadow(&c, m, m + 8, cw, ch, 16, 22, th->pop_shadow, 0.5f);
+    ui_box(&c, m, m, cw, ch, 16, th->pop_deep, 0, 0);
+    ui_box(&c, m, m, tile + 16, ch, 16, tint, 0, 0);  /* the tile, its right corners covered next */
+    ui_rect(&c, m + tile, m, 16, ch, th->pop_deep, 1);
+    /* the gauge's needle: up to the right for high, low on the left for lighter */
+    ui_icon(&c, note_high ? "<path d=\"M4 15a8 8 0 1 1 16 0\"/><path d=\"M12 15l4-5\"/>"
+                          : "<path d=\"M4 15a8 8 0 1 1 16 0\"/><path d=\"M12 15l-5.5-2.5\"/>",
+            m + (tile - 40) / 2, m + (ch - 40) / 2, 40, 2.6f, th->pop_deep);
+    ui_text(&c, UI_ROUNDED_800, t1, m + tile + pl, m + pt, l1, note_title, th->pop_white);
+    ui_text(&c, UI_GOTHIC_500, t2, m + tile + pl, m + pt + l1, l2, note_text, th->on_dark);
+    nb.w = (int)ceilf((cw + 2 * m) * s), nb.h = (int)ceilf((ch + 2 * m) * s), note_bottom = (int)ceilf((m + ch) * s);
+}
+
+static void note_draw(VkImage dst, uint32_t index, int32_t x0, int32_t y0, uint32_t bw, uint32_t bh) {
+    (void)bw;
+    if (!note_on || index >= 8 || !swap_views[index]) return;
+    if (hb_resources() || nb_resources()) {
+        note_on = 0;
+        return;
+    }
+    VkPipeline pipe = hb_pipeline(swap_format);
+    if (!pipe) return;
+    uint64_t now = SDL_GetTicks();
+    if (!note_start) note_start = now;
+    const float in = 0.4f, hold = 6.0f, out = 1.2f;
+    float t = (float)(now - note_start) / 1000.0f, a = t < in ? t / in : t < in + hold ? 1.0f : 1.0f - (t - in - hold) / out;
+    if (a <= 0 && t > in) {
+        note_on = 0;
+        return;
+    }
+    float s = overlay_scale(swap_extent.height);
+    if (s != nb.s) note_render(s), nb.s = s;
+    /* faded: premultiplied, so every channel times the strength */
+    uint32_t k = (uint32_t)(a * 256.0f);
+    for (int j = 0; j < nb.h; j++) {
+        const uint8_t *src = nb.cpu + (size_t)j * NOTE_W * 4;
+        uint8_t *row = (uint8_t *)nb.ptr + (size_t)j * NOTE_W * 4;
+        for (int i = 0; i < nb.w * 4; i++) row[i] = (uint8_t)((src[i] * k) >> 8);
+    }
+    hb_barrier(nb.image, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 0, VK_ACCESS_TRANSFER_WRITE_BIT);
+    VkBufferImageCopy copy = {.bufferRowLength = NOTE_W, .imageSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1},
+                              .imageExtent = {(uint32_t)nb.w, (uint32_t)nb.h, 1}};
+    vkCmdCopyBufferToImage(cmd, nb.buf, nb.image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &copy);
+    hb_barrier(nb.image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+               VK_ACCESS_TRANSFER_WRITE_BIT, VK_ACCESS_SHADER_READ_BIT);
+    hb_barrier(dst, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+               VK_ACCESS_TRANSFER_WRITE_BIT, VK_ACCESS_COLOR_ATTACHMENT_READ_BIT | VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT);
+    VkRenderingAttachmentInfo att = {.sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO, .imageView = swap_views[index],
+                                     .imageLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+                                     .loadOp = VK_ATTACHMENT_LOAD_OP_LOAD, .storeOp = VK_ATTACHMENT_STORE_OP_STORE};
+    VkRenderingInfo ri = {.sType = VK_STRUCTURE_TYPE_RENDERING_INFO, .renderArea = {{0, 0}, swap_extent},
+                          .layerCount = 1, .colorAttachmentCount = 1, .pColorAttachments = &att};
+    vkCmdBeginRendering(cmd, &ri);
+    vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, pipe);
+    VkViewport v = {0, 0, (float)swap_extent.width, (float)swap_extent.height, 0, 1};
+    VkRect2D sc = {{0, 0}, swap_extent};
+    vkCmdSetViewport(cmd, 0, 1, &v);
+    vkCmdSetScissor(cmd, 0, 1, &sc);
+    vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, hb.layout, 0, 1, &nb.set, 0, NULL);
+    float W = (float)swap_extent.width, H = (float)swap_extent.height;
+    /* the bottom-left corner: the card 40 units in from the left, 48 up from the bottom (its image has a margin) */
+    float px = (float)x0 + (40 - 24) * nb.s, py = (float)y0 + (float)bh - 48 * nb.s - (float)note_bottom;
+    float push[8] = {px / W * 2 - 1, py / H * 2 - 1, (px + (float)nb.w) / W * 2 - 1, (py + (float)nb.h) / H * 2 - 1,
+                     (float)nb.w / NOTE_W, (float)nb.h / NOTE_H, 0, 0};
+    vkCmdPushConstants(cmd, hb.layout, VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof push, push);
+    vkCmdDraw(cmd, 6, 1, 0, 0);
+    vkCmdEndRendering(cmd);
+    hb_barrier(dst, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+               VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT, VK_ACCESS_TRANSFER_WRITE_BIT | VK_ACCESS_TRANSFER_READ_BIT);
 }
 
 static void hud_draw(VkImage dst, uint32_t index, int32_t x0, int32_t y0, uint32_t bw, uint32_t bh) {
@@ -1273,6 +1458,16 @@ static void hud_onto(uint8_t *rgba, uint32_t w, uint32_t h) {
     /* YW4_SHOT_MENU=1 (tests): the in-game overlay too; normally left out, so its TAKE SCREENSHOT shows the game */
     static int shot_menu = -1;
     if (shot_menu < 0) shot_menu = getenv("YW4_SHOT_MENU") != NULL;
+    if (shot_menu && note_on && nb.ptr && nb.w) {  /* the notice too, as faded now, at the window's pixel size */
+        int32_t nx = (int32_t)((40 - 24) * nb.s), ny = (int32_t)h - (int32_t)(48 * nb.s) - note_bottom;
+        for (int j = 0; j < nb.h && ny + j < (int32_t)h; j++)
+            for (int i = 0; i < nb.w; i++) {
+                if (nx + i < 0 || nx + i >= (int32_t)w) continue;
+                const uint8_t *sp = (const uint8_t *)nb.ptr + ((size_t)j * NOTE_W + (size_t)i) * 4;
+                uint8_t *dp = rgba + ((size_t)(ny + j) * w + (size_t)(nx + i)) * 4;
+                for (int k = 0; k < 3; k++) dp[k] = (uint8_t)(sp[k] + dp[k] * (255 - sp[3]) / 255);
+            }
+    }
     if (!shot_menu || !gamemenu_open() || settings_open() || !ov.px || !ov.uploaded) return;
     /* the part shown: all, or in the preview only its bar (the rest of ov.px is an older drawing), as menu_draw */
     float fs, fx, fy, f = (float)h / (float)ov.img.h;  /* f: the overlay's pixels to the frame's */
@@ -1577,6 +1772,7 @@ static int present_image(VkImage src, VkImageLayout layout, VkRect2D r0, int rea
         dlssg_hudless(VK_NULL_HANDLE, VK_NULL_HANDLE, swap_format, 0, 0);
     }
     hud_draw(dst, index, x0, y0, bw, bh);
+    note_draw(dst, index, x0, y0, bw, bh);
     menu_draw(dst, x0, y0, bw, bh);
     panel_draw(dst, x0, y0, bw, bh);
     barrier(dst, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR, VK_ACCESS_TRANSFER_WRITE_BIT, 0);
