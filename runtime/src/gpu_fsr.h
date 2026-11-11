@@ -19,6 +19,8 @@ typedef struct {
 int gpu_fsr_built(void);
 /* 1: the DLLs are there and FSR runs on this device (checked once). */
 int gpu_fsr_available(void);
+/* FSR's context for these sizes made now, if it isn't (ahead of its first use: making it takes ~0.5 s). */
+void gpu_fsr_prepare(uint32_t rw, uint32_t rh, uint32_t ow, uint32_t oh);
 /* The shift for frame n of FSR's jitter sequence (render w against output ow), in pixels. */
 void gpu_fsr_jitter(uint32_t w, uint32_t ow, uint64_t n, float *jx, float *jy);
 /* Records FSR's passes into cb (outside rendering). 0 if FSR could not run. */

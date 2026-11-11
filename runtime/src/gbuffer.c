@@ -346,23 +346,29 @@ static _Thread_local struct {
     uint8_t layer_nvn[NVN_STATE_BYTES];  /* the engine's NVN state objects ([device+0x10d0]+0x240) then */
 } cur;
 
-/* host_readable is a system call: remember the answer per 64 KiB block. A failed draw-item search tries every word of
- * 8 KiB of stack as a pointer, mostly arbitrary blocks: the table is emptied at 3/4 full, so the probing stays short
- * (a full table would never end it) and stale answers go (2026-11-11: Demon Hand frames of up to 330 ms). */
+/* host_readable is a system call: remember the answer per 64 KiB block of the guest's 32 GiB, in a table with a place
+ * for every block. A failed draw-item search tries every word of 8 KiB of stack as a pointer, mostly arbitrary blocks;
+ * a small hash table (emptied when 3/4 full) asked again and again, on three render threads at once: the first Demon
+ * Hand of a session stopped the game for 200 ms in VirtualQuery (2026-11-11, YW4_PROFILE=hitch over every thread).
+ * An answer holds while yw4_memory_generation stays (memory was neither committed nor given back since); "not
+ * readable" holds at most a second besides. Each entry: generation << 32 | second << 2 | 1 readable, 2 not. */
 static int readable(uint64_t addr, uint64_t size) {
-    enum { SLOTS = 1 << 12 };
-    static uint64_t key[SLOTS];
-    static uint8_t val[SLOTS];
-    static int used;
+    enum { LO = 0x7000000000ull >> 16, BLOCKS = (0x7800000000ull - 0x7000000000ull) >> 16 };
+    static uint64_t known[BLOCKS];
+    uint64_t gen = (uint64_t)__atomic_load_n(&yw4_memory_generation, __ATOMIC_ACQUIRE) << 32;
+    uint64_t sec = ((uint64_t)host_now_ns() / 1000000000) & 0x3fffffff;
     for (uint64_t b = addr >> 16; b <= (addr + size - 1) >> 16; b++) {
-        uint32_t h = (uint32_t)(b * 0x9E3779B97F4A7C15ull >> 52);
-        while (key[h] && key[h] != b) h = (h + 1) & (SLOTS - 1);
-        if (!key[h] && used >= SLOTS * 3 / 4) {
-            memset(key, 0, sizeof key), used = 0;
-            h = (uint32_t)(b * 0x9E3779B97F4A7C15ull >> 52);
+        if (b - LO >= BLOCKS) {
+            if (!host_readable(b << 16, 1 << 16)) return 0;
+            continue;
         }
-        if (!key[h]) val[h] = (uint8_t)(host_readable(b << 16, 1 << 16) ? 1 : 2), key[h] = b, used++;
-        if (val[h] != 1) return 0;
+        uint64_t k = __atomic_load_n(&known[b - LO], __ATOMIC_RELAXED);
+        int fresh = (k & 3) && (k & ~0xffffffffull) == gen && ((k & 3) == 1 || ((k >> 2) & 0x3fffffff) == sec);
+        if (!fresh) {
+            k = gen | sec << 2 | (host_readable(b << 16, 1 << 16) ? 1 : 2);
+            __atomic_store_n(&known[b - LO], k, __ATOMIC_RELAXED);
+        }
+        if ((k & 3) != 1) return 0;
     }
     return 1;
 }

@@ -451,7 +451,7 @@ static FILE *file_handle(const File *f) {
     return open_files[i].fp;
 }
 
-static int read_file_part(const File *f, uint64_t at, uint8_t *out, uint64_t n) {
+static int read_file_part_locked(const File *f, uint64_t at, uint8_t *out, uint64_t n) {
     FILE *fp = file_handle(f);
     if (!fp) return -1;
 #ifdef _WIN32
@@ -462,7 +462,7 @@ static int read_file_part(const File *f, uint64_t at, uint8_t *out, uint64_t n) 
     /* Through a bounce buffer: the OS writing the game's memory directly (a large fread
      * becomes ReadFile into it) isn't seen by write tracking, and the draw path relies on
      * that to notice textures loaded after they were made (decision 0021). Callers hold
-     * the kernel lock, so one buffer is enough. */
+     * romfs_io (read_file_part), so one buffer is enough. */
     static uint8_t *bounce;
     enum { BOUNCE = 1 << 20 };
     if (!bounce && !(bounce = malloc(BOUNCE))) return -1;
@@ -473,6 +473,23 @@ static int read_file_part(const File *f, uint64_t at, uint8_t *out, uint64_t n) 
         out += k, n -= k;
     }
     return 0;
+}
+
+/* The reads run without the kernel lock (svc_fs.c), so that a loading thread's disk reads don't hold up every other
+ * thread's SVCs; this lock keeps the open files and the bounce buffer to one reader at a time. A read that took
+ * long is logged (YW4_TRACE_ROMFS names the files, this says when the disk was the wait). */
+static HostLock romfs_io = HOST_LOCK_INIT;
+
+static int read_file_part(const File *f, uint64_t at, uint8_t *out, uint64_t n) {
+    host_lock(&romfs_io);
+    int64_t t0 = host_now_ns();
+    int r = read_file_part_locked(f, at, out, n);
+    int64_t ms = (host_now_ns() - t0) / 1000000;
+    host_unlock(&romfs_io);
+    if (ms >= 20)
+        fprintf(stderr, "yw4: romfs: slow read: %s +%#llx, %llu bytes, %lld ms\n", f->path, (unsigned long long)at,
+                (unsigned long long)n, (long long)ms);
+    return r;
 }
 
 int romfs_image_read(RomfsImage *m, uint64_t offset, void *out_, uint64_t size) {

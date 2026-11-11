@@ -24,6 +24,7 @@
 #include "host.h"
 #include "ipc.h"
 #include "kernel.h"
+#include "nvn.h"
 #include "yw4load.h"
 
 /* Result codes (module 1, the kernel) */
@@ -232,6 +233,24 @@ static void write_watch_report(uint64_t pc, uint64_t addr) {
 int yw4_write_watch_arm(uint64_t addr, uint64_t size) {
     int r = host_write_watch(addr, size, write_watch_report);
     fprintf(stderr, "yw4: write watch on %#" PRIx64 " (%" PRIu64 " bytes) %s\n", addr, size, r ? "failed" : "armed");
+    return r;
+}
+
+/* YW4_TRACE_AI (ai_trace.c): a read of the watched bytes, on the reading guest thread: who reads them, and its callers */
+static void read_watch_report(uint64_t pc, uint64_t addr) {
+    char where[48];
+    fprintf(stderr, "yw4: ai: read of %#" PRIx64 " by guest thread %" PRIu64 " (host pc %#" PRIx64 " = yw4_describe%+lld)\n",
+            addr, cur ? cur->id : 0, pc, (long long)(pc - (uint64_t)(uintptr_t)&yw4_describe));
+    if (!cur) return;
+    uint64_t st[12];
+    int k = yw4_call_stack(cur->ctx, st, 12);
+    for (int i = 0; i < k; i++) fprintf(stderr, "       %s\n", yw4_describe(st[i] - 4, where));
+}
+
+int yw4_read_watch_arm(uint64_t addr, uint64_t size, long reports) {
+    int r = host_read_watch(addr, size, reports, read_watch_report);
+    fprintf(stderr, "yw4: ai: read watch on %#" PRIx64 " (%" PRIu64 " bytes, %ld reports) %s\n", addr, size, reports,
+            r ? "failed" : "armed");
     return r;
 }
 
@@ -478,6 +497,7 @@ static void thread_main(void *p) {
     t->host = host_thread_self();
     host_thread_set_priority(t->host, t->priority);
     exit_jump = &jump;
+    yw4_profile_thread(YW4_ROLE_ANY, 0);  /* YW4_PROFILE=hitch samples them all */
     if (setjmp(jump) == 0) {
         yw4_resolve(t->entry)(t->ctx);
         host_lock(&klock);  /* the entry function returned: the thread ends as if by ExitThread */

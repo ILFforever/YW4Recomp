@@ -111,6 +111,12 @@ static int create(uint32_t rw, uint32_t rh, uint32_t ow, uint32_t oh) {
     return 1;
 }
 
+/* FSR's context made ahead, at the first frame the sizes are known (the title, a loading screen), not at its first
+ * use in a battle: making it took 260-755 ms, a freeze at the first Demon Hand of every session (2026-11-11). */
+void gpu_fsr_prepare(uint32_t rw, uint32_t rh, uint32_t ow, uint32_t oh) {
+    if (gpu_fsr_available() == 1 && rw && rh && ow && oh) create(rw, rh, ow, oh);
+}
+
 void gpu_fsr_jitter(uint32_t w, uint32_t ow, uint64_t n, float *jx, float *jy) {
     *jx = *jy = 0.0f;
     if (gpu_fsr_available() != 1) return;
@@ -184,6 +190,7 @@ int gpu_fsr_dispatch(VkCommandBuffer cb, const GpuFsrInputs *in) {
 
 int gpu_fsr_built(void) { return 0; }
 int gpu_fsr_available(void) { return 0; }
+void gpu_fsr_prepare(uint32_t rw, uint32_t rh, uint32_t ow, uint32_t oh) { (void)rw, (void)rh, (void)ow, (void)oh; }
 void gpu_fsr_jitter(uint32_t w, uint32_t ow, uint64_t n, float *jx, float *jy) {
     (void)w, (void)ow, (void)n;
     *jx = *jy = 0.0f;

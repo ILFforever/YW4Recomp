@@ -170,6 +170,10 @@ int main(int argc, char **argv) {
     if (savefs_init(argv[3])) return 1;
     yw4_probe_init();
     yw4_watch_init();
+    {
+        void ai_trace_start(void);  /* ai_trace.c: YW4_TRACE_AI=1 only */
+        ai_trace_start();
+    }
 
     window_run(start_guest, NULL);
     return 0;
