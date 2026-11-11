@@ -5,7 +5,10 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include <SDL3/SDL_scancode.h>
+
 #include "gamemenu.h"
+#include "battle.h"
 #include "bindings.h"
 #include "bugreport.h"
 #include "settings.h"
@@ -25,6 +28,10 @@ static int toast_wanted;      /* the note (toast_msg, top right) starts at the n
 static uint64_t toast_until;  /* ms */
 static int hover_kind = -1, hover_a, hover_b;  /* what the mouse is over (HIT_*, -1 nothing), for the hover looks */
 static int ctrl_first, ctrl_rows, ctrl_visible;  /* the Controls table: its first row shown, rows, rows that fit */
+/* the Controls page's view: 1 the Bindings table (where it opens, as before), 0 the keyboard view (the owner's
+ * mockup, 2026-11-11), switched by one button or P; the keyboard view's mode: 0 exploring, 1 battles, 2 cutscenes
+ * (the exploring keys, only those that do something there) */
+static int ctrl_view = 1, kv_mode;
 static int preview, preview_hidden;  /* Preview: the game runs under the bar; the bar hidden (only its chip shows) */
 static float pv_rect[4];             /* the part of the overlay the window shows while previewing (design units) */
 static int bug_page, brow;           /* Report a bug: its page and chosen row (below, with the rest of it) */
@@ -166,6 +173,16 @@ int gamemenu_prompt_take(char *out, size_t n) {
 
 int gamemenu_open(void) { return __atomic_load_n(&open_, __ATOMIC_ACQUIRE); }
 int gamemenu_previewing(void) { return __atomic_load_n(&preview, __ATOMIC_ACQUIRE); }
+
+/* F2 with a keyboard (owner, 2026-11-11: "no need to pause, a quick toggle"): the Controls page's keyboard Overview
+ * alone over the running game, not paused, the player's input still going to the game; its mode follows the game
+ * (a battle's keys during one). F2 again hides it; opening the overlay hides it too. */
+static int peek_;
+int gamemenu_peeking(void) { return __atomic_load_n(&peek_, __ATOMIC_ACQUIRE) && !gamemenu_open(); }
+void gamemenu_peek_toggle(void) {
+    __atomic_store_n(&peek_, !__atomic_load_n(&peek_, __ATOMIC_ACQUIRE), __ATOMIC_RELEASE);
+    __atomic_add_fetch(&changes, 1, __ATOMIC_ACQ_REL);
+}
 void gamemenu_preview_rect(float r[4]) { memcpy(r, pv_rect, sizeof pv_rect); }
 
 static float focused_text_box[4];
@@ -190,7 +207,7 @@ uint32_t gamemenu_look(uint64_t now) {
     if (__atomic_exchange_n(&toast_wanted, 0, __ATOMIC_ACQ_REL)) toast_until = now + 1600;
     /* also when a key capture ends by itself (five seconds) */
     return (__atomic_load_n(&changes, __ATOMIC_ACQUIRE) + textin_changes()) * 4u + (now < toast_until) +
-           2u * (uint32_t)bindings_capturing();
+           2u * (uint32_t)bindings_capturing() + (gamemenu_peeking() ? 0x40000000u + 0x20000000u * (uint32_t)battle_active() : 0);
 }
 
 static void close_and_resume(void) {
@@ -213,6 +230,7 @@ void gamemenu_toggle(void) {
         return;
     }
     sel = GM_RESUME, confirm = 0, focus = 0;
+    __atomic_store_n(&peek_, 0, __ATOMIC_RELEASE);
     if (!window_paused()) window_pause_toggle();  /* F4 may have paused it already */
     __atomic_store_n(&open_, 1, __ATOMIC_RELEASE);
     changed();
@@ -267,6 +285,7 @@ void gamemenu_open_page(int item) {
     if (settings_open()) settings_toggle();  /* a replay's old panel: the overlay's page instead */
     bindings_cancel();
     textin_focus(NULL);
+    __atomic_store_n(&peek_, 0, __ATOMIC_RELEASE);
     if (!gamemenu_open()) {
         if (!window_paused()) window_pause_toggle();
         __atomic_store_n(&open_, 1, __ATOMIC_RELEASE);
@@ -356,6 +375,10 @@ static void controls_page_action(int a) {
     if (a == GM_BACK || a == GM_LEAVE) {
         bindings_cancel();
         focus = 0, sel = GM_RESUME;
+    } else if (a == GM_ALT && !bindings_capturing()) {  /* P, Y / Triangle: Overview <-> Bindings */
+        ctrl_view = !ctrl_view;
+    } else if (!ctrl_view) {  /* the Overview: Q / E (LB / RB) step the mode; nothing else to choose */
+        if (a == GM_PREV || a == GM_NEXT) kv_mode = (kv_mode + (a == GM_NEXT ? 1 : 2)) % 3;
     } else if (a == GM_UP || a == GM_DOWN || a == GM_LEFT || a == GM_RIGHT || a == GM_ACCEPT || a == GM_CLEAR) {
         bindings_action(map[a]);
     }
@@ -559,7 +582,8 @@ void gamemenu_refresh(void) { changed(); }
 enum { HIT_SIDE, HIT_SECTION, HIT_ROW, HIT_ROW_PREV, HIT_ROW_NEXT, HIT_BIND, HIT_MODE, HIT_CORNER, HIT_CORNER_BOX,
        HIT_PART, HIT_SLIDER, HIT_POPUP, HIT_HINT, HIT_BIND_STEP, HIT_PREVIEW,
        HIT_BUG_KIND, HIT_BUG_TEXT, HIT_BUG_OFTEN, HIT_BUG_NEXT, HIT_BUG_TICK, HIT_BUG_BTN, HIT_BUG_DONE,
-       HIT_PROMPT_FIELD, HIT_PROMPT_OK, HIT_PROMPT_CANCEL, HIT_OSK_KEY };
+       HIT_PROMPT_FIELD, HIT_PROMPT_OK, HIT_PROMPT_CANCEL, HIT_OSK_KEY,
+       HIT_KV_TAB, HIT_KV_MODE, HIT_KV_KEY };
 #define HINT_CLOSE (-1)  /* a key hint's action: close the overlay */
 typedef struct {
     float x, y, w, h;
@@ -652,6 +676,14 @@ void gamemenu_mouse(float x, float y, int button) {
     case HIT_BIND:
         focus = 1, bindings_select(h.a, h.b < 0 ? -1 : h.b);
         if (click && h.b != -2) bindings_action(SETTINGS_ACCEPT);  /* a key: waits for the new one; a value: the next */        break;
+    case HIT_KV_TAB:
+        if (click && !bindings_capturing()) focus = 1, ctrl_view = h.a;
+        break;
+    case HIT_KV_MODE:
+        if (click) focus = 1, kv_mode = h.a;
+        break;
+    case HIT_KV_KEY:  /* pointing is enough: the detail bar follows the hover */
+        break;
     case HIT_MODE:
         focus = 1, prow = 0;
         if (click) window_hud_set_mode(perf_modes[h.a]), settings_save();
@@ -1185,6 +1217,274 @@ static float cell_text(const UiCanvas *c, float x, float y, float h, const char 
     return w;
 }
 
+/* ---- the Controls page's Overview: the keyboard and the mouse with the bound keys lit and what each does, for
+ * exploring, battles or cutscenes (the owner's mockup, 2026-11-11). What a Switch input does is the owner's names
+ * for his binds; an input without a name isn't lit. */
+
+/* the keyboard: rows in key units (a key = 1), the main block 15 wide, the arrows 0.5 to its right as an inverted T.
+ * code 0: a gap of that width */
+typedef struct {
+    int code;
+    float w;
+    const char *cap;
+} KvKey;
+static const KvKey kv_rows[6][17] = {
+    {{SDL_SCANCODE_ESCAPE, 1, "Esc"}, {0, 1, 0}, {SDL_SCANCODE_F1, 1, "F1"}, {SDL_SCANCODE_F2, 1, "F2"},
+     {SDL_SCANCODE_F3, 1, "F3"}, {SDL_SCANCODE_F4, 1, "F4"}, {0, .5f, 0}, {SDL_SCANCODE_F5, 1, "F5"},
+     {SDL_SCANCODE_F6, 1, "F6"}, {SDL_SCANCODE_F7, 1, "F7"}, {SDL_SCANCODE_F8, 1, "F8"}, {0, .5f, 0},
+     {SDL_SCANCODE_F9, 1, "F9"}, {SDL_SCANCODE_F10, 1, "F10"}, {SDL_SCANCODE_F11, 1, "F11"}, {SDL_SCANCODE_F12, 1, "F12"}},
+    {{SDL_SCANCODE_GRAVE, 1, "`"}, {SDL_SCANCODE_1, 1, "1"}, {SDL_SCANCODE_2, 1, "2"}, {SDL_SCANCODE_3, 1, "3"},
+     {SDL_SCANCODE_4, 1, "4"}, {SDL_SCANCODE_5, 1, "5"}, {SDL_SCANCODE_6, 1, "6"}, {SDL_SCANCODE_7, 1, "7"},
+     {SDL_SCANCODE_8, 1, "8"}, {SDL_SCANCODE_9, 1, "9"}, {SDL_SCANCODE_0, 1, "0"}, {SDL_SCANCODE_MINUS, 1, "-"},
+     {SDL_SCANCODE_EQUALS, 1, "="}, {SDL_SCANCODE_BACKSPACE, 2, "Backspace"}},
+    {{SDL_SCANCODE_TAB, 1.5f, "Tab"}, {SDL_SCANCODE_Q, 1, "Q"}, {SDL_SCANCODE_W, 1, "W"}, {SDL_SCANCODE_E, 1, "E"},
+     {SDL_SCANCODE_R, 1, "R"}, {SDL_SCANCODE_T, 1, "T"}, {SDL_SCANCODE_Y, 1, "Y"}, {SDL_SCANCODE_U, 1, "U"},
+     {SDL_SCANCODE_I, 1, "I"}, {SDL_SCANCODE_O, 1, "O"}, {SDL_SCANCODE_P, 1, "P"}, {SDL_SCANCODE_LEFTBRACKET, 1, "["},
+     {SDL_SCANCODE_RIGHTBRACKET, 1, "]"}, {SDL_SCANCODE_BACKSLASH, 1.5f, "\\"}},
+    {{SDL_SCANCODE_CAPSLOCK, 1.75f, "Caps"}, {SDL_SCANCODE_A, 1, "A"}, {SDL_SCANCODE_S, 1, "S"}, {SDL_SCANCODE_D, 1, "D"},
+     {SDL_SCANCODE_F, 1, "F"}, {SDL_SCANCODE_G, 1, "G"}, {SDL_SCANCODE_H, 1, "H"}, {SDL_SCANCODE_J, 1, "J"},
+     {SDL_SCANCODE_K, 1, "K"}, {SDL_SCANCODE_L, 1, "L"}, {SDL_SCANCODE_SEMICOLON, 1, ";"},
+     {SDL_SCANCODE_APOSTROPHE, 1, "'"}, {SDL_SCANCODE_RETURN, 2.25f, "Enter"}},
+    {{SDL_SCANCODE_LSHIFT, 2.25f, "Shift"}, {SDL_SCANCODE_Z, 1, "Z"}, {SDL_SCANCODE_X, 1, "X"}, {SDL_SCANCODE_C, 1, "C"},
+     {SDL_SCANCODE_V, 1, "V"}, {SDL_SCANCODE_B, 1, "B"}, {SDL_SCANCODE_N, 1, "N"}, {SDL_SCANCODE_M, 1, "M"},
+     {SDL_SCANCODE_COMMA, 1, ","}, {SDL_SCANCODE_PERIOD, 1, "."}, {SDL_SCANCODE_SLASH, 1, "/"},
+     {SDL_SCANCODE_RSHIFT, 2.75f, "Shift"}, {0, 1.5f, 0}, {SDL_SCANCODE_UP, 1, "\xe2\x86\x91"}},
+    {{SDL_SCANCODE_LCTRL, 1.25f, "Ctrl"}, {SDL_SCANCODE_LGUI, 1.25f, "Win"}, {SDL_SCANCODE_LALT, 1.25f, "Alt"},
+     {SDL_SCANCODE_SPACE, 6.25f, "Space"}, {SDL_SCANCODE_RALT, 1.25f, "Alt"}, {SDL_SCANCODE_APPLICATION, 1.25f, "Menu"},
+     {SDL_SCANCODE_RCTRL, 1.5f, "Ctrl"}, {0, .5f, 0}, {SDL_SCANCODE_LEFT, 1, "\xe2\x86\x90"},
+     {SDL_SCANCODE_DOWN, 1, "\xe2\x86\x93"}, {SDL_SCANCODE_RIGHT, 1, "\xe2\x86\x92"}}};
+enum { KV_MOUSE_LEFT = 1000, KV_MOUSE_RIGHT, KV_MOUSE_MID, KV_WHEEL };  /* hit numbers of the mouse's parts */
+
+/* the port's own keys (gold): the same in every mode */
+static const char *kv_port(int code) {
+    switch (code) {
+    case SDL_SCANCODE_ESCAPE: return "Overlay";
+    case SDL_SCANCODE_F1: return "Settings";
+    case SDL_SCANCODE_F2: return "Controls";
+    case SDL_SCANCODE_F3: return "HUD";
+    case SDL_SCANCODE_F11: return "Full screen";
+    case SDL_SCANCODE_F12: return "Screenshot";
+    default: return NULL;
+    }
+}
+
+/* What a Switch input (its settings-file name) does in a mode; NULL: nothing known (not lit). The owner's names. */
+static const char *kv_action(int mode, const char *id) {
+    static const char *const field[][2] = {
+        {"A", "Interact / confirm"}, {"B", "Jump / back, hold to run"}, {"X", "Yo-kai Pad"}, {"Y", "Map"},
+        {"L", "Hold: more shortcuts"}, {"R", "Minimap size"}, {"ZL", "Watch scan"}, {"ZR", "Yo-kai Beam"},
+        {"PLUS", "Pause"}, {"LS_PRESS", "Close hints"}, {"RS_PRESS", "Scan"},
+        {"DPAD_UP", "Shortcut"}, {"DPAD_RIGHT", "Shortcut"}, {"DPAD_DOWN", "Shortcut"}, {"DPAD_LEFT", "Shortcut"}};
+    static const char *const battle[][2] = {
+        {"A", "Confirm"}, {"B", "Roll / dodge"}, {"X", "Character skill"}, {"Y", "Attack"},
+        {"R", "Skill wheel / Encourage / Soul Steal"}, {"ZL", "Aim"}, {"ZR", "Yo-kai Drain"}, {"PLUS", "Stop watching"},
+        {"MINUS", "Auto battle"}, {"LS_PRESS", "Target enemy"}, {"DPAD_UP", "Switch character"},
+        {"DPAD_DOWN", "Switch character"}, {"DPAD_LEFT", "Target ally"}, {"DPAD_RIGHT", "Target ally"}};
+    static const char *const cutscene[][2] = {{"A", "Next line"}, {"R", "Fast forward"}, {"PLUS", "Pause"}};
+    if (!strncmp(id, "LS_", 3) && strcmp(id, "LS_PRESS")) return mode == 2 ? NULL : "Move";
+    if (!strncmp(id, "RS_", 3) && strcmp(id, "RS_PRESS")) return mode == 2 ? NULL : "Camera";
+    const char *const(*t)[2] = mode == 1 ? battle : mode == 2 ? cutscene : field;
+    int n = mode == 1 ? (int)(sizeof battle / sizeof *battle) : mode == 2 ? (int)(sizeof cutscene / sizeof *cutscene)
+                                                                             : (int)(sizeof field / sizeof *field);
+    for (int i = 0; i < n; i++)
+        if (!strcmp(t[i][0], id)) return t[i][1];
+    return NULL;
+}
+
+/* A key's or mouse part's actions in the Overview's mode: their names joined (each once) into out; 0 if none.
+ * *move: only moving or the camera (teal); *shortcut: exploring's D-pad shortcut number (1-4, +4 while 1 is held). */
+static int kv_names(int key, char *out, size_t n, int *move, int *shortcut) {
+    uint32_t m = bindings_key_inputs(kv_mode == 1 ? 1 : 0, key);
+    *out = 0, *move = 1, *shortcut = 0;
+    int found = 0;
+    for (int i = 0; i < 32; i++) {
+        if (!(m >> i & 1)) continue;
+        const char *id = bindings_input_id(i), *a = kv_action(kv_mode, id);
+        if (!a) continue;
+        if (kv_mode == 0 && !strncmp(id, "DPAD_", 5))
+            *shortcut = !strcmp(id, "DPAD_UP") ? 1 : !strcmp(id, "DPAD_RIGHT") ? 2 : !strcmp(id, "DPAD_DOWN") ? 3 : 4;
+        if (strcmp(a, "Move") && strcmp(a, "Camera")) *move = 0;
+        if (strstr(out, a)) continue;  /* the same action twice (a stick's directions) */
+        size_t l = strlen(out);
+        snprintf(out + l, n - l, "%s%s", l ? " / " : "", a);
+        found = 1;
+    }
+    return found;
+}
+
+/* text cut with "..." to fit w */
+static void kv_fit(int f, float px, const char *s, float w, char *out, size_t n) {
+    snprintf(out, n, "%s", s);
+    if (ui_text_w(f, px, out) <= w) return;
+    for (size_t l = strlen(out); l > 1; l--) {
+        out[l - 1] = 0;
+        char t[200];
+        snprintf(t, sizeof t, "%s...", out);
+        if (ui_text_w(f, px, t) <= w) {
+            snprintf(out, n, "%s", t);
+            return;
+        }
+    }
+}
+
+/* a key's label in up to two lines of width w: split at the last space that lets the first line fit, the rest
+ * cut with "..." if it still doesn't; returns the lines (1 or 2) */
+static int kv_lines(int f, float px, const char *s, float w, char *l1, char *l2, size_t n) {
+    *l2 = 0;
+    if (ui_text_w(f, px, s) <= w) {
+        snprintf(l1, n, "%s", s);
+        return 1;
+    }
+    char t[200];
+    snprintf(t, sizeof t, "%s", s);
+    for (char *sp = strrchr(t, ' '); sp; sp = strrchr(t, ' ')) {
+        *sp = 0;
+        if (ui_text_w(f, px, t) <= w) {
+            snprintf(l1, n, "%s", t);
+            const char *rest = s + (sp - t) + 1;
+            while (*rest == '/' || *rest == ' ') rest++;  /* "A / B": the second line starts at B */
+            kv_fit(f, px, rest, w, l2, n);
+            if (l1[0] && l1[strlen(l1) - 1] == '/') l1[strlen(l1) - 1] = 0;  /* no "/" left hanging */
+            while (l1[0] && l1[strlen(l1) - 1] == ' ') l1[strlen(l1) - 1] = 0;
+            return 2;
+        }
+    }
+    kv_fit(f, px, s, w, l1, n);  /* one long word */
+    return 1;
+}
+
+/* a segmented switch of n labels at (x, y), the chosen one filled; returns its width (c NULL: measures) */
+static float kv_seg(const UiCanvas *c, float x, float y, const char *const *labels, int n, int chosen, int kind) {
+    float pad = 16, h = 40, w = 4;
+    for (int i = 0; i < n; i++) w += ui_text_w(UI_ROUNDED_700, 15, labels[i]) + 2 * pad + 4;
+    if (!c) return w;
+    ui_box(c, x, y, w, h + 8, 12, SOFT, 0, 0);
+    float bx = x + 4;
+    for (int i = 0; i < n; i++) {
+        float bw = ui_text_w(UI_ROUNDED_700, 15, labels[i]) + 2 * pad;
+        int hv = i != chosen && hovered(kind, i, 0);
+        if (i == chosen || hv) ui_box(c, bx, y + 4, bw, h, 9, i == chosen ? PLUM : LILAC, 0, 0);
+        ui_text_in(c, UI_ROUNDED_700, 15, bx, y + 4, bw, h, 1, labels[i], i == chosen ? SNOW : PLUM);
+        hit_add(bx, y + 4, bw, h, kind, i, 0);
+        bx += bw + 4;
+    }
+    return w;
+}
+
+/* drawn at x0, top, W design units wide (the Controls page: 488, 1024; F2's quick look: bigger, centred) */
+static void draw_controls_overview(const UiCanvas *c, float x0, float top, float W, int peek) {
+    static const char *const modes[3] = {"Exploring", "Battle", "Cutscene"};
+    const uint32_t TEAL = 0x1e9aa6;
+    kv_seg(c, x0, top, modes, 3, kv_mode, HIT_KV_MODE);
+    /* the keyboard: 18.5 units wide with 18 gaps, beside the mouse */
+    float mw = 120, g = 5, kbw = W - mw - 36, k = (kbw - g * 18) / 18.5f;
+    float ky = top + 64, hover_key = -1;
+    char names[200], t[200];
+    const char *hcap = NULL;
+    int hcode = 0;
+    for (int r = 0; r < 6; r++) {
+        float kx = x0, y = ky + r * (k + g) + (r ? 10 : 0);
+        for (int i = 0; i < 17 && kv_rows[r][i].w > 0; i++) {
+            const KvKey *key = &kv_rows[r][i];
+            float w = k * key->w + g * (key->w - 1);
+            if (key->code) {
+                int move, sc, lit = kv_names(key->code, names, sizeof names, &move, &sc);
+                const char *port = kv_port(key->code);
+                if (port) lit = 1, move = 0, snprintf(names, sizeof names, "%s", port);
+                int hv = lit && hovered(HIT_KV_KEY, key->code, 0);
+                uint32_t fill = !lit ? WHITE : port ? GOLD : move ? TEAL : PLUM;
+                uint32_t ink = !lit ? MUTED : port ? ON_GOLD : SNOW;
+                if (hv) ui_box(c, kx - 3, y - 3, w + 6, k + 6, 10, port ? PLUM : RING, 0, 0);
+                ui_box(c, kx, y, w, k, 8, fill, lit ? 0 : 1.5f, LINE);
+                char l1[200], l2[200];
+                int lines = 1;
+                float fs = k * 0.19f;
+                if (lit) {
+                    if (sc) snprintf(l1, sizeof l1, "%d \xc2\xb7 %d", sc, sc + 4), *l2 = 0;
+                    else lines = kv_lines(UI_GOTHIC_700, fs, names, w - 6, l1, l2, sizeof l1);
+                }
+                /* the key's name at the top, its action under it in one or two lines */
+                float capy = !lit ? y : lines == 2 ? y + k * 0.04f : y + k * 0.12f, caph = lit ? k * 0.34f : k;
+                ui_text_in(c, UI_GOTHIC_700, k * 0.25f, kx, capy, w, caph, 1, key->cap, ink);
+                if (lit) {
+                    float ly = lines == 2 ? y + k * 0.40f : y + k * 0.50f, lh = k * 0.27f;
+                    ui_text_in(c, UI_GOTHIC_700, fs, kx + 3, ly, w - 6, lh, 1, l1, ink);
+                    if (lines == 2) ui_text_in(c, UI_GOTHIC_700, fs, kx + 3, ly + lh * 0.95f, w - 6, lh, 1, l2, ink);
+                    hit_add(kx, y, w, k, HIT_KV_KEY, key->code, 0);
+                    if (hv) hover_key = 1, hcap = key->cap, hcode = key->code;
+                }
+            }
+            kx += w + g;
+        }
+    }
+    /* the mouse: its two buttons and the wheel, lit where bound */
+    float mx = x0 + W - mw, my = ky + k + 10, mh = 190;
+    ui_box(c, mx, my, mw, mh, mw / 2, WHITE, 1.5f, LINE);
+    static const struct { int part, key; const char *cap; } mparts[3] = {
+        {KV_MOUSE_LEFT, MOUSE_BIND_LEFT, "Left click"}, {KV_MOUSE_RIGHT, MOUSE_BIND_RIGHT, "Right click"},
+        {KV_MOUSE_MID, MOUSE_BIND_MIDDLE, "Wheel press"}};
+    for (int p = 0; p < 2; p++) {
+        int move, sc, lit = kv_names(mparts[p].key, names, sizeof names, &move, &sc);
+        float bx = mx + (p ? mw / 2 + 1 : 0), bw = mw / 2 - 1, bh = 82;
+        int hv = lit && hovered(HIT_KV_KEY, mparts[p].part, 0);
+        if (lit) {
+            ui_box(c, bx + 3, my + 3, bw - 6, bh - 6, p ? 18 : 18, hv ? NIGHT : PLUM, 0, 0);
+            ui_text_wrap(c, UI_GOTHIC_700, 11, 0, bx + 6, my + 18, bw - 12, 13, 1, names, SNOW);
+            hit_add(bx, my, bw, bh, HIT_KV_KEY, mparts[p].part, 0);
+            if (hv) hover_key = 1, hcap = mparts[p].cap, hcode = mparts[p].key;
+        }
+    }
+    ui_rect(c, mx + mw / 2 - 0.75f, my + 4, 1.5f, 80, LINE, 1);
+    {  /* the wheel: pressed, and turned (exploring's shortcuts / battle's character switch) */
+        int move, sc, lit = kv_names(MOUSE_BIND_MIDDLE, names, sizeof names, &move, &sc);
+        char turn[200];
+        int lit2 = kv_names(MOUSE_BIND_WHEEL_UP, turn, sizeof turn, &move, &sc);
+        int hv = (lit || lit2) && hovered(HIT_KV_KEY, KV_WHEEL, 0);
+        ui_box(c, mx + mw / 2 - 11, my + 16, 22, 48, 11, lit || lit2 ? (hv ? NIGHT : GOLD) : SOFT, 1.5f, LINE);
+        if (lit || lit2) {
+            hit_add(mx + mw / 2 - 14, my + 12, 28, 56, HIT_KV_KEY, KV_WHEEL, 0);
+            if (hv) hover_key = 1, hcap = "Wheel", hcode = -1;
+        }
+        float ly = my + mh + 10;
+        if (lit) snprintf(t, sizeof t, "Wheel press: %s", names), ui_text_wrap(c, UI_GOTHIC_500, 13, 0, mx - 20, ly, mw + 40, 17, 1, t, MUTED), ly += 36;
+        if (lit2) snprintf(t, sizeof t, "Wheel: %s", turn), ui_text_wrap(c, UI_GOTHIC_500, 13, 0, mx - 20, ly, mw + 40, 17, 1, t, MUTED);
+    }
+    /* the detail bar: the key under the mouse, in a full sentence */
+    float by = ky + 6 * (k + g) + 10 + 18, bh = peek ? -16 : 58;
+    if (!peek) ui_box(c, x0, by, W, bh, 14, NIGHT, 0, 0);
+    if (peek) {
+    } else if (hover_key < 0) {
+        ui_text_in(c, UI_GOTHIC_500, 16, x0 + 22, by, W - 44, bh, 0, "Point at a key to see what it does.", ON_DARK);
+    } else {
+        float cw = ui_text_w(UI_GOTHIC_700, 16, hcap) + 24;
+        ui_box(c, x0 + 18, by + 13, cw, bh - 26, 8, VSOFT, 0, 0);
+        ui_text_in(c, UI_GOTHIC_700, 16, x0 + 18, by + 13, cw, bh - 26, 1, hcap, SNOW);
+        int move, sc = 0;
+        const char *port = hcode > 0 ? kv_port(hcode) : NULL;
+        if (port) snprintf(t, sizeof t, "%s.", port);
+        else if (hcode == -1) {
+            char turn[200];
+            int a = kv_names(MOUSE_BIND_MIDDLE, names, sizeof names, &move, &sc);
+            int b = kv_names(MOUSE_BIND_WHEEL_UP, turn, sizeof turn, &move, &sc);
+            snprintf(t, sizeof t, "%s%s%s%s%s", a ? "Press: " : "", a ? names : "", a && b ? ". " : "", b ? "Turn: " : "",
+                     b ? turn : "");
+        } else {
+            kv_names(hcode, names, sizeof names, &move, &sc);
+            if (sc) snprintf(t, sizeof t, "Shortcut %d, or shortcut %d while you hold 1.", sc, sc + 4);
+            else snprintf(t, sizeof t, "%s.", names);
+        }
+        ui_text_in(c, UI_GOTHIC_500, 17, x0 + 18 + cw + 16, by, W - cw - 60, bh, 0, t, SNOW);
+    }
+    /* the colours */
+    float lx = x0, ly = by + bh + 16;
+    static const char *const leg[3] = {"Game buttons", "Moving and the camera", "Menus and screenshots"};
+    uint32_t lc[3] = {PLUM, TEAL, GOLD};
+    for (int i = 0; i < 3; i++) {
+        ui_box(c, lx, ly + 3, 16, 16, 4, lc[i], 0, 0);
+        lx += 24 + ui_text(c, UI_GOTHIC_500, 15, lx + 24, ly, 22, leg[i], MUTED) + 26;
+    }
+}
+
 /* The controls page (the design's isControls section): a table of each Switch input with its two keys and its
  * controller input, the chosen row ringed in gold and the chosen key or input on a gold chip; the rows scroll.
  * Under it, what the chosen row does (the design's note line). */
@@ -1194,10 +1494,21 @@ static void draw_controls_page(const UiCanvas *c, const GameMenuInfo *in) {
     int row, col, n = bindings_rows(rows, 64, &row, &col, help, sizeof help);
     ui_box(c, 448, 40, 1104, 764, 20, PAPER, 0, 0);
     ui_text(c, UI_ROUNDED_800, 34, 488, 76, 34 * 1.25f, "Controls", NIGHT);
+    /* one button at the right of the title: to the keyboard view, or back to the bindings (P, Y / Triangle) */
+    const char *other = ctrl_view ? "Keyboard view" : "Bindings";
+    float vw = ui_text_w(UI_ROUNDED_700, 17, other) + 40, vh = 48, vx = 488 + 1024 - vw, vy = 76 + (34 * 1.25f - vh) / 2;
+    int vhov = hovered(HIT_KV_TAB, !ctrl_view, 0);
+    ui_box(c, vx, vy, vw, vh, 24, vhov ? LILAC : WHITE, 2, PLUM);
+    ui_text_in(c, UI_ROUNDED_700, 17, vx, vy, vw, vh, 1, other, PLUM);
+    hit_add(vx, vy, vw, vh, HIT_KV_TAB, !ctrl_view, 0);
+    float top = 76 + 34 * 1.25f + 22, bottom = 40 + 764 - 36;
+    if (!ctrl_view) {
+        draw_controls_overview(c, 488, top, 1024, 0);
+        return;
+    }
     if (in->pad_name) snprintf(t, sizeof t, "%s connected", in->pad_name);
     else snprintf(t, sizeof t, "No controller connected");
-    ui_text_in(c, UI_GOTHIC_400, 16, 488, 76 + 12, 1024, 34 * 1.25f - 12, 2, t, MUTED);
-    float top = 76 + 34 * 1.25f + 22, bottom = 40 + 764 - 36;
+    ui_text_in(c, UI_GOTHIC_400, 16, 488, 76 + 12, 1024 - vw - 24, 34 * 1.25f - 12, 2, t, MUTED);
     float hh = ui_text_wrap(NULL, UI_GOTHIC_500, 15, 0, 0, 0, 1024, 15 * 1.45f, 0, help, 0);
     float x = 488, w = 1024, cw[3] = {379, 379, 266}, hdr = 16 * 1.45f + 28, rh = 17 * 1.45f + 24;
     int visible = (int)((bottom - hh - 22 - top - hdr - 4) / rh);
@@ -1674,6 +1985,28 @@ static void draw_preview(const UiCanvas *c, const GameMenuInfo *in) {
 void gamemenu_draw(const UiCanvas *c, const GameMenuInfo *in) {
     TH = theme_colors();
     draw_text_has = 0;
+    if (gamemenu_peeking()) {  /* F2's quick look: the keyboard Overview alone, in the game's current mode */
+        int hk = hit_back();
+        hit_n[hk] = 0;  /* the mouse belongs to the game meanwhile: nothing to point at */
+        int saved = kv_mode;
+        kv_mode = battle_active() ? 1 : 0;
+        /* centred on the 1600 x 900 design (owner: in the middle, bigger, the picture behind it blurred) */
+        float pw = 1360, ph = 640, px = (1600 - pw) / 2, py = (900 - ph) / 2;
+        ui_box(c, px, py, pw, ph, 22, PAPER, 0, 0);
+        /* the key hints along the card's bottom, as the other pages' bar (a dark band, the keys on light chips) */
+        float hb = py + ph - 56, hx = px + 40;
+        ui_box(c, px, hb, pw, 56, 22, NIGHT, 0, 0);
+        ui_rect(c, px, hb, pw, 24, NIGHT, 1);  /* its top corners square */
+        hx += hint(c, hx, hb, "F2", "Hide") + 28;
+        hint(c, hx, hb, "Esc", "Menu, to change the keys");
+        ui_text(c, UI_ROUNDED_800, 30, px + 40, py + 30, 30 * 1.25f, "Controls", NIGHT);
+        draw_controls_overview(c, px + 40, py + 30 + 30 * 1.25f + 18, pw - 80, 1);
+        kv_mode = saved;
+        pv_rect[0] = px, pv_rect[1] = py, pv_rect[2] = pw, pv_rect[3] = ph;  /* the part the window shows */
+        __atomic_store_n(&hit_front, hk, __ATOMIC_RELEASE);
+        (void)in;
+        return;
+    }
     float W = (float)c->w / c->s, H = 900;
     /* a picture narrower than 16:9 (the 16:10 aspect ratio): the design is fitted to its width and centred, with
      * a strip of E design units above and below it (window.c, overlay_fit). The frame reaches the picture's
@@ -1866,8 +2199,15 @@ void gamemenu_draw(const UiCanvas *c, const GameMenuInfo *in) {
             hx += hint(c, hx, by, "Enter", "Done") + 28;
             hint(c, hx, by, "Ctrl V", "Paste");
         }
+    } else if (focus && sel == GM_CONTROLS && !ctrl_view) {  /* the controls page's keyboard Overview */
+        int ps = in->pad == 2;
+        hx += hint(c, hx, by, in->pad ? "LB RB" : "Q E", "Exploring / Battle / Cutscene") + 28;
+        hx += hint(c, hx, by, in->pad ? alt_button(in) : "P", "Bindings") + 28;
+        hx += hint(c, hx, by, in->pad ? (ps ? "Circle" : "B") : "Esc", "Back") + 28;
+        if (in->pad) hint(c, hx, by, in->close, "Close overlay");
     } else if (focus && sel == GM_CONTROLS) {  /* the controls page */
         int ps = in->pad == 2;
+        hx += hint(c, hx, by, in->pad ? alt_button(in) : "P", "Keyboard view") + 28;
         hx += hint(c, hx, by, in->pad ? "D-pad" : "W S", "Choose") + 28;
         if (!in->pad) hx += hint(c, hx, by, "A D", "Navigate") + 28;  /* across: a key, the other key, the pad */
         hx += hint(c, hx, by, in->pad ? (ps ? "Cross" : "A") : "Enter", "Change") + 28;

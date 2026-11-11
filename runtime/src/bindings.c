@@ -109,6 +109,20 @@ static void sets_ready(void) {
     }
 }
 
+/* The Controls page's keyboard view (gamemenu.c): the inputs a key or mouse button is bound to in a set (0 exploring,
+ * 1 battles), as a mask of input numbers, and an input's name as in the settings file ("A", "LS_UP"). */
+uint32_t bindings_key_inputs(int set, int key) {
+    sets_ready();
+    if (set < 0 || set >= NSETS || !key) return 0;
+    uint32_t m = 0;
+    for (int i = 0; i < NINPUTS && i < 32; i++)
+        for (int k = 0; k < BIND_KEYS; k++)
+            if (sets[set][i].keys[k] == key) m |= 1u << i;
+    return m;
+}
+
+const char *bindings_input_id(int i) { return i >= 0 && i < NINPUTS ? inputs[i].id : ""; }
+
 /* ---- mouse sensitivity, left-right and up-down: the controls page's first rows, saved as YW4_MOUSE_SENS_X and
  * YW4_MOUSE_SENS_Y (the environment wins; YW4_MOUSE_SENS, the older single one, sets both) */
 

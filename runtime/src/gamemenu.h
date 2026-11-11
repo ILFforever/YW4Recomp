@@ -29,6 +29,10 @@ enum { GM_UP, GM_DOWN, GM_LEFT, GM_RIGHT, GM_ACCEPT, GM_BACK, GM_LEAVE, GM_PREV,
  * window draws only gamemenu_preview_rect's part of the overlay (design units: x, y, w, h; w 0: nothing) over
  * the live picture. */
 int gamemenu_previewing(void);
+/* F2's quick look (keyboard): the Controls page's keyboard Overview alone over the running game, not paused; drawn
+ * like the preview (only gamemenu_preview_rect's part). F2 again hides it, opening the overlay too. */
+int gamemenu_peeking(void);
+void gamemenu_peek_toggle(void);
 void gamemenu_preview_rect(float r[4]);
 
 /* Name entry (2026-11-07, canvas board N1): the game's software keyboard (swkbd.c) asks for a name and waits; the

@@ -56,6 +56,10 @@ void bindings_cancel(void);
 void bindings_select(int r, int c);
 /* The rows as they are now, the chosen row and column, and the text for the explanation box. */
 int bindings_rows(BindRow *rows, int max, int *row, int *col, char *help, int help_size);
+/* The keyboard view: the inputs `key` (an SDL_Scancode or MOUSE_BIND_*) is bound to in a set (0 exploring, 1 battles),
+ * as a mask of input numbers; an input's settings-file name ("A", "LS_UP", "DPAD_LEFT"). */
+uint32_t bindings_key_inputs(int set, int key);
+const char *bindings_input_id(int i);
 
 
 /* The settings file's lines (settings.c): one KEY1_/KEY2_/PAD_<input>=<name> line each, and YW4_MOUSE_SENS. */

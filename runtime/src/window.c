@@ -77,6 +77,7 @@ static VkImageView swap_views[8];  /* to draw into (the HUD, blended) */
 static VkSemaphore rendered[8];  /* one per swapchain image: reused only after that image is presented */
 static uint32_t nswap;
 static VkFormat swap_format;
+static int swap_readable;  /* the window's images can be copied from (the quick look's blur) */
 static int swapchain_stale = 1;  /* (re)create before the next present: first use, resize */
 /* the last presented picture's place in the window, as fractions (x, y, width, height): the present fits it
  * with black bars when the window's shape differs. Written by the present, read by the window's thread. */
@@ -170,6 +171,7 @@ static int create_swapchain(uint64_t frame) {  /* frame: the game frame being pr
         for (uint32_t i = 0; i < nmodes; i++)
             if (modes[i] == VK_PRESENT_MODE_MAILBOX_KHR) mode = modes[i];
     }
+    swap_readable = (caps.supportedUsageFlags & VK_IMAGE_USAGE_TRANSFER_SRC_BIT) != 0;
     VkSwapchainKHR old = swapchain;
     VkSwapchainCreateInfoKHR ci = {
         .sType = VK_STRUCTURE_TYPE_SWAPCHAIN_CREATE_INFO_KHR,
@@ -179,7 +181,9 @@ static int create_swapchain(uint64_t frame) {  /* frame: the game frame being pr
         .imageColorSpace = fmt.colorSpace,
         .imageExtent = extent,
         .imageArrayLayers = 1,
-        .imageUsage = VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT,  /* copies; the HUD drawn */
+        /* copies; the HUD drawn; read back where it can be (F2's quick look blurs the picture behind its card) */
+        .imageUsage = VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT |
+                      (caps.supportedUsageFlags & VK_IMAGE_USAGE_TRANSFER_SRC_BIT),
         .imageSharingMode = VK_SHARING_MODE_EXCLUSIVE,
         .preTransform = caps.currentTransform,
         .compositeAlpha = VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR,
@@ -1121,7 +1125,7 @@ void window_hud_cycle(void) {
 }
 int window_hud_shown(void) { return hud_enabled(); }
 
-static void menu_draw(VkImage dst, int32_t x0, int32_t y0, uint32_t bw, uint32_t bh);  /* below, with the pause */
+static void menu_draw(VkImage dst, uint32_t index, int32_t x0, int32_t y0, uint32_t bw, uint32_t bh);  /* below */
 
 /* The in-game overlay's design is 900 units high and at least 1600 wide (16:9; wider pictures give it more width).
  * A picture narrower than 16:9 (the 16:10 aspect ratio) would cut its right side off: there the 1600 x 900 is
@@ -1358,9 +1362,177 @@ static int overlay_background(uint32_t bw, uint32_t bh) {
     return 0;
 }
 
-static void menu_draw(VkImage dst, int32_t x0, int32_t y0, uint32_t bw, uint32_t bh) {
-    if (!gamemenu_open() || settings_open()) return;
-    int pv = gamemenu_previewing();  /* Preview: only its bar, over the live picture (no kept picture needed) */
+/* The quick look's card through the HUD's blend pipeline (see-through around its rounded corners): an image the
+ * card's size, made again when the card grows, uploaded from the overlay's canvas when it was drawn again. */
+static struct {
+    VkBuffer buf;
+    VkDeviceMemory buf_mem;
+    void *ptr;
+    VkImage image;
+    VkDeviceMemory mem;
+    VkImageView view;
+    VkDescriptorPool pool;
+    VkDescriptorSet set;
+    uint32_t w, h;
+} pk;
+
+static int pk_resources(uint32_t w, uint32_t h) {
+    if (pk.set) return pk.w >= w && pk.h >= h ? 0 : -1;  /* made once; a bigger card than that: the blit instead */
+    if (hb_resources()) return -1;
+    /* the size of the largest window it could be drawn in: a 4K one (or this one, if larger) */
+    if (w < 3840) w = 3840;
+    if (h < 2160) h = 2160;
+    VkBufferCreateInfo bci = {.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO, .size = (VkDeviceSize)w * h * 4,
+                              .usage = VK_BUFFER_USAGE_TRANSFER_SRC_BIT};
+    if (vkCreateBuffer(vk.device, &bci, NULL, &pk.buf) != VK_SUCCESS) return -1;
+    VkMemoryRequirements mr;
+    vkGetBufferMemoryRequirements(vk.device, pk.buf, &mr);
+    VkMemoryAllocateInfo mai = {.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO, .allocationSize = mr.size,
+                                .memoryTypeIndex = vk_memory_type(mr.memoryTypeBits, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT |
+                                                                                      VK_MEMORY_PROPERTY_HOST_COHERENT_BIT)};
+    if (vkAllocateMemory(vk.device, &mai, NULL, &pk.buf_mem) != VK_SUCCESS) return -1;
+    vkBindBufferMemory(vk.device, pk.buf, pk.buf_mem, 0);
+    vkMapMemory(vk.device, pk.buf_mem, 0, VK_WHOLE_SIZE, 0, &pk.ptr);
+    VkImageCreateInfo ici = {.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO, .imageType = VK_IMAGE_TYPE_2D,
+                             .format = VK_FORMAT_R8G8B8A8_UNORM, .extent = {w, h, 1}, .mipLevels = 1, .arrayLayers = 1,
+                             .samples = VK_SAMPLE_COUNT_1_BIT, .tiling = VK_IMAGE_TILING_OPTIMAL,
+                             .usage = VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT};
+    if (vkCreateImage(vk.device, &ici, NULL, &pk.image) != VK_SUCCESS) return -1;
+    vkGetImageMemoryRequirements(vk.device, pk.image, &mr);
+    mai.allocationSize = mr.size;
+    mai.memoryTypeIndex = vk_memory_type(mr.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
+    if (vkAllocateMemory(vk.device, &mai, NULL, &pk.mem) != VK_SUCCESS) return -1;
+    vkBindImageMemory(vk.device, pk.image, pk.mem, 0);
+    VkImageViewCreateInfo vi = {.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO, .image = pk.image,
+                                .viewType = VK_IMAGE_VIEW_TYPE_2D, .format = VK_FORMAT_R8G8B8A8_UNORM,
+                                .subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1}};
+    if (vkCreateImageView(vk.device, &vi, NULL, &pk.view) != VK_SUCCESS) return -1;
+    VkDescriptorPoolSize ps = {VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 1};
+    VkDescriptorPoolCreateInfo pci = {.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO, .maxSets = 1,
+                                      .poolSizeCount = 1, .pPoolSizes = &ps};
+    if (vkCreateDescriptorPool(vk.device, &pci, NULL, &pk.pool) != VK_SUCCESS) return -1;
+    VkDescriptorSetAllocateInfo dai = {.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO, .descriptorPool = pk.pool,
+                                       .descriptorSetCount = 1, .pSetLayouts = &hb.dsl};
+    if (vkAllocateDescriptorSets(vk.device, &dai, &pk.set) != VK_SUCCESS) return -1;
+    VkDescriptorImageInfo ii = {hb.sampler, pk.view, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL};
+    VkWriteDescriptorSet wr = {.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET, .dstSet = pk.set, .dstBinding = 0,
+                               .descriptorCount = 1, .descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+                               .pImageInfo = &ii};
+    vkUpdateDescriptorSets(vk.device, 1, &wr, 0, NULL);
+    pk.w = w, pk.h = h;
+    return 0;
+}
+
+/* The card's part of the canvas (rx, ry, rw x rh of a bw-wide RGBA canvas, premultiplied) blended onto dst at
+ * (x0 + rx, y0 + ry). upload: the canvas was drawn again. 0 when drawn. */
+static int pk_draw(VkImage dst, uint32_t index, const uint8_t *px, uint32_t bw, int32_t rx, int32_t ry, int32_t rw,
+                   int32_t rh, int32_t x0, int32_t y0, int upload) {
+    if (index >= 8 || !swap_views[index] || pk_resources((uint32_t)rw, (uint32_t)rh)) return -1;
+    VkPipeline pipe = hb_pipeline(swap_format);
+    if (!pipe) return -1;
+    static int32_t last_w, last_h;
+    if (upload || last_w != rw || last_h != rh) {
+        for (int32_t j = 0; j < rh; j++)
+            memcpy((uint8_t *)pk.ptr + (size_t)j * pk.w * 4, px + ((size_t)(ry + j) * bw + (size_t)rx) * 4, (size_t)rw * 4);
+        hb_barrier(pk.image, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 0, VK_ACCESS_TRANSFER_WRITE_BIT);
+        VkBufferImageCopy copy = {.bufferRowLength = pk.w, .imageSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1},
+                                  .imageExtent = {(uint32_t)rw, (uint32_t)rh, 1}};
+        vkCmdCopyBufferToImage(cmd, pk.buf, pk.image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &copy);
+        hb_barrier(pk.image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+                   VK_ACCESS_TRANSFER_WRITE_BIT, VK_ACCESS_SHADER_READ_BIT);
+        last_w = rw, last_h = rh;
+    }
+    hb_barrier(dst, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+               VK_ACCESS_TRANSFER_WRITE_BIT, VK_ACCESS_COLOR_ATTACHMENT_READ_BIT | VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT);
+    VkRenderingAttachmentInfo att = {.sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO, .imageView = swap_views[index],
+                                     .imageLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+                                     .loadOp = VK_ATTACHMENT_LOAD_OP_LOAD, .storeOp = VK_ATTACHMENT_STORE_OP_STORE};
+    VkRenderingInfo ri = {.sType = VK_STRUCTURE_TYPE_RENDERING_INFO, .renderArea = {{0, 0}, swap_extent},
+                          .layerCount = 1, .colorAttachmentCount = 1, .pColorAttachments = &att};
+    vkCmdBeginRendering(cmd, &ri);
+    vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, pipe);
+    VkViewport v = {0, 0, (float)swap_extent.width, (float)swap_extent.height, 0, 1};
+    VkRect2D sc = {{0, 0}, swap_extent};
+    vkCmdSetViewport(cmd, 0, 1, &v);
+    vkCmdSetScissor(cmd, 0, 1, &sc);
+    vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, hb.layout, 0, 1, &pk.set, 0, NULL);
+    float W = (float)swap_extent.width, H = (float)swap_extent.height, px0 = (float)(x0 + rx), py0 = (float)(y0 + ry);
+    float push[8] = {px0 / W * 2 - 1, py0 / H * 2 - 1, (px0 + (float)rw) / W * 2 - 1, (py0 + (float)rh) / H * 2 - 1,
+                     (float)rw / (float)pk.w, (float)rh / (float)pk.h, 0, 0};
+    vkCmdPushConstants(cmd, hb.layout, VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof push, push);
+    vkCmdDraw(cmd, 6, 1, 0, 0);
+    vkCmdEndRendering(cmd);
+    hb_barrier(dst, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+               VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT, VK_ACCESS_TRANSFER_WRITE_BIT | VK_ACCESS_TRANSFER_READ_BIT);
+    return 0;
+}
+
+/* F2's quick look: the running picture behind its card blurred, cheaply: copied down to an eighth of its size and
+ * back up with linear filtering, two image copies a frame. dst is in TRANSFER_DST and stays so. */
+static struct {
+    VkImage img;
+    VkDeviceMemory mem;
+    uint32_t w, h;
+    VkFormat format;
+} pb;
+
+static void peek_blur(VkImage dst, int32_t x0, int32_t y0, uint32_t bw, uint32_t bh) {
+    static int told;
+    if (!told++)
+        fprintf(stderr, "yw4: window: quick look: %s\n",
+                swap_readable ? "blurring the picture behind it" : "no blur: the window's images can't be read");
+    if (!swap_readable || bw < 64 || bh < 64) return;
+    uint32_t w = bw / 8, h = bh / 8;
+    if (pb.img && (pb.w != w || pb.h != h || pb.format != swap_format)) {
+        vkDeviceWaitIdle(vk.device);
+        vkDestroyImage(vk.device, pb.img, NULL), vkFreeMemory(vk.device, pb.mem, NULL);
+        memset(&pb, 0, sizeof pb);
+    }
+    if (!pb.img) {
+        VkImageCreateInfo ici = {.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO, .imageType = VK_IMAGE_TYPE_2D,
+                                 .format = swap_format, .extent = {w, h, 1}, .mipLevels = 1, .arrayLayers = 1,
+                                 .samples = VK_SAMPLE_COUNT_1_BIT, .tiling = VK_IMAGE_TILING_OPTIMAL,
+                                 .usage = VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT};
+        if (vkCreateImage(vk.device, &ici, NULL, &pb.img) != VK_SUCCESS) return;
+        VkMemoryRequirements mr;
+        vkGetImageMemoryRequirements(vk.device, pb.img, &mr);
+        VkMemoryAllocateInfo mai = {.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO, .allocationSize = mr.size,
+                                    .memoryTypeIndex = vk_memory_type(mr.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT)};
+        if (vkAllocateMemory(vk.device, &mai, NULL, &pb.mem) != VK_SUCCESS) {
+            vkDestroyImage(vk.device, pb.img, NULL), pb.img = VK_NULL_HANDLE;
+            return;
+        }
+        vkBindImageMemory(vk.device, pb.img, pb.mem, 0);
+        pb.w = w, pb.h = h, pb.format = swap_format;
+    }
+    barrier(dst, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, VK_ACCESS_TRANSFER_WRITE_BIT,
+            VK_ACCESS_TRANSFER_READ_BIT);
+    barrier(pb.img, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 0, VK_ACCESS_TRANSFER_WRITE_BIT);
+    VkImageBlit down = {.srcSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1},
+                        .srcOffsets = {{x0, y0, 0}, {x0 + (int32_t)bw, y0 + (int32_t)bh, 1}},
+                        .dstSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1},
+                        .dstOffsets = {{0, 0, 0}, {(int32_t)w, (int32_t)h, 1}}};
+    vkCmdBlitImage(cmd, dst, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, pb.img, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &down,
+                   VK_FILTER_LINEAR);
+    barrier(pb.img, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+            VK_ACCESS_TRANSFER_WRITE_BIT, VK_ACCESS_TRANSFER_READ_BIT);
+    barrier(dst, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_ACCESS_TRANSFER_READ_BIT,
+            VK_ACCESS_TRANSFER_WRITE_BIT);
+    VkImageBlit up = {.srcSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1},
+                      .srcOffsets = {{0, 0, 0}, {(int32_t)w, (int32_t)h, 1}},
+                      .dstSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1},
+                      .dstOffsets = {{x0, y0, 0}, {x0 + (int32_t)bw, y0 + (int32_t)bh, 1}}};
+    vkCmdBlitImage(cmd, pb.img, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, dst, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &up,
+                   VK_FILTER_LINEAR);
+    barrier(dst, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_ACCESS_TRANSFER_WRITE_BIT,
+            VK_ACCESS_TRANSFER_WRITE_BIT);
+}
+
+static void menu_draw(VkImage dst, uint32_t index, int32_t x0, int32_t y0, uint32_t bw, uint32_t bh) {
+    int peek = gamemenu_peeking();  /* F2's quick look: the keyboard card alone over the running game, not paused */
+    if ((!gamemenu_open() && !peek) || settings_open()) return;
+    int pv = gamemenu_previewing() || peek;  /* Preview: only its bar, over the live picture (no kept picture needed) */
+    if (peek) peek_blur(dst, x0, y0, bw, bh);
     if (!pv && overlay_background(bw, bh)) return;
     if (ov.img.image && (ov.img.w != bw || ov.img.h != bh)) {  /* the window changed size */
         vkDeviceWaitIdle(vk.device);
@@ -1376,9 +1548,11 @@ static void menu_draw(VkImage dst, int32_t x0, int32_t y0, uint32_t bw, uint32_t
     uint64_t now = SDL_GetTicks();
     uint32_t look = gamemenu_look(now);
     if (pv) look ^= 0x80000000u | (uint32_t)(now / 500) << 20;  /* the bar's frame rate, twice a second */
-    if (!ov.uploaded || look != ov.look) {  /* draw it again: on the CPU, then one copy into the upload buffer */
+    int redrawn = !ov.uploaded || look != ov.look;
+    if (redrawn) {  /* draw it again: on the CPU, then one copy into the upload buffer */
         if (!ov.px && !(ov.px = malloc((size_t)bw * bh * 4))) return;
         if (!pv) memcpy(ov.px, ov.bg, (size_t)bw * bh * 4);  /* the bar is opaque: drawn over anything */
+        if (peek) memset(ov.px, 0, (size_t)bw * bh * 4);       /* the quick look: see-through around its card */
         float fs, fx, fy;
         overlay_fit((float)bw, (float)bh, &fs, &fx, &fy);
         UiCanvas c = {ov.px, (int)bw, (int)bh, fs, fx, fy};
@@ -1415,6 +1589,8 @@ static void menu_draw(VkImage dst, int32_t x0, int32_t y0, uint32_t bw, uint32_t
         if (rx + rw > (int32_t)bw) rw = (int32_t)bw - rx;
         if (ry + rh > (int32_t)bh) rh = (int32_t)bh - ry;
         if (rw <= 0 || rh <= 0) return;
+        /* the quick look: blended, so its rounded corners show the (blurred) picture; the blit below if that fails */
+        if (peek && !pk_draw(dst, index, ov.px, bw, rx, ry, rw, rh, x0, y0, redrawn)) return;
     }
     VkImageBlit blit = {.srcSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1},
                         .srcOffsets = {{rx, ry, 0}, {rx + rw, ry + rh, 1}},
@@ -1477,12 +1653,12 @@ static void hud_onto(uint8_t *rgba, uint32_t w, uint32_t h) {
                 for (int k = 0; k < 3; k++) dp[k] = (uint8_t)(sp[k] + dp[k] * (255 - sp[3]) / 255);
             }
     }
-    if (!shot_menu || !gamemenu_open() || settings_open() || !ov.px || !ov.uploaded) return;
+    if (!shot_menu || !(gamemenu_open() || gamemenu_peeking()) || settings_open() || !ov.px || !ov.uploaded) return;
     /* the part shown: all, or in the preview only its bar (the rest of ov.px is an older drawing), as menu_draw */
     float fs, fx, fy, f = (float)h / (float)ov.img.h;  /* f: the overlay's pixels to the frame's */
     overlay_fit((float)ov.img.w, (float)ov.img.h, &fs, &fx, &fy);
     float r[4] = {-fx / fs, -fy / fs, (float)ov.img.w / fs, (float)ov.img.h / fs};  /* all of it */
-    if (gamemenu_previewing()) gamemenu_preview_rect(r);
+    if (gamemenu_previewing() || gamemenu_peeking()) gamemenu_preview_rect(r);
     float k = fs * f;  /* design units to the frame's pixels */
     float l = (fx + r[0] * fs) * f, t = (fy + r[1] * fs) * f, rgt = l + r[2] * k, bot = t + r[3] * k;
     for (uint32_t y = 0; y < h; y++)  /* the overlay's picture (the window's size) scaled to the frame's */
@@ -1782,7 +1958,7 @@ static int present_image(VkImage src, VkImageLayout layout, VkRect2D r0, int rea
     }
     hud_draw(dst, index, x0, y0, bw, bh);
     note_draw(dst, index, x0, y0, bw, bh);
-    menu_draw(dst, x0, y0, bw, bh);
+    menu_draw(dst, index, x0, y0, bw, bh);
     panel_draw(dst, x0, y0, bw, bh);
     barrier(dst, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR, VK_ACCESS_TRANSFER_WRITE_BIT, 0);
     vkEndCommandBuffer(cmd);
@@ -2606,6 +2782,13 @@ void window_run(void (*guest)(void *), void *arg) {
             if (!settings_legacy_keys() && !settings_open() && !e.key.repeat && !textin_active() &&
                 e.key.key == SDLK_F3) {
                 window_hud_cycle(), yw4_hid_note_key("HUDCYC");
+                break;
+            }
+            /* F2 while playing: the keyboard card as a quick look, the game not paused (owner, 2026-11-11); in the
+             * overlay F2 still goes to its Controls page */
+            if (!settings_legacy_keys() && !settings_open() && !e.key.repeat && !textin_active() &&
+                e.key.key == SDLK_F2 && !gamemenu_open()) {
+                gamemenu_peek_toggle(), yw4_hid_note_key("KV_PEEK");
                 break;
             }
             if (!settings_legacy_keys() && !settings_open() && !e.key.repeat && !textin_active() &&
