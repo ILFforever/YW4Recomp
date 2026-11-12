@@ -29,6 +29,35 @@ int gpu_screen_ab_draw(const GpuState *s);
 int gpu_ab_pending(void);
 void gpu_ab_flush(void);
 
+/* ---- gpu_watch.c: the minimap watch (YW4_MINIMAP_WATCH=1): what was drawn into the minimap's images and put on
+ * screen each frame, and the images themselves read back; logs the frames it goes blank in */
+typedef struct {
+    const NvnTexture *tex;  /* NULL: the slot names no texture (the draw gets a dummy) */
+    uint32_t slot;
+    uint64_t handle;        /* the texture handle bound to the slot */
+    int fresh;              /* made or uploaded for this very draw */
+} GpuWatchTex;
+typedef struct {
+    uint8_t stage, slot;  /* 0 vertex, 1 fragment */
+    uint64_t addr, size;
+} GpuWatchBuf;
+typedef struct {  /* the draw's own data, in the game's memory */
+    uint64_t vb_addr, vb_size;  /* the first vertex stream the program reads */
+    uint32_t first, stride;
+    int stale;                  /* our video-memory copy of it was out of date before this draw */
+    GpuWatchBuf cb[4];          /* constant buffers of the vertex and fragment programs */
+    int ncb;
+} GpuWatchData;
+int gpu_watch_on(void);
+void gpu_watch_clear(const NvnTexture *t);  /* a colour clear of t */
+/* is this draw one the watch records: into a minimap image, or sampling one? */
+int gpu_watch_wants(const GpuState *s, const GpuWatchTex *tex, int ntex);
+/* a draw into s's targets by these programs, with its fragment program's textures */
+void gpu_watch_draw(const GpuState *s, uint64_t vs, uint64_t fs, uint64_t verts, const GpuWatchTex *tex, int ntex,
+                    const GpuWatchData *data);
+void gpu_watch_frame(VkCommandBuffer cb, uint64_t frame);  /* gpu_present; then, cb submitted: */
+void gpu_watch_submitted(uint64_t seq);
+
 /* ---- gpu_passes.c: per-pass GPU timing (F5) */
 void gpu_passes_begin(VkCommandBuffer cb, int slot);
 void gpu_passes_end(VkCommandBuffer cb);

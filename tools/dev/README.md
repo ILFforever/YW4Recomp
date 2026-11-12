@@ -8,6 +8,7 @@ and keys are in [docs/debugging.md](../../docs/debugging.md). Nothing here conta
 |---|---|
 | `python -m tools.dev.scene` | **Start here.** A test run by scene name, checked before and after: refuses what would fail silently, runs until the last scheduled frame, then says what was not done. One folder per task, one `result.json` per scene |
 | `python -m tools.dev.run` | One run of the built game from a **fresh copy of a save**, with a replay and settings; prints the log's summaries |
+| `python -m tools.dev.minimap` | Catches the minimap going blank: `run SCENE` or `play` (the owner walks around, their settings) with the runtime's minimap watch on, then a report of each short gap with the counts around it, the pictures and the draw lists |
 | `python -m tools.dev.perf_compare` | Two settings, alternating runs of one replay; averages of game work, GPU time, CPU |
 | `python -m tools.dev.shot_compare` | Side by side and difference of the same frames from two screenshot folders |
 | `python -m tools.dev.frame_ab` | Compares two renderings **within one run** from image dumps of alternating frames |

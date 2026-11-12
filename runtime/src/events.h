@@ -6,7 +6,9 @@
  *
  * kind: screenshot (path), set (name, value: YW4_SET_AT), stall (ms, where; for the GPU thread also pipelines,
  * images and their ms), ab (pass, target, depth, differ, texels: a same-frame A/B's count), fatal (text),
- * unreached (what, frame: scheduled for a frame the run never got to), end (frames). Off with the performance
+ * unreached (what, frame: scheduled for a frame the run never got to), minimap (what, target, ...: the minimap
+ * watch, gpu_watch.c), geometry_missed (addr, size: a small vertex range rewritten before its pages showed it,
+ * gpu.c; the first 64), end (frames). Off with the performance
  * log (YW4_PERF=0). Any thread. */
 #ifndef YW4_EVENTS_H
 #define YW4_EVENTS_H

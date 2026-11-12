@@ -2240,6 +2240,41 @@ static void draw(VkCommandBuffer cb, GpuState *s, const CmdRec *r) {
         static int logged;
         if (!logged++) fprintf(stderr, "yw4: gpu: alpha test %u ignored for now\n", s->color[2]);
     }
+    if (gpu_watch_on()) {  /* the minimap watch (gpu_watch.c): before the uploads, to see which are this draw's */
+        GpuWatchTex wt[16];
+        int nwt = 0;
+        const Shader *fs = g->sh[ST_FRAG];
+        for (int i = 0; fs && i < fs->nb && nwt < 16; i++) {
+            const Binding *b = &fs->b[i];
+            if (b->kind != 't' && b->kind != 'd') continue;
+            uint64_t handle = b->slot < TEXTURES ? s->tex[nvn_stage[ST_FRAG]][b->slot] : 0;
+            NvnTexEntry *e = tex_entry(s, handle);
+            wt[nwt++] = (GpuWatchTex){e ? e->tex : NULL, b->slot, handle, e ? gpu_needs_transfer(e->tex) : 0};
+        }
+        GpuWatchData wd;
+        memset(&wd, 0, sizeof wd);
+        const Shader *wvs = g->sh[ST_VERT];
+        uint32_t stream = 16;  /* the lowest stream the vertex program reads */
+        for (uint32_t loc = 0; wvs && loc < 32; loc++) {
+            uint32_t a = loc < s->nattribs ? s->attribs[loc] : 0;
+            if (wvs->inputs[loc] && a & 0xFF && (a >> 8 & 0x1F) < stream) stream = a >> 8 & 0x1F;
+        }
+        int wanted = gpu_watch_wants(s, wt, nwt);  /* the rest only for the minimap's draws: 110 ms a frame for all */
+        if (wanted && stream < 16) {
+            wd.vb_addr = s->vbuf[stream].addr, wd.vb_size = s->vbuf[stream].size;
+            wd.stride = stream < s->nstreams ? s->streams[stream][0] : 0;
+            wd.first = r->op == CMD_DRAW_ARRAYS ? (uint32_t)r->x[1] : 0;
+            wd.stale = gpu_vram_geometry() && wd.vb_size && gpu_geometry_needs_copy(wd.vb_addr, wd.vb_size);
+        }
+        for (int st = ST_VERT; wanted && st <= ST_FRAG; st++)
+            for (int i = 0; g->sh[st] && i < g->sh[st]->nb && wd.ncb < 4; i++) {
+                const Binding *b = &g->sh[st]->b[i];
+                if (b->kind != 'c' || b->slot >= UBOS) continue;
+                GpuRange ub = s->ubo[nvn_stage[st]][b->slot];
+                wd.cb[wd.ncb++] = (GpuWatchBuf){(uint8_t)st, (uint8_t)b->slot, ub.addr, ub.size};
+            }
+        if (wanted) gpu_watch_draw(s, wvs ? wvs->key : 0, fs ? fs->key : 0, r->x[2], wt, nwt, &wd);
+    }
     if (needs_transfers(s, g)) gpu_end_rendering(cb, s);
     /* Images and uploads first (outside rendering), then rendering. */
     for (int st = 0; st < NSETS; st++)

@@ -2075,6 +2075,7 @@ void gpu_execute(uint64_t handle) {
             int i = (int)r->x[0];
             NvnTexture *t = i < s.ncolor ? s.rt.color[i] : NULL;
             if (!t) break;
+            if (gpu_watch_on()) gpu_watch_clear(t);
             gpu_end_rendering(cb, &s);
             if ((r->x[2] & 0xF) != 0xF) {
                 static int logged;
@@ -2480,6 +2481,12 @@ void gpu_present(NvnTexture *t, uint64_t frame, const int crop[4]) {
         gpu_post_flush();
     }
     dump_images(present_count);
+    if (gpu_watch_on()) {  /* the minimap watch (gpu_watch.c): this frame's counts, its images on their way back */
+        VkCommandBuffer cb = begin();
+        gpu_watch_frame(cb, present_count);
+        submit(cb);
+        gpu_watch_submitted(gpu_submitted());
+    }
     if (getenv("YW4_COMPUTE_TRACE")) {
         gpu_wait(gpu_submitted(), UINT64_MAX);
         gpu_compute_trace(present_count);
