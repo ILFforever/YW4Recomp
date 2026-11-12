@@ -13,6 +13,13 @@ python -m fontTools.subset <font>.ttf --unicodes="U+0020-007E,U+00A0-00FF,U+2010
     --layout-features='kern,liga' --no-hinting --desubroutinize --output-file=<font>.ttf
 ```
 
+Chinese and Japanese letters (the game's name entry and prompts) come from `NotoSansSC-SemiBold-yw4.ttf`:
+Noto Sans SC (SIL Open Font License 1.1, `OFL-NotoSansSC.txt`; its Reserved Font Name is "Source", which this
+copy doesn't use) from the same google/fonts commit (`ofl/notosanssc/NotoSansSC[wght].ttf`), pinned to weight
+600 (close to the game's own gothic) and cut down to GB2312, Big5 level 1, JIS X 0208, kana and CJK punctuation
+(~11,600 letters, 3.7 MB) by `python -m tools.yw4.cjkfont "NotoSansSC[wght].ttf"`. Letters it leaves out come
+from the system's fonts (`runtime/src/ui.c`). The launcher doesn't use it.
+
 The launcher uses the same files: copies sit in `launcher/ui/fonts/` (with the licences), because Tauri only
 serves files from `launcher/ui/`. Change both places together.
 

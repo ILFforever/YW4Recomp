@@ -42,6 +42,10 @@ static const unsigned char font_g500[] = {
 static const unsigned char font_g700[] = {
 #embed "../../third_party/fonts/ZenKakuGothicNew-Bold.ttf"
 };
+/* Chinese and Japanese letters: Noto Sans SC cut down (tools/yw4/cjkfont.py), the first fallback below */
+static const unsigned char font_cjk[] = {
+#embed "../../third_party/fonts/NotoSansSC-SemiBold-yw4.ttf"
+};
 #if defined(__clang__)
 #pragma clang diagnostic pop
 #elif defined(__GNUC__)
@@ -51,45 +55,119 @@ static const unsigned char font_g700[] = {
 static stbtt_fontinfo fonts[UI_FONTS];
 static int fonts_state;  /* 0 not loaded, 1 loaded, -1 failed */
 
-enum { UI_FALLBACK_FONT = UI_FONTS };
-static stbtt_fontinfo fallback_font;
-static int fallback_state;  /* 0 not tried, 1 loaded, -1 none */
+/* Letters the Latin fonts don't have: Japanese and Chinese in the game's prompts and names. A chain tried in
+ * order for each letter: first the built-in CJK font (font_cjk: ~11,600 letters, the same on every PC), then the
+ * system's fonts for the rare ones it leaves out (one system font rarely has them all: Yu Gothic has no
+ * simplified-only Chinese like 给 or 个, DejaVu no CJK at all). Japanese first (the game's own language), then
+ * simplified and traditional Chinese, then a general font. On Linux fontconfig names the fonts installed for each
+ * language (a fixed path list missed distributions' layouts: issue #3), the fixed paths after it. Loaded on the
+ * first letter that needs them. */
+enum { UI_FALLBACK_FONT = UI_FONTS, FALLBACK_MAX = 8 };
+static stbtt_fontinfo fallback_fonts[FALLBACK_MAX];
+static int nfallback;
+static int fallback_state;  /* 0 not tried, 1 at least one loaded, -1 none */
+static char fallback_paths[FALLBACK_MAX][512];
 
-static int fallback_ready(void) {
+static void fallback_add(const char *path, int index) {
+    if (!path || !*path || nfallback >= FALLBACK_MAX) return;
+    for (int k = 0; k < nfallback; k++)
+        if (!strcmp(fallback_paths[k], path)) return;  /* fontconfig and the list can name the same file */
+    FILE *f = fopen(path, "rb");
+    if (!f) return;
+    fseek(f, 0, SEEK_END);
+    long n = ftell(f);
+    fseek(f, 0, SEEK_SET);
+    unsigned char *d = n > 0 ? malloc((size_t)n) : NULL;
+    int ok = d && fread(d, 1, (size_t)n, f) == (size_t)n;
+    fclose(f);
+    int offset = ok ? stbtt_GetFontOffsetForIndex(d, index) : -1;
+    if (offset < 0) offset = ok ? stbtt_GetFontOffsetForIndex(d, 0) : -1;
+    /* stb_truetype reads TrueType and CFF outlines; a variable CFF2 font (some Noto CJK packages) fails here */
+    if (offset >= 0 && stbtt_InitFont(&fallback_fonts[nfallback], d, offset)) {
+        snprintf(fallback_paths[nfallback], sizeof fallback_paths[nfallback], "%s", path);
+        fprintf(stderr, "yw4: ui: fallback font %d: %s (face %d)\n", nfallback, path, index);
+        nfallback++;
+        return;
+    }
+    free(d);
+}
+
+#ifndef _WIN32
+/* fontconfig's best font for a language (`fc-match :lang=zh-cn`), its file and face index. */
+static void fallback_fc(const char *lang) {
+    char cmd[128], line[600];
+    snprintf(cmd, sizeof cmd, "fc-match -f '%%{file}|%%{index}' ':lang=%s' 2>/dev/null", lang);
+    FILE *p = popen(cmd, "r");
+    if (!p) return;
+    if (fgets(line, sizeof line, p)) {
+        char *bar = strrchr(line, '|');
+        int index = 0;
+        if (bar) *bar = 0, index = atoi(bar + 1);
+        fallback_add(line, index);
+    }
+    pclose(p);
+}
+#endif
+
+/* The built-in CJK font: fallback 0. */
+static int fallback_builtin(void) {
     if (fallback_state) return fallback_state > 0;
     fallback_state = -1;
-    const char *paths[] = {
-        "C:/Windows/Fonts/YuGothM.ttc",
-        "C:/Windows/Fonts/meiryo.ttc",
-        "C:/Windows/Fonts/msgothic.ttc",
+    if (stbtt_InitFont(&fallback_fonts[0], font_cjk, stbtt_GetFontOffsetForIndex(font_cjk, 0))) {
+        snprintf(fallback_paths[0], sizeof fallback_paths[0], "(built in)");
+        nfallback = 1;
+        fallback_state = 1;
+    } else fprintf(stderr, "yw4: ui: built-in CJK font unreadable\n");
+    return fallback_state > 0;
+}
+
+/* The system's fonts, after it: read (tens of MB) only when a letter isn't in the built-in one. */
+static int system_state;  /* 0 not tried, 1 tried */
+
+static void fallback_system(void) {
+    if (system_state) return;
+    system_state = 1;
+    int before = nfallback;
+#ifdef _WIN32
+    static const char *const paths[] = {
+        "C:/Windows/Fonts/YuGothM.ttc",  "C:/Windows/Fonts/meiryo.ttc", "C:/Windows/Fonts/msyh.ttc",
+        "C:/Windows/Fonts/msjh.ttc",     "C:/Windows/Fonts/msgothic.ttc", "C:/Windows/Fonts/simsun.ttc",
         "C:/Windows/Fonts/segoeui.ttf",
+    };
+#else
+    fallback_fc("ja");
+    fallback_fc("zh-cn");
+    fallback_fc("zh-tw");
+    static const char *const paths[] = {
         "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
         "/usr/share/fonts/noto-cjk/NotoSansCJK-Regular.ttc",
         "/usr/share/fonts/truetype/noto/NotoSansCJK-Regular.ttc",
+        "/usr/share/fonts/google-noto-cjk/NotoSansCJK-Regular.ttc",
+        "/usr/share/fonts/adobe-source-han-sans/SourceHanSans.ttc",
+        "/usr/share/fonts/wenquanyi/wqy-microhei/wqy-microhei.ttc",
+        "/usr/share/fonts/truetype/wqy/wqy-microhei.ttc",
+        "/usr/share/fonts/wenquanyi/wqy-zenhei/wqy-zenhei.ttc",
+        "/usr/share/fonts/truetype/wqy/wqy-zenhei.ttc",
+        "/usr/share/fonts/truetype/droid/DroidSansFallbackFull.ttf",
         "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
         "/usr/share/fonts/TTF/DejaVuSans.ttf",
-        "/usr/share/fonts/dejavu/DejaVuSans.ttf"
+        "/usr/share/fonts/dejavu/DejaVuSans.ttf",
     };
-    for (size_t i = 0; i < sizeof paths / sizeof *paths; i++) {
-        if (!paths[i] || !*paths[i]) continue;
-        FILE *f = fopen(paths[i], "rb");
-        if (!f) continue;
-        fseek(f, 0, SEEK_END);
-        long n = ftell(f);
-        fseek(f, 0, SEEK_SET);
-        unsigned char *d = n > 0 ? malloc((size_t)n) : NULL;
-        int ok = d && fread(d, 1, (size_t)n, f) == (size_t)n;
-        fclose(f);
-        int offset = ok ? stbtt_GetFontOffsetForIndex(d, 0) : -1;
-        if (offset >= 0 && stbtt_InitFont(&fallback_font, d, offset)) {
-            fallback_state = 1;
-            fprintf(stderr, "yw4: ui: fallback font %s\n", paths[i]);
-            return 1;
-        }
-        free(d);
+#endif
+    for (size_t i = 0; i < sizeof paths / sizeof *paths; i++) fallback_add(paths[i], 0);
+    if (nfallback == before) fprintf(stderr, "yw4: ui: no system font found for letters outside the built-in ones\n");
+}
+
+/* The first fallback font that has cp, or -1. */
+static int fallback_for(int cp) {
+    fallback_builtin();
+    for (int pass = 0; pass < 2; pass++) {
+        for (int k = 0; k < nfallback; k++)
+            if (stbtt_FindGlyphIndex(&fallback_fonts[k], cp)) return k;
+        if (system_state) break;
+        fallback_system();
     }
-    fprintf(stderr, "yw4: ui: no fallback font found\n");
-    return 0;
+    return -1;
 }
 
 static int fonts_ready(void) {
@@ -255,16 +333,18 @@ static float text_run(const UiCanvas *c, int f, float px, float x, float base, c
         if (prev) pen += (float)stbtt_GetCodepointKernAdvance(fi, prev, cp) * sc;
         int adv, lsb;
         stbtt_GetCodepointHMetrics(fi, cp, &adv, &lsb);
+        int fb;
         if (cp > 32 && !stbtt_FindGlyphIndex(fi, cp)) {
-            if (fallback_ready() && stbtt_FindGlyphIndex(&fallback_font, cp)) {
-                float fsc = stbtt_ScaleForMappingEmToPixels(&fallback_font, px);
+            if ((fb = fallback_for(cp)) >= 0) {
+                const stbtt_fontinfo *ff = &fallback_fonts[fb];
+                float fsc = stbtt_ScaleForMappingEmToPixels(ff, px);
                 int fadv, flsb;
-                stbtt_GetCodepointHMetrics(&fallback_font, cp, &fadv, &flsb);
+                stbtt_GetCodepointHMetrics(ff, cp, &fadv, &flsb);
                 if (c) {
                     float fx = floorf(pen);
                     int sub = (int)((pen - fx) * GLYPH_SUBPIXELS + 0.5f);
                     if (sub == GLYPH_SUBPIXELS) sub = 0, fx += 1;  /* rounds up to the next whole pixel */
-                    const Glyph *g = glyph_get(&fallback_font, UI_FALLBACK_FONT, px, fsc, cp, sub);
+                    const Glyph *g = glyph_get(ff, UI_FALLBACK_FONT + fb, px, fsc, cp, sub);
                     if (g->w > 0) {
                         int gx = (int)fx + g->x0, gy = (int)floorf(base + 0.5f) + g->y0;
                         for (int j = 0; j < g->h; j++)
