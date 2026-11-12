@@ -40,7 +40,8 @@ body {
 a { color: var(--violet-soft); text-decoration-thickness: 1.5px; text-underline-offset: 3px; }
 a:hover { color: var(--violet); }
 :focus-visible { outline: 2px solid var(--gold-deep); outline-offset: 3px; }
-kbd { font: 700 .82em/1 var(--display); background: var(--lilac-1); border: 1px solid var(--lilac-3); border-radius: 5px; padding: 2px 6px; }
+kbd { font: 700 .82em/1 var(--display); color: var(--violet-deep); background: var(--white); border: 1px solid var(--lilac-3);
+  border-bottom-width: 2px; border-radius: 5px; padding: 2px 6px; white-space: nowrap; }
 
 .hero { color: var(--white); background-color: var(--violet-deep); position: relative; overflow: hidden; border-bottom: 3px solid var(--gold); }
 .hero::before {
@@ -104,7 +105,7 @@ article { background: var(--white); border-radius: var(--r); border: 1px solid v
 .prose ul, .prose ol { margin: 8px 0 10px; padding-left: 1.2em; }
 .prose li { margin: 0 0 6px; }
 .prose li::marker { color: var(--gold-deep); }
-.spec { background: var(--cream); border-radius: 10px; border-top: 3px solid var(--gold); padding: 4px 14px; font-size: var(--step--1); align-self: start; }
+.spec { background: var(--cream); border-radius: 10px; padding: 4px 14px; font-size: var(--step--1); align-self: start; }
 .spec dl { margin: 0; display: grid; grid-template-columns: auto minmax(0, 1fr); }
 .spec dt, .spec dd { padding: 7px 0; border-bottom: 1px solid oklch(88% 0.04 85); margin: 0; }
 .spec dt { color: var(--ink-2); padding-right: 14px; }

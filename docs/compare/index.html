@@ -121,13 +121,14 @@ article { background: var(--white); border-radius: var(--r); border: 1px solid v
 .prose li { margin: 0 0 6px; }
 .prose li::marker { color: var(--gold-deep); }
 /* the spec sheet: cream washi with a gold rule, like the results screen */
-.spec { background: var(--cream); border-radius: 10px; border-top: 3px solid var(--gold); padding: 4px 14px; font-size: var(--step--1); align-self: start; }
+.spec { background: var(--cream); border-radius: 10px; padding: 4px 14px; font-size: var(--step--1); align-self: start; }
 .spec dl { margin: 0; display: grid; grid-template-columns: auto minmax(0, 1fr); }
 .spec dt, .spec dd { padding: 7px 0; border-bottom: 1px solid oklch(88% 0.04 85); margin: 0; }
 .spec dt { color: var(--ink-2); padding-right: 14px; }
 .spec dd { font-weight: 700; }
 .spec dt:last-of-type, .spec dd:last-of-type { border-bottom: 0; }
-kbd { font: 700 .82em/1 var(--display); background: var(--white); border: 1px solid var(--lilac-3); border-bottom-width: 2px; border-radius: 5px; padding: 1px 5px; }
+kbd { font: 700 .82em/1 var(--display); color: var(--violet-deep); background: var(--white); border: 1px solid var(--lilac-3);
+  border-bottom-width: 2px; border-radius: 5px; padding: 2px 6px; white-space: nowrap; }
 
 /* comparison */
 figure { margin: 0 0 16px; }

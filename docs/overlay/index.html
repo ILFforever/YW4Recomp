@@ -1,0 +1,639 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>YW4 Recomp · The in-game overlay</title>
+<link rel="icon" href="../favicon.ico" sizes="any">
+<link rel="icon" type="image/png" href="../img/icon-192.png">
+<link rel="apple-touch-icon" href="../img/icon-192.png">
+<meta name="description" content="The in-game overlay of YW4 Recomp: every graphics setting with a live preview, controls and mouse buttons for exploring and battles, a quick look at the keys, the performance HUD and themes.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=M+PLUS+Rounded+1c:wght@500;700;800&family=Zen+Kaku+Gothic+New:wght@400;500;700&display=swap" rel="stylesheet">
+<style>
+/* The launcher page's look (../launcher/): the game's menus, Yo-kai Pad lilac and violet, gold. */
+:root {
+  --lilac-0: oklch(97.5% 0.012 305); --lilac-1: oklch(94% 0.025 305); --lilac-2: oklch(89% 0.04 305);
+  --lilac-3: oklch(80% 0.06 305);
+  --violet: oklch(36% 0.11 295); --violet-deep: oklch(27% 0.09 295); --violet-soft: oklch(50% 0.11 300);
+  --ink: oklch(25% 0.04 295); --ink-2: oklch(45% 0.04 295);
+  --gold: oklch(80% 0.12 85); --gold-deep: oklch(62% 0.12 75); --cream: oklch(96.5% 0.03 90);
+  --cyan: oklch(76% 0.11 215); --white: oklch(99.2% 0.004 305);
+  --r: 14px;
+  --display: "M PLUS Rounded 1c", "Hiragino Maru Gothic ProN", sans-serif;
+  --body: "Zen Kaku Gothic New", "Hiragino Sans", sans-serif;
+  --step--1: clamp(.8rem, .78rem + .1vw, .88rem);
+  --step-0: clamp(.98rem, .95rem + .15vw, 1.05rem);
+  --step-1: clamp(1.15rem, 1.08rem + .35vw, 1.35rem);
+  --step-2: clamp(1.3rem, 1.18rem + .6vw, 1.7rem);
+  --step-3: clamp(2rem, 1.5rem + 2.4vw, 3.3rem);
+}
+* { box-sizing: border-box; }
+html { scroll-behavior: smooth; scroll-padding-top: 16px; }
+body {
+  margin: 0; overflow-x: hidden; color: var(--ink); font: 400 var(--step-0)/1.7 var(--body);
+  font-variant-numeric: tabular-nums; background-color: var(--lilac-1);
+  background-image: conic-gradient(var(--lilac-0) 25%, transparent 0 50%, var(--lilac-0) 0 75%, transparent 0);
+  background-size: 64px 64px;
+}
+a { color: var(--violet-soft); text-decoration-thickness: 1.5px; text-underline-offset: 3px; }
+a:hover { color: var(--violet); }
+:focus-visible { outline: 2px solid var(--gold-deep); outline-offset: 3px; }
+kbd { font: 700 .82em/1 var(--display); color: var(--violet-deep); background: var(--white); border: 1px solid var(--lilac-3);
+  border-bottom-width: 2px; border-radius: 5px; padding: 2px 6px; white-space: nowrap; }
+
+.hero { color: var(--white); background-color: var(--violet-deep); position: relative; overflow: hidden; border-bottom: 3px solid var(--gold); }
+.hero::before {
+  content: ""; position: absolute; inset: 0; opacity: .12; pointer-events: none;
+  background-image: radial-gradient(circle at 50% 100%, transparent 38%, var(--gold) 39% 42%, transparent 43% 55%, var(--gold) 56% 59%, transparent 60%);
+  background-size: 56px 28px;
+}
+.hero-inner {
+  position: relative; max-width: 1280px; margin: 0 auto; padding: clamp(28px, 5vw, 56px) 20px clamp(28px, 4vw, 44px);
+  display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.35fr); gap: clamp(24px, 4vw, 56px); align-items: center;
+}
+.eyebrow { font: 700 var(--step--1)/1 var(--display); letter-spacing: .16em; text-transform: uppercase; color: var(--gold); }
+.hero h1 { font: 800 var(--step-3)/1.08 var(--display); margin: 12px 0 14px; letter-spacing: -.01em; }
+.hero p { margin: 0 0 22px; color: oklch(88% 0.03 300); max-width: 46ch; }
+.stats { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); border: 1px solid oklch(50% 0.08 295); border-radius: 12px; overflow: hidden; margin: 0 0 22px; }
+.stat { padding: 12px 14px; background: oklch(31% 0.1 295); }
+.stat + .stat { border-left: 1px solid oklch(50% 0.08 295); }
+.stat b { display: block; font: 800 var(--step-1)/1.1 var(--display); color: var(--gold); }
+.stat span { font-size: .78rem; color: oklch(82% 0.03 300); line-height: 1.35; display: block; margin-top: 4px; }
+.links { display: flex; flex-wrap: wrap; gap: 10px; }
+.btn { font: 700 .92rem/1 var(--display); text-decoration: none; border-radius: 999px; padding: 11px 18px; border: 1.5px solid var(--gold);
+  background: var(--gold); color: var(--violet-deep); }
+.btn:hover { color: var(--violet-deep); background: oklch(85% 0.12 85); }
+.btn.ghost { background: transparent; color: var(--gold); }
+.btn.ghost:hover { color: var(--gold); background: oklch(80% 0.12 85 / .12); }
+/* the GitHub button in GitHub's own look: black, the white mark (Octicons mark-github, MIT) */
+.btn.gh { display: inline-flex; align-items: center; gap: 8px; color: #fff; background: #000; border-color: #3d444d; }
+.btn.gh:hover { color: #fff; background: #1f2328; border-color: #656c76; }
+.btn.gh svg { width: 1.15em; height: 1.15em; fill: currentColor; flex: none; }
+/* the header's top bar: our icon and name (home), the GitHub button at the right */
+.sitebar { position: relative; max-width: 1280px; margin: 0 auto; padding: 16px 20px 0; display: flex; align-items: center;
+  justify-content: space-between; gap: 12px; }
+.brand { display: inline-flex; align-items: center; gap: 10px; color: var(--white); text-decoration: none;
+  font: 800 1.05rem/1 var(--display); }
+.brand:hover { color: var(--gold); }
+.brand img { width: 36px; height: 36px; display: block; }
+.sitebar .btn.gh { padding: 9px 14px; font-size: .88rem; }
+.shot { background: var(--gold); border-radius: var(--r); padding: 8px; box-shadow: 0 18px 40px oklch(15% 0.08 295 / .5); margin: 0; }
+.shot img { display: block; width: 100%; height: auto; border-radius: 8px; }
+.shot figcaption { color: var(--violet-deep); font-size: .8rem; margin: 8px 6px 2px; }
+
+.shell { max-width: 1280px; margin: 0 auto; padding: 40px 20px 72px; display: grid; grid-template-columns: 236px minmax(0, 1fr); gap: 40px; align-items: start; }
+.shell > * { min-width: 0; }
+/* the Default keys band: the whole page's width (the keyboard is one drawing, scaled to fit: in the
+   column beside the contents it came out at about 75%) */
+.wide { max-width: 1280px; margin: -32px auto 72px; padding: 0 20px; }
+.wide article { scroll-margin-top: 16px; }
+.pad { position: sticky; top: 16px; background: var(--white); border-radius: var(--r); overflow: hidden; border: 1px solid var(--lilac-3); }
+.pad h2 { margin: 0; padding: 11px 16px; background: var(--violet); color: var(--white); font: 700 .78rem/1 var(--display); letter-spacing: .14em; text-transform: uppercase; }
+.pad ol { list-style: none; margin: 0; padding: 8px; display: grid; gap: 2px; }
+.pad a { display: flex; gap: 10px; align-items: baseline; text-decoration: none; color: var(--ink); font: 500 .92rem/1.3 var(--body); padding: 7px 10px; border-radius: 8px; }
+.pad a .n { font: 700 .75rem/1 var(--display); color: var(--ink-2); min-width: 1.3em; }
+.pad a:hover { background: var(--lilac-1); }
+
+main { display: grid; gap: 28px; }
+article { background: var(--white); border-radius: var(--r); border: 1px solid var(--lilac-3); overflow: hidden; }
+.bar { display: flex; align-items: center; gap: 12px; padding: 12px 20px; background: var(--violet); color: var(--white); }
+.bar h2 { margin: 0; font: 800 var(--step-2)/1.2 var(--display); flex: 1; }
+.bar .cat { font: 700 .7rem/1 var(--display); letter-spacing: .14em; text-transform: uppercase; color: var(--gold); }
+.bar .q { flex: none; width: 28px; height: 28px; border-radius: 50%; background: var(--cyan); display: grid; place-items: center;
+  font: 800 .9rem/1 var(--display); color: var(--violet-deep); }
+.body { padding: 20px 20px 22px; }
+.top { display: grid; grid-template-columns: minmax(0, 1.5fr) minmax(220px, 1fr); gap: 24px; margin: 0 0 16px; }
+.prose p { margin: 0 0 10px; max-width: 66ch; }
+.prose ul, .prose ol { margin: 8px 0 10px; padding-left: 1.2em; }
+.prose li { margin: 0 0 6px; }
+.prose li::marker { color: var(--gold-deep); }
+.spec { background: var(--cream); border-radius: 10px; padding: 4px 14px; font-size: var(--step--1); align-self: start; }
+.spec dl { margin: 0; display: grid; grid-template-columns: auto minmax(0, 1fr); }
+.spec dt, .spec dd { padding: 7px 0; border-bottom: 1px solid oklch(88% 0.04 85); margin: 0; }
+.spec dt { color: var(--ink-2); padding-right: 14px; }
+.spec dd { font-weight: 700; }
+.spec dt:last-of-type, .spec dd:last-of-type { border-bottom: 0; }
+.whole { margin: 0; }
+.whole + .whole { margin-top: 14px; }
+.whole img { display: block; width: 100%; height: auto; border-radius: 10px; border: 1px solid var(--lilac-2); }
+.whole figcaption { margin: 6px 2px 0; font-size: var(--step--1); color: var(--ink-2); }
+.pair { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 320px), 1fr)); gap: 14px; }
+.steps { counter-reset: s; list-style: none; padding: 0 !important; }
+.steps li { counter-increment: s; display: grid; grid-template-columns: 30px minmax(0, 1fr); gap: 10px; align-items: start; }
+.steps li::before { content: counter(s); width: 26px; height: 26px; border-radius: 50%; background: var(--gold); color: var(--violet-deep);
+  font: 800 .85rem/26px var(--display); text-align: center; margin-top: 2px; }
+
+footer { background: var(--violet-deep); color: oklch(84% 0.03 300); border-top: 3px solid var(--gold); }
+footer .in { max-width: 1280px; margin: 0 auto; padding: 24px 20px 32px; font-size: var(--step--1); display: grid; gap: 6px; }
+footer a { color: var(--gold); }
+
+@media (max-width: 960px) {
+  .hero-inner { grid-template-columns: minmax(0, 1fr); }
+  .shell { grid-template-columns: minmax(0, 1fr); gap: 20px; padding-top: 0; }
+  .pad { top: 0; z-index: 5; border-radius: 0 0 12px 12px; margin: 0 -20px; border-top: 0; }
+  .pad h2 { display: none; }
+  .pad ol { display: flex; overflow-x: auto; scrollbar-width: none; padding: 6px; }
+  .pad a { white-space: nowrap; }
+  .top { grid-template-columns: minmax(0, 1fr); }
+}
+@media (max-width: 560px) { .stats { grid-template-columns: minmax(0, 1fr); } .stat + .stat { border-left: 0; border-top: 1px solid oklch(50% 0.08 295); } .bar .cat { display: none; } }
+@media (prefers-reduced-motion: reduce) { html { scroll-behavior: auto; } }
+/* the default keys: the game's F2 card (gamemenu.c draw_controls_overview) drawn from the same bindings and names */
+.kv { padding: 20px; display: grid; gap: 14px; }
+.kv-seg { display: inline-flex; gap: 4px; padding: 4px; background: var(--lilac-1); border-radius: 12px; justify-self: start; }
+.kv-seg button { font: 700 .95rem/1 var(--display); color: var(--violet); background: transparent; border: 0; border-radius: 9px;
+  padding: 11px 16px; cursor: pointer; transition: background .15s var(--ease); }
+.kv-seg button:hover { background: var(--lilac-2); }
+.kv-seg button[aria-pressed="true"] { background: var(--violet); color: var(--white); }
+.kv-board { overflow-x: auto; }
+.kv-board svg { display: block; width: 100%; min-width: 760px; height: auto; }
+.kv-board text { font-family: var(--body); font-weight: 700; pointer-events: none; }
+.kv-board .k { cursor: default; }
+.kv-board .k:focus { outline: none; }
+.kv-board .k:focus-visible .ring, .kv-board .k.on .ring { stroke: var(--gold); }
+.kv-board .ring { fill: none; stroke: transparent; stroke-width: 3; }
+.kv-board .unlit { fill: var(--white); stroke: var(--lilac-3); stroke-width: 1.5; }
+.kv-board .game { fill: var(--violet); } .kv-board .move { fill: #1e9aa6; } .kv-board .port { fill: var(--gold); }
+.kv-board .k.on .game, .kv-board .k.on .move { fill: var(--violet-deep); }
+.kv-board .ink-unlit { fill: var(--ink-2); } .kv-board .ink-lit { fill: var(--white); } .kv-board .ink-port { fill: var(--violet-deep); }
+.kv-board .mbody { fill: var(--white); stroke: var(--lilac-3); stroke-width: 1.5; }
+.kv-board .mline { fill: none; stroke: var(--lilac-3); stroke-width: 1.5; }
+.kv-board .soft { fill: var(--lilac-1); stroke: var(--lilac-3); stroke-width: 1.5; }
+.kv-board .muted { fill: var(--ink-2); font-weight: 500; }
+.kv-bar { background: var(--violet-deep); color: var(--white); border-radius: 14px; min-height: 58px; padding: 12px 18px;
+  display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
+.kv-bar .cap { font: 700 1rem/1 var(--body); background: var(--violet-soft); border-radius: 8px; padding: 8px 12px; }
+.kv-bar .what { font: 500 1.02rem/1.4 var(--body); color: var(--white); }
+.kv-bar .hint { color: oklch(84% 0.03 300); }
+.kv-legend { display: flex; flex-wrap: wrap; gap: 8px 26px; font-size: .92rem; color: var(--ink-2); margin: 0; padding: 0; list-style: none; }
+.kv-legend li { display: flex; align-items: center; gap: 8px; }
+.kv-legend i { width: 16px; height: 16px; border-radius: 4px; display: inline-block; }
+.keys-foot { padding: 4px 20px 20px; font-size: .88rem; color: var(--ink-2); }
+.keys-foot p { margin: 8px 0 0; max-width: 90ch; }
+</style>
+</head>
+<body>
+
+<header class="hero">
+  <nav class="sitebar" aria-label="Site">
+    <a class="brand" href="../"><img src="../img/icon-192.png" alt="" width="36" height="36">YW4 Recomp</a>
+    <a class="btn gh" href="https://github.com/ILFforever/YW4Recomp"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 0c4.42 0 8 3.58 8 8a8.013 8.013 0 0 1-5.45 7.59c-.4.08-.55-.17-.55-.38 0-.27.01-1.13.01-2.2 0-.75-.25-1.23-.54-1.48 1.78-.2 3.65-.88 3.65-3.95 0-.88-.31-1.59-.82-2.15.08-.2.36-1.02-.08-2.12 0 0-.67-.22-2.2.82-.64-.18-1.32-.27-2-.27-.68 0-1.36.09-2 .27-1.53-1.03-2.2-.82-2.2-.82-.44 1.1-.16 1.92-.08 2.12-.51.56-.82 1.28-.82 2.15 0 3.06 1.86 3.75 3.64 3.95-.23.2-.44.55-.51 1.07-.46.21-1.61.55-2.33-.66-.15-.24-.6-.83-1.23-.82-.67.01-.27.38.01.53.34.19.73.9.82 1.13.16.45.68 1.31 2.69.94 0 .67.01 1.3.01 1.49 0 .21-.15.45-.55.38A7.995 7.995 0 0 1 0 8c0-4.42 3.58-8 8-8Z"/></svg>Project on GitHub</a>
+  </nav>
+  <div class="hero-inner">
+    <div>
+      <span class="eyebrow">YW4 Recomp · fan PC port</span>
+      <h1>The in-game overlay</h1>
+      <p>Everything inside the game added by YWRecomp: graphics settings with a live preview, custom keys,
+        mouse and controller bindings for exploring and battles, and a in depth performance HUD. Press <kbd>Esc</kbd> to open it.</p>
+      <div class="stats">
+        <div class="stat"><b>7 sections</b><span>of graphics settings, each with a live preview</span></div>
+        <div class="stat"><b>2 sets</b><span>of keys and mouse buttons: exploring and battles</span></div>
+        <div class="stat"><b>11 themes</b><span>synced with the launcher</span></div>
+      </div>
+      <div class="links">
+        <a class="btn" href="../">Home</a>
+        <a class="btn ghost" href="../compare/">Comparisons</a>
+        <a class="btn ghost" href="../launcher/">The launcher</a>
+      </div>
+    </div>
+    <figure class="shot">
+      <img src="../screenshots/97-overlay.jpg" alt="Four of the overlay's pages: Settings, Preview with the game running under the bar, Controls with a DualSense, and the performance HUD's page">
+      <figcaption>Settings, Preview, Controls and the Performance HUD's page</figcaption>
+    </figure>
+  </div>
+</header>
+
+<div class="shell">
+  <nav class="pad" aria-label="The in-game overlay">
+    <h2>Contents</h2>
+    <ol>
+      <li><a href="#open"><span class="n">1</span>Opening it</a></li>
+      <li><a href="#settings"><span class="n">2</span>Settings</a></li>
+      <li><a href="#preview"><span class="n">3</span>Preview</a></li>
+      <li><a href="#controls"><span class="n">4</span>Controls</a></li>
+      <li><a href="#mouse"><span class="n">5</span>Mouse buttons</a></li>
+      <li><a href="#quick-look"><span class="n">6</span>Quick look</a></li>
+      <li><a href="#hud"><span class="n">7</span>Performance HUD</a></li>
+      <li><a href="#themes"><span class="n">8</span>Themes</a></li>
+      <li><a href="#default-keys"><span class="n">9</span>Default keys</a></li>
+    </ol>
+  </nav>
+
+  <main>
+    <article id="open">
+      <div class="bar"><span class="q">!</span><h2>Opening it</h2><span class="cat">Basics</span></div>
+      <div class="body">
+        <div class="top">
+          <div class="prose">
+            <p>Press <kbd>Esc</kbd>, or on a controller the touchpad (PlayStation), Share (Xbox Series), Capture
+              (Switch Pro) or Back and Start together. The game pauses behind it.</p>
+            <p>The side panel: <b>Resume</b>, <b>Settings</b>, <b>Controls</b>, <b>Overlay</b> (the performance HUD),
+              <b>Report a bug</b>, <b>Return to title</b> and <b>Exit game</b>. <kbd>F1</kbd> opens Settings straight away.</p>
+            <p>Keyboard, mouse and controller all work everywhere in it, and the key hints along the bottom follow
+              whichever you used last.</p>
+          </div>
+          <div class="spec"><dl>
+            <dt>Opens with</dt><dd><kbd>Esc</kbd>, touchpad, Share, Back + Start</dd>
+            <dt>The game</dt><dd>Paused behind it</dd>
+            <dt>Mouse</dt><dd>Hover chooses, click selects, right click goes back</dd>
+            <dt>Record</dt><dd><a href="https://github.com/ILFforever/YW4Recomp/blob/master/docs/decisions/0053-in-game-overlay.md">decision 0053</a></dd>
+          </dl></div>
+        </div>
+      </div>
+    </article>
+
+    <article id="settings">
+      <div class="bar"><span class="q">!</span><h2>Settings</h2><span class="cat">Graphics</span></div>
+      <div class="body">
+        <div class="top">
+          <div class="prose">
+            <p>Every graphics setting, in seven sections: Display, Anti-aliasing and upscaling, Frame generation and
+              latency, Detail, Shadows, Look and Advanced. Each option shows what it does and what it costs in the box
+              below, and the Switch's own choice is marked.</p>
+          </div>
+          <div class="spec"><dl>
+            <dt>Sections</dt><dd>7</dd>
+            <dt>Opens with</dt><dd><kbd>F1</kbd>, or Settings in the panel</dd>
+            <dt>Saved</dt><dd>With the game's settings</dd>
+          </dl></div>
+        </div>
+        <figure class="whole">
+          <img src="../screenshots/97-overlay-settings.jpg" loading="lazy" alt="The overlay's Settings: the Display section with window mode, resolution, aspect ratio and frame rate">
+          <figcaption>Settings: Display</figcaption>
+        </figure>
+      </div>
+    </article>
+
+    <article id="preview">
+      <div class="bar"><span class="q">!</span><h2>Preview</h2><span class="cat">Graphics</span></div>
+      <div class="body">
+        <div class="top">
+          <div class="prose">
+            <p><b>See a change before you keep it.</b> Preview unpauses the game with your character held still and
+              a bar at the bottom with the section's settings and the frame rate, so each change shows live.</p>
+          </div>
+          <div class="spec"><dl>
+            <dt>Opens with</dt><dd><kbd>P</kbd>, Y / Triangle, or its button</dd>
+            <dt>In the bar</dt><dd><kbd>W</kbd> <kbd>S</kbd> choose, <kbd>A</kbd> <kbd>D</kbd> change, <kbd>H</kbd> hides it</dd>
+          </dl></div>
+        </div>
+        <figure class="whole">
+          <img src="../screenshots/97-overlay-preview.jpg" loading="lazy" alt="Preview: the game running in the schoolyard under a bar with the shadow settings and the frame rate">
+          <figcaption>Preview with the shadow settings</figcaption>
+        </figure>
+      </div>
+    </article>
+
+    <article id="controls">
+      <div class="bar"><span class="q">!</span><h2>Controls</h2><span class="cat">Controls</span></div>
+      <div class="body">
+        <div class="top">
+          <div class="prose">
+            <p>Every Switch button with its two keys and its controller input, named as printed on your controller
+              (× ○ □ △ on PlayStation, A B X Y on Xbox). Exploring and battles have their own sets, so a key can do one
+              thing on the field and another in a battle.</p>
+            <p>With a controller, the controller column is the only one it changes, so a controller never moves a
+              keyboard key.</p>
+          </div>
+          <div class="spec"><dl>
+            <dt>Per Switch button</dt><dd>Two keys and one controller input</dd>
+            <dt>Sets</dt><dd>Exploring and battles</dd>
+            <dt>Also</dt><dd>Mouse sensitivity, vibration</dd>
+          </dl></div>
+        </div>
+        <figure class="whole">
+          <img src="../screenshots/75-controls-dualsense.jpg" loading="lazy" alt="The overlay's Controls page with a DualSense: the mouse's sensitivities and buttons, then each Switch button with its keys and its PlayStation symbol">
+          <figcaption>Controls, with a DualSense</figcaption>
+        </figure>
+      </div>
+    </article>
+
+    <article id="mouse">
+      <div class="bar"><span class="q">!</span><h2>Mouse buttons</h2><span class="cat">Controls</span></div>
+      <div class="body">
+        <div class="top">
+          <div class="prose">
+            <p>What the left and right buttons, the wheel press and turning the wheel do, for exploring and for battles.
+              Step through with ‹ ›, or pick from a list of every Switch button named by what it does there.</p>
+            <p>The mouse also turns the camera; <kbd>Alt</kbd> frees it.</p>
+          </div>
+          <div class="spec"><dl>
+            <dt>Parts</dt><dd>Left, right, wheel press, wheel up, wheel down</dd>
+            <dt>Sets</dt><dd>Exploring and battles</dd>
+          </dl></div>
+        </div>
+        <figure class="whole">
+          <img src="../screenshots/75-controls-mouse-buttons.jpg" loading="lazy" alt="The Mouse buttons page for battles: the mouse drawn with Attack on the left button and Aim on the right">
+          <figcaption>Mouse buttons in battles</figcaption>
+        </figure>
+      </div>
+    </article>
+
+    <article id="quick-look">
+      <div class="bar"><span class="q">!</span><h2>Quick look</h2><span class="cat">Controls</span></div>
+      <div class="body">
+        <div class="top">
+          <div class="prose">
+            <p>A card over the running game with what every button does, in the game's current mode: press <kbd>F2</kbd>,
+              or hold Back on a controller. It uses your bindings and your controller's own buttons, and the game gets
+              none of your presses while it shows.</p>
+          </div>
+          <div class="spec"><dl>
+            <dt>Opens with</dt><dd><kbd>F2</kbd>, or hold Back</dd>
+            <dt>Pages</dt><dd>Exploring, Battle, Cutscene</dd>
+          </dl></div>
+        </div>
+        <div class="pair">
+          <figure class="whole">
+          <img src="../screenshots/76-controls-quick-look-controller.jpg" loading="lazy" alt="The quick look with a DualSense: each button joined to what it does">
+          <figcaption>With a controller</figcaption>
+        </figure>
+          <figure class="whole">
+          <img src="../screenshots/76-controls-quick-look-keyboard.jpg" loading="lazy" alt="The quick look on the keyboard: every bound key coloured and named">
+          <figcaption>With a keyboard</figcaption>
+        </figure>
+        </div>
+      </div>
+    </article>
+
+    <article id="hud">
+      <div class="bar"><span class="q">!</span><h2>Performance HUD</h2><span class="cat">Look</span></div>
+      <div class="body">
+        <div class="top">
+          <div class="prose">
+            <p>Frames per second with the 1% and 0.1% lows, a frame-time graph, the GPU's and the game's time per frame,
+              CPU and memory, and with frame generation the frames shown and the game's own. <kbd>F3</kbd> steps it:
+              off, compact, detailed. The Overlay page picks its corner, its parts, its size and how see-through it is,
+              with a live preview.</p>
+          </div>
+          <div class="spec"><dl>
+            <dt>Opens with</dt><dd><kbd>F3</kbd></dd>
+            <dt>Forms</dt><dd>Compact or detailed</dd>
+            <dt>Screenshots</dt><dd><kbd>F12</kbd> includes it</dd>
+          </dl></div>
+        </div>
+        <figure class="whole">
+          <img src="../screenshots/11-hud-in-town.jpg" loading="lazy" alt="Riding a bike down snowy Ordinary Street at 4K with the detailed performance HUD">
+          <figcaption>The detailed HUD at 4K</figcaption>
+        </figure>
+      </div>
+    </article>
+
+    <article id="themes">
+      <div class="bar"><span class="q">!</span><h2>Themes</h2><span class="cat">Look</span></div>
+      <div class="body">
+        <div class="top">
+          <div class="prose">
+            <p>The overlay and the HUD come in the launcher's themes, and stay in step with it: a theme picked in the
+              game (Settings › Look › Theme) is the launcher's too.</p>
+          </div>
+          <div class="spec"><dl>
+            <dt>Themes</dt><dd>11, with the built-in one</dd>
+            <dt>Where</dt><dd>Settings › Look › Theme</dd>
+            <dt>Record</dt><dd><a href="https://github.com/ILFforever/YW4Recomp/blob/master/docs/decisions/0055-overlay-themes.md">decision 0055</a></dd>
+          </dl></div>
+        </div>
+        <figure class="whole">
+          <img src="../screenshots/98-overlay-themes.jpg" loading="lazy" alt="The overlay in four themes: Jibanyan, Komasan, Shmoopie and Whisper">
+          <figcaption>Jibanyan, Komasan, Shmoopie and Whisper</figcaption>
+        </figure>
+      </div>
+    </article>
+
+  </main>
+</div>
+
+<div class="wide">
+    <article id="default-keys">
+      <div class="bar"><span class="q">!</span><h2>Default keys</h2><span class="cat">Controls</span></div>
+    <div class="kv" id="kv">
+      <div class="kv-seg" role="group" aria-label="Which keys">
+        <button type="button" data-mode="0" aria-pressed="true">Exploring</button>
+        <button type="button" data-mode="1" aria-pressed="false">Battle</button>
+        <button type="button" data-mode="2" aria-pressed="false">Cutscene</button>
+      </div>
+      <div class="kv-board"><svg id="kv-svg" role="img" aria-label="The keyboard and mouse with each default key named"></svg></div>
+      <div class="kv-bar" aria-live="polite"><span class="what hint">Point at a key, or press one, to see what it does.</span></div>
+      <ul class="kv-legend">
+        <li><i style="background:var(--violet)"></i>Game buttons</li>
+        <li><i style="background:#1e9aa6"></i>Moving and the camera</li>
+        <li><i style="background:var(--gold)"></i>Menus and screenshots</li>
+      </ul>
+    </div>
+    <div class="keys-foot">
+      <p>The same card is in the game: press <kbd>F2</kbd> while playing, or hold Back on a controller to see it with your
+        controller's buttons. The mouse turns the camera; <kbd>Alt</kbd> frees it. Every key can be changed on the
+        overlay's Controls page, separately for exploring and battles.</p>
+    </div>
+    </article>
+</div>
+
+<footer>
+  <div class="in">
+    <span>A fan project. Screenshots are from the maintainer's own copy of the game, running in the recompiled port.
+      Not affiliated with or endorsed by LEVEL-5 or Nintendo; <i>Yo-kai Watch</i> belongs to its owners.</span>
+    <span>How each part works: the <a href="https://github.com/ILFforever/YW4Recomp#features">README</a> and
+      <a href="https://github.com/ILFforever/YW4Recomp/tree/master/docs/decisions">docs/decisions</a>.</span>
+  </div>
+</footer>
+<script>
+// The default keys: the game's F2 card (runtime/src/gamemenu.c, draw_controls_overview) drawn from the same data:
+// the key rows (kv_rows), the default bindings (runtime/src/bindings.c: inputs[] and battle_keys[]) and what each
+// Switch input does in each mode (kv_action). Point at or tap a key, or press it on your keyboard, to see what it does.
+(() => {
+  const svg = document.getElementById('kv-svg');
+  if (!svg) return;
+  const bar = document.querySelector('#kv .kv-bar'), segs = [...document.querySelectorAll('#kv .kv-seg button')];
+  const NS = 'http://www.w3.org/2000/svg', U = 54, G = 5, STEP = U + G;
+  const ORDER = ['A','B','X','Y','L','R','ZL','ZR','PLUS','MINUS','LS_PRESS','RS_PRESS','DPAD_UP','DPAD_DOWN','DPAD_LEFT',
+    'DPAD_RIGHT','LS_UP','LS_DOWN','LS_LEFT','LS_RIGHT','RS_UP','RS_DOWN','RS_LEFT','RS_RIGHT'];
+  const STICKS = { LS_UP: 'KeyW', LS_DOWN: 'KeyS', LS_LEFT: 'KeyA', LS_RIGHT: 'KeyD', RS_UP: 'KeyI', RS_DOWN: 'KeyK', RS_LEFT: 'KeyJ', RS_RIGHT: 'KeyL' };
+  const SETS = [
+    { A: ['KeyE','Enter','M_LEFT'], B: ['Space'], X: ['Tab'], Y: ['KeyM'], L: ['Digit1'], R: ['Digit3','W_UP','W_DOWN'],
+      ZL: ['KeyQ','M_RIGHT'], ZR: ['KeyF'],
+      PLUS: ['KeyP','Escape'], MINUS: ['KeyX'], LS_PRESS: ['ShiftLeft'], RS_PRESS: ['M_MID','KeyR'], DPAD_UP: ['ArrowUp'],
+      DPAD_DOWN: ['ArrowDown'], DPAD_LEFT: ['ArrowLeft'], DPAD_RIGHT: ['ArrowRight'] },
+    { A: ['KeyE','Enter'], B: ['Space','ShiftLeft'], X: ['KeyQ'], Y: ['M_LEFT','KeyU'], L: [], R: ['KeyE'], ZL: ['M_RIGHT','KeyO'],
+      ZR: ['KeyF'], PLUS: ['KeyR','KeyP'], MINUS: ['KeyC'], LS_PRESS: ['Tab'], RS_PRESS: ['M_MID'], DPAD_UP: ['ArrowUp','W_UP'],
+      DPAD_DOWN: ['ArrowDown','W_DOWN'], DPAD_LEFT: ['ArrowLeft'], DPAD_RIGHT: ['ArrowRight'] }];
+  for (const s of SETS) for (const id in STICKS) s[id] = [STICKS[id]];
+  const ACT = [
+    { A: 'Interact / confirm', B: 'Jump / back, hold to run', X: 'Yo-kai Pad', Y: 'Map', L: 'Hold: more shortcuts', R: 'Minimap size',
+      ZL: 'Watch scan', ZR: 'Yo-kai Beam', PLUS: 'Pause', LS_PRESS: 'Close hints', RS_PRESS: 'Scan',
+      DPAD_UP: 'Shortcut', DPAD_RIGHT: 'Shortcut', DPAD_DOWN: 'Shortcut', DPAD_LEFT: 'Shortcut' },
+    { A: 'Confirm', B: 'Roll / dodge', X: 'Character skill', Y: 'Attack', R: 'Skill wheel / Encourage / Soul Steal', ZL: 'Aim',
+      ZR: 'Yo-kai Drain', PLUS: 'Stop watching', MINUS: 'Auto battle', LS_PRESS: 'Target enemy', DPAD_UP: 'Switch character',
+      DPAD_DOWN: 'Switch character', DPAD_LEFT: 'Target ally', DPAD_RIGHT: 'Target ally' },
+    { A: 'Next line', B: 'Next line', R: 'Fast forward', PLUS: 'Pause' }];
+  const PORT = { Escape: 'Overlay', F1: 'Settings', F2: 'Controls', F3: 'HUD', F11: 'Full screen', F12: 'Screenshot' };
+  const SHORTCUT = { DPAD_UP: 1, DPAD_RIGHT: 2, DPAD_DOWN: 3, DPAD_LEFT: 4 };
+  const k = (code, w, cap) => ({ code, w, cap }), gap = w => ({ w });
+  const letters = s => [...s].map(c => k('Key' + c, 1, c));
+  const ROWS = [
+    [k('Escape',1,'Esc'), gap(1), k('F1',1,'F1'), k('F2',1,'F2'), k('F3',1,'F3'), k('F4',1,'F4'), gap(.5), k('F5',1,'F5'), k('F6',1,'F6'),
+     k('F7',1,'F7'), k('F8',1,'F8'), gap(.5), k('F9',1,'F9'), k('F10',1,'F10'), k('F11',1,'F11'), k('F12',1,'F12')],
+    [k('Backquote',1,'`'), ...[1,2,3,4,5,6,7,8,9,0].map(d => k('Digit' + d, 1, String(d))), k('Minus',1,'-'), k('Equal',1,'='), k('Backspace',2,'Backspace')],
+    [k('Tab',1.5,'Tab'), ...letters('QWERTYUIOP'), k('BracketLeft',1,'['), k('BracketRight',1,']'), k('Backslash',1.5,'\\')],
+    [k('CapsLock',1.75,'Caps'), ...letters('ASDFGHJKL'), k('Semicolon',1,';'), k('Quote',1,"'"), k('Enter',2.25,'Enter')],
+    [k('ShiftLeft',2.25,'Shift'), ...letters('ZXCVBNM'), k('Comma',1,','), k('Period',1,'.'), k('Slash',1,'/'), k('ShiftRight',2.75,'Shift'),
+     gap(.5), k('ArrowUp',1,'↑')],
+    [k('ControlLeft',1.25,'Ctrl'), k('MetaLeft',1.25,'Win'), k('AltLeft',1.25,'Alt'), k('Space',6.25,'Space'), k('AltRight',1.25,'Alt'),
+     k('ContextMenu',1.25,'Menu'), k('ControlRight',1.5,'Ctrl'), gap(.5), k('ArrowLeft',1,'←'), k('ArrowDown',1,'↓'), k('ArrowRight',1,'→')]];
+  const TRI = { ArrowUp: 'M12 5.5l9 13H3z', ArrowDown: 'M12 18.5l9-13H3z', ArrowLeft: 'M5.5 12l13-9v18z', ArrowRight: 'M18.5 12l-13-9v18z' };
+  const MX = 17.5 * STEP - G + 36, MY = STEP + 10, MW = 120, MH = 190, W = MX + MW + 22, H = 6 * STEP + 10;
+  let mode = 0, focus = null;
+
+  // what a key or mouse part does in the mode: the names joined once each (as kv_mask_names)
+  function names(code) {
+    const set = SETS[mode === 1 ? 1 : 0], out = [];
+    let move = true, sc = 0;
+    for (const id of ORDER) {
+      if (!(set[id] || []).includes(code)) continue;
+      let a = ACT[mode][id];
+      if (id.startsWith('LS_') && id !== 'LS_PRESS') a = mode === 2 ? null : 'Move';
+      if (id.startsWith('RS_') && id !== 'RS_PRESS') a = mode === 2 ? null : 'Camera';
+      if (!a) continue;
+      if (mode === 0 && SHORTCUT[id]) sc = SHORTCUT[id];
+      if (a !== 'Move' && a !== 'Camera') move = false;
+      if (!out.includes(a)) out.push(a);
+    }
+    return out.length ? { text: out.join(' / '), move, sc } : null;
+  }
+  const meas = document.createElement('canvas').getContext('2d');
+  const width = (s, px) => { meas.font = `700 ${px}px "Zen Kaku Gothic New", sans-serif`; return meas.measureText(s).width; };
+  function wrap(s, px, w, max) {  // lines of at most w, at spaces; the last cut with "..."
+    const words = s.split(' '), lines = [];
+    let cur = '';
+    for (const wd of words) {
+      const t = cur ? cur + ' ' + wd : wd;
+      if (width(t, px) <= w || !cur) cur = t; else { lines.push(cur); cur = wd; }
+    }
+    if (cur) lines.push(cur);
+    if (lines.length > max) { lines.length = max; lines[max - 1] += '...'; }
+    return lines.map(l => l.replace(/ \/$/, ''));
+  }
+  const el = (tag, attrs, parent) => {
+    const e = document.createElementNS(NS, tag);
+    for (const a in attrs) e.setAttribute(a, attrs[a]);
+    if (parent) parent.appendChild(e);
+    return e;
+  };
+  const text = (parent, x, y, s, px, cls, anchor = 'middle') => {
+    const t = el('text', { x, y, 'font-size': px, class: cls, 'text-anchor': anchor, 'dominant-baseline': 'central' }, parent);
+    t.textContent = s;
+    return t;
+  };
+  function part(code, cap, g) {  // a pointable thing: hover, focus and tap show what it does
+    g.classList.add('k');
+    g.dataset.code = code;
+    g.setAttribute('tabindex', '0');
+    g.setAttribute('aria-label', cap);
+    g.dataset.cap = cap;
+    const show = () => setFocus(code, cap);
+    g.addEventListener('pointerenter', show);
+    g.addEventListener('focus', show);
+    g.addEventListener('click', show);
+  }
+
+  function draw() {
+    svg.textContent = '';
+    svg.setAttribute('viewBox', `-4 -4 ${W + 8} ${H + 8}`);
+    ROWS.forEach((row, r) => {
+      let x = 0;
+      const y = r * STEP + (r ? 10 : 0);
+      for (const key of row) {
+        const w = key.w * U + (key.w - 1) * G;
+        if (key.code) {
+          const port = PORT[key.code], n = port ? { text: port, move: false, sc: 0 } : names(key.code), lit = !!n;
+          const g = el('g', {}, svg);
+          el('rect', { x: x - 3, y: y - 3, width: w + 6, height: U + 6, rx: 10, class: 'ring' }, g);
+          el('rect', { x, y, width: w, height: U, rx: 8, class: !lit ? 'unlit' : port ? 'port' : n.move ? 'move' : 'game' }, g);
+          const ink = !lit ? 'ink-unlit' : port ? 'ink-port' : 'ink-lit';
+          let lines = [];
+          if (lit) lines = wrap(n.text, U * .19, w - 6, 2);  // the D-pad's keys read "Shortcut"; the bar has the numbers
+          const capY = !lit ? y + U / 2 : lines.length === 2 ? y + U * .21 : y + U * .29;
+          if (TRI[key.code]) {
+            const ts = U * .32;
+            el('path', { d: TRI[key.code], class: ink, transform: `translate(${x + (w - ts) / 2} ${capY - ts / 2}) scale(${ts / 24})` }, g);
+          } else text(g, x + w / 2, capY, key.cap, U * .25, ink);
+          const ly = lines.length === 2 ? y + U * .53 : y + U * .66;
+          lines.forEach((l, i) => text(g, x + w / 2, ly + i * U * .26, l, U * .19, ink));
+          if (lit) part(key.code, port ? key.cap : key.cap, g); else g.dataset.code = key.code;
+        }
+        x += key.w * STEP;
+      }
+    });
+    // the mouse: the body, the two buttons round the wheel's slot, the wheel (as gamemenu.c)
+    const m = el('g', { transform: `translate(${MX} ${MY})` }, svg);
+    el('rect', { x: 0, y: 0, width: MW, height: MH, rx: MW / 2, class: 'mbody' }, m);
+    [['M_LEFT', 'Left click', 'L', 'M3 86V60A57 57 0 0 1 59 3V12A15 15 0 0 0 45 27V53A15 15 0 0 0 59 68V86Z', 7],
+     ['M_RIGHT', 'Right click', 'R', 'M117 86V60A57 57 0 0 0 61 3V12A15 15 0 0 1 75 27V53A15 15 0 0 1 61 68V86Z', 77]]
+      .forEach(([code, cap, side, d, tx]) => {
+        const n = names(code), g = el('g', {}, m);
+        el('path', { d, class: n ? (n.move ? 'move' : 'game') : 'mline' }, g);
+        text(g, tx + 18, 75, side, U * .25, n ? 'ink-lit' : 'ink-unlit');
+        if (n) {
+          let px = U * .19;
+          for (const wd of n.text.split(' ')) while (px > 7 && width(wd, px) > 36) px -= .5;
+          wrap(n.text, px, 36, 2).forEach((l, i) => text(g, tx + 18, 42 + i * px * 1.35, l, px, 'ink-lit'));
+          part(code, cap, g);
+        }
+      });
+    const press = names('M_MID'), turn = names('W_UP');
+    const wg = el('g', {}, m);
+    el('rect', { x: 45, y: 12, width: 30, height: 56, rx: 15, fill: 'transparent' }, wg);
+    el('rect', { x: 49, y: 16, width: 22, height: 48, rx: 11,
+      class: press || turn ? ((!press || press.move) && (!turn || turn.move) ? 'move' : 'game') : 'soft' }, wg);
+    if (press || turn) part('WHEEL', 'Wheel', wg);
+    let ly = MH + 22;
+    if (press) { wrap('Wheel press: ' + press.text, 13, MW + 40, 2).forEach(l => { text(m, MW / 2, ly, l, 13, 'muted'); ly += 17; }); ly += 6; }
+    if (turn) wrap('Wheel: ' + turn.text, 13, MW + 40, 2).forEach(l => { text(m, MW / 2, ly, l, 13, 'muted'); ly += 17; });
+    if (focus) setFocus(focus.code, focus.cap);
+  }
+
+  // the detail bar: the key in focus, in a full sentence (as the game's)
+  function setFocus(code, cap) {
+    focus = { code, cap };
+    svg.querySelectorAll('.k.on').forEach(e => e.classList.remove('on'));
+    const g = svg.querySelector(`.k[data-code="${code}"]`);
+    let what;
+    if (PORT[code]) what = PORT[code] + '.';
+    else if (code === 'WHEEL') {
+      const a = names('M_MID'), b = names('W_UP');
+      what = [a && 'Press: ' + a.text, b && 'Turn: ' + b.text].filter(Boolean).join('. ') + '.';
+    } else {
+      const n = names(code);
+      what = !n ? null : n.sc ? `Shortcut ${n.sc}, or shortcut ${n.sc + 4} while you hold 1.` : n.text + '.';
+    }
+    if (!g || !what) {
+      bar.innerHTML = `<span class="cap"></span><span class="what"></span>`;
+      bar.querySelector('.cap').textContent = cap;
+      bar.querySelector('.what').textContent = 'Not used here.';
+      return;
+    }
+    g.classList.add('on');
+    bar.innerHTML = `<span class="cap"></span><span class="what"></span>`;
+    bar.querySelector('.cap').textContent = cap;
+    bar.querySelector('.what').textContent = what;
+  }
+
+  segs.forEach(b => b.addEventListener('click', () => {
+    mode = +b.dataset.mode;
+    segs.forEach(s => s.setAttribute('aria-pressed', s === b ? 'true' : 'false'));
+    draw();
+  }));
+  // a real key pressed shows itself, as on the card (nothing is taken from the page: Tab and the arrows still work)
+  const capOf = code => { for (const row of ROWS) for (const key of row) if (key.code === code) return key.cap; return null; };
+  document.addEventListener('keydown', e => {
+    if (e.target.closest && e.target.closest('input, textarea')) return;
+    const cap = capOf(e.code);
+    if (cap && svg.getBoundingClientRect().bottom > 0 && svg.getBoundingClientRect().top < innerHeight) setFocus(e.code, cap);
+  });
+  draw();
+  if (document.fonts && document.fonts.ready) document.fonts.ready.then(draw);  // measured again in the real font
+})();
+</script>
+</body>
+</html>
