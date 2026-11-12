@@ -152,7 +152,8 @@ the camera. The bamboo forest, PCSS off:
 <details>
 <summary><b>Soft shadows (PCSS)</b>: sharp where a shadow touches its caster, softer farther away</summary>
 
-PCSS (percentage-closer soft shadows) makes shadows behave more like real ones:
+PCSS (percentage-closer soft shadows) makes shadows behave more like real ones. It softens a shadow by how far it
+is from what casts it:
 
 - **Close shadows stay sharp**: where a shadow touches its caster (feet, poles, the base of a wall).
 - **Farther shadows get softer**: the farther the caster is from the ground, the softer the edge, so tree canopies
@@ -364,7 +365,16 @@ FSR is AMD's, under the MIT licence.
 **Controls**
 
 <details>
-<summary><b>Keyboard, mouse and controllers</b>: rebind everything, the mouse turns the camera</summary>
+<summary><b>Keyboard, mouse and controllers</b>: rebind everything, the mouse turns the camera, a quick look at what every button does</summary>
+
+**Controls quick look** (hold Back, or F2): a card over the game shows the controller with what each button does.
+It uses your bindings and your controller's button names, and has one layout for exploring and one for battles.
+
+![The quick look with a DualSense while exploring: each button of the controller joined to what it does, from Watch scan on L2 to Interact / confirm on cross](docs/screenshots/76-controls-quick-look-controller.jpg)
+
+With a keyboard it shows the keys instead:
+
+![The quick look on the keyboard: every bound key coloured and named: game buttons, moving and the camera, menus and screenshots](docs/screenshots/76-controls-quick-look-keyboard.jpg)
 
 **Controls (F2)**, with a DualSense
 
@@ -417,10 +427,9 @@ get yours from [GameBanana](https://gamebanana.com/mods/480884)):
 <details>
 <summary><b>In-game overlay</b>: a PC menu over the game, like Steam's overlay, with full mouse and keyboard (Escape)</summary>
 
-A menu of the PC version's own, drawn over the game the way the Steam overlay is: it's not part of the Switch game,
-so it works the way a PC game's menus do. **Point and click with the mouse** (hover, click, drag the sliders,
-right-click to go back), use the keyboard, or a controller; the button hints change to match. Press **Escape** to
-pause and open it. On a controller: the **touchpad** on PlayStation, **Share** on Xbox
+A custom menu drawn over the game, as Steam's overlay is. It works with the **mouse**
+(hover, click, drag the sliders, right-click to go back), the keyboard or a controller; the button hints show
+whichever you used last. Press **Escape** to pause and open it. On a controller: the **touchpad** on PlayStation, **Share** on Xbox
 Series, **Capture** on a Switch Pro controller, or **Back + Start** together on any controller. The game pauses the
 way its own pause does (the whole world stops), without its pause screen. From the side panel:
 
@@ -428,7 +437,8 @@ way its own pause does (the whole world stops), without its pause screen. From t
   need LEGACY MENUS on, see below). **Preview** (P, or Y /
   △) lets the game run again with a bar at the bottom holding that section's settings, so you see each change live
   and what it does to the frame rate; Escape pauses again.
-- **Controls**: the keys and controller buttons for every Switch button. Choose one, then press the new key or button.
+- **Controls**: a picture of your keyboard or controller with what every key and button does (exploring, battle,
+  cutscene), and the list to change them: choose one, then press the new key or button.
 - **Overlay**: the performance HUD off, compact (the frame rate only) or detailed, which corner it sits in, its size and opacity, and
   what the detailed one shows.
 - **Report a bug**: describe the problem, then save a zip with a screenshot and the log, or send it to GitHub (it
@@ -436,9 +446,7 @@ way its own pause does (the whole world stops), without its pause screen. From t
 
 W/S or the arrow keys choose, A/D or ←/→ change a setting, Enter selects, Q/E jump between sections (LB/RB or
 LT/RT on a controller). Holding a direction keeps moving. Escape, Backspace or B goes back one step; from the side
-panel it goes back to the game, as Resume does. The mouse works too: hover to choose, click to select or drag a
-slider, right-click to go back. The key hints follow whatever you used last. On a DualSense the **mic button**
-shows or hides the performance HUD.
+panel it goes back to the game, as Resume does. On a DualSense the **mic button** shows or hides the performance HUD.
 
 ![The in-game overlay: Settings with the display options; Preview: the game running under a bar with the shadow settings; Controls with a DualSense's buttons; Overlay: the detailed performance HUD with a live preview](docs/screenshots/97-overlay.jpg)
 
@@ -454,10 +462,12 @@ closes (a theme file added to the launcher's themes folder shows up in both).
 <summary><b>Settings</b>: every option in game, F1 for settings, F2 for controls, F3 for the performance HUD</summary>
 
 **F1** opens the overlay's **Settings** page: every option with all its choices, and what each one does (arrow keys or
-D-pad to choose and change). **F2** opens the overlay's **Controls** page: two keys or mouse buttons and one gamepad
-button for every Switch button and stick direction, changed by pressing the new one, and at the top the mouse's camera
-sensitivity, left-right and up-down. **F3** steps the performance HUD: off, compact, detailed. F1 and F2 pause the
-game while their page is open; the same key again goes back to the game. On a controller, open them from the in-game overlay (above).
+D-pad to choose and change). **F2** shows the **quick look** at the controls over the running game (see Controls
+above); Escape from there opens the overlay's **Controls** page: two keys or mouse buttons and one gamepad
+button for every Switch button and stick direction, changed by pressing the new one, and the mouse's camera
+sensitivity, left-right and up-down. **F3** steps the performance HUD: off, compact, detailed. F1 pauses the
+game while its page is open; the same key again goes back to the game. On a controller, open the pages from the
+in-game overlay (above), and hold Back for the quick look.
 
 **LEGACY MENUS** (Settings, ADVANCED) turns the keys back to the older panels: F1 opens the old settings panel, F2 the
 old controls page, F3 shows or hides the HUD. The **developer options**, the switches players don't need, are at the
