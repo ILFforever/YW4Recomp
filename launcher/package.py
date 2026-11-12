@@ -183,11 +183,22 @@ def build() -> None:
         for dll in ("WebView2Loader.dll", "libunwind.dll"):
             (release / dll).unlink(missing_ok=True)
             dlls[(OUT / dll).as_posix()] = dll
+    # the installer's own pictures and icon (installer_art.py), drawn for this version; only here, like the stage
+    sys.path.insert(0, str(launcher))
+    import installer_art
+    sidebar, header = installer_art.draw(OUT / "installer", version)
     overrides.write_text(json.dumps({
         "version": version,
         "mainBinaryName": "YW4 Recomp",
-        # the launcher's themes (themes.rs): files anyone can copy into this folder, so they ship next to the launcher
-        "bundle": {"resources": {**dlls, STAGE.as_posix() + "/": "builder/", (REPO / "launcher" / "ui" / "themes").as_posix() + "/": "themes/"}},
+        "bundle": {
+            # the launcher's themes (themes.rs): files anyone can copy into this folder, so they ship next to the launcher
+            "resources": {**dlls, STAGE.as_posix() + "/": "builder/", (REPO / "launcher" / "ui" / "themes").as_posix() + "/": "themes/"},
+            "windows": {"nsis": {
+                "installerIcon": (launcher / "src-tauri" / "icons" / "icon.ico").as_posix(),
+                "sidebarImage": sidebar.as_posix(),
+                "headerImage": header.as_posix(),
+            }},
+        },
     }, indent=2))
     npx = shutil.which("npx")
     if not npx:
