@@ -591,8 +591,8 @@ shadows here are our own pass with no graphical improvements applied (SHADOW PAS
 
 ## Building from source
 
-Requirements: Python 3.11+, Git, a C compiler (Clang recommended:
-[llvm-mingw](https://github.com/mstorsjo/llvm-mingw) on Windows; GCC also works), a GPU with Vulkan 1.3, and
+Requirements: Python 3.11+, Git, a C compiler (Clang 19 or newer recommended:
+[llvm-mingw](https://github.com/mstorsjo/llvm-mingw) on Windows; GCC 15 or newer also works), a GPU with Vulkan 1.3, and
 `glslangValidator` (from the [Vulkan SDK](https://vulkan.lunarg.com/), or a standalone glslang). SDL3 is fetched
 automatically on Windows. Full steps in [docs/setup.md](docs/setup.md).
 
