@@ -92,7 +92,18 @@ void yw4_log_start(void) {
     if (PIPE(pipe_fds) != 0 || saved_stderr < 0 || dup2(pipe_fds[1], 2) < 0) return;
 #endif
     setvbuf(stderr, NULL, _IONBF, 0);
-    if (host_thread_start(copy_thread, NULL, 1 << 16) != 0) return;
+    if (host_thread_start(copy_thread, NULL, 1 << 16) != 0) {
+        /* Nobody reads the pipe: give stderr back, or every message is lost and the game blocks once the pipe is
+         * full. (Linux, 2026-11-12: the thread's 64 KiB stack was refused, and a run that quit at start left an
+         * empty terminal and an empty log.) */
+#ifdef _WIN32
+        _dup2(saved_stderr, 2);
+#else
+        dup2(saved_stderr, 2);
+#endif
+        fprintf(stderr, "yw4: log: cannot start the copying thread; no log file this run\n");
+        return;
+    }
     atexit(drain);
     fprintf(stderr, "yw4: log file %s\n", name);
 }
