@@ -360,7 +360,8 @@ void settings_load(void) {
         for (int i = 0; i < NSETTINGS; i++)  /* only the panel's settings, and never over the environment */
             if (!strcmp(line, setting(i)->env) && !getenv(line)) set_env(line, value), n++;
         n += bindings_load_line(line, value);
-        if ((!strcmp(line, "YW4_THEME") || !strcmp(line, "YW4_WINDOW_SIZE")) && !getenv(line))
+        if ((!strcmp(line, "YW4_THEME") || !strcmp(line, "YW4_WINDOW_SIZE") || !strcmp(line, "YW4_KEYBOARD")) &&
+            !getenv(line))
             set_env(line, value), n++;
     }
     fclose(f);
@@ -391,6 +392,8 @@ void settings_save(void) {
     int ww, wh;
     window_size_kept(&ww, &wh);  /* the size the player left the window at (window.c) */
     if (ww && wh) fprintf(f, "YW4_WINDOW_SIZE=%dx%d\n", ww, wh);
+    const char *kb = getenv("YW4_KEYBOARD");  /* the name keyboard's last language (gamemenu.c) */
+    if (kb && *kb) fprintf(f, "YW4_KEYBOARD=%s\n", kb);
     bindings_save(f);
     fclose(f);
 }

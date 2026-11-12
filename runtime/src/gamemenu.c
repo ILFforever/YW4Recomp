@@ -71,11 +71,13 @@ void gamemenu_prompt_options(int min_chars, int cancel) { prompt_min = min_chars
  * use (the hints follow the last device), as the Switch's own keyboard; QWERTY. D-pad moves, A types, B deletes (on an
  * empty field: Cancel where offered), Y capitals on or off, Done answers. The first letter is a
  * capital, the next ones small, as names are written. The mouse can press its keys too.
- * Three pages (owner, 2026-11-13, mockup option A): ABC, hiragana and katakana, switched by LB / RB (L1 / R1, Q / E)
- * or the tabs above the keys. A kana page is the gojūon table as Japanese keyboards lay it out: a column per
- * consonant, the あ column on the right, a i u e o downwards; its last row has ゛゜ (also Y) and 小, which change the
- * letter before the cursor (か が, は ば ぱ, つ っ). A name in the Japanese game opens on あ, with a translation mod
- * (its own chara_text, romfs_host_path) on ABC. The popup keeps the kana pages' height on the ABC page too. */
+ * Languages (owner, 2026-11-13, mockup option A): a switcher above the keys as the iPhone's, "‹ English ›" and
+ * "‹ 日本語 ›", each name in its own script; LB / RB (L1 / R1, Q / E) or its arrows step through them. English is the
+ * QWERTY page; 日本語 has a hiragana and a katakana page, flipped by the あ / ア key, and comes back to the one used last.
+ * A kana page is the gojūon table as Japanese keyboards lay it out: a column per consonant, the あ column on the right,
+ * a i u e o downwards; its last row has ゛゜ (also Y) and 小, which change the letter before the cursor (か が,
+ * は ば ぱ, つ っ). A name in the Japanese game opens on 日本語, with a translation mod (its own chara_text,
+ * romfs_host_path) on English. The popup keeps the kana pages' height on the English page too. */
 enum { OSK_COLS = 10, OSK_ROWS = 6 };  /* a kana page's rows: five of letters, then the last; ABC has four */
 /* QWERTY (owner, 2026-11-07), the numbers on top as on a keyboard */
 static const char *const osk_keys[4] = {"1234567890", "QWERTYUIOP", "ASDFGHJKL'", "ZXCVBNM-.!"};
@@ -85,20 +87,31 @@ static const char *const osk_kana[OSK_COLS][5] = {
     {"た", "ち", "つ", "て", "と"}, {"な", "に", "ぬ", "ね", "の"}, {"は", "ひ", "ふ", "へ", "ほ"},
     {"ま", "み", "む", "め", "も"}, {"や", "", "ゆ", "", "よ"},     {"ら", "り", "る", "れ", "ろ"},
     {"わ", "を", "ん", "ー", "！"}};
-enum { OSK_SHIFT, OSK_SPACE, OSK_DELETE, OSK_DONE, OSK_VOICE, OSK_SMALL };
+enum { OSK_SHIFT, OSK_SPACE, OSK_DELETE, OSK_DONE, OSK_VOICE, OSK_SMALL, OSK_SCRIPT };
 typedef struct {
     const char *label;
     int c0, c1, act;  /* the columns it covers, [c0, c1) */
 } OskKey;
 static const OskKey osk_last_abc[] = {
     {"Shift", 0, 2, OSK_SHIFT}, {"Space", 2, 6, OSK_SPACE}, {"Delete", 6, 8, OSK_DELETE}, {"Done", 8, 10, OSK_DONE}};
-static const OskKey osk_last_kana[] = {{"゛゜", 0, 2, OSK_VOICE},    {"小", 2, 4, OSK_SMALL}, {"Space", 4, 6, OSK_SPACE},
-                                       {"Delete", 6, 8, OSK_DELETE}, {"Done", 8, 10, OSK_DONE}};
-static const char *const osk_page_names[3] = {"ABC", "あ", "ア"};
-static int osk_row, osk_col, osk_caps = 1, osk_shown, osk_page;  /* osk_page: 0 ABC, 1 hiragana, 2 katakana */
+/* OSK_SCRIPT's label is the other script's letter (ア on hiragana, あ on katakana), set where it's drawn */
+static const OskKey osk_last_kana[] = {{"゛゜", 0, 2, OSK_VOICE},    {"小", 2, 3, OSK_SMALL},    {"ア", 3, 4, OSK_SCRIPT},
+                                       {"Space", 4, 6, OSK_SPACE},  {"Delete", 6, 8, OSK_DELETE}, {"Done", 8, 10, OSK_DONE}};
+/* osk_page: 0 English (QWERTY), 1 hiragana, 2 katakana; osk_kana_page: the 日本語 page used last */
+static int osk_row, osk_col, osk_caps = 1, osk_shown, osk_page, osk_kana_page = 1;
+/* The language a name's keyboard opens on: the one picked last (owner, 2026-11-13: "make it remember the last
+ * language"), kept as YW4_KEYBOARD in the settings file (settings.c); before any pick, the mod guess below. */
+static const char *const osk_lang_ids[3] = {"english", "hiragana", "katakana"};
+static int osk_switched;  /* the language was changed in this popup: kept when it closes */
+static int osk_remembered(void) {
+    const char *e = getenv("YW4_KEYBOARD");
+    for (int i = 0; e && i < 3; i++)
+        if (!strcmp(e, osk_lang_ids[i])) return i;
+    return -1;
+}
 
 static const OskKey *osk_last(int *n) {
-    *n = osk_page ? 5 : 4;
+    *n = osk_page ? 6 : 4;
     return osk_page ? osk_last_kana : osk_last_abc;
 }
 static int osk_letter_rows(void) { return osk_page ? 5 : 4; }
@@ -188,6 +201,7 @@ static void osk_press(void) {
     case OSK_DONE: prompt_finish(); break;
     case OSK_VOICE: osk_change_last(0); break;
     case OSK_SMALL: osk_change_last(1); break;
+    case OSK_SCRIPT: osk_page = osk_kana_page = osk_page == 1 ? 2 : 1, osk_switched = 1; break;  /* the cursor stays */
     }
 }
 
@@ -218,10 +232,13 @@ static void osk_move(int a) {
 }
 
 static void osk_set_page(int p) {
-    osk_page = (p + 3) % 3;
+    osk_page = p;
+    if (p) osk_kana_page = p;
     if (!osk_has(osk_row, osk_col)) osk_row = osk_row >= osk_letter_rows() && osk_row < OSK_ROWS - 1 ? osk_letter_rows() - 1 : 0;
     if (!osk_has(osk_row, osk_col)) osk_row = 0;
 }
+/* The language switcher's next one, either way: English ⇄ 日本語 (more languages would join this loop). */
+static void osk_step_language(void) { osk_set_page(osk_page ? 0 : osk_kana_page), osk_switched = 1; }
 
 void gamemenu_prompt_begin(const char *title, int max_chars, const char *fallback) {
     snprintf(prompt_title, sizeof prompt_title, "%s", title && *title ? title : "Enter a name");
@@ -236,10 +253,16 @@ void gamemenu_prompt_begin(const char *title, int max_chars, const char *fallbac
     prompt_label = strstr(low, "password") ? "Password" : strstr(low, "code") ? "Code" : "Name";
     textin_clear(&prompt_text);
     prompt_text.max_chars = max_chars > 0 ? max_chars : 0;
-    /* a name in the Japanese game: あ (on あ itself, the top right); else ABC on Q. A translation mod has its own
-     * character names (swkbd.c reads them from the same file); passwords and codes are Latin letters. */
-    int kana = !strcmp(prompt_label, "Name") && !romfs_host_path("data/common/text/ja/chara_text.cfg.bin");
-    osk_page = kana, osk_caps = 1;
+    /* A name: the language picked last; before any pick, 日本語 in the Japanese game, English with a translation mod
+     * (it has its own character names, swkbd.c reads them from the same file). Passwords and codes: English. On a
+     * kana page the cursor starts on あ itself (the top right), on English on Q. */
+    int name = !strcmp(prompt_label, "Name"), saved = osk_remembered();
+    if (!name) osk_page = 0;
+    else if (saved >= 0) osk_page = saved;
+    else osk_page = romfs_host_path("data/common/text/ja/chara_text.cfg.bin") ? 0 : osk_kana_page;
+    if (osk_page) osk_kana_page = osk_page;
+    int kana = osk_page != 0;
+    osk_caps = 1, osk_switched = 0;
     if (kana) osk_row = 0, osk_col = OSK_COLS - 1;
     else osk_row = 1, osk_col = 0;
     __atomic_store_n(&prompt_finished, 0, __ATOMIC_RELEASE);
@@ -263,6 +286,16 @@ void gamemenu_message_begin(const char *title, const char *body) {
 }
 
 static void prompt_close(int how) {
+    if (osk_switched && !strcmp(prompt_label, "Name")) {  /* the next name's keyboard opens on this language */
+#ifdef _WIN32
+        _putenv_s("YW4_KEYBOARD", osk_lang_ids[osk_page]);
+#else
+        setenv("YW4_KEYBOARD", osk_lang_ids[osk_page], 1);
+#endif
+        settings_save();
+        fprintf(stderr, "yw4: overlay: keyboard language %s kept\n", osk_lang_ids[osk_page]);
+    }
+    osk_switched = 0;
     textin_focus(NULL);
     __atomic_store_n(&prompting, 0, __ATOMIC_RELEASE);
     __atomic_store_n(&open_, 0, __ATOMIC_RELEASE);
@@ -655,7 +688,7 @@ void gamemenu_action(int a) {
             else if (a == GM_ACCEPT) osk_press();
             else if (a == GM_ALT && osk_page) osk_change_last(0);  /* Y: ゛゜ on a kana page, else capitals */
             else if (a == GM_ALT) osk_caps ^= 1;
-            else if (a == GM_PREV || a == GM_NEXT) osk_set_page(osk_page + (a == GM_NEXT ? 1 : -1));
+            else if (a == GM_PREV || a == GM_NEXT) osk_step_language();
             else if ((a == GM_BACK || a == GM_LEAVE || a == GM_CLEAR) && t[0]) textin_focus(&prompt_text), textin_edit(TI_BACK);
             else if (a == GM_BACK || a == GM_LEAVE) gamemenu_prompt_cancel();
             return;
@@ -773,7 +806,7 @@ void gamemenu_mouse(float x, float y, int button) {
             if (osk_row != h.a || osk_col != h.b) osk_row = h.a, osk_col = h.b, changed();
             if (button == 1) osk_press(), changed();
         }
-        if (button == 1 && found && h.kind == HIT_OSK_PAGE && h.a != osk_page) osk_set_page(h.a), changed();
+        if (button == 1 && found && h.kind == HIT_OSK_PAGE) osk_step_language(), changed();  /* the switcher's arrows */
         return;
     }
     if (button == 3) {  /* the right button: back, as Escape */
@@ -2646,23 +2679,27 @@ void gamemenu_draw(const UiCanvas *c, const GameMenuInfo *in) {
         snprintf(help, sizeof help, "%s%s%s%s%s", osk_shown ? "Pick the letters below." : "Type with your keyboard.", limit,
                  prompt_fallback[0] ? " Leave it empty for " : "", prompt_fallback, prompt_fallback[0] ? "." : "");
         ui_text(c, UI_GOTHIC_500, 16, bx, y, llh, help, MUTED);
-        if (osk_shown) {  /* the on-screen keyboard: the pages' tabs, then ten columns, the chosen key gold */
+        if (osk_shown) {  /* the on-screen keyboard: the language switcher, then ten columns, the chosen key gold */
             float ky = y + llh + 14, kw = (bw - (OSK_COLS - 1) * kgap) / OSK_COLS;
-            {  /* LB  [ABC] [あ] [ア]  RB: the page shown plum */
+            {  /* LB [‹] [ English ] [›] RB: the language's name in its own script, on plum */
                 const char *lb = in->pad == 2 ? "L1" : "LB", *rb = in->pad == 2 ? "R1" : "RB";
                 float sw = ui_text_w(UI_ROUNDED_800, 13, "L1") + 18;
                 if (ui_text_w(UI_ROUNDED_800, 13, "LB") + 18 > sw) sw = ui_text_w(UI_ROUNDED_800, 13, "LB") + 18;
-                float sh = 26, sy = ky + (tab_h - sh) / 2, tx = bx + sw + kgap, tw = (bw - 2 * (sw + kgap) - 2 * kgap) / 3;
+                float sh = 26, sy = ky + (tab_h - sh) / 2, aw = 52;
+                float ax0 = bx + sw + kgap, ax1 = bx + bw - sw - kgap - aw;  /* the two arrows */
+                float nx = ax0 + aw + kgap, nw = ax1 - kgap - nx;                /* the name between them */
                 ui_box(c, bx, sy, sw, sh, 8, PLUM, 0, 0);
                 ui_text_in(c, UI_ROUNDED_800, 13, bx, sy, sw, sh, 1, lb, SNOW);
                 ui_box(c, bx + bw - sw, sy, sw, sh, 8, PLUM, 0, 0);
                 ui_text_in(c, UI_ROUNDED_800, 13, bx + bw - sw, sy, sw, sh, 1, rb, SNOW);
-                for (int p = 0; p < 3; p++, tx += tw + kgap) {
-                    int cur_page = p == osk_page;
-                    ui_box(c, tx, ky, tw, tab_h, 10, cur_page ? PLUM : WHITE, cur_page ? 0 : 2, LINE);
-                    ui_text_in(c, UI_ROUNDED_800, 18, tx, ky, tw, tab_h, 1, osk_page_names[p], cur_page ? SNOW : PLUM);
-                    hit_add(tx, ky, tw, tab_h, HIT_OSK_PAGE, p, 0);
-                }
+                ui_box(c, ax0, ky, aw, tab_h, 10, WHITE, 2, LINE);
+                ui_text_in(c, UI_ROUNDED_800, 24, ax0, ky, aw, tab_h, 1, "‹", PLUM);
+                hit_add(ax0, ky, aw, tab_h, HIT_OSK_PAGE, -1, 0);
+                ui_box(c, ax1, ky, aw, tab_h, 10, WHITE, 2, LINE);
+                ui_text_in(c, UI_ROUNDED_800, 24, ax1, ky, aw, tab_h, 1, "›", PLUM);
+                hit_add(ax1, ky, aw, tab_h, HIT_OSK_PAGE, 1, 0);
+                ui_box(c, nx, ky, nw, tab_h, 10, PLUM, 0, 0);
+                ui_text_in(c, UI_ROUNDED_800, 18, nx, ky, nw, tab_h, 1, osk_page ? "日本語" : "English", SNOW);
                 ky += tab_h + 12;
             }
             int nlast;
@@ -2672,7 +2709,7 @@ void gamemenu_draw(const UiCanvas *c, const GameMenuInfo *in) {
                 for (int k = 0; k < nkeys; k++) {
                     int c0 = last ? L[k].c0 : k, c1 = last ? L[k].c1 : k + 1;
                     char label[16];
-                    if (last) snprintf(label, sizeof label, "%s", L[k].label);
+                    if (last) snprintf(label, sizeof label, "%s", L[k].act == OSK_SCRIPT ? osk_page == 1 ? "ア" : "あ" : L[k].label);
                     else osk_letter(r, k, label);
                     if (!label[0]) continue;  /* や's column: no key in the gaps */
                     float kx = bx + (float)c0 * (kw + kgap), w2 = (float)(c1 - c0) * (kw + kgap) - kgap;
@@ -2709,7 +2746,7 @@ void gamemenu_draw(const UiCanvas *c, const GameMenuInfo *in) {
             hx += hint(c, hx, by, ps ? "Cross" : "A", "Type") + 28;
             hx += hint(c, hx, by, ps ? "Circle" : "B", can_cancel ? "Delete / Cancel" : "Delete") + 28;
             hx += hint(c, hx, by, ps ? "Triangle" : "Y", osk_page ? "゛゜" : "Capitals") + 28;
-            hint(c, hx, by, ps ? "L1 R1" : "LB RB", "Letters");
+            hint(c, hx, by, ps ? "L1 R1" : "LB RB", "Language");
         } else if (in->pad) {
             hx += hint(c, hx, by, in->pad == 2 ? "Cross" : "A", "OK") + 28;
             if (can_cancel) hint(c, hx, by, in->pad == 2 ? "Circle" : "B", "Cancel");
