@@ -98,8 +98,12 @@ the two do the same work:
 | | Emulator (Eden) | This project |
 |---|---|---|
 | CPU | 210% of one core | 111% |
-| Memory | 15.7 GB | 3.9 GB |
+| Memory | ~7 GB | 3.9 GB |
 | GPU | 30% | 33% |
+
+Memory: Eden's is private + mapped (the emulated console's RAM is mapped memory, which Task Manager's Memory
+column leaves out: it shows about 1.3 GB for Eden and 2.8 GB for this project). Ours is everything the game has
+committed.
 
 ## Features
 
