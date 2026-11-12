@@ -17,6 +17,7 @@
  * third_party/lasrecomp), as does the sampler translation.
  */
 #include <inttypes.h>
+#include <limits.h>
 #include <math.h>
 #include <stdarg.h>
 #include <stdio.h>

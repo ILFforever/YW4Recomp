@@ -47,17 +47,18 @@ typedef struct {
 static float hud_opacity = -1.0f;
 
 float hud_opacity_get(void) {
-    float v = __atomic_load_n(&hud_opacity, __ATOMIC_ACQUIRE);
+    float v;
+    __atomic_load(&hud_opacity, &v, __ATOMIC_ACQUIRE);  /* the generic form: _n takes no float before Clang 19 */
     if (v < 0) {
         const char *e = getenv("YW4_HUD_OPACITY");
         v = e && *e ? (float)atof(e) : OPACITY_DEFAULT;
         v = v < 0 ? 0 : v > 1 ? 1 : v;
-        __atomic_store_n(&hud_opacity, v, __ATOMIC_RELEASE);
+        __atomic_store(&hud_opacity, &v, __ATOMIC_RELEASE);
     }
     return v;
 }
 
-void hud_opacity_set(float v) { __atomic_store_n(&hud_opacity, v, __ATOMIC_RELEASE); }
+void hud_opacity_set(float v) { __atomic_store(&hud_opacity, &v, __ATOMIC_RELEASE); }
 
 /* the card: its fill at the slider's opacity, its border fading with it */
 static void card(const UiCanvas *c, float w, float h, float r) {

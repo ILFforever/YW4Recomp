@@ -29,6 +29,10 @@ RUNTIME = check.REPO / "runtime"
 CFLAGS = ["-std=c11", "-O2", "-ffp-contract=off", "-Wall", "-Wno-unused-label"]
 # The runtime's few C++ files (NVIDIA Streamline's headers are C++): no exceptions or RTTI, so no C++ runtime library
 CXXFLAGS = ["-std=c++17", "-O2", "-ffp-contract=off", "-Wall", "-fno-exceptions", "-fno-rtti"]
+if sys.platform != "win32":
+    # glibc under -std=c11 hides what is POSIX and not ISO C (localtime_r, realpath, setenv, fseeko, off_t, S_IFDIR,
+    # ftruncate, strnlen...): 13 runtime files failed on Linux without this (2026-11-12). MinGW shows them anyway.
+    CFLAGS.append("-D_GNU_SOURCE")
 target_flags = check.target_flags  # the host CPU (decision 0034); musl keeps its verified flags
 
 # musl 1.1.19's math (third_party/musl, decision 0013). These are the flags its results were

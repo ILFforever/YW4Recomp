@@ -668,17 +668,18 @@ static void overlay_show(Overlay *o, VkImage dst, int w, int h, int32_t x, int32
 static float hud_scale = -1.0f;
 
 float hud_scale_get(void) {
-    float v = __atomic_load_n(&hud_scale, __ATOMIC_ACQUIRE);
+    float v;
+    __atomic_load(&hud_scale, &v, __ATOMIC_ACQUIRE);  /* the generic form: _n takes no float before Clang 19 */
     if (v < 0) {
         const char *e = getenv("YW4_HUD_SCALE");
         v = e && *e && strcmp(e, "auto") ? (float)atof(e) : 0.0f;
         if (v < 0) v = 0;
-        __atomic_store_n(&hud_scale, v, __ATOMIC_RELEASE);
+        __atomic_store(&hud_scale, &v, __ATOMIC_RELEASE);
     }
     return v;
 }
 
-void hud_scale_set(float v) { __atomic_store_n(&hud_scale, v, __ATOMIC_RELEASE); }
+void hud_scale_set(float v) { __atomic_store(&hud_scale, &v, __ATOMIC_RELEASE); }
 
 static float overlay_scale(uint32_t h) {
     float s = hud_scale_get();
