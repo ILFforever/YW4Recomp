@@ -1262,7 +1262,7 @@ int window_pause_to_title(void) {
         if (b) title_keys[title_n++] = b;
         p += n + (p[n] == ',');
     }
-    title_at = 0, title_next_ms = SDL_GetTicks() + 300;
+    title_at = 0, title_next_ms = SDL_GetTicks() + 150;
     pause_to_title();  /* the kept picture stays up while the buttons answer the game's screens behind it */
     fprintf(stderr, "yw4: pause: return to title, %d buttons (%s), behind the kept picture\n", title_n, e);
     return 1;
@@ -1272,8 +1272,11 @@ int window_pause_to_title(void) {
  * player, OR'd into the input */
 uint64_t window_pause_buttons(void) {
     if (title_at < title_n && SDL_GetTicks() >= title_next_ms && !__atomic_load_n(&pause_press, __ATOMIC_ACQUIRE)) {
-        pause_press_button(title_keys[title_at++]);
-        title_next_ms = SDL_GetTicks() + 700;
+        uint64_t b = title_keys[title_at++];
+        pause_press_button(b);
+        /* the pause screen is open already (the player was in the popup): quick; after an A a window may open
+         * (the Yes / No one, about half a second): wait for it before the next button */
+        title_next_ms = SDL_GetTicks() + (b == BTN_A_BIT ? 600 : 250);
         fprintf(stderr, "yw4: pause: return to title, button %d of %d\n", title_at, title_n);
     }
     if (window_paused()) {
@@ -1284,9 +1287,10 @@ uint64_t window_pause_buttons(void) {
             game_pause_toggle();  /* the resume asked while it was pausing */
         } else if (st == PAUSE_OFF) {
             pause_live("the game resumed");
-        } else if (st == PAUSE_TITLE && title_at >= title_n && now > title_next_ms + 2300) {
-            /* 3 s after the last button the game hasn't said it left its pause: the live picture anyway, so it
-             * can't stay frozen (a press lost: then the game's own window is there to answer by hand) */
+        } else if (st == PAUSE_TITLE && title_at >= title_n && now + 100 > title_next_ms) {
+            /* half a second after the last button: the live picture, the game's own fade to its title screen (its
+             * menu state's Exit doesn't run on that way, seen 2026-11-13: nothing to wait for; a press lost: the
+             * game's own window is there to answer by hand) */
             pause_forget();
             pause_live("return to title: the buttons are done");
         } else if (st == PAUSE_WANTED && now - pause_asked_at > 2000) {
