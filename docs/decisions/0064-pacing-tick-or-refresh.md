@@ -93,9 +93,37 @@ Read by the 600-frame windows of the log, not only the whole run:
   each), so neither can help there.
 - Refresh costs CPU: 3 to 5 points of one core at 30, 8 to 14 at 60 (the spin before each deadline).
 
-So far: refresh is clearly better at 30 on a 120 Hz display, the same at 60, and costs some CPU. The default is
-not changed until runs 5 and 6 (frame generation) and a 60 Hz display are measured, and the menus' background
-and a slow pan are watched by eye.
+Runs 5 and 6, the same day and display, cap 60 with frame generation (both really generating: FSR's log says 600
+of 600 frames had a generated one before them; DLSS's says on):
+
+| Frame generation | Way | Frames over 25 ms, whole run | Steady-play spread | Process CPU | Game work p95 |
+|---|---|---|---|---|---|
+| FSR (`YW4_AA=4 YW4_FG=1`) | tick | 221, 222 | 0.26 ms | 141 | 7.95 ms |
+| FSR | refresh | 111, 218 | 0.01 ms | 161 | 9.05 ms |
+| DLSS (`YW4_AA=5 YW4_FG=2`) | tick | 225, 221 | 0.25 ms | 125 | 7.85 ms |
+| DLSS | refresh | 220, 223 | 0.01 ms | 127 | 7.65 ms |
+
+The long frames are again the town's arrival, GPU-bound, the same in both ways (the 111 was one run of two). No
+gain with frame generation; with FSR's, refresh used 20 points more CPU.
+
+The same display switched to 60 Hz (it reports exactly 60.00 Hz, so the drift against a 59.94 Hz display could
+not be tried), the same walk, no frame generation:
+
+| Cap | Way | Frames over 1.5 frame times, whole run | Steady-play spread | Process CPU |
+|---|---|---|---|---|
+| 30 | tick | 57, 33 | 0.25 ms | 62 |
+| 30 | refresh | 6, 7 | 0.01 ms | 65.5 |
+| 60 | tick | 223 | 0.26 ms | 117 |
+| 60 | refresh | 218 | 0.01 ms | 120 |
+
+(At 60 only one pair is whole: the second pair's runs were cut short, most likely by rebuilds that source edits
+during the runs set off in `tools.dev.run`.) So the gain at 30 does not come from the display's faster refresh:
+it is the late-frame rule. A tick wait that misses its tick waits a whole tick more; refresh starts its deadline
+again from the late frame.
+
+Result: refresh is clearly better at 30 on both displays (about one long frame for every eight with the tick),
+the same at 60 with or without frame generation, and costs CPU at 60. Recommended: refresh as the default at 30,
+the tick at 60. The owner decides; not changed yet.
 
 ## Consequences
 
