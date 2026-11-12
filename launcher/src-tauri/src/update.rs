@@ -156,15 +156,18 @@ fn built_version(line: &str) -> Option<Ver> {
 }
 
 /// What the Play screen offers: a game update, a newer launcher, or a rebuild. Nothing for a launcher run from the
-/// repo (it builds the repo's own code).
+/// repo (it builds the repo's own code), except a test feed's launcher offers (YW4_UPDATE_FEED: the box can then be
+/// seen in `tauri dev`).
 #[tauri::command]
 pub async fn check_updates(app: tauri::AppHandle, install: String, built: String, fresh: Option<bool>) -> Updates {
-    let Some(own) = crate::buildrun::bundled_src(&app) else { return Updates::default() };
+    let own = crate::buildrun::bundled_src(&app);
+    if own.is_none() && std::env::var("YW4_UPDATE_FEED").is_err() { return Updates::default() }
     tauri::async_runtime::spawn_blocking(move || {
         let inst = PathBuf::from(&install);
-        let code = game_code(&own, &inst);
+        let code = own.as_deref().map(|own| game_code(own, &inst));
         let mut u = Updates::default();
-        if let (Some(have), Some(built)) = (ver(&code.version), built_version(&built)) {
+        if let Some((Some(have), Some(built))) = code.as_ref().map(|c| (ver(&c.version), built_version(&built))) {
+            let code = code.as_ref().unwrap();
             if have > built {
                 u.rebuild = Some(code.version.clone());
                 u.rebuild_notes = std::fs::read_to_string(code.dir.join("notes.md")).unwrap_or_default();
@@ -196,8 +199,11 @@ pub async fn check_updates(app: tauri::AppHandle, install: String, built: String
                 }));
             }
         }
-        let have = ver(&code.version).unwrap_or((0, 0, 0));
-        u.game = game.filter(|(v, _)| *v > have).map(|(_, g)| g);
+        // from the repo (a test feed) no game offers: the repo's code is what it builds
+        u.game = code.as_ref().and_then(|c| {
+            let have = ver(&c.version).unwrap_or((0, 0, 0));
+            game.filter(|(v, _)| *v > have).map(|(_, g)| g)
+        });
         // a newer version out than the downloaded one waiting to be built: download that instead of building this
         // (2026-11-11: a 0.9.3 that didn't build stood in front of the 0.9.4 that fixed it)
         if u.game.is_some() { u.rebuild = None; u.rebuild_notes.clear(); }
