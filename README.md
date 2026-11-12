@@ -72,6 +72,10 @@ game on your PC once (about 10 to 15 minutes) and starts it. After that it opens
 screenshots, mods, DLC, saves and logs. Its theme is synced with the in-game overlay's. Until it is out, you can
 [build from source](#building-from-source). Every step and screen is on [the launcher's page](https://ilfforever.github.io/YW4Recomp/launcher/).
 
+The launcher building the game (video):
+
+[![YW4 Recomp building process (video on YouTube)](https://i.ytimg.com/vi/Vnpo5EPti9w/maxresdefault.jpg)](https://youtu.be/Vnpo5EPti9w)
+
 ![The launcher: the first start with the welcome popup; your game files; Play with what's new; Settings](docs/screenshots/99-launcher.jpg)
 
 ![Launcher themes: Jibanyan and Whisper](docs/screenshots/99-launcher-themes.jpg)
