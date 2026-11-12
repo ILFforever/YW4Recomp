@@ -261,14 +261,16 @@ fn copy_dlc(app: &AppHandle, plan: &Plan, inst: &Path) -> Result<(), String> {
     Ok(())
 }
 
-/// If data\dlc has the 4++ Upgrade Pack (index 100) and data\dlc-romfs\100\ isn't unpacked yet (added after building),
-/// runs `python -m tools.yw4.extract --dlc-only` so the game can read it (decision 0056).
+/// If data\dlc has a recognised add-on whose data\dlc-romfs\<index>\ isn't unpacked yet (added after building, or
+/// recognised only since: 2026-11-13, a ticket-less add-on 2 the build had passed over), runs
+/// `python -m tools.yw4.extract --dlc-only` so the game can read it (decision 0056). Until then the game leaves such
+/// an add-on out (svc_misc.c): opening one that isn't there stopped the game at the mail delivery.
 pub fn ensure_dlc_extracted(app: &AppHandle, inst: &Path) {
     let dlc = inst.join("data").join("dlc");
     let romfs = inst.join("data").join("dlc-romfs");
     let needed = std::fs::read_dir(&dlc).into_iter().flatten().flatten().map(|e| e.path()).any(|p| {
         p.extension().map_or(false, |x| x.eq_ignore_ascii_case("nsp"))
-            && crate::check::dlc_index_of(&p).map_or(false, |i| i == 100 && !romfs.join("100").is_dir())
+            && crate::check::dlc_index_of(&p).map_or(false, |i| !romfs.join(i.to_string()).is_dir())
     });
     let cfg = inst.join("config.toml");
     if !needed || !cfg.is_file() { return; }
