@@ -18,6 +18,10 @@ from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[2]
 MAX_BYTES = 2 * 1024 * 1024
+# Bundled open-licence fonts (third_party/fonts/README.md) may be larger: the overlay's CJK font is 3.7 MB. Only
+# the size limit is lifted for them; the signature checks below still run.
+LARGE_OK = ("third_party/fonts/",)
+LARGE_OK_SUFFIXES = (".ttf", ".otf")
 
 # Signatures at offset 0.
 MAGICS = {
@@ -54,7 +58,8 @@ def staged_blob(path: str) -> bytes:
 
 
 def problem(path: str, data: bytes) -> str | None:
-    if len(data) > MAX_BYTES:
+    large_ok = path.startswith(LARGE_OK) and path.endswith(LARGE_OK_SUFFIXES)
+    if len(data) > MAX_BYTES and not large_ok:
         return f"{len(data) / 1e6:.1f} MB (limit {MAX_BYTES / 1e6:.0f} MB)"
     kind = MAGICS.get(data[:4])
     if kind:
