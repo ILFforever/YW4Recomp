@@ -641,6 +641,11 @@ async function afterBuild() {
     disabledMods: (inst && inst.disabledMods) || [], icon: inst && inst.icon };  // Settings' choices stay
   syncSettingsButton();
   try { await invoke('save_state', { state: inst }); } catch (e) { logLine('could not remember the install: ' + e); }
+  // the icon the build just made: a first build has none cached, and Ready's install_info (DLC checks) is slow, so
+  // the sidebar showed no icon for a moment (load_state fills it in cheaply from work\icon)
+  if (!inst.icon) {
+    try { const s = await invoke('load_state'); if (s && s.icon) inst.icon = s.icon; } catch (_) {}
+  }
   if (options.desktop || options.startMenu) {
     try { await invoke('make_shortcuts', { state: inst }); } catch (e) { logLine(String(e)); }
   }
@@ -839,17 +844,22 @@ function updateBand(src, isBlurred) {
 }
 
 async function showReady() {
+  const cachedIcon = (inst && inst.icon) || localStorage.getItem('yw4_icon_' + (inst && inst.install));
+  if (cachedIcon) {
+    // the picture loaded before the screen shows (at most a quarter second), or it pops in a moment after
+    const src = T.core.convertFileSrc(cachedIcon);
+    const img = $('game-icon');
+    img.hidden = false;
+    if (img.src !== src) {
+      img.src = src;
+      await Promise.race([img.decode().catch(() => {}), new Promise((r) => setTimeout(r, 250))]);
+    }
+    updateBand(src, true);
+  }
   show('ready');
   if (!$('stat-last').textContent) $('stat-last').textContent = '--';
   if (!$('stat-time').textContent) $('stat-time').textContent = '--';
   if (!$('stat-shots').textContent) $('stat-shots').textContent = '--';
-  const cachedIcon = (inst && inst.icon) || localStorage.getItem('yw4_icon_' + (inst && inst.install));
-  if (cachedIcon) {
-    const src = T.core.convertFileSrc(cachedIcon);
-    $('game-icon').hidden = false;
-    if ($('game-icon').src !== src) $('game-icon').src = src;
-    updateBand(src, true);
-  }
   const info = await invoke('install_info', { install: inst.install });
   const icon = info.icon ? T.core.convertFileSrc(info.icon) : '';
   if (info.icon) {
