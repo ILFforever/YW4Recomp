@@ -426,7 +426,7 @@ footer a { color: var(--gold); }
           el('rect', { x, y, width: w, height: U, rx: 8, class: !lit ? 'unlit' : port ? 'port' : n.move ? 'move' : 'game' }, g);
           const ink = !lit ? 'ink-unlit' : port ? 'ink-port' : 'ink-lit';
           let lines = [];
-          if (lit) lines = n.sc ? [`${n.sc} · ${n.sc + 4}`] : wrap(n.text, U * .19, w - 6, 2);
+          if (lit) lines = wrap(n.text, U * .19, w - 6, 2);  // the D-pad's keys read "Shortcut"; the bar has the numbers
           const capY = !lit ? y + U / 2 : lines.length === 2 ? y + U * .21 : y + U * .29;
           if (TRI[key.code]) {
             const ts = U * .32;
