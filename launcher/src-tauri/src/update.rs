@@ -5,7 +5,9 @@
 //                (release.toml: protocol, min_launcher).
 //   game update  a GitHub release tagged vX.Y.Z with yw4recomp-game-X.Y.Z.zip: downloaded, checked against the
 //                SHA-256 GitHub reports for it, unpacked, then the player rebuilds when they want.
-//   launcher     a release tagged launcher-vA.B.C: the player installs it themselves (its release page).
+//   launcher     a release tagged launcher-vA.B.C with YW4-Recomp-Launcher-A.B.C-setup.exe: on the player's Update
+//                the launcher downloads it, checks it against GitHub's SHA-256, starts it and quits; the installer
+//                replaces it and starts the new one. A release without that file: its page, to install by hand.
 //
 // The check is one request to GitHub's list of releases (no account), at most once an hour (cached beside the
 // launcher's state). If GitHub can't be reached nothing is offered and nothing breaks. Windows' own curl.exe and
@@ -94,8 +96,19 @@ pub fn drop_other_game_code(install: &Path, used: &Path) {
 
 #[derive(Serialize, Clone)]
 pub struct GameOffer { version: String, url: String, sha256: String, size: u64, notes: String }
+/// A newer launcher. url, sha256 and size are its installer's (empty when the release has none with a digest:
+/// then only its page is offered).
 #[derive(Serialize, Clone)]
-pub struct LauncherOffer { version: String, page: String, notes: String }
+pub struct LauncherOffer { version: String, page: String, notes: String, url: String, sha256: String, size: u64 }
+
+/// The installer a launcher release carries (package.py's name for it), with the SHA-256 GitHub reports for it.
+fn launcher_installer(release: &serde_json::Value, v: Ver) -> Option<(String, String, u64)> {
+    let name = format!("YW4-Recomp-Launcher-{}.{}.{}-setup.exe", v.0, v.1, v.2);
+    let a = release["assets"].as_array()?.iter().find(|a| a["name"] == name.as_str())?;
+    let sha256 = a["digest"].as_str()?.strip_prefix("sha256:")?.to_lowercase();
+    let url = a["browser_download_url"].as_str()?.to_string();
+    (sha256.len() == 64).then_some((url, sha256, a["size"].as_u64().unwrap_or(0)))
+}
 #[derive(Serialize, Clone, Default)]
 pub struct Updates {
     game: Option<GameOffer>,          // newer game code on GitHub
@@ -166,7 +179,9 @@ pub async fn check_updates(app: tauri::AppHandle, install: String, built: String
                 if launcher.as_ref().map_or(true, |(b, _)| v > *b) {
                     let page = r["html_url"].as_str().unwrap_or("").to_string();
                     let notes = r["body"].as_str().unwrap_or("").to_string();
-                    launcher = Some((v, LauncherOffer { version: format!("{}.{}.{}", v.0, v.1, v.2), page, notes }));
+                    let (url, sha256, size) = launcher_installer(r, v).unwrap_or_default();
+                    launcher = Some((v, LauncherOffer { version: format!("{}.{}.{}", v.0, v.1, v.2), page, notes,
+                                                        url, sha256, size }));
                 }
             } else if let Some(v) = tag.strip_prefix('v').and_then(ver) {
                 let name = format!("yw4recomp-game-{}.{}.{}.zip", v.0, v.1, v.2);
@@ -245,4 +260,86 @@ pub async fn download_game_update(install: String, version: String, url: String,
             }
         }
     }).await.map_err(|e| e.to_string())?
+}
+
+/// The launcher installer download_launcher_update checked; run_launcher_update starts only this file, so the page
+/// can't hand it any other.
+static CHECKED_INSTALLER: std::sync::Mutex<Option<PathBuf>> = std::sync::Mutex::new(None);
+
+/// Downloads a newer launcher's installer into the temp folder and checks it against GitHub's SHA-256. Only this
+/// repo's release file for that version (a test feed, YW4_UPDATE_FEED, may also point at a local file), and not
+/// while a build runs: the launcher is about to quit.
+#[tauri::command]
+pub async fn download_launcher_update(app: tauri::AppHandle, version: String, url: String, sha256: String) -> Result<(), String> {
+    if crate::buildrun::building(&app) {
+        return Err("A build is running. Update the launcher when it has finished.".into());
+    }
+    tauri::async_runtime::spawn_blocking(move || {
+        let Some(v) = ver(&version) else { return Err("not a launcher update".to_string()) };
+        let v = format!("{}.{}.{}", v.0, v.1, v.2);
+        let name = format!("YW4-Recomp-Launcher-{v}-setup.exe");
+        let github = format!("https://github.com/ILFforever/YW4Recomp/releases/download/launcher-v{v}/{name}");
+        let local_test = std::env::var("YW4_UPDATE_FEED").is_ok() && url.starts_with("file:///");
+        if sha256.len() != 64 || !(url == github || local_test) {
+            return Err("not a launcher update".to_string());
+        }
+        let dir = std::env::temp_dir().join("YW4 Recomp");
+        std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+        let (part, exe) = (dir.join(format!("{name}.part")), dir.join(&name));
+        let _ = std::fs::remove_file(&exe);
+        let ok = hidden(Command::new(system_tool("curl.exe")).args(["-sSfL", "--max-time", "600", "-o"]).arg(&part).arg(&url))
+            .status().map(|s| s.success()).unwrap_or(false);
+        if !ok {
+            let _ = std::fs::remove_file(&part);
+            return Err("The download didn't finish. Check your connection and try again.".into());
+        }
+        let data = std::fs::read(&part).map_err(|e| e.to_string())?;
+        let got: String = Sha256::digest(&data).iter().map(|b| format!("{b:02x}")).collect();
+        if got != sha256.to_lowercase() {
+            let _ = std::fs::remove_file(&part);
+            return Err("The download isn't the file GitHub lists for this launcher. Try again later.".into());
+        }
+        std::fs::rename(&part, &exe).map_err(|e| e.to_string())?;
+        *CHECKED_INSTALLER.lock().map_err(|e| e.to_string())? = Some(exe);
+        Ok(())
+    }).await.map_err(|e| e.to_string())?
+}
+
+/// Starts the checked installer and quits. Its flags (Tauri 2's NSIS installer, checked in the template of
+/// @tauri-apps/cli 2.12.4): /P passive (a progress window, no questions, closes when done), /UPDATE over the
+/// installed launcher without its reinstall questions, /R the new launcher started again afterwards, as the user.
+/// If this launcher hasn't quit by the time the installer looks, the installer closes it (Restart Manager).
+#[tauri::command]
+pub fn run_launcher_update(app: tauri::AppHandle) -> Result<(), String> {
+    let exe = CHECKED_INSTALLER.lock().map_err(|e| e.to_string())?.take().ok_or("no checked installer")?;
+    Command::new(&exe).args(["/P", "/UPDATE", "/R"]).spawn().map_err(|e| format!("couldn't start the installer: {e}"))?;
+    std::thread::spawn(move || {
+        std::thread::sleep(std::time::Duration::from_millis(300));  // the page's answer gets back first
+        app.exit(0);
+    });
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn launcher_installer_from_a_release() {
+        let sha = "ab".repeat(32);
+        let r = serde_json::json!({ "tag_name": "launcher-v1.2.3", "assets": [
+            { "name": "YW4-Recomp-Launcher-1.2.3-portable.zip", "digest": format!("sha256:{sha}"),
+              "browser_download_url": "https://example/zip", "size": 5 },
+            { "name": "YW4-Recomp-Launcher-1.2.3-setup.exe", "digest": format!("sha256:{}", sha.to_uppercase()),
+              "browser_download_url": "https://github.com/ILFforever/YW4Recomp/releases/download/launcher-v1.2.3/YW4-Recomp-Launcher-1.2.3-setup.exe",
+              "size": 7 } ] });
+        let (url, got, size) = launcher_installer(&r, (1, 2, 3)).expect("the installer");
+        assert!(url.ends_with("/launcher-v1.2.3/YW4-Recomp-Launcher-1.2.3-setup.exe"));
+        assert_eq!((got, size), (sha, 7));
+        // no digest (older GitHub uploads), or another version's file: none, the page is offered instead
+        let no_digest = serde_json::json!({ "assets": [{ "name": "YW4-Recomp-Launcher-1.2.3-setup.exe",
+            "browser_download_url": "x" }] });
+        assert!(launcher_installer(&no_digest, (1, 2, 3)).is_none());
+        assert!(launcher_installer(&r, (1, 2, 4)).is_none());
+    }
 }

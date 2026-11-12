@@ -3,7 +3,7 @@
 state: accepted
 date: 2026-11-05
 replaces: 0052 (part)
-code: launcher/VERSION, launcher/package.py, launcher/src-tauri/src/buildrun.rs, tools/yw4/build_install.py
+code: launcher/VERSION, launcher/package.py, launcher/src-tauri/src/buildrun.rs, launcher/src-tauri/src/update.rs, tools/yw4/build_install.py
 -->
 
 Status: **accepted** (2026-11-05, the owner's answers below). **Built** (2026-11-05, tested end to end with a fake
@@ -115,6 +115,22 @@ can try the update again later. It is deleted once the new build has finished.
 3. The build steps move into the game code: yes.
 4. No new dependencies needed without signing.
 5. A failed update build keeps the previous game playable: yes.
+
+## Later: the launcher installs its own update (2026-11-12)
+
+The owner asked that the launcher update itself when the player presses Update, written here (not taken from a
+fork's). It uses no new dependency and no signing key, the same trust as a game update: GitHub's SHA-256 of the
+release file.
+
+- `check_updates` also reads, from a `launcher-vA.B.C` release, the asset `YW4-Recomp-Launcher-A.B.C-setup.exe`
+  (package.py's name) and its digest. A release without it, or without a digest, is offered as before: its page.
+- Update: `download_launcher_update` takes only that version's file from this repo's release downloads, into the temp
+  folder, and checks it; not while a build runs. `run_launcher_update` starts only the file it checked, with Tauri's
+  NSIS flags `/P` (passive: a progress window, no questions), `/UPDATE` (over the installed launcher) and `/R` (the
+  new launcher started afterwards, as the user), then quits. If the launcher is still open when the installer
+  looks, the installer closes it itself (Restart Manager). The flags were read in the installer template of
+  `@tauri-apps/cli` 2.12.4, the version this repo pins.
+- Works from the first launcher that has it: players on an older one still get the page.
 
 ## Then
 

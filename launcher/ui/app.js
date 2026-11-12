@@ -1182,7 +1182,8 @@ function openRebuildOptions() {  // for the Settings page's "Rebuild with other 
 }
 
 // ---- updates (decision 0054): a popup when the Play screen opens, at most one offer: a downloaded game update
-// waiting for its rebuild first, then a game update on GitHub, then a newer launcher (installed by the player).
+// waiting for its rebuild first, then a game update on GitHub, then a newer launcher (installed by the launcher on
+// Update, or by the player from its page when its release has no installer).
 // "Later" doesn't ask again until the launcher is started again.
 const updateDlg = $('update-dlg');
 const laterFor = new Set();  // offers put off in this run
@@ -1255,7 +1256,26 @@ async function showUpdates(info) {
         }
         showUpdates(info);  // now the rebuild question, in the same popup
       }, u.game.notes);
-  } else if (u.launcher) {
+  } else if (u.launcher && u.launcher.sha256) {
+    // the release has its installer: downloaded, checked and started here; the launcher closes and comes back new
+    const l = u.launcher;
+    askUpdate('launcher ' + l.version, `Launcher ${l.version}`,
+      `A new launcher is out: ${gb(l.size)} to download. The launcher closes, installs it and opens again; your game and saves stay.`,
+      'Update', async () => {
+        const btn = $('update-btn');
+        btn.disabled = true;
+        $('update-later').disabled = true;
+        btn.textContent = 'Downloading…';
+        try {
+          await invoke('download_launcher_update', { version: l.version, url: l.url, sha256: l.sha256 });
+          btn.textContent = 'Installing…';
+          await invoke('run_launcher_update');
+        } catch (e) {
+          updateDlg.close();
+          popup('Launcher update', String(e));
+        }
+      }, l.notes);
+  } else if (u.launcher) {  // a release without its installer: its page, to install by hand
     askUpdate('launcher ' + u.launcher.version, `Launcher ${u.launcher.version}`,
       'A new launcher is out. Download it and install it over this one; your game and saves stay.', 'Download', () => {
         updateDlg.close();
