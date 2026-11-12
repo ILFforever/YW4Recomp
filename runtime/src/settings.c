@@ -97,21 +97,29 @@ static const char *mask_speedup_disabled(void) {
     return gpu_pcss_level() ? NULL : "NEEDS SOFT SHADOWS";
 }
 static const char *contact_disabled(void) { return shadow_mask_native() ? NULL : "NEEDS SHADOW MASK SET TO CUSTOM"; }
+/* Why a row is locked when AMD FSR and NVIDIA DLSS are not in the program. On Windows the builder left them out
+ * (recomp.build --no-fsr / --no-dlss). Elsewhere they can't be built in yet, and "not in this build" read like
+ * something had gone wrong (owner, 2026-11-12). */
+#ifdef _WIN32
+#define NOT_BUILT "NOT IN THIS BUILD"
+#else
+#define NOT_BUILT "NOT SUPPORTED ON LINUX YET"
+#endif
 static int reflex_index(void) { return dlssg_reflex(); }  /* what runs: on while DLSS frame generation is */
 static const char *reflex_disabled(void) {
-    if (!gpu_dlss_built()) return "NOT IN THIS BUILD";
+    if (!gpu_dlss_built()) return NOT_BUILT;
     if (!dlssg_reflex_available()) return "NEEDS AN NVIDIA GPU";
     /* locked on, not off: the panels show a reason starting "ALWAYS ON" without their "Off for now" */
     return gpu_fg() == 2 && dlssg_available() ? "ALWAYS ON WITH DLSS FRAME GENERATION. NVIDIA REQUIRES IT" : NULL;
 }
 static const char *fg_disabled(void) {
-    if (!gpu_fsr_built() && !gpu_dlss_built()) return "NOT IN THIS BUILD";
+    if (!gpu_fsr_built() && !gpu_dlss_built()) return NOT_BUILT;
     if (!gpu_fsr_built() && !dlssg_available()) return "NOT SUPPORTED ON THIS GPU";
     return gpu_aa() >= 3 ? NULL : (gpu_dlss_available() ? "NEEDS ANTI-ALIASING SET TO TAA, FSR OR DLSS"
                                                         : "NEEDS ANTI-ALIASING SET TO TAA OR FSR");
 }
 static const char *upscale_disabled(void) {
-    if (!gpu_fsr_built() && !gpu_dlss_built()) return "NOT IN THIS BUILD";
+    if (!gpu_fsr_built() && !gpu_dlss_built()) return NOT_BUILT;
     if (!gpu_fsr_built() && !gpu_dlss_available()) return "NEEDS AN NVIDIA RTX GPU FOR DLSS";
     return gpu_aa() >= 4 ? NULL : (gpu_dlss_available() ? "NEEDS ANTI-ALIASING SET TO FSR OR DLSS"
                                                         : "NEEDS ANTI-ALIASING SET TO FSR");

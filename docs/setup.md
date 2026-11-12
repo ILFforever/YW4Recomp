@@ -18,7 +18,8 @@ the decompressed `main`).
   own, then build and run with `PKG_CONFIG_PATH=<folder>/lib/pkgconfig` and `LD_LIBRARY_PATH=<folder>/lib`.
 - Linux is new (first built and started 2026-11-12, Ubuntu 24.04 under WSL with Clang 19, software rendering): it
   compiles, links and draws the first screens. Not yet tried there: a real GPU, audio, controllers. AMD FSR,
-  NVIDIA DLSS, frame generation and Reflex are Windows only.
+  NVIDIA DLSS, frame generation and Reflex are Windows only: their rows in the settings are locked with "Not
+  supported on Linux yet", and anti-aliasing offers FXAA, SMAA and TAA.
 - On Windows the first build also downloads AMD FSR (upscaling, frame generation), NVIDIA DLSS and NVIDIA
   Streamline (DLSS frame generation, Reflex): about 550 MB in all, once, each checked against a pinned SHA-256
   and kept in `work/deps/`. Later builds are offline. Without internet, download the archive yourself and put it
