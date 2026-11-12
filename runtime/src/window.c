@@ -154,9 +154,30 @@ static int create_swapchain(uint64_t frame) {  /* frame: the game frame being pr
     vkGetPhysicalDeviceSurfaceFormatsKHR(vk.gpu, surface, &nfmt, NULL);
     if (nfmt > 64) nfmt = 64;
     vkGetPhysicalDeviceSurfaceFormatsKHR(vk.gpu, surface, &nfmt, fmts);
-    VkSurfaceFormatKHR fmt = fmts[0];
-    for (uint32_t i = 0; i < nfmt; i++)  /* UNORM: the game's bytes are shown as they are, as on the Switch */
-        if (fmts[i].format == VK_FORMAT_B8G8R8A8_UNORM || fmts[i].format == VK_FORMAT_R8G8B8A8_UNORM) fmt = fmts[i];
+    /* UNORM in the plain sRGB colour space: the game's bytes are shown as they are, as on the Switch. The same
+     * UNORM format can be listed again with other colour spaces (HDR, extended or linear ones: Linux compositors
+     * with colour management); those make the screen read the bytes differently, and an _SRGB format would encode
+     * them a second time: both look pale (issue #3). So the colour space must be SRGB_NONLINEAR too. */
+    int pick = -1;
+    for (uint32_t i = 0; i < nfmt && pick < 0; i++)
+        if ((fmts[i].format == VK_FORMAT_B8G8R8A8_UNORM || fmts[i].format == VK_FORMAT_R8G8B8A8_UNORM) &&
+            fmts[i].colorSpace == VK_COLOR_SPACE_SRGB_NONLINEAR_KHR)
+            pick = (int)i;
+    int second = 0;  /* without one: a UNORM format in any colour space, else the driver's first */
+    for (uint32_t i = nfmt; i-- > 0;)
+        if (fmts[i].format == VK_FORMAT_B8G8R8A8_UNORM || fmts[i].format == VK_FORMAT_R8G8B8A8_UNORM) second = (int)i;
+    VkSurfaceFormatKHR fmt = fmts[pick < 0 ? second : pick];
+    static int fmt_logged;
+    if (!fmt_logged || pick < 0) {  /* once (the swapchain is made again on every resize), or each time it's wrong */
+        fmt_logged = 1;
+        char list[64 * 24] = "", *p = list;
+        for (uint32_t i = 0; i < nfmt && p < list + sizeof list - 24; i++)
+            p += snprintf(p, (size_t)(list + sizeof list - p), "%s%d/%d", i ? " " : "", (int)fmts[i].format,
+                          (int)fmts[i].colorSpace);
+        fprintf(stderr, "yw4: window: screen formats (format/colour space) %s; using %d/%d%s\n", list,
+                (int)fmt.format, (int)fmt.colorSpace,
+                pick < 0 ? ": WARNING no 8-bit UNORM in sRGB colour space, colours may look wrong" : "");
+    }
     uint32_t count = caps.minImageCount + 1;
     if (caps.maxImageCount && count > caps.maxImageCount) count = caps.maxImageCount;
     /* FIFO waits for the monitor's refresh. Above 60 frames/s or with no limit (framerate.c) MAILBOX, else
@@ -340,6 +361,14 @@ static int vk_init(void) {
     if (props.apiVersion < VK_API_VERSION_1_3) {
         fprintf(stderr, "yw4: window: the draw path needs Vulkan 1.3 (decision 0021)\n");
         return -1;
+    }
+    {  /* the driver and the window system, for reports from other PCs (issue #3: RADV on Linux) */
+        VkPhysicalDeviceDriverProperties dp = {.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DRIVER_PROPERTIES};
+        VkPhysicalDeviceProperties2 p2 = {.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2, .pNext = &dp};
+        vkGetPhysicalDeviceProperties2(vk.gpu, &p2);
+        const char *wsys = SDL_GetCurrentVideoDriver();
+        fprintf(stderr, "yw4: window: driver %s, %s (id %d), window system %s\n", dp.driverName, dp.driverInfo,
+                (int)dp.driverID, wsys ? wsys : "?");
     }
     const char *dexts[16] = {VK_KHR_SWAPCHAIN_EXTENSION_NAME};
     uint32_t ndexts = 1;
