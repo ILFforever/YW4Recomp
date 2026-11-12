@@ -23,6 +23,7 @@
  * the game's own code. */
 #include <inttypes.h>
 #include <math.h>
+#include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -35,6 +36,7 @@
 #define MKDIR(p) mkdir(p, 0777)
 #endif
 
+#include "events.h"
 #include "host.h"
 #include "gpu_fg.h"
 #include "framerate.h"
@@ -60,7 +62,7 @@ void yw4_perf_add(int what, int64_t ns) {
     if (a) __atomic_add_fetch(a, ns, __ATOMIC_RELAXED);
 }
 
-static FILE *csv;
+static FILE *csv, *events;  /* events: events.h */
 static char summary_path[600];
 static int enabled = -1, exiting;
 static int64_t t0, last_exit, last_cpu;
@@ -175,6 +177,61 @@ static void write_summary(size_t from, const char *what) {
     }
 }
 
+static void start(void);
+
+void yw4_event_text(const char *kind, uint64_t frame, const char *key, const char *text) {
+    char esc[900];
+    size_t n = 0;
+    for (const unsigned char *p = (const unsigned char *)text; *p && n + 8 < sizeof esc; p++) {
+        if (*p == '"' || *p == '\\') esc[n++] = '\\', esc[n++] = (char)*p;
+        else if (*p < 0x20) n += (size_t)snprintf(esc + n, 7, "\\u%04x", *p);
+        else esc[n++] = (char)*p;
+    }
+    esc[n] = 0;
+    yw4_event(kind, frame, "\"%s\":\"%s\"", key, esc);
+}
+
+void yw4_event(const char *kind, uint64_t frame, const char *fields, ...) {
+    if (enabled < 0) start();
+    if (!events) return;
+    char line[1400];  /* one fputs per line: lines of different threads don't mix */
+    size_t n = (size_t)snprintf(line, sizeof line, "{\"kind\":\"%s\",\"frame\":%" PRIu64 ",\"t\":%.3f", kind, frame,
+                                (double)(host_now_ns() - t0) / 1e9);
+    if (fields && n < sizeof line - 8) {
+        line[n++] = ',';
+        size_t room = sizeof line - n - 3;
+        va_list ap;
+        va_start(ap, fields);
+        int m = vsnprintf(line + n, room, fields, ap);
+        va_end(ap);
+        n += m < 0 ? 0 : (size_t)m < room ? (size_t)m : room - 1;
+    }
+    line[n++] = '}', line[n++] = '\n', line[n] = 0;
+    fputs(line, events);
+    fflush(events);
+}
+
+/* At exit: what was scheduled for a frame the run never got to. A screenshot, an image dump or a setting change
+ * at a frame number is silently not done when the run ends first, and "the tool is broken" was the wrong guess
+ * more than once (2026-11-11: frame numbers reckoned at 60 frames/s in a run at 30). Each of these variables is
+ * a list whose items start with a frame number. */
+static void report_unreached(uint64_t last) {
+    static const char *const at[] = {"YW4_SCREENSHOTS", "YW4_SET_AT", "YW4_DUMP_IMAGE_AT", "YW4_AB_AT", "YW4_DUMP_AT",
+                                     "YW4_CAPTURE_LAYER_AT", "YW4_GPU_TRACE_AT", "YW4_FG_AT", "YW4_FLASH_SAVE",
+                                     "YW4_GBUFFER_ALTERNATE", "YW4_PCSS_ALTERNATE"};
+    for (size_t i = 0; i < sizeof at / sizeof *at; i++)
+        for (const char *p = getenv(at[i]); p && *p;) {
+            char *end;
+            unsigned long long f = strtoull(p, &end, 10);
+            if (end != p && f > last) {
+                fprintf(stderr, "yw4: never reached: %s frame %llu (the run ended at frame %" PRIu64 ")\n", at[i], f, last);
+                yw4_event("unreached", f, "\"what\":\"%s\"", at[i]);
+            }
+            p = strchr(end, ',');
+            if (p) p++;
+        }
+}
+
 static void finish(void) {
     if (!csv) return;
     exiting = 1;
@@ -183,6 +240,11 @@ static void finish(void) {
     csv = NULL;
     write_summary(0, "whole run");
     print_summary(stderr, 0, "yw4: perf, whole run");
+    uint64_t last = nrows ? rows[nrows - 1].frame : 0;
+    report_unreached(last);
+    yw4_event("end", last, "\"frames\":%zu", nrows);
+    if (events) fclose(events);
+    events = NULL;
 }
 
 static void start(void) {
@@ -213,6 +275,9 @@ static void start(void) {
     snprintf(summary_path, sizeof summary_path, "%s/perf_%s.txt", path, when);
     csv = fopen(csv_path, "w");
     if (!csv) return;
+    char events_path[600];
+    snprintf(events_path, sizeof events_path, "%s/perf_%s.jsonl", path, when);
+    events = fopen(events_path, "w");
     fprintf(csv, "frame,t_s,interval_ms,work_ms,present_ms,wait_ms,draws,cpu_pct,rss_mb,gpu_busy_ms,gpu_span_ms,submit_ms,submit_other_ms,sync_ms\n");
     fprintf(stderr, "yw4: performance log %s\n", csv_path);
     uint64_t rss;
@@ -308,6 +373,14 @@ void yw4_perf_hud(HudContent *c, int compact, unsigned parts) {
  * present, exit = after the wait for the flip. */
 void yw4_perf_frame(uint64_t frame, int64_t enter, int64_t shown, int64_t exit_, uint64_t draws) {
     if (enabled < 0) start();
+    /* YW4_EXIT_AT=<frame> (tests): the run ends cleanly once that frame has been presented, so a test lasts as long
+     * as its last scheduled frame needs and not a guessed number of seconds */
+    static uint64_t exit_at = UINT64_MAX;
+    if (exit_at == UINT64_MAX) exit_at = getenv("YW4_EXIT_AT") ? strtoull(getenv("YW4_EXIT_AT"), NULL, 10) : 0;
+    if (exit_at && frame >= exit_at) {
+        fprintf(stderr, "yw4: frame %" PRIu64 " presented, exiting (YW4_EXIT_AT)\n", frame);
+        yw4_exit(0, __FILE__, __LINE__);
+    }
     if (enabled <= 0) return;
     if (!last_exit) {  /* the first present: nothing to compare with yet */
         last_exit = exit_;

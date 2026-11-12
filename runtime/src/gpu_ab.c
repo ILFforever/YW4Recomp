@@ -18,6 +18,7 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "events.h"
 #include "gpu_internal.h"
 
 int gpu_ab_game;  /* the second run: the game's draws (gbuffer.c asks) */
@@ -241,6 +242,8 @@ void gpu_ab_flush(void) {
                     if (first < 0) first = k;
                     differ++;
                 }
+            yw4_event("ab", ab.frame, "\"pass\":\"%s\",\"target\":%d,\"depth\":%d,\"differ\":%ld,\"texels\":%u", ab.pass, i,
+                      t->depth ? 1 : 0, differ, t->g->width * t->g->height * t->g->layers);
             fprintf(stderr, "yw4: ab: %s frame %" PRIu64 " %s %d (%#" PRIx64 ", %ux%u, format %d): %ld of %u texels differ between"
                     " ours and the game's", ab.pass, ab.frame, t->depth ? "depth" : "colour", i, t->g->key.addr, t->g->width,
                     t->g->height, (int)t->g->format, differ, t->g->width * t->g->height * t->g->layers);

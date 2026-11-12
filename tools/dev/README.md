@@ -6,6 +6,7 @@ and keys are in [docs/debugging.md](../../docs/debugging.md). Nothing here conta
 
 | Tool | What it does |
 |---|---|
+| `python -m tools.dev.scene` | **Start here.** A test run by scene name, checked before and after: refuses what would fail silently, runs until the last scheduled frame, then says what was not done. One folder per task, one `result.json` per scene |
 | `python -m tools.dev.run` | One run of the built game from a **fresh copy of a save**, with a replay and settings; prints the log's summaries |
 | `python -m tools.dev.perf_compare` | Two settings, alternating runs of one replay; averages of game work, GPU time, CPU |
 | `python -m tools.dev.shot_compare` | Side by side and difference of the same frames from two screenshot folders |
@@ -14,6 +15,33 @@ and keys are in [docs/debugging.md](../../docs/debugging.md). Nothing here conta
 | `python -m tools.dev.spv_salt` | Makes a compiled shader new to the driver's cache, to test a cold start in the real game |
 | `python -m tools.dev.decisions` | Writes the decisions' index ([docs/decisions/README.md](../../docs/decisions/README.md)) from each record's header; `--check` also finds dead links, `decision NNNN` mentions of records that don't exist and code paths that are gone |
 | `python -m tools.yw4.mainview` | Groups a traced frame into passes with the engine functions that draw them ([frame.md](../../docs/frame.md)) |
+
+## A test run, start to finish
+
+    python -m tools.dev.scene --list
+    python -m tools.dev.scene lategame --task mytest --shots 1650 YW4_SET_AT=1600:YW4_ASPECT=21:9
+    python -m tools.dev.scene busy-all --settings owner --task perf     # every busy scene, one table
+    python -m tools.dev.scene --clean mytest
+
+A scene is a save and a replay by name (`scenes.toml`). The runner exists because the same mistakes kept costing
+an hour each; it checks them instead of a list of pitfalls having to be remembered:
+
+- **Before:** the game isn't already running; the save and replay exist; `--settings` is `none`, `owner` (a *copy*
+  of the owner's `settings.ini`, so a test can't change it) or a full path; every `ENV=value` name is one the
+  runtime reads (`YW4_SHADOW=native` does nothing, silently: it is `YW4_SHADOWS`); 30 GB free before capturing.
+- **How long:** until the last scheduled frame has been presented (`YW4_EXIT_AT`), not a guessed number of
+  seconds, so 30 or 120 frames a second no longer matters. `--frames N` ends at a frame you choose.
+- **After:** every scheduled frame was reached, every screenshot exists, the game didn't stop on an error, each
+  same-frame A/B found 0 texels different. Exit code 1 and a `FAILED:` line otherwise.
+- **Results as data:** `<work>/shots_<task>/<scene>/result.json` has the frame times in play (from 8 s after the
+  3D world first draws), the spikes, and the run's events from the runtime's `perf_<time>.jsonl`
+  (`runtime/src/events.h`: screenshots, setting changes, stalls with their cause, A/B counts, fatal stops). Read
+  that; don't search the log's text.
+- **One folder per task**, with the log, the perf files and the captures. `--clean TASK` deletes it;
+  `--prune DAYS` deletes old files from `work/perf` and `work/logs`.
+
+The game itself now says at a clean exit what it never got to (`yw4: never reached: YW4_SCREENSHOTS frame 900`),
+also when started by hand. `tools.dev.run` is the plain launcher underneath, still there for owner play sessions.
 
 ## Local files these use (in `work/`, not committed)
 

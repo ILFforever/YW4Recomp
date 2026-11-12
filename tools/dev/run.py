@@ -39,8 +39,9 @@ def game_running() -> bool:
 
 def run(cfg: config.Config, save: Path | None, replay: Path | None, seconds: int, exit_at_end: bool,
         env_pairs: list[str], shots: str | None = None, shot_dir: Path | None = None,
-        log: Path | None = None) -> Path:
-    """One run; returns the path of the log it wrote (stdout and stderr of the game)."""
+        log: Path | None = None, outcome: dict | None = None) -> Path:
+    """One run; returns the path of the log it wrote (stdout and stderr of the game). `outcome`, when given, gets
+    "returncode" (None when the time limit stopped the game) and "timed_out"."""
     if game_running():
         sys.exit("yw4.exe is running: close it first")
     run_save = cfg.work_dir / "testsaves" / "save_run"
@@ -72,9 +73,12 @@ def run(cfg: config.Config, save: Path | None, replay: Path | None, seconds: int
     args = [str(exe), str(cfg.work_dir / "exefs"), str(cfg.romfs_dir), str(run_save if save else cfg.work_dir / "save")]
     with open(log, "wb") as out:
         try:
-            subprocess.run(args, env=env, stdout=out, stderr=subprocess.STDOUT, timeout=seconds or None)
+            done = subprocess.run(args, env=env, stdout=out, stderr=subprocess.STDOUT, timeout=seconds or None)
+            if outcome is not None:
+                outcome.update(returncode=done.returncode, timed_out=False)
         except subprocess.TimeoutExpired:
-            pass  # the run's time is up; the log has what it wrote
+            if outcome is not None:  # the run's time is up; the log has what it wrote
+                outcome.update(returncode=None, timed_out=True)
     return log
 
 

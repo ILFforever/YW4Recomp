@@ -24,6 +24,7 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "events.h"
 #include "gbuffer.h"
 #include "gpu_dlssg.h"
 #include "gpu_fg.h"
@@ -96,6 +97,11 @@ void gpu_stop(const char *fmt, ...) {
     vfprintf(stderr, fmt, ap);
     fprintf(stderr, " (not supported yet)\n");
     va_end(ap);
+    char text[600];
+    va_start(ap, fmt);
+    vsnprintf(text, sizeof text, fmt, ap);
+    va_end(ap);
+    yw4_event_text("fatal", 0, "text", text);
     yw4_exit(3, __FILE__, __LINE__);
 }
 
@@ -2262,6 +2268,9 @@ static void stall_report(uint64_t frame) {
      * includes re-uploads of changed textures; the command-buffer wait is one of the GPU waits) */
     double other = (ns[STALL_EXEC] + ns[STALL_PRESENT] - ns[STALL_LOCK] - ns[STALL_PIPE] - ns[STALL_IMAGE] -
                     ns[STALL_SHADER] - ns[STALL_WAIT]) / 1e6;
+    yw4_event("stall", frame, "\"ms\":%.1f,\"where\":\"gpu thread\",\"pipelines\":%ld,\"pipelines_ms\":%.1f,\"images\":%ld,"
+              "\"images_ms\":%.1f,\"gpu_wait_ms\":%.1f", (ns[STALL_EXEC] + ns[STALL_PRESENT]) / 1e6, (long)n[STALL_PIPE],
+              ns[STALL_PIPE] / 1e6, (long)n[STALL_IMAGE], ns[STALL_IMAGE] / 1e6, ns[STALL_WAIT] / 1e6);
     fprintf(stderr, "yw4: stall: frame %" PRIu64 ": %.1f ms of GPU-thread work: %ld command lists %.1f ms, present %.1f; in them: "
             "waiting for the lock %.1f, waiting for the GPU %.1f (for a command buffer %.1f), %ld pipelines built %.1f, "
             "%ld shaders loaded %.1f, %ld images made %.1f with their uploads (%ld texture uploads %.1f), other %.1f\n",
@@ -2510,6 +2519,8 @@ void gpu_present(NvnTexture *t, uint64_t frame, const int crop[4]) {
     dlssg_frame_begin();  /* DLSS frame generation: the next frame starts (Reflex's sleep) */
     int64_t wt2 = host_now_ns();
     if (wt2 - wt0 > 30000000)  /* hitches outside the stall log: the window's present and Reflex's sleep */
+        yw4_event("stall", present_count, "\"ms\":%.1f,\"where\":\"window present\"", (double)(wt2 - wt0) / 1e6);
+    if (wt2 - wt0 > 30000000)
         fprintf(stderr, "yw4: stall: frame %" PRIu64 ": window present %.1f ms, Reflex sleep %.1f ms\n", present_count,
                 (double)(wt1 - wt0) / 1e6, (double)(wt2 - wt1) / 1e6);
 }

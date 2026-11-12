@@ -27,6 +27,7 @@
 #include <SDL3/SDL.h>
 #include <SDL3/SDL_vulkan.h>
 
+#include "events.h"
 #include "host.h"
 #include "bindings.h"
 #include "framerate.h"
@@ -537,7 +538,7 @@ static void save_screenshot(const uint8_t *rgba, uint32_t w, uint32_t h, uint64_
     MKDIR(path);
     snprintf(path, sizeof path, "%s/frame_%06" PRIu64 "%s.bmp", screenshot_dir, n, shot_suffix);
     SDL_Surface *s = SDL_CreateSurfaceFrom((int)w, (int)h, SDL_PIXELFORMAT_ABGR8888, (void *)rgba, (int)w * 4);
-    if (s && SDL_SaveBMP(s, path)) fprintf(stderr, "yw4: screenshot %s\n", path);
+    if (s && SDL_SaveBMP(s, path)) fprintf(stderr, "yw4: screenshot %s\n", path), yw4_event_text("screenshot", n, "path", path);
     else fprintf(stderr, "yw4: screenshot %s failed: %s\n", path, SDL_GetError());
     if (s) SDL_DestroySurface(s);
 }

@@ -6,6 +6,7 @@
 
 #include <SDL3/SDL_filesystem.h>
 
+#include "events.h"
 #include "bindings.h"
 #include "framerate.h"
 #include "gpu_dlss.h"
@@ -638,6 +639,7 @@ void settings_test_at(uint64_t frame) {
                     setting_step(s, 1);
                 }
                 fprintf(stderr, "yw4: settings: %s is %s at frame %llu (YW4_SET_AT)\n", s->env, s->values[s->current()], f);
+                yw4_event("set", f, "\"name\":\"%s\",\"value\":\"%s\"", s->env, s->values[s->current()]);
             }
         p = next ? next + 1 : NULL;
     }

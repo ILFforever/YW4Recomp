@@ -1,0 +1,73 @@
+# Named test scenes for `python -m tools.dev.scene`. A scene is a save to start from and a replay to play;
+# both are the owner's local files under <work_dir> (testsaves/ and inputs/), never committed. Only their
+# names are here.
+#
+#   save     folder in <work_dir>/testsaves (copied before every run: the game autosaves)
+#   replay   file in <work_dir>/inputs (load_save.txt presses through the title into the save)
+#   seconds  how long the run lasts when nothing gives it a last frame (--frames, a screenshot, YW4_..._AT)
+#   about    what the scene is for
+
+[busy]
+save = "save_base_busy"
+replay = "load_save.txt"
+seconds = 115
+about = "The owner's busy spot (~410 draws): the CPU-heavy one"
+
+[lag]
+save = "save_base_lag"
+replay = "load_save.txt"
+seconds = 115
+about = "Slow town place 1: an evening street"
+
+[lag2]
+save = "save_base_lag2"
+replay = "load_save.txt"
+seconds = 115
+about = "Slow town place 2"
+
+[lag3]
+save = "save_base_lag3"
+replay = "load_save.txt"
+seconds = 115
+about = "Slow town place 3"
+
+[lag4]
+save = "save_base_lag4"
+replay = "load_save.txt"
+seconds = 115
+about = "Slow town place 4"
+
+[lategame]
+save = "save_base_lategame"
+replay = "load_save.txt"
+seconds = 115
+about = "The owner's late-game save: the bamboo forest"
+
+[yokaiworld]
+save = "save_base_yokaiworld"
+replay = "load_save.txt"
+seconds = 115
+about = "A Yo-kai World street"
+
+[walk]
+save = "save_base_walk"
+replay = "walk.txt"
+seconds = 175
+about = "A two-minute walk through the town: the only scene that moves"
+
+[school]
+save = "save_school"
+replay = "load_save.txt"
+seconds = 115
+about = "The schoolyard by day, a running character: the renderer's A/B scene"
+
+[forest]
+save = "save_base_forest"
+replay = "load_save.txt"
+seconds = 115
+about = "A forest cutscene"
+
+# Several scenes under one name: `python -m tools.dev.scene busy-all`.
+[groups]
+busy-all = ["busy", "lag", "lag2", "lag3", "lag4", "lategame", "yokaiworld", "walk"]
+all = ["busy", "lag", "lag2", "lag3", "lag4", "lategame", "yokaiworld", "walk", "school", "forest"]
