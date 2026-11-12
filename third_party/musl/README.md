@@ -22,7 +22,7 @@ The sdk's math functions, so the native runtime returns exactly what the Switch 
 - **`src/math/acosf.c`** (marked `YW4 PATCH`): for |x| < 2^-26 and x = −1, the sdk returns the correctly rounded π/2 and π (`0x3fc90fdb`, `0x40490fdb`). musl's `pio2_hi + 0x1p-120f` gives `0x3fc90fda`/`0x40490fda`. The sdk loads these as constants, so Nintendo's compiler folded the expression differently. All 1,249 mismatches were these two values.
 
 Nothing else is changed. Our own files are in `yw4/`:
-- `glue.h`: force-included. Gives every function a `musl_` prefix, so it can't mix with the host libm or be constant-folded as a builtin.
+- `glue.h`: force-included. Gives every function a `musl_` prefix, so it can't mix with the host libm or be constant-folded as a builtin. It reads the host's `<math.h>` first, under the real names, and declares the renamed functions itself: glibc's header does not compile with the names changed.
 - `endian.h`: byte order for hosts without `<endian.h>`.
 
 `sqrt`, `sqrtf`, `floor` (called inside musl) and the imports `ceil`, `floor`, `sqrt`, `fabs` (+ `f` versions) are not taken from here. musl's aarch64 build makes them single instructions, so `runtime/src/hle_math.c` uses the recompiler's exact models of those instructions.
