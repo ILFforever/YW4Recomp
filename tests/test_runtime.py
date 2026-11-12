@@ -6,6 +6,7 @@ import hashlib
 import random
 import subprocess
 import shutil
+import sys
 import tempfile
 import unittest
 from pathlib import Path
@@ -13,6 +14,31 @@ from pathlib import Path
 from recomp import check
 
 RUNTIME = check.REPO / "runtime"
+# glibc hides the POSIX names the runtime uses under -std=c11 (recomp/build.py passes the same off Windows)
+POSIX = [] if sys.platform == "win32" else ["-D_GNU_SOURCE"]
+
+
+def sdl3(folder: Path) -> tuple[list[str], list[str]] | None:
+    """SDL3 for a test program built in `folder`: (compiler flags, what to link), or None when this system has
+    none (the test is skipped). Windows: the pinned package recomp.build uses, in the owner's work folder when
+    there is a config, else a folder of its own under the temp folder (GitHub has no config); its DLL is copied
+    next to the program. Elsewhere: the system's, by pkg-config."""
+    if sys.platform != "win32":
+        try:
+            pc = lambda *a: subprocess.run(["pkg-config", *a, "sdl3"], capture_output=True, text=True,
+                                           check=True).stdout.split()
+            return pc("--cflags"), pc("--libs")
+        except (subprocess.CalledProcessError, FileNotFoundError):
+            return None
+    from types import SimpleNamespace
+    from tools.yw4 import config, deps
+    try:
+        cfg = config.load(require_exefs=False)
+    except config.ConfigError:
+        cfg = SimpleNamespace(work_dir=Path(tempfile.gettempdir()) / "yw4_test_deps")
+    sdl = deps.fetch_sdl(cfg)
+    shutil.copy2(sdl / "bin" / "SDL3.dll", folder / "SDL3.dll")
+    return [f"-I{sdl / 'include'}"], [str(sdl / "lib" / "libSDL3.dll.a")]
 
 SHA_DRIVER = r"""
 #include <stdio.h>
@@ -291,7 +317,7 @@ class RomfsTest(unittest.TestCase):
             (root / "emptydir").mkdir()
             (t / "drv.c").write_text(ROMFS_DRIVER)
             exe = t / "romfs.exe"
-            subprocess.run([check.host_cc(), "-std=c11", "-O1", "-Wall", f"-I{RUNTIME / 'src'}", "-o", str(exe),
+            subprocess.run([check.host_cc(), "-std=c11", "-O1", "-Wall", *POSIX, f"-I{RUNTIME / 'src'}", "-o", str(exe),
                             str(t / "drv.c"), str(RUNTIME / "src" / "romfs.c")], check=True, capture_output=True)
             subprocess.run([str(exe), str(root), str(t / "image.bin")], capture_output=True, check=True)
             img = (t / "image.bin").read_bytes()
@@ -439,7 +465,7 @@ class SwkbdCheckTest(unittest.TestCase):
             subprocess.run([check.host_cc(), "-std=c17", "-O1", "-Wall",
                             f"-I{RUNTIME / 'include'}", f"-I{RUNTIME / 'src'}",
                             f"-I{check.REPO / 'third_party' / 'vulkan' / 'include'}",
-                            f"-I{check.REPO / 'third_party' / 'sdl3' / 'include'}",
+                            *POSIX,
                             "-o", str(exe), str(t / "drv.c")], check=True, capture_output=True)
             got = subprocess.run([str(exe)], capture_output=True, text=True, check=True)
             self.assertEqual(got.returncode, 0)
@@ -457,17 +483,16 @@ HID_VIBRATION_DRIVER = r"""
 #include "host.h"
 #include "kernel.h"
 
-static uint16_t last_low;
-static uint16_t last_high;
-static uint32_t last_duration;
+/* what svc_hid.c hands the window (decision 0058): each band's amplitude (0..1) and frequency */
+static float last_low, last_freq_low, last_high, last_freq_high;
 static int rumble_calls;
 
-void window_rumble(uint16_t low, uint16_t high, uint32_t duration_ms) {
-    last_low = low;
-    last_high = high;
-    last_duration = duration_ms;
+void window_vibration(float amp_low, float freq_low, float amp_high, float freq_high) {
+    last_low = amp_low, last_freq_low = freq_low;
+    last_high = amp_high, last_freq_high = freq_high;
     rumble_calls++;
 }
+static int near(float a, float b) { return fabsf(a - b) < 1e-4f; }
 
 void window_input(uint64_t *buttons, int32_t sticks[4]) {}
 void host_lock(HostLock *l) {}
@@ -521,16 +546,17 @@ int main(void) {
     rumble_calls = 0;
     svc_hid(&s, &req206, &resp);
 
+    /* the stronger amplitude of the two devices per band, the bands' frequencies as sent */
     if (rumble_calls != 1) return 1;
-    if (last_low < 52400 || last_low > 52450) return 2;
-    if (last_high < 26200 || last_high > 26250) return 3;
-    if (last_duration != 1000) return 4;
+    if (!near(last_low, 0.8f)) return 2;
+    if (!near(last_high, 0.4f)) return 3;
+    if (!near(last_freq_low, 160.0f) || !near(last_freq_high, 320.0f)) return 4;
 
     /* 2. Test stopping vibration (zero amplitude) */
     vals[0].amp_low = 0.0f; vals[0].amp_high = 0.0f;
     vals[1].amp_low = 0.0f; vals[1].amp_high = 0.0f;
     svc_hid(&s, &req206, &resp);
-    if (last_low != 0 || last_high != 0 || last_duration != 0) return 5;
+    if (last_low != 0 || last_high != 0) return 5;
 
     /* 3. Test player 2 handle ignored */
     uint32_t p2_handle = 0x00010101; /* npad 1 (player 2) */
@@ -553,8 +579,8 @@ int main(void) {
     req201.data = raw201;
     req201.data_size = 28;
     svc_hid(&s, &req201, &resp);
-    if (last_low < 39300 || last_low > 39350) return 7;
-    if (last_high < 19650 || last_high > 19700) return 8;
+    if (!near(last_low, 0.6f)) return 7;
+    if (!near(last_high, 0.3f)) return 8;
 
     return 0;
 }
@@ -572,7 +598,7 @@ class HidVibrationTest(unittest.TestCase):
             subprocess.run([check.host_cc(), "-std=c17", "-O1", "-Wall",
                             f"-I{RUNTIME / 'include'}", f"-I{RUNTIME / 'src'}",
                             f"-I{check.REPO / 'third_party' / 'vulkan' / 'include'}",
-                            f"-I{check.REPO / 'third_party' / 'sdl3' / 'include'}",
+                            *POSIX,
                             "-o", str(exe), str(t / "drv.c")], check=True, capture_output=True)
             got = subprocess.run([str(exe)], capture_output=True, text=True, check=True)
             self.assertEqual(got.returncode, 0)
@@ -656,16 +682,15 @@ int main(void) {
             t = Path(t)
             (t / "drv_toggle.c").write_text(driver)
             exe = t / "toggle_test.exe"
-            from tools.yw4 import deps, config
-            cfg = config.load()
-            sdl = deps.fetch_sdl(cfg)
-            shutil.copy2(sdl / "bin" / "SDL3.dll", t / "SDL3.dll")
-            sdl_lib = sdl / "lib" / "libSDL3.dll.a"
+            sdl = sdl3(t)
+            if sdl is None:
+                self.skipTest("no SDL3 on this system (pkg-config sdl3)")
+            sdl_flags, sdl_libs = sdl
             subprocess.run([check.host_cc(), "-std=c17", "-O1", "-Wall",
                             f"-I{RUNTIME / 'include'}", f"-I{RUNTIME / 'src'}",
                             f"-I{check.REPO / 'third_party' / 'vulkan' / 'include'}",
-                            f"-I{sdl / 'include'}",
-                            "-o", str(exe), str(t / "drv_toggle.c"), str(sdl_lib)], check=True, capture_output=True)
+                            *POSIX, *sdl_flags,
+                            "-o", str(exe), str(t / "drv_toggle.c"), *sdl_libs], check=True, capture_output=True)
             got = subprocess.run([str(exe)], capture_output=True, text=True, check=True)
             self.assertEqual(got.returncode, 0)
 
@@ -773,15 +798,14 @@ int main(void) {
             t = Path(t)
             (t / "drv_battle_scroll.c").write_text(driver)
             exe = t / "battle_scroll_test.exe"
-            from tools.yw4 import deps, config
-            cfg = config.load()
-            sdl = deps.fetch_sdl(cfg)
-            shutil.copy2(sdl / "bin" / "SDL3.dll", t / "SDL3.dll")
-            sdl_lib = sdl / "lib" / "libSDL3.dll.a"
+            sdl = sdl3(t)
+            if sdl is None:
+                self.skipTest("no SDL3 on this system (pkg-config sdl3)")
+            sdl_flags, sdl_libs = sdl
             subprocess.run([check.host_cc(), "-std=c17", "-O1", "-Wall",
                             f"-I{RUNTIME / 'include'}", f"-I{RUNTIME / 'src'}",
                             f"-I{check.REPO / 'third_party' / 'vulkan' / 'include'}",
-                            f"-I{sdl / 'include'}",
-                            "-o", str(exe), str(t / "drv_battle_scroll.c"), str(sdl_lib)], check=True, capture_output=True)
+                            *POSIX, *sdl_flags,
+                            "-o", str(exe), str(t / "drv_battle_scroll.c"), *sdl_libs], check=True, capture_output=True)
             got = subprocess.run([str(exe)], capture_output=True, text=True, check=True)
             self.assertEqual(got.returncode, 0)
