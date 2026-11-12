@@ -13,6 +13,7 @@
 
 #include "gamemenu.h"
 #include "host.h"
+#include "romfs.h"
 #include "textin.h"
 #include "window.h"
 #include "yw4load.h"
@@ -73,6 +74,57 @@ static int check_name(CPUState *c, const uint8_t *a, const char *name, int utf8,
     fprintf(stderr, "yw4: swkbd: textcheck \"%s\" (callback 0x%llx) -> result %u\n",
             name, (unsigned long long)cb, result);
     return result != 0;
+}
+
+/* A main character's default name for the token the game starts name entry with ("<NAME_KETA_8888>"...), in the
+ * game's language. The names are in data/common/text/ja/chara_text.cfg.bin, as six names, Neptuna (マグロドン),
+ * then the six tokens in the same order (measured in the game's file and the English patch's, 2026-11-13). A
+ * translation mod replaces that file with a loose one, read here; the game's own copy is inside text_all.cpk
+ * (compressed), so without a mod the game's Japanese names below are used. NULL: not a main character's token. */
+static const char *main_name_for(const char *token) {
+    static const char *const tokens[] = {"<NAME_TOUMA", "<NAME_NATSUME", "<NAME_AKINORI",
+                                         "<NAME_SHIN",  "<NAME_KETA",    "<NAME_FUMI"};
+    static const char *const japanese[] = {"トウマ", "ナツメ", "アキノリ", "シン", "ケータ", "フミ"};
+    static char from_mod[6][64];
+    static int loaded;  /* 0 not yet, 1 from the mod's file, -1 the Japanese names */
+    int k = -1;
+    for (int i = 0; i < 6; i++)
+        if (!strncmp(token, tokens[i], strlen(tokens[i]))) k = i;
+    if (k < 0) return NULL;
+    if (!loaded) {
+        loaded = -1;
+        const char *path = romfs_host_path("data/common/text/ja/chara_text.cfg.bin");
+        FILE *f = path ? fopen(path, "rb") : NULL;
+        char *d = NULL;
+        long n = 0;
+        if (f && !fseek(f, 0, SEEK_END) && (n = ftell(f)) > 0 && !fseek(f, 0, SEEK_SET) && (d = malloc((size_t)n + 1)) &&
+            fread(d, 1, (size_t)n, f) == (size_t)n) {
+            d[n] = 0;
+            /* the first token, then the strings before it: Neptuna, then the six names, last first */
+            const char *t = NULL;
+            for (long i = 0; i + 16 <= n && !t; i++)
+                if (!memcmp(d + i, "<NAME_TOUMA_888>", 16) && i > 0 && !d[i - 1]) t = d + i;
+            const char *starts[7];
+            int got = 0;
+            for (const char *p = t ? t - 1 : NULL; p && got < 7 && p > d;) {
+                const char *q = p - 1;  /* p is the zero that ends the string before */
+                while (q > d && q[-1]) q--;
+                const char *s = q;  /* the first string follows the table's 0xFF filler (never in UTF-8) */
+                while (s < p && (unsigned char)*s == 0xFF) s++;
+                if (p - s <= 0 || p - s >= 64) break;
+                starts[got++] = s, p = q - 1;
+            }
+            if (got == 7) {
+                for (int i = 0; i < 6; i++) snprintf(from_mod[i], sizeof from_mod[i], "%s", starts[6 - i]);
+                loaded = 1;
+            }
+            fprintf(stderr, "yw4: swkbd: main characters' names: %s (%s)\n",
+                    loaded == 1 ? "the mod's" : "not found in the mod's file, the game's Japanese ones", path);
+        }
+        if (f) fclose(f);
+        free(d);
+    }
+    return loaded == 1 ? from_mod[k] : japanese[k];
 }
 
 /* nn::ngc::ProfanityFilter: accepts names without requiring the Switch NgWord2 system archive */
@@ -158,12 +210,7 @@ void yw4_swkbd_ShowKeyboard(CPUState *c) {
          * "<NAME_KETA_8888>" for the boy: each main character's default name in the English patch (system_text,
          * 2026-11-07); "My name is..." asks three times, so the token, not the question, tells them apart. Other
          * tokens: no default. A Yo-kai's nickname or a My Set's name starts with real text, kept as is. */
-        static const struct { const char *token, *name; } names[] = {
-            {"<NAME_KETA", "Nate"},       {"<NAME_FUMI", "Katie"},     {"<NAME_NATSUME", "Natsume"},
-            {"<NAME_TOUMA", "Touma"},     {"<NAME_AKINORI", "Akinori"}, {"<NAME_SHIN", "Shin"}};
-        const char *known = NULL;
-        for (size_t i = 0; i < sizeof names / sizeof *names; i++)
-            if (!strncmp(initial, names[i].token, strlen(names[i].token))) known = names[i].name;
+        const char *known = main_name_for(initial);
         snprintf(initial, sizeof initial, "%s", known ? known : "");
     }
     /* a new game asks twice: the boy's name, then "the girl he loves" (English header; 女 in Japanese) */

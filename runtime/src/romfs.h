@@ -16,6 +16,9 @@ int romfs_open(const char *dir);
 uint64_t romfs_size(void);
 /* Reads [offset, offset + size) of the image; returns 0, or -1 on a host read error. */
 int romfs_read(uint64_t offset, void *out, uint64_t size);
+/* The file on disk that serves `path` in the game's image (e.g. "data/common/text/ja/chara_text.cfg.bin"), mods
+ * laid over; NULL if the image has no such loose file (a file inside a .cpk isn't one). */
+const char *romfs_host_path(const char *path);
 
 /* Another image built the same way, without mods: an add-on's RomFS (fsp-srv OpenDataStorageByDataId, decision
  * 0056). NULL if `dir` can't be read. */

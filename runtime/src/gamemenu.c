@@ -16,6 +16,7 @@
 #include "theme.h"
 #include "window.h"
 #include "host.h"
+#include "romfs.h"
 
 static int open_, sel, confirm, choice;
 static int focus;             /* 0 the side panel, 1 the page it shows (Settings) */
@@ -69,46 +70,157 @@ void gamemenu_prompt_options(int min_chars, int cancel) { prompt_min = min_chars
 /* The on-screen keyboard (owner, 2026-11-07: "make it simple"): a letter grid in the popup while a controller is in
  * use (the hints follow the last device), as the Switch's own keyboard; QWERTY. D-pad moves, A types, B deletes (on an
  * empty field: Cancel where offered), Y capitals on or off, Done answers. The first letter is a
- * capital, the next ones small, as names are written. The mouse can press its keys too. */
-enum { OSK_COLS = 10, OSK_ROWS = 5 };
+ * capital, the next ones small, as names are written. The mouse can press its keys too.
+ * Three pages (owner, 2026-11-13, mockup option A): ABC, hiragana and katakana, switched by LB / RB (L1 / R1, Q / E)
+ * or the tabs above the keys. A kana page is the gojūon table as Japanese keyboards lay it out: a column per
+ * consonant, the あ column on the right, a i u e o downwards; its last row has ゛゜ (also Y) and 小, which change the
+ * letter before the cursor (か が, は ば ぱ, つ っ). A name in the Japanese game opens on あ, with a translation mod
+ * (its own chara_text, romfs_host_path) on ABC. The popup keeps the kana pages' height on the ABC page too. */
+enum { OSK_COLS = 10, OSK_ROWS = 6 };  /* a kana page's rows: five of letters, then the last; ABC has four */
 /* QWERTY (owner, 2026-11-07), the numbers on top as on a keyboard */
-static const char *const osk_keys[OSK_ROWS - 1] = {"1234567890", "QWERTYUIOP", "ASDFGHJKL'", "ZXCVBNM-.!"};
-enum { OSK_SHIFT, OSK_SPACE, OSK_DELETE, OSK_DONE };  /* the last row: its keys and the columns they cover */
-static const int osk_last[4][2] = {{0, 2}, {2, 6}, {6, 8}, {8, 10}};
-static int osk_row, osk_col, osk_caps = 1, osk_shown;
+static const char *const osk_keys[4] = {"1234567890", "QWERTYUIOP", "ASDFGHJKL'", "ZXCVBNM-.!"};
+/* the kana columns from あ to わ ("": no key); katakana are the same letters moved by 0x60 */
+static const char *const osk_kana[OSK_COLS][5] = {
+    {"あ", "い", "う", "え", "お"}, {"か", "き", "く", "け", "こ"}, {"さ", "し", "す", "せ", "そ"},
+    {"た", "ち", "つ", "て", "と"}, {"な", "に", "ぬ", "ね", "の"}, {"は", "ひ", "ふ", "へ", "ほ"},
+    {"ま", "み", "む", "め", "も"}, {"や", "", "ゆ", "", "よ"},     {"ら", "り", "る", "れ", "ろ"},
+    {"わ", "を", "ん", "ー", "！"}};
+enum { OSK_SHIFT, OSK_SPACE, OSK_DELETE, OSK_DONE, OSK_VOICE, OSK_SMALL };
+typedef struct {
+    const char *label;
+    int c0, c1, act;  /* the columns it covers, [c0, c1) */
+} OskKey;
+static const OskKey osk_last_abc[] = {
+    {"Shift", 0, 2, OSK_SHIFT}, {"Space", 2, 6, OSK_SPACE}, {"Delete", 6, 8, OSK_DELETE}, {"Done", 8, 10, OSK_DONE}};
+static const OskKey osk_last_kana[] = {{"゛゜", 0, 2, OSK_VOICE},    {"小", 2, 4, OSK_SMALL}, {"Space", 4, 6, OSK_SPACE},
+                                       {"Delete", 6, 8, OSK_DELETE}, {"Done", 8, 10, OSK_DONE}};
+static const char *const osk_page_names[3] = {"ABC", "あ", "ア"};
+static int osk_row, osk_col, osk_caps = 1, osk_shown, osk_page;  /* osk_page: 0 ABC, 1 hiragana, 2 katakana */
 
+static const OskKey *osk_last(int *n) {
+    *n = osk_page ? 5 : 4;
+    return osk_page ? osk_last_kana : osk_last_abc;
+}
+static int osk_letter_rows(void) { return osk_page ? 5 : 4; }
 static int osk_last_key(int col) {
-    for (int k = 0; k < 4; k++)
-        if (col >= osk_last[k][0] && col < osk_last[k][1]) return k;
-    return OSK_DONE;
+    int n;
+    const OskKey *L = osk_last(&n);
+    for (int k = 0; k < n; k++)
+        if (col >= L[k].c0 && col < L[k].c1) return k;
+    return n - 1;
+}
+
+static uint32_t osk_utf8_cp(const char *s) {
+    const unsigned char *p = (const unsigned char *)s;
+    if (p[0] < 0x80) return p[0];
+    if (p[0] < 0xE0) return (uint32_t)(p[0] & 31) << 6 | (p[1] & 63);
+    if (p[0] < 0xF0) return (uint32_t)(p[0] & 15) << 12 | (uint32_t)(p[1] & 63) << 6 | (p[2] & 63);
+    return (uint32_t)(p[0] & 7) << 18 | (uint32_t)(p[1] & 63) << 12 | (uint32_t)(p[2] & 63) << 6 | (p[3] & 63);
+}
+static void osk_utf8_put(uint32_t cp, char out[5]) {  /* the kana are all 3 bytes; others as needed */
+    if (cp < 0x80) out[0] = (char)cp, out[1] = 0;
+    else if (cp < 0x800) out[0] = (char)(0xC0 | cp >> 6), out[1] = (char)(0x80 | (cp & 63)), out[2] = 0;
+    else out[0] = (char)(0xE0 | cp >> 12), out[1] = (char)(0x80 | (cp >> 6 & 63)), out[2] = (char)(0x80 | (cp & 63)),
+         out[3] = 0;
+}
+
+/* The letter key at (r, col) of the page, as UTF-8 ("" where the page has no key). */
+static void osk_letter(int r, int col, char out[8]) {
+    out[0] = 0;
+    if (!osk_page) {
+        out[0] = osk_keys[r][col], out[1] = 0;
+        if (!osk_caps && out[0] >= 'A' && out[0] <= 'Z') out[0] = (char)(out[0] + 32);
+        return;
+    }
+    snprintf(out, 8, "%s", osk_kana[OSK_COLS - 1 - col][r]);  /* the あ column on the right */
+    uint32_t cp = osk_utf8_cp(out);
+    if (osk_page == 2 && cp >= 0x3041 && cp <= 0x3096) osk_utf8_put(cp + 0x60, out);
+}
+
+/* ゛゜ and 小 on a kana letter (hiragana or katakana; anything else: unchanged). Unicode keeps each voiced letter
+ * right after its plain one (か が), は's two after it (は ば ぱ), a small one right before its big one (ぁ あ). */
+static uint32_t kana_change(uint32_t cp, int small) {
+    uint32_t k = cp >= 0x30A1 && cp <= 0x30F6 ? 0x60 : 0, h = cp - k;
+    if (!small) {
+        if (h >= 0x304B && h <= 0x3062) h = (h - 0x304B) % 2 ? h - 1 : h + 1;       /* か..ぢ */
+        else if (h >= 0x3064 && h <= 0x3069) h = (h - 0x3064) % 2 ? h - 1 : h + 1;  /* つ..ど */
+        else if (h >= 0x306F && h <= 0x307D) h = (h - 0x306F) % 3 == 2 ? h - 2 : h + 1;  /* は..ぽ */
+        else if (h == 0x3046 || h == 0x3094) h = h == 0x3046 ? 0x3094 : 0x3046;    /* う ゔ */
+        else return cp;
+    } else {
+        if (h >= 0x3041 && h <= 0x304A) h = (h - 0x3041) % 2 ? h - 1 : h + 1;       /* ぁ..お */
+        else if (h >= 0x3083 && h <= 0x3088) h = (h - 0x3083) % 2 ? h - 1 : h + 1;  /* ゃ..よ */
+        else if (h == 0x3063 || h == 0x3064) h = h == 0x3063 ? 0x3064 : 0x3063;    /* っ つ */
+        else if (h == 0x308E || h == 0x308F) h = h == 0x308E ? 0x308F : 0x308E;    /* ゎ わ */
+        else return cp;
+    }
+    return h + k;
+}
+static void osk_change_last(int small) {  /* the letter before the cursor */
+    char t[TEXTIN_MAX], ch[5];
+    int cur = 0;
+    textin_read(&prompt_text, t, sizeof t, &cur, NULL);
+    if (cur <= 0) return;
+    int s = cur - 1;
+    while (s > 0 && ((unsigned char)t[s] & 0xC0) == 0x80) s--;
+    uint32_t cp = osk_utf8_cp(t + s), to = kana_change(cp, small);
+    if (to == cp) return;
+    osk_utf8_put(to, ch);
+    textin_focus(&prompt_text), textin_edit(TI_BACK), textin_type(ch);
 }
 
 static void prompt_finish(void);
 static void osk_press(void) {
-    if (osk_row < OSK_ROWS - 1) {
-        char ch[2] = {osk_keys[osk_row][osk_col], 0};
-        if (!osk_caps && ch[0] >= 'A' && ch[0] <= 'Z') ch[0] = (char)(ch[0] + 32);
+    if (osk_row < osk_letter_rows()) {
+        char ch[8];
+        osk_letter(osk_row, osk_col, ch);
+        if (!ch[0]) return;
         textin_focus(&prompt_text);
         textin_type(ch);
-        if (ch[0] != ' ') osk_caps = 0;  /* a capital first, then small letters */
+        if (!osk_page && ch[0] != ' ') osk_caps = 0;  /* a capital first, then small letters */
         return;
     }
-    switch (osk_last_key(osk_col)) {
+    int n;
+    switch (osk_last(&n)[osk_last_key(osk_col)].act) {
     case OSK_SHIFT: osk_caps ^= 1; break;
     case OSK_SPACE: textin_focus(&prompt_text), textin_type(" "); break;
     case OSK_DELETE: textin_focus(&prompt_text), textin_edit(TI_BACK); break;
     case OSK_DONE: prompt_finish(); break;
+    case OSK_VOICE: osk_change_last(0); break;
+    case OSK_SMALL: osk_change_last(1); break;
     }
 }
 
+static int osk_has(int r, int col) {  /* a key at (r, col): the last row, or a letter there */
+    if (r == OSK_ROWS - 1) return 1;
+    if (r >= osk_letter_rows()) return 0;
+    char ch[8];
+    osk_letter(r, col, ch);
+    return ch[0] != 0;
+}
+
 static void osk_move(int a) {
-    if (a == GM_UP) osk_row = (osk_row + OSK_ROWS - 1) % OSK_ROWS;
-    else if (a == GM_DOWN) osk_row = (osk_row + 1) % OSK_ROWS;
-    else if (osk_row == OSK_ROWS - 1) {  /* the last row moves key by key */
+    if (a == GM_UP || a == GM_DOWN) {  /* past the gaps (や's column; ABC's row left free) */
+        int r = osk_row;
+        do r = a == GM_UP ? (r + OSK_ROWS - 1) % OSK_ROWS : (r + 1) % OSK_ROWS;
+        while (!osk_has(r, osk_col));
+        osk_row = r;
+    } else if (osk_row == OSK_ROWS - 1) {  /* the last row moves key by key */
+        int n;
+        const OskKey *L = osk_last(&n);
         int k = osk_last_key(osk_col);
-        k = a == GM_LEFT ? (k + 3) % 4 : (k + 1) % 4;
-        osk_col = osk_last[k][0];
-    } else osk_col = a == GM_LEFT ? (osk_col + OSK_COLS - 1) % OSK_COLS : (osk_col + 1) % OSK_COLS;
+        k = a == GM_LEFT ? (k + n - 1) % n : (k + 1) % n;
+        osk_col = L[k].c0;
+    } else {
+        do osk_col = a == GM_LEFT ? (osk_col + OSK_COLS - 1) % OSK_COLS : (osk_col + 1) % OSK_COLS;
+        while (!osk_has(osk_row, osk_col));
+    }
+}
+
+static void osk_set_page(int p) {
+    osk_page = (p + 3) % 3;
+    if (!osk_has(osk_row, osk_col)) osk_row = osk_row >= osk_letter_rows() && osk_row < OSK_ROWS - 1 ? osk_letter_rows() - 1 : 0;
+    if (!osk_has(osk_row, osk_col)) osk_row = 0;
 }
 
 void gamemenu_prompt_begin(const char *title, int max_chars, const char *fallback) {
@@ -124,7 +236,12 @@ void gamemenu_prompt_begin(const char *title, int max_chars, const char *fallbac
     prompt_label = strstr(low, "password") ? "Password" : strstr(low, "code") ? "Code" : "Name";
     textin_clear(&prompt_text);
     prompt_text.max_chars = max_chars > 0 ? max_chars : 0;
-    osk_row = 1, osk_col = 0, osk_caps = 1;  /* on Q */
+    /* a name in the Japanese game: あ (on あ itself, the top right); else ABC on Q. A translation mod has its own
+     * character names (swkbd.c reads them from the same file); passwords and codes are Latin letters. */
+    int kana = !strcmp(prompt_label, "Name") && !romfs_host_path("data/common/text/ja/chara_text.cfg.bin");
+    osk_page = kana, osk_caps = 1;
+    if (kana) osk_row = 0, osk_col = OSK_COLS - 1;
+    else osk_row = 1, osk_col = 0;
     __atomic_store_n(&prompt_finished, 0, __ATOMIC_RELEASE);
     __atomic_store_n(&prompting, 1, __ATOMIC_RELEASE);
     __atomic_store_n(&open_, 1, __ATOMIC_RELEASE);
@@ -536,7 +653,9 @@ void gamemenu_action(int a) {
             textin_read(&prompt_text, t, sizeof t, NULL, NULL);
             if (a == GM_UP || a == GM_DOWN || a == GM_LEFT || a == GM_RIGHT) osk_move(a);
             else if (a == GM_ACCEPT) osk_press();
+            else if (a == GM_ALT && osk_page) osk_change_last(0);  /* Y: ゛゜ on a kana page, else capitals */
             else if (a == GM_ALT) osk_caps ^= 1;
+            else if (a == GM_PREV || a == GM_NEXT) osk_set_page(osk_page + (a == GM_NEXT ? 1 : -1));
             else if ((a == GM_BACK || a == GM_LEAVE || a == GM_CLEAR) && t[0]) textin_focus(&prompt_text), textin_edit(TI_BACK);
             else if (a == GM_BACK || a == GM_LEAVE) gamemenu_prompt_cancel();
             return;
@@ -588,7 +707,7 @@ void gamemenu_refresh(void) { changed(); }
 enum { HIT_SIDE, HIT_SECTION, HIT_ROW, HIT_ROW_PREV, HIT_ROW_NEXT, HIT_BIND, HIT_MODE, HIT_CORNER, HIT_CORNER_BOX,
        HIT_PART, HIT_SLIDER, HIT_POPUP, HIT_HINT, HIT_BIND_STEP, HIT_PREVIEW,
        HIT_BUG_KIND, HIT_BUG_TEXT, HIT_BUG_OFTEN, HIT_BUG_NEXT, HIT_BUG_TICK, HIT_BUG_BTN, HIT_BUG_DONE,
-       HIT_PROMPT_FIELD, HIT_PROMPT_OK, HIT_PROMPT_CANCEL, HIT_OSK_KEY,
+       HIT_PROMPT_FIELD, HIT_PROMPT_OK, HIT_PROMPT_CANCEL, HIT_OSK_KEY, HIT_OSK_PAGE,
        HIT_KV_TAB, HIT_KV_MODE, HIT_KV_KEY, HIT_PV_PART };
 #define HINT_CLOSE (-1)  /* a key hint's action: close the overlay */
 typedef struct {
@@ -654,6 +773,7 @@ void gamemenu_mouse(float x, float y, int button) {
             if (osk_row != h.a || osk_col != h.b) osk_row = h.a, osk_col = h.b, changed();
             if (button == 1) osk_press(), changed();
         }
+        if (button == 1 && found && h.kind == HIT_OSK_PAGE && h.a != osk_page) osk_set_page(h.a), changed();
         return;
     }
     if (button == 3) {  /* the right button: back, as Escape */
@@ -2480,7 +2600,7 @@ void gamemenu_draw(const UiCanvas *c, const GameMenuInfo *in) {
         static int osk_force = -1;  /* YW4_OSK=1: the keyboard with any device (tests, touch screens) */
         if (osk_force < 0) osk_force = getenv("YW4_OSK") && *getenv("YW4_OSK") == '1';
         osk_shown = (in->pad || osk_force) && !prompt_body[0];
-        float kh = 50, kgap = 8, osk_h = osk_shown ? 14 + OSK_ROWS * (kh + kgap) : 0;
+        float kh = 50, kgap = 8, tab_h = 40, osk_h = osk_shown ? 14 + tab_h + 12 + OSK_ROWS * (kh + kgap) : 0;
         float body = prompt_body[0] ? 24 + msg_h + 24 : 24 + llh + 8 + fh + 12 + llh + osk_h + 22;
         float tray = 16 + 52 + 16, ph = bar + 3 + body + tray;
         float px = (W - pw) / 2, py = (H - 56 - ph) / 2;
@@ -2526,26 +2646,42 @@ void gamemenu_draw(const UiCanvas *c, const GameMenuInfo *in) {
         snprintf(help, sizeof help, "%s%s%s%s%s", osk_shown ? "Pick the letters below." : "Type with your keyboard.", limit,
                  prompt_fallback[0] ? " Leave it empty for " : "", prompt_fallback, prompt_fallback[0] ? "." : "");
         ui_text(c, UI_GOTHIC_500, 16, bx, y, llh, help, MUTED);
-        if (osk_shown) {  /* the on-screen keyboard: ten columns, the chosen key gold */
+        if (osk_shown) {  /* the on-screen keyboard: the pages' tabs, then ten columns, the chosen key gold */
             float ky = y + llh + 14, kw = (bw - (OSK_COLS - 1) * kgap) / OSK_COLS;
+            {  /* LB  [ABC] [あ] [ア]  RB: the page shown plum */
+                const char *lb = in->pad == 2 ? "L1" : "LB", *rb = in->pad == 2 ? "R1" : "RB";
+                float sw = ui_text_w(UI_ROUNDED_800, 13, "L1") + 18;
+                if (ui_text_w(UI_ROUNDED_800, 13, "LB") + 18 > sw) sw = ui_text_w(UI_ROUNDED_800, 13, "LB") + 18;
+                float sh = 26, sy = ky + (tab_h - sh) / 2, tx = bx + sw + kgap, tw = (bw - 2 * (sw + kgap) - 2 * kgap) / 3;
+                ui_box(c, bx, sy, sw, sh, 8, PLUM, 0, 0);
+                ui_text_in(c, UI_ROUNDED_800, 13, bx, sy, sw, sh, 1, lb, SNOW);
+                ui_box(c, bx + bw - sw, sy, sw, sh, 8, PLUM, 0, 0);
+                ui_text_in(c, UI_ROUNDED_800, 13, bx + bw - sw, sy, sw, sh, 1, rb, SNOW);
+                for (int p = 0; p < 3; p++, tx += tw + kgap) {
+                    int cur_page = p == osk_page;
+                    ui_box(c, tx, ky, tw, tab_h, 10, cur_page ? PLUM : WHITE, cur_page ? 0 : 2, LINE);
+                    ui_text_in(c, UI_ROUNDED_800, 18, tx, ky, tw, tab_h, 1, osk_page_names[p], cur_page ? SNOW : PLUM);
+                    hit_add(tx, ky, tw, tab_h, HIT_OSK_PAGE, p, 0);
+                }
+                ky += tab_h + 12;
+            }
+            int nlast;
+            const OskKey *L = osk_last(&nlast);
             for (int r = 0; r < OSK_ROWS; r++, ky += kh + kgap) {
-                int nkeys = r < OSK_ROWS - 1 ? OSK_COLS : 4;
+                int last = r == OSK_ROWS - 1, nkeys = last ? nlast : r < osk_letter_rows() ? OSK_COLS : 0;
                 for (int k = 0; k < nkeys; k++) {
-                    int c0 = r < OSK_ROWS - 1 ? k : osk_last[k][0], c1 = r < OSK_ROWS - 1 ? k + 1 : osk_last[k][1];
+                    int c0 = last ? L[k].c0 : k, c1 = last ? L[k].c1 : k + 1;
+                    char label[16];
+                    if (last) snprintf(label, sizeof label, "%s", L[k].label);
+                    else osk_letter(r, k, label);
+                    if (!label[0]) continue;  /* や's column: no key in the gaps */
                     float kx = bx + (float)c0 * (kw + kgap), w2 = (float)(c1 - c0) * (kw + kgap) - kgap;
                     int on = osk_row == r && osk_col >= c0 && osk_col < c1;
-                    char label[16];
-                    if (r < OSK_ROWS - 1) {
-                        label[0] = osk_keys[r][k], label[1] = 0;
-                        if (!osk_caps && label[0] >= 'A' && label[0] <= 'Z') label[0] = (char)(label[0] + 32);
-                    } else {
-                        static const char *const names[4] = {"Shift", "Space", "Delete", "Done"};
-                        snprintf(label, sizeof label, "%s", names[k]);
-                    }
-                    int shift_on = r == OSK_ROWS - 1 && k == OSK_SHIFT && osk_caps, done = r == OSK_ROWS - 1 && k == OSK_DONE;
+                    int shift_on = last && L[k].act == OSK_SHIFT && osk_caps, done = last && L[k].act == OSK_DONE;
+                    int word = last && label[0] >= 'A' && label[0] <= 'Z';  /* Shift, Space...: smaller than letters */
                     uint32_t fill = on ? GOLD : done ? PLUM : shift_on ? LILAC : WHITE;
                     ui_box(c, kx, ky, w2, kh, 10, fill, on ? 0 : 2, LINE);
-                    ui_text_in(c, UI_ROUNDED_800, r < OSK_ROWS - 1 ? 22 : 17, kx, ky, w2, kh, 1, label,
+                    ui_text_in(c, UI_ROUNDED_800, word ? 17 : 22, kx, ky, w2, kh, 1, label,
                                on ? ON_GOLD : done ? SNOW : PLUM);
                     hit_add(kx, ky, w2, kh, HIT_OSK_KEY, r, c0);
                 }
@@ -2572,7 +2708,8 @@ void gamemenu_draw(const UiCanvas *c, const GameMenuInfo *in) {
             hx += hint(c, hx, by, "D-pad", "Move") + 28;
             hx += hint(c, hx, by, ps ? "Cross" : "A", "Type") + 28;
             hx += hint(c, hx, by, ps ? "Circle" : "B", can_cancel ? "Delete / Cancel" : "Delete") + 28;
-            hint(c, hx, by, ps ? "Triangle" : "Y", "Capitals");
+            hx += hint(c, hx, by, ps ? "Triangle" : "Y", osk_page ? "゛゜" : "Capitals") + 28;
+            hint(c, hx, by, ps ? "L1 R1" : "LB RB", "Letters");
         } else if (in->pad) {
             hx += hint(c, hx, by, in->pad == 2 ? "Cross" : "A", "OK") + 28;
             if (can_cancel) hint(c, hx, by, in->pad == 2 ? "Circle" : "B", "Cancel");

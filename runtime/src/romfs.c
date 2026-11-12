@@ -306,6 +306,7 @@ struct RomfsImage {
     uint64_t tables_off, tables_size, image_size, data_size;
 };
 static RomfsImage game;
+static const Dir *game_root;  /* the game's tree with the mods laid over it (romfs_host_path) */
 
 static void flatten(RomfsImage *m, Dir *d) {
     for (int i = 0; i < d->nfiles; i++) {
@@ -418,7 +419,26 @@ int romfs_open(const char *dir) {
     }
     apply_mods(root);
     build(&game, root, dir);
+    game_root = root;
     return 0;
+}
+
+const char *romfs_host_path(const char *path) {
+    const Dir *d = game_root;
+    while (d && *path) {
+        const char *slash = strchr(path, '/');
+        size_t n = slash ? (size_t)(slash - path) : strlen(path);
+        if (!slash) {
+            for (int i = 0; i < d->nfiles; i++)
+                if (strlen(d->files[i]->name) == n && !strncmp(d->files[i]->name, path, n)) return d->files[i]->path;
+            return NULL;
+        }
+        const Dir *next = NULL;
+        for (int i = 0; i < d->ndirs && !next; i++)
+            if (strlen(d->dirs[i]->name) == n && !strncmp(d->dirs[i]->name, path, n)) next = d->dirs[i];
+        d = next, path = slash + 1;
+    }
+    return NULL;
 }
 
 RomfsImage *romfs_image_open(const char *dir) {
