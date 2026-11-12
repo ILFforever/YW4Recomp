@@ -751,7 +751,11 @@ static VkPipeline build_pipeline(Program *g, const PipeKey *k, int64_t *took) {
  * Shader.model: redrawn every frame) needs a pipeline that neither this run nor the journal has seen, the
  * build goes to a background thread and the draw is skipped until it is ready: the object shows a few frames
  * late, the very first time only (then the cache on disk has it). Everything else (the UI, full-screen
- * passes, render-to-texture that may be drawn once) still builds in its frame. YW4_ASYNC_PIPELINES=0: off. */
+ * passes, render-to-texture that may be drawn once) still builds in its frame.
+ *
+ * Off unless YW4_ASYNC_PIPELINES=1 (the owner, 2026-11-12): an object missing for a few frames is worse than a
+ * hitch that happens once, and with the cache and the journal's prewarm a pipeline is new only the first time
+ * it is ever drawn. Off, every pipeline builds in its frame, as before. */
 enum { ASYNC_THREADS = 3, ASYNC_QUEUE = 1024 };
 typedef struct {
     Program *g;
@@ -786,7 +790,7 @@ static void async_thread(void *arg) {
 static int async_enabled(void) {
     if (async_on < 0) {
         const char *e = getenv("YW4_ASYNC_PIPELINES");
-        async_on = !(e && *e == '0');
+        async_on = e && *e && *e != '0';
         if (async_on) {
             host_lock_init(&async_lock);
             host_cond_init(&async_cond);
@@ -812,7 +816,7 @@ static VkPipeline pipeline(Program *g, const PipeKey *k) {
         }
     Pipe *p = calloc(1, sizeof *p);
     p->key = *k;
-    if (!g->warm && g->sh[ST_VERT] && g->sh[ST_VERT]->model && !journal_knows(g, k) && async_enabled()) {
+    if (!g->warm && g->sh[ST_VERT] && g->sh[ST_VERT]->model && async_enabled() && !journal_knows(g, k)) {
         host_lock(&async_lock);
         int room = async_head - async_tail < ASYNC_QUEUE;
         if (room) {
