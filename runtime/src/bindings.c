@@ -43,7 +43,7 @@ static const Input inputs[] = {
     {"BUTTONS", "PLUS", "PLUS", 10, 0, 0, {SDL_SCANCODE_P, SDL_SCANCODE_ESCAPE}, SDL_GAMEPAD_BUTTON_START},
     {"BUTTONS", "MINUS", "MINUS", 11, 0, 0, {SDL_SCANCODE_X}, SDL_GAMEPAD_BUTTON_BACK},
     {"BUTTONS", "LEFT STICK PRESS", "LS_PRESS", 4, 0, 0, {SDL_SCANCODE_LSHIFT}, SDL_GAMEPAD_BUTTON_LEFT_STICK},
-    {"BUTTONS", "RIGHT STICK PRESS", "RS_PRESS", 5, 0, 0, {MOUSE_BIND_MIDDLE, SDL_SCANCODE_R}, SDL_GAMEPAD_BUTTON_RIGHT_STICK},
+    {"BUTTONS", "RIGHT STICK PRESS", "RS_PRESS", 5, 0, 0, {0, SDL_SCANCODE_R}, SDL_GAMEPAD_BUTTON_RIGHT_STICK},
     {"D-PAD", "UP", "DPAD_UP", 13, 0, 0, {SDL_SCANCODE_UP}, SDL_GAMEPAD_BUTTON_DPAD_UP},
     {"D-PAD", "DOWN", "DPAD_DOWN", 15, 0, 0, {SDL_SCANCODE_DOWN}, SDL_GAMEPAD_BUTTON_DPAD_DOWN},
     {"D-PAD", "LEFT", "DPAD_LEFT", 12, 0, 0, {SDL_SCANCODE_LEFT}, SDL_GAMEPAD_BUTTON_DPAD_LEFT},
@@ -58,10 +58,12 @@ static const Input inputs[] = {
     {"RIGHT STICK", "LEFT", "RS_LEFT", -1, 2, -1, {SDL_SCANCODE_J}, AXIS(SDL_GAMEPAD_AXIS_RIGHTX, 0)},
     {"RIGHT STICK", "RIGHT", "RS_RIGHT", -1, 2, 1, {SDL_SCANCODE_L}, AXIS(SDL_GAMEPAD_AXIS_RIGHTX, 1)},
 };
-/* The controls page's rows: the mouse's two sensitivities, the vibration toggle, which set is shown, the inputs, the reset row. */
+/* The controls page's rows: the mouse's two sensitivities, its buttons (a page of their own in the overlay), the
+ * vibration toggle, which set is shown, the inputs, the reset row. */
 enum { NINPUTS = sizeof inputs / sizeof *inputs, NMOUSE = 2,
        SENS_ROW = 0,
-       RUMBLE_ROW = SENS_ROW + NMOUSE,
+       MOUSE_ROW = SENS_ROW + NMOUSE,
+       RUMBLE_ROW = MOUSE_ROW + 1,
        SET_ROW = RUMBLE_ROW + 1,
        FIRST_INPUT = SET_ROW + 1,
        RESET_ROW = FIRST_INPUT + NINPUTS, NROWS };
@@ -85,34 +87,66 @@ static const int battle_keys[NINPUTS][BIND_KEYS] = {
     {SDL_SCANCODE_E, SDL_SCANCODE_RETURN},      /* A */
     {SDL_SCANCODE_SPACE, SDL_SCANCODE_LSHIFT},  /* B */
     {SDL_SCANCODE_Q},                           /* X */
-    {MOUSE_BIND_LEFT, SDL_SCANCODE_U},          /* Y */
+    {0, SDL_SCANCODE_U},                        /* Y (and the left button: mouse_starting) */
     {0},                                        /* L */
     {SDL_SCANCODE_E},                           /* R */
-    {MOUSE_BIND_RIGHT, SDL_SCANCODE_O},         /* ZL */
+    {0, SDL_SCANCODE_O},                        /* ZL (and the right button) */
     {SDL_SCANCODE_F},                           /* ZR */
     {SDL_SCANCODE_R, SDL_SCANCODE_P},           /* PLUS */
     {SDL_SCANCODE_C},                           /* MINUS */
     {SDL_SCANCODE_TAB},                         /* LS_PRESS */
-    {MOUSE_BIND_MIDDLE},                        /* RS_PRESS */
-    {SDL_SCANCODE_UP, MOUSE_BIND_WHEEL_UP},     /* DPAD_UP */
-    {SDL_SCANCODE_DOWN, MOUSE_BIND_WHEEL_DOWN}, /* DPAD_DOWN */
+    {0},                                        /* RS_PRESS (the wheel press) */
+    {SDL_SCANCODE_UP},                          /* DPAD_UP (and wheel up) */
+    {SDL_SCANCODE_DOWN},                        /* DPAD_DOWN (and wheel down) */
     {SDL_SCANCODE_LEFT},  {SDL_SCANCODE_RIGHT}, /* DPAD_LEFT, DPAD_RIGHT */
     {SDL_SCANCODE_W}, {SDL_SCANCODE_S}, {SDL_SCANCODE_A}, {SDL_SCANCODE_D},  /* LS */
     {SDL_SCANCODE_I}, {SDL_SCANCODE_K}, {SDL_SCANCODE_J}, {SDL_SCANCODE_L},  /* RS */
 };
+
+/* The mouse's own bindings (owner, 2026-11-13: the Mouse buttons page): in each set, the Switch input each part of
+ * the mouse presses (an index of inputs[], -1 none), one each. Kept apart from an input's two keys, so binding the
+ * mouse never pushes a key out. Only the usual parts (owner: no side buttons). Saved as MOUSE_LEFT=Y and so on. */
+static const int mouse_code[BMOUSE_PARTS] = {MOUSE_BIND_LEFT, MOUSE_BIND_RIGHT, MOUSE_BIND_MIDDLE, MOUSE_BIND_WHEEL_UP,
+                                             MOUSE_BIND_WHEEL_DOWN};
+static const char *const mouse_save[BMOUSE_PARTS] = {"MOUSE_LEFT", "MOUSE_RIGHT", "MOUSE_MID", "MOUSE_WHEEL_UP",
+                                                     "MOUSE_WHEEL_DOWN"};
+static int mouse_map[NSETS][BMOUSE_PARTS];
+static int mouse_part(int code) {  /* the part a MOUSE_BIND_* is, or -1 (the side buttons, a key) */
+    for (int p = 0; p < BMOUSE_PARTS; p++)
+        if (mouse_code[p] == code) return p;
+    return -1;
+}
+static int input_by_id(const char *id) {
+    for (int i = 0; i < NINPUTS; i++)
+        if (!strcmp(inputs[i].id, id)) return i;
+    return -1;
+}
+/* the starting mouse (the owner's, 2026-11-13): exploring, left interacts (A), right is the watch scan (ZL), the
+ * wheel press scans, turning the wheel changes the minimap's size (R); battles, left attacks (Y), right aims (ZL),
+ * the wheel press is the right stick press, the wheel picks the character (D-pad up and down) */
+static void mouse_starting(int set) {
+    static const char *const field[BMOUSE_PARTS] = {"A", "ZL", "RS_PRESS", "R", "R"};
+    static const char *const battle[BMOUSE_PARTS] = {"Y", "ZL", "RS_PRESS", "DPAD_UP", "DPAD_DOWN"};
+    for (int p = 0; p < BMOUSE_PARTS; p++) {
+        const char *id = (set == SET_BATTLE ? battle : field)[p];
+        mouse_map[set][p] = id ? input_by_id(id) : -1;
+    }
+}
+
 static void battle_starting_set(void) {
     for (int i = 0; i < NINPUTS; i++) {
         for (int k = 0; k < BIND_KEYS; k++) sets[SET_BATTLE][i].keys[k] = battle_keys[i][k];
         sets[SET_BATTLE][i].pad = inputs[i].pad;
     }
+    mouse_starting(SET_BATTLE);
 }
 
-/* the battle row's COPY THE EXPLORING KEYS: the exploring set, with the wheel on character selection */
-static void apply_battle_defaults(void) {
-    for (int i = 0; i < NINPUTS; i++) {
-        if (!strcmp(inputs[i].id, "DPAD_UP")) sets[SET_BATTLE][i].keys[1] = MOUSE_BIND_WHEEL_UP;
-        else if (!strcmp(inputs[i].id, "DPAD_DOWN")) sets[SET_BATTLE][i].keys[1] = MOUSE_BIND_WHEEL_DOWN;
-    }
+/* the battle row's COPY THE EXPLORING KEYS: the exploring set and its mouse, with the wheel on character selection */
+static void copy_exploring_to_battle(void) {
+    memcpy(sets[SET_BATTLE], sets[SET_FIELD], sizeof sets[SET_FIELD]);
+    memcpy(mouse_map[SET_BATTLE], mouse_map[SET_FIELD], sizeof mouse_map[SET_FIELD]);
+    mouse_map[SET_BATTLE][BMOUSE_WHEEL_UP] = input_by_id("DPAD_UP");
+    mouse_map[SET_BATTLE][BMOUSE_WHEEL_DOWN] = input_by_id("DPAD_DOWN");
 }
 
 static void reset_set(int set) {
@@ -124,6 +158,7 @@ static void reset_set(int set) {
         for (int k = 0; k < BIND_KEYS; k++) sets[set][i].keys[k] = inputs[i].keys[k];
         sets[set][i].pad = inputs[i].pad;
     }
+    mouse_starting(set);
 }
 static void reset(void) {
     for (int s = 0; s < NSETS; s++) reset_set(s);
@@ -146,6 +181,8 @@ static void sets_ready(void) {
 uint32_t bindings_key_inputs(int set, int key) {
     sets_ready();
     if (set < 0 || set >= NSETS || !key) return 0;
+    int part = mouse_part(key);  /* a mouse part: its own binding */
+    if (part >= 0) return mouse_map[set][part] >= 0 ? 1u << mouse_map[set][part] : 0;
     uint32_t m = 0;
     for (int i = 0; i < NINPUTS && i < 32; i++)
         for (int k = 0; k < BIND_KEYS; k++)
@@ -411,32 +448,18 @@ void bindings_read(const bool *keyboard, uint32_t mouse_buttons, int wheel_up, i
     uint64_t b = 0;
     int32_t key_stick[4] = {0, 0, 0, 0}, pad_stick[4] = {0, 0, 0, 0};
     int any_key = 0, any_pad = 0;
-    int has_wheel[2] = {0, 0};
-    if (battle) {
-        for (int i = 0; i < NINPUTS; i++)
-            for (int k = 0; k < BIND_KEYS; k++) {
-                if (use[i].keys[k] == MOUSE_BIND_WHEEL_UP) has_wheel[0] = 1;
-                if (use[i].keys[k] == MOUSE_BIND_WHEEL_DOWN) has_wheel[1] = 1;
-            }
-    }
+    /* the mouse's parts held now, and the Switch input each presses in this set (mouse_map) */
+    const int held[BMOUSE_PARTS] = {(mouse_buttons & SDL_BUTTON_LMASK) != 0, (mouse_buttons & SDL_BUTTON_RMASK) != 0,
+                                    (mouse_buttons & SDL_BUTTON_MMASK) != 0, wheel_up != 0, wheel_down != 0};
+    const int *mouse = mouse_map[battle ? SET_BATTLE : SET_FIELD];
     for (int i = 0; i < NINPUTS; i++) {
         int key = 0;
         for (int k = 0; k < BIND_KEYS; k++) {
             int sc = use[i].keys[k];
-            if (!sc) continue;
-            if (sc == MOUSE_BIND_LEFT) key |= (mouse_buttons & SDL_BUTTON_LMASK) != 0;
-            else if (sc == MOUSE_BIND_RIGHT) key |= (mouse_buttons & SDL_BUTTON_RMASK) != 0;
-            else if (sc == MOUSE_BIND_MIDDLE) key |= (mouse_buttons & SDL_BUTTON_MMASK) != 0;
-            else if (sc == MOUSE_BIND_X1) key |= (mouse_buttons & SDL_BUTTON_X1MASK) != 0;
-            else if (sc == MOUSE_BIND_X2) key |= (mouse_buttons & SDL_BUTTON_X2MASK) != 0;
-            else if (sc == MOUSE_BIND_WHEEL_UP) key |= wheel_up != 0;
-            else if (sc == MOUSE_BIND_WHEEL_DOWN) key |= wheel_down != 0;
-            else if (keyboard && sc < SDL_SCANCODE_COUNT) key |= keyboard[sc];
+            if (sc && keyboard && sc < SDL_SCANCODE_COUNT) key |= keyboard[sc];
         }
-        if (battle) {
-            if (!has_wheel[0] && wheel_up && !strcmp(inputs[i].id, "DPAD_UP")) key = 1;
-            if (!has_wheel[1] && wheel_down && !strcmp(inputs[i].id, "DPAD_DOWN")) key = 1;
-        }
+        for (int p = 0; p < BMOUSE_PARTS; p++)
+            if (mouse[p] == i && held[p]) key = 1;
         any_key |= key;
         int32_t amount = pad_amount(gamepad, use[i].pad);
         if (inputs[i].bit >= 0) {
@@ -733,12 +756,15 @@ static uint32_t gaiji_swap(uint32_t crc, int *sheet) {
     sets_ready();
     const Bound *use = sets[battle_active() ? SET_BATTLE : SET_FIELD];  /* the keys in use now */
     if (!using_pad) {
-        /* the row's first key or mouse button that has an icon; groups (a stick, the whole D-pad) keep the
-         * Switch icon: the keyboard sheet has none for a set of keys */
+        /* the row's first key that has an icon, else its mouse part (the keyboard first: owner, 2026-11-13); groups
+         * (a stick, the whole D-pad) keep the Switch icon: the keyboard sheet has none for a set of keys */
         for (int k = 0; row >= 0 && k < BIND_KEYS; k++) {
             const char *name = use[row].keys[k] ? key_gaiji(use[row].keys[k]) : NULL;
             if (name) return *sheet = SHEET_KEY, gaiji_crc(name);
         }
+        const int *mouse = mouse_map[battle_active() ? SET_BATTLE : SET_FIELD];
+        for (int p = 0; row >= 0 && p < BMOUSE_PARTS; p++)
+            if (mouse[p] == row) return *sheet = SHEET_KEY, gaiji_crc(key_gaiji(mouse_code[p]));
         return 0;
     }
     int shown = g;
@@ -897,6 +923,7 @@ void bindings_action(int action) {
             window_rumble_set_enabled(next);
             if (next) window_rumble_test();
             settings_save();
+        } else if (row == MOUSE_ROW) {  /* the Mouse buttons row opens its page (gamemenu.c): nothing here */
         } else if (!pad_only) {  /* a pad stays on its own column */
             col = action == SETTINGS_LEFT ? (col > 0 ? col - 1 : 0) : (col < BIND_COLS - 1 ? col + 1 : BIND_COLS - 1);
         }
@@ -913,11 +940,10 @@ void bindings_action(int action) {
             settings_save();
         } else if (row == RESET_ROW) {
             /* the exploring set back to the starting keys; the battle set to a copy of the exploring set */
-            if (edit_set == SET_BATTLE) {
-                memcpy(sets[SET_BATTLE], sets[SET_FIELD], sizeof sets[SET_FIELD]);
-                apply_battle_defaults();
-            } else reset_set(SET_FIELD);
+            if (edit_set == SET_BATTLE) copy_exploring_to_battle();
+            else reset_set(SET_FIELD);
             settings_save();
+        } else if (row == MOUSE_ROW) {  /* opens its page (gamemenu.c) */
         } else {
             capturing = 1, capture_since = SDL_GetTicks();
         }
@@ -950,39 +976,42 @@ int bindings_capture_key(int scancode) {
     return 1;
 }
 
+/* A mouse part pressed while a key column waits: that part now presses this row's Switch input, in the set shown
+ * (the mouse's own binding, mouse_map; the row's keys stay). The side buttons aren't bound (owner, 2026-11-13). */
+static int capture_mouse_part(int part) {
+    if (!bindings_capturing() || col >= BIND_KEYS || part < 0) return 0;
+    capturing = 0;
+    mouse_map[edit_set][part] = row - FIRST_INPUT;
+    using_pad = 0;
+    settings_save();
+    return 1;
+}
 int bindings_capture_mouse(int button) {
-    if (!bindings_capturing()) return 0;
-    if (col >= BIND_KEYS) return 0;
-    int code = 0;
-    switch (button) {
-    case SDL_BUTTON_LEFT: code = MOUSE_BIND_LEFT; break;
-    case SDL_BUTTON_RIGHT: code = MOUSE_BIND_RIGHT; break;
-    case SDL_BUTTON_MIDDLE: code = MOUSE_BIND_MIDDLE; break;
-    case SDL_BUTTON_X1: code = MOUSE_BIND_X1; break;
-    case SDL_BUTTON_X2: code = MOUSE_BIND_X2; break;
-    }
-    if (!code) return 0;
-    capturing = 0;
-    for (int k = 0; k < BIND_KEYS; k++)
-        if (bound[row - FIRST_INPUT].keys[k] == code) bound[row - FIRST_INPUT].keys[k] = 0;
-    bound[row - FIRST_INPUT].keys[col] = code;
-    using_pad = 0;
-    settings_save();
-    return 1;
+    return capture_mouse_part(button == SDL_BUTTON_LEFT ? BMOUSE_LEFT : button == SDL_BUTTON_RIGHT ? BMOUSE_RIGHT
+                              : button == SDL_BUTTON_MIDDLE ? BMOUSE_MID : -1);
 }
+int bindings_capture_wheel(int y) { return capture_mouse_part(y > 0 ? BMOUSE_WHEEL_UP : BMOUSE_WHEEL_DOWN); }
 
-int bindings_capture_wheel(int y) {
-    if (!bindings_capturing()) return 0;
-    if (col >= BIND_KEYS) return 0;
-    capturing = 0;
-    int code = y > 0 ? MOUSE_BIND_WHEEL_UP : MOUSE_BIND_WHEEL_DOWN;
-    for (int k = 0; k < BIND_KEYS; k++)
-        if (bound[row - FIRST_INPUT].keys[k] == code) bound[row - FIRST_INPUT].keys[k] = 0;
-    bound[row - FIRST_INPUT].keys[col] = code;
-    using_pad = 0;
-    settings_save();
-    return 1;
+/* ---- the Mouse buttons page (gamemenu.c) */
+int bindings_mouse_get(int set, int part) {
+    sets_ready();
+    return set >= 0 && set < NSETS && part >= 0 && part < BMOUSE_PARTS ? mouse_map[set][part] : -1;
 }
+void bindings_mouse_set(int set, int part, int input) {
+    sets_ready();
+    if (set < 0 || set >= NSETS || part < 0 || part >= BMOUSE_PARTS || input < -1 || input >= NINPUTS) return;
+    mouse_map[set][part] = input;
+    settings_save();
+}
+/* the inputs a mouse part can press: the buttons and the D-pad (not a stick's directions) */
+int bindings_mouse_choices(int *out, int max) {
+    int n = 0;
+    for (int i = 0; i < NINPUTS && n < max; i++)
+        if (inputs[i].bit >= 0) out[n++] = i;
+    return n;
+}
+int bindings_on_mouse_row(void) { return row == MOUSE_ROW; }
+int bindings_set_shown(void) { return edit_set; }
 
 int bindings_capture_button(int button) {
     if (!bindings_capturing()) return 0;
@@ -1015,6 +1044,10 @@ static void input_title(int i, char *s, size_t n) {
     if (inputs[i].group[0] == 'B') snprintf(s, n, "%s", inputs[i].name);
     else snprintf(s, n, "%s %s", inputs[i].group, inputs[i].name);
 }
+void bindings_input_title(int i, char *s, size_t n) {
+    if (i >= 0 && i < NINPUTS) input_title(i, s, n);
+    else if (n) *s = 0;
+}
 
 int bindings_rows(BindRow *rows, int max, int *sel_row, int *sel_col, char *help, int help_size) {
     sets_ready();
@@ -1025,6 +1058,12 @@ int bindings_rows(BindRow *rows, int max, int *sel_row, int *sel_col, char *help
         memset(r, 0, sizeof *r);
         r->group = "MOUSE", r->name = sens_names[a], r->value = 1;
         snprintf(r->cells[0], BIND_NAME, "%sX", sens_values[sens_index(a)]);
+    }
+    if (n < max) {  /* the Mouse buttons row: the overlay draws it as a way into its page */
+        BindRow *r = &rows[n++];
+        memset(r, 0, sizeof *r);
+        r->group = "MOUSE", r->name = "BUTTONS", r->value = 1;
+        snprintf(r->cells[0], BIND_NAME, "OPEN");
     }
     if (n < max) {
         BindRow *r = &rows[n++];
@@ -1061,6 +1100,12 @@ int bindings_rows(BindRow *rows, int max, int *sel_row, int *sel_col, char *help
                  "HOW FAST THE CAMERA TURNS %s WITH THE MOUSE: %sX (1.0X TO START), IN BOTH SETS. LEFT/RIGHT: CHANGE. "
                  "DELETE OR X: BACK TO 1.0X. A CLICK IN THE WINDOW GIVES THE MOUSE TO THE GAME, ALT TAKES IT BACK.",
                  a ? "UP AND DOWN" : "LEFT AND RIGHT", sens_values[sens_index(a)]);
+        return n;
+    }
+    if (row == MOUSE_ROW) {
+        snprintf(help, (size_t)help_size,
+                 "WHAT THE LEFT AND RIGHT BUTTONS, THE WHEEL PRESS AND TURNING THE WHEEL DO, FOR EXPLORING AND FOR "
+                 "BATTLES. ENTER OR CLICK: OPEN.");
         return n;
     }
     if (row == RUMBLE_ROW) {
@@ -1131,20 +1176,22 @@ int bindings_load_line(const char *name, const char *value) {
         set = SET_BATTLE, name += 7;
     }
     Bound *b = sets[set];
+    for (int p = 0; p < BMOUSE_PARTS; p++)  /* the mouse's own lines: MOUSE_LEFT=Y, - for none */
+        if (!strcmp(name, mouse_save[p])) {
+            mouse_map[set][p] = strcmp(value, "-") ? input_by_id(value) : -1;
+            return 1;
+        }
     for (int i = 0; i < NINPUTS; i++) {
         char want[32];
         for (int k = 0; k < BIND_KEYS; k++) {
             snprintf(want, sizeof want, "KEY%d_%s", k + 1, inputs[i].id);
             if (!strcmp(name, want)) {
-                b[i].keys[k] = key_from_name(value);
-                /* Upgrade older settings files where the battle D-pad secondary key was unassigned (-)
-                 * so that mouse scroll to select character in battle works by default. */
-                if (set == SET_BATTLE && k == 1 && !strcmp(value, "-")) {
-                    if (!strcmp(inputs[i].id, "DPAD_UP") && b[i].keys[0] == SDL_SCANCODE_UP)
-                        b[i].keys[1] = MOUSE_BIND_WHEEL_UP;
-                    else if (!strcmp(inputs[i].id, "DPAD_DOWN") && b[i].keys[0] == SDL_SCANCODE_DOWN)
-                        b[i].keys[1] = MOUSE_BIND_WHEEL_DOWN;
-                }
+                int code = key_from_name(value), part = mouse_part(code);
+                /* a mouse button in a key slot (files before the Mouse buttons page, 2026-11-13): it becomes the
+                 * mouse's own binding and the slot is freed; the side buttons are dropped */
+                if (part >= 0) mouse_map[set][part] = i, code = 0;
+                else if (code == MOUSE_BIND_X1 || code == MOUSE_BIND_X2) code = 0;
+                b[i].keys[k] = code;
                 return 1;
             }
         }
@@ -1163,15 +1210,19 @@ int bindings_load_line(const char *name, const char *value) {
 
 void bindings_save(FILE *f) {
     sets_ready();
-    fprintf(f, "# Controls: two keys (SDL key names or MOUSE_LEFT/RIGHT/MID/4/5/WHEEL_UP/DOWN) and one gamepad input per Switch input; - for none.\n"
+    fprintf(f, "# Controls: two keys (SDL key names) and one gamepad input per Switch input; - for none.\n"
+               "# MOUSE_LEFT/RIGHT/MID/WHEEL_UP/WHEEL_DOWN: the Switch input that part of the mouse presses.\n"
                "# BATTLE_...: the same for battles.\n");
-    for (int s = 0; s < NSETS; s++)
+    for (int s = 0; s < NSETS; s++) {
+        const char *pre = s == SET_BATTLE ? "BATTLE_" : "";
         for (int i = 0; i < NINPUTS; i++) {
-            const char *pre = s == SET_BATTLE ? "BATTLE_" : "";
             for (int k = 0; k < BIND_KEYS; k++)
                 fprintf(f, "%sKEY%d_%s=%s\n", pre, k + 1, inputs[i].id, key_save_name(sets[s][i].keys[k]));
             fprintf(f, "%sPAD_%s=%s\n", pre, inputs[i].id, pad_name(sets[s][i].pad));
         }
+        for (int p = 0; p < BMOUSE_PARTS; p++)
+            fprintf(f, "%s%s=%s\n", pre, mouse_save[p], mouse_map[s][p] >= 0 ? inputs[mouse_map[s][p]].id : "-");
+    }
     for (int a = 0; a < NMOUSE; a++) fprintf(f, "%s=%s\n", sens_env[a], sens_values[sens_index(a)]);
     fprintf(f, "YW4_RUMBLE=%d\n", window_rumble_enabled());
 }

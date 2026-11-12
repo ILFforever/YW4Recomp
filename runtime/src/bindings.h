@@ -79,6 +79,18 @@ void bindings_pad_back(int state);
  * look shows its controller view, and after it hides until the pad is let go. */
 void bindings_pad_lock(int on);
 
+/* The mouse's own bindings (the overlay's Mouse buttons page): per set (0 exploring, 1 battles), the Switch input
+ * each part of the mouse presses, an input number or -1 none; setting one saves. The choices: the inputs a mouse part
+ * can press (buttons and the D-pad), into out; how many. Whether the Controls table's chosen row is the Mouse
+ * buttons row, the set the table shows, and an input's name ("Y", "D-PAD UP"). */
+enum { BMOUSE_LEFT, BMOUSE_RIGHT, BMOUSE_MID, BMOUSE_WHEEL_UP, BMOUSE_WHEEL_DOWN, BMOUSE_PARTS };
+int bindings_mouse_get(int set, int part);
+void bindings_mouse_set(int set, int part, int input);
+int bindings_mouse_choices(int *out, int max);
+int bindings_on_mouse_row(void);
+int bindings_set_shown(void);
+void bindings_input_title(int i, char *s, size_t n);
+
 
 /* The settings file's lines (settings.c): one KEY1_/KEY2_/PAD_<input>=<name> line each, and YW4_MOUSE_SENS. */
 int bindings_load_line(const char *name, const char *value);

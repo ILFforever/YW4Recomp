@@ -36,6 +36,7 @@ static int ctrl_first, ctrl_rows, ctrl_visible;  /* the Controls table: its firs
  * mockup, 2026-11-11), switched by one button or P; the keyboard view's mode: 0 exploring, 1 battles, 2 cutscenes
  * (the exploring keys, only those that do something there) */
 static int ctrl_view = 1, kv_mode;
+static int mb_open;  /* the Controls page shows its Mouse buttons page (mouse_page_action) */
 /* Pressing a real key lights it on the keyboard view (gamemenu_held): the drawn keys held now, by scancode (a gold
  * ring round each), the mouse's buttons held (bits: left, right, wheel), and the last lit key pressed, which stays
  * in focus as if the mouse pointed at it (a scancode or MOUSE_BIND_*, 0 none) */
@@ -453,7 +454,7 @@ static void accept(void) {
     switch (sel) {
     case GM_RESUME: close_and_resume(); break;
     case GM_SETTINGS: focus = 1, in_rows = 0; break;  /* into its page: its sections first */
-    case GM_CONTROLS: focus = 1; break;
+    case GM_CONTROLS: focus = 1, mb_open = 0; break;
     case GM_PERF: focus = 1; break;
     case GM_BUG: focus = 1, bug_page = 0, brow = 0; break;  /* the report's first page (below) */
     case GM_TITLE:  /* "keep playing" chosen first; greyed out (window_pause_title_state): nothing */
@@ -583,10 +584,62 @@ static void settings_page_action(int a) {
     }
 }
 
+/* ---- the Controls page's Mouse buttons page (owner's pick B, 2026-11-13): the mouse drawn, an Exploring / Battle
+ * switch, a row per part (left, right, the wheel press, wheel up, wheel down) with ‹ › through what it can press,
+ * and a list of them all (Enter). The bindings are the mouse's own (bindings_mouse_*). */
+enum { MB_ROWS = BMOUSE_PARTS, MB_PER_COL = 9 };
+static int mb_row, mb_set, mb_list, mb_list_sel;
+static const char *const mb_part_name[MB_ROWS] = {"Left click", "Right click", "Wheel press", "Wheel up", "Wheel down"};
+
+/* the list's entries: 0 none, then the inputs a mouse part can press; *cur: the entry bound now */
+static int mb_entries(int *ids, int max, int *cur) {
+    int ch[48], n = bindings_mouse_choices(ch, 48), now = bindings_mouse_get(mb_set, mb_row);
+    ids[0] = -1, *cur = 0;
+    for (int k = 0; k < n && k + 1 < max; k++) {
+        ids[k + 1] = ch[k];
+        if (ch[k] == now) *cur = k + 1;
+    }
+    return n + 1 < max ? n + 1 : max;
+}
+static void mb_page_open(void) { mb_open = 1, mb_row = 0, mb_list = 0, mb_set = bindings_set_shown(); }
+static void mb_step(int part, int d) {  /* ‹ ›: the next or the previous choice, round */
+    int ids[48], cur, n;
+    mb_row = part;
+    n = mb_entries(ids, 48, &cur);
+    bindings_mouse_set(mb_set, part, ids[(cur + d + n) % n]);
+}
+static void mouse_page_action(int a) {
+    int ids[48], cur, n = mb_entries(ids, 48, &cur);
+    if (mb_list) {  /* the list: two columns, Up / Down through all, Left / Right a column across */
+        if (a == GM_UP) mb_list_sel = mb_list_sel > 0 ? mb_list_sel - 1 : 0;
+        else if (a == GM_DOWN) mb_list_sel = mb_list_sel < n - 1 ? mb_list_sel + 1 : n - 1;
+        else if (a == GM_LEFT && mb_list_sel >= MB_PER_COL) mb_list_sel -= MB_PER_COL;
+        else if (a == GM_RIGHT && mb_list_sel + MB_PER_COL < n) mb_list_sel += MB_PER_COL;
+        else if (a == GM_ACCEPT) bindings_mouse_set(mb_set, mb_row, ids[mb_list_sel]), mb_list = 0;
+        else if (a == GM_BACK || a == GM_LEAVE) mb_list = 0;
+        return;
+    }
+    if (a == GM_UP) mb_row = mb_row > 0 ? mb_row - 1 : 0;
+    else if (a == GM_DOWN) mb_row = mb_row < MB_ROWS - 1 ? mb_row + 1 : MB_ROWS - 1;
+    else if (a == GM_LEFT || a == GM_RIGHT) mb_step(mb_row, a == GM_RIGHT ? 1 : -1);
+    else if (a == GM_ACCEPT) mb_list = 1, mb_list_sel = cur;
+    else if (a == GM_CLEAR) bindings_mouse_set(mb_set, mb_row, -1);
+    else if (a == GM_PREV || a == GM_NEXT) mb_set ^= 1;
+    else if (a == GM_BACK || a == GM_LEAVE) mb_open = 0;  /* back to the Controls table */
+}
+
 /* the controls page: the controls' own selection and key capture (bindings.h), as the F2 page's */
 static void controls_page_action(int a) {
     static const int map[] = {[GM_UP] = SETTINGS_UP, [GM_DOWN] = SETTINGS_DOWN, [GM_LEFT] = SETTINGS_LEFT,
                               [GM_RIGHT] = SETTINGS_RIGHT, [GM_ACCEPT] = SETTINGS_ACCEPT, [GM_CLEAR] = SETTINGS_CLEAR};
+    if (mb_open) {
+        mouse_page_action(a);
+        return;
+    }
+    if (ctrl_view && (a == GM_ACCEPT || a == GM_RIGHT) && bindings_on_mouse_row() && !bindings_capturing()) {
+        mb_page_open();  /* the Mouse buttons row: its page */
+        return;
+    }
     if (a == GM_BACK || a == GM_LEAVE) {
         bindings_cancel();
         focus = 0, sel = GM_RESUME;
@@ -807,7 +860,8 @@ enum { HIT_SIDE, HIT_SECTION, HIT_ROW, HIT_ROW_PREV, HIT_ROW_NEXT, HIT_BIND, HIT
        HIT_PART, HIT_SLIDER, HIT_POPUP, HIT_HINT, HIT_BIND_STEP, HIT_PREVIEW,
        HIT_BUG_KIND, HIT_BUG_TEXT, HIT_BUG_OFTEN, HIT_BUG_NEXT, HIT_BUG_TICK, HIT_BUG_BTN, HIT_BUG_DONE,
        HIT_PROMPT_FIELD, HIT_PROMPT_OK, HIT_PROMPT_CANCEL, HIT_OSK_KEY, HIT_OSK_PAGE,
-       HIT_KV_TAB, HIT_KV_MODE, HIT_KV_KEY, HIT_PV_PART };
+       HIT_KV_TAB, HIT_KV_MODE, HIT_KV_KEY, HIT_PV_PART,
+       HIT_MB_BACK, HIT_MB_SET, HIT_MB_ROW, HIT_MB_STEP, HIT_MB_OPT, HIT_MB_SCRIM, HIT_MB_POP };
 #define HINT_CLOSE (-1)  /* a key hint's action: close the overlay */
 typedef struct {
     float x, y, w, h;
@@ -918,7 +972,37 @@ void gamemenu_mouse(float x, float y, int button) {
         break;
     case HIT_BIND:
         focus = 1, bindings_select(h.a, h.b < 0 ? -1 : h.b);
-        if (click && h.b != -2) bindings_action(SETTINGS_ACCEPT);  /* a key: waits for the new one; a value: the next */        break;
+        if (click && bindings_on_mouse_row()) mb_page_open();  /* the Mouse buttons row: its page */
+        else if (click && h.b != -2) bindings_action(SETTINGS_ACCEPT);  /* a key: waits for the new one; a value: the next */
+        break;
+    case HIT_MB_BACK:
+        if (click) mb_open = 0, mb_list = 0;
+        break;
+    case HIT_MB_SET:
+        if (click) mb_set = h.a;
+        break;
+    case HIT_MB_ROW:  /* a part's row or the part on the drawing: hovering chooses it, a click opens the list */
+        if (!mb_list && mb_row != h.a) mb_row = h.a, changed();
+        if (click && !mb_list) {
+            int ids[48], cur;
+            mb_entries(ids, 48, &cur);
+            mb_list = 1, mb_list_sel = cur;
+        }
+        break;
+    case HIT_MB_STEP:
+        if (click) mb_step(h.a, h.b);
+        break;
+    case HIT_MB_OPT:
+        if (mb_list_sel != h.a) mb_list_sel = h.a, changed();
+        if (click) {
+            int ids[48], cur, n = mb_entries(ids, 48, &cur);
+            if (h.a < n) bindings_mouse_set(mb_set, mb_row, ids[h.a]);
+            mb_list = 0;
+        }
+        break;
+    case HIT_MB_SCRIM:  /* a click beside the list closes it */
+        if (click) mb_list = 0;
+        break;
     case HIT_KV_TAB:
         if (click && !bindings_capturing()) focus = 1, ctrl_view = h.a;
         break;
@@ -1021,7 +1105,7 @@ void gamemenu_wheel(int dy) {
         changed();
         return;
     }
-    if (sel != GM_CONTROLS) return;
+    if (sel != GM_CONTROLS || mb_open) return;  /* the Mouse buttons page doesn't scroll */
     if (ctrl_visible <= 0 || ctrl_rows <= ctrl_visible) return;  /* not drawn yet, or it all fits */
     int f = ctrl_first + (dy > 0 ? -1 : 1);  /* one row a notch (owner: no fast scroll) */
     if (f > ctrl_rows - ctrl_visible) f = ctrl_rows - ctrl_visible;
@@ -2194,11 +2278,155 @@ void gamemenu_held(const bool *keys, uint32_t mouse, uint32_t parts) {
 /* The controls page (the design's isControls section): a table of each Switch input with its two keys and its
  * controller input, the chosen row ringed in gold and the chosen key or input on a gold chip; the rows scroll.
  * Under it, what the chosen row does (the design's note line). */
+/* What an input does in a set, for the Mouse buttons page: its action (the keyboard view's names; the D-pad's
+ * shortcuts numbered) and its Switch name; none: "None" and "". */
+static void mb_value(int set, int input, char *act, size_t na, char *sw, size_t ns) {
+    if (input < 0) {
+        snprintf(act, na, "None"), *sw = 0;
+        return;
+    }
+    char t[48];
+    bindings_input_title(input, t, sizeof t);
+    sentence_case(t, sw, ns);
+    const char *id = bindings_input_id(input), *a = kv_action(set, id);
+    static const char *const dpad[4] = {"DPAD_UP", "DPAD_RIGHT", "DPAD_DOWN", "DPAD_LEFT"};
+    for (int k = 0; set == 0 && k < 4; k++)
+        if (!strcmp(id, dpad[k])) {
+            snprintf(act, na, "Shortcut %d", k + 1);
+            return;
+        }
+    snprintf(act, na, "%s", a ? a : set ? "Nothing in battles" : "Nothing while exploring");
+}
+
+/* The Mouse buttons page (owner's pick B, 2026-11-13): the mouse drawn at the left, lit by what its parts press in
+ * the set shown, the rows at the right with ‹ › (the part in focus ringed in gold on both), a box explaining the row,
+ * and the list over it all when open. */
+static void draw_mouse_page(const UiCanvas *c, const GameMenuInfo *in) {
+    char act[96], sw[48], t[200];
+    /* the title: ‹ Controls (back), Mouse buttons, the Exploring / Battle switch at the right */
+    float bw = ui_text_w(UI_ROUNDED_700, 16, "Controls") + 58, by = 76 + (34 * 1.25f - 48) / 2;
+    int bh = hovered(HIT_MB_BACK, 0, 0);
+    ui_box(c, 488, by, bw, 48, 24, bh ? LILAC : WHITE, 2, PLUM);
+    ui_icon(c, ICON_PREV, 488 + 14, by + 13, 22, 2.4f, PLUM);
+    ui_text_in(c, UI_ROUNDED_700, 16, 488 + 38, by, bw - 50, 48, 0, "Controls", PLUM);
+    hit_add(488, by, bw, 48, HIT_MB_BACK, 0, 0);
+    ui_text(c, UI_ROUNDED_800, 34, 488 + bw + 18, 76, 34 * 1.25f, "Mouse buttons", NIGHT);
+    static const char *const sets[2] = {"Exploring", "Battle"};
+    float sw2 = kv_seg(NULL, 0, 0, sets, 2, mb_set, HIT_MB_SET);
+    kv_seg(c, 1512 - sw2, 76 + (34 * 1.25f - 48) / 2, sets, 2, mb_set, HIT_MB_SET);
+    float top = 76 + 34 * 1.25f + 30;
+    /* the mouse: the F2 card's shapes (120 x 190 units), S times as large */
+    const float S = 2.1f, mx = 488 + 18, my = top + 6;
+    static const char *const paths[2] = {"M3 86V60A57 57 0 0 1 59 3V12A15 15 0 0 0 45 27V53A15 15 0 0 0 59 68V86Z",
+                                         "M117 86V60A57 57 0 0 0 61 3V12A15 15 0 0 1 75 27V53A15 15 0 0 1 61 68V86Z"};
+    ui_box(c, mx, my, 120 * S, 190 * S, 60 * S, WHITE, 2, LINE);
+    for (int p = 0; p < 2; p++) {
+        int input = bindings_mouse_get(mb_set, p), on = mb_row == p;
+        char el[200];
+        snprintf(el, sizeof el, input >= 0 || on ? "<path d=\"%s\" fill=\"#000\"/>" : "<path d=\"%s\" stroke=\"#000\" stroke-width=\"1.5\"/>",
+                 paths[p]);
+        ui_shape(c, el, mx, my, 120 * S, 90 * S, 120, on ? (input >= 0 ? NIGHT : GOLD) : input >= 0 ? PLUM : LINE);
+        float tx = mx + (p ? 77 : 7) * S, tw = 36 * S;
+        uint32_t ink = input >= 0 ? SNOW : on ? ON_GOLD : MUTED;
+        if (input >= 0) {
+            mb_value(mb_set, input, act, sizeof act, sw, sizeof sw);
+            ui_text_wrap(c, UI_GOTHIC_700, 15, 0, tx, my + 34 * S, tw, 19, 1, act, ink);
+        }
+        ui_text_in(c, UI_GOTHIC_700, 20, tx, my + 64 * S, tw, 26, 1, p ? "R" : "L", ink);
+        hit_add(mx + (p ? 60 * S : 0), my, 60 * S, 86 * S, HIT_MB_ROW, p, 0);
+    }
+    {  /* the wheel: pressed or turned; lit if any of the three is bound, darker when one of them is in focus */
+        int any = 0, on = mb_row >= BMOUSE_MID;
+        for (int p = BMOUSE_MID; p < MB_ROWS; p++) any |= bindings_mouse_get(mb_set, p) >= 0;
+        ui_box(c, mx + 49 * S, my + 16 * S, 22 * S, 48 * S, 11 * S, on ? (any ? NIGHT : GOLD) : any ? PLUM : SOFT, 2, LINE);
+        ui_icon(c, "<path d=\"M12 5l5 6H7z\" fill=\"#000\" stroke=\"none\"/>", mx + 49 * S + 11 * S - 9, my + 16 * S + 8, 18, 1,
+                any || on ? SNOW : MUTED);
+        ui_icon(c, "<path d=\"M12 19l5-6H7z\" fill=\"#000\" stroke=\"none\"/>", mx + 49 * S + 11 * S - 9, my + 64 * S - 26, 18, 1,
+                any || on ? SNOW : MUTED);
+        hit_add(mx + 45 * S, my + 12 * S, 30 * S, 56 * S, HIT_MB_ROW, mb_row >= BMOUSE_MID ? mb_row : BMOUSE_MID, 0);
+    }
+    /* the rows: the part, then ‹ what it does (its Switch name under) › */
+    float rx = 488 + 330, rw = 1024 - 330, rh = 66, gap = 12;
+    for (int p = 0; p < MB_ROWS; p++) {
+        float y = top + p * (rh + gap);
+        int on = mb_row == p, input = bindings_mouse_get(mb_set, p);
+        if (on) ui_box(c, rx - 4, y - 4, rw + 8, rh + 8, 16, RING, 0, 0);
+        ui_box(c, rx, y, rw, rh, 12, WHITE, on ? 0 : 2, LINE);
+        hit_add(rx, y, rw, rh, HIT_MB_ROW, p, 0);
+        ui_text_in(c, UI_GOTHIC_400, 18, rx + 22, y, 0, rh, 0, mb_part_name[p], INK);
+        mb_value(mb_set, input, act, sizeof act, sw, sizeof sw);
+        float vx = rx + 250, vw = rw - 250 - 16;
+        for (int k = 0; k < 2; k++) {  /* ‹ and ›, a box under the mouse */
+            float ax = k ? vx + vw - 34 : vx, ay = y + (rh - 34) / 2;
+            int hv = hovered(HIT_MB_STEP, p, k ? 1 : -1);
+            if (hv) ui_box(c, ax, ay, 34, 34, 9, LILAC, 0, 0);
+            ui_icon(c, k ? ICON_NEXT : ICON_PREV, ax + 6, ay + 6, 22, 2.4f, PLUM);
+            hit_add(ax - 4, y, 42, rh, HIT_MB_STEP, p, k ? 1 : -1);
+        }
+        if (*sw) {
+            ui_text_in(c, UI_GOTHIC_700, 17, vx + 40, y + 9, vw - 80, 26, 1, act, NIGHT);
+            ui_text_in(c, UI_GOTHIC_500, 13, vx + 40, y + 36, vw - 80, 20, 1, sw, MUTED);
+        } else {
+            ui_text_in(c, UI_GOTHIC_500, 17, vx + 40, y, vw - 80, rh, 1, act, MUTED);
+        }
+    }
+    /* the box: the row in focus, in a sentence */
+    {
+        float y = top + MB_ROWS * (rh + gap) + 8, h = 118;
+        int input = bindings_mouse_get(mb_set, mb_row);
+        mb_value(mb_set, input, act, sizeof act, sw, sizeof sw);
+        ui_box(c, rx, y, rw, h, 14, NIGHT, 0, 0);
+        snprintf(t, sizeof t, "%s \xc2\xb7 %s", mb_part_name[mb_row], mb_set ? "Battle" : "Exploring");
+        ui_text_in(c, UI_GOTHIC_700, 17, rx + 22, y + 14, rw - 44, 26, 0, t, SNOW);
+        if (input >= 0) snprintf(t, sizeof t, "%s (%s). %s steps through what it can do, %s opens the list, %s sets none.", act, sw,
+                                 in->pad ? "Left / Right" : "A / D or the arrows", in->pad ? "A" : "Enter or a click",
+                                 in->pad ? "X" : "Delete");
+        else snprintf(t, sizeof t, "Does nothing now. %s steps through what it can do, %s opens the list.",
+                      in->pad ? "Left / Right" : "A / D or the arrows", in->pad ? "A" : "Enter or a click");
+        ui_text_wrap(c, UI_GOTHIC_500, 15, 0, rx + 22, y + 46, rw - 44, 15 * 1.5f, 0, t, ON_DARK);
+    }
+    if (!mb_list) return;
+    /* the list: over the page, dimmed behind; two columns, the one bound now marked, the one in focus ringed */
+    int ids[48], cur, n = mb_entries(ids, 48, &cur);
+    ui_card(c, 448, 40, 1104, 764, 20, SHADE, 0.55f, 0, 0, 0);
+    hit_add(448, 40, 1104, 764, HIT_MB_SCRIM, 0, 0);
+    int cols = n > MB_PER_COL ? 2 : 1, per = (n + cols - 1) / cols;
+    float ow = 360, oh = 44, pw = cols * ow + 48 + (cols - 1) * 16, ph = 96 + per * oh + 20, px = 1000 - pw / 2, py = 422 - ph / 2;
+    ui_box(c, px, py, pw, ph, 20, PAPER, 0, 0);
+    hit_add(px, py, pw, ph, HIT_MB_POP, 0, 0);  /* the list itself: not a click beside it */
+    snprintf(t, sizeof t, "%s in %s", mb_part_name[mb_row], mb_set ? "battles" : "exploring");
+    ui_text(c, UI_ROUNDED_800, 22, px + 24, py + 22, 22 * 1.3f, t, NIGHT);
+    snprintf(t, sizeof t, "The Switch button it presses, named by what it does %s.", mb_set ? "in battles" : "while exploring");
+    ui_text_in(c, UI_GOTHIC_500, 14, px + 24, py + 54, pw - 48, 22, 0, t, MUTED);
+    for (int i = 0; i < n; i++) {
+        float ox = px + 24 + (i / per) * (ow + 16), oy = py + 92 + (i % per) * oh;
+        int on = mb_list_sel == i;
+        if (on) ui_box(c, ox, oy + 2, ow, oh - 4, 10, RING, 0, 0), ui_box(c, ox + 3, oy + 5, ow - 6, oh - 10, 8, WHITE, 0, 0);
+        hit_add(ox, oy, ow, oh, HIT_MB_OPT, i, 0);
+        mb_value(mb_set, ids[i], act, sizeof act, sw, sizeof sw);
+        if (*sw) {
+            ui_text_in(c, UI_GOTHIC_700, 15, ox + 14, oy, 128, oh, 0, sw, PLUM);
+            ui_text_in(c, UI_GOTHIC_400, 15, ox + 148, oy, ow - 148 - 58, oh, 0, act, INK);
+        } else {
+            ui_text_in(c, UI_GOTHIC_500, 15, ox + 14, oy, ow - 70, oh, 0, act, MUTED);
+        }
+        if (i == cur) {  /* the one bound now */
+            float tw = ui_text_w(UI_GOTHIC_700, 12, "Now") + 14;
+            ui_box(c, ox + ow - tw - 10, oy + (oh - 22) / 2, tw, 22, 6, PLUM, 0, 0);
+            ui_text_in(c, UI_GOTHIC_700, 12, ox + ow - tw - 10, oy + (oh - 22) / 2, tw, 22, 1, "Now", SNOW);
+        }
+    }
+}
+
 static void draw_controls_page(const UiCanvas *c, const GameMenuInfo *in) {
     static BindRow rows[64];
     char help[512], t[160], u[160];
     int row, col, n = bindings_rows(rows, 64, &row, &col, help, sizeof help);
     ui_box(c, 448, 40, 1104, 764, 20, PAPER, 0, 0);
+    if (mb_open && ctrl_view) {
+        draw_mouse_page(c, in);
+        return;
+    }
     ui_text(c, UI_ROUNDED_800, 34, 488, 76, 34 * 1.25f, "Controls", NIGHT);
     /* one button at the right of the title: to the keyboard view, or back to the bindings (P, Y / Triangle) */
     const char *other = !ctrl_view ? "Bindings" : in->pad ? "Controller view" : "Keyboard view";
@@ -2256,6 +2484,27 @@ static void draw_controls_page(const UiCanvas *c, const GameMenuInfo *in) {
         sentence_case(u, t, sizeof t);
         ui_text_in(c, UI_GOTHIC_400, 17, x + 22, y, 0, rh, 0, t, INK);
         if (!r->group) continue;
+        if (r->value && !strcmp(r->group, "MOUSE") && !strcmp(r->name, "BUTTONS")) {
+            /* the way into the Mouse buttons page: what each part does in the set shown, as chips, and a › */
+            static const char *const part[MB_ROWS] = {"Left", "Right", "Wheel press", "Wheel up", "Wheel down"};
+            int set = bindings_set_shown(), any = 0;
+            float sx = x + cw[0] + 22, lim = x + w - 64, chh = 28;
+            for (int p = 0; p < MB_ROWS; p++) {
+                int input = bindings_mouse_get(set, p);
+                if (input < 0) continue;
+                char act[96], sw[48], chipt[160];
+                mb_value(set, input, act, sizeof act, sw, sizeof sw);
+                snprintf(chipt, sizeof chipt, "%s: %s", part[p], act);
+                float chw = ui_text_w(UI_GOTHIC_700, 13, chipt) + 20;
+                if (sx + chw > lim) break;
+                ui_box(c, sx, y + (rh - chh) / 2, chw, chh, 8, SOFT, 0, 0);
+                ui_text_in(c, UI_GOTHIC_700, 13, sx, y + (rh - chh) / 2, chw, chh, 1, chipt, PLUM);
+                sx += chw + 8, any = 1;
+            }
+            if (!any) ui_text_in(c, UI_GOTHIC_500, 16, sx, y, 0, rh, 0, "Nothing bound", MUTED);
+            ui_icon(c, ICON_NEXT, x + w - 46, y + (rh - 24) / 2, 24, 2.6f, PLUM);
+            continue;
+        }
         if (r->value && !strcmp(r->group, "CONTROLLER") && !strcmp(r->name, "VIBRATION")) {
             int on_state = !strcmp(r->cells[0], "ON");
             const char *label = on_state ? "On" : "Off";
@@ -2942,6 +3191,22 @@ void gamemenu_draw(const UiCanvas *c, const GameMenuInfo *in) {
         } else {
             hx += hint(c, hx, by, "Enter", "Done") + 28;
             hint(c, hx, by, "Ctrl V", "Paste");
+        }
+    } else if (focus && sel == GM_CONTROLS && ctrl_view && mb_open) {  /* the Mouse buttons page, or its list */
+        static const char *const shoulders[3] = {"LB RB", "L1 R1", "L R"};
+        int ps = in->pad == 2;
+        const char *ok = in->pad ? (ps ? "Cross" : "A") : "Enter", *back = in->pad ? (ps ? "Circle" : "B") : "Esc";
+        if (mb_list) {
+            hx += hint(c, hx, by, in->pad ? "D-pad" : "W S", "Choose") + 28;
+            hx += hint(c, hx, by, ok, "Bind") + 28;
+            hint(c, hx, by, back, "Cancel");
+        } else {
+            hx += hint(c, hx, by, in->pad ? "D-pad" : "W S", "Choose") + 28;
+            hx += hint(c, hx, by, in->pad ? "D-pad" : "A D", "Change") + 28;
+            hx += hint(c, hx, by, ok, "List") + 28;
+            hx += hint(c, hx, by, in->pad ? (ps ? "Square" : "X") : "Del", "None") + 28;
+            hx += hint(c, hx, by, in->pad ? shoulders[bindings_pad_style() % 3] : "Q E", "Exploring / Battle") + 28;
+            hint(c, hx, by, back, "Back");
         }
     } else if (focus && sel == GM_CONTROLS && !ctrl_view) {  /* the controls page's keyboard or controller view */
         static const char *const shoulders[3] = {"LB RB", "L1 R1", "L R"};  /* as the controller names them */
