@@ -1184,6 +1184,15 @@ pub async fn locate_game(
 mod tests {
     use super::*;
 
+    /// The same folder, however each side spells it: GitHub's Windows machines give the temp folder by its short
+    /// name (C:\Users\RUNNER~1\...) where the launcher answers with the long one (C:\Users\runneradmin\...).
+    fn same_folder(a: &str, b: &Path) -> bool {
+        match (std::fs::canonicalize(a), std::fs::canonicalize(b)) {
+            (Ok(a), Ok(b)) => a == b,
+            _ => false,
+        }
+    }
+
     static TEST_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
     #[test]
@@ -1289,25 +1298,25 @@ mod tests {
         std::fs::write(temp.join("config.toml"), "[input]\nbase_nsp = \"C:\\\\dump\\\\base.nsp\"\n").unwrap();
 
         let res = locate_installed_game_path(temp.clone()).unwrap();
-        assert_eq!(res.install, temp.display().to_string());
+        assert!(same_folder(&res.install, &temp), "{} is not {}", res.install, temp.display());
         assert_eq!(res.mode, "files");
         assert_eq!(res.paths.get("base").map(|s| s.as_str()), Some("C:\\dump\\base.nsp"));
         assert!(res.originals_offered);
 
         // State was saved and can be loaded
         let loaded = load_state().expect("state should be loadable");
-        assert_eq!(loaded.install, temp.display().to_string());
+        assert!(same_folder(&loaded.install, &temp), "{} is not {}", loaded.install, temp.display());
 
         // game.ini was created next to yw4.exe
         assert!(wb.join("game.ini").is_file());
 
         // Locating from subfolder work/build also works
         let res_sub = locate_installed_game_path(wb).unwrap();
-        assert_eq!(res_sub.install, temp.display().to_string());
+        assert!(same_folder(&res_sub.install, &temp), "{} is not {}", res_sub.install, temp.display());
 
         // Locating by selecting yw4.exe file directly also works
         let res_exe = locate_installed_game_path(temp.join("work").join("build").join("yw4.exe")).unwrap();
-        assert_eq!(res_exe.install, temp.display().to_string());
+        assert!(same_folder(&res_exe.install, &temp), "{} is not {}", res_exe.install, temp.display());
 
         let _ = std::fs::remove_dir_all(&temp);
         let _ = std::fs::remove_file(&temp_state);
@@ -1348,7 +1357,7 @@ mod tests {
         std::fs::write(temp.join("game.ini"), "YW4_SAVE=%APPDATA%/YW4 Recomp/save\nYW4_SETTINGS_FILE=%APPDATA%/YW4 Recomp/settings.ini\n").unwrap();
 
         let res = locate_installed_game_path(temp.clone()).unwrap();
-        assert_eq!(res.install, temp.display().to_string());
+        assert!(same_folder(&res.install, &temp), "{} is not {}", res.install, temp.display());
         assert_eq!(res.saves, "appdata");
         assert_eq!(res.mode, "folders");
 
