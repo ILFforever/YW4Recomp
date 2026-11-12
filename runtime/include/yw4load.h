@@ -86,6 +86,9 @@ void *yw4_reserve_range(uint64_t want, size_t size);
 int yw4_commit(uint64_t addr, size_t size);
 void yw4_reserve_free(uint64_t lo, uint64_t hi);  /* see loader.c */
 void yw4_decommit(uint64_t addr, size_t size);
+/* Changes at every yw4_commit and yw4_decommit: answers about which guest memory is mapped (gbuffer.c) hold while
+ * it stays the same. */
+extern volatile uint32_t yw4_memory_generation;
 /* Sleeps the calling host thread (no-op for ns <= 0). */
 void yw4_host_sleep_ns(int64_t ns);
 

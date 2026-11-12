@@ -108,6 +108,47 @@ fn contents(path: &Path) -> Result<(Vec<Entry>, bool), String> {
     Err("it isn't an NSP or XCI".into())
 }
 
+/// The bytes of one file inside an NSP or XCI (at most `max`), else None.
+fn entry_bytes(path: &Path, e: &Entry, max: u64) -> Option<Vec<u8>> {
+    if e.size > max { return None; }
+    read_at(&mut File::open(path).ok()?, e.offset, e.size as usize).ok()
+}
+
+/// Is this .tik a common ticket, whose title key the build takes from the ticket itself (tools/yw4/extract.py
+/// ticket_title_key)? A personalised one needs the key from title.keys.
+fn common_ticket(d: &[u8]) -> bool {
+    if d.len() < 4 { return false; }
+    let (sig, pad) = match u32le(d, 0) {
+        0x10000 | 0x10003 => (0x200, 0x3C),
+        0x10001 | 0x10004 => (0x100, 0x3C),
+        0x10002 | 0x10005 => (0x3C, 0x40),
+        _ => return false,
+    };
+    let body = 4 + sig + pad;
+    d.len() >= body + 0x170 && d[body + 0x141] == 0
+}
+
+/// The rights IDs of an NSP's tickets that need title.keys: those its own common tickets don't carry the key for.
+fn rights_needing_keys(path: &Path, entries: &[Entry]) -> Vec<String> {
+    entries.iter().filter(|e| e.name.ends_with(".tik"))
+        .filter(|e| !entry_bytes(path, e, 0x1000).is_some_and(|d| common_ticket(&d)))
+        .filter_map(|e| Some(e.name.strip_suffix(".tik")?.to_lowercase()))
+        .collect()
+}
+
+/// Title IDs named by an NSP's metadata XML (<Id>0x...</Id> in its .cnmt.xml), for NSPs without a ticket
+/// (2026-11-09: a base game NSP whose NCAs need no title key carried no .tik, and was taken for another game).
+fn cnmt_titles(path: &Path, entries: &[Entry]) -> Vec<u64> {
+    entries.iter().filter(|e| e.name.ends_with(".cnmt.xml"))
+        .filter_map(|e| entry_bytes(path, e, 0x10000))
+        .filter_map(|d| {
+            let t = String::from_utf8_lossy(&d).to_lowercase();
+            let i = t.find("<id>0x")? + 6;
+            u64::from_str_radix(t.get(i..i + 16)?, 16).ok()
+        })
+        .collect()
+}
+
 /// Title IDs named by an NSP's tickets (the first 16 hex digits of each .tik's name: its rights ID).
 fn ticket_titles(entries: &[Entry]) -> Vec<(u64, String)> {
     entries.iter().filter_map(|e| {
@@ -217,14 +258,18 @@ fn check_files(paths: &HashMap<String, String>, t: &Target) -> Vec<Row> {
         Some(Ok((entries, xci))) => {
             base_is_xci = xci;
             let titles = ticket_titles(&entries);
+            let path = Path::new(base_path.unwrap());
+            let named = cnmt_titles(path, &entries);
             if xci {
                 rows.push(row("Base game", "ok", "Game card image (XCI)"));
-            } else if titles.iter().any(|(id, _)| *id == t.app) {
+            } else if titles.iter().any(|(id, _)| *id == t.app) || named.contains(&t.app) {
                 rows.push(row("Base game", "ok", format!("Yo-kai Watch 4++ · {:016X}", t.app)));
+            } else if titles.is_empty() && named.is_empty() {
+                rows.push(row("Base game", "warn", "No ticket or metadata to check it by: checked while building"));
             } else {
                 rows.push(row("Base game", "bad", "This NSP isn't Yo-kai Watch 4++"));
             }
-            rights.extend(titles.into_iter().map(|(_, r)| r));
+            rights.extend(rights_needing_keys(path, &entries));
         }
     }
     match paths.get("update").filter(|p| !p.is_empty()).map(|p| contents(Path::new(p))) {
@@ -233,12 +278,16 @@ fn check_files(paths: &HashMap<String, String>, t: &Target) -> Vec<Row> {
         Some(Err(e)) => rows.push(row("Update", "bad", format!("This file can't be used: {e}"))),
         Some(Ok((entries, _))) => {
             let titles = ticket_titles(&entries);
-            if titles.iter().any(|(id, _)| *id == upd_id) {
+            let path = Path::new(paths.get("update").unwrap());
+            let named = cnmt_titles(path, &entries);
+            if titles.iter().any(|(id, _)| *id == upd_id) || named.contains(&upd_id) {
                 rows.push(row("Update", "ok", format!("An update of this game · {upd_id:016X}")));
+            } else if titles.is_empty() && named.is_empty() {
+                rows.push(row("Update", "warn", "No ticket or metadata to check it by: checked while building"));
             } else {
                 rows.push(row("Update", "bad", "This NSP isn't an update of Yo-kai Watch 4++"));
             }
-            rights.extend(titles.into_iter().map(|(_, r)| r));
+            rights.extend(rights_needing_keys(path, &entries));
         }
     }
     let krow = keys_row(paths.get("keys"), &rights);

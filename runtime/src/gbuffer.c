@@ -346,16 +346,29 @@ static _Thread_local struct {
     uint8_t layer_nvn[NVN_STATE_BYTES];  /* the engine's NVN state objects ([device+0x10d0]+0x240) then */
 } cur;
 
-/* host_readable is a system call: remember the answer per 64 KiB block */
+/* host_readable is a system call: remember the answer per 64 KiB block of the guest's 32 GiB, in a table with a place
+ * for every block. A failed draw-item search tries every word of 8 KiB of stack as a pointer, mostly arbitrary blocks;
+ * a small hash table (emptied when 3/4 full) asked again and again, on three render threads at once: the first Demon
+ * Hand of a session stopped the game for 200 ms in VirtualQuery (2026-11-11, YW4_PROFILE=hitch over every thread).
+ * An answer holds while yw4_memory_generation stays (memory was neither committed nor given back since); "not
+ * readable" holds at most a second besides. Each entry: generation << 32 | second << 2 | 1 readable, 2 not. */
 static int readable(uint64_t addr, uint64_t size) {
-    enum { SLOTS = 1 << 12 };
-    static uint64_t key[SLOTS];
-    static uint8_t val[SLOTS];
+    enum { LO = 0x7000000000ull >> 16, BLOCKS = (0x7800000000ull - 0x7000000000ull) >> 16 };
+    static uint64_t known[BLOCKS];
+    uint64_t gen = (uint64_t)__atomic_load_n(&yw4_memory_generation, __ATOMIC_ACQUIRE) << 32;
+    uint64_t sec = ((uint64_t)host_now_ns() / 1000000000) & 0x3fffffff;
     for (uint64_t b = addr >> 16; b <= (addr + size - 1) >> 16; b++) {
-        uint32_t h = (uint32_t)(b * 0x9E3779B97F4A7C15ull >> 52);
-        while (key[h] && key[h] != b) h = (h + 1) & (SLOTS - 1);
-        if (!key[h]) val[h] = (uint8_t)(host_readable(b << 16, 1 << 16) ? 1 : 2), key[h] = b;
-        if (val[h] != 1) return 0;
+        if (b - LO >= BLOCKS) {
+            if (!host_readable(b << 16, 1 << 16)) return 0;
+            continue;
+        }
+        uint64_t k = __atomic_load_n(&known[b - LO], __ATOMIC_RELAXED);
+        int fresh = (k & 3) && (k & ~0xffffffffull) == gen && ((k & 3) == 1 || ((k >> 2) & 0x3fffffff) == sec);
+        if (!fresh) {
+            k = gen | sec << 2 | (host_readable(b << 16, 1 << 16) ? 1 : 2);
+            __atomic_store_n(&known[b - LO], k, __ATOMIC_RELAXED);
+        }
+        if ((k & 3) != 1) return 0;
     }
     return 1;
 }
@@ -503,18 +516,53 @@ static int is_item(uint64_t p) {
     return guest_ptr(p) && readable(p, 0x48) && U64(p) == cur.geometry &&
            U64(p + 0x10) + 0x50ull * U16(p + 0x40) == cur.submesh;
 }
+/* How much of the 8 KiB above sp is mapped. A worker thread's stack can end within it, and the
+ * per-64-KiB answer of readable() doesn't see a stack's last page (three job threads crashed in a
+ * battle reading past theirs), so this asks per 4 KiB page: at most three system calls. */
+static uint64_t stack_span(uint64_t sp) {
+    /* Per thread: [lo, hi) is known mapped, and hi is the stack's end when `ends` (a thread's
+     * stack stays mapped while it runs), so most calls make no system call. */
+    static _Thread_local uint64_t lo, hi;
+    static _Thread_local int ends;
+    uint64_t end = sp + 0x2000;
+    if (sp >= lo && sp < hi && (end <= hi || ends)) return (end < hi ? end : hi) - sp;
+    uint64_t top = sp & ~0xFFFull;
+    int stop = 0;
+    for (; top < end; top += 0x1000)
+        if (!host_readable(top, 0x1000)) { stop = 1; break; }
+    lo = sp & ~0xFFFull, hi = top, ends = stop;
+    return (end < top ? end : top) - sp;
+}
+/* Submeshes whose draw item wasn't found lately: their draws skip the search (8 KiB of stack, every word tried as a
+ * pointer) for 120 frames, instead of searching again at every draw (the Demon Hand's effect: frames up to 330 ms). */
+enum { MISSES = 64, MISS_FRAMES = 120 };
+static struct { uint64_t submesh, frame; } misses[MISSES];
+static int missed_lately(uint64_t submesh, uint64_t frame) {
+    const uint32_t h = (uint32_t)(submesh * 0x9E3779B97F4A7C15ull >> 58);
+    return misses[h].submesh == submesh && frame - misses[h].frame < MISS_FRAMES;
+}
+static void note_miss(uint64_t submesh, uint64_t frame) {
+    const uint32_t h = (uint32_t)(submesh * 0x9E3779B97F4A7C15ull >> 58);
+    misses[h].submesh = submesh, misses[h].frame = frame;
+}
 static uint64_t find_item(uint64_t sp, int site) {
     static int where[2] = {-1, -1};  /* stack offset, +1 bit: 1 the slot holds a pointer, 0 the item is there */
+    if (!guest_ptr(sp)) return 0;
+    const uint64_t frame = __atomic_load_n(&yw4_frames_presented, __ATOMIC_RELAXED);
+    if (missed_lately(cur.submesh, frame)) return 0;
+    uint64_t span = stack_span(sp);
     int w = __atomic_load_n(&where[site], __ATOMIC_RELAXED);
-    if (w >= 0) {
+    if (w >= 0 && (uint64_t)(w & ~1) + 0x48 <= span) {
         uint64_t p = w & 1 ? U64(sp + (w & ~1)) : sp + (uint64_t)w;
         if (is_item(p)) return p;
     }
-    for (int off = 0; off < 0x2000; off += 8) {
-        if (is_item(sp + off)) return __atomic_store_n(&where[site], off, __ATOMIC_RELAXED), sp + off;
+    for (int off = 0; (uint64_t)off + 8 <= span; off += 8) {
+        if ((uint64_t)off + 0x48 <= span && is_item(sp + off))
+            return __atomic_store_n(&where[site], off, __ATOMIC_RELAXED), sp + off;
         uint64_t p = U64(sp + off);
         if (is_item(p)) return __atomic_store_n(&where[site], off | 1, __ATOMIC_RELAXED), p;
     }
+    note_miss(cur.submesh, frame);
     static int logged;
     if (logged++ < 3) fprintf(stderr, "yw4: gbuffer: no draw item found for submesh %#" PRIx64 "\n", cur.submesh);
     return 0;

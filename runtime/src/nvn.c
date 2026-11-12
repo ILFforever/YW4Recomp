@@ -79,10 +79,10 @@ static uint64_t proc_address(const char *name) {
     if (!addr) {
         if (nprocs == MAX_PROCS) {
             fprintf(stderr, "yw4: NVN: too many function names\n");
-            exit(3);
+            yw4_exit(3, __FILE__, __LINE__);
         }
         char *copy = malloc(strlen(name) + 1);
-        if (!copy) exit(3);
+        if (!copy) yw4_exit(3, __FILE__, __LINE__);
         strcpy(copy, name);
         GuestFn fn = find_impl(name);
         addr = fn ? yw4_host_function_data(fn, copy) : yw4_host_function_data(missing, copy);

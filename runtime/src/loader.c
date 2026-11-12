@@ -83,15 +83,24 @@ void *yw4_reserve_range(uint64_t want, size_t size) {
 }
 
 /* Zeroed read/write memory inside a reserved range; 0 on success. */
+volatile uint32_t yw4_memory_generation;
+
 int yw4_commit(uint64_t addr, size_t size) {
+    __atomic_add_fetch(&yw4_memory_generation, 1, __ATOMIC_RELEASE);
+    int r;
 #ifdef _WIN32
-    return VirtualAlloc((void *)(uintptr_t)addr, size, MEM_COMMIT, PAGE_READWRITE) ? 0 : -1;
+    r = VirtualAlloc((void *)(uintptr_t)addr, size, MEM_COMMIT, PAGE_READWRITE) ? 0 : -1;
 #else
-    if (mprotect((void *)(uintptr_t)addr, size, PROT_READ | PROT_WRITE) == 0) return 0;
-    void *p = mmap((void *)(uintptr_t)addr, size, PROT_READ | PROT_WRITE,  /* not reserved: map it */
-                   MAP_PRIVATE | MAP_ANONYMOUS | MAP_FIXED_NOREPLACE, -1, 0);
-    return p == (void *)(uintptr_t)addr ? 0 : -1;
+    r = 0;
+    if (mprotect((void *)(uintptr_t)addr, size, PROT_READ | PROT_WRITE) != 0) {
+        void *p = mmap((void *)(uintptr_t)addr, size, PROT_READ | PROT_WRITE,  /* not reserved: map it */
+                       MAP_PRIVATE | MAP_ANONYMOUS | MAP_FIXED_NOREPLACE, -1, 0);
+        r = p == (void *)(uintptr_t)addr ? 0 : -1;
+    }
 #endif
+    /* again after: a "not readable" answer taken while the memory was being committed doesn't stay (Linux too) */
+    __atomic_add_fetch(&yw4_memory_generation, 1, __ATOMIC_RELEASE);
+    return r;
 }
 
 /* Reserves every free part of [lo, hi), so later commits work at any 4 KiB page: Windows
@@ -137,6 +146,7 @@ void yw4_decommit(uint64_t addr, size_t size) {
 #else
     mmap((void *)(uintptr_t)addr, size, PROT_NONE, MAP_PRIVATE | MAP_ANONYMOUS | MAP_NORESERVE | MAP_FIXED, -1, 0);
 #endif
+    __atomic_add_fetch(&yw4_memory_generation, 1, __ATOMIC_RELEASE);  /* after: no answer from before it stays */
 }
 
 void yw4_host_sleep_ns(int64_t ns) { host_sleep_ns(ns); }
@@ -184,7 +194,7 @@ uint64_t yw4_host_function_data(GuestFn fn, void *data) {
     }
     if (!host_fn_base || nhost_fns == MAX_HOST_FNS) {
         fprintf(stderr, "yw4: no room for host callbacks\n");
-        exit(1);
+        yw4_exit(1, __FILE__, __LINE__);
     }
     size_t i = nhost_fns;
     host_fns[i].fn = fn;
@@ -203,7 +213,7 @@ uint64_t yw4_guest_symbol(const char *name) {
         if (!strcmp(yw4_guest_symbols[i].name, name))
             return *yw4_modules[yw4_guest_symbols[i].module].base + yw4_guest_symbols[i].offset;
     fprintf(stderr, "yw4: guest symbol %s is not in recomp/overrides.toml [[guest_symbol]]\n", name);
-    exit(3);
+    yw4_exit(3, __FILE__, __LINE__);
 }
 
 /* ---- modules */

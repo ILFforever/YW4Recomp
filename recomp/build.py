@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import argparse
 import concurrent.futures
+import hashlib
 import os
 import subprocess
 import sys
@@ -225,6 +226,16 @@ def main(argv: list[str] | None = None) -> int:
     feature_stamp = objdir / "features.txt"
     features_now = " ".join(feature_defs)
     stale_features = not feature_stamp.exists() or feature_stamp.read_text().strip() != features_now
+    # the runtime's sources by content, not only their times: objects newer than the sources yet built from other ones
+    # (another copy of the code, an update unpacked with older file times) were linked as they were, half old, half
+    # new (2026-11-11, 0.9.3: "undefined symbol: yw4_read_watch_arm" after "compiling 0 of 285 files")
+    source_stamp = objdir / "runtime_sources.txt"
+    digest = hashlib.sha1()
+    for f in sorted([*(RUNTIME / "src").iterdir(), *(RUNTIME / "include").glob("*.h")]):
+        if f.is_file():
+            digest.update(f.name.encode() + b"\0" + f.read_bytes())
+    sources_now = digest.hexdigest()
+    stale_features = stale_features or not source_stamp.exists() or source_stamp.read_text().strip() != sources_now
     todo, objs = [], []
     for src in sources(cfg):
         rt = src.parent == RUNTIME / "src"
@@ -300,6 +311,7 @@ def main(argv: list[str] | None = None) -> int:
         return 1
     stamp.write_text(flags_now + "\n")
     feature_stamp.write_text(features_now + "\n")
+    source_stamp.write_text(sources_now + "\n")
     exe = cfg.work_dir / "build" / ("yw4.exe" if sys.platform == "win32" else "yw4")
     # winmm: timeBeginPeriod; gdi32: the game icon read back for the in-game overlay (gamelogo.c); math on Linux
     libs = [*sdl_libs, "-pthread"] + (["-lwinmm", "-lpsapi", "-lgdi32"] if sys.platform == "win32" else ["-lm"])

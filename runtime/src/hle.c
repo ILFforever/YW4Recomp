@@ -13,6 +13,7 @@
 
 #include "hle.h"
 #include "yw4load.h"
+#include "host.h"
 
 typedef struct {
     const char *name;
@@ -137,7 +138,7 @@ _Noreturn void yw4_hle_stop(CPUState *ctx, const char *fmt, ...) {
     va_end(ap);
     char where[48];
     fprintf(stderr, "\n     called from %s\n", yw4_describe(ctx->x[30] - 4, where));
-    exit(3);
+    yw4_exit(3, __FILE__, __LINE__);
 }
 
 /* The native implementation of an sdk function, by mangled name, or NULL. Since decision

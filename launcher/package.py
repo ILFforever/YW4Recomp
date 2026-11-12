@@ -146,23 +146,54 @@ def stage(ref: str) -> None:
     print(f"stage: {len(files)} files, {sum(p.stat().st_size for p in files) / 1e6:.0f} MB, {ref} = {commit}")
 
 
+def rust_host() -> str:
+    """The Rust compiler's own target ("x86_64-pc-windows-msvc", "x86_64-pc-windows-gnu", ...); "" without rustc."""
+    try:
+        out = subprocess.run(["rustc", "-vV"], capture_output=True, text=True, check=True).stdout
+    except (subprocess.CalledProcessError, FileNotFoundError):
+        return ""
+    return next((line.split(":", 1)[1].strip() for line in out.splitlines() if line.startswith("host:")), "")
+
+
 def build() -> None:
     launcher = REPO / "launcher"
     version = (REPO / "launcher" / "VERSION").read_text().strip()  # the launcher's own number (0054)
     # only for this build: a plain `cargo build` has no stage and must keep working without one
     overrides = OUT / "tauri.package.json"
+    # the GNU Rust build links WebView2 through WebView2Loader.dll (an MSVC build links it in): it has to sit next to
+    # the launcher, or Windows refuses to start it (2026-11-09: a friend's fresh install said the DLL was missing).
+    # Cargo's build puts it in target/release; a first build makes it, so build once before bundling.
+    # Only that build: an MSVC Rust (GitHub's build check, rustup's default on Windows) has neither DLL to ship.
+    release = launcher / "src-tauri" / "target" / "release"
+    loader = release / "WebView2Loader.dll"
+    dlls: dict[str, str] = {}
+    if rust_host().endswith(("-windows-gnu", "-windows-gnullvm")):
+        if not loader.is_file():
+            subprocess.run(["cargo", "build", "--release"], cwd=launcher / "src-tauri", check=True)
+        shutil.copy(loader, OUT / "WebView2Loader.dll")
+        # the same build links Rust's unwinder from llvm-mingw's libunwind.dll (the toolchain's bin, on the PATH for
+        # the build): it ships next to the launcher as well
+        clang = shutil.which("clang")
+        unwind = Path(clang).parent / "libunwind.dll" if clang else None
+        if not unwind or not unwind.is_file():
+            raise SystemExit("libunwind.dll not found: put llvm-mingw's bin on the PATH")
+        shutil.copy(unwind, OUT / "libunwind.dll")
+        # the bundle copies both into target/release; the launcher's own build script runs from there with
+        # libunwind.dll loaded, so a copy left from the last build can't be overwritten (os error 32): start without them
+        for dll in ("WebView2Loader.dll", "libunwind.dll"):
+            (release / dll).unlink(missing_ok=True)
+            dlls[(OUT / dll).as_posix()] = dll
     overrides.write_text(json.dumps({
         "version": version,
         "mainBinaryName": "YW4 Recomp",
         # the launcher's themes (themes.rs): files anyone can copy into this folder, so they ship next to the launcher
-        "bundle": {"resources": {STAGE.as_posix() + "/": "builder/", (REPO / "launcher" / "ui" / "themes").as_posix() + "/": "themes/"}},
+        "bundle": {"resources": {**dlls, STAGE.as_posix() + "/": "builder/", (REPO / "launcher" / "ui" / "themes").as_posix() + "/": "themes/"}},
     }, indent=2))
     npx = shutil.which("npx")
     if not npx:
         raise SystemExit("npx not found: install Node.js")
     subprocess.run([npx, "tauri", "build", "--config", str(overrides)], cwd=launcher, check=True)
 
-    release = launcher / "src-tauri" / "target" / "release"
     shutil.rmtree(DIST, ignore_errors=True)
     DIST.mkdir(parents=True)
     installers = list((release / "bundle" / "nsis").glob(f"*{version}*.exe"))
@@ -172,6 +203,8 @@ def build() -> None:
 
     with zipfile.ZipFile(DIST / f"YW4-Recomp-Launcher-{version}-portable.zip", "w", zipfile.ZIP_DEFLATED) as z:
         z.write(release / "YW4 Recomp.exe", "YW4 Recomp/YW4 Recomp.exe")
+        for dll in dlls.values():  # the GNU Rust build's (above); none with MSVC
+            z.write(OUT / dll, f"YW4 Recomp/{dll}")
         for p in (release / "builder").rglob("*"):
             if p.is_file():
                 z.write(p, Path("YW4 Recomp") / p.relative_to(release))

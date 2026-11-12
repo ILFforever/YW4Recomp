@@ -317,8 +317,11 @@ class RomfsTest(unittest.TestCase):
             (root / "emptydir").mkdir()
             (t / "drv.c").write_text(ROMFS_DRIVER)
             exe = t / "romfs.exe"
+            # host.c: romfs.c's own lock around file reads and yw4_exit (every exit names its source line)
             subprocess.run([check.host_cc(), "-std=c11", "-O1", "-Wall", *POSIX, f"-I{RUNTIME / 'src'}", "-o", str(exe),
-                            str(t / "drv.c"), str(RUNTIME / "src" / "romfs.c")], check=True, capture_output=True)
+                            str(t / "drv.c"), str(RUNTIME / "src" / "romfs.c"), str(RUNTIME / "src" / "host.c"),
+                            "-pthread", *(["-lwinmm"] if sys.platform == "win32" else [])],
+                           check=True, capture_output=True)
             subprocess.run([str(exe), str(root), str(t / "image.bin")], capture_output=True, check=True)
             img = (t / "image.bin").read_bytes()
             self.assertEqual(int.from_bytes(img[:8], "little"), 0x50)

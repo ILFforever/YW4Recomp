@@ -28,6 +28,7 @@ DRIVER = r"""
 #include "yw4load.h"
 
 /* What the kernel links against, with no game: no modules, no services. */
+void yw4_profile_thread(int role, uint64_t frame) { (void)role, (void)frame; }  /* profile.c: no profiler here */
 const Yw4Module yw4_modules[1];
 const size_t yw4_nmodules = 0;
 const uint64_t yw4_entry_init_start = 0, yw4_main_stack_size = 0x1000;

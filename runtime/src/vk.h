@@ -43,7 +43,9 @@
     X(vkCmdSetStencilCompareMask) X(vkCmdSetStencilWriteMask) X(vkCmdSetStencilReference)                    \
     X(vkCmdSetDepthBias) X(vkCmdSetDepthBiasEnable) X(vkCmdSetBlendConstants) X(vkCmdPushConstants)          \
     X(vkCmdSetRasterizerDiscardEnable) X(vkCmdSetDepthBoundsTestEnable) X(vkCmdSetPrimitiveRestartEnable)  \
-    X(vkCreateComputePipelines) X(vkCmdDispatch) X(vkCreateQueryPool) X(vkCmdResetQueryPool) X(vkCmdWriteTimestamp) X(vkGetQueryPoolResults)
+    X(vkCreateComputePipelines) X(vkCmdDispatch) X(vkCreateQueryPool) X(vkCmdResetQueryPool) X(vkCmdWriteTimestamp) X(vkGetQueryPoolResults) \
+    X(vkCreatePipelineCache) X(vkGetPipelineCacheData) X(vkDestroyPipeline) X(vkDestroyPipelineLayout)        \
+    X(vkDestroyShaderModule) X(vkDestroyDescriptorSetLayout)
 
 #define VK_DECLARE_EXTERN(f) extern PFN_##f f;
 VK_GLOBAL_FNS(VK_DECLARE_EXTERN)

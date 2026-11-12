@@ -9,6 +9,7 @@
 
 #include "dlc_known.h"
 #include "ipc_simple.h"
+#include "kernel.h"
 #include "romfs.h"
 #include "savefs.h"
 
@@ -32,7 +33,13 @@ static void romfs_storage(Service *s, IpcRequest *req, IpcResponse *resp) {
         const IpcBuffer *b = out_buffer(req);
         if (!b || size > b->size) size = b ? b->size : 0;
         void *out = GPTR(b ? b->addr : 0);
-        if (addon ? romfs_image_read(addon, offset, out, size) : romfs_read(offset, out, size)) {
+        /* The read without the kernel lock (romfs.c has a lock of its own): a loading thread's large reads held every
+         * other thread's SVCs, the presenting one's too: a 200 ms frame at the Demon Hand's first effect load
+         * (2026-11-11, YW4_PROFILE=hitch: the main thread waiting in svc). */
+        yw4_kernel_unlock();
+        int failed = addon ? romfs_image_read(addon, offset, out, size) : romfs_read(offset, out, size);
+        yw4_kernel_lock();
+        if (failed) {
             fprintf(stderr, "yw4: fs: %sRomFS read [%#" PRIx64 ", +%#" PRIx64 ") failed\n", addon ? "add-on " : "",
                     offset, size);
             resp->result = FS_OUT_OF_RANGE;

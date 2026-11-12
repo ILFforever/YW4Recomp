@@ -12,6 +12,27 @@
 #include "host.h"
 
 #ifdef _WIN32
+#include <windows.h>
+#endif
+
+void yw4_exit(int code, const char *file, int line) {
+    const char *base = strrchr(file, '/');
+    const char *b2 = strrchr(file, '\\');
+    if (b2 && (!base || b2 > base)) base = b2;
+    base = base ? base + 1 : file;
+#ifdef _WIN32
+    MEMORYSTATUSEX m = {.dwLength = sizeof m};
+    if (GlobalMemoryStatusEx(&m))
+        fprintf(stderr, "yw4: exit %d from %s:%d (memory: %llu MiB of %llu free, commit %llu MiB of %llu free)\n", code,
+                base, line, (unsigned long long)(m.ullAvailPhys >> 20), (unsigned long long)(m.ullTotalPhys >> 20),
+                (unsigned long long)(m.ullAvailPageFile >> 20), (unsigned long long)(m.ullTotalPageFile >> 20));
+    else
+#endif
+        fprintf(stderr, "yw4: exit %d from %s:%d\n", code, base, line);
+    exit(code);
+}
+
+#ifdef _WIN32
 #include <process.h>
 #include <windows.h>
 #include <timeapi.h>
@@ -207,7 +228,7 @@ void host_respawn(int argc, char **argv) {
         CloseHandle(pi.hProcess);
         CloseHandle(pi.hThread);
         free(cmd);
-        exit((int)code);
+        yw4_exit((int)code, __FILE__, __LINE__);
     }
     free(cmd);
 }
@@ -251,6 +272,48 @@ int host_write_watch(uint64_t addr, uint64_t size, void (*report)(uint64_t pc, u
     ww_addr = addr, ww_size = size, ww_page = addr & ~(uint64_t)4095, ww_report = report;
     if (!AddVectoredExceptionHandler(1, ww_handler)) return -1;
     return VirtualProtect((void *)(uintptr_t)ww_page, 4096, PAGE_READONLY, &old) ? 0 : -1;
+}
+
+/* Read watchpoint (YW4_TRACE_AI, ai_trace.c): the page is made inaccessible; an access by the game reports it when it
+ * touches [addr, addr + size) (any access in the page faults; only those are reported), then the page is opened for one
+ * single-stepped instruction and closed again. After `left` reports it stays open. */
+static uint64_t rw_addr, rw_size, rw_page;
+static long rw_left;
+static void (*rw_report)(uint64_t pc, uint64_t addr);
+static _Thread_local int rw_stepping;
+
+static LONG CALLBACK rw_handler(EXCEPTION_POINTERS *e) {
+    EXCEPTION_RECORD *r = e->ExceptionRecord;
+    DWORD old;
+    if (r->ExceptionCode == EXCEPTION_ACCESS_VIOLATION && r->NumberParameters >= 2 && rw_page) {
+        uint64_t a = (uint64_t)r->ExceptionInformation[1];
+        if (a < rw_page || a >= rw_page + 4096) return EXCEPTION_CONTINUE_SEARCH;
+        if (a < rw_addr + rw_size && a + 16 > rw_addr && __atomic_fetch_sub(&rw_left, 1, __ATOMIC_RELAXED) > 0)
+            rw_report((uint64_t)(uintptr_t)r->ExceptionAddress, a);
+        VirtualProtect((void *)(uintptr_t)rw_page, 4096, PAGE_READWRITE, &old);
+        if (__atomic_load_n(&rw_left, __ATOMIC_RELAXED) <= 0) {  /* done: the page stays open */
+            rw_page = 0;
+            return EXCEPTION_CONTINUE_EXECUTION;
+        }
+        e->ContextRecord->EFlags |= 0x100;
+        rw_stepping = 1;
+        return EXCEPTION_CONTINUE_EXECUTION;
+    }
+    if (r->ExceptionCode == EXCEPTION_SINGLE_STEP && rw_stepping) {
+        rw_stepping = 0;
+        if (rw_page) VirtualProtect((void *)(uintptr_t)rw_page, 4096, PAGE_NOACCESS, &old);
+        return EXCEPTION_CONTINUE_EXECUTION;
+    }
+    return EXCEPTION_CONTINUE_SEARCH;
+}
+
+int host_read_watch(uint64_t addr, uint64_t size, long reports, void (*report)(uint64_t pc, uint64_t addr)) {
+    static int added;
+    DWORD old;
+    rw_addr = addr, rw_size = size, rw_left = reports, rw_report = report, rw_page = addr & ~(uint64_t)4095;
+    if (!added && !AddVectoredExceptionHandler(1, rw_handler)) return -1;
+    added = 1;
+    return VirtualProtect((void *)(uintptr_t)rw_page, 4096, PAGE_NOACCESS, &old) ? 0 : -1;
 }
 
 int host_readable(uint64_t addr, uint64_t size) {
@@ -448,6 +511,11 @@ long host_written_pages(uint64_t addr, uint64_t size, void (*fn)(uint64_t page, 
 int host_write_watch(uint64_t addr, uint64_t size, void (*report)(uint64_t pc, uint64_t addr)) {
     (void)addr, (void)size, (void)report;
     return -1;  /* to do: mprotect + SIGSEGV + single step */
+}
+
+int host_read_watch(uint64_t addr, uint64_t size, long reports, void (*report)(uint64_t pc, uint64_t addr)) {
+    (void)addr, (void)size, (void)reports, (void)report;
+    return -1;  /* Windows only for now (YW4_TRACE_AI) */
 }
 
 int host_readable(uint64_t addr, uint64_t size) {

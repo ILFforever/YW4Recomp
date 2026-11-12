@@ -240,12 +240,19 @@ def find_jump_table(code: Code, br_off: int, reg: int, lowest: int, window: int 
     o -= 4
     while o >= lo:                                           # b.hi / b.ls guarding the table
         e = code.word(o)
+        if e & 0xFC000000 == 0x14000000 or e == 0xD65F03C0:  # b / ret: the table's block starts after it
+            bound = guard_into(code, o + 4, lowest, br_off)  # and is entered by a branch to it, not by falling in
+            if bound is not None:                            # (sdk+0x446df0: `cmp x8, #5; b.ls` far above, while
+                break                                        # the `cmp w8, #4; b.ls` just before belongs to a loop)
         if e & 0xFF00001E == 0x54000008 or e & 0xFF00001F == 0x54000000:  # HI/LS, or EQ (below)
             eq = e & 0xFF00001F == 0x54000000                # `cmp w, #N; b.eq`: the index was masked to 0..N, so N entries
             o -= 4
             lo_cmp = max(br_off - 4 * 8 * window, lowest)    # the compiler can schedule much code in between
             while o >= lo_cmp:                               # the flag-setting compare before it
                 e = code.word(o)
+                if e & 0x7FE00C10 == 0x7A400800 and not eq:  # ccmp xN/wN, #imm, #nzcv, cond
+                    bound = bits(e, 20, 16)                  # `cmp a, #0; ccmp idx, #N, #2, ne; b.hi`:
+                    break                                    # the last compare is the index's bound
                 if e & 0x7F80001F == 0x7100001F and not bits(e, 22, 22):
                     bound = bits(e, 21, 10) - eq             # cmp xN/wN, #imm (subs xzr, ..)
                     if bound < 0:
@@ -268,6 +275,28 @@ def find_jump_table(code: Code, br_off: int, reg: int, lowest: int, window: int 
         targets = table_targets(code, cand, bound, near=br_off)
         if targets is not None:
             return targets
+    return None
+
+
+def guard_into(code: Code, start: int, lowest: int, br_off: int) -> int | None:
+    """The bound of a switch whose dispatch block at `start` is entered by `cmp xI, #N; b.ls start` (N+1 entries)
+    or `b.lo start` (N entries) somewhere in the function before it, else None."""
+    o = max(lowest, br_off - 0x4000)
+    while o < start:
+        e = code.word(o)
+        if e & 0xFF000010 == 0x54000000 and e & 0xF in (3, 9):  # b.lo / b.ls
+            imm = bits(e, 23, 5)
+            if imm & 0x40000:
+                imm -= 0x80000
+            if o + 4 * imm == start:
+                for back in range(1, 9):                       # its compare, just before it
+                    c = code.word(o - 4 * back)
+                    if c & 0x7F80001F == 0x7100001F and not bits(c, 22, 22):
+                        n = bits(c, 21, 10)
+                        return n if e & 0xF == 9 else (n - 1 if n else None)
+                    if c & 0x1F000000 in (0x11000000, 0x0B000000) and bits(c, 29, 29):
+                        break                                  # another flag setter: not ours
+        o += 4
     return None
 
 

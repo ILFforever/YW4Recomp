@@ -91,7 +91,7 @@ static void put(const Job *j) {
         started = 1;
         if (host_thread_start(worker, NULL, 1 << 20)) {
             fprintf(stderr, "yw4: gpu: cannot start the GPU worker thread\n");
-            exit(3);
+            yw4_exit(3, __FILE__, __LINE__);
         }
     }
     while (queued - done >= JOBS) host_cond_wait(&progress, &lock, -1);  /* the worker is far behind */

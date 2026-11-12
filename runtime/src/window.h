@@ -39,6 +39,9 @@ void window_pause_toggle(void);
 int window_paused(void);  /* the overlay's pause is on: the player's input is held back */
 uint64_t window_pause_buttons(void);  /* the buttons it presses for the player now (live input and replays) */
 
+/* The refresh rate of the display the window is on, in Hz (0 not known yet, or no window). Any thread. */
+double window_refresh_hz(void);
+
 /* Relative mouse motion accumulated since the last call (bindings.c yw4_hook_mouse_look). */
 void window_mouse_motion(float *dx, float *dy);
 

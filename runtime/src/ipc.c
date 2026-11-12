@@ -17,6 +17,7 @@
 
 #include "hle.h"
 #include "ipc.h"
+#include "host.h"
 
 #define R_OK 0u
 #define R_NOT_FOUND 0xF201u
@@ -59,7 +60,7 @@ static int stub_mode(void) {
 
 Service *ipc_service_new(const char *name, ServiceHandler handler, void *state) {
     Service *s = calloc(1, sizeof *s);
-    if (!s) exit(3);
+    if (!s) yw4_exit(3, __FILE__, __LINE__);
     s->name = name;
     s->handler = handler;
     s->state = state;
@@ -103,7 +104,7 @@ typedef struct {
 
 static uint32_t session_new(Service *s, Domain *domain) {
     Session *k = calloc(1, sizeof *k);
-    if (!k) exit(3);
+    if (!k) yw4_exit(3, __FILE__, __LINE__);
     k->obj.type = KOBJ_SESSION;
     k->svc = s;
     k->domain = domain;
@@ -193,7 +194,7 @@ static void control(Session *k, IpcRequest *req, IpcResponse *resp) {
     switch (req->cmd) {
     case 0:  /* ConvertCurrentObjectToDomain -> object id */
         k->domain = calloc(1, sizeof *k->domain);
-        if (!k->domain) exit(3);
+        if (!k->domain) yw4_exit(3, __FILE__, __LINE__);
         k->domain->objects[1] = k->svc;
         IPC_OUT(uint32_t, 0) = 1;
         ipc_out_size(resp, 4);
@@ -207,7 +208,7 @@ static void control(Session *k, IpcRequest *req, IpcResponse *resp) {
         return;
     default:
         fprintf(stderr, "yw4: unimplemented IPC control command %u on %s\n", req->cmd, k->svc->name);
-        exit(3);
+        yw4_exit(3, __FILE__, __LINE__);
     }
 }
 
@@ -239,7 +240,7 @@ uint32_t ipc_send_request(uint32_t handle, uint64_t message) {
         uint32_t object = *(uint32_t *)(payload + 4);
         if (object >= 256 || !k->domain->objects[object]) {
             fprintf(stderr, "yw4: IPC to missing domain object %u on %s\n", object, k->svc->name);
-            exit(3);
+            yw4_exit(3, __FILE__, __LINE__);
         }
         if (dcmd == 2) {  /* close this domain object */
             service_release(k->domain->objects[object]);
@@ -251,7 +252,7 @@ uint32_t ipc_send_request(uint32_t handle, uint64_t message) {
     }
     if (memcmp(payload, "SFCI", 4) != 0) {
         fprintf(stderr, "yw4: IPC request to %s without SFCI header (type %u)\n", target->name, req.type);
-        exit(3);
+        yw4_exit(3, __FILE__, __LINE__);
     }
     req.cmd = *(uint32_t *)(payload + 8);
     req.data = payload + 16;
@@ -267,7 +268,7 @@ uint32_t ipc_send_request(uint32_t handle, uint64_t message) {
         control(k, &req, &resp);
     else {
         fprintf(stderr, "yw4: IPC message type %u not supported\n", req.type);
-        exit(3);
+        yw4_exit(3, __FILE__, __LINE__);
     }
 
 reply:;
@@ -279,7 +280,7 @@ reply:;
             while (id < 256 && k->domain->objects[id]) id++;
             if (id == 256) {
                 fprintf(stderr, "yw4: IPC domain of %s is full\n", k->svc->name);
-                exit(3);
+                yw4_exit(3, __FILE__, __LINE__);
             }
             k->domain->objects[id] = resp.objects[i];
             resp.objects[i]->refs++;

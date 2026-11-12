@@ -29,6 +29,7 @@
 
 #include "ipc_simple.h"
 #include "savefs.h"
+#include "host.h"
 
 #define FS_PATH_NOT_FOUND 0x202u       /* fs (module 2), description 1 */
 #define FS_PATH_ALREADY_EXISTS 0x402u  /* description 2 */
@@ -173,7 +174,7 @@ static SaveDir *read_directory(const char *path, uint32_t mode) {
     DIR *dir = opendir(path);
     if (!dir) return NULL;
     SaveDir *d = calloc(1, sizeof *d);
-    if (!d) exit(3);
+    if (!d) yw4_exit(3, __FILE__, __LINE__);
     uint64_t cap = 0;
     for (struct dirent *e; (e = readdir(dir));) {
         if (!strcmp(e->d_name, ".") || !strcmp(e->d_name, "..") || strlen(e->d_name) > 0x300) continue;
@@ -183,7 +184,7 @@ static SaveDir *read_directory(const char *path, uint32_t mode) {
         if (stat(full, &st)) continue;
         int is_directory = (st.st_mode & S_IFMT) == S_IFDIR;
         if (!(mode & (is_directory ? 1 : 2))) continue;
-        if (d->n == cap && !(d->entries = realloc(d->entries, (cap = cap ? 2 * cap : 16) * sizeof *d->entries))) exit(3);
+        if (d->n == cap && !(d->entries = realloc(d->entries, (cap = cap ? 2 * cap : 16) * sizeof *d->entries))) yw4_exit(3, __FILE__, __LINE__);
         DirEntry *de = &d->entries[d->n++];
         strcpy(de->name, e->d_name);
         de->type = is_directory ? 0 : 1;
@@ -254,7 +255,7 @@ static void save_fs(Service *s, IpcRequest *req, IpcResponse *resp) {
         FILE *f = fopen(path, mode & 6 ? "r+b" : "rb");
         if (!f) { resp->result = FS_PATH_NOT_FOUND; return; }
         SaveFile *sf = calloc(1, sizeof *sf);
-        if (!sf) exit(3);
+        if (!sf) yw4_exit(3, __FILE__, __LINE__);
         sf->f = f;  /* closed never: files of a save stay few, and the Switch's limit is the game's concern */
         ipc_return_object(resp, ipc_service_new("fs:IFile (save)", save_file, sf));
         return;
@@ -283,14 +284,14 @@ uint32_t savefs_open(uint64_t program_id, const uint8_t uid[16], int create, Ser
         make_dirs(dir);
         if (!is_dir(dir)) {
             fprintf(stderr, "yw4: fs: cannot create the save folder %s\n", dir);
-            exit(3);
+            yw4_exit(3, __FILE__, __LINE__);
         }
         fprintf(stderr, "yw4: fs: created save data in %s\n", dir);
         return 0;
     }
     if (out) {
         SaveFs *fs = calloc(1, sizeof *fs);
-        if (!fs) exit(3);
+        if (!fs) yw4_exit(3, __FILE__, __LINE__);
         snprintf(fs->root, sizeof fs->root, "%s", dir);
         *out = ipc_service_new("fs:IFileSystem (save)", save_fs, fs);
     }

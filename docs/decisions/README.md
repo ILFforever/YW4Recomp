@@ -71,3 +71,5 @@ lists later records that replace a record, or part of it.
 | 0060 | [The launcher's icon: the owner's own Whisper silhouette](0060-launcher-icon.md) | accepted | 2026-11-10 |  | `launcher/icon-source.png`, `launcher/src-tauri/icons` |
 | 0061 | [The game's "time was changed" check is answered "not changed"](0061-time-change-check.md) | accepted | 2026-11-11 |  | `runtime/src/svc_time.c`, `recomp/overrides.toml` |
 | 0062 | [First start: graphics picked for the GPU, two levels](0062-first-start-graphics.md) | accepted | 2026-11-11 |  | `runtime/src/settings.c`, `runtime/src/window.c` |
+| 0063 | [Pipeline cache and journal on disk, and when they are thrown away](0063-pipeline-cache.md) | accepted | 2026-11-12 |  | `runtime/src/gpu_pcache.c`, `runtime/src/gpu_draw.c` |
+| 0064 | [Holding 30 and 60 frames/s: the vsync tick, or the display's refresh (to measure)](0064-pacing-tick-or-refresh.md) | proposed | 2026-11-12 |  | `runtime/src/framerate.c`, `runtime/src/vi.c`, `runtime/src/perf.c` |

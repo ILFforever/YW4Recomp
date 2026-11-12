@@ -20,6 +20,7 @@
  *
  * Enum values follow LAS Recomp (runtime/nvn/vulkan/exec.c; MIT, see third_party/lasrecomp).
  */
+#include <dirent.h>
 #include <inttypes.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -262,6 +263,17 @@ static VkShaderModule replacement(uint64_t key, int stage) {
     return VK_NULL_HANDLE;
 }
 
+/* The next non-empty line of *p (NUL-terminated in place), or NULL at the end; *p moves past it. */
+static char *next_line(char **p) {
+    char *s = *p;
+    while (*s == '\n' || *s == '\r') s++;
+    if (!*s) return NULL;
+    char *e = s + strcspn(s, "\n");
+    if (*e) *e++ = 0;
+    *p = e;
+    return s;
+}
+
 /* A translated shader's module and descriptor set layout, from the files (not kept in the list). */
 static Shader *load_shader(uint64_t key, int stage) {
     Shader *s = calloc(1, sizeof *s);
@@ -279,7 +291,9 @@ static Shader *load_shader(uint64_t key, int stage) {
     char *text = read_file(path, &n);
     if (!text) gpu_stop("no shader interface %s", path);
     VkDescriptorSetLayoutBinding lb[MAX_BINDINGS];
-    for (char *line = strtok(text, "\n"); line; line = strtok(NULL, "\n")) {
+    /* lines split by hand, not strtok: the prewarm threads load shaders at the same time (gpu_prebuild_start) */
+    char *rest = text;
+    for (char *line; (line = next_line(&rest)) != NULL;) {
         char kind, dim[32] = "";
         unsigned slot, rx, ry, rz, rw;
         if (!strncmp(line, "m in", 4)) {  /* the position: input 0 as it is */
@@ -363,11 +377,55 @@ static Shader *load_shader(uint64_t key, int stage) {
     return s;
 }
 
+/* ---- every translated shader loaded in the background at start (gpu_prebuild_start), so a new area's
+ * first draws find theirs ready: loading one from its files (SPIR-V, interface, GLSL) and making its module
+ * took 5-10 ms on the GPU thread (2026-11-08, town: 12 new shaders = 110 ms, a visible hitch). The slots are
+ * made before the threads start and are read-only after, but for s: NULL not loaded yet, &pre_taken taken
+ * by the GPU thread (shader()), else a loaded Shader waiting to be taken. YW4_SHADER_PRELOAD=0: off. */
+enum { PRE_CAP = 8192 };
+typedef struct {
+    uint64_t key;  /* 0: empty slot */
+    int stage;
+    Shader *s;
+} PreSlot;
+static PreSlot *pre;
+static uint32_t *pre_order;  /* the slots in directory order, for the threads */
+static size_t pre_n, pre_next;
+static Shader pre_taken;
+static int64_t pre_t0;
+static int pre_left;
+
+static size_t pre_hash(uint64_t key, int stage) {
+    return (size_t)(((key ^ (uint64_t)stage * 0x9E3779B97F4A7C15ull) * 0xff51afd7ed558ccdull) >> 40) & (PRE_CAP - 1);
+}
+
+static PreSlot *pre_find(uint64_t key, int stage) {
+    if (!pre || !key) return NULL;
+    for (size_t i = pre_hash(key, stage);; i = (i + 1) & (PRE_CAP - 1)) {
+        if (!pre[i].key) return NULL;
+        if (pre[i].key == key && pre[i].stage == stage) return &pre[i];
+    }
+}
+
+/* The preloaded shader for (key, stage), taken (the slot then stays taken), or NULL: load it here. */
+static Shader *pre_take(uint64_t key, int stage) {
+    PreSlot *p = pre_find(key, stage);
+    if (!p) return NULL;
+    Shader *s = __atomic_exchange_n(&p->s, &pre_taken, __ATOMIC_ACQ_REL);
+    return s == &pre_taken ? NULL : s;
+}
+
 static Shader *shader(uint64_t key, int stage) {
     for (Shader *s = shaders; s; s = s->next)
         if (s->key == key && s->stage == stage) return s;
+    Shader *s = pre_take(key, stage);
+    if (s) {
+        s->next = shaders;
+        shaders = s;
+        return s;
+    }
     int64_t t0 = host_now_ns();
-    Shader *s = load_shader(key, stage);
+    s = load_shader(key, stage);
     gpu_stall_add(STALL_SHADER, host_now_ns() - t0);
     s->next = shaders;
     shaders = s;
@@ -411,7 +469,10 @@ typedef struct {
     Shader *comp;  /* the compute stage, if any (set 0, no push constants) */
     VkPipelineLayout comp_layout;
     VkPipeline comp_pipe;
+    int warm;  /* a prewarm thread's copy (gpu_prebuild_start): not journalled, not counted as a frame's stall */
 } Program;
+
+static void journal_add(const Program *g, const PipeKey *k);
 
 static Program *program_of(NvnProgram *p) {
     if (p->gpu) return ((Program *)p->gpu)->sh[ST_VERT] ? p->gpu : NULL;  /* a compute-only program has no draws */
@@ -448,7 +509,7 @@ static Program *compute_program_of(NvnProgram *p) {
                                                 .stage = VK_SHADER_STAGE_COMPUTE_BIT, .module = g->comp->module,
                                                 .pName = "main"},
                                       .layout = g->comp_layout};
-    CHECK(vkCreateComputePipelines(vk.device, VK_NULL_HANDLE, 1, &ci, NULL, &g->comp_pipe));
+    CHECK(vkCreateComputePipelines(vk.device, gpu_pcache(), 1, &ci, NULL, &g->comp_pipe));
     return g;
 }
 
@@ -648,9 +709,8 @@ static VkShaderModule debug_fragment(const Shader *fs) {
     return m;
 }
 
-static VkPipeline pipeline(Program *g, const PipeKey *k) {
-    for (Pipe *p = g->pipes; p; p = p->next)
-        if (!memcmp(&p->key, k, sizeof *k)) return p->pipeline;
+/* Asks the driver for the pipeline of g with state k (through the cache on disk); *took: how long. */
+static VkPipeline build_pipeline(Program *g, const PipeKey *k, int64_t *took) {
     VkPipelineShaderStageCreateInfo st[NSETS];
     uint32_t nst = 0;
     for (int i = 0; i < NSETS; i++)
@@ -720,13 +780,109 @@ static VkPipeline pipeline(Program *g, const PipeKey *k) {
         .pVertexInputState = &vi, .pInputAssemblyState = &ia, .pViewportState = &vp, .pRasterizationState = &rs,
         .pMultisampleState = &ms, .pDepthStencilState = &ds, .pColorBlendState = &cbs, .pDynamicState = &dy,
         .layout = g->layout};
+    VkPipeline pl;
+    int64_t t0 = host_now_ns();
+    CHECK(vkCreateGraphicsPipelines(vk.device, gpu_pcache(), 1, &pci, NULL, &pl));
+    *took = host_now_ns() - t0;
+    gpu_pcache_built();
+    return pl;
+}
+
+/* ---- pipelines built in the background (2026-11-08)
+ *
+ * A pipeline the driver has never compiled costs 40-300 ms on a Radeon (one shader pair has up to four
+ * variants, by vertex format and blending: 234 pipelines for 118 pairs in the town). Built in the frame, each
+ * is a visible hitch. So when a 3D object's draw (a vertex program with the engine's local-matrix block,
+ * Shader.model: redrawn every frame) needs a pipeline that neither this run nor the journal has seen, the
+ * build goes to a background thread and the draw is skipped until it is ready: the object shows a few frames
+ * late, the very first time only (then the cache on disk has it). Everything else (the UI, full-screen
+ * passes, render-to-texture that may be drawn once) still builds in its frame.
+ *
+ * Off unless YW4_ASYNC_PIPELINES=1 (the owner, 2026-11-12): an object missing for a few frames is worse than a
+ * hitch that happens once, and with the cache and the journal's prewarm a pipeline is new only the first time
+ * it is ever drawn. Off, every pipeline builds in its frame, as before. */
+enum { ASYNC_THREADS = 3, ASYNC_QUEUE = 1024 };
+typedef struct {
+    Program *g;
+    Pipe *p;
+} AsyncJob;
+static AsyncJob async_q[ASYNC_QUEUE];
+static unsigned async_head, async_tail;  /* under async_lock */
+static HostLock async_lock;
+static HostCond async_cond;
+static int async_on = -1;
+static uint64_t async_built, async_skipped;
+
+static void async_thread(void *arg) {
+    (void)arg;
+    for (;;) {
+        host_lock(&async_lock);
+        while (async_head == async_tail) host_cond_wait(&async_cond, &async_lock, -1);
+        AsyncJob j = async_q[async_tail++ % ASYNC_QUEUE];
+        host_unlock(&async_lock);
+        int64_t took;
+        VkPipeline pl = build_pipeline(j.g, &j.p->key, &took);
+        journal_add(j.g, &j.p->key);
+        __atomic_store_n(&j.p->pipeline, pl, __ATOMIC_RELEASE);
+        uint64_t n = __atomic_add_fetch(&async_built, 1, __ATOMIC_RELAXED);
+        if (n % 50 == 1)
+            fprintf(stderr, "yw4: gpu: %" PRIu64 " new pipelines built in the background (last %lld ms), %" PRIu64
+                    " draws waited for one\n", n, (long long)(took / 1000000),
+                    __atomic_load_n(&async_skipped, __ATOMIC_RELAXED));
+    }
+}
+
+static int async_enabled(void) {
+    if (async_on < 0) {
+        const char *e = getenv("YW4_ASYNC_PIPELINES");
+        async_on = e && *e && *e != '0';
+        if (async_on) {
+            host_lock_init(&async_lock);
+            host_cond_init(&async_cond);
+            for (int i = 0; i < ASYNC_THREADS; i++)
+                if (host_thread_start(async_thread, NULL, 1 << 20)) {
+                    if (!i) async_on = 0;
+                    break;
+                }
+        }
+    }
+    return async_on;
+}
+
+static int journal_knows(const Program *g, const PipeKey *k);
+
+/* The pipeline of g with state k. VK_NULL_HANDLE (draw nothing) while a background build of it is running. */
+static VkPipeline pipeline(Program *g, const PipeKey *k) {
+    for (Pipe *p = g->pipes; p; p = p->next)
+        if (!memcmp(&p->key, k, sizeof *k)) {
+            VkPipeline pl = __atomic_load_n(&p->pipeline, __ATOMIC_ACQUIRE);
+            if (!pl) __atomic_add_fetch(&async_skipped, 1, __ATOMIC_RELAXED);
+            return pl;
+        }
     Pipe *p = calloc(1, sizeof *p);
     p->key = *k;
-    int64_t t0 = host_now_ns();
-    CHECK(vkCreateGraphicsPipelines(vk.device, VK_NULL_HANDLE, 1, &pci, NULL, &p->pipeline));
-    int64_t took = host_now_ns() - t0;
-    gpu_stall_add(STALL_PIPE, took);
-    if (took > 100000000)  /* a slow build stalls the frame: say which shaders */
+    if (!g->warm && g->sh[ST_VERT] && g->sh[ST_VERT]->model && async_enabled() && !journal_knows(g, k)) {
+        host_lock(&async_lock);
+        int room = async_head - async_tail < ASYNC_QUEUE;
+        if (room) {
+            async_q[async_head++ % ASYNC_QUEUE] = (AsyncJob){g, p};
+            host_cond_signal(&async_cond);
+        }
+        host_unlock(&async_lock);
+        if (room) {
+            p->next = g->pipes;  /* listed now, its pipeline 0 until the thread is done */
+            g->pipes = p;
+            __atomic_add_fetch(&async_skipped, 1, __ATOMIC_RELAXED);
+            return VK_NULL_HANDLE;
+        }
+    }
+    int64_t took;
+    p->pipeline = build_pipeline(g, k, &took);
+    if (!g->warm) {
+        journal_add(g, k);
+        gpu_stall_add(STALL_PIPE, took);
+    }
+    if (took > 100000000 && !g->warm)  /* a slow build stalls the frame: say which shaders */
         fprintf(stderr, "yw4: gpu: pipeline took %lld ms (vert %016" PRIx64 ", frag %016" PRIx64 ")\n",
                 (long long)(took / 1000000), g->sh[ST_VERT] ? g->sh[ST_VERT]->key : 0,
                 g->sh[ST_FRAG] ? g->sh[ST_FRAG]->key : 0);
@@ -763,6 +919,7 @@ static void prebuild_thread(void *arg) {
         if (!have) continue;
         int64_t t0 = host_now_ns();
         Program g = {0};
+        g.warm = 1;
         g.sh[ST_VERT] = load_shader(prebuilt[i].vert, ST_VERT);
         g.sh[ST_FRAG] = load_shader(prebuilt[i].frag, ST_FRAG);
         VkDescriptorSetLayout layouts[2] = {g.sh[ST_VERT]->layout, g.sh[ST_FRAG]->layout};
@@ -789,11 +946,291 @@ static void prebuild_thread(void *arg) {
     }
 }
 
+/* ---- the pipeline journal and the prewarm (2026-11-08)
+ *
+ * The cache on disk (gpu_pcache.c) makes a pipeline built in an earlier run cost ~1 ms instead of 40-300 ms
+ * on a Radeon, but the game still asks for each one in the middle of a frame: 117 at once when the town first
+ * appears. So every pipeline the game builds is also written to a journal, work/pipelines.journal: its stage
+ * programs (by key) and its PipeKey. At start-up, while the game boots and shows its title, background
+ * threads build every pipeline in the journal into the cache; when the game then asks for one, it is a cache
+ * hit. A pipeline never seen before still compiles in its frame, once: from the next run on it is warm.
+ *
+ * Records are written only for new pipelines (a hash set of what the file already holds), appended and
+ * flushed one by one so a crash keeps what came before. A file from another build (another PipeKey size) is
+ * set aside as .old and a new one started; one from another GPU, driver or set of shaders is deleted with the
+ * cache (gpu_pcache.c, decision 0063). YW4_PIPELINE_JOURNAL=<file> moves it, =none turns it off. */
+typedef struct {
+    uint64_t key[NSETS];
+    PipeKey k;
+} JournalRec;
+
+static const char JOURNAL_MAGIC[8] = {'Y', 'W', '4', 'P', 'I', 'P', 'E', '1'};
+static FILE *journal;
+static HostLock journal_lock;
+static uint64_t *journal_set;  /* open addressing; 0 = empty */
+static size_t journal_cap, journal_count;
+static JournalRec *warm_recs;
+static size_t warm_n, warm_next;
+
+static uint64_t rec_hash(const JournalRec *r) {
+    uint64_t h = 1469598103934665603ull;
+    const unsigned char *p = (const unsigned char *)r;
+    for (size_t i = 0; i < sizeof *r; i++) h = (h ^ p[i]) * 1099511628211ull;
+    return h ? h : 1;
+}
+
+/* 1 if h was new (now in the set) */
+static int set_add(uint64_t h) {
+    if (2 * (journal_count + 1) > journal_cap) {
+        size_t cap = journal_cap ? 2 * journal_cap : 4096;
+        uint64_t *n = calloc(cap, sizeof *n);
+        if (!n) return 0;
+        for (size_t i = 0; i < journal_cap; i++)
+            if (journal_set[i]) {
+                size_t j = journal_set[i] & (cap - 1);
+                while (n[j]) j = (j + 1) & (cap - 1);
+                n[j] = journal_set[i];
+            }
+        free(journal_set);
+        journal_set = n, journal_cap = cap;
+    }
+    size_t j = h & (journal_cap - 1);
+    while (journal_set[j]) {
+        if (journal_set[j] == h) return 0;
+        j = (j + 1) & (journal_cap - 1);
+    }
+    journal_set[j] = h;
+    journal_count++;
+    return 1;
+}
+
+static void journal_rec(JournalRec *r, const Program *g, const PipeKey *k) {
+    memset(r, 0, sizeof *r);
+    for (int i = 0; i < NSETS; i++) r->key[i] = g->sh[i] ? g->sh[i]->key : 0;
+    r->k = *k;
+}
+
+/* 1 if this pipeline was built in an earlier run (it's in the journal, so in the cache on disk) or this one */
+static int journal_knows(const Program *g, const PipeKey *k) {
+    if (!journal) return 0;
+    JournalRec r;
+    journal_rec(&r, g, k);
+    uint64_t h = rec_hash(&r);
+    host_lock(&journal_lock);
+    int found = 0;
+    if (journal_cap) {
+        size_t j = h & (journal_cap - 1);
+        while (journal_set[j] && !found) {
+            found = journal_set[j] == h;
+            j = (j + 1) & (journal_cap - 1);
+        }
+    }
+    host_unlock(&journal_lock);
+    return found;
+}
+
+static void journal_add(const Program *g, const PipeKey *k) {
+    if (!journal) return;
+    JournalRec r;
+    journal_rec(&r, g, k);
+    host_lock(&journal_lock);
+    if (set_add(rec_hash(&r)) && fwrite(&r, sizeof r, 1, journal) == 1) fflush(journal);
+    host_unlock(&journal_lock);
+}
+
+/* Reads the journal into warm_recs and opens it for appending. */
+static void journal_open(void) {
+    const char *path = gpu_pcache_journal_path();  /* gpu_pcache.c: a stale one is gone by now */
+    if (!path) return;
+    host_lock_init(&journal_lock);
+    uint32_t want = (uint32_t)sizeof(JournalRec);
+    FILE *f = fopen(path, "rb");
+    if (f) {
+        char magic[8];
+        uint32_t size = 0;
+        if (fread(magic, 1, 8, f) == 8 && !memcmp(magic, JOURNAL_MAGIC, 8) && fread(&size, 4, 1, f) == 1 &&
+            size == want) {
+            JournalRec r;
+            size_t cap = 0;
+            while (fread(&r, sizeof r, 1, f) == 1) {
+                if (!set_add(rec_hash(&r))) continue;
+                if (warm_n == cap) {
+                    cap = cap ? 2 * cap : 1024;
+                    JournalRec *n = realloc(warm_recs, cap * sizeof *n);
+                    if (!n) break;
+                    warm_recs = n;
+                }
+                warm_recs[warm_n++] = r;
+            }
+            fclose(f);
+        } else {  /* another build's: kept beside, a new one started */
+            fclose(f);
+            char old[1040];
+            snprintf(old, sizeof old, "%s.old", path);
+            remove(old);
+            rename(path, old);
+        }
+    }
+    int fresh = !warm_n && journal_count == 0;
+    journal = fopen(path, fresh ? "wb" : "ab");
+    if (journal && fresh) {
+        fwrite(JOURNAL_MAGIC, 1, 8, journal);
+        fwrite(&want, 4, 1, journal);
+        fflush(journal);
+    }
+    fprintf(stderr, "yw4: gpu: pipeline journal %s: %zu pipelines to prewarm\n", journal ? path : "off", warm_n);
+}
+
+static int shader_file(uint64_t key, int stage) {
+    char path[1024];
+    snprintf(path, sizeof path, "%s/%016" PRIx64 ".%s.spv", shader_dir(), key, stage_names[stage]);
+    FILE *f = fopen(path, "rb");
+    if (f) fclose(f);
+    return f != NULL;
+}
+
+static void free_shader(Shader *s) {
+    if (!s) return;
+    vkDestroyShaderModule(vk.device, s->module, NULL);
+    if (s->ours) vkDestroyShaderModule(vk.device, s->ours, NULL);
+    vkDestroyDescriptorSetLayout(vk.device, s->layout, NULL);
+    free(s);
+}
+
+static void preload_thread(void *arg) {
+    (void)arg;
+    host_thread_set_priority(NULL, 50);  /* as prebuild_thread: below the game's boot and intro playback (232829c) */
+    for (;;) {
+        size_t i = __atomic_fetch_add(&pre_next, 1, __ATOMIC_RELAXED);
+        if (i >= pre_n) break;
+        PreSlot *p = &pre[pre_order[i]];
+        if (__atomic_load_n(&p->s, __ATOMIC_ACQUIRE)) continue;  /* the GPU thread got there first */
+        Shader *s = load_shader(p->key, p->stage), *expect = NULL;
+        if (!__atomic_compare_exchange_n(&p->s, &expect, s, 0, __ATOMIC_ACQ_REL, __ATOMIC_ACQUIRE)) free_shader(s);
+    }
+    if (__atomic_sub_fetch(&pre_left, 1, __ATOMIC_ACQ_REL) == 0)
+        fprintf(stderr, "yw4: gpu: preloaded %zu shaders in %lld ms\n", pre_n,
+                (long long)((host_now_ns() - pre_t0) / 1000000));
+}
+
+/* The slots from the shader folder's *.spv names (<16 hex>.<stage>.spv) that have their interface file too
+ * (load_shader stops the game without one), then the threads. */
+static void preload_start(void) {
+    const char *e = getenv("YW4_SHADER_PRELOAD");
+    if (e && *e == '0') return;
+    DIR *d = opendir(shader_dir());
+    if (!d) return;
+    pre = calloc(PRE_CAP, sizeof *pre);
+    pre_order = malloc(PRE_CAP * sizeof *pre_order);
+    if (!pre || !pre_order) {
+        closedir(d);
+        free(pre), free(pre_order), pre = NULL;
+        return;
+    }
+    for (struct dirent *de; (de = readdir(d)) != NULL && pre_n < PRE_CAP * 3 / 4;) {
+        const char *n = de->d_name;
+        size_t len = strlen(n);
+        if (len < 22 || strcmp(n + len - 4, ".spv") || n[16] != '.') continue;
+        char hex[17];
+        memcpy(hex, n, 16), hex[16] = 0;
+        char *end;
+        uint64_t key = strtoull(hex, &end, 16);
+        if (*end || !key) continue;
+        int stage = -1;
+        for (int st = 0; st < 4; st++)
+            if (len == 17 + strlen(stage_names[st]) + 4 && !strncmp(n + 17, stage_names[st], strlen(stage_names[st])))
+                stage = st;
+        if (stage < 0 || pre_find(key, stage)) continue;
+        char path[1024];
+        snprintf(path, sizeof path, "%s/%016" PRIx64 ".iface", shader_dir(), key);
+        FILE *f = fopen(path, "rb");
+        if (!f) continue;
+        fclose(f);
+        size_t i = pre_hash(key, stage);
+        while (pre[i].key) i = (i + 1) & (PRE_CAP - 1);
+        pre[i].key = key, pre[i].stage = stage;
+        pre_order[pre_n++] = (uint32_t)i;
+    }
+    closedir(d);
+    if (!pre_n) return;
+    /* 4 threads: the 3D's own threads use about two cores, the 5700X3D's class of CPU has 16 */
+    int n = host_cpu_count() / 4;
+    if (n > 4) n = 4;
+    if (n < 1) n = 1;
+    pre_t0 = host_now_ns();
+    pre_left = n;
+    for (int i = 0; i < n; i++)
+        if (host_thread_start(preload_thread, NULL, 1 << 20)) {
+            fprintf(stderr, "yw4: gpu: cannot start a shader preload thread\n");
+            if (__atomic_sub_fetch(&pre_left, 1, __ATOMIC_ACQ_REL) == 0) break;
+        }
+}
+
+static int64_t warm_t0;
+static int warm_threads_left;
+
+/* One prewarm thread: takes journal records in order and builds each into the cache; the pipelines and their
+ * shaders are destroyed again (the cache keeps the driver's result). */
+static void warm_thread(void *arg) {
+    (void)arg;
+    host_thread_set_priority(NULL, 50);  /* as prebuild_thread: below the game's boot and intro playback (232829c) */
+    for (;;) {
+        size_t i = __atomic_fetch_add(&warm_next, 1, __ATOMIC_RELAXED);
+        if (i >= warm_n) break;
+        const JournalRec *r = &warm_recs[i];
+        int ok = r->key[ST_VERT] != 0;
+        for (int st = 0; st < NSETS && ok; st++)
+            if (r->key[st] && !shader_file(r->key[st], st)) ok = 0;
+        if (!ok) continue;
+        Program g = {0};
+        g.warm = 1;
+        VkDescriptorSetLayout layouts[NSETS];
+        for (int st = 0; st < NSETS; st++) {
+            if (r->key[st]) g.sh[st] = load_shader(r->key[st], st);
+            layouts[st] = g.sh[st] ? g.sh[st]->layout : empty_layout();
+        }
+        VkPushConstantRange pc = {VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_GEOMETRY_BIT, 0, 4};
+        VkPipelineLayoutCreateInfo pli = {.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO,
+                                          .setLayoutCount = g.sh[ST_GEOM] ? 3u : 2u, .pSetLayouts = layouts,
+                                          .pushConstantRangeCount = 1, .pPushConstantRanges = &pc};
+        CHECK(vkCreatePipelineLayout(vk.device, &pli, NULL, &g.layout));
+        if (!r->k.ours || (g.sh[ST_VERT] && g.sh[ST_VERT]->ours) || (g.sh[ST_FRAG] && g.sh[ST_FRAG]->ours))
+            pipeline(&g, &r->k);
+        for (Pipe *p = g.pipes, *next; p; p = next) {
+            next = p->next;
+            vkDestroyPipeline(vk.device, p->pipeline, NULL);
+            free(p);
+        }
+        vkDestroyPipelineLayout(vk.device, g.layout, NULL);
+        for (int st = 0; st < NSETS; st++) free_shader(g.sh[st]);
+    }
+    if (__atomic_sub_fetch(&warm_threads_left, 1, __ATOMIC_ACQ_REL) == 0) {
+        fprintf(stderr, "yw4: gpu: prewarmed %zu pipelines in %lld ms\n", warm_n,
+                (long long)((host_now_ns() - warm_t0) / 1000000));
+        gpu_pcache_save();
+    }
+}
+
 void gpu_prebuild_start(void) {
     const char *e = getenv("YW4_PREBUILD");
     if (e && *e == '0') return;
     if (host_thread_start(prebuild_thread, NULL, 1 << 20))
         fprintf(stderr, "yw4: gpu: cannot start the pipeline prebuild thread\n");
+    journal_open();
+    preload_start();
+    if (!warm_n) return;
+    empty_layout();  /* made once here, before the threads share it */
+    int n = host_cpu_count() / 2;
+    if (n > 6) n = 6;
+    if (n < 1) n = 1;
+    if ((size_t)n > warm_n) n = (int)warm_n;
+    warm_t0 = host_now_ns();
+    warm_threads_left = n;
+    for (int i = 0; i < n; i++)
+        if (host_thread_start(warm_thread, NULL, 1 << 20)) {
+            fprintf(stderr, "yw4: gpu: cannot start a pipeline prewarm thread\n");
+            if (__atomic_sub_fetch(&warm_threads_left, 1, __ATOMIC_ACQ_REL) == 0) break;
+        }
 }
 
 /* ================================================================== state and rendering */
@@ -1907,7 +2344,9 @@ static void draw(VkCommandBuffer cb, GpuState *s, const CmdRec *r) {
         vkCmdBindVertexBuffers(cb, i, 1, &buf, &off);
     }
 
-    vkCmdBindPipeline(cb, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline(g, &k));
+    VkPipeline pl = pipeline(g, &k);
+    if (!pl) return;  /* a 3D object whose new pipeline is being built in the background: drawn from the next frame */
+    vkCmdBindPipeline(cb, VK_PIPELINE_BIND_POINT_GRAPHICS, pl);
     bind_unjitter = !(g->sh[ST_VERT] && g->sh[ST_VERT]->model) && !s->after_composite;
     bind_sets(cb, s, g);
 

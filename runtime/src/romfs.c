@@ -17,6 +17,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/stat.h>
+#include "host.h"
 
 #define EMPTY 0xFFFFFFFFu
 #define DATA_START 0x200u
@@ -40,7 +41,7 @@ struct Dir {
 
 static char *dup_str(const char *s) {
     char *d = malloc(strlen(s) + 1);
-    if (!d) exit(3);
+    if (!d) yw4_exit(3, __FILE__, __LINE__);
     return strcpy(d, s);
 }
 
@@ -63,7 +64,7 @@ static Dir *scan(const char *path, const char *name, Dir *parent, int depth) {
     DIR *d = depth < 32 ? opendir(path) : NULL;
     if (!d) return NULL;
     Dir *dir = calloc(1, sizeof *dir);
-    if (!dir) exit(3);
+    if (!dir) yw4_exit(3, __FILE__, __LINE__);
     dir->name = dup_str(name);
     dir->parent = parent;
     int cap_d = 0, cap_f = 0;
@@ -72,7 +73,7 @@ static Dir *scan(const char *path, const char *name, Dir *parent, int depth) {
         if (e->d_name[0] == '.') continue;
         size_t n = strlen(path) + strlen(e->d_name) + 2;
         char *p = malloc(n);
-        if (!p) exit(3);
+        if (!p) yw4_exit(3, __FILE__, __LINE__);
         snprintf(p, n, "%s/%s", path, e->d_name);
         int is_dir = 0;
         int64_t size = file_size(p, &is_dir);
@@ -86,7 +87,7 @@ static Dir *scan(const char *path, const char *name, Dir *parent, int depth) {
             dir->dirs[dir->ndirs++] = c;
         } else {
             File *f = calloc(1, sizeof *f);
-            if (!f) exit(3);
+            if (!f) yw4_exit(3, __FILE__, __LINE__);
             f->name = dup_str(e->d_name), f->path = p, f->size = (uint64_t)size, f->parent = dir;
             if (dir->nfiles == cap_f) dir->files = realloc(dir->files, sizeof *dir->files * (size_t)(cap_f = cap_f ? 2 * cap_f : 16));
             dir->files[dir->nfiles++] = f;
@@ -118,7 +119,7 @@ static void overlay(Dir *dst, const char *path, int depth) {
         if (e->d_name[0] == '.') continue;
         size_t n = strlen(path) + strlen(e->d_name) + 2;
         char *p = malloc(n);
-        if (!p) exit(3);
+        if (!p) yw4_exit(3, __FILE__, __LINE__);
         snprintf(p, n, "%s/%s", path, e->d_name);
         int is_dir = 0;
         int64_t size = file_size(p, &is_dir);
@@ -144,7 +145,7 @@ static void overlay(Dir *dst, const char *path, int depth) {
                 free(f->path);
                 mod_replaced++;
             } else {
-                if (!(f = calloc(1, sizeof *f))) exit(3);
+                if (!(f = calloc(1, sizeof *f))) yw4_exit(3, __FILE__, __LINE__);
                 f->name = dup_str(e->d_name), f->parent = dst;
                 dst->files = realloc(dst->files, sizeof *dst->files * (size_t)(dst->nfiles + 1));
                 dst->files[dst->nfiles++] = f;
@@ -361,7 +362,7 @@ static void build(RomfsImage *m, Dir *root, const char *dir) {
     uint64_t dhash = 0, dmeta = 4ull * nbd, fhash = dmeta + dsize, fmeta = fhash + 4ull * nbf;
     m->tables_size = fmeta + fsize;
     uint8_t *tables = m->tables = malloc(m->tables_size);
-    if (!tables) exit(3);
+    if (!tables) yw4_exit(3, __FILE__, __LINE__);
     for (uint32_t i = 0; i < nbd; i++) put32(tables + dhash + 4 * i, EMPTY);
     for (uint32_t i = 0; i < nbf; i++) put32(tables + fhash + 4 * i, EMPTY);
     memset(tables + dmeta, 0, dsize);
@@ -424,7 +425,7 @@ RomfsImage *romfs_image_open(const char *dir) {
     Dir *root = scan(dir, "", NULL, 0);
     if (!root) return NULL;
     RomfsImage *m = calloc(1, sizeof *m);
-    if (!m) exit(3);
+    if (!m) yw4_exit(3, __FILE__, __LINE__);
     build(m, root, dir);
     return m;
 }
@@ -450,7 +451,7 @@ static FILE *file_handle(const File *f) {
     return open_files[i].fp;
 }
 
-static int read_file_part(const File *f, uint64_t at, uint8_t *out, uint64_t n) {
+static int read_file_part_locked(const File *f, uint64_t at, uint8_t *out, uint64_t n) {
     FILE *fp = file_handle(f);
     if (!fp) return -1;
 #ifdef _WIN32
@@ -461,7 +462,7 @@ static int read_file_part(const File *f, uint64_t at, uint8_t *out, uint64_t n) 
     /* Through a bounce buffer: the OS writing the game's memory directly (a large fread
      * becomes ReadFile into it) isn't seen by write tracking, and the draw path relies on
      * that to notice textures loaded after they were made (decision 0021). Callers hold
-     * the kernel lock, so one buffer is enough. */
+     * romfs_io (read_file_part), so one buffer is enough. */
     static uint8_t *bounce;
     enum { BOUNCE = 1 << 20 };
     if (!bounce && !(bounce = malloc(BOUNCE))) return -1;
@@ -472,6 +473,23 @@ static int read_file_part(const File *f, uint64_t at, uint8_t *out, uint64_t n) 
         out += k, n -= k;
     }
     return 0;
+}
+
+/* The reads run without the kernel lock (svc_fs.c), so that a loading thread's disk reads don't hold up every other
+ * thread's SVCs; this lock keeps the open files and the bounce buffer to one reader at a time. A read that took
+ * long is logged (YW4_TRACE_ROMFS names the files, this says when the disk was the wait). */
+static HostLock romfs_io = HOST_LOCK_INIT;
+
+static int read_file_part(const File *f, uint64_t at, uint8_t *out, uint64_t n) {
+    host_lock(&romfs_io);
+    int64_t t0 = host_now_ns();
+    int r = read_file_part_locked(f, at, out, n);
+    int64_t ms = (host_now_ns() - t0) / 1000000;
+    host_unlock(&romfs_io);
+    if (ms >= 20)
+        fprintf(stderr, "yw4: romfs: slow read: %s +%#llx, %llu bytes, %lld ms\n", f->path, (unsigned long long)at,
+                (unsigned long long)n, (long long)ms);
+    return r;
 }
 
 int romfs_image_read(RomfsImage *m, uint64_t offset, void *out_, uint64_t size) {

@@ -34,6 +34,7 @@
 #include "version.h"
 #include "window.h"
 #include "yw4load.h"
+#include "host.h"
 
 static void init_module(CPUState *ctx, size_t i) {
     const Yw4Module *m = &yw4_modules[i];
@@ -52,7 +53,7 @@ static void start_guest(void *unused) {
     uint8_t *stack = yw4_reserve(YW4_STACK_BASE, yw4_main_stack_size);
     if (!ctx || !stack) {
         fprintf(stderr, "yw4: out of memory\n");
-        exit(1);
+        yw4_exit(1, __FILE__, __LINE__);
     }
     ctx->sp = ((uint64_t)(uintptr_t)(stack + yw4_main_stack_size)) & ~15ull;
     ctx->x[0] = yw4_kernel_init(ctx, (uint64_t)(uintptr_t)stack, yw4_main_stack_size);
@@ -169,6 +170,10 @@ int main(int argc, char **argv) {
     if (savefs_init(argv[3])) return 1;
     yw4_probe_init();
     yw4_watch_init();
+    {
+        void ai_trace_start(void);  /* ai_trace.c: YW4_TRACE_AI=1 only */
+        ai_trace_start();
+    }
 
     window_run(start_guest, NULL);
     return 0;

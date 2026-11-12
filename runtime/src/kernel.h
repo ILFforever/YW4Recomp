@@ -9,7 +9,7 @@
 #include <stdio.h>
 
 /* Performance log: what a guest thread was seen doing, and each thread's CPU use. */
-enum { YW4_ROLE_PRESENT = 1, YW4_ROLE_SUBMIT = 2 };
+enum { YW4_ROLE_PRESENT = 1, YW4_ROLE_SUBMIT = 2, YW4_ROLE_ANY = 4 /* profile.c: every guest thread, at its start */ };
 void yw4_thread_role(int role);
 /* The guest thread id of the calling thread (the performance report's "thread N"); 0 if none. */
 uint64_t yw4_thread_id(void);
@@ -86,6 +86,8 @@ _Noreturn void yw4_stop(void);
 int yw4_call_stack(const CPUState *ctx, uint64_t *out, int n);
 /* YW4_WATCHW: report every write to [addr, addr + size) with the writer's call stack. */
 int yw4_write_watch_arm(uint64_t addr, uint64_t size);
+/* YW4_TRACE_AI: report up to `reports` reads of [addr, addr + size) with the reader's call stack. */
+int yw4_read_watch_arm(uint64_t addr, uint64_t size, long reports);
 
 /* Sets up the memory map (modules, main stack, thread-local regions) and the main thread,
  * which runs on the calling host thread with `ctx` (its TPIDRRO_EL0 is set here); returns

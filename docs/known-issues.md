@@ -57,6 +57,10 @@ What is known to be missing or wrong, roughly in the order it is likely to matte
   bloom composite's pass (with ~12 more draws, maybe a special move's effects) took 7–11 ms against ~2 ms
   otherwise; not traced yet. A 1.8 s freeze seen once at a battle's start did not come back (no shader builds
   logged then).
+  **2026-11-12:** three causes of freezes at a battle's first special move, found by Quandiy on a Radeon, are
+  fixed (FSR's context made at start instead of at its first use, 260-755 ms; RomFS reads no longer hold the kernel
+  lock; old-size effect targets freed at once; [progress.md](progress.md)). Whether the 1.8 s one was among them
+  is not known: it was never reproduced.
 - **PCSS (soft shadows) only reaches what the shadow mask covers.** It is in the game's screen-space shadow mask shader, which
   shadows everything drawn into the G-buffer. Objects the game draws forward (6 other shadow shaders seen so far) keep
   the game's filter. Its strengths are tuned by eye in the town and the bamboo forest only.

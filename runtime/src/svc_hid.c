@@ -97,6 +97,7 @@ static uint64_t scripted(uint64_t tick) {
 #include <sys/stat.h>
 #define MKDIR(p) mkdir(p, 0777)
 #endif
+#include "host.h"
 
 void gpu_request_trace(int draws);
 void gpu_request_dump(void);
@@ -223,7 +224,7 @@ static int replay_state(uint64_t tick, uint64_t *buttons, int32_t sticks[4]) {
             const char *e = getenv("YW4_REPLAY_EXIT");
             if (e && atoi(e)) {
                 fprintf(stderr, "yw4: replay: done, exiting (YW4_REPLAY_EXIT)\n");
-                exit(0);
+                yw4_exit(0, __FILE__, __LINE__);
             }
         }
         return 0;

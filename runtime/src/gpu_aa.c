@@ -278,7 +278,7 @@ static VkPipeline pipeline(int pass, VkFormat out) {
         .pVertexInputState = &vi, .pInputAssemblyState = &ia, .pViewportState = &vp, .pRasterizationState = &rs,
         .pMultisampleState = &ms, .pDepthStencilState = &ds, .pColorBlendState = &cbs, .pDynamicState = &dy,
         .layout = pipe_layout};
-    CHECK(vkCreateGraphicsPipelines(vk.device, VK_NULL_HANDLE, 1, &pci, NULL, &pipes[n].pipe));
+    CHECK(vkCreateGraphicsPipelines(vk.device, gpu_pcache(), 1, &pci, NULL, &pipes[n].pipe));
     pipes[n].pass = pass, pipes[n].out = out;
     return pipes[n++].pipe;
 }
@@ -520,6 +520,7 @@ static void dlss_jitter(uint32_t w, uint32_t ow, uint64_t n, float *jx, float *j
 static int fsr(VkCommandBuffer cb, GpuImage *d, VkImageView target, VkFormat fmt, uint32_t w, uint32_t h, uint32_t ow,
                uint32_t oh) {
     uint64_t now = gpu_frames();
+    gpu_fsr_prepare(w, h, ow, oh);  /* made now if it isn't: before the first frame FSR can run (gpu_fsr.c) */
     if (!motion.image || motion_frame + 1 < now || motion_frame > now + 1) return 0;
     if (!d || d->width != w || d->height != h || motion.w != w || motion.h != h) return 0;
     output_image(cb, ow, oh);

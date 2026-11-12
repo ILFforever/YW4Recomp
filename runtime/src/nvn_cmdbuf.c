@@ -383,7 +383,7 @@ void nvn_execute(uint64_t handle) {
         if (r->op >= CMD_COUNT || r->size < sizeof(CmdRec) || r->size & 7 || n > 10000000) {
             fprintf(stderr, "yw4: NVN: command list %#llx is broken at %#llx (op %u, size %u)\n",
                     (unsigned long long)handle, (unsigned long long)at, r->op, r->size);
-            exit(3);
+            yw4_exit(3, __FILE__, __LINE__);
         }
         switch (r->op) {
         case CMD_END: return;

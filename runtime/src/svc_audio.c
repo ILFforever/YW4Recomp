@@ -195,14 +195,14 @@ void svc_audout(Service *s, IpcRequest *req, IpcResponse *resp) {
         IpcBuffer out = req->cmd == 1 ? (req->nb ? req->b[0] : (IpcBuffer){0, 0}) : ipc_out_buffer(req, 0);
         if (out.size >= sizeof name) memcpy(GPTR(out.addr), name, sizeof name);
         AudioOut *o = calloc(1, sizeof *o);
-        if (!o) exit(3);
+        if (!o) yw4_exit(3, __FILE__, __LINE__);
         o->channels = channels;
         o->stream = open_stream(channels);
         const char *dump = getenv("YW4_AUDIO_DUMP");
         if (o->stream && dump && *dump) o->dump = fopen(dump, "wb");
         o->event = yw4_event_new(&o->event_handle);
         o->event->host_signalled = 1;
-        if (host_thread_start(player_thread, o, 1 << 16)) exit(3);
+        if (host_thread_start(player_thread, o, 1 << 16)) yw4_exit(3, __FILE__, __LINE__);
         IPC_OUT(uint32_t, 0) = SAMPLE_RATE;
         IPC_OUT(uint32_t, 4) = channels;
         IPC_OUT(uint32_t, 8) = FORMAT_PCM16;

@@ -60,6 +60,9 @@ VkContext vk = {.queue_lock = HOST_LOCK_INIT};
 /* ---- state */
 
 static SDL_Window *window;
+static int64_t refresh_mhz;  /* the display's refresh in millihertz, 0 unknown (window_refresh_hz) */
+
+double window_refresh_hz(void) { return (double)__atomic_load_n(&refresh_mhz, __ATOMIC_ACQUIRE) / 1000.0; }
 static int have_vulkan;
 static HostLock present_lock = HOST_LOCK_INIT;
 
@@ -2693,7 +2696,7 @@ typedef struct {
 static void guest_main(void *p) {
     Guest *g = p;
     g->fn(g->arg);
-    exit(0);  /* the game's main returned */
+    yw4_exit(0, __FILE__, __LINE__);  /* the game's main returned */
 }
 
 void window_request_screenshot(void) { __atomic_store_n(&screenshot_requested, screenshot_burst(), __ATOMIC_RELEASE); }
@@ -2704,7 +2707,7 @@ static void start_guest_thread(void (*guest)(void *), void *arg) {
     yw4_boot_mark("the guest starts");
     if (host_thread_start(guest_main, &g, GUEST_HOST_STACK)) {
         fprintf(stderr, "yw4: window: cannot start the guest's thread\n");
-        exit(1);
+        yw4_exit(1, __FILE__, __LINE__);
     }
 }
 
@@ -2804,6 +2807,18 @@ void window_run(void (*guest)(void *), void *arg) {
     for (;;) {
         SDL_Event e;
         int got = SDL_WaitEventTimeout(&e, 8);
+        {  /* the window's display's refresh, for the frame pacing (framerate.c); read here, SDL's thread */
+            static int64_t last;
+            int64_t now = host_now_ns();
+            if (now - last > 1000000000ll) {
+                last = now;
+                const SDL_DisplayMode *m = SDL_GetCurrentDisplayMode(SDL_GetDisplayForWindow(window));
+                double hz = !m ? 0 : m->refresh_rate_numerator && m->refresh_rate_denominator
+                                         ? (double)m->refresh_rate_numerator / m->refresh_rate_denominator
+                                         : m->refresh_rate;
+                __atomic_store_n(&refresh_mhz, (int64_t)(hz * 1000.0 + 0.5), __ATOMIC_RELEASE);
+            }
+        }
         update_input();
         overlay_pad_repeat();
         fullscreen_apply();
@@ -2936,7 +2951,7 @@ void window_run(void (*guest)(void *), void *arg) {
             break;
         case SDL_EVENT_QUIT:
             fprintf(stderr, "yw4: window closed\n");
-            exit(0);
+            yw4_exit(0, __FILE__, __LINE__);
         case SDL_EVENT_KEY_DOWN:
             if ((e.key.key == SDLK_LALT || e.key.key == SDLK_RALT) && !settings_open() && !mouse_off()) {
                 if (window) {

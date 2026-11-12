@@ -322,7 +322,7 @@ static VkPipeline pipeline(VkFormat depth, int kind, VkFormat uv, VkFormat wind)
         .pStages = st, .pVertexInputState = &vi, .pInputAssemblyState = &ia, .pViewportState = &vp,
         .pRasterizationState = &rs, .pMultisampleState = &ms, .pDepthStencilState = &ds, .pColorBlendState = &cbs,
         .pDynamicState = &dy, .layout = layout(kind)};
-    CHECK(vkCreateGraphicsPipelines(vk.device, VK_NULL_HANDLE, 1, &pci, NULL, &pipes[n].pipe));
+    CHECK(vkCreateGraphicsPipelines(vk.device, gpu_pcache(), 1, &pci, NULL, &pipes[n].pipe));
     pipes[n].depth = depth, pipes[n].kind = kind, pipes[n].uv = uv, pipes[n].wind = wind;
     return pipes[n++].pipe;
 }
