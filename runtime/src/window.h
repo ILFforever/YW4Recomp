@@ -74,4 +74,8 @@ void window_hud_preview(uint8_t *rgba, int w, int h, float canvas_s, int *used_w
 int window_fullscreen_index(void);
 void window_fullscreen_cycle(void);
 
+/* The window's own size (not full screen, not maximized) as the settings file keeps it (YW4_WINDOW_SIZE):
+ * 0x0 when there is none yet. Any thread. */
+void window_size_kept(int *w, int *h);
+
 #endif

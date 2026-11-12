@@ -32,6 +32,11 @@ static int ctrl_first, ctrl_rows, ctrl_visible;  /* the Controls table: its firs
  * mockup, 2026-11-11), switched by one button or P; the keyboard view's mode: 0 exploring, 1 battles, 2 cutscenes
  * (the exploring keys, only those that do something there) */
 static int ctrl_view = 1, kv_mode;
+/* Pressing a real key lights it on the keyboard view (gamemenu_held): the drawn keys held now, by scancode (a gold
+ * ring round each), the mouse's buttons held (bits: left, right, wheel), and the last lit key pressed, which stays
+ * in focus as if the mouse pointed at it (a scancode or MOUSE_BIND_*, 0 none) */
+static uint8_t kv_held[64];
+static int kv_mouse_held, kv_focus;
 static int preview, preview_hidden;  /* Preview: the game runs under the bar; the bar hidden (only its chip shows) */
 static float pv_rect[4];             /* the part of the overlay the window shows while previewing (design units) */
 static int bug_page, brow;           /* Report a bug: its page and chosen row (below, with the rest of it) */
@@ -583,7 +588,7 @@ enum { HIT_SIDE, HIT_SECTION, HIT_ROW, HIT_ROW_PREV, HIT_ROW_NEXT, HIT_BIND, HIT
        HIT_PART, HIT_SLIDER, HIT_POPUP, HIT_HINT, HIT_BIND_STEP, HIT_PREVIEW,
        HIT_BUG_KIND, HIT_BUG_TEXT, HIT_BUG_OFTEN, HIT_BUG_NEXT, HIT_BUG_TICK, HIT_BUG_BTN, HIT_BUG_DONE,
        HIT_PROMPT_FIELD, HIT_PROMPT_OK, HIT_PROMPT_CANCEL, HIT_OSK_KEY,
-       HIT_KV_TAB, HIT_KV_MODE, HIT_KV_KEY };
+       HIT_KV_TAB, HIT_KV_MODE, HIT_KV_KEY, HIT_PV_PART };
 #define HINT_CLOSE (-1)  /* a key hint's action: close the overlay */
 typedef struct {
     float x, y, w, h;
@@ -607,6 +612,18 @@ static int hit_find(float x, float y, Hit *out) {
         }
     }
     return 0;
+}
+
+/* The mouse over the quick look (design units): the key under it comes into focus, as on the Controls page. Only
+ * that: nothing in the quick look can be clicked. */
+void gamemenu_peek_point(float x, float y) {
+    if (!gamemenu_peeking()) return;
+    Hit h;
+    int on = hit_find(x, y, &h) && h.kind == HIT_KV_KEY;
+    int k = on ? HIT_KV_KEY : -1, ha = on ? h.a : 0, hb = on ? h.b : 0;
+    if (k == hover_kind && ha == hover_a && hb == hover_b) return;
+    hover_kind = k, hover_a = ha, hover_b = hb;
+    changed();
 }
 
 void gamemenu_mouse(float x, float y, int button) {
@@ -682,7 +699,7 @@ void gamemenu_mouse(float x, float y, int button) {
     case HIT_KV_MODE:
         if (click) focus = 1, kv_mode = h.a;
         break;
-    case HIT_KV_KEY:  /* pointing is enough: the detail bar follows the hover */
+    case HIT_KV_KEY: case HIT_PV_PART:  /* pointing is enough: the detail bar follows the hover */
         break;
     case HIT_MODE:
         focus = 1, prow = 0;
@@ -1185,22 +1202,22 @@ static void draw_settings_page(const UiCanvas *c, const GameMenuInfo *in) {
 /* A binding's name (bindings.c pad_label, key names) with its symbols drawn as icons, as the old F2 page's pixel
  * font drew them: \1..\4 the arrows (up, down, left, right), \5..\8 PlayStation's triangle, circle, square, cross.
  * The rest in sentence case. Drawn from x, centred in [y, y + h]; returns its width. c NULL: only measures. */
+static const char *const bind_sym[9] = {
+    NULL,
+    "<path d=\"M12 19V5M6 11l6-6 6 6\"/>",   /* up */
+    "<path d=\"M12 5v14M6 13l6 6 6-6\"/>",   /* down */
+    "<path d=\"M19 12H5M11 6l-6 6 6 6\"/>",  /* left */
+    "<path d=\"M5 12h14M13 6l6 6-6 6\"/>",   /* right */
+    "<path d=\"M12 5l7.5 12.5h-15z\"/>",     /* triangle */
+    "<circle cx=\"12\" cy=\"12\" r=\"6.5\"/>",  /* circle */
+    "<rect x=\"6\" y=\"6\" width=\"12\" height=\"12\" rx=\"1\"/>",  /* square */
+    "<path d=\"M7 7l10 10M17 7L7 17\"/>",    /* cross */
+};
 static float cell_text(const UiCanvas *c, float x, float y, float h, const char *cell, uint32_t rgb) {
-    static const char *const sym[9] = {
-        NULL,
-        "<path d=\"M12 19V5M6 11l6-6 6 6\"/>",   /* up */
-        "<path d=\"M12 5v14M6 13l6 6 6-6\"/>",   /* down */
-        "<path d=\"M19 12H5M11 6l-6 6 6 6\"/>",  /* left */
-        "<path d=\"M5 12h14M13 6l6 6-6 6\"/>",   /* right */
-        "<path d=\"M12 5l7.5 12.5h-15z\"/>",     /* triangle */
-        "<circle cx=\"12\" cy=\"12\" r=\"6.5\"/>",  /* circle */
-        "<rect x=\"6\" y=\"6\" width=\"12\" height=\"12\" rx=\"1\"/>",  /* square */
-        "<path d=\"M7 7l10 10M17 7L7 17\"/>",    /* cross */
-    };
     float w = 0;
     for (const char *p = cell; *p;) {
         if (*p >= 1 && *p <= 8) {  /* a symbol: 20 units, a little space after when text follows */
-            if (c) ui_icon(c, sym[(int)*p], x + w, y + (h - 20) / 2, 20, 2.4f, rgb);
+            if (c) ui_icon(c, bind_sym[(int)*p], x + w, y + (h - 20) / 2, 20, 2.4f, rgb);
             w += 20;
             p++;
             if (*p) w += 4;
@@ -1293,8 +1310,12 @@ static const char *kv_action(int mode, const char *id) {
 
 /* A key's or mouse part's actions in the Overview's mode: their names joined (each once) into out; 0 if none.
  * *move: only moving or the camera (teal); *shortcut: exploring's D-pad shortcut number (1-4, +4 while 1 is held). */
+static int kv_mask_names(uint32_t m, char *out, size_t n, int *move, int *shortcut);
 static int kv_names(int key, char *out, size_t n, int *move, int *shortcut) {
-    uint32_t m = bindings_key_inputs(kv_mode == 1 ? 1 : 0, key);
+    return kv_mask_names(bindings_key_inputs(kv_mode == 1 ? 1 : 0, key), out, n, move, shortcut);
+}
+/* the same for a set of inputs (a mask of input numbers): a key's, or a part of the controller's */
+static int kv_mask_names(uint32_t m, char *out, size_t n, int *move, int *shortcut) {
     *out = 0, *move = 1, *shortcut = 0;
     int found = 0;
     for (int i = 0; i < 32; i++) {
@@ -1382,6 +1403,8 @@ static void draw_controls_overview(const UiCanvas *c, float x0, float top, float
     char names[200], t[200];
     const char *hcap = NULL;
     int hcode = 0;
+    /* the key in focus: under the mouse, else the last one pressed on the real keyboard */
+    int focus_key = hover_kind == HIT_KV_KEY ? 0 : kv_focus;
     for (int r = 0; r < 6; r++) {
         float kx = x0, y = ky + r * (k + g) + (r ? 10 : 0);
         for (int i = 0; i < 17 && kv_rows[r][i].w > 0; i++) {
@@ -1391,10 +1414,11 @@ static void draw_controls_overview(const UiCanvas *c, float x0, float top, float
                 int move, sc, lit = kv_names(key->code, names, sizeof names, &move, &sc);
                 const char *port = kv_port(key->code);
                 if (port) lit = 1, move = 0, snprintf(names, sizeof names, "%s", port);
-                int hv = lit && hovered(HIT_KV_KEY, key->code, 0);
+                int hv = lit && (hovered(HIT_KV_KEY, key->code, 0) || focus_key == key->code);
+                int down = kv_held[key->code >> 3 & 63] >> (key->code & 7) & 1;  /* held: the ring, lit or not */
                 uint32_t fill = !lit ? WHITE : port ? GOLD : move ? TEAL : PLUM;
                 uint32_t ink = !lit ? MUTED : port ? ON_GOLD : SNOW;
-                if (hv) ui_box(c, kx - 3, y - 3, w + 6, k + 6, 10, port ? PLUM : RING, 0, 0);
+                if (hv || down) ui_box(c, kx - 3, y - 3, w + 6, k + 6, 10, port ? PLUM : RING, 0, 0);
                 ui_box(c, kx, y, w, k, 8, fill, lit ? 0 : 1.5f, LINE);
                 char l1[200], l2[200];
                 int lines = 1;
@@ -1426,7 +1450,7 @@ static void draw_controls_overview(const UiCanvas *c, float x0, float top, float
     for (int p = 0; p < 2; p++) {
         int move, sc, lit = kv_names(mparts[p].key, names, sizeof names, &move, &sc);
         float bx = mx + (p ? mw / 2 + 1 : 0), bw = mw / 2 - 1, bh = 82;
-        int hv = lit && hovered(HIT_KV_KEY, mparts[p].part, 0);
+        int hv = lit && (hovered(HIT_KV_KEY, mparts[p].part, 0) || focus_key == mparts[p].key || kv_mouse_held >> p & 1);
         if (lit) {
             ui_box(c, bx + 3, my + 3, bw - 6, bh - 6, p ? 18 : 18, hv ? NIGHT : PLUM, 0, 0);
             ui_text_wrap(c, UI_GOTHIC_700, 11, 0, bx + 6, my + 18, bw - 12, 13, 1, names, SNOW);
@@ -1439,7 +1463,7 @@ static void draw_controls_overview(const UiCanvas *c, float x0, float top, float
         int move, sc, lit = kv_names(MOUSE_BIND_MIDDLE, names, sizeof names, &move, &sc);
         char turn[200];
         int lit2 = kv_names(MOUSE_BIND_WHEEL_UP, turn, sizeof turn, &move, &sc);
-        int hv = (lit || lit2) && hovered(HIT_KV_KEY, KV_WHEEL, 0);
+        int hv = (lit || lit2) && (hovered(HIT_KV_KEY, KV_WHEEL, 0) || focus_key == MOUSE_BIND_MIDDLE || kv_mouse_held >> 2 & 1);
         ui_box(c, mx + mw / 2 - 11, my + 16, 22, 48, 11, lit || lit2 ? (hv ? NIGHT : GOLD) : SOFT, 1.5f, LINE);
         if (lit || lit2) {
             hit_add(mx + mw / 2 - 14, my + 12, 28, 56, HIT_KV_KEY, KV_WHEEL, 0);
@@ -1450,11 +1474,11 @@ static void draw_controls_overview(const UiCanvas *c, float x0, float top, float
         if (lit2) snprintf(t, sizeof t, "Wheel: %s", turn), ui_text_wrap(c, UI_GOTHIC_500, 13, 0, mx - 20, ly, mw + 40, 17, 1, t, MUTED);
     }
     /* the detail bar: the key under the mouse, in a full sentence */
-    float by = ky + 6 * (k + g) + 10 + 18, bh = peek ? -16 : 58;
-    if (!peek) ui_box(c, x0, by, W, bh, 14, NIGHT, 0, 0);
-    if (peek) {
-    } else if (hover_key < 0) {
-        ui_text_in(c, UI_GOTHIC_500, 16, x0 + 22, by, W - 44, bh, 0, "Point at a key to see what it does.", ON_DARK);
+    float by = ky + 6 * (k + g) + 10 + 18, bh = 58;
+    (void)peek;  /* the quick look has the bar too (owner, 2026-11-12) */
+    ui_box(c, x0, by, W, bh, 14, NIGHT, 0, 0);
+    if (hover_key < 0) {
+        ui_text_in(c, UI_GOTHIC_500, 16, x0 + 22, by, W - 44, bh, 0, "Point at a key, or press one, to see what it does.", ON_DARK);
     } else {
         float cw = ui_text_w(UI_GOTHIC_700, 16, hcap) + 24;
         ui_box(c, x0 + 18, by + 13, cw, bh - 26, 8, VSOFT, 0, 0);
@@ -1485,6 +1509,412 @@ static void draw_controls_overview(const UiCanvas *c, float x0, float top, float
     }
 }
 
+/* ---- the Controls page's controller view: the pad in the middle, its bound buttons lit, a thin line from each to
+ * its name, the names stacked down both sides in the buttons' top-to-bottom order so no two lines cross (the
+ * owner's mockup, 2026-11-12). The pad follows the connected controller, as the game's button icons do: Xbox,
+ * PlayStation (D-pad top left, both sticks low) or Switch labels. A part is lit by what it is bound to in the
+ * chosen mode (the real pad bindings, bindings.c), named as the keyboard view names it (kv_action). Gold parts
+ * are the port's own: the overlay button, the DualSense's mic (the HUD), and View / Create / Minus, which held
+ * shows the quick look (a short press still goes to the game: auto battle in battles). */
+enum { PV_ZL = GM_PAD_ZL, PV_L, PV_ZR, PV_R, PV_LS, PV_RS, PV_DPAD, PV_S, PV_E, PV_W, PV_N, PV_MINUS, PV_PLUS, PV_SHARE,
+       PV_MIC, PV_PARTS };  /* gamemenu.h's parts; PV_S..PV_N: the face buttons by their place */
+/* Pressing a real button lights it on the drawing (gamemenu_held): the parts held now (a gold ring round each), and
+ * the last one pressed, which stays in focus as if the mouse pointed at it when it is lit (-1 none) */
+static uint32_t pv_down;
+static int pv_focus = -1;
+
+/* where each part sits in the pad's 400 x 260 box, per style; every layout is mirrored around x = 200 */
+static void pv_layout(int style, float pos[PV_PARTS][2]) {
+    static const float base[PV_PARTS][2] = {
+        [PV_ZL] = {97, 14}, [PV_L] = {101, 37}, [PV_ZR] = {303, 14}, [PV_R] = {299, 37}, [PV_LS] = {108, 104},
+        [PV_RS] = {250, 170}, [PV_DPAD] = {150, 170}, [PV_S] = {292, 132}, [PV_E] = {320, 104}, [PV_W] = {264, 104},
+        [PV_N] = {292, 76}, [PV_MINUS] = {175, 92}, [PV_PLUS] = {225, 92}, [PV_SHARE] = {200, 116}, [PV_MIC] = {200, 122}};
+    memcpy(pos, base, sizeof base);
+#define AT(p, x, y) (pos[p][0] = (x), pos[p][1] = (y))
+    if (style == 1)
+        AT(PV_DPAD, 108, 104), AT(PV_LS, 150, 172), AT(PV_RS, 250, 172), AT(PV_MINUS, 140, 66), AT(PV_PLUS, 260, 66),
+            AT(PV_SHARE, 200, 74);
+    if (style == 2) AT(PV_MINUS, 168, 78), AT(PV_PLUS, 232, 78), AT(PV_SHARE, 172, 108);
+#undef AT
+}
+
+/* what the controller prints on a part; \5..\8: PlayStation's shapes, drawn as symbols (bind_sym) */
+static const char *pv_chip(int part, int style) {
+    static const char *const names[3][PV_PARTS] = {
+        {"LT", "LB", "RT", "RB", "L stick", "R stick", "D-pad", "A", "B", "X", "Y", "View", "Menu", "Share", ""},
+        {"L2", "L1", "R2", "R1", "L stick", "R stick", "D-pad", "\x08", "\x06", "\x07", "\x05", "Create", "Options",
+         "Touchpad", "Mic"},
+        {"ZL", "L", "ZR", "R", "L stick", "R stick", "D-pad", "B", "A", "Y", "X", "-", "+", "Capture", ""}};
+    return names[style < 0 || style > 2 ? 0 : style][part];
+}
+static float pv_chip_w(const char *s, float px) {
+    return *s >= 5 && *s <= 8 ? px * 1.2f : ui_text_w(UI_ROUNDED_800, px, s);
+}
+static void pv_chip_text(const UiCanvas *c, float x, float y, float w, float h, const char *s, float px, uint32_t rgb) {
+    if (*s >= 5 && *s <= 8) ui_icon(c, bind_sym[(int)*s], x + (w - px * 1.5f) / 2, y + (h - px * 1.5f) / 2, px * 1.5f, 2.6f, rgb);
+    else ui_text_in(c, UI_ROUNDED_800, px, x, y, w, h, 1, s, rgb);
+}
+
+/* the bindings' name (BPAD_*) of a part; -1: not something the game's inputs are bound to */
+static int pv_bpad(int part) {
+    static const int map[PV_PARTS] = {BPAD_L2, BPAD_L1, BPAD_R2, BPAD_R1, BPAD_LSTICK, BPAD_RSTICK, BPAD_DPAD, BPAD_SOUTH,
+                                      BPAD_EAST, BPAD_WEST, BPAD_NORTH, BPAD_BACK, BPAD_START, -1, -1};
+    return map[part];
+}
+
+/* What a part shows in the chosen mode: its name, a smaller second line, and its kind: 0 not lit, 1 a game
+ * button (purple), 2 moving and the camera (teal), 3 the port's own (gold). */
+typedef struct {
+    char n1[100], n2[100];
+    int kind;
+} PvLabel;
+static void pv_label(int part, const GameMenuInfo *in, int style, PvLabel *l) {
+    char a[200], b[200];
+    int move, sc, set = kv_mode == 1 ? 1 : 0;
+    memset(l, 0, sizeof *l);
+    if (part == PV_SHARE) {  /* the overlay button; a pad without one opens it with its two middle buttons */
+        snprintf(l->n1, sizeof l->n1, "Overlay");
+        if (!strcmp(in->close, "Back + Start"))
+            snprintf(l->n2, sizeof l->n2, "No %s button: %s + %s", pv_chip(PV_SHARE, style), pv_chip(PV_MINUS, style),
+                     pv_chip(PV_PLUS, style));
+        l->kind = 3;
+        return;
+    }
+    if (part == PV_MIC) {  /* only a DualSense has it */
+        if (style == 1 && in->pad_mic) snprintf(l->n1, sizeof l->n1, "Performance HUD"), l->kind = 3;
+        return;
+    }
+    int has = kv_mask_names(bindings_pad_inputs(set, pv_bpad(part)), a, sizeof a, &move, &sc);
+    if (part == PV_MINUS && !settings_legacy_keys()) {  /* held: the quick look; the game's own name first */
+        if (has) snprintf(l->n1, sizeof l->n1, "%s", a), snprintf(l->n2, sizeof l->n2, "Hold: Controls");
+        else snprintf(l->n1, sizeof l->n1, "Hold: Controls");
+        l->kind = 3;
+        return;
+    }
+    if (part == PV_LS || part == PV_RS) {  /* a stick: what moving it does, and under it what pressing it does */
+        int m2, s2, press = kv_mask_names(bindings_pad_inputs(set, part == PV_LS ? BPAD_L3 : BPAD_R3), b, sizeof b, &m2, &s2);
+        if (!has && !press) return;
+        if (has) snprintf(l->n1, sizeof l->n1, "%s", a);
+        snprintf(has ? l->n2 : l->n1, sizeof l->n1, "%s%.80s", press ? "Press: " : "", press ? b : "");
+        l->kind = 2;
+        return;
+    }
+    if (!has) return;
+    l->kind = 1;
+    if (part == PV_DPAD && kv_mode == 0 && sc) {  /* exploring: the shortcuts, four more while L is held */
+        const char *hold = "L";
+        for (int i = 0; i < 32; i++)
+            if (!strcmp(bindings_input_id(i), "L"))
+                for (int p = PV_ZL; p <= PV_N; p++)
+                    if (bindings_pad_inputs(set, pv_bpad(p)) >> i & 1 && *pv_chip(p, style) > 8) hold = pv_chip(p, style);
+        snprintf(l->n1, sizeof l->n1, "Shortcuts 1-4");
+        snprintf(l->n2, sizeof l->n2, "Hold %s: shortcuts 5-8", hold);
+        return;
+    }
+    if (part == PV_DPAD && kv_mode == 1 && strstr(a, "Switch character") && strstr(a, "Target ally")) {
+        snprintf(l->n1, sizeof l->n1, "Up / down: switch character");
+        snprintf(l->n2, sizeof l->n2, "Left / right: target ally");
+        return;
+    }
+    char *cut = strlen(a) > 24 ? strstr(a, " / ") : NULL;  /* a long list of names: the first above the rest */
+    if (cut) *cut = 0, snprintf(l->n2, sizeof l->n2, "%s", cut + 3);
+    snprintf(l->n1, sizeof l->n1, "%s", a);
+}
+
+/* the keyboard keys that do the same as a part in the chosen mode, for the detail bar ("" none) */
+static void pv_keys(int part, char *out, size_t n) {
+    static const char *const pretty[][2] = {
+        {"MOUSE LEFT", "Left mouse"}, {"MOUSE RIGHT", "Right mouse"}, {"MOUSE MID", "Wheel press"}, {"MOUSE 4", "Mouse 4"},
+        {"MOUSE 5", "Mouse 5"}, {"Return", "Enter"}, {"Up", "\xe2\x86\x91"}, {"Down", "\xe2\x86\x93"},
+        {"Left", "\xe2\x86\x90"}, {"Right", "\xe2\x86\x92"}};
+    *out = 0;
+    if (part == PV_SHARE || part == PV_MIC) {
+        snprintf(out, n, "%s", part == PV_SHARE ? "Esc" : "F3");
+        return;
+    }
+    int set = kv_mode == 1 ? 1 : 0;
+    uint32_t m = bindings_pad_inputs(set, pv_bpad(part));
+    const char *sep = part == PV_LS || part == PV_RS || part == PV_DPAD ? "  " : " or ";  /* directions: side by side */
+    for (int i = 0; i < 32; i++) {
+        if (!(m >> i & 1) || !kv_action(kv_mode, bindings_input_id(i))) continue;
+        for (int k = 0; k < BIND_KEYS; k++) {
+            const char *name = bindings_input_key(set, i, k);
+            if (!name || !strncmp(name, "WHEEL", 5)) continue;
+            for (size_t j = 0; j < sizeof pretty / sizeof *pretty; j++)
+                if (!strcmp(name, pretty[j][0])) name = pretty[j][1];
+            size_t l = strlen(out);
+            snprintf(out + l, n - l, "%s%s", l ? sep : "", name);
+        }
+    }
+    if (part == PV_MINUS && !settings_legacy_keys()) {
+        size_t l = strlen(out);
+        snprintf(out + l, n - l, "%sF2 for Controls", l ? " \xc2\xb7 " : "");
+    }
+}
+
+/* a colour a part of the way (t) to another: a part stepping back while another is in focus, a line's lighter tone */
+static uint32_t pv_mix(uint32_t a, uint32_t b, float t) {
+    uint32_t out = 0;
+    for (int s = 16; s >= 0; s -= 8) {
+        float x = (float)(a >> s & 255), y = (float)(b >> s & 255);
+        out |= (uint32_t)(x + (y - x) * t + 0.5f) << s;
+    }
+    return out;
+}
+
+/* a part's name beside its chip (the controller's label for it) at height ly: dir 0 the chip ends at ex and the
+ * name runs left of it as far as lim, 1 the chip starts at ex and the name runs right to lim, 2 the chip centred
+ * on ex with the name under it. k: the drawing's scale. */
+static void pv_name(const UiCanvas *c, int part, const PvLabel *l, const char *chip, float ex, float ly, int dir, float k,
+                    float lim, int dim) {
+    uint32_t fill = l->kind == 3 ? GOLD : l->kind == 2 ? 0x1e9aa6 : PLUM, ink = l->kind == 3 ? ON_GOLD : SNOW;
+    uint32_t nc = INK, sc = MUTED;
+    if (dim) fill = pv_mix(fill, PAPER, 0.7f), ink = pv_mix(ink, PAPER, 0.5f), nc = pv_mix(nc, PAPER, 0.7f), sc = pv_mix(sc, PAPER, 0.7f);
+    float cpx = 12 * k, cw = pv_chip_w(chip, cpx) + 14 * k, ch = 22 * k;
+    if (cw < 28 * k) cw = 28 * k;
+    float cx = dir == 2 ? ex - cw / 2 : dir == 0 ? ex - cw : ex;
+    ui_box(c, cx, ly - ch / 2, cw, ch, 7 * k, fill, 0, 0);
+    pv_chip_text(c, cx, ly - ch / 2, cw, ch, chip, cpx, ink);
+    float npx = 15 * k, spx = 12.5f * k, nh = 18 * k, sh = 16 * k;
+    if (dir == 2) {
+        ui_text_in(c, UI_GOTHIC_700, npx, ex - 200 * k, ly + 22 * k - nh / 2, 400 * k, nh, 1, l->n1, nc);
+        if (l->n2[0]) ui_text_in(c, UI_GOTHIC_500, spx, ex - 200 * k, ly + 39 * k - sh / 2, 400 * k, sh, 1, l->n2, sc);
+        hit_add(ex - 100 * k, ly - ch / 2, 200 * k, 58 * k, HIT_PV_PART, part, 0);
+        return;
+    }
+    char t1[100], t2[100];
+    float tx = dir == 0 ? cx - 8 * k : cx + cw + 8 * k, tw = dir == 0 ? tx - lim : lim - tx, bx = dir == 0 ? lim : tx;
+    kv_fit(UI_GOTHIC_700, npx, l->n1, tw, t1, sizeof t1);
+    kv_fit(UI_GOTHIC_500, spx, l->n2, tw, t2, sizeof t2);
+    ui_text_in(c, UI_GOTHIC_700, npx, bx, (t2[0] ? ly - 8 * k : ly) - nh / 2, tw, nh, dir == 0 ? 2 : 0, t1, nc);
+    if (t2[0]) ui_text_in(c, UI_GOTHIC_500, spx, bx, ly + 9 * k - sh / 2, tw, sh, dir == 0 ? 2 : 0, t2, sc);
+    float nw = ui_text_w(UI_GOTHIC_700, npx, t1), sw = ui_text_w(UI_GOTHIC_500, spx, t2);
+    if (sw > nw) nw = sw;
+    hit_add(dir == 0 ? tx - nw : cx, ly - 20 * k, cw + 8 * k + nw, 40 * k, HIT_PV_PART, part, 0);
+}
+
+/* a part of the pad: a rounded box centred on (cx, cy) with what is printed on it; bg: what it lies on (the body or
+ * the page), for the lighter tones. Returns its fill. */
+static uint32_t pv_button(const UiCanvas *c, int part, float cx, float cy, float w, float h, float r, int kind, int dim,
+                          const char *text, float k, uint32_t bg) {
+    uint32_t fill, ink, border = 0;
+    float bw = 0, ring = 4 * k;
+    /* held on the real controller: a gold ring round it (dark round a gold one), lit or not */
+    if (pv_down >> part & 1)
+        ui_box(c, cx - w / 2 - ring, cy - h / 2 - ring, w + 2 * ring, h + 2 * ring, r + ring, kind == 3 ? NIGHT : RING, 0, 0);
+    if (!kind) fill = pv_mix(SOFT, bg, 0.45f), border = pv_mix(LINE, bg, 0.3f), bw = 1.5f * k, ink = pv_mix(MUTED, fill, 0.5f);
+    else fill = kind == 3 ? GOLD : kind == 2 ? 0x1e9aa6 : PLUM, ink = kind == 3 ? ON_GOLD : SNOW;
+    if (kind && dim) fill = pv_mix(fill, bg, 0.7f), ink = pv_mix(ink, bg, 0.5f);
+    ui_box(c, cx - w / 2, cy - h / 2, w, h, r, fill, bw, border);
+    if (text && *text) pv_chip_text(c, cx - w / 2, cy - h / 2, w, h, text, 15 * k, ink);
+    if (kind) hit_add(cx - w / 2, cy - h / 2, w, h, HIT_PV_PART, part, 0);
+    return fill;
+}
+
+/* drawn at x0, top, W design units wide (the Controls page: 488, 1024; the quick look: bigger, centred). The
+ * drawing's own units are the mockup's (its picture is 1280 wide from x = -40, the pad a 400 x 260 box drawn 1.4
+ * times at (320, 120)); k turns them into the design's. */
+static void draw_controls_pad(const UiCanvas *c, const GameMenuInfo *in, float x0, float top, float W, int peek) {
+    static const char *const modes[3] = {"Exploring", "Battle", "Cutscene"};
+    const uint32_t TEAL = 0x1e9aa6, DGOLD = 0xb88a2a;
+    const float S = 1.4f, PX = 320, PY = 120;
+    int style = bindings_pad_style();
+    float k = W / 1280, oy = top;
+    if (!peek) kv_seg(c, x0, top, modes, 3, kv_mode, HIT_KV_MODE), oy = top + 56;
+#define MX(v) (x0 + ((v) + 40) * k)
+#define MY(v) (oy + ((v) - 50) * k)
+    float pos[PV_PARTS][2];
+    PvLabel lab[PV_PARTS];
+    pv_layout(style, pos);
+    for (int p = 0; p < PV_PARTS; p++) pv_label(p, in, style, &lab[p]);
+    /* the part in focus: under the mouse, or the last one pressed on the controller; the others step back */
+    int hot = -1;
+    for (int p = 0; p < PV_PARTS && !peek; p++)
+        if (lab[p].kind && hovered(HIT_PV_PART, p, 0)) hot = p;
+    if (hot < 0 && pv_focus >= 0 && lab[pv_focus].kind) hot = pv_focus;
+#define DIMMED(p) (hot >= 0 && hot != (p))
+    /* the body: drawn 1.18 times around the buttons' middle (200, 140), so it has room around them; its picture
+     * is the pad's box with that margin (x -40..440, y 10..280) */
+    {
+        static const char path[] = "M110 40h180c40 0 62 20 74 58l26 92c10 36-14 62-42 54c-18-5-30-22-44-44l-14-22h-180"
+                                   "l-14 22c-14 22-26 39-44 44c-28 8-52-18-42-54l26-92c12-38 34-58 74-58z";
+        static const char tf[] = "translate(40 -10) translate(200 140) scale(1.18) translate(-200 -140)";
+        char el[512];
+        float bx = MX(PX - 40 * S), by = MY(PY + 10 * S), bw = 480 * S * k, bh = 270 * S * k;
+        snprintf(el, sizeof el, "<g transform=\"%s\"><path fill=\"#000000\" d=\"%s\"/></g>", tf, path);
+        ui_shape(c, el, bx, by, bw, bh, 480, WHITE);
+        snprintf(el, sizeof el, "<g transform=\"%s\"><path stroke=\"#000000\" stroke-width=\"1.6\" d=\"%s\"/></g>", tf, path);
+        ui_shape(c, el, bx, by, bw, bh, 480, LINE);
+    }
+    /* the lines and the names. A line is its colour half way to the page's (thin lines at full strength look
+     * heavy); in focus at full strength and thicker */
+    uint32_t leadc[4] = {0, PLUM, TEAL, DGOLD};
+#define LEAD(p) (hot == (p) ? leadc[lab[p].kind] : pv_mix(leadc[lab[p].kind], PAPER, DIMMED(p) ? 0.85f : 0.5f))
+#define LEADW(p) ((hot == (p) ? 2.0f : 1.5f) * k)
+    /* the sides: each line runs sideways from its button at its own height, then bends to its name; the names keep
+     * the buttons' top-to-bottom order so nothing crosses (the left face button's line first goes up, between
+     * the top one and the shoulder) */
+    int left[4] = {PV_ZL, PV_L, PV_LS, PV_DPAD}, right[7] = {PV_ZR, PV_R, PV_W, PV_N, PV_E, PV_S, PV_RS};
+    if (pos[PV_DPAD][1] < pos[PV_LS][1]) left[2] = PV_DPAD, left[3] = PV_LS;
+    float out = 400 * S * (1.18f - 1) / 2;  /* the name columns stay clear of the bigger body */
+    for (int side = 0; side < 2; side++) {
+        int list[7], n = 0;
+        for (int i = 0; i < (side ? 7 : 4); i++)
+            if (lab[(side ? right : left)[i]].kind) list[n++] = (side ? right : left)[i];
+        float t0 = 70, b0 = 440, step = n > 1 ? (b0 - t0) / (float)(n - 1) : 0;
+        if (step > 58) step = 58;
+        float y0 = t0 + ((b0 - t0) - step * (float)(n - 1)) / 2;
+        float col = side ? PX + 400 * S + 18 + out : PX - 18 - out, ex = side ? col + 28 : col - 28;
+        float hx = side ? col - 40 : col + 40;
+        for (int i = 0; i < n; i++) {
+            int p = list[i], up = p == PV_W;
+            float bx = PX + pos[p][0] * S, by = PY + pos[p][1] * S, ly = y0 + (float)i * step, run = up ? PY + 54 * S : by;
+            uint32_t lc = LEAD(p);
+            if (up) ui_line(c, MX(bx), MY(by), MX(bx), MY(run), LEADW(p), lc, 1);
+            ui_line(c, MX(bx), MY(run), MX(hx), MY(run), LEADW(p), lc, 1);
+            ui_line(c, MX(hx), MY(run), MX(col), MY(ly), LEADW(p), lc, 1);
+            ui_line(c, MX(col), MY(ly), MX(ex), MY(ly), LEADW(p), lc, 1);
+            pv_name(c, p, &lab[p], pv_chip(p, style), MX(side ? ex + 6 : ex - 6), MY(ly), side, k, side ? MX(1240) : MX(-40),
+                    DIMMED(p));
+        }
+    }
+    for (int i = 0; i < 2; i++) {  /* the two small middle buttons: straight up, their names above the pad */
+        int p = i ? PV_PLUS : PV_MINUS;
+        if (!lab[p].kind) continue;
+        float bx = PX + pos[p][0] * S, by = PY + pos[p][1] * S, ly = PY - 40;
+        ui_line(c, MX(bx), MY(by), MX(bx), MY(ly), LEADW(p), LEAD(p), 1);
+        pv_name(c, p, &lab[p], pv_chip(p, style), MX(bx), MY(ly), i, k, i ? MX(bx + 330) : MX(bx - 330), DIMMED(p));
+    }
+    {  /* the overlay button (and the mic): straight down, their names under the pad, side by side when both */
+        int two = lab[PV_MIC].kind != 0;
+        for (int i = 0; i <= two; i++) {
+            int p = i ? PV_MIC : PV_SHARE;
+            float bx = PX + pos[p][0] * S + (two ? (i ? 4 : -4) : 0), by = PY + pos[p][1] * S;
+            float lx = two ? PX + pos[p][0] * S + (i ? 110 : -110) : bx, ly = 488, mid = ly - 30;
+            uint32_t lc = LEAD(p);
+            ui_line(c, MX(bx), MY(by), MX(bx), MY(mid), LEADW(p), lc, 1);
+            ui_line(c, MX(bx), MY(mid), MX(lx), MY(mid), LEADW(p), lc, 1);
+            ui_line(c, MX(lx), MY(mid), MX(lx), MY(ly - 11), LEADW(p), lc, 1);
+            pv_name(c, p, &lab[p], pv_chip(p, style), MX(lx), MY(ly), 2, k, 0, DIMMED(p));
+        }
+    }
+    /* the buttons, over where the lines start */
+#define BTN(p, w, h, r, text, bg) \
+    pv_button(c, p, MX(PX + pos[p][0] * S), MY(PY + pos[p][1] * S), (w) * S * k, (h) * S * k, (r) * S * k, lab[p].kind, \
+              DIMMED(p), text, k, bg)
+    BTN(PV_ZL, 72, 24, 10, pv_chip(PV_ZL, style), PAPER), BTN(PV_ZR, 72, 24, 10, pv_chip(PV_ZR, style), PAPER);
+    BTN(PV_L, 66, 18, 9, pv_chip(PV_L, style), WHITE), BTN(PV_R, 66, 18, 9, pv_chip(PV_R, style), WHITE);
+    BTN(PV_MINUS, 26, 14, 7, "", WHITE), BTN(PV_PLUS, 26, 14, 7, "", WHITE);
+    if (style == 1) {  /* the touchpad, and the mic button under it */
+        BTN(PV_SHARE, 74, 40, 8, "", WHITE), BTN(PV_MIC, 16, 6, 3, "", WHITE);
+    } else if (style == 2) {  /* Capture, and Home mirroring it (never lit: Steam and the console take that one) */
+        BTN(PV_SHARE, 13, 13, 3, "", WHITE);
+        float hx = MX(PX + (400 - pos[PV_SHARE][0]) * S), hy = MY(PY + pos[PV_SHARE][1] * S), hr = 7.5f * S * k;
+        ui_box(c, hx - hr, hy - hr, 2 * hr, 2 * hr, hr, pv_mix(SOFT, WHITE, 0.45f), 1.5f * k, pv_mix(LINE, WHITE, 0.3f));
+    } else {
+        BTN(PV_SHARE, 20, 12, 6, "", WHITE);
+    }
+    for (int i = 0; i < 2; i++) {  /* the sticks: a disc with a ring on it */
+        int p = i ? PV_RS : PV_LS;
+        uint32_t fill = BTN(p, 54, 54, 27, "", WHITE);
+        float cx = MX(PX + pos[p][0] * S), cy = MY(PY + pos[p][1] * S), r = 17 * S * k;
+        ui_box(c, cx - r, cy - r, 2 * r, 2 * r, r, fill, 2 * k, lab[p].kind ? pv_mix(fill, SNOW, 0.5f) : pv_mix(LINE, WHITE, 0.3f));
+    }
+    {  /* the D-pad: a cross of two bars; not lit, its outline is one cross (no lines through its middle) */
+        float cx = MX(PX + pos[PV_DPAD][0] * S), cy = MY(PY + pos[PV_DPAD][1] * S), u = S * k;
+        uint32_t held = pv_down;  /* held: one ring round the whole cross, under both bars */
+        if (held >> PV_DPAD & 1) {
+            float ring = 4 * k;
+            ui_box(c, cx - 10 * u - ring, cy - 28 * u - ring, 20 * u + 2 * ring, 56 * u + 2 * ring, 4 * u + ring, RING, 0, 0);
+            ui_box(c, cx - 28 * u - ring, cy - 10 * u - ring, 56 * u + 2 * ring, 20 * u + 2 * ring, 4 * u + ring, RING, 0, 0);
+        }
+        pv_down &= ~(1u << PV_DPAD);
+        BTN(PV_DPAD, 20, 56, 4, "", WHITE);
+        uint32_t fill = BTN(PV_DPAD, 56, 20, 4, "", WHITE);
+        pv_down = held;
+        if (!lab[PV_DPAD].kind) ui_rect(c, cx - 10 * u + 1.5f * k, cy - 11 * u, 20 * u - 3 * k, 22 * u, fill, 1);
+    }
+    for (int p = PV_S; p <= PV_N; p++) BTN(p, 30, 30, 15, pv_chip(p, style), WHITE);
+#undef BTN
+#undef LEAD
+#undef LEADW
+    float by = MY(545) + 8, bh = 58;
+#undef MX
+#undef MY
+#undef DIMMED
+    if (peek) return;
+    /* the detail bar: the part in focus, what it does, and the keys that do the same */
+    ui_box(c, x0, by, W, bh, 14, NIGHT, 0, 0);
+    if (hot < 0) {
+        ui_text_in(c, UI_GOTHIC_500, 16, x0 + 22, by, W - 44, bh, 0,
+                   "Point at a button, or press one, to see what it does and its keys.", ON_DARK);
+    } else {
+        const char *chip = pv_chip(hot, style);
+        char keys[200];
+        float cw = pv_chip_w(chip, 16) + 24, tx = x0 + 18 + cw + 16;
+        ui_box(c, x0 + 18, by + 13, cw, bh - 26, 8, VSOFT, 0, 0);
+        pv_chip_text(c, x0 + 18, by + 13, cw, bh - 26, chip, 16, SNOW);
+        ui_text_in(c, UI_GOTHIC_500, 17, tx, by, 0, bh, 0, lab[hot].n1, SNOW);
+        tx += ui_text_w(UI_GOTHIC_500, 17, lab[hot].n1);
+        if (lab[hot].n2[0]) {
+            char t[120];
+            snprintf(t, sizeof t, " \xc2\xb7 %s", lab[hot].n2);
+            ui_text_in(c, UI_GOTHIC_500, 17, tx, by, 0, bh, 0, t, ON_DARK);
+        }
+        pv_keys(hot, keys, sizeof keys);
+        if (keys[0]) {
+            float kw = ui_text_w(UI_GOTHIC_700, 15, keys), rx = x0 + W - 22 - kw;
+            ui_text_in(c, UI_GOTHIC_700, 15, rx, by, kw, bh, 0, keys, SNOW);
+            ui_text_in(c, UI_GOTHIC_500, 15, rx - 8 - 200, by, 200, bh, 2, "Keyboard:", ON_DARK);
+        }
+    }
+    /* the colours */
+    float lx = x0, ly = by + bh + 16;
+    static const char *const leg[3] = {"Game buttons", "Moving and the camera", "The port's own: overlay, Controls, HUD"};
+    uint32_t lc[3] = {PLUM, TEAL, GOLD};
+    for (int i = 0; i < 3; i++) {
+        ui_box(c, lx, ly + 3, 16, 16, 4, lc[i], 0, 0);
+        lx += 24 + ui_text(c, UI_GOTHIC_500, 15, lx + 24, ly, 22, leg[i], MUTED) + 26;
+    }
+}
+
+/* What is held on the real keyboard, mouse and controller (gamemenu.h), each time the window polls: on the Controls
+ * page's keyboard or controller view, and in the quick look, what is pressed lights up on the drawing and, when it
+ * does something, comes into focus. Elsewhere nothing is kept. */
+void gamemenu_held(const bool *keys, uint32_t mouse, uint32_t parts) {
+    int peek = gamemenu_peeking();
+    int page = gamemenu_open() && !settings_open() && focus && sel == GM_CONTROLS && !ctrl_view && !confirm &&
+               !preview && !gamemenu_prompting() && !bindings_capturing();
+    uint8_t now[64] = {0};
+    int fresh = 0, m = 0;
+    if (!peek && !page) parts = 0;
+    for (int r = 0; r < 6 && keys && (peek || page); r++)
+        for (int i = 0; i < 17 && kv_rows[r][i].w > 0; i++) {
+            int code = kv_rows[r][i].code;
+            if (!code || !keys[code]) continue;
+            if (!(kv_held[code >> 3 & 63] >> (code & 7) & 1)) fresh = code;
+            now[code >> 3 & 63] |= (uint8_t)(1 << (code & 7));
+        }
+    /* the mouse's buttons only in the quick look: on the page they click its own buttons. SDL's mask: 1 the left
+     * button, 2 the middle one, 4 the right one */
+    if (peek) m = (mouse & 1 ? 1 : 0) | (mouse & 4 ? 2 : 0) | (mouse & 2 ? 4 : 0);
+    if (!memcmp(now, kv_held, sizeof now) && m == kv_mouse_held && parts == pv_down) return;
+    for (int b = 0; b < 3; b++)
+        if ((m & ~kv_mouse_held) >> b & 1) fresh = b == 0 ? MOUSE_BIND_LEFT : b == 1 ? MOUSE_BIND_RIGHT : MOUSE_BIND_MIDDLE;
+    if (fresh) {  /* into focus if it does something in the view's mode (the quick look: the game's) */
+        char names[200];
+        int move, sc, saved = kv_mode;
+        if (peek) kv_mode = battle_active() ? 1 : 0;
+        if ((fresh < 1000 && kv_port(fresh)) || kv_names(fresh, names, sizeof names, &move, &sc)) kv_focus = fresh, hover_kind = -1;
+        kv_mode = saved;
+    }
+    for (int p = 0; p < PV_PARTS; p++)
+        if ((parts & ~pv_down) >> p & 1) pv_focus = p, hover_kind = -1;
+    memcpy(kv_held, now, sizeof now);
+    kv_mouse_held = m, pv_down = parts;
+    changed();
+}
+
 /* The controls page (the design's isControls section): a table of each Switch input with its two keys and its
  * controller input, the chosen row ringed in gold and the chosen key or input on a gold chip; the rows scroll.
  * Under it, what the chosen row does (the design's note line). */
@@ -1495,15 +1925,16 @@ static void draw_controls_page(const UiCanvas *c, const GameMenuInfo *in) {
     ui_box(c, 448, 40, 1104, 764, 20, PAPER, 0, 0);
     ui_text(c, UI_ROUNDED_800, 34, 488, 76, 34 * 1.25f, "Controls", NIGHT);
     /* one button at the right of the title: to the keyboard view, or back to the bindings (P, Y / Triangle) */
-    const char *other = ctrl_view ? "Keyboard view" : "Bindings";
+    const char *other = !ctrl_view ? "Bindings" : in->pad ? "Controller view" : "Keyboard view";
     float vw = ui_text_w(UI_ROUNDED_700, 17, other) + 40, vh = 48, vx = 488 + 1024 - vw, vy = 76 + (34 * 1.25f - vh) / 2;
     int vhov = hovered(HIT_KV_TAB, !ctrl_view, 0);
     ui_box(c, vx, vy, vw, vh, 24, vhov ? LILAC : WHITE, 2, PLUM);
     ui_text_in(c, UI_ROUNDED_700, 17, vx, vy, vw, vh, 1, other, PLUM);
     hit_add(vx, vy, vw, vh, HIT_KV_TAB, !ctrl_view, 0);
     float top = 76 + 34 * 1.25f + 22, bottom = 40 + 764 - 36;
-    if (!ctrl_view) {
-        draw_controls_overview(c, 488, top, 1024, 0);
+    if (!ctrl_view) {  /* the controller when it was used last, else the keyboard */
+        if (in->pad) draw_controls_pad(c, in, 488, top, 1024, 0);
+        else draw_controls_overview(c, 488, top, 1024, 0);
         return;
     }
     if (in->pad_name) snprintf(t, sizeof t, "%s connected", in->pad_name);
@@ -1987,24 +2418,32 @@ void gamemenu_draw(const UiCanvas *c, const GameMenuInfo *in) {
     draw_text_has = 0;
     if (gamemenu_peeking()) {  /* F2's quick look: the keyboard Overview alone, in the game's current mode */
         int hk = hit_back();
-        hit_n[hk] = 0;  /* the mouse belongs to the game meanwhile: nothing to point at */
+        hit_n[hk] = 0;  /* only the keys can be pointed at (gamemenu_peek_point) */
         int saved = kv_mode;
         kv_mode = battle_active() ? 1 : 0;
-        /* centred on the 1600 x 900 design (owner: in the middle, bigger, the picture behind it blurred) */
-        float pw = 1360, ph = 640, px = (1600 - pw) / 2, py = (900 - ph) / 2;
+        /* centred on the 1600 x 900 design (owner: in the middle, bigger, the picture behind it blurred); the
+         * keyboard's card is taller by its detail bar */
+        float pw = 1360, ph = in->pad ? 640 : 714, px = (1600 - pw) / 2, py = (900 - ph) / 2;
         ui_box(c, px, py, pw, ph, 22, PAPER, 0, 0);
         /* the key hints along the card's bottom, as the other pages' bar (a dark band, the keys on light chips) */
         float hb = py + ph - 56, hx = px + 40;
         ui_box(c, px, hb, pw, 56, 22, NIGHT, 0, 0);
         ui_rect(c, px, hb, pw, 24, NIGHT, 1);  /* its top corners square */
-        hx += hint(c, hx, hb, "F2", "Hide") + 28;
-        hint(c, hx, hb, "Esc", "Menu, to change the keys");
-        ui_text(c, UI_ROUNDED_800, 30, px + 40, py + 30, 30 * 1.25f, "Controls", NIGHT);
-        draw_controls_overview(c, px + 40, py + 30 + 30 * 1.25f + 18, pw - 80, 1);
+        if (in->pad) {  /* the controller was used last (the quick look by holding View / Create / Minus): its view */
+            hx += hint(c, hx, hb, pv_chip(PV_MINUS, bindings_pad_style()), "Hide") + 28;
+            hint(c, hx, hb, in->close, "Menu");
+            ui_text(c, UI_ROUNDED_800, 30, px + 40, py + 30, 30 * 1.25f,
+                    kv_mode ? "Controls \xc2\xb7 Battle" : "Controls \xc2\xb7 Exploring", NIGHT);
+            draw_controls_pad(c, in, px + 40, py + 30 + 30 * 1.25f + 6, pw - 80, 1);
+        } else {
+            hx += hint(c, hx, hb, "F2", "Hide") + 28;
+            hint(c, hx, hb, "Esc", "Menu, to change the keys");
+            ui_text(c, UI_ROUNDED_800, 30, px + 40, py + 30, 30 * 1.25f, "Controls", NIGHT);
+            draw_controls_overview(c, px + 40, py + 30 + 30 * 1.25f + 18, pw - 80, 1);
+        }
         kv_mode = saved;
         pv_rect[0] = px, pv_rect[1] = py, pv_rect[2] = pw, pv_rect[3] = ph;  /* the part the window shows */
         __atomic_store_n(&hit_front, hk, __ATOMIC_RELEASE);
-        (void)in;
         return;
     }
     float W = (float)c->w / c->s, H = 900;
@@ -2199,15 +2638,16 @@ void gamemenu_draw(const UiCanvas *c, const GameMenuInfo *in) {
             hx += hint(c, hx, by, "Enter", "Done") + 28;
             hint(c, hx, by, "Ctrl V", "Paste");
         }
-    } else if (focus && sel == GM_CONTROLS && !ctrl_view) {  /* the controls page's keyboard Overview */
+    } else if (focus && sel == GM_CONTROLS && !ctrl_view) {  /* the controls page's keyboard or controller view */
+        static const char *const shoulders[3] = {"LB RB", "L1 R1", "L R"};  /* as the controller names them */
         int ps = in->pad == 2;
-        hx += hint(c, hx, by, in->pad ? "LB RB" : "Q E", "Exploring / Battle / Cutscene") + 28;
+        hx += hint(c, hx, by, in->pad ? shoulders[bindings_pad_style() % 3] : "Q E", "Exploring / Battle / Cutscene") + 28;
         hx += hint(c, hx, by, in->pad ? alt_button(in) : "P", "Bindings") + 28;
         hx += hint(c, hx, by, in->pad ? (ps ? "Circle" : "B") : "Esc", "Back") + 28;
         if (in->pad) hint(c, hx, by, in->close, "Close overlay");
     } else if (focus && sel == GM_CONTROLS) {  /* the controls page */
         int ps = in->pad == 2;
-        hx += hint(c, hx, by, in->pad ? alt_button(in) : "P", "Keyboard view") + 28;
+        hx += hint(c, hx, by, in->pad ? alt_button(in) : "P", in->pad ? "Controller view" : "Keyboard view") + 28;
         hx += hint(c, hx, by, in->pad ? "D-pad" : "W S", "Choose") + 28;
         if (!in->pad) hx += hint(c, hx, by, "A D", "Navigate") + 28;  /* across: a key, the other key, the pad */
         hx += hint(c, hx, by, in->pad ? (ps ? "Cross" : "A") : "Enter", "Change") + 28;

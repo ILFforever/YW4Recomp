@@ -108,6 +108,6 @@ wrong for posed parts and moving objects.
 - Replay keys `F1`, `F2`, `UP`, `DOWN`, `LEFT`, `RIGHT`, `ENTER` work the **old** panel, whatever LEGACY MENUS is.
   The in-game overlay has its own: `MENU` (Escape), `M_SET` / `M_CTRL` / `M_PERF` (its pages), `M_UP`, `M_DOWN`,
   `M_LEFT`, `M_RIGHT`, `M_OK`, `M_BACK`, `M_ALT` (on the Controls page: the keyboard view), and `KV_PEEK` (F2's
-  quick look while playing) (`runtime/src/svc_hid.c`). `F12` in a replay takes a screenshot;
-  `YW4_SHOT_MENU=1` keeps the overlay in it. Example: settings page, Advanced, its last rows:
+  quick look while playing) (`runtime/src/svc_hid.c`). `F12` in a replay takes a screenshot,
+  overlay included (`YW4_SHOT_MENU=0` leaves it out). Example: settings page, Advanced, its last rows:
   `k 3300 M_SET`, six `M_DOWN`, `M_RIGHT`, twelve `M_DOWN`, then `F12` (run 240 s at 30 frames/s).

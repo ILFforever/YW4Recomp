@@ -64,4 +64,9 @@ void ui_image(const UiCanvas *c, const uint8_t *rgba, int iw, int ih, float x, f
  * with width `stroke` (in the view box's units), round caps and joins, in rgb. */
 void ui_icon(const UiCanvas *c, const char *svg_elements, float x, float y, float size, float stroke, uint32_t rgb);
 
+/* A straight line w units wide with round ends, and a shape from SVG elements in a view box vw wide drawn over the
+ * box (x, y, w, h): each element says whether it is filled (fill="#000") or stroked (stroke="#000" stroke-width). */
+void ui_line(const UiCanvas *c, float x0, float y0, float x1, float y1, float w, uint32_t rgb, float a);
+void ui_shape(const UiCanvas *c, const char *elements, float x, float y, float w, float h, float vw, uint32_t rgb);
+
 #endif

@@ -42,7 +42,7 @@ from its own small image, over the game and under the overlay.
 ## Consequences
 
 - `YW4_FIRST_RUN_LEVEL=low|high` forces the level in tests (with `YW4_SETTINGS_FILE` pointing at a file that
-  doesn't exist); `YW4_SHOT_MENU=1` puts the notice into screenshots.
+  doesn't exist); screenshots include the notice.
 - Existing installs are untouched: they already have a settings file.
 - Not done: a "reset to recommended" row (the owner didn't ask for it); checking the levels on a real
   integrated GPU and an AMD card (the clean-PC test).

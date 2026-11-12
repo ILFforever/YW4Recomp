@@ -591,3 +591,54 @@ void ui_icon(const UiCanvas *c, const char *elements, float x, float y, float si
     }
     nsvgDelete(im);
 }
+
+/* A straight line with round ends: every pixel by its distance to the segment, so only the line's own box is
+ * touched (the controller view's lines from a button to its name). */
+void ui_line(const UiCanvas *c, float x0, float y0, float x1, float y1, float w, uint32_t rgb, float a) {
+    float ax = c->ox + x0 * c->s, ay = c->oy + y0 * c->s, bx = c->ox + x1 * c->s, by = c->oy + y1 * c->s;
+    float hw = w * c->s * 0.5f, dx = bx - ax, dy = by - ay, len2 = dx * dx + dy * dy;
+    int ix0 = (int)floorf((ax < bx ? ax : bx) - hw - 1), ix1 = (int)ceilf((ax > bx ? ax : bx) + hw + 1);
+    int iy0 = (int)floorf((ay < by ? ay : by) - hw - 1), iy1 = (int)ceilf((ay > by ? ay : by) + hw + 1);
+    if (ix0 < 0) ix0 = 0;
+    if (iy0 < 0) iy0 = 0;
+    if (ix1 > c->w) ix1 = c->w;
+    if (iy1 > c->h) iy1 = c->h;
+    for (int j = iy0; j < iy1; j++)
+        for (int i = ix0; i < ix1; i++) {
+            float px = (float)i + 0.5f - ax, py = (float)j + 0.5f - ay;
+            float t = len2 > 0 ? (px * dx + py * dy) / len2 : 0;
+            t = t < 0 ? 0 : t > 1 ? 1 : t;
+            float qx = px - dx * t, qy = py - dy * t;
+            float co = cover(sqrtf(qx * qx + qy * qy) - hw);
+            if (co > 0) blend(c, i, j, rgb, co * a);
+        }
+}
+
+/* A shape from SVG elements, as ui_icon but any size and filled or stroked as each element says (fill="#000", or
+ * stroke="#000" with a stroke-width): the view box is vw wide and drawn over the box (x, y, w, h). */
+void ui_shape(const UiCanvas *c, const char *elements, float x, float y, float w, float h, float vw, uint32_t rgb) {
+    char svg[2048];
+    float vh = vw * h / w;
+    snprintf(svg, sizeof svg,
+             "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"%g\" height=\"%g\" viewBox=\"0 0 %g %g\">"
+             "<g fill=\"none\" stroke-linecap=\"round\" stroke-linejoin=\"round\">%s</g></svg>",
+             (double)vw, (double)vh, (double)vw, (double)vh, elements);
+    NSVGimage *im = nsvgParse(svg, "px", 96.0f);
+    if (!im) return;
+    static NSVGrasterizer *rast;
+    if (!rast) rast = nsvgCreateRasterizer();
+    int nx = (int)ceilf(w * c->s) + 2, ny = (int)ceilf(h * c->s) + 2;
+    unsigned char *buf = rast && nx > 0 && ny > 0 && nx < 8192 && ny < 8192 ? calloc((size_t)nx * (size_t)ny, 4) : NULL;
+    if (buf) {
+        float fx = c->ox + x * c->s, fy = c->oy + y * c->s;
+        int ix = (int)floorf(fx), iy = (int)floorf(fy);
+        nsvgRasterize(rast, im, fx - (float)ix, fy - (float)iy, w * c->s / vw, buf, nx, ny, nx * 4);
+        for (int j = 0; j < ny; j++)
+            for (int i = 0; i < nx; i++) {
+                int a = buf[((size_t)j * (size_t)nx + (size_t)i) * 4 + 3];
+                if (a) blend(c, ix + i, iy + j, rgb, (float)a / 255.0f);
+            }
+        free(buf);
+    }
+    nsvgDelete(im);
+}

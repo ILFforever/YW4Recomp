@@ -64,6 +64,8 @@ def run(cfg: config.Config, save: Path | None, replay: Path | None, seconds: int
     for pair in env_pairs:
         k, _, v = pair.partition("=")
         env[k] = v
+    if env["YW4_SETTINGS_FILE"] == "none":  # test runs: one fixed size (the game's default follows the monitor)
+        env.setdefault("YW4_WINDOW_SIZE", "1280x720")
     exe = cfg.work_dir / "build" / ("yw4.exe" if os.name == "nt" else "yw4")
     log = log or cfg.work_dir / "logs" / f"dev_run_{time.strftime('%Y%m%d_%H%M%S')}.log"
     log.parent.mkdir(parents=True, exist_ok=True)

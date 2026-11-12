@@ -351,7 +351,8 @@ void settings_load(void) {
         for (int i = 0; i < NSETTINGS; i++)  /* only the panel's settings, and never over the environment */
             if (!strcmp(line, setting(i)->env) && !getenv(line)) set_env(line, value), n++;
         n += bindings_load_line(line, value);
-        if (!strcmp(line, "YW4_THEME") && !getenv(line)) set_env(line, value), n++;
+        if ((!strcmp(line, "YW4_THEME") || !strcmp(line, "YW4_WINDOW_SIZE")) && !getenv(line))
+            set_env(line, value), n++;
     }
     fclose(f);
     fprintf(stderr, "yw4: settings: %d from %s\n", n, path);
@@ -378,6 +379,9 @@ void settings_save(void) {
     fprintf(f, "YW4_HUD=%d\nYW4_HUD_CORNER=%d\nYW4_HUD_PARTS=%u\n", window_hud_mode(), window_hud_corner(),
             window_hud_parts());
     fprintf(f, "YW4_THEME=%s\n", theme_id());  /* the overlay's Look > Theme (theme.h) */
+    int ww, wh;
+    window_size_kept(&ww, &wh);  /* the size the player left the window at (window.c) */
+    if (ww && wh) fprintf(f, "YW4_WINDOW_SIZE=%dx%d\n", ww, wh);
     bindings_save(f);
     fclose(f);
 }

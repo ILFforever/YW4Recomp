@@ -60,6 +60,22 @@ int bindings_rows(BindRow *rows, int max, int *row, int *col, char *help, int he
  * as a mask of input numbers; an input's settings-file name ("A", "LS_UP", "DPAD_LEFT"). */
 uint32_t bindings_key_inputs(int set, int key);
 const char *bindings_input_id(int i);
+/* The controller view: the connected controller's style (0 Xbox, 1 PlayStation, 2 Nintendo; Xbox when there is
+ * none); the inputs a part of the pad is bound to in a set (a face button by its place on that controller; the
+ * D-pad and the sticks: any of their directions); an input's key k (0, 1) by name ("Left Shift", "MOUSE LEFT"), NULL: none. */
+enum { BPAD_SOUTH, BPAD_EAST, BPAD_WEST, BPAD_NORTH, BPAD_L1, BPAD_R1, BPAD_L2, BPAD_R2, BPAD_BACK, BPAD_START,
+       BPAD_L3, BPAD_R3, BPAD_DPAD, BPAD_LSTICK, BPAD_RSTICK };
+int bindings_pad_style(void);
+uint32_t bindings_pad_inputs(int set, int part);
+const char *bindings_input_key(int set, int i, int k);
+/* YW4_HINTS (docs/debugging.md): 0 not set, 1 the keys, 2 + a style: that device for the whole run. */
+int bindings_hints_forced(void);
+/* What the game sees of the pad's Back button (View / Create / Minus) instead of the button itself: -1 the button,
+ * 0 not pressed, 1 pressed. The window holds a press back until it knows it isn't a hold for the quick look. */
+void bindings_pad_back(int state);
+/* 1: the game sees nothing of the pad (buttons, sticks, triggers); 0: as usual. The window sets it while the quick
+ * look shows its controller view, and after it hides until the pad is let go. */
+void bindings_pad_lock(int on);
 
 
 /* The settings file's lines (settings.c): one KEY1_/KEY2_/PAD_<input>=<name> line each, and YW4_MOUSE_SENS. */

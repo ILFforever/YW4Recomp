@@ -123,6 +123,41 @@ uint32_t bindings_key_inputs(int set, int key) {
 
 const char *bindings_input_id(int i) { return i >= 0 && i < NINPUTS ? inputs[i].id : ""; }
 
+/* The controller view: the inputs a part of the pad (BPAD_*) is bound to in a set, as bindings_key_inputs; a face
+ * button is the one at that place on the connected controller (resolve). And the keys of an input (k: 0, 1), for
+ * the view's "the same on the keyboard". */
+static int resolve(int pad);
+uint32_t bindings_pad_inputs(int set, int part) {
+    static const int buttons[] = {[BPAD_SOUTH] = SDL_GAMEPAD_BUTTON_SOUTH, [BPAD_EAST] = SDL_GAMEPAD_BUTTON_EAST,
+                                  [BPAD_WEST] = SDL_GAMEPAD_BUTTON_WEST, [BPAD_NORTH] = SDL_GAMEPAD_BUTTON_NORTH,
+                                  [BPAD_L1] = SDL_GAMEPAD_BUTTON_LEFT_SHOULDER, [BPAD_R1] = SDL_GAMEPAD_BUTTON_RIGHT_SHOULDER,
+                                  [BPAD_L2] = AXIS(SDL_GAMEPAD_AXIS_LEFT_TRIGGER, 1),
+                                  [BPAD_R2] = AXIS(SDL_GAMEPAD_AXIS_RIGHT_TRIGGER, 1),
+                                  [BPAD_BACK] = SDL_GAMEPAD_BUTTON_BACK, [BPAD_START] = SDL_GAMEPAD_BUTTON_START,
+                                  [BPAD_L3] = SDL_GAMEPAD_BUTTON_LEFT_STICK, [BPAD_R3] = SDL_GAMEPAD_BUTTON_RIGHT_STICK};
+    sets_ready();
+    if (set < 0 || set >= NSETS || part < 0 || part > BPAD_RSTICK) return 0;
+    uint32_t m = 0;
+    for (int i = 0; i < NINPUTS && i < 32; i++) {
+        int p = resolve(sets[set][i].pad), on;
+        if (p == PAD_NONE) continue;
+        int axis = p >= PAD_AXIS && p < PAD_FACE ? (p - PAD_AXIS) / 2 : -1;
+        if (part == BPAD_DPAD) on = p >= SDL_GAMEPAD_BUTTON_DPAD_UP && p <= SDL_GAMEPAD_BUTTON_DPAD_RIGHT;
+        else if (part == BPAD_LSTICK) on = axis == SDL_GAMEPAD_AXIS_LEFTX || axis == SDL_GAMEPAD_AXIS_LEFTY;
+        else if (part == BPAD_RSTICK) on = axis == SDL_GAMEPAD_AXIS_RIGHTX || axis == SDL_GAMEPAD_AXIS_RIGHTY;
+        else on = p == buttons[part];
+        if (on) m |= 1u << i;
+    }
+    return m;
+}
+
+static const char *key_name(int scancode);
+const char *bindings_input_key(int set, int i, int k) {
+    sets_ready();
+    if (set < 0 || set >= NSETS || i < 0 || i >= NINPUTS || k < 0 || k >= BIND_KEYS || !sets[set][i].keys[k]) return NULL;
+    return key_name(sets[set][i].keys[k]);
+}
+
 /* ---- mouse sensitivity, left-right and up-down: the controls page's first rows, saved as YW4_MOUSE_SENS_X and
  * YW4_MOUSE_SENS_Y (the environment wins; YW4_MOUSE_SENS, the older single one, sets both) */
 
@@ -195,6 +230,28 @@ static int pad_style;           /* the connected controller's (bindings_read); X
 static int using_pad, had_pad;  /* 1 after a gamepad connection or input, 0 after a key or mouse input */
 
 int bindings_pad_nintendo(void) { return pad_style == STYLE_NINTENDO; }
+int bindings_pad_style(void) { return pad_style; }
+
+/* YW4_HINTS: the device the button icons (and the overlay's views) follow for the whole run, for screenshots of
+ * each style without a controller: 0 not set, 1 the keys, 2 + a style (Xbox, PlayStation, Nintendo). */
+int bindings_hints_forced(void) {
+    static int hint_env = -1;
+    if (hint_env < 0) {
+        const char *h = getenv("YW4_HINTS");
+        hint_env = !h || !*h ? 0 : !strcmp(h, "key") ? 1 : !strcmp(h, "xbox") ? 2 : !strcmp(h, "ps") ? 3 : !strcmp(h, "nx") ? 4 : 0;
+    }
+    return hint_env;
+}
+
+/* The quick look's hold (window.c): what the game is to see of the pad's Back button (View / Create / Minus)
+ * instead of the button itself: -1 the button, 0 not pressed, 1 pressed. */
+static int back_shown = -1;
+void bindings_pad_back(int state) { __atomic_store_n(&back_shown, state, __ATOMIC_RELEASE); }
+
+/* The quick look's controller view (window.c): the whole pad is kept from the game while it shows, so a button
+ * pressed to see it light up there does nothing in the game. */
+static int pad_locked;
+void bindings_pad_lock(int on) { __atomic_store_n(&pad_locked, on, __ATOMIC_RELEASE); }
 
 /* A face button by name as the button it is on the connected controller; anything else as it is. */
 static int resolve(int pad) {
@@ -293,6 +350,11 @@ static int key_from_name(const char *name) {
 static int32_t pad_amount(SDL_Gamepad *g, int pad) {
     pad = resolve(pad);
     if (!g || pad == PAD_NONE) return 0;
+    if (__atomic_load_n(&pad_locked, __ATOMIC_ACQUIRE)) return 0;
+    if (pad == SDL_GAMEPAD_BUTTON_BACK) {  /* held back while the window waits to see a press or a hold */
+        int shown = __atomic_load_n(&back_shown, __ATOMIC_ACQUIRE);
+        if (shown >= 0) return shown ? 32767 : 0;
+    }
     if (pad < PAD_AXIS) return SDL_GetGamepadButton(g, (SDL_GamepadButton)pad) ? 32767 : 0;
     int32_t v = SDL_GetGamepadAxis(g, (SDL_GamepadAxis)((pad - PAD_AXIS) / 2));
     if (!((pad - PAD_AXIS) & 1)) v = -v;
@@ -363,11 +425,7 @@ void bindings_read(const bool *keyboard, uint32_t mouse_buttons, int wheel_up, i
     }
     if (any_pad) using_pad = 1;
     else if (any_key) using_pad = 0;
-    static int hint_env = -1;
-    if (hint_env < 0) {
-        const char *h = getenv("YW4_HINTS");
-        hint_env = !h || !*h ? 0 : !strcmp(h, "key") ? 1 : !strcmp(h, "xbox") ? 2 : !strcmp(h, "ps") ? 3 : !strcmp(h, "nx") ? 4 : 0;
-    }
+    int hint_env = bindings_hints_forced();
     if (hint_env == 1) using_pad = 0;
     else if (hint_env >= 2) using_pad = 1, pad_style = hint_env - 2;
     *buttons = b;

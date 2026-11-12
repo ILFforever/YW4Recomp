@@ -10,6 +10,7 @@
 #ifndef YW4_GAMEMENU_H
 #define YW4_GAMEMENU_H
 
+#include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
 
@@ -33,7 +34,18 @@ int gamemenu_previewing(void);
  * like the preview (only gamemenu_preview_rect's part). F2 again hides it, opening the overlay too. */
 int gamemenu_peeking(void);
 void gamemenu_peek_toggle(void);
+/* The mouse over the quick look (the overlay's design units): the key under it shows in the detail bar. */
+void gamemenu_peek_point(float x, float y);
 void gamemenu_preview_rect(float r[4]);
+/* The Controls page's controller view (2026-11-12): the pad as the connected controller's style draws it, its bound
+ * buttons lit and named; shown instead of the keyboard view when the controller was used last (GameMenuInfo.pad),
+ * also as the quick look, which a controller toggles by holding View / Create / Minus (window.c).
+ * gamemenu_held: what is held now on the real keyboard (SDL's key state by scancode), the mouse (SDL's button mask)
+ * and the controller (a mask of the parts below, by their place on the pad): on those two views and in the quick
+ * look what is pressed lights up on the drawing. Called each time the window polls. */
+enum { GM_PAD_ZL, GM_PAD_L, GM_PAD_ZR, GM_PAD_R, GM_PAD_LS, GM_PAD_RS, GM_PAD_DPAD, GM_PAD_SOUTH, GM_PAD_EAST, GM_PAD_WEST,
+       GM_PAD_NORTH, GM_PAD_MINUS, GM_PAD_PLUS, GM_PAD_SHARE, GM_PAD_MIC };
+void gamemenu_held(const bool *keys, uint32_t mouse, uint32_t parts);
 
 /* Name entry (2026-11-07, canvas board N1): the game's software keyboard (swkbd.c) asks for a name and waits; the
  * overlay shows only a popup with the game's question (title), a field of at most max_chars letters and OK. Typing
@@ -80,6 +92,7 @@ typedef struct {
     int pad;
     const char *close;
     const char *pad_name;  /* the connected controller (the Controls page), NULL: none */
+    int pad_mic;           /* it has a mic button (a DualSense): the HUD's button on the controller view */
     const uint8_t *logo;  /* the game's icon (RGBA, logo_w x logo_h), NULL: none */
     int logo_w, logo_h;
     uint64_t now;  /* ms */

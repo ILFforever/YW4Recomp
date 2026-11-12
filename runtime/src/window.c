@@ -1287,6 +1287,7 @@ static struct {
 } ov;
 
 static int pad_hints(const char **close);  /* below, with the gamepad */
+static int pad_has_mic(void);
 static const char *pad_name(void);
 const uint8_t *game_logo(int *w, int *h);  /* gamelogo.c */
 
@@ -1560,6 +1561,7 @@ static void menu_draw(VkImage dst, uint32_t index, int32_t x0, int32_t y0, uint3
         GameMenuInfo info = {hud_enabled(), yw4_version, pad_hints(&close), close, NULL, 0, 0, now};
         info.logo = game_logo(&info.logo_w, &info.logo_h);
         info.pad_name = pad_name();
+        info.pad_mic = pad_has_mic();
         info.picture = pv ? NULL : ov.bg, info.picture_w = (int)bw, info.picture_h = (int)bh;
         if (pv) {
             static HudContent hc;
@@ -1640,9 +1642,13 @@ static void hud_onto(uint8_t *rgba, uint32_t w, uint32_t h) {
     if (panel_shown_w && (uint32_t)panel_shown_w * s <= w && (uint32_t)panel_shown_h * s <= h)
         paste(rgba, w, h, &panel, panel_shown_w, panel_shown_h, (w - (uint32_t)panel_shown_w * s) / 2,
               (h - (uint32_t)panel_shown_h * s) / 2, (float)s);
-    /* YW4_SHOT_MENU=1 (tests): the in-game overlay too; normally left out, so its TAKE SCREENSHOT shows the game */
+    /* the in-game overlay and the corner notice too, as the window shows them (owner, 2026-11-12: F12 takes what
+     * is on screen); YW4_SHOT_MENU=0 leaves them out (pictures of the game alone) */
     static int shot_menu = -1;
-    if (shot_menu < 0) shot_menu = getenv("YW4_SHOT_MENU") != NULL;
+    if (shot_menu < 0) {
+        const char *e = getenv("YW4_SHOT_MENU");
+        shot_menu = !(e && e[0] == '0');
+    }
     if (shot_menu && note_on && nb.ptr && nb.w) {  /* the notice too, as faded now, at the window's pixel size */
         int32_t nx = (int32_t)((40 - 24) * nb.s), ny = (int32_t)h - (int32_t)(48 * nb.s) - note_bottom;
         for (int j = 0; j < nb.h && ny + j < (int32_t)h; j++)
@@ -1661,11 +1667,17 @@ static void hud_onto(uint8_t *rgba, uint32_t w, uint32_t h) {
     if (gamemenu_previewing() || gamemenu_peeking()) gamemenu_preview_rect(r);
     float k = fs * f;  /* design units to the frame's pixels */
     float l = (fx + r[0] * fs) * f, t = (fy + r[1] * fs) * f, rgt = l + r[2] * k, bot = t + r[3] * k;
+    /* F2's quick look is see-through around its card (premultiplied, blended as the window does); the full overlay
+     * is opaque (its background is the kept game picture, whose alpha means nothing): copied */
+    int blend = gamemenu_peeking();
     for (uint32_t y = 0; y < h; y++)  /* the overlay's picture (the window's size) scaled to the frame's */
         for (uint32_t x = 0; x < w; x++) {
             if ((float)x < l || (float)x >= rgt || (float)y < t || (float)y >= bot) continue;
-            memcpy(rgba + ((size_t)y * w + x) * 4,
-                   ov.px + ((size_t)(y * ov.img.h / h) * ov.img.w + x * ov.img.w / w) * 4, 4);
+            uint8_t *dp = rgba + ((size_t)y * w + x) * 4;
+            const uint8_t *sp = ov.px + ((size_t)(y * ov.img.h / h) * ov.img.w + x * ov.img.w / w) * 4;
+            if (!blend) memcpy(dp, sp, 4);
+            else
+                for (int c = 0; c < 3; c++) dp[c] = (uint8_t)(sp[c] + dp[c] * (255 - sp[3]) / 255);
         }
 }
 
@@ -2297,6 +2309,8 @@ void window_vibration(float amp_low, float freq_low, float amp_high, float freq_
 }
 
 /* The keyboard, mouse, and the gamepad through the controls (bindings.c; the settings panel's second page). */
+static void pad_back_hold(void);  /* below, with the gamepad */
+static uint32_t pad_parts_held(void);
 static void update_input(void) {
     uint64_t b;
     int32_t s[4];
@@ -2333,7 +2347,10 @@ static void update_input(void) {
     wdwn = wheel_active[1];
     host_unlock(&mouse_lock);
 
+    pad_back_hold();
     bindings_read(SDL_GetKeyboardState(NULL), mb, wup, wdwn, gamepad, &b, s);
+    /* the overlay's keyboard and controller views light up what is pressed */
+    gamemenu_held(SDL_GetKeyboardState(NULL), SDL_GetMouseState(NULL, NULL), pad_parts_held());
     /* The settings panel takes the keyboard, mouse, and the gamepad while it is open, and after it closes until
      * everything is let go, so the button that closed it (B, Escape) doesn't reach the game as well. */
     static int withheld;
@@ -2348,6 +2365,22 @@ static void update_input(void) {
             SDL_SetWindowRelativeMouseMode(window, true);
     }
     was_open = is_open;
+    /* F2's quick look: the cursor is free while it shows, to point at its keys (owner, 2026-11-12); the keyboard
+     * still plays. Freed once when it opens, so Alt can hand the mouse back to the camera meanwhile; given back
+     * when it hides (an overlay that opens from it gives it back itself, above). */
+    {
+        static int was_peek, peek_freed;
+        int peek = gamemenu_peeking();
+        if (peek && !was_peek) {
+            if (window && SDL_GetWindowRelativeMouseMode(window)) SDL_SetWindowRelativeMouseMode(window, false), peek_freed = 1;
+        } else if (!peek && was_peek) {
+            if (peek_freed && !is_open && window && !SDL_GetWindowRelativeMouseMode(window) &&
+                (SDL_GetWindowFlags(window) & SDL_WINDOW_INPUT_FOCUS))
+                SDL_SetWindowRelativeMouseMode(window, true);
+            peek_freed = 0;
+        }
+        was_peek = peek;
+    }
     if (withheld) {
         if (!b && !s[0] && !s[1] && !s[2] && !s[3] && !is_open) withheld = 0;
         b = 0, memset(s, 0, sizeof s);
@@ -2418,7 +2451,15 @@ static void used_pad(int pad) {
     if (pad != last_used_pad) last_used_pad = pad, gamemenu_refresh();
 }
 static int pad_hints(const char **close) {
-    if (!gamepad || !last_used_pad) return 0;
+    /* YW4_HINTS: one device's hints for the whole run, with or without a controller (screenshots of each style).
+     * Without one: PlayStation's touchpad, Switch's Capture, and an Xbox pad without Share */
+    int forced = bindings_hints_forced();
+    if (forced == 1) return 0;
+    if (forced >= 2 && !gamepad) {
+        *close = forced == 3 ? "Touchpad" : forced == 4 ? "Capture" : "Back + Start";
+        return forced == 3 ? 2 : 1;
+    }
+    if (!gamepad || (!last_used_pad && !forced)) return 0;
     int ps = pad_is_playstation();
     if (ps) *close = "Touchpad";
     else if (SDL_GamepadHasButton(gamepad, SDL_GAMEPAD_BUTTON_MISC1))
@@ -2428,6 +2469,84 @@ static int pad_hints(const char **close) {
 }
 
 static const char *pad_name(void) { return gamepad ? SDL_GetGamepadName(gamepad) : NULL; }
+/* a DualSense: its mic button (SDL's MISC1 on a PlayStation pad) shows or hides the HUD */
+static int pad_has_mic(void) {
+    if (!gamepad) return bindings_hints_forced() == 3;
+    return pad_is_playstation() && SDL_GamepadHasButton(gamepad, SDL_GAMEPAD_BUTTON_MISC1);
+}
+
+/* The parts of the controller held now, as the overlay's controller view draws them (gamemenu.h): what is pressed
+ * lights up there. By the buttons' places, whatever they are bound to; a stick counts pushed past half way, a
+ * trigger pulled past half way, the D-pad in any direction. */
+static uint32_t pad_parts_held(void) {
+    if (!gamepad) {  /* YW4_PAD_HELD=<mask, hex>: parts held without a controller (tests: a screenshot of the ring) */
+        static long env = -1;
+        if (env < 0) env = getenv("YW4_PAD_HELD") ? strtol(getenv("YW4_PAD_HELD"), NULL, 16) : 0;
+        return (uint32_t)env;
+    }
+    static const struct {
+        SDL_GamepadButton button;
+        int part;
+    } map[] = {{SDL_GAMEPAD_BUTTON_SOUTH, GM_PAD_SOUTH}, {SDL_GAMEPAD_BUTTON_EAST, GM_PAD_EAST},
+               {SDL_GAMEPAD_BUTTON_WEST, GM_PAD_WEST}, {SDL_GAMEPAD_BUTTON_NORTH, GM_PAD_NORTH},
+               {SDL_GAMEPAD_BUTTON_LEFT_SHOULDER, GM_PAD_L}, {SDL_GAMEPAD_BUTTON_RIGHT_SHOULDER, GM_PAD_R},
+               {SDL_GAMEPAD_BUTTON_BACK, GM_PAD_MINUS}, {SDL_GAMEPAD_BUTTON_START, GM_PAD_PLUS},
+               {SDL_GAMEPAD_BUTTON_LEFT_STICK, GM_PAD_LS}, {SDL_GAMEPAD_BUTTON_RIGHT_STICK, GM_PAD_RS},
+               {SDL_GAMEPAD_BUTTON_DPAD_UP, GM_PAD_DPAD}, {SDL_GAMEPAD_BUTTON_DPAD_DOWN, GM_PAD_DPAD},
+               {SDL_GAMEPAD_BUTTON_DPAD_LEFT, GM_PAD_DPAD}, {SDL_GAMEPAD_BUTTON_DPAD_RIGHT, GM_PAD_DPAD}};
+    uint32_t m = 0;
+    for (size_t i = 0; i < sizeof map / sizeof *map; i++)
+        if (SDL_GetGamepadButton(gamepad, map[i].button)) m |= 1u << map[i].part;
+    int ps = pad_is_playstation();
+    if (ps && SDL_GetGamepadButton(gamepad, SDL_GAMEPAD_BUTTON_TOUCHPAD)) m |= 1u << GM_PAD_SHARE;
+    if (SDL_GetGamepadButton(gamepad, SDL_GAMEPAD_BUTTON_MISC1)) m |= 1u << (ps ? GM_PAD_MIC : GM_PAD_SHARE);
+    if (SDL_GetGamepadAxis(gamepad, SDL_GAMEPAD_AXIS_LEFT_TRIGGER) > 16000) m |= 1u << GM_PAD_ZL;
+    if (SDL_GetGamepadAxis(gamepad, SDL_GAMEPAD_AXIS_RIGHT_TRIGGER) > 16000) m |= 1u << GM_PAD_ZR;
+    for (int i = 0; i < 2; i++) {
+        int x = SDL_GetGamepadAxis(gamepad, i ? SDL_GAMEPAD_AXIS_RIGHTX : SDL_GAMEPAD_AXIS_LEFTX);
+        int y = SDL_GetGamepadAxis(gamepad, i ? SDL_GAMEPAD_AXIS_RIGHTY : SDL_GAMEPAD_AXIS_LEFTY);
+        if ((int64_t)x * x + (int64_t)y * y > (int64_t)16000 * 16000) m |= 1u << (i ? GM_PAD_RS : GM_PAD_LS);
+    }
+    return m;
+}
+
+/* The quick look by controller (owner, 2026-11-12): holding Back (View / Create / Minus) for half a second while
+ * playing shows the Controls card over the running game, as F2 does; a press while it shows hides it. The game
+ * uses the same button (Minus: auto battle in battles), so its press is held back from the game until we know
+ * what it is (bindings_pad_back): let go before the half second, the game gets a short press then (three of its
+ * input reads long); held to the half second, the game never sees it. Start pressed meanwhile (Back + Start
+ * opens the overlay, panel_pad_button): the hold is dropped and the game sees the buttons as they are. Not with
+ * LEGACY MENUS, and not while the overlay or the panel is open (they take the input anyway). Called each time
+ * the window polls, before the bindings are read. */
+static void pad_back_hold(void) {
+    enum { IDLE, WAITING, SWALLOWED, HANDED_OVER };  /* the last two: until the button is let go */
+    static int state, tapping;
+    static uint64_t since, tap_until;  /* ms; the game's input reads */
+    int down = gamepad && SDL_GetGamepadButton(gamepad, SDL_GAMEPAD_BUTTON_BACK);
+    int start = gamepad && SDL_GetGamepadButton(gamepad, SDL_GAMEPAD_BUTTON_START);
+    uint64_t now = SDL_GetTicks(), reads = window_input_reads();
+    if (tapping && reads >= tap_until) tapping = 0;
+    if (settings_legacy_keys() || settings_open() || gamemenu_open() || bindings_capturing()) {
+        state = down ? HANDED_OVER : IDLE, tapping = 0;
+    } else if (!down) {
+        if (state == WAITING) tapping = 1, tap_until = reads + 3;  /* a short press: the game's, now */
+        state = IDLE;
+    } else if (state == IDLE) {
+        if (gamemenu_peeking()) gamemenu_peek_toggle(), yw4_hid_note_key("KV_PEEK"), state = SWALLOWED;
+        else state = start ? HANDED_OVER : WAITING, since = now;
+    } else if (state == WAITING) {
+        if (start) state = HANDED_OVER;
+        else if (now - since >= 500) gamemenu_peek_toggle(), yw4_hid_note_key("KV_PEEK"), state = SWALLOWED;
+    }
+    bindings_pad_back(state == WAITING || state == SWALLOWED ? 0 : tapping ? 1 : -1);
+    /* While the quick look shows the controller's view, the pad is the card's alone: a button pressed to see it
+     * light up must not also act in the game (owner, 2026-11-12). The keyboard's view leaves the keyboard playing.
+     * Kept until everything on the pad is let go after it hides, so nothing held then reaches the game. */
+    static int locked;
+    if (gamemenu_peeking() && last_used_pad) locked = 1;
+    else if (locked && !pad_parts_held()) locked = 0;
+    bindings_pad_lock(locked);
+}
 
 static void panel_pad_button(SDL_GamepadButton button) {
     /* the overlay's controls page waits for an input to bind: it takes the press */
@@ -2588,6 +2707,61 @@ static void start_guest_thread(void (*guest)(void *), void *arg) {
     }
 }
 
+/* ---- the window's size. At start: YW4_WINDOW_SIZE=<w>x<h> (the environment, or the settings file's line: the
+ * size the player left the window at), cut to what the desktop can show; without it 80% of the desktop's usable
+ * area, 16:9, and never under the Switch's 1280x720 (a fixed 1280x720 looked small on a 1440p or 4K monitor).
+ * While playing: a size the player gives the window is written to the settings file once it has stayed for a
+ * second (a drag passes through many sizes). Full screen, maximized and minimized sizes are not the window's
+ * own, so they are never kept: leaving full screen goes back to the kept size. */
+static int size_kept[2];  /* 0: none yet */
+
+void window_size_kept(int *w, int *h) {
+    *w = __atomic_load_n(&size_kept[0], __ATOMIC_ACQUIRE), *h = __atomic_load_n(&size_kept[1], __ATOMIC_ACQUIRE);
+    const char *ws = getenv("YW4_WINDOW_SIZE");  /* before the window exists: the line that was read */
+    if ((!*w || !*h) && !(ws && sscanf(ws, "%dx%d", w, h) == 2 && *w > 0 && *h > 0)) *w = *h = 0;
+}
+
+static void window_start_size(int *w, int *h) {  /* after SDL_Init */
+    SDL_Rect r;
+    bool have = SDL_GetDisplayUsableBounds(SDL_GetPrimaryDisplay(), &r) && r.w > 0 && r.h > 0;
+    int sw, sh;
+    const char *ws = getenv("YW4_WINDOW_SIZE");
+    *w = 1280, *h = 720;
+    if (ws && sscanf(ws, "%dx%d", &sw, &sh) == 2 && sw >= 320 && sh >= 180) {
+        *w = have && sw > r.w ? r.w : sw, *h = have && sh > r.h ? r.h : sh;  /* kept on a larger monitor */
+    } else if (have) {
+        int fh = r.h * 4 / 5, fw = fh * 16 / 9;
+        if (fw > r.w * 4 / 5) fw = r.w * 4 / 5, fh = fw * 9 / 16;
+        if (fw > *w) *w = fw & ~1, *h = fh & ~1;
+    }
+    __atomic_store_n(&size_kept[0], *w, __ATOMIC_RELEASE), __atomic_store_n(&size_kept[1], *h, __ATOMIC_RELEASE);
+}
+
+static void window_size_track(void) {  /* the window's thread, each time it polls */
+    static int cand[2];
+    static uint64_t since;
+    if (!window || window_fullscreen_index() ||
+        (SDL_GetWindowFlags(window) & (SDL_WINDOW_FULLSCREEN | SDL_WINDOW_MAXIMIZED | SDL_WINDOW_MINIMIZED))) {
+        since = 0;
+        return;
+    }
+    int w = 0, h = 0;
+    SDL_GetWindowSize(window, &w, &h);
+    if (w <= 0 || h <= 0 || (w == size_kept[0] && h == size_kept[1])) {
+        since = 0;
+        return;
+    }
+    uint64_t now = SDL_GetTicks();
+    if (!since || w != cand[0] || h != cand[1]) {
+        cand[0] = w, cand[1] = h, since = now ? now : 1;
+        return;
+    }
+    if (now - since < 1000) return;
+    __atomic_store_n(&size_kept[0], w, __ATOMIC_RELEASE), __atomic_store_n(&size_kept[1], h, __ATOMIC_RELEASE);
+    since = 0;
+    settings_save();
+}
+
 void window_run(void (*guest)(void *), void *arg) {
     const char *dir = getenv("YW4_SCREENSHOT_DIR");
     if (dir && *dir) snprintf(screenshot_dir, sizeof screenshot_dir, "%s", dir);
@@ -2600,12 +2774,10 @@ void window_run(void (*guest)(void *), void *arg) {
         SDL_SetHint("SDL_JOYSTICK_HIDAPI_PS4_RUMBLE", "1");
         SDL_SetHint(SDL_HINT_JOYSTICK_ENHANCED_REPORTS, "1");
         int win_w = 1280, win_h = 720;
-        const char *ws = getenv("YW4_WINDOW_SIZE");
-        if (ws) sscanf(ws, "%dx%d", &win_w, &win_h);
         yw4_boot_mark("save folder ready; starting SDL");
         if (!SDL_Init(SDL_INIT_VIDEO | SDL_INIT_GAMEPAD)) {
             fprintf(stderr, "yw4: window: SDL_Init: %s; running headless\n", SDL_GetError());
-        } else if (!(window = SDL_CreateWindow("Yo-kai Watch 4++", win_w, win_h, SDL_WINDOW_VULKAN |
+        } else if (window_start_size(&win_w, &win_h), !(window = SDL_CreateWindow("Yo-kai Watch 4++", win_w, win_h, SDL_WINDOW_VULKAN |
                                                SDL_WINDOW_RESIZABLE |
                                                (window_fullscreen_index() ? SDL_WINDOW_FULLSCREEN : 0)))) {
             fprintf(stderr, "yw4: window: SDL_CreateWindow: %s; running headless\n", SDL_GetError());
@@ -2634,6 +2806,7 @@ void window_run(void (*guest)(void *), void *arg) {
         update_input();
         overlay_pad_repeat();
         fullscreen_apply();
+        window_size_track();
         {  /* the system's text input (a keyboard layout's letters, an IME) runs while a text field has the focus */
             static int text_on;
             static SDL_Rect last_rect;
@@ -2720,6 +2893,9 @@ void window_run(void (*guest)(void *), void *arg) {
                 float x, y;
                 if (overlay_point(e.motion.x, e.motion.y, &x, &y))
                     used_pad(0), gamemenu_mouse(x, y, e.motion.state & SDL_BUTTON_LMASK ? 4 : 0);
+            } else if (gamemenu_peeking()) {  /* the quick look: the key under the mouse */
+                float x, y;
+                if (overlay_point(e.motion.x, e.motion.y, &x, &y)) gamemenu_peek_point(x, y);
             }
             break;
         case SDL_EVENT_MOUSE_BUTTON_DOWN:
@@ -2729,6 +2905,7 @@ void window_run(void (*guest)(void *), void *arg) {
                 else if (!settings_open() && (e.button.button == SDL_BUTTON_LEFT || e.button.button == SDL_BUTTON_RIGHT) &&
                          overlay_point(e.button.x, e.button.y, &x, &y))
                     used_pad(0), gamemenu_mouse(x, y, e.button.button == SDL_BUTTON_LEFT ? (e.button.clicks >= 2 ? 2 : 1) : 3);
+            } else if (gamemenu_peeking()) {  /* the quick look: a click doesn't take the cursor back (Alt does) */
             } else if (window && !SDL_GetWindowRelativeMouseMode(window) && !mouse_off() && !mousemenu_open()) {
                 SDL_SetWindowRelativeMouseMode(window, true);
                 mouse_held_off = 1;
@@ -2788,6 +2965,7 @@ void window_run(void (*guest)(void *), void *arg) {
              * overlay F2 still goes to its Controls page */
             if (!settings_legacy_keys() && !settings_open() && !e.key.repeat && !textin_active() &&
                 e.key.key == SDLK_F2 && !gamemenu_open()) {
+                used_pad(0);  /* by the keyboard: its view */
                 gamemenu_peek_toggle(), yw4_hid_note_key("KV_PEEK");
                 break;
             }
