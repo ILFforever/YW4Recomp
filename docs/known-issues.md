@@ -102,6 +102,14 @@ What is known to be missing or wrong, roughly in the order it is likely to matte
 
 ## Input and menus
 
+- **A DualSense over Bluetooth adds about 2.5 s to the start** (2026-11-13, measured on the owner's PC with the
+  same exe and settings): the first frame at 7.4-7.9 s over Bluetooth, 5.2-5.7 s on its USB cable, 5.1-5.2 s with
+  SDL's HID path off (`SDL_JOYSTICK_HIDAPI=0`). Two waits in SDL, each a series of reports read over the wireless
+  link: starting the controller system (`SDL_Init` with `SDL_INIT_GAMEPAD`, ~1.6 s before the window, so the game
+  starts booting later) and opening the pad (`SDL_OpenGamepad` in the window's event loop, ~1.5 s, which holds up
+  the first frames). Starting the controllers after the window and the guest was tried: the second wait then took
+  the time back, no gain, reverted. A fix would open the pad off the window's thread; SDL wants its controller calls
+  on one thread, so it waits for after 1.0. Until then: the USB cable.
 - **Yo-kai Pad mouse support ([decision 0057](decisions/0057-mouse-menu-lists.md))**: open issues from real-mouse testing (owner, 2026-11-08; the rest of the Pad is assumed working):
   - **Watch skills**: still broken (characters cannot be clicked).
   - **Soulmate**: page is buggy.
