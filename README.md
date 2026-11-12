@@ -528,8 +528,8 @@ All captured from the recompiled build on Windows.
 
 ![The Amano house kitchen: Amano house kitchen; Opening scene; LEVEL-5 logo; Opening movie](docs/screenshots/92-screenshots.jpg)
 
-On Ordinary Street with the performance HUD on (F3), at 3840×2160 with DLSS and frame generation: 51 frames a
-second rendered, 103 shown. The game is a native Windows program; here it uses 14% of a 16-core laptop's CPU.
+On Ordinary Street with the performance HUD on (F3). The frame takes about 19 ms of the game's own work and 14% of a 16-core laptop's CPU, against the 33 ms the game's 30 frames/s allow; at
+3840×2160 with DLSS, frame generation turns the 51 frames a second it renders into 103 on screen.
 
 <p align="center">
   <img src="docs/screenshots/11-hud-in-town.jpg" alt="Riding a bike down snowy Ordinary Street at 4K, with the performance HUD: 103 frames a second with DLSS, frame times, GPU, CPU, memory and a frame-time graph" width="820">
