@@ -105,6 +105,10 @@ Memory: Eden's is private + mapped (the emulated console's RAM is mapped memory,
 column leaves out: it shows about 1.3 GB for Eden and 2.8 GB for this project). Ours is everything the game has
 committed.
 
+On a low-end PC: about 35-40 frames/s here, 22-30 in Eden (video; more on the site's [Showcases](https://ilfforever.github.io/YW4Recomp/showcases/) page):
+
+[![YW4 Recomp vs Eden comparison on Potato PC (video on YouTube)](https://i.ytimg.com/vi/HfCrAkMDOzs/maxresdefault.jpg)](https://youtu.be/HfCrAkMDOzs)
+
 ## Features
 
 What the PC version adds to the Switch game. Open an entry for details, pictures and measurements; more in [docs/graphics.md](docs/graphics.md).

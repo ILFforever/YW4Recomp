@@ -1,0 +1,194 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>YW4 Recomp · Showcases</title>
+<meta name="description" content="Videos of YW4 Recomp, the fan PC port of Yo-kai Watch 4++, running: comparisons against an emulator and runs at high settings.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=M+PLUS+Rounded+1c:wght@500;700;800&family=Zen+Kaku+Gothic+New:wght@400;500;700&display=swap" rel="stylesheet">
+<style>
+/* The same look as the comparisons page (../compare/): the game's menus, Yo-kai Pad lilac and violet, gold. */
+:root {
+  --lilac-0: oklch(97.5% 0.012 305); --lilac-1: oklch(94% 0.025 305); --lilac-2: oklch(89% 0.04 305);
+  --lilac-3: oklch(80% 0.06 305);
+  --violet: oklch(36% 0.11 295); --violet-deep: oklch(27% 0.09 295); --violet-soft: oklch(50% 0.11 300);
+  --ink: oklch(25% 0.04 295); --ink-2: oklch(45% 0.04 295);
+  --gold: oklch(80% 0.12 85); --gold-deep: oklch(62% 0.12 75); --cream: oklch(96.5% 0.03 90);
+  --cyan: oklch(76% 0.11 215); --white: oklch(99.2% 0.004 305);
+  --r: 14px;
+  --display: "M PLUS Rounded 1c", "Hiragino Maru Gothic ProN", sans-serif;
+  --body: "Zen Kaku Gothic New", "Hiragino Sans", sans-serif;
+  --step--1: clamp(.8rem, .78rem + .1vw, .88rem);
+  --step-0: clamp(.98rem, .95rem + .15vw, 1.05rem);
+  --step-1: clamp(1.15rem, 1.08rem + .35vw, 1.35rem);
+  --step-2: clamp(1.3rem, 1.18rem + .6vw, 1.7rem);
+  --step-3: clamp(2rem, 1.5rem + 2.4vw, 3.3rem);
+}
+* { box-sizing: border-box; }
+html { scroll-behavior: smooth; scroll-padding-top: 16px; }
+body {
+  margin: 0; overflow-x: hidden; color: var(--ink); font: 400 var(--step-0)/1.7 var(--body);
+  font-variant-numeric: tabular-nums; background-color: var(--lilac-1);
+  background-image: conic-gradient(var(--lilac-0) 25%, transparent 0 50%, var(--lilac-0) 0 75%, transparent 0);
+  background-size: 64px 64px;
+}
+a { color: var(--violet-soft); text-decoration-thickness: 1.5px; text-underline-offset: 3px; }
+a:hover { color: var(--violet); }
+:focus-visible { outline: 2px solid var(--gold-deep); outline-offset: 3px; }
+kbd { font: 700 .82em/1 var(--display); background: var(--lilac-1); border: 1px solid var(--lilac-3); border-radius: 5px; padding: 2px 6px; }
+
+.hero { color: var(--white); background-color: var(--violet-deep); position: relative; overflow: hidden; border-bottom: 3px solid var(--gold); }
+.hero::before {
+  content: ""; position: absolute; inset: 0; opacity: .12; pointer-events: none;
+  background-image: radial-gradient(circle at 50% 100%, transparent 38%, var(--gold) 39% 42%, transparent 43% 55%, var(--gold) 56% 59%, transparent 60%);
+  background-size: 56px 28px;
+}
+.hero-inner {
+  position: relative; max-width: 1280px; margin: 0 auto; padding: clamp(28px, 5vw, 56px) 20px clamp(28px, 4vw, 44px);
+  display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.35fr); gap: clamp(24px, 4vw, 56px); align-items: center;
+}
+.eyebrow { font: 700 var(--step--1)/1 var(--display); letter-spacing: .16em; text-transform: uppercase; color: var(--gold); }
+.hero h1 { font: 800 var(--step-3)/1.08 var(--display); margin: 12px 0 14px; letter-spacing: -.01em; }
+.hero p { margin: 0 0 22px; color: oklch(88% 0.03 300); max-width: 46ch; }
+.stats { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); border: 1px solid oklch(50% 0.08 295); border-radius: 12px; overflow: hidden; margin: 0 0 22px; }
+.stat { padding: 12px 14px; background: oklch(31% 0.1 295); }
+.stat + .stat { border-left: 1px solid oklch(50% 0.08 295); }
+.stat b { display: block; font: 800 var(--step-1)/1.1 var(--display); color: var(--gold); }
+.stat span { font-size: .78rem; color: oklch(82% 0.03 300); line-height: 1.35; display: block; margin-top: 4px; }
+.links { display: flex; flex-wrap: wrap; gap: 10px; }
+.btn { font: 700 .92rem/1 var(--display); text-decoration: none; border-radius: 999px; padding: 11px 18px; border: 1.5px solid var(--gold);
+  background: var(--gold); color: var(--violet-deep); }
+.btn:hover { color: var(--violet-deep); background: oklch(85% 0.12 85); }
+.btn.ghost { background: transparent; color: var(--gold); }
+.btn.ghost:hover { color: var(--gold); background: oklch(80% 0.12 85 / .12); }
+.shot { background: var(--gold); border-radius: var(--r); padding: 8px; box-shadow: 0 18px 40px oklch(15% 0.08 295 / .5); margin: 0; }
+.shot img { display: block; width: 100%; height: auto; border-radius: 8px; }
+.shot figcaption { color: var(--violet-deep); font-size: .8rem; margin: 8px 6px 2px; }
+
+.shell { max-width: 1280px; margin: 0 auto; padding: 40px 20px 72px; display: grid; grid-template-columns: 236px minmax(0, 1fr); gap: 40px; align-items: start; }
+.shell > * { min-width: 0; }
+.pad { position: sticky; top: 16px; background: var(--white); border-radius: var(--r); overflow: hidden; border: 1px solid var(--lilac-3); }
+.pad h2 { margin: 0; padding: 11px 16px; background: var(--violet); color: var(--white); font: 700 .78rem/1 var(--display); letter-spacing: .14em; text-transform: uppercase; }
+.pad ol { list-style: none; margin: 0; padding: 8px; display: grid; gap: 2px; }
+.pad a { display: flex; gap: 10px; align-items: baseline; text-decoration: none; color: var(--ink); font: 500 .92rem/1.3 var(--body); padding: 7px 10px; border-radius: 8px; }
+.pad a .n { font: 700 .75rem/1 var(--display); color: var(--ink-2); min-width: 1.3em; }
+.pad a:hover { background: var(--lilac-1); }
+
+main { display: grid; gap: 28px; }
+article { background: var(--white); border-radius: var(--r); border: 1px solid var(--lilac-3); overflow: hidden; }
+.bar { display: flex; align-items: center; gap: 12px; padding: 12px 20px; background: var(--violet); color: var(--white); }
+.bar h2 { margin: 0; font: 800 var(--step-2)/1.2 var(--display); flex: 1; }
+.bar .cat { font: 700 .7rem/1 var(--display); letter-spacing: .14em; text-transform: uppercase; color: var(--gold); }
+.bar .q { flex: none; width: 28px; height: 28px; border-radius: 50%; background: var(--cyan); display: grid; place-items: center;
+  font: 800 .9rem/1 var(--display); color: var(--violet-deep); }
+.body { padding: 20px 20px 22px; }
+.top { display: grid; grid-template-columns: minmax(0, 1.5fr) minmax(220px, 1fr); gap: 24px; margin: 0 0 16px; }
+.prose p { margin: 0 0 10px; max-width: 66ch; }
+.prose ul, .prose ol { margin: 8px 0 10px; padding-left: 1.2em; }
+.prose li { margin: 0 0 6px; }
+.prose li::marker { color: var(--gold-deep); }
+.spec { background: var(--cream); border-radius: 10px; border-top: 3px solid var(--gold); padding: 4px 14px; font-size: var(--step--1); align-self: start; }
+.spec dl { margin: 0; display: grid; grid-template-columns: auto minmax(0, 1fr); }
+.spec dt, .spec dd { padding: 7px 0; border-bottom: 1px solid oklch(88% 0.04 85); margin: 0; }
+.spec dt { color: var(--ink-2); padding-right: 14px; }
+.spec dd { font-weight: 700; }
+.spec dt:last-of-type, .spec dd:last-of-type { border-bottom: 0; }
+.whole { margin: 0; }
+.whole + .whole { margin-top: 14px; }
+.whole img { display: block; width: 100%; height: auto; border-radius: 10px; border: 1px solid var(--lilac-2); }
+.whole figcaption { margin: 6px 2px 0; font-size: var(--step--1); color: var(--ink-2); }
+.pair { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 320px), 1fr)); gap: 14px; }
+.steps { counter-reset: s; list-style: none; padding: 0 !important; }
+.steps li { counter-increment: s; display: grid; grid-template-columns: 30px minmax(0, 1fr); gap: 10px; align-items: start; }
+.steps li::before { content: counter(s); width: 26px; height: 26px; border-radius: 50%; background: var(--gold); color: var(--violet-deep);
+  font: 800 .85rem/26px var(--display); text-align: center; margin-top: 2px; }
+
+footer { background: var(--violet-deep); color: oklch(84% 0.03 300); border-top: 3px solid var(--gold); }
+footer .in { max-width: 1280px; margin: 0 auto; padding: 24px 20px 32px; font-size: var(--step--1); display: grid; gap: 6px; }
+footer a { color: var(--gold); }
+
+@media (max-width: 960px) {
+  .hero-inner { grid-template-columns: minmax(0, 1fr); }
+  .shell { grid-template-columns: minmax(0, 1fr); gap: 20px; padding-top: 0; }
+  .pad { top: 0; z-index: 5; border-radius: 0 0 12px 12px; margin: 0 -20px; border-top: 0; }
+  .pad h2 { display: none; }
+  .pad ol { display: flex; overflow-x: auto; scrollbar-width: none; padding: 6px; }
+  .pad a { white-space: nowrap; }
+  .top { grid-template-columns: minmax(0, 1fr); }
+}
+@media (max-width: 560px) { .stats { grid-template-columns: minmax(0, 1fr); } .stat + .stat { border-left: 0; border-top: 1px solid oklch(50% 0.08 295); } .bar .cat { display: none; } }
+@media (prefers-reduced-motion: reduce) { html { scroll-behavior: auto; } }
+/* Showcases: a video fills its card's width at 16:9; a stub holds the place of one not recorded yet. */
+.video { margin: 0; }
+.video iframe { display: block; width: 100%; aspect-ratio: 16 / 9; border: 0; border-radius: 10px; background: var(--violet-deep); }
+.video figcaption { margin-top: 8px; font-size: var(--step--1); color: var(--ink-2); }
+.stub { display: grid; place-items: center; min-height: 200px; border-radius: 10px; border: 2px dashed var(--lilac-3);
+  background: var(--lilac-0); color: var(--ink-2); text-align: center; padding: 16px; }
+.stub b { display: block; font: 800 var(--step-2)/1.2 var(--display); color: var(--violet); margin-bottom: 6px; }
+</style>
+</head>
+<body>
+
+<header class="hero">
+  <div class="hero-inner">
+    <div>
+      <span class="eyebrow">YW4 Recomp · fan PC port</span>
+      <h1>Showcases</h1>
+      <p>Videos of the PC version of <i>Yo-kai Watch 4++</i> running.</p>
+      <div class="links">
+        <a class="btn" href="../">Home</a>
+        <a class="btn ghost" href="../compare/">Comparisons</a>
+        <a class="btn ghost" href="../launcher/">The launcher</a>
+        <a class="btn ghost" href="https://github.com/ILFforever/YW4Recomp">Project on GitHub</a>
+      </div>
+    </div>
+    <figure class="shot">
+      <img src="../compare/img/hero-forest-4k.jpg" alt="Mystic Grove, a bamboo forest by a river, at 3840×2160">
+      <figcaption>Mystic Grove, at 3840×2160</figcaption>
+    </figure>
+  </div>
+</header>
+
+<div class="shell">
+  <nav class="pad" aria-label="Showcases">
+    <h2>Contents</h2>
+    <ol>
+      <li><a href="#4k-max"><span class="n">1</span>4K at max settings</a></li>
+      <li><a href="#vs-eden-low-end"><span class="n">2</span>Against Eden on a low-end PC</a></li>
+    </ol>
+  </nav>
+
+  <main>
+    <article id="4k-max">
+      <div class="bar"><span class="q">!</span><h2>4K at max settings</h2><span class="cat">Coming soon</span></div>
+      <div class="body">
+        <div class="stub"><div><b>Not recorded yet</b>A run at 3840×2160 with every setting at its highest.</div></div>
+      </div>
+    </article>
+
+    <article id="vs-eden-low-end">
+      <div class="bar"><span class="q">!</span><h2>Against Eden on a low-end PC</h2><span class="cat">Comparison</span></div>
+      <div class="body">
+        <figure class="video">
+          <iframe src="https://www.youtube-nocookie.com/embed/HfCrAkMDOzs" title="YW4 Recomp vs Eden comparison on Potato PC" loading="lazy" referrerpolicy="strict-origin-when-cross-origin"
+            allow="accelerometer; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share" allowfullscreen></iframe>
+          <figcaption>The same low-end PC: about 35-40 frames/s with YW4 Recomp, 22-30 with the Eden emulator.
+            <a href="https://youtu.be/HfCrAkMDOzs">Watch on YouTube</a></figcaption>
+        </figure>
+      </div>
+    </article>
+  </main>
+</div>
+
+<footer>
+  <div class="in">
+    <span>A fan project. Videos are of the maintainer's own copy of the game. Not affiliated with or endorsed by
+      LEVEL-5 or Nintendo; <i>Yo-kai Watch</i> belongs to its owners.</span>
+    <span><a href="https://github.com/ILFforever/YW4Recomp">github.com/ILFforever/YW4Recomp</a></span>
+  </div>
+</footer>
+
+</body>
+</html>
