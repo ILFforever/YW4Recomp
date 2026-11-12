@@ -1232,9 +1232,50 @@ static void game_pause_toggle(void) {
     }
 }
 
+/* ---- Return to title (the overlay's, 2026-11-13): the game's pause screen is still open under the kept picture,
+ * with Continue chosen. Its other item is Return to Title, which opens the game's own Yes / No window
+ * (pause_menu_inc.lua: OnDecideFocus, OpenGeneralWindow, Callback_IsCloseYN). The live picture is shown and the
+ * answer is pressed for the player, one button every 0.7 s (a screen opening drops a press that comes too soon).
+ * YW4_TITLE_KEYS=Down,A,... changes the buttons (tests). */
+enum { BTN_LEFT_BIT = 1 << 12, BTN_UP_BIT = 1 << 13, BTN_RIGHT_BIT = 1 << 14, BTN_DOWN_BIT = 1 << 15 };
+static uint64_t title_keys[8];
+static int title_n, title_at;   /* the buttons, how many, the next one */
+static uint64_t title_next_ms;  /* SDL ticks of the next press */
+
+int window_pause_title_state(void) {
+    int st = pause_state();
+    if (paused_view && st == PAUSE_ON) return 1;  /* the game's pause screen is open: Return to Title can be answered */
+    if (paused_view && st == PAUSE_WANTED) return 0;  /* Plus pressed, the screen still opening (up to ~2 s) */
+    return -1;  /* no pause screen here (a cutscene, the title screen), or the overlay's preview runs the game */
+}
+
+int window_pause_to_title(void) {
+    if (!paused_view || pause_state() != PAUSE_ON) return 0;  /* not in the game's pause screen: nothing to answer */
+    const char *e = getenv("YW4_TITLE_KEYS");
+    if (!e) e = "Down,A,Left,A";  /* its Yes / No window: Yes left, No right and chosen first (seen 2026-11-13) */
+    title_n = 0;
+    for (const char *p = e; *p && title_n < 8;) {
+        size_t n = strcspn(p, ",");
+        uint64_t b = !strncmp(p, "Down", n) ? BTN_DOWN_BIT : !strncmp(p, "Up", n) ? BTN_UP_BIT
+                   : !strncmp(p, "Left", n) ? BTN_LEFT_BIT : !strncmp(p, "Right", n) ? BTN_RIGHT_BIT
+                   : !strncmp(p, "A", n) ? BTN_A_BIT : 0;
+        if (b) title_keys[title_n++] = b;
+        p += n + (p[n] == ',');
+    }
+    title_at = 0, title_next_ms = SDL_GetTicks() + 300;
+    pause_to_title();  /* the kept picture stays up while the buttons answer the game's screens behind it */
+    fprintf(stderr, "yw4: pause: return to title, %d buttons (%s), behind the kept picture\n", title_n, e);
+    return 1;
+}
+
 /* once per input update (window's thread, and replays): moves the pause on; returns the buttons pressed for the
  * player, OR'd into the input */
 uint64_t window_pause_buttons(void) {
+    if (title_at < title_n && SDL_GetTicks() >= title_next_ms && !__atomic_load_n(&pause_press, __ATOMIC_ACQUIRE)) {
+        pause_press_button(title_keys[title_at++]);
+        title_next_ms = SDL_GetTicks() + 700;
+        fprintf(stderr, "yw4: pause: return to title, button %d of %d\n", title_at, title_n);
+    }
     if (window_paused()) {
         uint64_t now = SDL_GetTicks();
         int st = pause_state();
@@ -1243,6 +1284,11 @@ uint64_t window_pause_buttons(void) {
             game_pause_toggle();  /* the resume asked while it was pausing */
         } else if (st == PAUSE_OFF) {
             pause_live("the game resumed");
+        } else if (st == PAUSE_TITLE && title_at >= title_n && now > title_next_ms + 2300) {
+            /* 3 s after the last button the game hasn't said it left its pause: the live picture anyway, so it
+             * can't stay frozen (a press lost: then the game's own window is there to answer by hand) */
+            pause_forget();
+            pause_live("return to title: the buttons are done");
         } else if (st == PAUSE_WANTED && now - pause_asked_at > 2000) {
             pause_resume_pending = 0;
             pause_forget();

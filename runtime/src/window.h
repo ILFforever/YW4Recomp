@@ -36,6 +36,11 @@ uint64_t window_input_reads(void);
 void window_input_read_replayed(void);  /* a replay gave the game its input instead: counts as a read too */
 /* The overlay's pause on or off (the game's Plus pause, its screen hidden): F4, replays' PAUSE key. */
 void window_pause_toggle(void);
+/* The overlay's Return to title: the game's own pause screen (under the kept picture) answered with Return to Title
+ * and Yes, on the live picture. 0 if the game isn't in its pause screen (a cutscene): nothing done. */
+int window_pause_to_title(void);
+/* Whether it can: 1 yes, 0 not yet (the game is still pausing), -1 not here (no pause screen: greyed out) */
+int window_pause_title_state(void);
 int window_paused(void);  /* the overlay's pause is on: the player's input is held back */
 uint64_t window_pause_buttons(void);  /* the buttons it presses for the player now (live input and replays) */
 

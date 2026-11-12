@@ -7,11 +7,13 @@ enum {
     PAUSE_WANTED,  /* Plus is being pressed for the player */
     PAUSE_ON,      /* the game is paused: its pause screen is open (hidden by the window) */
     PAUSE_RESUME,  /* resume asked: A on Continue until the game has left its pause */
+    PAUSE_TITLE,   /* Return to Title asked: its buttons pressed (window.c) until the game has left its pause */
 };
 
 int pause_state(void);
 void pause_request(void);  /* before pressing Plus for the player */
 int pause_resume(void);    /* paused -> resume asked; 0 if the game isn't paused */
+int pause_to_title(void);  /* paused -> Return to Title asked; 0 if the game isn't paused */
 void pause_forget(void);   /* give up (the game didn't pause, or didn't resume) */
 
 #endif

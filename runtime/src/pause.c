@@ -34,6 +34,7 @@ static int set_from(int from, int to) {
 }
 void pause_request(void) { __atomic_store_n(&state, PAUSE_WANTED, __ATOMIC_RELEASE); }
 int pause_resume(void) { return set_from(PAUSE_ON, PAUSE_RESUME); }
+int pause_to_title(void) { return set_from(PAUSE_ON, PAUSE_TITLE); }
 void pause_forget(void) { __atomic_store_n(&state, PAUSE_OFF, __ATOMIC_RELEASE); }
 
 /* f_880750(out, scene name, flag, params): opens a scene. params: entries of 0x14 bytes, a type (2) and a hash;
@@ -64,5 +65,7 @@ int yw4_hook_menu_state_exit(CPUState *ctx) {
     (void)ctx;
     if (set_from(PAUSE_RESUME, PAUSE_OFF) || set_from(PAUSE_ON, PAUSE_OFF))
         fprintf(stderr, "yw4: pause: the game resumed\n");
+    else if (set_from(PAUSE_TITLE, PAUSE_OFF))
+        fprintf(stderr, "yw4: pause: the game left its pause for the title screen\n");
     return 0;
 }

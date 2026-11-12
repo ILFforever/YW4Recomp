@@ -17,4 +17,8 @@ const char *savefs_root(void);
  * ResultTargetNotFound if it doesn't exist; with create = 1, makes it (out unused). */
 uint32_t savefs_open(uint64_t program_id, const uint8_t uid[16], int create, Service **out);
 
+/* When the game last saved, in Unix seconds: its last Commit in this run, else the newest file of its save as it
+ * was opened (a save from an earlier run); 0 before any save is known. The overlay's popups say how long ago. */
+int64_t savefs_last_save(void);
+
 #endif

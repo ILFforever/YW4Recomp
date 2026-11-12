@@ -4,6 +4,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
 
 #include <SDL3/SDL_scancode.h>
 
@@ -11,6 +12,7 @@
 #include "battle.h"
 #include "bindings.h"
 #include "bugreport.h"
+#include "savefs.h"
 #include "settings.h"
 #include "textin.h"
 #include "theme.h"
@@ -358,11 +360,28 @@ int gamemenu_selected(void) { return sel; }
 int gamemenu_confirming(void) { return confirm; }
 
 static void changed(void) { __atomic_add_fetch(&changes, 1, __ATOMIC_RELEASE); }
+static void toast(const char *msg);  /* below: a short note, top right */
+
+/* The popups' second line: how long ago the game saved (savefs.c: its last Commit, else its save's newest file) */
+static void save_age(char *out, size_t n) {
+    int64_t t = savefs_last_save(), s = (int64_t)time(NULL) - t;
+    if (!t) {
+        snprintf(out, n, "No save found yet.");
+        return;
+    }
+    if (s < 0) s = 0;
+    if (s < 60) snprintf(out, n, "Last saved %lld s ago.", (long long)s);
+    else if (s < 3600) snprintf(out, n, "Last saved %lld min %lld s ago.", (long long)(s / 60), (long long)(s % 60));
+    else snprintf(out, n, "Last saved %lld h %lld min ago.", (long long)(s / 3600), (long long)(s / 60 % 60));
+}
 
 uint32_t gamemenu_look(uint64_t now) {
     if (__atomic_exchange_n(&toast_wanted, 0, __ATOMIC_ACQ_REL)) toast_until = now + 1600;
     /* also when a key capture ends by itself (five seconds) */
-    return (__atomic_load_n(&changes, __ATOMIC_ACQUIRE) + textin_changes()) * 4u + (now < toast_until) +
+    /* a popup's "Last saved ... ago" counts up: drawn again each second while it shows */
+    uint32_t tick = confirm ? (uint32_t)(now / 1000) * 0x10000u : 0;
+    tick += (uint32_t)(window_pause_title_state() + 1) * 0x01000000u;  /* Return to title greyed or not: drawn again */
+    return tick + (__atomic_load_n(&changes, __ATOMIC_ACQUIRE) + textin_changes()) * 4u + (now < toast_until) +
            2u * (uint32_t)bindings_capturing() + (gamemenu_peeking() ? 0x40000000u + 0x20000000u * (uint32_t)battle_active() : 0);
 }
 
@@ -377,6 +396,27 @@ static void close_and_resume(void) {
     if (window_paused()) window_pause_toggle();
     changed();
     fprintf(stderr, "yw4: overlay: closed\n");
+}
+
+/* Return to title: closed as for Resume, but the game's pause screen is answered with Return to Title (window.c).
+ * Where the game didn't pause (a cutscene) there is no pause screen to answer: a note, and the overlay stays. */
+static void close_and_resume_to_title(void) {
+    if (!window_pause_to_title()) {
+        confirm = 0;
+        toast("You can't return to the title screen here");
+        changed();
+        fprintf(stderr, "yw4: overlay: return to title: the game isn't in its pause screen here\n");
+        return;
+    }
+    if (settings_open()) settings_toggle();
+    bindings_cancel();
+    textin_focus(NULL);
+    __atomic_store_n(&focused_text_valid, 0, __ATOMIC_RELEASE);
+    confirm = 0, focus = 0;
+    __atomic_store_n(&preview, 0, __ATOMIC_RELEASE);
+    __atomic_store_n(&open_, 0, __ATOMIC_RELEASE);
+    changed();
+    fprintf(stderr, "yw4: overlay: closed for the title screen\n");
 }
 
 void gamemenu_toggle(void) {
@@ -400,7 +440,10 @@ static void accept(void) {
     case GM_CONTROLS: focus = 1; break;
     case GM_PERF: focus = 1; break;
     case GM_BUG: focus = 1, bug_page = 0, brow = 0; break;  /* the report's first page (below) */
-    case GM_EXIT: confirm = 1, choice = 0; break;  /* "keep playing" chosen first */
+    case GM_TITLE:  /* "keep playing" chosen first; greyed out (window_pause_title_state): nothing */
+        if (window_pause_title_state() > 0) confirm = GM_TITLE, choice = 0;
+        break;
+    case GM_EXIT: confirm = GM_EXIT, choice = 0; break;
     }
 }
 
@@ -432,7 +475,7 @@ static void preview_stop(void) {
 }
 
 void gamemenu_open_page(int item) {
-    if (gamemenu_prompting() || item <= GM_RESUME || item >= GM_EXIT) return;
+    if (gamemenu_prompting() || item <= GM_RESUME || item >= GM_TITLE) return;  /* the items with a page */
     if (gamemenu_open() && sel == item && focus && !preview && !confirm) {  /* the same key again: back to the game */
         close_and_resume();
         return;
@@ -708,6 +751,11 @@ void gamemenu_action(int a) {
                 confirm = 0;
                 return;
             }
+            if (confirm == GM_TITLE) {  /* the overlay closes; the window answers the game's own pause screen */
+                fprintf(stderr, "yw4: overlay: return to title\n");
+                close_and_resume_to_title();
+                return;
+            }
             fprintf(stderr, "yw4: overlay: exit game\n");
             yw4_exit(0, __FILE__, __LINE__);  /* as closing the window */
         }
@@ -726,6 +774,8 @@ void gamemenu_action(int a) {
     }
     if (a == GM_UP) sel = sel > 0 ? sel - 1 : 0;
     else if (a == GM_DOWN) sel = sel < GM_ITEMS - 1 ? sel + 1 : GM_ITEMS - 1;
+    if ((a == GM_UP || a == GM_DOWN) && sel == GM_TITLE && window_pause_title_state() <= 0)
+        sel = a == GM_UP ? GM_BUG : GM_EXIT;  /* greyed out: passed over */
     else if (a == GM_ACCEPT ||
              (a == GM_RIGHT && (sel == GM_SETTINGS || sel == GM_CONTROLS || sel == GM_PERF || sel == GM_BUG)))
         accept();
@@ -1017,6 +1067,7 @@ static const char *const ICON_BUG =
     "<path d=\"M8 10a4 4 0 0 1 8 0v4a4 4 0 0 1-8 0zM12 10v8M4 12h4M16 12h4M5 7.5l3 2M19 7.5l-3 2M5 18.5l3-2M19 18.5"
     "l-3-2M10 6.5L8.5 4M14 6.5L15.5 4\"/>";
 static const char *const ICON_EXIT = "<path d=\"M12 3v9M6.3 6.3a8 8 0 1 0 11.4 0\"/>";
+static const char *const ICON_TITLE = "<path d=\"M3 11l9-7 9 7M5 10v10h14V10\"/>";  /* a house: back to the start */
 /* the value arrows (‹ ›): drawn as icons, not the font's characters, which sit low in their line */
 static const char *const ICON_PREV = "<path d=\"M14.5 6l-6 6 6 6\"/>";
 static const char *const ICON_NEXT = "<path d=\"M9.5 6l6 6-6 6\"/>";
@@ -1035,6 +1086,19 @@ static void side_button(const UiCanvas *c, float x, float y, float w, const char
     uint32_t col = on && ink == PLUM ? ON_GOLD : ink;
     ui_icon(c, icon, x + 20, y + 16, 24, 2, col);
     ui_text_in(c, UI_ROUNDED_700, 18, x + 20 + 24 + 14, y, 0, 56, 0, label, col);
+}
+
+/* A side panel button that can't be used here: muted, never gold-filled (chosen: a gold outline only), and a short
+ * note at its right (none while it may still become usable) */
+static void side_button_off(const UiCanvas *c, float x, float y, float w, const char *icon, const char *label, int on,
+                            const char *note) {
+    ui_box(c, x, y, w, 56, 12, WHITE, 2, on ? GOLD : LINE);
+    ui_icon(c, icon, x + 20, y + 16, 24, 2, MUTED);
+    ui_text_in(c, UI_ROUNDED_700, 18, x + 20 + 24 + 14, y, 0, 56, 0, label, MUTED);
+    if (note) {
+        float nw = ui_text_w(UI_GOTHIC_500, 13, note);
+        ui_text_in(c, UI_GOTHIC_500, 13, x + w - 20 - nw, y, nw, 56, 0, note, MUTED);
+    }
 }
 
 /* A key hint: the key on a round chip, then what it does (the bottom bar). Returns its width. */
@@ -2794,9 +2858,16 @@ void gamemenu_draw(const UiCanvas *c, const GameMenuInfo *in) {
         side_button(c, 20, T + 128 + i * 66, 356, icons[i], l, sel == i, PLUM);
         hit_add(20, T + 128 + i * 66, 356, 56, HIT_SIDE, i, 0);
     }
-    /* Exit game at the bottom, under a line; the version under it */
-    float vy = H + E - 20 - 19, ey = vy - 14 - 56;
-    ui_rect(c, 20, ey - 14 - 2, 356, 2, LINE, 1);
+    /* Return to title and Exit game at the bottom, under a line (the ways out of the game); the version under them */
+    float vy = H + E - 20 - 19, ey = vy - 14 - 56, ry = ey - 10 - 56;
+    ui_rect(c, 20, ry - 14 - 2, 356, 2, LINE, 1);
+    int title_state = window_pause_title_state();  /* 1 usable, 0 the game is still pausing, -1 not here */
+    if (title_state > 0) {
+        side_button(c, 20, ry, 356, ICON_TITLE, "Return to title", sel == GM_TITLE, PLUM);
+        hit_add(20, ry, 356, 56, HIT_SIDE, GM_TITLE, 0);
+    } else {  /* greyed out: no hover, no click, the keys pass over it */
+        side_button_off(c, 20, ry, 356, ICON_TITLE, "Return to title", 0, NULL);
+    }
     side_button(c, 20, ey, 356, ICON_EXIT, "Exit game", sel == GM_EXIT, WINE);
     hit_add(20, ey, 356, 56, HIT_SIDE, GM_EXIT, 0);
     char ver[48];
@@ -2869,11 +2940,14 @@ void gamemenu_draw(const UiCanvas *c, const GameMenuInfo *in) {
     /* the exit popup: a small window as the launcher's popups (launcher/ui/style.css "dialog", 2026-11-05): a
      * violet title bar over a gold rule, the text on white, the buttons in a lilac tray at the bottom */
     if (confirm) {
+        int title = confirm == GM_TITLE;
+        char age[80];
+        save_age(age, sizeof age);
         ui_rect(c, 0, T - 1, W, H + 2 * E + 2, POP_BACKDROP, 0.6f);
         const float k = POP_K, r = 14 * k, gold = 3 * k;
         float pw = 460 * k, lh_title = 17 * k * 1.3f, bar = (15 + 13) * k + lh_title, lh = 14 * k * 1.5f;
         float tray = (12 + 40 + 12) * k, gap = 18 * k, pad = 22 * k;
-        float ph = bar + gold + gap + lh + gap + tray;
+        float ph = bar + gold + gap + 2 * lh + gap + tray;  /* two lines: what is lost, and when the game saved */
         float px = (W - pw) / 2, py = (H - ph) / 2;
         ui_shadow(c, px, py + r, pw, ph, r, 36 * k, POP_SHADOW, 0.45f);
         ui_box_alpha(c, px - 1, py - 1, pw + 2, ph + 2, r + 1, POP_BORDER, 0.5f);  /* the 1 px border, half seen */
@@ -2884,11 +2958,16 @@ void gamemenu_draw(const UiCanvas *c, const GameMenuInfo *in) {
         ui_box(c, px, ty - r, pw, tray + r, r, POP_LILAC, 0, 0);  /* the tray (its upper corners covered) */
         ui_rect(c, px, py + bar + gold, pw, ty - (py + bar + gold), POP_WHITE, 1);
         ui_rect(c, px, ty, pw, 1, POP_LINE, 1);
-        ui_text(c, UI_ROUNDED_800, 17 * k, px + pad, py + 15 * k, lh_title, "Quit the game?", POP_WHITE);
+        /* the title bar: the side button's icon (house / power), then the question */
+        float is = 20 * k;
+        ui_icon(c, title ? ICON_TITLE : ICON_EXIT, px + pad, py + 15 * k + (lh_title - is) / 2, is, 2.2f, POP_WHITE);
+        ui_text(c, UI_ROUNDED_800, 17 * k, px + pad + is + 10 * k, py + 15 * k, lh_title,
+                title ? "Return to the title screen?" : "Quit the game?", POP_WHITE);
         ui_text(c, UI_GOTHIC_400, 14 * k, px + pad, py + bar + gold + gap, lh, "Progress since your last save is lost.",
                 POP_INK);
+        ui_text(c, UI_GOTHIC_400, 14 * k, px + pad, py + bar + gold + gap + lh, lh, age, POP_INK);
         float right = px + pw - 16 * k;
-        right -= popup_button(c, right, ty + 12 * k, "Quit game", 1, choice == 1) + 10 * k;
+        right -= popup_button(c, right, ty + 12 * k, title ? "Return to title" : "Quit game", 1, choice == 1) + 10 * k;
         popup_button(c, right, ty + 12 * k, "Keep playing", 0, choice == 0);
     }
     if (draw_text_has) {

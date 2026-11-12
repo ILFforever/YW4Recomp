@@ -16,7 +16,7 @@
 
 #include "ui.h"
 
-enum { GM_RESUME, GM_SETTINGS, GM_CONTROLS, GM_PERF, GM_BUG, GM_EXIT, GM_ITEMS };
+enum { GM_RESUME, GM_SETTINGS, GM_CONTROLS, GM_PERF, GM_BUG, GM_TITLE, GM_EXIT, GM_ITEMS };
 /* GM_BACK: one step back (B, Escape, Backspace, the right mouse button): a page to the side panel, the side panel
  * to the game. GM_LEAVE: as GM_BACK on a page (older recordings' A key). GM_PREV / GM_NEXT: the page's previous /
  * next section (LB / RB, LT / RT, Q / E). Lists stop at their ends. */
@@ -66,7 +66,7 @@ int gamemenu_text_rect(float r[4], float *caret_x);
 
 int gamemenu_open(void);       /* the overlay is open (its panel shows, or a page it opened) */
 int gamemenu_selected(void);   /* GM_* */
-int gamemenu_confirming(void); /* the exit popup shows */
+int gamemenu_confirming(void); /* a popup shows: Exit game's or Return to title's */
 void gamemenu_toggle(void);    /* the overlay button: open, or close and resume */
 /* LEGACY MENUS off (settings.h): F1, F2 and F3 open the overlay straight on GM_SETTINGS, GM_CONTROLS or GM_PERF
  * (pausing the game); the same key on its own page closes it and resumes. */

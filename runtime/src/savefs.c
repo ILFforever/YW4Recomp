@@ -15,6 +15,7 @@
 #include <string.h>
 #include <sys/stat.h>
 #include <dirent.h>
+#include <time.h>
 
 #ifdef _WIN32
 #include <direct.h>
@@ -39,6 +40,27 @@
 
 static char save_root[1024];
 const char *savefs_root(void) { return save_root; }
+
+static int64_t last_save;  /* Unix seconds: savefs_last_save */
+int64_t savefs_last_save(void) { return __atomic_load_n(&last_save, __ATOMIC_ACQUIRE); }
+
+/* The newest modification time of the files under dir, two folders deep at most (a save is a few files) */
+static int64_t newest_file(const char *dir, int depth) {
+    int64_t best = 0;
+    DIR *d = opendir(dir);
+    if (!d) return 0;
+    for (struct dirent *e; (e = readdir(d));) {
+        if (!strcmp(e->d_name, ".") || !strcmp(e->d_name, "..")) continue;
+        char p[1024];
+        snprintf(p, sizeof p, "%s/%s", dir, e->d_name);
+        struct stat st;
+        if (stat(p, &st)) continue;
+        int64_t t = S_ISDIR(st.st_mode) ? (depth > 0 ? newest_file(p, depth - 1) : 0) : (int64_t)st.st_mtime;
+        if (t > best) best = t;
+    }
+    closedir(d);
+    return best;
+}
 
 int savefs_init(const char *dir) {
     if (strlen(dir) >= sizeof save_root - 200) return -1;
@@ -267,7 +289,9 @@ static void save_fs(Service *s, IpcRequest *req, IpcResponse *resp) {
         ipc_return_object(resp, ipc_service_new("fs:IDirectory (save)", save_directory, d));
         return;
     }
-    case 10:  /* Commit: writes are already in the files */
+    case 10:  /* Commit: writes are already in the files; it marks the end of a save (the overlay says when) */
+        __atomic_store_n(&last_save, (int64_t)time(NULL), __ATOMIC_RELEASE);
+        fprintf(stderr, "yw4: fs: the game saved (Commit)\n");
         return;
     default:
         ipc_unimplemented(s, req, resp);
@@ -294,6 +318,10 @@ uint32_t savefs_open(uint64_t program_id, const uint8_t uid[16], int create, Ser
         if (!fs) yw4_exit(3, __FILE__, __LINE__);
         snprintf(fs->root, sizeof fs->root, "%s", dir);
         *out = ipc_service_new("fs:IFileSystem (save)", save_fs, fs);
+        if (!savefs_last_save()) {  /* until the game saves in this run: when its save was last written */
+            int64_t t = newest_file(dir, 2), none = 0;
+            if (t) __atomic_compare_exchange_n(&last_save, &none, t, 0, __ATOMIC_ACQ_REL, __ATOMIC_ACQUIRE);
+        }
     }
     return 0;
 }
