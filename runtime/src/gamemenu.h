@@ -36,6 +36,8 @@ int gamemenu_peeking(void);
 void gamemenu_peek_toggle(void);
 /* The mouse over the quick look (the overlay's design units): the key under it shows in the detail bar. */
 void gamemenu_peek_point(float x, float y);
+void gamemenu_peek_click(float x, float y);  /* a click on the quick look: its mode switch */
+void gamemenu_peek_mode_step(int d);  /* the quick look's mode: -1 back, +1 on, round (a short press of View / Create / Minus) */
 void gamemenu_preview_rect(float r[4]);
 /* The Controls page's controller view (2026-11-12): the pad as the connected controller's style draws it, its bound
  * buttons lit and named; shown instead of the keyboard view when the controller was used last (GameMenuInfo.pad),

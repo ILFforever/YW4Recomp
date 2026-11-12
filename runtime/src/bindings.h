@@ -54,6 +54,8 @@ int bindings_capture_axis(int axis, int value);
 void bindings_cancel(void);
 /* Chooses row r (and column c, -1: as it was), as the mouse over the overlay's Controls table; not while waiting. */
 void bindings_select(int r, int c);
+/* 1: the controller was used last; the binding rows keep to the controller column (no keyboard key changed by a pad) */
+void bindings_pad_only(int on);
 /* The rows as they are now, the chosen row and column, and the text for the explanation box. */
 int bindings_rows(BindRow *rows, int max, int *row, int *col, char *help, int help_size);
 /* The keyboard view: the inputs `key` (an SDL_Scancode or MOUSE_BIND_*) is bound to in a set (0 exploring, 1 battles),

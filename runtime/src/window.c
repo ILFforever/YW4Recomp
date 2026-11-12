@@ -2449,12 +2449,16 @@ static void update_input(void) {
             SDL_SetWindowRelativeMouseMode(window, true);
     }
     was_open = is_open;
-    /* F2's quick look: the cursor is free while it shows, to point at its keys (owner, 2026-11-12); the keyboard
-     * still plays. Freed once when it opens, so Alt can hand the mouse back to the camera meanwhile; given back
-     * when it hides (an overlay that opens from it gives it back itself, above). */
+    /* F2's quick look: the cursor is free while it shows, to point at its keys (owner, 2026-11-12). The keyboard
+     * and the mouse are the card's alone, as the pad is (pad_back_hold): a key pressed to see it light up must not
+     * also act in the game (owner, 2026-11-13), and nothing held when it hides reaches the game until it is let
+     * go. F2, Escape and the other window keys are events, not read here, so they still work. The cursor is freed
+     * once when it opens and given back when it hides (an overlay that opens from it gives it back itself,
+     * above). */
+    int peek = gamemenu_peeking();
+    if (peek) withheld = 1;
     {
         static int was_peek, peek_freed;
-        int peek = gamemenu_peeking();
         if (peek && !was_peek) {
             if (window && SDL_GetWindowRelativeMouseMode(window)) SDL_SetWindowRelativeMouseMode(window, false), peek_freed = 1;
         } else if (!peek && was_peek) {
@@ -2466,12 +2470,12 @@ static void update_input(void) {
         was_peek = peek;
     }
     if (withheld) {
-        if (!b && !s[0] && !s[1] && !s[2] && !s[3] && !is_open) withheld = 0;
+        if (!b && !s[0] && !s[1] && !s[2] && !s[3] && !is_open && !peek) withheld = 0;
         b = 0, memset(s, 0, sizeof s);
     }
     /* the mouse in a supported menu (mousemenu.c): the cursor shows while it is open, and hovering and clicking
      * become the menu's own D-pad, A and B presses; the camera gets the mouse back when it closes */
-    if (window && !is_open) {
+    if (window && !is_open && !peek) {
         static int freed;  /* we turned the relative mouse off for a menu */
         int ww = 0, wh = 0, want = 0;
         SDL_GetWindowSize(window, &ww, &wh);
@@ -2532,7 +2536,7 @@ static int overlay_point(float mx, float my, float *x, float *y) {
 
 static int last_used_pad;  /* the overlay's hints: the controller was used last (else the keyboard or mouse) */
 static void used_pad(int pad) {
-    if (pad != last_used_pad) last_used_pad = pad, gamemenu_refresh();
+    if (pad != last_used_pad) last_used_pad = pad, bindings_pad_only(pad), gamemenu_refresh();
 }
 static int pad_hints(const char **close) {
     /* YW4_HINTS: one device's hints for the whole run, with or without a controller (screenshots of each style).
@@ -2595,7 +2599,8 @@ static uint32_t pad_parts_held(void) {
 }
 
 /* The quick look by controller (owner, 2026-11-12): holding Back (View / Create / Minus) for half a second while
- * playing shows the Controls card over the running game, as F2 does; a press while it shows hides it. The game
+ * playing shows the Controls card over the running game, as F2 does; while it shows, a short press goes to its
+ * next page (Exploring, Battle, Cutscene, round again) and the same half-second hold hides it. The game
  * uses the same button (Minus: auto battle in battles), so its press is held back from the game until we know
  * what it is (bindings_pad_back): let go before the half second, the game gets a short press then (three of its
  * input reads long); held to the half second, the game never sees it. Start pressed meanwhile (Back + Start
@@ -2603,7 +2608,9 @@ static uint32_t pad_parts_held(void) {
  * LEGACY MENUS, and not while the overlay or the panel is open (they take the input anyway). Called each time
  * the window polls, before the bindings are read. */
 static void pad_back_hold(void) {
-    enum { IDLE, WAITING, SWALLOWED, HANDED_OVER };  /* the last two: until the button is let go */
+    /* PEEK_WAIT: pressed while the card shows; let go before the half second: its next page, held: it hides
+     * (owner, 2026-11-13: a short press cycles the pages, not LB / RB) */
+    enum { IDLE, WAITING, SWALLOWED, HANDED_OVER, PEEK_WAIT };  /* SWALLOWED, HANDED_OVER: until let go */
     static int state, tapping;
     static uint64_t since, tap_until;  /* ms; the game's input reads */
     int down = gamepad && SDL_GetGamepadButton(gamepad, SDL_GAMEPAD_BUTTON_BACK);
@@ -2614,17 +2621,22 @@ static void pad_back_hold(void) {
         state = down ? HANDED_OVER : IDLE, tapping = 0;
     } else if (!down) {
         if (state == WAITING) tapping = 1, tap_until = reads + 3;  /* a short press: the game's, now */
+        if (state == PEEK_WAIT && gamemenu_peeking()) gamemenu_peek_mode_step(1), yw4_hid_note_key("KV_NEXT");
         state = IDLE;
     } else if (state == IDLE) {
-        if (gamemenu_peeking()) gamemenu_peek_toggle(), yw4_hid_note_key("KV_PEEK"), state = SWALLOWED;
+        if (gamemenu_peeking()) state = PEEK_WAIT, since = now;
         else state = start ? HANDED_OVER : WAITING, since = now;
     } else if (state == WAITING) {
         if (start) state = HANDED_OVER;
         else if (now - since >= 500) gamemenu_peek_toggle(), yw4_hid_note_key("KV_PEEK"), state = SWALLOWED;
+    } else if (state == PEEK_WAIT) {
+        if (!gamemenu_peeking()) state = SWALLOWED;  /* hidden meanwhile (F2) */
+        else if (now - since >= 500) gamemenu_peek_toggle(), yw4_hid_note_key("KV_PEEK"), state = SWALLOWED;
     }
-    bindings_pad_back(state == WAITING || state == SWALLOWED ? 0 : tapping ? 1 : -1);
+    bindings_pad_back(state == WAITING || state == SWALLOWED || state == PEEK_WAIT ? 0 : tapping ? 1 : -1);
     /* While the quick look shows the controller's view, the pad is the card's alone: a button pressed to see it
-     * light up must not also act in the game (owner, 2026-11-12). The keyboard's view leaves the keyboard playing.
+     * light up must not also act in the game (owner, 2026-11-12). The keyboard and mouse are held back where the window reads them
+     * (update_input's withheld).
      * Kept until everything on the pad is let go after it hides, so nothing held then reaches the game. */
     static int locked;
     if (gamemenu_peeking() && last_used_pad) locked = 1;
@@ -2977,11 +2989,14 @@ void window_run(void (*guest)(void *), void *arg) {
                 !bindings_capture_axis(e.gaxis.axis, e.gaxis.value)) {
                 if (e.gaxis.value > 16000 || e.gaxis.value < -16000) used_pad(1);
                 panel_pad_stick(), panel_pad_triggers();
+            } else if (gamepad && SDL_GetGamepadID(gamepad) == e.gaxis.which && gamemenu_peeking() &&
+                       (e.gaxis.value > 16000 || e.gaxis.value < -16000)) {
+                used_pad(1);  /* F2's quick look: a stick or trigger shows the controller's view */
             }
             break;
         case SDL_EVENT_MOUSE_MOTION:
-            if (window && SDL_GetWindowRelativeMouseMode(window)) {
-                host_lock(&mouse_lock);
+            if (window && SDL_GetWindowRelativeMouseMode(window) && !gamemenu_peeking()) {
+                host_lock(&mouse_lock);  /* the camera's; never while the quick look shows */
                 mouse_accum_x += e.motion.xrel;
                 mouse_accum_y += e.motion.yrel;
                 host_unlock(&mouse_lock);
@@ -3001,7 +3016,11 @@ void window_run(void (*guest)(void *), void *arg) {
                 else if (!settings_open() && (e.button.button == SDL_BUTTON_LEFT || e.button.button == SDL_BUTTON_RIGHT) &&
                          overlay_point(e.button.x, e.button.y, &x, &y))
                     used_pad(0), gamemenu_mouse(x, y, e.button.button == SDL_BUTTON_LEFT ? (e.button.clicks >= 2 ? 2 : 1) : 3);
-            } else if (gamemenu_peeking()) {  /* the quick look: a click doesn't take the cursor back (Alt does) */
+            } else if (gamemenu_peeking()) {  /* the quick look: a click doesn't take the cursor back (nor Alt) */
+                float x, y;
+                used_pad(0);  /* but shows the keyboard's view, and on the mode switch changes the mode */
+                if (e.button.button == SDL_BUTTON_LEFT && overlay_point(e.button.x, e.button.y, &x, &y))
+                    gamemenu_peek_click(x, y);
             } else if (window && !SDL_GetWindowRelativeMouseMode(window) && !mouse_off() && !mousemenu_open()) {
                 SDL_SetWindowRelativeMouseMode(window, true);
                 mouse_held_off = 1;
@@ -3033,7 +3052,13 @@ void window_run(void (*guest)(void *), void *arg) {
             fprintf(stderr, "yw4: window closed\n");
             yw4_exit(0, __FILE__, __LINE__);
         case SDL_EVENT_KEY_DOWN:
-            if ((e.key.key == SDLK_LALT || e.key.key == SDLK_RALT) && !settings_open() && !mouse_off()) {
+            /* F2's quick look: a key (not F1..F12, so F12's screenshot keeps the view) shows the keyboard's view */
+            if (gamemenu_peeking() && !e.key.repeat && (e.key.scancode < SDL_SCANCODE_F1 || e.key.scancode > SDL_SCANCODE_F12))
+                used_pad(0);  /* no keys for its mode switch: keyboard players click it (owner, 2026-11-13) */
+            /* Alt: the mouse to the camera and back; not while F2's quick look shows (owner, 2026-11-13: the cursor
+             * stays a pointer there, and Alt pressed to see it light up mustn't take it away) */
+            if ((e.key.key == SDLK_LALT || e.key.key == SDLK_RALT) && !settings_open() && !mouse_off() &&
+                !gamemenu_peeking()) {
                 if (window) {
                     bool rel = SDL_GetWindowRelativeMouseMode(window);
                     SDL_SetWindowRelativeMouseMode(window, !rel);

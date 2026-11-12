@@ -30,19 +30,20 @@ typedef struct {
     int pad;
 } Input;
 
+/* The starting keys are the owner's own (2026-11-13: "ship my keys as defaults"); the battle set's are below. */
 static const Input inputs[] = {
-    {"BUTTONS", "A", "A", 0, 0, 0, {SDL_SCANCODE_SPACE, SDL_SCANCODE_RETURN}, PAD_FACE + 0},
-    {"BUTTONS", "B", "B", 1, 0, 0, {SDL_SCANCODE_BACKSPACE}, PAD_FACE + 1},  /* Escape: the in-game overlay */
-    {"BUTTONS", "X", "X", 2, 0, 0, {SDL_SCANCODE_X}, PAD_FACE + 2},
-    {"BUTTONS", "Y", "Y", 3, 0, 0, {SDL_SCANCODE_Y}, PAD_FACE + 3},
-    {"BUTTONS", "L", "L", 6, 0, 0, {SDL_SCANCODE_Q}, SDL_GAMEPAD_BUTTON_LEFT_SHOULDER},
-    {"BUTTONS", "R", "R", 7, 0, 0, {SDL_SCANCODE_E}, SDL_GAMEPAD_BUTTON_RIGHT_SHOULDER},
-    {"BUTTONS", "ZL", "ZL", 8, 0, 0, {SDL_SCANCODE_1}, AXIS(SDL_GAMEPAD_AXIS_LEFT_TRIGGER, 1)},
-    {"BUTTONS", "ZR", "ZR", 9, 0, 0, {SDL_SCANCODE_3}, AXIS(SDL_GAMEPAD_AXIS_RIGHT_TRIGGER, 1)},
-    {"BUTTONS", "PLUS", "PLUS", 10, 0, 0, {SDL_SCANCODE_P}, SDL_GAMEPAD_BUTTON_START},
-    {"BUTTONS", "MINUS", "MINUS", 11, 0, 0, {SDL_SCANCODE_M}, SDL_GAMEPAD_BUTTON_BACK},
+    {"BUTTONS", "A", "A", 0, 0, 0, {SDL_SCANCODE_E, SDL_SCANCODE_RETURN}, PAD_FACE + 0},
+    {"BUTTONS", "B", "B", 1, 0, 0, {SDL_SCANCODE_SPACE}, PAD_FACE + 1},
+    {"BUTTONS", "X", "X", 2, 0, 0, {SDL_SCANCODE_TAB}, PAD_FACE + 2},
+    {"BUTTONS", "Y", "Y", 3, 0, 0, {SDL_SCANCODE_M}, PAD_FACE + 3},
+    {"BUTTONS", "L", "L", 6, 0, 0, {SDL_SCANCODE_1}, SDL_GAMEPAD_BUTTON_LEFT_SHOULDER},
+    {"BUTTONS", "R", "R", 7, 0, 0, {SDL_SCANCODE_3}, SDL_GAMEPAD_BUTTON_RIGHT_SHOULDER},
+    {"BUTTONS", "ZL", "ZL", 8, 0, 0, {SDL_SCANCODE_Q}, AXIS(SDL_GAMEPAD_AXIS_LEFT_TRIGGER, 1)},
+    {"BUTTONS", "ZR", "ZR", 9, 0, 0, {SDL_SCANCODE_F}, AXIS(SDL_GAMEPAD_AXIS_RIGHT_TRIGGER, 1)},
+    {"BUTTONS", "PLUS", "PLUS", 10, 0, 0, {SDL_SCANCODE_P, SDL_SCANCODE_ESCAPE}, SDL_GAMEPAD_BUTTON_START},
+    {"BUTTONS", "MINUS", "MINUS", 11, 0, 0, {SDL_SCANCODE_X}, SDL_GAMEPAD_BUTTON_BACK},
     {"BUTTONS", "LEFT STICK PRESS", "LS_PRESS", 4, 0, 0, {SDL_SCANCODE_LSHIFT}, SDL_GAMEPAD_BUTTON_LEFT_STICK},
-    {"BUTTONS", "RIGHT STICK PRESS", "RS_PRESS", 5, 0, 0, {SDL_SCANCODE_RSHIFT}, SDL_GAMEPAD_BUTTON_RIGHT_STICK},
+    {"BUTTONS", "RIGHT STICK PRESS", "RS_PRESS", 5, 0, 0, {MOUSE_BIND_MIDDLE, SDL_SCANCODE_R}, SDL_GAMEPAD_BUTTON_RIGHT_STICK},
     {"D-PAD", "UP", "DPAD_UP", 13, 0, 0, {SDL_SCANCODE_UP}, SDL_GAMEPAD_BUTTON_DPAD_UP},
     {"D-PAD", "DOWN", "DPAD_DOWN", 15, 0, 0, {SDL_SCANCODE_DOWN}, SDL_GAMEPAD_BUTTON_DPAD_DOWN},
     {"D-PAD", "LEFT", "DPAD_LEFT", 12, 0, 0, {SDL_SCANCODE_LEFT}, SDL_GAMEPAD_BUTTON_DPAD_LEFT},
@@ -78,6 +79,35 @@ static int edit_set;  /* the set the controls page shows and changes */
 #define bound (sets[edit_set])
 static int bound_ready, battle_set_known;  /* the battle set was read from the settings file or copied */
 
+/* The battle set's starting keys (the owner's battle set, 2026-11-13), in the order of inputs[]; the controller's
+ * inputs are the same as exploring's */
+static const int battle_keys[NINPUTS][BIND_KEYS] = {
+    {SDL_SCANCODE_E, SDL_SCANCODE_RETURN},      /* A */
+    {SDL_SCANCODE_SPACE, SDL_SCANCODE_LSHIFT},  /* B */
+    {SDL_SCANCODE_Q},                           /* X */
+    {MOUSE_BIND_LEFT, SDL_SCANCODE_U},          /* Y */
+    {0},                                        /* L */
+    {SDL_SCANCODE_E},                           /* R */
+    {MOUSE_BIND_RIGHT, SDL_SCANCODE_O},         /* ZL */
+    {SDL_SCANCODE_F},                           /* ZR */
+    {SDL_SCANCODE_R, SDL_SCANCODE_P},           /* PLUS */
+    {SDL_SCANCODE_C},                           /* MINUS */
+    {SDL_SCANCODE_TAB},                         /* LS_PRESS */
+    {MOUSE_BIND_MIDDLE},                        /* RS_PRESS */
+    {SDL_SCANCODE_UP, MOUSE_BIND_WHEEL_UP},     /* DPAD_UP */
+    {SDL_SCANCODE_DOWN, MOUSE_BIND_WHEEL_DOWN}, /* DPAD_DOWN */
+    {SDL_SCANCODE_LEFT},  {SDL_SCANCODE_RIGHT}, /* DPAD_LEFT, DPAD_RIGHT */
+    {SDL_SCANCODE_W}, {SDL_SCANCODE_S}, {SDL_SCANCODE_A}, {SDL_SCANCODE_D},  /* LS */
+    {SDL_SCANCODE_I}, {SDL_SCANCODE_K}, {SDL_SCANCODE_J}, {SDL_SCANCODE_L},  /* RS */
+};
+static void battle_starting_set(void) {
+    for (int i = 0; i < NINPUTS; i++) {
+        for (int k = 0; k < BIND_KEYS; k++) sets[SET_BATTLE][i].keys[k] = battle_keys[i][k];
+        sets[SET_BATTLE][i].pad = inputs[i].pad;
+    }
+}
+
+/* the battle row's COPY THE EXPLORING KEYS: the exploring set, with the wheel on character selection */
 static void apply_battle_defaults(void) {
     for (int i = 0; i < NINPUTS; i++) {
         if (!strcmp(inputs[i].id, "DPAD_UP")) sets[SET_BATTLE][i].keys[1] = MOUSE_BIND_WHEEL_UP;
@@ -86,11 +116,14 @@ static void apply_battle_defaults(void) {
 }
 
 static void reset_set(int set) {
+    if (set == SET_BATTLE) {
+        battle_starting_set();
+        return;
+    }
     for (int i = 0; i < NINPUTS; i++) {
         for (int k = 0; k < BIND_KEYS; k++) sets[set][i].keys[k] = inputs[i].keys[k];
         sets[set][i].pad = inputs[i].pad;
     }
-    if (set == SET_BATTLE) apply_battle_defaults();
 }
 static void reset(void) {
     for (int s = 0; s < NSETS; s++) reset_set(s);
@@ -99,12 +132,11 @@ static void reset(void) {
 static void ready(void) {
     if (!bound_ready) reset();
 }
-/* After the settings file: a battle set it didn't have starts as the exploring set. */
+/* After the settings file: a battle set it didn't have gets the battle set's starting keys. */
 static void sets_ready(void) {
     ready();
     if (!battle_set_known) {
-        memcpy(sets[SET_BATTLE], sets[SET_FIELD], sizeof sets[SET_FIELD]);
-        apply_battle_defaults();
+        battle_starting_set();
         battle_set_known = 1;
     }
 }
@@ -824,6 +856,13 @@ int yw4_hook_gaiji_render(CPUState *ctx) {
 
 static int row, col, capturing;
 static uint64_t capture_since;
+/* The controller was used last (window.c used_pad): the binding rows keep to the controller column, so a pad can't
+ * change or clear a keyboard key (owner, 2026-11-13). The keyboard and mouse still reach every column. */
+static int pad_only;
+void bindings_pad_only(int on) {
+    pad_only = on;
+    if (on && !capturing) col = BIND_KEYS;
+}
 
 int bindings_capturing(void) {
     if (capturing && SDL_GetTicks() - capture_since > 5000) capturing = 0;
@@ -835,10 +874,12 @@ void bindings_select(int r, int c) {
     if (capturing || r < 0 || r >= NROWS) return;
     row = r;
     if (c >= 0 && c < BIND_COLS) col = c;
+    if (pad_only) col = BIND_KEYS;
 }
 
 void bindings_action(int action) {
     sets_ready();
+    if (pad_only && !capturing) col = BIND_KEYS;
     int sens = row - SENS_ROW;  /* the sensitivity rows' axis */
     switch (action) {
     /* the ends stop the choice (no wrapping round: holding a direction stops at the last row) */
@@ -856,7 +897,7 @@ void bindings_action(int action) {
             window_rumble_set_enabled(next);
             if (next) window_rumble_test();
             settings_save();
-        } else {
+        } else if (!pad_only) {  /* a pad stays on its own column */
             col = action == SETTINGS_LEFT ? (col > 0 ? col - 1 : 0) : (col < BIND_COLS - 1 ? col + 1 : BIND_COLS - 1);
         }
         break;
@@ -1084,8 +1125,7 @@ int bindings_load_line(const char *name, const char *value) {
     int set = SET_FIELD;
     if (!strncmp(name, "BATTLE_", 7)) {
         if (!battle_set_known) {
-            memcpy(sets[SET_BATTLE], sets[SET_FIELD], sizeof sets[SET_FIELD]);
-            apply_battle_defaults();
+            battle_starting_set();  /* each BATTLE_ line then changes its own key */
             battle_set_known = 1;
         }
         set = SET_BATTLE, name += 7;

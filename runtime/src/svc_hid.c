@@ -260,6 +260,8 @@ static int replay_state(uint64_t tick, uint64_t *buttons, int32_t sticks[4]) {
         else if (!strcmp(k, "M_PERF")) gamemenu_open_page(GM_PERF);  /* the overlay's Overlay page (F3 before 2026-11-11) */
         else if (!strcmp(k, "HUDCYC")) window_hud_cycle();  /* F3: the HUD off, compact, detailed */
         else if (!strcmp(k, "KV_PEEK")) gamemenu_peek_toggle();  /* F2 while playing: the keyboard card, not paused */
+        else if (!strcmp(k, "KV_PREV")) gamemenu_peek_mode_step(-1);  /* its mode switch, back */
+        else if (!strcmp(k, "KV_NEXT")) gamemenu_peek_mode_step(1);   /* on: a short press of View / Create / Minus */
         else if (!strcmp(k, "M_UP")) gamemenu_action(GM_UP);
         else if (!strcmp(k, "M_DOWN")) gamemenu_action(GM_DOWN);
         else if (!strcmp(k, "M_LEFT")) gamemenu_action(GM_LEFT);
