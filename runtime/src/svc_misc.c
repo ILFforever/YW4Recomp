@@ -5,6 +5,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/stat.h>
 #include <time.h>
 
 #include <SDL3/SDL_filesystem.h>
@@ -33,6 +34,24 @@ static void aoc_add(uint32_t index) {
     for (uint32_t i = 0; i < naoc; i++)
         if (aoc[i] == index) return;
     if (naoc < 64) aoc[naoc++] = index;
+}
+
+/* An add-on found in the DLC folder: owned only once its files are unpacked into YW4_DLCROMFS_DIR/<index>/ (as
+ * svc_fs.c's addon_image reads them). The game opens every owned add-on's data, for instance for the mail
+ * delivery, and stops itself (svcBreak) when one isn't there: 2026-11-13, add-on 2 recognised (a ticket-less copy,
+ * ace4d79) but never unpacked, the owner's game closed at the mail delivery. Left out, it's just not offered. */
+static void aoc_found(long index, const char *name) {
+    const char *base = getenv("YW4_DLCROMFS_DIR");
+    char dir[1100];
+    snprintf(dir, sizeof dir, "%s/%ld", base && *base ? base : "work/dlc-romfs", index);
+    struct stat st;
+    if (stat(dir, &st) || !(st.st_mode & S_IFDIR)) {
+        fprintf(stderr, "yw4: aoc: %s: add-on %ld, but its files aren't unpacked in %s (left out; a rebuild unpacks "
+                "them, or python -m tools.yw4.extract --dlc-only)\n", name, index, dir);
+        return;
+    }
+    aoc_add((uint32_t)index);
+    fprintf(stderr, "yw4: aoc: %s: add-on %ld\n", name, index);
 }
 
 static int ends_with(const char *s, const char *tail) {
@@ -166,8 +185,7 @@ static void aoc_load(void) {
             long index = aoc_nsp(_wfopen(wpath, L"rb"));
             files++;
             if (index >= 0) {
-                aoc_add((uint32_t)index);
-                fprintf(stderr, "yw4: aoc: %s: add-on %ld\n", name, index);
+                aoc_found(index, name);
             } else {
                 unknown++;
                 fprintf(stderr, "yw4: aoc: %s is not a known add-on (left out)\n", name);
@@ -184,8 +202,7 @@ static void aoc_load(void) {
         long index = aoc_nsp(fopen(path, "rb"));
         files++;
         if (index >= 0) {
-            aoc_add((uint32_t)index);
-            fprintf(stderr, "yw4: aoc: %s: add-on %ld\n", e->d_name, index);
+            aoc_found(index, e->d_name);
         } else {
             unknown++;
             fprintf(stderr, "yw4: aoc: %s is not a known add-on (left out)\n", e->d_name);
