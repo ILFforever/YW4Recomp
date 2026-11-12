@@ -386,9 +386,14 @@ With a keyboard it shows the keys instead:
 
 ![The quick look on the keyboard: every bound key coloured and named: game buttons, moving and the camera, menus and screenshots](docs/screenshots/76-controls-quick-look-keyboard.jpg)
 
-**Controls (F2)**, with a DualSense
+**Controls** in the overlay, with a DualSense: every Switch button with its keys and its controller input, named as
+printed on yours.
 
-![The controls page with a DualSense: the mouse's sensitivities at the top, then cross, circle, square, triangle, L1 to R3](docs/screenshots/75-controls-mouse-dualsense.png)
+![The overlay's Controls page with a DualSense: the mouse's sensitivities and buttons at the top, then each Switch button with its keys and its PlayStation symbol](docs/screenshots/75-controls-dualsense.jpg)
+
+**Mouse buttons**: what left, right, the wheel press and turning the wheel do, for exploring and for battles.
+
+![The Mouse buttons page for battles: the mouse drawn with Attack on the left button and Aim on the right, the wheel switching character](docs/screenshots/75-controls-mouse-buttons.jpg)
 
 **Controllers:** Xbox, PlayStation and Joy-Cons work, and the controls page names the buttons as printed on
 yours (A B X Y and LB/RT on Xbox; × ○ □ △ and L1-R3 on PlayStation; ZL/ZR on Nintendo). By default the game's
@@ -400,8 +405,8 @@ Tested by playing with a **DualSense (PS5)**, battles included, and with the con
 **Mouse:** the game's code still has a mouse camera that the Switch version never feeds; we feed it, so the mouse
 turns the camera. A click in the window gives the mouse to the game, Alt or opening the panel or the overlay gives it
 back. The mouse also works in the Yo-kai Pad and its pages: hover, click, and the wheel scrolls lists (work in
-progress, [decision 0057](docs/decisions/0057-mouse-menu-lists.md)). In battles the wheel selects characters. Mouse
-buttons can be bound on the CONTROLS page; none are by default.
+progress, [decision 0057](docs/decisions/0057-mouse-menu-lists.md)). By default the left button attacks and the right
+button aims in battles, and the wheel selects characters; each is set on the Mouse buttons page.
 
 </details>
 
@@ -526,7 +531,7 @@ panel.
 
 All captured from the recompiled build on Windows.
 
-![The Amano house kitchen: Amano house kitchen; Opening scene; LEVEL-5 logo; Opening movie](docs/screenshots/92-screenshots.jpg)
+![Four screenshots: the Amano house kitchen; the opening scene in English; a Yo-kai Pad hint; the opening movie](docs/screenshots/92-screenshots.jpg)
 
 On Ordinary Street with the performance HUD on (F3). The frame takes about 19 ms of the game's own work and 14% of a 16-core laptop's CPU, against the 33 ms the game's 30 frames/s allow; at
 3840×2160 with DLSS, frame generation turns the 51 frames a second it renders into 103 on screen.
