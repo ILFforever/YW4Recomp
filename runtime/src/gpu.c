@@ -486,6 +486,7 @@ typedef struct {
     uint64_t addr, size, at;     /* the range, and where its copy is in the arena */
     uint32_t copied_gen, checked_gen;
     uint32_t copies;             /* made again this many times: GEO_DYNAMIC and it stays in the pool */
+    uint64_t print;              /* a small range's contents when copied (geo_print) */
 } GeoCopy;
 static GeoCopy geo[GEO_SLOTS];
 static VkBuffer geo_buf;
@@ -552,13 +553,42 @@ static int geo_stale(GeoCopy *c, const NvnPool *p) {
     return 0;
 }
 
+/* Small ranges are also compared by content (YW4_GEO_PRINT=0: pages only). The pages tell what was written up to
+ * the last present, but the game writes a frame's UI quads after it: when its ring of vertex memory comes round
+ * to an address that still has a copy, the pages look clean for one more frame and the draw got the quad that
+ * was there a lap ago (2026-11-13: the minimap drawn as its icon sheet for one frame, found with the minimap
+ * watch, gpu_watch.c). A quad is 160 bytes: reading it costs less than the copy it decides on. */
+enum { GEO_SMALL = 1024 };
+static uint64_t geo_print(uint64_t addr, uint64_t size) {
+    const uint8_t *m = (const uint8_t *)(uintptr_t)addr;
+    uint64_t h = 0xcbf29ce484222325ull;
+    for (uint64_t i = 0; i < size; i++) h = (h ^ m[i]) * 0x100000001b3ull;
+    return h | 1;  /* never 0: 0 is "no print" */
+}
+
+static int geo_print_on(void) {
+    static int v = -1;
+    if (v < 0) v = !getenv("YW4_GEO_PRINT") || atoi(getenv("YW4_GEO_PRINT"));
+    return v;
+}
+
 /* gpu_draw.c, before rendering: 1 if the range would be copied now (rendering must end first). */
 int gpu_geometry_needs_copy(uint64_t addr, uint64_t size) {
     if (!gpu_vram_geometry() || !size) return 0;
     NvnPool *p = pool_of(addr);
     if (!p || addr + size > p->storage + p->size || ((GpuPool *)p->gpu)->untracked) return 0;
     GeoCopy *c = geo_find(addr, size, 1);
-    return c && c->copies < GEO_DYNAMIC && geo_stale(c, p);
+    if (!c || c->copies >= GEO_DYNAMIC) return 0;
+    if (geo_stale(c, p)) return 1;
+    if (size > GEO_SMALL || !c->print || !geo_print_on() || geo_print(addr, size) == c->print) return 0;
+    static uint64_t missed;  /* rewritten, and its pages don't say so yet */
+    if (missed++ < 8 || missed % 1000 == 0)
+        fprintf(stderr, "yw4: gpu: frame %" PRIu64 ": geometry range %#" PRIx64 " (%" PRIu64 " bytes) was rewritten since its copy"
+                        " and its pages don't show it yet: copied again (%" PRIu64 " so far)\n", present_count + 1, addr, size, missed);
+    if (missed <= 64) yw4_event("geometry_missed", present_count + 1, "\"addr\":%" PRIu64 ",\"size\":%" PRIu64, addr, size);
+    if (++c->copies >= GEO_DYNAMIC) return 0;  /* it keeps changing: read from the pool from now on, as the others */
+    c->copied_gen = 0;  /* stale, also for gpu_geometry_copy's own asking */
+    return 1;
 }
 
 /* gpu_draw.c, outside rendering: makes the range's copy if it needs one. */
@@ -589,6 +619,7 @@ void gpu_geometry_copy(VkCommandBuffer cb, uint64_t addr, uint64_t size) {
                     addr, size, GEO_DYNAMIC);
     }
     c->copied_gen = c->checked_gen = write_gen;
+    c->print = size <= GEO_SMALL ? geo_print(addr, size) : 0;
 }
 
 /* The range's copy in video memory if it has a current one, else 0. */

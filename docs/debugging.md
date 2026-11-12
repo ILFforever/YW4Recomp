@@ -74,6 +74,7 @@ line then says WARNING.
 | `YW4_GBUFFER=programs` | Step 2a only: our readable programs in the game's own draws |
 | `YW4_GPU_THREAD=0` | Translate the game's command lists to Vulkan inside its submit call, on its own thread, as before decision 0029, instead of on our GPU worker thread (the default) |
 | `YW4_VRAM_GEOMETRY=0` | The game's vertex and index data read from its memory pools in system memory, as before decision 0028, instead of copies in video memory (the default; about 3x less GPU time in busy towns) |
+| `YW4_GEO_PRINT=0` | Vertex ranges up to 1 KiB are checked for changes by written pages only, as before 2026-11-13, not also by content (decision 0028's addition; brings back the one-frame minimap blank, for comparisons) |
 | `YW4_MOVIE_LOG=1` | When the game's movie program (CRI Sofdec, e.g. the title menu's background) shows a new picture: the GPU frame, the time and how many frames the last one stayed. The title video is 30 frames/s and arrives evenly (every 4th frame at 120); stutter there is frame pacing, not the video (`runtime/src/gpu_draw.c`) |
 | `YW4_DT_LOG=1` | With each screenshot (`YW4_SCREENSHOTS`, F12 bursts): the game's own time step for that frame and the time since the last screenshot (`runtime/src/window.c`) |
 | `YW4_PRESENT_LOG=<frame>,<count>` | For those frames, the order of the game's queue calls (submits, fences, waits, window texture acquires, presents) with the thread and queue (`runtime/src/nvn_objects.c`) |

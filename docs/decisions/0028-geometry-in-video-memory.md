@@ -71,3 +71,25 @@ at 29.9 frames/s (the game's 30 cap), 12 ms of GPU time each.
   buffers): measure first with the per-pass timer.
 - The arena's emptying is simple and pauses once; a finer eviction (least recently used ranges) can come if the
   pause shows.
+
+## Addition, 2026-11-13: small ranges are also compared by content
+
+The minimap went blank for one frame now and then while walking. The minimap watch (`runtime/src/gpu_watch.c`,
+`python -m tools.dev.minimap`) showed the bad frames had the same draws, programs and textures as their neighbours,
+and that in them 76 to 107 of the ~112 minimap draws took their vertices from an old copy (0, 39 and 8 in the frames
+before): the image held the icon sheet drawn over the whole map.
+
+The cause is in "copied again only when the CPU has written one of its pages since". Written pages are read once a
+frame, at present, and the game writes a frame's UI quads after that. The game hands that vertex memory out as a
+ring, so most addresses are new and get a first copy. When the ring comes round to an address that still has a copy,
+its pages look clean for one more frame and the draw gets the quad that was there a lap ago: an icon drawn with the
+map's full-size quad.
+
+So a range of up to 1 KiB (a quad is 160 bytes) is now also compared by content: a 64-bit FNV-1a of it is kept with
+the copy and checked before the copy is used (`geo_print`, `gpu.c`). A mismatch counts as a rewrite like any other,
+so such a range is left in the pool after a few. Measured on the owner's late-game save: the case happened over
+2000 times in 5000 frames of walking and the watch saw no blank frame (3 in a walk of the same length before);
+frame times unchanged. `YW4_GEO_PRINT=0` turns the comparison off.
+
+Larger ranges (models) still go by pages alone: the same gap exists for them in principle (a mesh loaded into
+reused memory and drawn before the next present), not seen so far.
