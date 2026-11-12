@@ -32,15 +32,48 @@
 uint64_t yw4_image_base;
 uint64_t yw4_sdk_base;
 
+/* Which 4 KiB pages of the guest's range [YW4_MAP_LO, YW4_MAP_HI) have memory: one bit each (1 MiB), set by
+ * yw4_reserve and yw4_commit once the memory is there, cleared by yw4_decommit before it goes. Asking this instead of
+ * VirtualQuery (host_readable): the graphics driver holds the process's address-space lock while it makes GPU memory,
+ * and VirtualQuery waits for it, up to 41 ms a call; the render threads' calls froze the first Demon Hand of a
+ * session for 125-344 ms (2026-11-12). */
+#define YW4_MAP_LO YW4_GUEST_LO  /* the whole guest range (yw4load.h) */
+#define YW4_MAP_HI YW4_GUEST_HI
+static uint64_t page_map[(YW4_MAP_HI - YW4_MAP_LO) >> 12 >> 6];
+
+static void map_pages(uint64_t addr, uint64_t size, int on) {
+    if (!size) return;
+    uint64_t lo = addr < YW4_MAP_LO ? YW4_MAP_LO : addr, hi = addr + size > YW4_MAP_HI ? YW4_MAP_HI : addr + size;
+    if (lo >= hi) return;
+    for (uint64_t p = (lo - YW4_MAP_LO) >> 12, e = (hi - YW4_MAP_LO + 4095) >> 12; p < e; p++) {
+        uint64_t bit = 1ull << (p & 63);
+        if (on) __atomic_fetch_or(&page_map[p >> 6], bit, __ATOMIC_RELEASE);
+        else __atomic_fetch_and(&page_map[p >> 6], ~bit, __ATOMIC_RELEASE);
+    }
+}
+
+/* 1: every page of [addr, addr + size) has memory (by the map); 0: not, or outside the guest range (-1: unknown) */
+int yw4_guest_mapped(uint64_t addr, uint64_t size) {
+    if (addr < YW4_MAP_LO || addr + size > YW4_MAP_HI || addr + size < addr) return -1;
+    for (uint64_t p = (addr - YW4_MAP_LO) >> 12, e = (addr + size - YW4_MAP_LO + 4095) >> 12; p < e; p++)
+        if (!(__atomic_load_n(&page_map[p >> 6], __ATOMIC_ACQUIRE) >> (p & 63) & 1)) return 0;
+    return 1;
+}
+
 void *yw4_reserve(uint64_t want, size_t size) {
 #ifdef _WIN32
     void *p = VirtualAlloc((void *)(uintptr_t)want, size, MEM_RESERVE | MEM_COMMIT, PAGE_READWRITE);
     if (!p && want) p = VirtualAlloc((void *)(uintptr_t)want, size, MEM_COMMIT, PAGE_READWRITE);
     if (!p && want) p = VirtualAlloc(NULL, size, MEM_RESERVE | MEM_COMMIT, PAGE_READWRITE);
+    if (p) map_pages((uint64_t)(uintptr_t)p, size, 1);
     return p;
 #else
-    if (want && mprotect((void *)(uintptr_t)want, size, PROT_READ | PROT_WRITE) == 0) return (void *)(uintptr_t)want;
+    if (want && mprotect((void *)(uintptr_t)want, size, PROT_READ | PROT_WRITE) == 0) {  /* inside the reserved range */
+        map_pages(want, size, 1);
+        return (void *)(uintptr_t)want;
+    }
     void *p = mmap((void *)(uintptr_t)want, size, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+    if (p != MAP_FAILED) map_pages((uint64_t)(uintptr_t)p, size, 1);
     return p == MAP_FAILED ? NULL : p;
 #endif
 }
@@ -85,21 +118,21 @@ void *yw4_reserve_range(uint64_t want, size_t size) {
 /* Zeroed read/write memory inside a reserved range; 0 on success. */
 volatile uint32_t yw4_memory_generation;
 
+/* Only yw4_decommit changes yw4_memory_generation: a commit can turn "not readable" into "readable", never back, and
+ * gbuffer.c's "not readable" answers last a second anyway. Commits came in hundreds while the Demon Hand loaded, and
+ * each emptied every answer: the render threads asked VirtualQuery again and again, a 343 ms frame (2026-11-12). */
 int yw4_commit(uint64_t addr, size_t size) {
-    __atomic_add_fetch(&yw4_memory_generation, 1, __ATOMIC_RELEASE);
-    int r;
 #ifdef _WIN32
-    r = VirtualAlloc((void *)(uintptr_t)addr, size, MEM_COMMIT, PAGE_READWRITE) ? 0 : -1;
+    int r = VirtualAlloc((void *)(uintptr_t)addr, size, MEM_COMMIT, PAGE_READWRITE) ? 0 : -1;
 #else
-    r = 0;
+    int r = 0;
     if (mprotect((void *)(uintptr_t)addr, size, PROT_READ | PROT_WRITE) != 0) {
         void *p = mmap((void *)(uintptr_t)addr, size, PROT_READ | PROT_WRITE,  /* not reserved: map it */
                        MAP_PRIVATE | MAP_ANONYMOUS | MAP_FIXED_NOREPLACE, -1, 0);
         r = p == (void *)(uintptr_t)addr ? 0 : -1;
     }
 #endif
-    /* again after: a "not readable" answer taken while the memory was being committed doesn't stay (Linux too) */
-    __atomic_add_fetch(&yw4_memory_generation, 1, __ATOMIC_RELEASE);
+    if (!r) map_pages(addr, size, 1);
     return r;
 }
 
@@ -141,6 +174,7 @@ int yw4_guest_memory_init(void) {
 
 /* Give the memory back but keep the range reserved; the next commit reads as zeros. */
 void yw4_decommit(uint64_t addr, size_t size) {
+    map_pages(addr, size, 0);  /* before the memory goes */
 #ifdef _WIN32
     VirtualFree((void *)(uintptr_t)addr, size, MEM_DECOMMIT);
 #else

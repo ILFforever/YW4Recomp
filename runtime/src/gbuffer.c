@@ -365,7 +365,8 @@ static int readable(uint64_t addr, uint64_t size) {
         uint64_t k = __atomic_load_n(&known[b - LO], __ATOMIC_RELAXED);
         int fresh = (k & 3) && (k & ~0xffffffffull) == gen && ((k & 3) == 1 || ((k >> 2) & 0x3fffffff) == sec);
         if (!fresh) {
-            k = gen | sec << 2 | (host_readable(b << 16, 1 << 16) ? 1 : 2);
+            int m = yw4_guest_mapped(b << 16, 1 << 16);  /* the runtime's record: no system call (loader.c) */
+            k = gen | sec << 2 | ((m < 0 ? host_readable(b << 16, 1 << 16) : m) ? 1 : 2);
             __atomic_store_n(&known[b - LO], k, __ATOMIC_RELAXED);
         }
         if ((k & 3) != 1) return 0;
@@ -529,7 +530,10 @@ static uint64_t stack_span(uint64_t sp) {
     uint64_t top = sp & ~0xFFFull;
     int stop = 0;
     for (; top < end; top += 0x1000)
-        if (!host_readable(top, 0x1000)) { stop = 1; break; }
+        if (!(yw4_guest_mapped(top, 0x1000) > 0 || (yw4_guest_mapped(top, 0x1000) < 0 && host_readable(top, 0x1000)))) {
+            stop = 1;
+            break;
+        }
     lo = sp & ~0xFFFull, hi = top, ends = stop;
     return (end < top ? end : top) - sp;
 }

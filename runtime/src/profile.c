@@ -43,6 +43,8 @@ extern uint64_t yw4_frames_presented;  /* dispatch.c */
 static uint64_t pending[1 << 14];      /* hitch mode: this frame's samples, kept if the frame turns out long */
 static int npending;
 static uint64_t hitch_ms = 100;
+static long readable_before;
+static long long readable_ns_before;
 static uint64_t from_frame;
 static SRWLOCK lock = SRWLOCK_INIT;  /* the counts, between the sampler and write_out */
 
@@ -85,6 +87,23 @@ static void frame_check(void) {
         for (int i = 0; i < npending; i++) add(pending[i]);
         fprintf(stderr, "yw4: profile: frame %" PRIu64 " took %" PRIu64 " ms: its %d samples kept\n", last_frame,
                 now - last_ms, npending);
+        /* host.c counts host_readable's calls and callers: a long frame's system calls, named (2026-11-12) */
+        extern volatile long host_readable_calls, host_readable_caller_n[8];
+        extern volatile uintptr_t host_readable_callers[8];
+        fprintf(stderr, "yw4: profile:   host_readable calls in it: %ld; callers so far:", host_readable_calls - readable_before);
+        for (int i = 0; i < 8; i++)
+            if (host_readable_callers[i])
+                fprintf(stderr, " exe+%#llx x%ld", (unsigned long long)(host_readable_callers[i] - exe_base),
+                        host_readable_caller_n[i]);
+        extern volatile long long host_readable_ns, host_readable_max_ns;
+        fprintf(stderr, "\nyw4: profile:   host_readable time in it: %lld ms, longest call %lld ms\n",
+                (host_readable_ns - readable_ns_before) / 1000000, host_readable_max_ns / 1000000);
+        host_readable_max_ns = 0;
+    }
+    {
+        extern volatile long host_readable_calls;
+        extern volatile long long host_readable_ns;
+        readable_before = host_readable_calls, readable_ns_before = host_readable_ns;
     }
     npending = 0, last_frame = f, last_ms = now;
 }
@@ -180,7 +199,7 @@ void yw4_profile_thread(int role, uint64_t frame) {
         if (pending) setup(), InitOnceComplete(&once, 0, NULL);
         if (!mode) return;
     }
-    if (mode == 3 ? !(role & (YW4_ROLE_PRESENT | YW4_ROLE_ANY))
+    if (mode == 3 ? !(role & (YW4_ROLE_PRESENT | YW4_ROLE_SUBMIT | YW4_ROLE_ANY))
                   : (role == YW4_ROLE_PRESENT) != (mode == 1) || role == YW4_ROLE_ANY || frame < from_frame)
         return;
     const char *only = getenv("YW4_PROFILE_THREAD");

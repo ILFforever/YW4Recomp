@@ -316,9 +316,30 @@ int host_read_watch(uint64_t addr, uint64_t size, long reports, void (*report)(u
     return VirtualProtect((void *)(uintptr_t)rw_page, 4096, PAGE_NOACCESS, &old) ? 0 : -1;
 }
 
-int host_readable(uint64_t addr, uint64_t size) {
+/* Calls of host_readable and their callers (profile.c reports them for a long frame, 2026-11-12) */
+volatile long host_readable_calls;
+volatile long long host_readable_ns, host_readable_max_ns;
+volatile uintptr_t host_readable_callers[8];
+volatile long host_readable_caller_n[8];
+
+__attribute__((noinline)) int host_readable(uint64_t addr, uint64_t size) {
+    __atomic_add_fetch(&host_readable_calls, 1, __ATOMIC_RELAXED);
+    uintptr_t ra = (uintptr_t)__builtin_return_address(0);
+    for (int i = 0; i < 8; i++) {
+        uintptr_t c = host_readable_callers[i];
+        if (c == ra) { __atomic_add_fetch(&host_readable_caller_n[i], 1, __ATOMIC_RELAXED); break; }
+        if (!c && __atomic_compare_exchange_n(&host_readable_callers[i], &c, ra, 0, __ATOMIC_RELAXED, __ATOMIC_RELAXED)) {
+            __atomic_add_fetch(&host_readable_caller_n[i], 1, __ATOMIC_RELAXED);
+            break;
+        }
+    }
     MEMORY_BASIC_INFORMATION mbi;
-    if (!VirtualQuery((void *)(uintptr_t)addr, &mbi, sizeof mbi) || mbi.State != MEM_COMMIT) return 0;
+    int64_t t0 = host_now_ns();
+    SIZE_T got = VirtualQuery((void *)(uintptr_t)addr, &mbi, sizeof mbi);
+    long long dt = host_now_ns() - t0;
+    __atomic_add_fetch(&host_readable_ns, dt, __ATOMIC_RELAXED);
+    if (dt > host_readable_max_ns) host_readable_max_ns = dt;
+    if (!got || mbi.State != MEM_COMMIT) return 0;
     if (!(mbi.Protect & (PAGE_READONLY | PAGE_READWRITE | PAGE_EXECUTE_READ | PAGE_EXECUTE_READWRITE))) return 0;
     return addr + size <= (uint64_t)(uintptr_t)mbi.BaseAddress + mbi.RegionSize;
 }
