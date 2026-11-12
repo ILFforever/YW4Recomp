@@ -344,7 +344,8 @@ footer a { color: var(--gold); }
     'DPAD_RIGHT','LS_UP','LS_DOWN','LS_LEFT','LS_RIGHT','RS_UP','RS_DOWN','RS_LEFT','RS_RIGHT'];
   const STICKS = { LS_UP: 'KeyW', LS_DOWN: 'KeyS', LS_LEFT: 'KeyA', LS_RIGHT: 'KeyD', RS_UP: 'KeyI', RS_DOWN: 'KeyK', RS_LEFT: 'KeyJ', RS_RIGHT: 'KeyL' };
   const SETS = [
-    { A: ['KeyE','Enter'], B: ['Space'], X: ['Tab'], Y: ['KeyM'], L: ['Digit1'], R: ['Digit3'], ZL: ['KeyQ'], ZR: ['KeyF'],
+    { A: ['KeyE','Enter','M_LEFT'], B: ['Space'], X: ['Tab'], Y: ['KeyM'], L: ['Digit1'], R: ['Digit3','W_UP','W_DOWN'],
+      ZL: ['KeyQ','M_RIGHT'], ZR: ['KeyF'],
       PLUS: ['KeyP','Escape'], MINUS: ['KeyX'], LS_PRESS: ['ShiftLeft'], RS_PRESS: ['M_MID','KeyR'], DPAD_UP: ['ArrowUp'],
       DPAD_DOWN: ['ArrowDown'], DPAD_LEFT: ['ArrowLeft'], DPAD_RIGHT: ['ArrowRight'] },
     { A: ['KeyE','Enter'], B: ['Space','ShiftLeft'], X: ['KeyQ'], Y: ['M_LEFT','KeyU'], L: [], R: ['KeyE'], ZL: ['M_RIGHT','KeyO'],
