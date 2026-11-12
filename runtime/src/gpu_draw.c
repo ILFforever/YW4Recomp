@@ -912,7 +912,8 @@ static void prebuild_thread(void *arg) {
  *
  * Records are written only for new pipelines (a hash set of what the file already holds), appended and
  * flushed one by one so a crash keeps what came before. A file from another build (another PipeKey size) is
- * set aside as .old and a new one started. YW4_PIPELINE_JOURNAL=<file> moves it, =none turns it off. */
+ * set aside as .old and a new one started; one from another GPU, driver or set of shaders is deleted with the
+ * cache (gpu_pcache.c, decision 0063). YW4_PIPELINE_JOURNAL=<file> moves it, =none turns it off. */
 typedef struct {
     uint64_t key[NSETS];
     PipeKey k;
@@ -994,10 +995,8 @@ static void journal_add(const Program *g, const PipeKey *k) {
 
 /* Reads the journal into warm_recs and opens it for appending. */
 static void journal_open(void) {
-    const char *e = getenv("YW4_PIPELINE_JOURNAL");
-    if (e && !strcmp(e, "none")) return;
-    char path[1024];
-    snprintf(path, sizeof path, "%s", e && *e ? e : "work/pipelines.journal");
+    const char *path = gpu_pcache_journal_path();  /* gpu_pcache.c: a stale one is gone by now */
+    if (!path) return;
     host_lock_init(&journal_lock);
     uint32_t want = (uint32_t)sizeof(JournalRec);
     FILE *f = fopen(path, "rb");

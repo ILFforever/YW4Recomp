@@ -213,8 +213,12 @@ void gpu_capture_flush(void);
  * background threads at start-up (YW4_PREBUILD=0: off). */
 void gpu_prebuild_start(void);
 /* The pipeline cache on disk (gpu_pcache.c): pass gpu_pcache() to every vkCreate*Pipelines, call
- * gpu_pcache_built() after each build so the next save writes it. */
+ * gpu_pcache_built() after each build so the next save writes it. gpu_pcache_init comes before
+ * gpu_prebuild_start: it decides whether the files of earlier runs are still good (decision 0063). */
 void gpu_pcache_init(void);
+/* Where the pipeline journal is kept (gpu_draw.c), NULL when it is off; gpu_pcache_init has already deleted one
+ * made with another GPU, driver or set of shaders. */
+const char *gpu_pcache_journal_path(void);
 VkPipelineCache gpu_pcache(void);
 void gpu_pcache_built(void);
 void gpu_pcache_save(void);
