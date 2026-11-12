@@ -70,6 +70,33 @@ thread (`gpu_fg.c`), so runs 5 and 6 show whether the game's frames still arrive
 New problems to look for with refresh: judder that comes and goes over tens of seconds (the two clocks' phase),
 input that feels later, a higher CPU use of the presenting thread, and the replay ending in another place.
 
+## First results (2026-11-12, runs 1 to 4 only)
+
+The owner's PC: NVIDIA (DLSS frame generation capable), a 120 Hz display, 900p (no settings file, so the GPU has
+room), the town walk, each pair twice alternating (`perf_compare --pairs 2`). Frame generation (runs 5, 6) and a
+60 Hz display are not measured yet.
+
+| Cap | Way | Frames over 1.5 frame times, whole run | Standard deviation | Process CPU (% of one core) |
+|---|---|---|---|---|
+| 30 | tick | 80, 71 (1.09%, 0.97%) | 4.74, 4.02 ms | 62, 63 |
+| 30 | refresh | 7, 10 (0.10%, 0.14%) | 3.62, 3.36 ms | 67, 65 |
+| 60 | tick | 223, 223 (3.04%) | 5.32, 6.13 ms | 114, 113 |
+| 60 | refresh | 220, 217 (3.00%, 2.96%) | 4.36, 4.23 ms | 122, 127 |
+
+Read by the 600-frame windows of the log, not only the whole run:
+
+- In steady play both ways are near perfect: 0 or 1 long frames per window, a spread of about 0.25 ms (tick)
+  against 0.01 ms (refresh). Neither is visible.
+- The difference is in the heavy stretch when the town appears, where frames run late. At 30 the tick turned 66
+  of them into 50 ms frames (a late frame waits for the next 60 Hz tick: 16.7 ms more), refresh 1 (on a 120 Hz
+  display a late frame waits one refresh, 8.3 ms). At 60 that stretch is GPU-bound in both ways (188 long frames
+  each), so neither can help there.
+- Refresh costs CPU: 3 to 5 points of one core at 30, 8 to 14 at 60 (the spin before each deadline).
+
+So far: refresh is clearly better at 30 on a 120 Hz display, the same at 60, and costs some CPU. The default is
+not changed until runs 5 and 6 (frame generation) and a 60 Hz display are measured, and the menus' background
+and a slow pan are watched by eye.
+
 ## Consequences
 
 - One more variable to test with (`YW4_PACE`, [debugging.md](../debugging.md)); the summary line is there for
