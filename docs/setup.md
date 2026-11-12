@@ -88,5 +88,11 @@ Runtime options and debugging tools are in [debugging.md](debugging.md).
 ## Tests
 
 Synthetic data only, no game files needed: `python -m pytest tests -q` (or `python -m unittest discover -s tests -t .`).
+
+`python -m recomp.ci` compiles everything that needs no game files (the runtime, musl's math, our shaders) with the
+build's own flags, without a config: a quick "does it still compile here" before a push. GitHub runs it and the
+tests on Linux and on Windows, and builds the launcher, on every push, tag and pull request
+(`.github/workflows/build.yml`). It can't check the game itself: translating, linking and running it needs your
+own game files, which are never on GitHub.
 Instruction forms of the recompiler are checked against a real ARM64 CPU (a Raspberry Pi 5,
 [decision 0004](decisions/0004-pi5-as-arm64-reference.md)).

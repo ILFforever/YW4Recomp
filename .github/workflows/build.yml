@@ -1,0 +1,81 @@
+# Build check: does our own code still compile and pass its tests, on Linux and on Windows, and does the
+# launcher build? Runs on every push to master, every version tag and every pull request.
+#
+# What it can't check: the game itself. Translating, linking and running it needs a player's own game files,
+# which are never on GitHub (CLAUDE.md rule 1). So this compiles the runtime, musl's math and our shaders
+# (python -m recomp.ci) and runs the tests on made-up data (tests/); a green mark means "our code compiles on
+# both systems", not "the game plays".
+name: Build check
+
+on:
+  push:
+    branches: [master]
+    tags: ["v*"]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: build-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  linux:
+    name: Linux (Clang 19)
+    runs-on: ubuntu-24.04
+    env:
+      CC: clang-19
+    steps:
+      - uses: actions/checkout@v4
+      - name: Compiler and glslang
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq clang-19 glslang-tools
+      - name: Compile the runtime, musl's math and our shaders
+        run: python3 -m recomp.ci
+      - name: Tests
+        run: python3 -m unittest discover -s tests -t .
+      - name: Decision records
+        run: python3 -m tools.dev.decisions --check
+
+  windows:
+    name: Windows (llvm-mingw)
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      # the pinned compiler and SDKs (tools/yw4/deps.py: exact versions, SHA-256 checked); kept between runs
+      - uses: actions/cache@v4
+        with:
+          path: ${{ runner.temp }}\yw4
+          key: deps-${{ hashFiles('tools/yw4/deps.py') }}
+      - name: Compiler (the one players' builds use)
+        shell: pwsh
+        run: |
+          python -m tools.yw4.deps --toolchain "$env:RUNNER_TEMP\yw4"
+          "CC=$env:RUNNER_TEMP\yw4\llvm-mingw\bin\clang.exe" >> $env:GITHUB_ENV
+      - name: Compile the runtime and musl's math (with the FSR, DLSS and Streamline headers)
+        shell: pwsh
+        run: python -m recomp.ci --work "$env:RUNNER_TEMP\yw4\work"
+      - name: Tests
+        run: python -m unittest discover -s tests -t .
+
+  launcher:
+    name: Launcher (Windows)
+    runs-on: windows-latest
+    defaults:
+      run:
+        working-directory: launcher/src-tauri
+    steps:
+      - uses: actions/checkout@v4
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: launcher/src-tauri
+      - name: Build
+        run: cargo build --locked
+      - name: Tests
+        run: cargo test --locked
