@@ -22,6 +22,7 @@
  * the presenting thread). submit_ms and sync_ms are part of work_ms; the rest of work_ms is
  * the game's own code. */
 #include <inttypes.h>
+#include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -109,6 +110,16 @@ static void print_summary(FILE *f, size_t from, const char *what) {
     fprintf(f, "  interval ms: p50 %.1f  p95 %.1f  p99 %.1f  max %.1f   (slower than 34.5 ms: %zu = %.1f%%, than 50 ms: %zu)\n",
             percentile(interval, 0, m, 50), percentile(interval, 0, m, 95), percentile(interval, 0, m, 99),
             percentile(interval, 0, m, 100), over34, 100.0 * (double)over34 / frames, over50);
+    int cap = framerate_hz();
+    if (cap == 30 || cap == 60) {
+        /* for comparing the two ways of holding 30 and 60 (YW4_PACE): frames that took over one and a half of the
+         * cap's frame time (25 ms at 60, 50 ms at 30), and how much the frame times spread */
+        double limit = 1500.0 / cap, mean = sum / frames, var = 0;
+        size_t late = 0;
+        for (size_t i = 0; i < m; i++) late += interval[i] > limit, var += (interval[i] - mean) * (interval[i] - mean);
+        fprintf(f, "  pacing %s at %d frames/s: %zu frames over %.0f ms = %.2f%%, standard deviation %.2f ms\n",
+                framerate_pacing() ? "refresh" : "tick", cap, late, limit, 100.0 * (double)late / frames, sqrt(var / frames));
+    }
     fprintf(f, "  game work ms: avg %.1f  p50 %.1f  p95 %.1f  p99 %.1f  max %.1f   (budget at 30 frames/s: 33.3)\n", wsum / frames,
             percentile(work, 0, m, 50), percentile(work, 0, m, 95), percentile(work, 0, m, 99),
             percentile(work, 0, m, 100));

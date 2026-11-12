@@ -69,7 +69,16 @@ void framerate_cycle(void) {
 
 int framerate_hz(void) { return game_paces ? (game_n ? 60 / game_n : 0) : rates[framerate_index()]; }
 
+/* How 30 and 60 are held: 0 by the emulated vsync thread's tick (ours), 1 by a deadline aligned to the display's
+ * refresh (YW4_PACE=refresh). Read once. */
+int framerate_pacing(void) {
+    static int refresh = -1;
+    if (refresh < 0) refresh = getenv("YW4_PACE") && !strcmp(getenv("YW4_PACE"), "refresh");
+    return refresh;
+}
+
 void framerate_wait(void) {
+    static int said_tick;       /* the rate the log last named the tick wait for (0: not, or the other way since) */
     static uint64_t next_flip;  /* vsync count the next frame may show at (30 / 60) */
     static int64_t due;         /* host time the next frame may show at (120 / 144) */
     if (game_paces) return;     /* the game's limiter and interval did it */
@@ -81,8 +90,7 @@ void framerate_wait(void) {
      * tick (vi.c's thread) lost a whole tick now and then: ~1 frame in 400 showed for 33 ms with 6 ms of work
      * (2026-11-09, RX 6650 XT, 120 Hz). Here that thread has had the highest priority since (232829c), and the
      * two ways have not been measured against each other yet, so the tick wait stays unless this is asked for. */
-    static int pace_refresh = -1;
-    if (pace_refresh < 0) pace_refresh = getenv("YW4_PACE") && !strcmp(getenv("YW4_PACE"), "refresh");
+    int pace_refresh = framerate_pacing();
     if ((hz == 30 || hz == 60) && pace_refresh) {
         next_flip = 0;
         double refresh = window_refresh_hz();
@@ -93,6 +101,12 @@ void framerate_wait(void) {
             if (whole >= 1 && k / (double)whole > 0.99 && k / (double)whole < 1.01)
                 period = (int64_t)((double)whole * 1e9 / refresh + 0.5);
         }
+        static int64_t said_period;  /* the log names the way and its period, again when either changes */
+        if (period != said_period) {
+            said_period = period, said_tick = 0;
+            fprintf(stderr, "yw4: pacing: refresh, period %.3f ms at %.2f Hz (%d frames/s, YW4_PACE=refresh)\n",
+                    (double)period / 1e6, refresh, hz);
+        }
         int64_t now = host_now_ns();
         if (!due || now - due > period / 2) due = now;  /* first frame, or late: start again from now, no burst */
         if (due - now > 1000000) host_sleep_ns(due - now - 1000000);  /* the timer is good to ~1 ms: spin the rest */
@@ -101,6 +115,10 @@ void framerate_wait(void) {
         return;
     }
     if (hz == 30 || hz == 60) {
+        if (said_tick != hz) {
+            said_tick = hz;
+            fprintf(stderr, "yw4: pacing: tick (%d frames/s: %s 60 Hz vsync tick)\n", hz, hz == 30 ? "every 2nd" : "every");
+        }
         uint64_t now = yw4_vsync_count();
         if (next_flip < now + 1) next_flip = now + 1;
         yw4_wait_vsync(next_flip);
