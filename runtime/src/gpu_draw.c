@@ -1173,6 +1173,7 @@ static int warm_threads_left;
  * shaders are destroyed again (the cache keeps the driver's result). */
 static void warm_thread(void *arg) {
     (void)arg;
+    host_thread_set_priority(NULL, 50);  /* as prebuild_thread: below the game's boot and intro playback (232829c) */
     for (;;) {
         size_t i = __atomic_fetch_add(&warm_next, 1, __ATOMIC_RELAXED);
         if (i >= warm_n) break;
