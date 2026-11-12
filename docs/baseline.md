@@ -113,3 +113,35 @@ Notes:
   engine counters by process id).
 - The owner's slow evening and night towns (`work/testsaves/save_base_lag`..`lag4`), 20-26 fps before 0028, now run
   at 29.9 fps with 12 ms of GPU time and ~13 ms of game work a frame.
+
+## Recompiled build, frame pacing at the owner's settings, 2026-11-12
+
+Not against Eden: a check for spikes before the 1.0.0 release, on the same machine. Settings: 3840×2160, DLSS as
+anti-aliasing with upscaling off, DLSS frame generation, FRAME RATE 120, shadow map 4096, soft shadows ×2, contact
+shadows, full-size effects, ×16 texture filtering, our own renderer's passes on. Each scene once: loaded from a save
+by a replay, then every frame's time from the performance log (`work/perf/*.csv`), starting 8 s after the 3D world
+first draws so loading is not counted. The first seven stand still; the walk moves through the town for about two
+minutes (`work/inputs/walk.txt`).
+
+| Scene (save) | Game frames/s | Frame time, median | 99th percentile | Worst | Spikes | Draws | GPU ms |
+|---|---|---|---|---|---|---|---|
+| Busy spot (`save_base_busy`) | 57.0 | 17.5 ms | 20.1 ms | 35.2 ms | 1 | 415 | 14.2 |
+| Slow town place 1 (`save_base_lag`) | 50.6 | 19.7 ms | 23.1 ms | 35.1 ms | 0 | 402 | 15.7 |
+| Slow town place 2 (`save_base_lag2`) | 52.9 | 18.9 ms | 21.1 ms | 26.0 ms | 0 | 254 | 15.4 |
+| Slow town place 3 (`save_base_lag3`) | 52.0 | 19.2 ms | 21.7 ms | 32.7 ms | 0 | 316 | 15.5 |
+| Slow town place 4 (`save_base_lag4`) | 54.1 | 18.5 ms | 20.9 ms | 35.4 ms | 0 | 203 | 14.9 |
+| Late game, bamboo forest (`save_base_lategame`) | 47.8 | 20.9 ms | 22.5 ms | 39.7 ms | 0 | 113 | 17.2 |
+| Yo-kai World (`save_base_yokaiworld`) | 50.6 | 19.7 ms | 22.2 ms | 52.9 ms | 1 | 277 | 16.1 |
+| Town walk, moving (`save_base_walk`) | 52.1 | 19.3 ms | 22.2 ms | 39.3 ms | 1 | 433 | 15.7 |
+
+A spike here is a frame over twice the scene's median. 75 s of play per scene (135 s for the walk), about 11
+minutes in all.
+
+Notes:
+- These are the game's own frames; with frame generation about twice as many are shown (roughly 96 to 114).
+- Steady: in every scene the 99th percentile is within about 3 ms of the median. Three single slow frames in all
+  (35, 39 and 53 ms), each one frame and not a run of them; their cause was not looked for.
+- No `stall:` line (GPU-thread work over 50 ms, `YW4_STALL_MS`) during play in any scene, and no errors.
+- The GPU is the limit at these settings: 14 to 17 ms of each 18 to 21 ms frame. That is the cost of native 4K with
+  these shadows, and why it sits near 50 and not at the 120 cap; upscaling lifts it (README, Upscaling).
+- Not covered: battles, menus, cutscenes, and entering new areas beyond the one walk. Each scene ran once.
