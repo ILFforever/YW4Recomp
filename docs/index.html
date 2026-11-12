@@ -57,7 +57,7 @@ h1 { font: 800 clamp(2.4rem, 1.6rem + 3.4vw, 4.2rem)/1.04 var(--display); margin
 .slides .frames img.on { opacity: 1; }
 @media (prefers-reduced-motion: reduce) { .slides .frames img { transition: none; } }
 
-main { max-width: 1180px; margin: 0 auto; padding: 40px 20px 64px; display: grid; gap: 28px; }
+main { max-width: 1180px; margin: 0 auto; padding: 40px 20px 64px; display: grid; grid-template-columns: minmax(0, 1fr); gap: 28px; }
 .panel { background: var(--white); border-radius: var(--r); border: 1px solid var(--lilac-3); overflow: hidden; }
 .bar { display: flex; align-items: center; gap: 12px; padding: 12px 20px; background: var(--violet); color: var(--white); }
 .bar h2 { margin: 0; font: 800 clamp(1.25rem, 1.15rem + .5vw, 1.6rem)/1.2 var(--display); }
@@ -85,6 +85,40 @@ main { max-width: 1180px; margin: 0 auto; padding: 40px 20px 64px; display: grid
 .go a:hover { border-color: var(--violet-soft); background: var(--white); }
 .go b { display: block; font: 700 1rem/1.3 var(--display); color: var(--violet); }
 .go span { font-size: .88rem; color: var(--ink-2); }
+/* the default keys: the game's F2 card (gamemenu.c draw_controls_overview) drawn from the same bindings and names */
+.kv { padding: 20px; display: grid; gap: 14px; }
+.kv-seg { display: inline-flex; gap: 4px; padding: 4px; background: var(--lilac-1); border-radius: 12px; justify-self: start; }
+.kv-seg button { font: 700 .95rem/1 var(--display); color: var(--violet); background: transparent; border: 0; border-radius: 9px;
+  padding: 11px 16px; cursor: pointer; transition: background .15s var(--ease); }
+.kv-seg button:hover { background: var(--lilac-2); }
+.kv-seg button[aria-pressed="true"] { background: var(--violet); color: var(--white); }
+.kv-board { overflow-x: auto; }
+.kv-board svg { display: block; width: 100%; min-width: 760px; height: auto; }
+.kv-board text { font-family: var(--body); font-weight: 700; pointer-events: none; }
+.kv-board .k { cursor: default; }
+.kv-board .k:focus { outline: none; }
+.kv-board .k:focus-visible .ring, .kv-board .k.on .ring { stroke: var(--gold); }
+.kv-board .ring { fill: none; stroke: transparent; stroke-width: 3; }
+.kv-board .unlit { fill: var(--white); stroke: var(--lilac-3); stroke-width: 1.5; }
+.kv-board .game { fill: var(--violet); } .kv-board .move { fill: #1e9aa6; } .kv-board .port { fill: var(--gold); }
+.kv-board .k.on .game, .kv-board .k.on .move { fill: var(--violet-deep); }
+.kv-board .ink-unlit { fill: var(--ink-2); } .kv-board .ink-lit { fill: var(--white); } .kv-board .ink-port { fill: var(--violet-deep); }
+.kv-board .mbody { fill: var(--white); stroke: var(--lilac-3); stroke-width: 1.5; }
+.kv-board .mline { fill: none; stroke: var(--lilac-3); stroke-width: 1.5; }
+.kv-board .soft { fill: var(--lilac-1); stroke: var(--lilac-3); stroke-width: 1.5; }
+.kv-board .muted { fill: var(--ink-2); font-weight: 500; }
+.kv-bar { background: var(--violet-deep); color: var(--white); border-radius: 14px; min-height: 58px; padding: 12px 18px;
+  display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
+.kv-bar .cap { font: 700 1rem/1 var(--body); background: var(--violet-soft); border-radius: 8px; padding: 8px 12px; }
+.kv-bar .what { font: 500 1.02rem/1.4 var(--body); color: var(--white); }
+.kv-bar .hint { color: oklch(84% 0.03 300); }
+.kv-legend { display: flex; flex-wrap: wrap; gap: 8px 26px; font-size: .92rem; color: var(--ink-2); margin: 0; padding: 0; list-style: none; }
+.kv-legend li { display: flex; align-items: center; gap: 8px; }
+.kv-legend i { width: 16px; height: 16px; border-radius: 4px; display: inline-block; }
+kbd { display: inline-block; min-width: 1.7em; text-align: center; font: 700 .78rem/1 var(--display); color: var(--violet-deep);
+  background: var(--lilac-0); border: 1px solid var(--lilac-3); border-bottom-width: 2px; border-radius: 6px; padding: 4px 6px; margin: 1px 2px 1px 0; white-space: nowrap; }
+.keys-foot { padding: 4px 20px 20px; font-size: .88rem; color: var(--ink-2); }
+.keys-foot p { margin: 8px 0 0; max-width: 90ch; }
 .note { border-left: 3px solid var(--gold); background: var(--cream); padding: 12px 16px; border-radius: 0 10px 10px 0; font-size: .95rem; }
 
 footer { background: var(--violet-deep); color: oklch(84% 0.03 300); border-top: 3px solid var(--gold); }
@@ -210,6 +244,29 @@ footer a { color: var(--gold); }
     </div>
   </section>
 
+  <section class="panel" id="default-keys">
+    <div class="bar"><span class="q">!</span><h2>Default keys</h2></div>
+    <div class="kv" id="kv">
+      <div class="kv-seg" role="group" aria-label="Which keys">
+        <button type="button" data-mode="0" aria-pressed="true">Exploring</button>
+        <button type="button" data-mode="1" aria-pressed="false">Battle</button>
+        <button type="button" data-mode="2" aria-pressed="false">Cutscene</button>
+      </div>
+      <div class="kv-board"><svg id="kv-svg" role="img" aria-label="The keyboard and mouse with each default key named"></svg></div>
+      <div class="kv-bar" aria-live="polite"><span class="what hint">Point at a key, or press one, to see what it does.</span></div>
+      <ul class="kv-legend">
+        <li><i style="background:var(--violet)"></i>Game buttons</li>
+        <li><i style="background:#1e9aa6"></i>Moving and the camera</li>
+        <li><i style="background:var(--gold)"></i>Menus and screenshots</li>
+      </ul>
+    </div>
+    <div class="keys-foot">
+      <p>The same card is in the game: press <kbd>F2</kbd> while playing, or hold Back on a controller to see it with your
+        controller's buttons. The mouse turns the camera; <kbd>Alt</kbd> frees it. Every key can be changed on the
+        overlay's Controls page, separately for exploring and battles.</p>
+    </div>
+  </section>
+
   <section class="panel">
     <div class="bar"><span class="q">!</span><h2>Read more</h2></div>
     <div class="go">
@@ -255,6 +312,201 @@ footer a { color: var(--gold); }
     if (!imgs[n].complete || !imgs[n].naturalWidth) return;
     imgs[i].classList.remove('on'); imgs[n].classList.add('on'); cap.textContent = imgs[n].dataset.cap; i = n;
   }, 5000);
+})();
+
+// The default keys: the game's F2 card (runtime/src/gamemenu.c, draw_controls_overview) drawn from the same data:
+// the key rows (kv_rows), the default bindings (runtime/src/bindings.c: inputs[] and battle_keys[]) and what each
+// Switch input does in each mode (kv_action). Point at or tap a key, or press it on your keyboard, to see what it does.
+(() => {
+  const svg = document.getElementById('kv-svg');
+  if (!svg) return;
+  const bar = document.querySelector('#kv .kv-bar'), segs = [...document.querySelectorAll('#kv .kv-seg button')];
+  const NS = 'http://www.w3.org/2000/svg', U = 54, G = 5, STEP = U + G;
+  const ORDER = ['A','B','X','Y','L','R','ZL','ZR','PLUS','MINUS','LS_PRESS','RS_PRESS','DPAD_UP','DPAD_DOWN','DPAD_LEFT',
+    'DPAD_RIGHT','LS_UP','LS_DOWN','LS_LEFT','LS_RIGHT','RS_UP','RS_DOWN','RS_LEFT','RS_RIGHT'];
+  const STICKS = { LS_UP: 'KeyW', LS_DOWN: 'KeyS', LS_LEFT: 'KeyA', LS_RIGHT: 'KeyD', RS_UP: 'KeyI', RS_DOWN: 'KeyK', RS_LEFT: 'KeyJ', RS_RIGHT: 'KeyL' };
+  const SETS = [
+    { A: ['KeyE','Enter'], B: ['Space'], X: ['Tab'], Y: ['KeyM'], L: ['Digit1'], R: ['Digit3'], ZL: ['KeyQ'], ZR: ['KeyF'],
+      PLUS: ['KeyP','Escape'], MINUS: ['KeyX'], LS_PRESS: ['ShiftLeft'], RS_PRESS: ['M_MID','KeyR'], DPAD_UP: ['ArrowUp'],
+      DPAD_DOWN: ['ArrowDown'], DPAD_LEFT: ['ArrowLeft'], DPAD_RIGHT: ['ArrowRight'] },
+    { A: ['KeyE','Enter'], B: ['Space','ShiftLeft'], X: ['KeyQ'], Y: ['M_LEFT','KeyU'], L: [], R: ['KeyE'], ZL: ['M_RIGHT','KeyO'],
+      ZR: ['KeyF'], PLUS: ['KeyR','KeyP'], MINUS: ['KeyC'], LS_PRESS: ['Tab'], RS_PRESS: ['M_MID'], DPAD_UP: ['ArrowUp','W_UP'],
+      DPAD_DOWN: ['ArrowDown','W_DOWN'], DPAD_LEFT: ['ArrowLeft'], DPAD_RIGHT: ['ArrowRight'] }];
+  for (const s of SETS) for (const id in STICKS) s[id] = [STICKS[id]];
+  const ACT = [
+    { A: 'Interact / confirm', B: 'Jump / back, hold to run', X: 'Yo-kai Pad', Y: 'Map', L: 'Hold: more shortcuts', R: 'Minimap size',
+      ZL: 'Watch scan', ZR: 'Yo-kai Beam', PLUS: 'Pause', LS_PRESS: 'Close hints', RS_PRESS: 'Scan',
+      DPAD_UP: 'Shortcut', DPAD_RIGHT: 'Shortcut', DPAD_DOWN: 'Shortcut', DPAD_LEFT: 'Shortcut' },
+    { A: 'Confirm', B: 'Roll / dodge', X: 'Character skill', Y: 'Attack', R: 'Skill wheel / Encourage / Soul Steal', ZL: 'Aim',
+      ZR: 'Yo-kai Drain', PLUS: 'Stop watching', MINUS: 'Auto battle', LS_PRESS: 'Target enemy', DPAD_UP: 'Switch character',
+      DPAD_DOWN: 'Switch character', DPAD_LEFT: 'Target ally', DPAD_RIGHT: 'Target ally' },
+    { A: 'Next line', B: 'Next line', R: 'Fast forward', PLUS: 'Pause' }];
+  const PORT = { Escape: 'Overlay', F1: 'Settings', F2: 'Controls', F3: 'HUD', F11: 'Full screen', F12: 'Screenshot' };
+  const SHORTCUT = { DPAD_UP: 1, DPAD_RIGHT: 2, DPAD_DOWN: 3, DPAD_LEFT: 4 };
+  const k = (code, w, cap) => ({ code, w, cap }), gap = w => ({ w });
+  const letters = s => [...s].map(c => k('Key' + c, 1, c));
+  const ROWS = [
+    [k('Escape',1,'Esc'), gap(1), k('F1',1,'F1'), k('F2',1,'F2'), k('F3',1,'F3'), k('F4',1,'F4'), gap(.5), k('F5',1,'F5'), k('F6',1,'F6'),
+     k('F7',1,'F7'), k('F8',1,'F8'), gap(.5), k('F9',1,'F9'), k('F10',1,'F10'), k('F11',1,'F11'), k('F12',1,'F12')],
+    [k('Backquote',1,'`'), ...[1,2,3,4,5,6,7,8,9,0].map(d => k('Digit' + d, 1, String(d))), k('Minus',1,'-'), k('Equal',1,'='), k('Backspace',2,'Backspace')],
+    [k('Tab',1.5,'Tab'), ...letters('QWERTYUIOP'), k('BracketLeft',1,'['), k('BracketRight',1,']'), k('Backslash',1.5,'\\')],
+    [k('CapsLock',1.75,'Caps'), ...letters('ASDFGHJKL'), k('Semicolon',1,';'), k('Quote',1,"'"), k('Enter',2.25,'Enter')],
+    [k('ShiftLeft',2.25,'Shift'), ...letters('ZXCVBNM'), k('Comma',1,','), k('Period',1,'.'), k('Slash',1,'/'), k('ShiftRight',2.75,'Shift'),
+     gap(.5), k('ArrowUp',1,'↑')],
+    [k('ControlLeft',1.25,'Ctrl'), k('MetaLeft',1.25,'Win'), k('AltLeft',1.25,'Alt'), k('Space',6.25,'Space'), k('AltRight',1.25,'Alt'),
+     k('ContextMenu',1.25,'Menu'), k('ControlRight',1.5,'Ctrl'), gap(.5), k('ArrowLeft',1,'←'), k('ArrowDown',1,'↓'), k('ArrowRight',1,'→')]];
+  const TRI = { ArrowUp: 'M12 5.5l9 13H3z', ArrowDown: 'M12 18.5l9-13H3z', ArrowLeft: 'M5.5 12l13-9v18z', ArrowRight: 'M18.5 12l-13-9v18z' };
+  const MX = 17.5 * STEP - G + 36, MY = STEP + 10, MW = 120, MH = 190, W = MX + MW + 22, H = 6 * STEP + 10;
+  let mode = 0, focus = null;
+
+  // what a key or mouse part does in the mode: the names joined once each (as kv_mask_names)
+  function names(code) {
+    const set = SETS[mode === 1 ? 1 : 0], out = [];
+    let move = true, sc = 0;
+    for (const id of ORDER) {
+      if (!(set[id] || []).includes(code)) continue;
+      let a = ACT[mode][id];
+      if (id.startsWith('LS_') && id !== 'LS_PRESS') a = mode === 2 ? null : 'Move';
+      if (id.startsWith('RS_') && id !== 'RS_PRESS') a = mode === 2 ? null : 'Camera';
+      if (!a) continue;
+      if (mode === 0 && SHORTCUT[id]) sc = SHORTCUT[id];
+      if (a !== 'Move' && a !== 'Camera') move = false;
+      if (!out.includes(a)) out.push(a);
+    }
+    return out.length ? { text: out.join(' / '), move, sc } : null;
+  }
+  const meas = document.createElement('canvas').getContext('2d');
+  const width = (s, px) => { meas.font = `700 ${px}px "Zen Kaku Gothic New", sans-serif`; return meas.measureText(s).width; };
+  function wrap(s, px, w, max) {  // lines of at most w, at spaces; the last cut with "..."
+    const words = s.split(' '), lines = [];
+    let cur = '';
+    for (const wd of words) {
+      const t = cur ? cur + ' ' + wd : wd;
+      if (width(t, px) <= w || !cur) cur = t; else { lines.push(cur); cur = wd; }
+    }
+    if (cur) lines.push(cur);
+    if (lines.length > max) { lines.length = max; lines[max - 1] += '...'; }
+    return lines.map(l => l.replace(/ \/$/, ''));
+  }
+  const el = (tag, attrs, parent) => {
+    const e = document.createElementNS(NS, tag);
+    for (const a in attrs) e.setAttribute(a, attrs[a]);
+    if (parent) parent.appendChild(e);
+    return e;
+  };
+  const text = (parent, x, y, s, px, cls, anchor = 'middle') => {
+    const t = el('text', { x, y, 'font-size': px, class: cls, 'text-anchor': anchor, 'dominant-baseline': 'central' }, parent);
+    t.textContent = s;
+    return t;
+  };
+  function part(code, cap, g) {  // a pointable thing: hover, focus and tap show what it does
+    g.classList.add('k');
+    g.dataset.code = code;
+    g.setAttribute('tabindex', '0');
+    g.setAttribute('aria-label', cap);
+    g.dataset.cap = cap;
+    const show = () => setFocus(code, cap);
+    g.addEventListener('pointerenter', show);
+    g.addEventListener('focus', show);
+    g.addEventListener('click', show);
+  }
+
+  function draw() {
+    svg.textContent = '';
+    svg.setAttribute('viewBox', `-4 -4 ${W + 8} ${H + 8}`);
+    ROWS.forEach((row, r) => {
+      let x = 0;
+      const y = r * STEP + (r ? 10 : 0);
+      for (const key of row) {
+        const w = key.w * U + (key.w - 1) * G;
+        if (key.code) {
+          const port = PORT[key.code], n = port ? { text: port, move: false, sc: 0 } : names(key.code), lit = !!n;
+          const g = el('g', {}, svg);
+          el('rect', { x: x - 3, y: y - 3, width: w + 6, height: U + 6, rx: 10, class: 'ring' }, g);
+          el('rect', { x, y, width: w, height: U, rx: 8, class: !lit ? 'unlit' : port ? 'port' : n.move ? 'move' : 'game' }, g);
+          const ink = !lit ? 'ink-unlit' : port ? 'ink-port' : 'ink-lit';
+          let lines = [];
+          if (lit) lines = n.sc ? [`${n.sc} · ${n.sc + 4}`] : wrap(n.text, U * .19, w - 6, 2);
+          const capY = !lit ? y + U / 2 : lines.length === 2 ? y + U * .21 : y + U * .29;
+          if (TRI[key.code]) {
+            const ts = U * .32;
+            el('path', { d: TRI[key.code], class: ink, transform: `translate(${x + (w - ts) / 2} ${capY - ts / 2}) scale(${ts / 24})` }, g);
+          } else text(g, x + w / 2, capY, key.cap, U * .25, ink);
+          const ly = lines.length === 2 ? y + U * .53 : y + U * .66;
+          lines.forEach((l, i) => text(g, x + w / 2, ly + i * U * .26, l, U * .19, ink));
+          if (lit) part(key.code, port ? key.cap : key.cap, g); else g.dataset.code = key.code;
+        }
+        x += key.w * STEP;
+      }
+    });
+    // the mouse: the body, the two buttons round the wheel's slot, the wheel (as gamemenu.c)
+    const m = el('g', { transform: `translate(${MX} ${MY})` }, svg);
+    el('rect', { x: 0, y: 0, width: MW, height: MH, rx: MW / 2, class: 'mbody' }, m);
+    [['M_LEFT', 'Left click', 'L', 'M3 86V60A57 57 0 0 1 59 3V12A15 15 0 0 0 45 27V53A15 15 0 0 0 59 68V86Z', 7],
+     ['M_RIGHT', 'Right click', 'R', 'M117 86V60A57 57 0 0 0 61 3V12A15 15 0 0 1 75 27V53A15 15 0 0 1 61 68V86Z', 77]]
+      .forEach(([code, cap, side, d, tx]) => {
+        const n = names(code), g = el('g', {}, m);
+        el('path', { d, class: n ? (n.move ? 'move' : 'game') : 'mline' }, g);
+        text(g, tx + 18, 75, side, U * .25, n ? 'ink-lit' : 'ink-unlit');
+        if (n) {
+          let px = U * .19;
+          for (const wd of n.text.split(' ')) while (px > 7 && width(wd, px) > 36) px -= .5;
+          wrap(n.text, px, 36, 2).forEach((l, i) => text(g, tx + 18, 42 + i * px * 1.35, l, px, 'ink-lit'));
+          part(code, cap, g);
+        }
+      });
+    const press = names('M_MID'), turn = names('W_UP');
+    const wg = el('g', {}, m);
+    el('rect', { x: 45, y: 12, width: 30, height: 56, rx: 15, fill: 'transparent' }, wg);
+    el('rect', { x: 49, y: 16, width: 22, height: 48, rx: 11,
+      class: press || turn ? ((!press || press.move) && (!turn || turn.move) ? 'move' : 'game') : 'soft' }, wg);
+    if (press || turn) part('WHEEL', 'Wheel', wg);
+    let ly = MH + 22;
+    if (press) { wrap('Wheel press: ' + press.text, 13, MW + 40, 2).forEach(l => { text(m, MW / 2, ly, l, 13, 'muted'); ly += 17; }); ly += 6; }
+    if (turn) wrap('Wheel: ' + turn.text, 13, MW + 40, 2).forEach(l => { text(m, MW / 2, ly, l, 13, 'muted'); ly += 17; });
+    if (focus) setFocus(focus.code, focus.cap);
+  }
+
+  // the detail bar: the key in focus, in a full sentence (as the game's)
+  function setFocus(code, cap) {
+    focus = { code, cap };
+    svg.querySelectorAll('.k.on').forEach(e => e.classList.remove('on'));
+    const g = svg.querySelector(`.k[data-code="${code}"]`);
+    let what;
+    if (PORT[code]) what = PORT[code] + '.';
+    else if (code === 'WHEEL') {
+      const a = names('M_MID'), b = names('W_UP');
+      what = [a && 'Press: ' + a.text, b && 'Turn: ' + b.text].filter(Boolean).join('. ') + '.';
+    } else {
+      const n = names(code);
+      what = !n ? null : n.sc ? `Shortcut ${n.sc}, or shortcut ${n.sc + 4} while you hold 1.` : n.text + '.';
+    }
+    if (!g || !what) {
+      bar.innerHTML = `<span class="cap"></span><span class="what"></span>`;
+      bar.querySelector('.cap').textContent = cap;
+      bar.querySelector('.what').textContent = 'Not used here.';
+      return;
+    }
+    g.classList.add('on');
+    bar.innerHTML = `<span class="cap"></span><span class="what"></span>`;
+    bar.querySelector('.cap').textContent = cap;
+    bar.querySelector('.what').textContent = what;
+  }
+
+  segs.forEach(b => b.addEventListener('click', () => {
+    mode = +b.dataset.mode;
+    segs.forEach(s => s.setAttribute('aria-pressed', s === b ? 'true' : 'false'));
+    draw();
+  }));
+  // a real key pressed shows itself, as on the card (nothing is taken from the page: Tab and the arrows still work)
+  const capOf = code => { for (const row of ROWS) for (const key of row) if (key.code === code) return key.cap; return null; };
+  document.addEventListener('keydown', e => {
+    if (e.target.closest && e.target.closest('input, textarea')) return;
+    const cap = capOf(e.code);
+    if (cap && svg.getBoundingClientRect().bottom > 0 && svg.getBoundingClientRect().top < innerHeight) setFocus(e.code, cap);
+  });
+  draw();
+  if (document.fonts && document.fonts.ready) document.fonts.ready.then(draw);  // measured again in the real font
 })();
 </script>
 </body>
