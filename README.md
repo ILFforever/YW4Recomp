@@ -32,7 +32,7 @@
 > Platforms:
 > - Windows - x86-64, Vulkan graphics backend (this is what is built and tested): NVIDIA RTX, and AMD Radeon
 >   ([decision 0059](docs/decisions/0059-amd-depth-format-fallback.md)): a Ryzen 5 7530U laptop's integrated graphics
->   runs it at about 40 frames/s at native resolution, where the Eden emulator gets 25-30
+>   runs it at about 35-40 frames/s at native resolution, where the Eden emulator gets 22-30
 > - Linux - x86-64, Vulkan: planned; the runtime is written to be portable but has not been tested yet
 
 > [!NOTE]
