@@ -164,7 +164,10 @@ figure { margin: 0 0 16px; }
 .zoom img { display: block; width: 100%; height: auto; }
 .zoom .fs { opacity: 0; }
 .zoom:hover .fs, .zoom:focus-within .fs { opacity: .85; }
-.zoom:fullscreen { cursor: zoom-out; border-radius: 0; background: var(--violet-deep); display: grid; place-items: center; }
+/* one cell the size of the screen, so the picture's height: 100% means the screen's height: with an auto row a
+   picture taller than the screen's shape (the upscaling ones) kept its full height and was cut off at the bottom */
+.zoom:fullscreen { cursor: zoom-out; border-radius: 0; background: var(--violet-deep); display: grid; grid-template: 100% / 100%;
+  place-items: center; }
 .zoom:fullscreen img { width: 100%; height: 100%; object-fit: contain; border-radius: 0; }
 .zoom:fullscreen .fs { opacity: .85; }
 .zoom:fullscreen .fs .in { display: none; }

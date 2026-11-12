@@ -21,6 +21,7 @@
   --gold: oklch(80% 0.12 85); --gold-deep: oklch(62% 0.12 75); --cream: oklch(96.5% 0.03 90);
   --cyan: oklch(76% 0.11 215); --white: oklch(99.2% 0.004 305);
   --r: 14px;
+  --ease: cubic-bezier(.22, 1, .36, 1);
   --display: "M PLUS Rounded 1c", "Hiragino Maru Gothic ProN", sans-serif;
   --body: "Zen Kaku Gothic New", "Hiragino Sans", sans-serif;
   --step--1: clamp(.8rem, .78rem + .1vw, .88rem);
@@ -82,6 +83,12 @@ kbd { font: 700 .82em/1 var(--display); color: var(--violet-deep); background: v
 .shot { background: var(--gold); border-radius: var(--r); padding: 8px; box-shadow: 0 18px 40px oklch(15% 0.08 295 / .5); margin: 0; }
 .shot img { display: block; width: 100%; height: auto; border-radius: 8px; }
 .shot figcaption { color: var(--violet-deep); font-size: .8rem; margin: 8px 6px 2px; }
+/* the header's slideshow: the pictures stacked in one 16:9 box, the current one faded in */
+.slides .frames { position: relative; aspect-ratio: 16 / 9; border-radius: 8px; overflow: hidden; background: var(--violet-deep); }
+.slides .frames img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; border-radius: 0;
+  opacity: 0; transition: opacity 1.2s var(--ease); }
+.slides .frames img.on { opacity: 1; }
+@media (prefers-reduced-motion: reduce) { .slides .frames img { transition: none; } }
 
 .shell { max-width: 1280px; margin: 0 auto; padding: 40px 20px 72px; display: grid; grid-template-columns: 236px minmax(0, 1fr); gap: 40px; align-items: start; }
 .shell > * { min-width: 0; }
@@ -198,9 +205,16 @@ footer a { color: var(--gold); }
         <a class="btn ghost" href="../launcher/">The launcher</a>
       </div>
     </div>
-    <figure class="shot">
-      <img src="../screenshots/97-overlay.jpg" alt="Four of the overlay's pages: Settings, Preview with the game running under the bar, Controls with a DualSense, and the performance HUD's page">
-      <figcaption>Settings, Preview, Controls and the Performance HUD's page</figcaption>
+    <figure class="shot slides" aria-roledescription="slideshow" aria-label="The overlay's pages">
+      <div class="frames">
+        <img src="../screenshots/97-overlay-settings.jpg" class="on" alt="The overlay's Settings: the Display section with window mode, resolution, aspect ratio and frame rate" data-cap="Settings · the Display section">
+        <img src="../screenshots/97-overlay-preview.jpg" loading="lazy" alt="Preview: the game running in the schoolyard under a bar with the shadow settings and the frame rate" data-cap="Preview · the shadow settings on the running game">
+        <img src="../screenshots/75-controls-dualsense.jpg" loading="lazy" alt="The overlay's Controls page with a DualSense: each Switch button with its keys and its PlayStation symbol" data-cap="Controls · with a DualSense">
+        <img src="../screenshots/75-controls-mouse-buttons.jpg" loading="lazy" alt="The Mouse buttons page for battles: the mouse drawn with Attack on the left button and Aim on the right" data-cap="Mouse buttons · for battles">
+        <img src="../screenshots/76-controls-quick-look-keyboard.jpg" loading="lazy" alt="The quick look on the keyboard: every bound key coloured and named" data-cap="Quick look · the keyboard">
+        <img src="../screenshots/11-hud-in-town.jpg" loading="lazy" alt="Riding a bike down snowy Ordinary Street at 4K with the detailed performance HUD" data-cap="Performance HUD · the detailed one at 4K">
+      </div>
+      <figcaption><span class="cap">Settings · the Display section</span></figcaption>
     </figure>
   </div>
 </header>
@@ -633,6 +647,21 @@ footer a { color: var(--gold); }
   });
   draw();
   if (document.fonts && document.fonts.ready) document.fonts.ready.then(draw);  // measured again in the real font
+})();
+
+// The header's slideshow: the next picture every 5 s (once it has loaded), paused while the tab is hidden;
+// it stays on the first one when the reader asks for less motion. Loops back to the first after the last.
+(() => {
+  const imgs = [...document.querySelectorAll('.slides .frames img')], cap = document.querySelector('.slides .cap');
+  if (imgs.length < 2 || matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+  for (const img of imgs) img.loading = 'eager';  // fetch the rest now so each fade has its picture
+  let i = 0;
+  setInterval(() => {
+    if (document.hidden) return;
+    const n = (i + 1) % imgs.length;
+    if (!imgs[n].complete || !imgs[n].naturalWidth) return;
+    imgs[i].classList.remove('on'); imgs[n].classList.add('on'); cap.textContent = imgs[n].dataset.cap; i = n;
+  }, 5000);
 })();
 </script>
 </body>
