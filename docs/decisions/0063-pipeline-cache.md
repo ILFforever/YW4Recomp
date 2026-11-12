@@ -66,7 +66,7 @@ they were still good. That costs one run of first-time builds, after a game upda
   keeping it would let the next start prewarm the new cache in the background. It is deleted with the cache for
   now, as decided; keeping it is a small change in `gpu_pcache_init`.
 - Not taken from the fork: FSR 3.1 as the default on Radeons without RDNA 4 (it belongs with decision 0062, whose
-  first start only writes settings the panel has), and refresh-aligned pacing for 30 and 60 frames/s (it replaces
-  the wait on the vsync thread that 232829c tuned; not measured together).
+  first start only writes settings the panel has). The same fork commit's refresh-aligned pacing for 30 and 60
+  frames/s is in as an option, to be measured: decision 0064.
 - To check on a real GPU: the files appear in `work/`; a second run logs `pipelines to prewarm` and fewer
   `stall:` lines than the first; and the same on an AMD card.
