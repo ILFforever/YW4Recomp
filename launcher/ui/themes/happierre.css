@@ -10,10 +10,11 @@
   --violet-soft: #9bcf4a; /* the leaf green, a small accent */
   --ink: #2e2a14;       /* body text */
   --ink-2: #6e6640;     /* secondary text */
-  --gold: #f9e9a2;      /* primary buttons: his butter yellow */
+  --gold: #e8b923;      /* primary buttons: his yellow, solid (the butter yellow read as an empty button) */
   --gold-deep: #c9a640;
-  --gold-hi: #f3dc78;
-  --gold-press: #e6cc60;
+  --gold-hi: #f0c844;
+  --gold-press: #d4a51c;
+  --gold-ink: #2e2a14;  /* their text: dark (the title-bar yellow on yellow can't be read) */
   --cream: #fbf6dc;
   --white: #ffffff;
   --ok: #3f7a2e;

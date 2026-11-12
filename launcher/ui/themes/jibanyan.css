@@ -15,6 +15,7 @@
   --gold-deep: #c99a1e;
   --gold-hi: #ffd766;
   --gold-press: #e0ae2a;
+  --gold-ink: #2a1410;  /* text on primary buttons: dark (the red title-bar colour is too bright on yellow) */
   --cream: #fff3de;
   --white: #ffffff;
   --ok: #2e8b57;

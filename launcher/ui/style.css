@@ -31,6 +31,7 @@
   --step-done-ink: oklch(78% 0.07 85);
   --gold-hi: oklch(85% 0.12 85);
   --gold-press: oklch(74% 0.12 82);
+  --gold-ink: var(--violet-deep);  /* text on primary buttons: a theme whose title-bar colour is light sets its own */
   --gold-soft-press: oklch(93% 0.05 88);
   --ink-3: oklch(62% 0.03 295);
   --bad-bg: oklch(95% 0.035 30);
@@ -359,7 +360,7 @@ p.list-card { padding: 14px 18px; }
   font: 700 15px/1 var(--display); cursor: pointer; }
 .btn:not(.primary):not(:disabled):hover { background: var(--lilac-1); border-color: var(--violet-soft); }
 /* flat, like the game's menu buttons: no raised edge; pressing darkens */
-.btn.primary { border: 0; background: var(--gold); color: var(--violet-deep); font-weight: 800; }
+.btn.primary { border: 0; background: var(--gold); color: var(--gold-ink); font-weight: 800; }
 .btn.primary:hover { background: var(--gold-hi); }
 .btn.primary:active { background: var(--gold-press); }
 .btn.primary.play { background: var(--play); color: var(--play-ink); }
