@@ -668,6 +668,15 @@ static int overlay_resources(Overlay *o) {
  * layout) at the frame's top-left corner (x0, y0), scaled up with the window. The previous
  * present's fence has been waited for, so the buffer is free to write. */
 static int hud_shown_w, hud_shown_h;  /* the part of hud.ptr drawn at the last present (0: none) */
+/* What the HUD showed at the last present, and the scale and picture height it was drawn for: a screenshot draws
+ * it again at the frame's own scale (hud_onto), so a 4K shot from a smaller window doesn't get a tiny HUD */
+static struct {
+    HudContent content;
+    int compact;
+    unsigned parts;
+    float s;
+    uint32_t bh;
+} hud_shot;
 
 /* Records copying an overlay's drawn w x h part onto dst (in TRANSFER_DST layout) with its top-left at
  * (x, y), each texel s x s window pixels: whole steps stay sharp, between them it is filtered. */
@@ -1067,6 +1076,7 @@ static void hud_draw(VkImage dst, uint32_t index, int32_t x0, int32_t y0, uint32
         }
     }
     hud_shown_w = w, hud_shown_h = h;
+    hud_shot.content = content, hud_shot.compact = compact, hud_shot.parts = parts, hud_shot.s = s, hud_shot.bh = bh;
     int32_t hx, hy;
     hud_place(w, h, bw, bh, s, &hx, &hy);
     if (redraw) {
@@ -1712,16 +1722,27 @@ static uint32_t panel_scale(uint32_t bw, uint32_t bh) {
  * present, the HUD at the top-left corner, scaled as overlay_scale says for its height, and the panel in its middle at the window's scale
  * for a picture of this size (rgba: the w x h frame, colours as the window shows). */
 static void hud_onto(uint8_t *rgba, uint32_t w, uint32_t h) {
-    float hs = overlay_scale(h);
-    int32_t hx, hy;
-    hud_place(hud_shown_w, hud_shown_h, w, h, hs, &hx, &hy);
-    if (hb.cpu && hud_shown_w)  /* the see-through card, blended as the window does: src + dst * (1 - src.a) */
-        for (int j = 0; j < hud_shown_h && hy + j < (int32_t)h; j++)
-            for (int i = 0; i < hud_shown_w && hx + i < (int32_t)w; i++) {
-                const uint8_t *sp = hb.cpu + ((size_t)j * HUD_W + (size_t)i) * 4;
-                uint8_t *dp = rgba + ((size_t)(hy + j) * w + (size_t)(hx + i)) * 4;
-                for (int k = 0; k < 3; k++) dp[k] = (uint8_t)(sp[k] + dp[k] * (255 - sp[3]) / 255);
-            }
+    /* The HUD drawn again for this frame, at the size it has on screen relative to the picture: the window's
+     * scale times frame height / the picture's height in the window (owner, 2026-11-13: a 4K F12 from a smaller
+     * window had a quarter-size HUD, its window-sized texels pasted 1:1). Up to 4x, what HUD_W x HUD_H holds. */
+    if (hb.cpu && hud_shown_w && hud_shot.bh) {
+        float hs = hud_shot.s * (float)h / (float)hud_shot.bh;
+        if (hs > 4.0f) hs = 4.0f;
+        uint8_t *buf = malloc((size_t)HUD_W * HUD_H * 4);
+        if (buf) {
+            int hw = 0, hh = 0;
+            hud_style_render(buf, HUD_W, HUD_H, &hud_shot.content, hud_shot.compact, hud_shot.parts, hs, &hw, &hh);
+            int32_t hx, hy;
+            hud_place(hw, hh, w, h, hs, &hx, &hy);
+            for (int j = 0; j < hh && hy + j < (int32_t)h; j++)  /* the see-through card, blended as the window does */
+                for (int i = 0; i < hw && hx + i < (int32_t)w; i++) {
+                    const uint8_t *sp = buf + ((size_t)j * HUD_W + (size_t)i) * 4;
+                    uint8_t *dp = rgba + ((size_t)(hy + j) * w + (size_t)(hx + i)) * 4;
+                    for (int k = 0; k < 3; k++) dp[k] = (uint8_t)(sp[k] + dp[k] * (255 - sp[3]) / 255);
+                }
+            free(buf);
+        }
+    }
     uint32_t s = panel_scale(w, h);
     if (panel_shown_w && (uint32_t)panel_shown_w * s <= w && (uint32_t)panel_shown_h * s <= h)
         paste(rgba, w, h, &panel, panel_shown_w, panel_shown_h, (w - (uint32_t)panel_shown_w * s) / 2,
