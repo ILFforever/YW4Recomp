@@ -33,10 +33,10 @@ the unimplemented IPC command.
     `update` / `final_hex` in `runtime/src/sha256.c`; `std::io::copy` in `check.rs`) instead of allocating the whole
     NCA in memory. Use `_wfindfirst64` / `_wfopen` on Windows so NSPs with Japanese filenames open regardless of the
     active ANSI code page.
-  - Because content NCA filenames start with the first 32 hex digits of their SHA-256, skip any `.nca` whose filename
-    prefix is not in `[dlc]`. Multi-GB base and update NCAs sharing the folder are skipped immediately without reading.
+  - NCAs over 256 MiB are skipped without reading, so multi-GB base and update NCAs sharing the folder cost nothing.
+    (Until 2026-11-12 the filter was the file name; see decision 0049's update: the hash now leaves out the header.)
   - Software SHA-256 on the 222 MiB pack takes ~1028 ms on the first boot; once an NCA over 1 MiB passes its full
-    SHA-256 check, `svc_misc.c` records `(name, size, first-4-KiB SHA-256) -> full SHA-256` in `aoc.cache` next to
+    SHA-256 check, `svc_misc.c` records `(name, size, first-4-KiB SHA-256) -> body SHA-256` in `aoc-body.cache` next to
     `yw4.exe`, bringing subsequent boot scans of all 15 NSPs down to ~11–13 ms.
 - **Extracting add-on RomFS (`tools/yw4/extract.py`, `tools/yw4/build_install.py`, `launcher/src-tauri/src/buildrun.rs`,
   `launcher/src-tauri/src/ready.rs`)**:

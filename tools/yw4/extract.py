@@ -200,8 +200,8 @@ def extract_dlc(cfg: config.Config) -> int:
         return 0
     if cfg.keys_dir is None or not (cfg.keys_dir / "prod.keys").is_file():
         return 0
+    # SHA-256 of a content NCA's body, past its 0xC00-byte header (decision 0049): the same with or without a ticket
     known = {h.lower(): i for i, h in tomllib.loads(TARGET.read_text()).get("dlc", {}).items()}
-    prefixes = {h[:32] for h in known}
     out_root = cfg.romfs_dir.parent / "dlc-romfs"
     done = 0
     with tempfile.TemporaryDirectory() as tmp:
@@ -219,13 +219,12 @@ def extract_dlc(cfg: config.Config) -> int:
                             if got:
                                 tkeys[got[0]] = got[1]
                     for e in entries:
-                        if not e.name.endswith(".nca") or e.name.endswith(".cnmt.nca") or e.size > (256 << 20):
+                        if (not e.name.endswith(".nca") or e.name.endswith(".cnmt.nca") or e.size <= 0xC00
+                                or e.size > (256 << 20)):
                             continue
-                        if e.name[:-4].lower() not in prefixes:
-                            continue
-                        f.seek(e.offset)
+                        f.seek(e.offset + 0xC00)
                         sha = hashlib.sha256()
-                        left = e.size
+                        left = e.size - 0xC00
                         while left:
                             chunk = f.read(min(left, 1 << 20))
                             if not chunk:

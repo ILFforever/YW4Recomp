@@ -39,3 +39,23 @@ account-specific data, so the NSP as a whole is not.
   find.
 - An owner with an older version of an updated add-on isn't recognised for that add-on until its hash is added.
 - Adding DLC support for another dump format (an XCI of add-ons, NSZ) means reading that container here too.
+
+## Update 2026-11-12: the hash leaves out the NCA header
+
+A tester's add-ons (issue #3) were all left out although 12 of them hold the same content as the owner's. They had been
+run through a ticket-removal tool: it rewrites bytes 0x200–0x33F of each content NCA's header (rights ID and key
+area) and can rename the file (the 4++ Upgrade Pack's was `bcca0183….nca`), so neither the whole-file hash nor the
+name prefix matched.
+
+- `[dlc]` now holds the SHA-256 of each content NCA from byte 0xC00 to the end: the body, past the main header and
+  the four section headers. It is the same with or without a ticket.
+- The name prefix filter is gone: every content NCA up to 256 MiB is hashed (the game's and update's program NCAs are
+  GiBs and still skipped; their small control/manual NCAs cost nothing). The runtime's cache is now `aoc-body.cache`;
+  the old `aoc.cache` held whole-file hashes and is not read.
+- Same rule in `tools/yw4/extract.py` (add-on RomFS) and the launcher's check (`launcher/src-tauri/src/check.rs`).
+  The launcher's DLC tab now lists every file it left out, with a reason: not an `.nsp`, can't be read, the game or
+  an update, or not a known copy.
+- Add-ons 1 and 9 stay unknown. The only copies found (a widely shared "15 DLC Pack") have blank header signatures,
+  SDK 0.12.17.0 and key generation 0: built by a homebrew tool, not dumped. Their `aoc.cfg.bin` names slots that do
+  exist in the game's `add_content_config.cfg.bin` (33 slots), but nothing shows they were ever sold. Files nobody can
+  own are not added to the table.

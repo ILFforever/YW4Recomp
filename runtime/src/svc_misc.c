@@ -14,9 +14,9 @@
 #include "yw4load.h"  /* yw4_sha256_hex */
 
 /* ---- aoc:u: add-on content (decision 0049). On boot the game looks in its DLC folder (YW4_DLC_DIR, default
- * work/dlc) for the owner's add-on NSPs and owns an add-on when the SHA-256 of an NSP's content NCA is one in
- * target.toml's [dlc] table (dlc_known.c): that file is the same for every owner, a renamed or empty file
- * unlocks nothing. YW4_AOC (indices, comma separated) replaces the scan, for tests. */
+ * work/dlc) for the owner's add-on NSPs and owns an add-on when the SHA-256 of an NSP's content NCA body (past
+ * its 0xC00-byte header) is one in target.toml's [dlc] table (dlc_known.c): that is the same for every owner,
+ * with or without a ticket, and an empty or home-made file unlocks nothing. YW4_AOC (indices, comma separated) replaces the scan, for tests. */
 
 static uint32_t aoc[64];
 static uint32_t naoc = UINT32_MAX;
@@ -43,16 +43,9 @@ static int ends_with(const char *s, const char *tail) {
     return 1;
 }
 
-/* A content NCA's name is the first half of its SHA-256 (decision 0049): only one named like a known add-on's is
- * hashed, so the base game's and update's NCAs (when they share the folder) are never read. */
-static int known_name(const char *name) {
-    for (size_t k = 0; k < yw4_ndlc_known; k++) {
-        size_t i = 0;
-        while (i < 32 && tolower((unsigned char)name[i]) == yw4_dlc_known[k].sha256[i]) i++;
-        if (i == 32 && !strcmp(name + 32, ".nca")) return 1;
-    }
-    return 0;
-}
+/* The NCA header (0xC00 bytes: the main header and four section headers) is left out of the hash: tools that
+ * remove the ticket rewrite its rights ID and key area, and rename the file, while the body stays the same. */
+enum { NCA_HEADER = 0xC00 };
 
 /* SHA-256 of `size` bytes at `at`, read in pieces (the 4++ Upgrade Pack's NCA is 222 MiB). 0, or -1 on a short read. */
 static int hash_part(FILE *f, uint64_t at, uint64_t size, char hex[65]) {
@@ -72,14 +65,15 @@ static int hash_part(FILE *f, uint64_t at, uint64_t size, char hex[65]) {
     return ok ? 0 : -1;
 }
 
-/* Hashing a 222 MiB NCA in C takes ~1.1 s; once a >1 MiB NCA's full SHA-256 is verified, remember `(name, size,
- * first-4-KiB SHA-256) -> full SHA-256` in aoc.cache next to yw4.exe so later boots only hash the 4 KiB header. */
+/* SHA-256 of a content NCA's body (all but the header). Hashing a 222 MiB NCA in C takes ~1.1 s; once a >1 MiB
+ * NCA is hashed, remember `(name, size, first-4-KiB SHA-256) -> body SHA-256` in aoc-body.cache next to yw4.exe
+ * so later boots only hash 4 KiB. (aoc.cache, from before 2026-11-12, held whole-file hashes: not read.) */
 static int hash_nca(FILE *f, const char *name, uint64_t at, uint64_t size, char hex[65]) {
-    if (size <= (1u << 20)) return hash_part(f, at, size, hex);
+    if (size <= (1u << 20)) return hash_part(f, at + NCA_HEADER, size - NCA_HEADER, hex);
     char spot[65], path[1100], cname[64], cspot[65], chex[65];
     if (hash_part(f, at, 4096, spot)) return -1;
     const char *base = SDL_GetBasePath();
-    snprintf(path, sizeof path, "%saoc.cache", base ? base : "");
+    snprintf(path, sizeof path, "%saoc-body.cache", base ? base : "");
     FILE *cf = fopen(path, "r");
     for (unsigned long long csize; cf && fscanf(cf, "%63s %llu %64s %64s", cname, &csize, cspot, chex) == 4;)
         if (!strcmp(cname, name) && csize == size && !strcmp(cspot, spot)) {
@@ -88,7 +82,7 @@ static int hash_nca(FILE *f, const char *name, uint64_t at, uint64_t size, char 
             return 0;
         }
     if (cf) fclose(cf);
-    if (hash_part(f, at, size, hex)) return -1;
+    if (hash_part(f, at + NCA_HEADER, size - NCA_HEADER, hex)) return -1;
     if ((cf = fopen(path, "a")) != NULL) {
         fprintf(cf, "%s %llu %s %s\n", name, (unsigned long long)size, spot, hex);
         fclose(cf);
@@ -115,7 +109,11 @@ static long aoc_nsp(FILE *f) {
                 memcpy(&off, table + i * 0x18, 8), memcpy(&size, table + i * 0x18 + 8, 8);
                 memcpy(&name_off, table + i * 0x18 + 16, 4);
                 const char *name = name_off < strtab ? names + name_off : "";
-                if (!known_name(name) || size > (256u << 20)) continue;
+                /* Every content NCA up to 256 MiB is hashed: the base game's and update's program NCAs (GiBs, when
+                 * they share the folder) are skipped, their small control/manual NCAs cost nothing. */
+                if (!ends_with(name, ".nca") || ends_with(name, ".cnmt.nca") || size <= NCA_HEADER ||
+                    size > (256u << 20))
+                    continue;
                 char hex[65];
                 if (!hash_nca(f, name, data + off, size, hex))
                     for (size_t k = 0; k < yw4_ndlc_known; k++)

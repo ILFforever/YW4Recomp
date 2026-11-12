@@ -344,6 +344,9 @@ p.list-card { padding: 14px 18px; }
 .dlc-row b { font-weight: 700; overflow-wrap: anywhere; }
 .dlc-row code { font: 12px ui-monospace, Consolas, monospace; color: var(--ink-2); }
 .dlc-row span { margin-left: auto; flex: none; color: var(--ink-2); }
+.dlc-row.left-out { flex-wrap: wrap; row-gap: 2px; }
+.dlc-row.left-out b { color: var(--ink-2); font-weight: 400; }
+.dlc-row.left-out small { flex-basis: 100%; color: var(--ink-2); font-size: 12px; }
 .mod-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
 .mod-row b { font-weight: 700; overflow-wrap: anywhere; }
 .mod-row.disabled b { color: var(--ink-2); font-weight: 400; }

@@ -770,13 +770,23 @@ function renderModsDlc(info) {
       li.append(name);
     }
     const state = document.createElement('span');
-    state.textContent = d.index === null ? 'Not recognised: the game leaves it out'
-      : d.needsKeys ? 'Needs prod.keys to unpack' : 'Checked';
-    li.append(state);
+    if (d.index === null) {
+      li.classList.add('left-out');
+      state.textContent = 'Not recognised';
+      const why = document.createElement('small');
+      why.textContent = d.reason || 'The game leaves it out';
+      li.append(state, why);
+    } else {
+      state.textContent = d.needsKeys ? 'Needs prod.keys to unpack' : 'Checked';
+      li.append(state);
+    }
     dlcs.append(li);
   }
   if (!info.dlcList.length) { const li = chip('None. Put DLC NSPs in the DLC folder.'); li.className = 'none'; dlcs.append(li); }
-  $('row-dlc').textContent = needsKeys ? 'Needs prod.keys' : info.dlc ? `${info.dlc} checked` : 'None';
+  const out = info.dlcList.length - info.dlc;
+  const outText = out ? `${out} not recognised` : '';
+  $('row-dlc').textContent = needsKeys ? 'Needs prod.keys'
+    : info.dlc ? (out ? `${info.dlc} checked · ${outText}` : `${info.dlc} checked`) : outText || 'None';
 }
 $('dlc-keys-btn').addEventListener('click', async () => {
   if (!T || !T.dialog) return;

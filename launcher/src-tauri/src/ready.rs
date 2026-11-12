@@ -216,7 +216,7 @@ fn dir_size(p: &Path) -> u64 {
     crate::check::folder_size(p).0
 }
 
-/// One NSP in data\dlc. The add-ons hold no name we can read, so a checked one is its index and title ID.
+/// One file in data\dlc, or one left out of the chosen DLC folder. The add-ons hold no name we can read, so a checked one is its index and title ID.
 #[derive(Serialize)]
 pub struct DlcItem {
     index: Option<u32>,       // None: the file isn't a known add-on (the game will leave it out)
@@ -224,6 +224,7 @@ pub struct DlcItem {
     file: String,
     #[serde(rename = "needsKeys")]
     needs_keys: bool,         // true when index 100 (4++ Upgrade Pack) hasn't been unpacked to data\dlc-romfs\100 yet
+    reason: Option<String>,   // why the game leaves it out (index None)
 }
 
 #[derive(Serialize)]
@@ -371,16 +372,36 @@ pub async fn install_info(app: tauri::AppHandle, install: String) -> Info {
         crate::buildrun::ensure_dlc_extracted(&app, &inst);
         let version = game_version(&exe(&install));
         let has_100 = inst.join("data").join("dlc-romfs").join("100").is_dir();
-        let mut dlc_list: Vec<DlcItem> = std::fs::read_dir(inst.join("data").join("dlc")).into_iter().flatten().flatten()
-            .map(|e| e.path())
-            .filter(|p| p.extension().map_or(false, |x| x.eq_ignore_ascii_case("nsp")))
-            .map(|p| {
-                let index = crate::check::dlc_index_of(&p);
-                DlcItem { index, id: index.map(crate::check::dlc_title_id),
-                          file: p.file_name().unwrap_or_default().to_string_lossy().into_owned(),
-                          needs_keys: index == Some(100) && !has_100 }
-            })
-            .collect();
+        // Every file in data\dlc (copied by the build or by hand), then the files of the DLC folder chosen for the
+        // build that weren't copied because they failed the check: each left-out file says why.
+        let item = |p: &Path| {
+            let check = crate::check::dlc_check(p);
+            let index = check.ok();
+            DlcItem { index, id: index.map(crate::check::dlc_title_id),
+                      file: p.file_name().unwrap_or_default().to_string_lossy().into_owned(),
+                      needs_keys: index == Some(100) && !has_100, reason: check.err().map(str::to_string) }
+        };
+        let listed = |dir: &Path| -> Vec<PathBuf> {
+            std::fs::read_dir(dir).into_iter().flatten().flatten().map(|e| e.path())
+                .filter(|p| p.file_name().map_or(false, |n| {
+                    let n = n.to_string_lossy().to_lowercase();
+                    !n.starts_with('.') && n != "desktop.ini" && n != "thumbs.db"
+                }))
+                .collect()
+        };
+        let data_dlc = inst.join("data").join("dlc");
+        let mut dlc_list: Vec<DlcItem> = listed(&data_dlc).iter().map(|p| item(p)).collect();
+        let source = current_state().filter(|s| Path::new(&s.install) == inst.as_path())
+            .and_then(|s| s.paths.get("dlc").cloned()).filter(|d| !d.is_empty()).map(PathBuf::from)
+            .filter(|d| d.is_dir() && std::fs::canonicalize(d).ok() != std::fs::canonicalize(&data_dlc).ok());
+        if let Some(src) = source {
+            for p in listed(&src) {
+                if !data_dlc.join(p.file_name().unwrap_or_default()).exists() {
+                    let it = item(&p);
+                    if it.index.is_none() { dlc_list.push(it); }
+                }
+            }
+        }
         dlc_list.sort_by(|a, b| (a.index.is_none(), a.index, &a.file).cmp(&(b.index.is_none(), b.index, &b.file)));
         let dlc = dlc_list.iter().filter(|d| d.index.is_some()).count();
         let mut shots: Vec<(std::time::SystemTime, PathBuf)> = std::fs::read_dir(inst.join("screenshots")).into_iter().flatten().flatten()

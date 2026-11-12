@@ -31,7 +31,7 @@ fn row(label: &str, state: &'static str, detail: impl Into<String>) -> Row {
 
 struct Target {
     app: u64,
-    dlc: HashMap<String, u32>, // sha256 of a content NCA -> add-on index
+    dlc: HashMap<String, u32>, // sha256 of a content NCA body (past 0xC00) -> add-on index
     romfs_bytes: u64,
 }
 
@@ -157,9 +157,25 @@ fn ticket_titles(entries: &[Entry]) -> Vec<(u64, String)> {
     }).collect()
 }
 
-/// The add-on index of one DLC NSP: its content NCA's SHA-256 looked up in target.toml [dlc].
+/// The add-on index of one DLC NSP: its content NCA body's SHA-256 looked up in target.toml [dlc].
 pub fn dlc_index_of(path: &Path) -> Option<u32> {
     dlc_index(path, &target())
+}
+
+/// One file in a DLC folder: its add-on index, or why the game leaves it out (shown on the DLC tab).
+pub fn dlc_check(path: &Path) -> Result<u32, &'static str> {
+    if path.is_dir() || !path.extension().map_or(false, |x| x.eq_ignore_ascii_case("nsp")) {
+        return Err("The game only reads .nsp files");
+    }
+    let Ok((entries, false)) = contents(path) else { return Err("Can't be read as an NSP file") };
+    if let Some(i) = dlc_index(path, &target()) {
+        return Ok(i);
+    }
+    // An add-on's content is at most 222 MiB (the 4++ Upgrade Pack); the game's and update's are GiBs
+    if entries.iter().any(|e| e.name.ends_with(".nca") && e.size > 256 << 20) {
+        return Err("The game or an update, not an add-on");
+    }
+    Err("Not a known copy of an add-on of this game")
 }
 
 /// This install already has all the game files from its last build: the same test as the build's own
@@ -186,14 +202,15 @@ pub fn folder_size(dir: &Path) -> (u64, u64) {
 fn dlc_index(path: &Path, t: &Target) -> Option<u32> {
     let (entries, _) = contents(path).ok()?;
     let mut f = File::open(path).ok()?;
-    for e in entries.iter().filter(|e| e.name.ends_with(".nca") && !e.name.ends_with(".cnmt.nca") && e.size <= 256 << 20) {
-        let prefix = e.name.strip_suffix(".nca")?.to_lowercase();
-        if !t.dlc.keys().any(|h| h.starts_with(&prefix)) {
-            continue;
-        }
-        f.seek(SeekFrom::Start(e.offset)).ok()?;
+    // The body past the 0xC00-byte header is hashed (decision 0049): ticket-removal tools rewrite the header and
+    // rename the file, so neither the name nor the whole file identifies an add-on.
+    const HEADER: u64 = 0xC00;
+    for e in entries.iter().filter(|e| {
+        e.name.ends_with(".nca") && !e.name.ends_with(".cnmt.nca") && e.size > HEADER && e.size <= 256 << 20
+    }) {
+        f.seek(SeekFrom::Start(e.offset + HEADER)).ok()?;
         let mut h = Sha256::new();
-        std::io::copy(&mut (&mut f).take(e.size), &mut h).ok()?;
+        std::io::copy(&mut (&mut f).take(e.size - HEADER), &mut h).ok()?;
         let hex: String = h.finalize().iter().map(|b| format!("{b:02x}")).collect();
         if let Some(&i) = t.dlc.get(&hex) {
             return Some(i);
@@ -217,12 +234,14 @@ fn dlc_row(dir: Option<&String>, has_keys: bool, t: &Target) -> Row {
             }
         }
     }
+    // NSPs that failed the check: the DLC tab names each with its reason after the build
+    let out = if nsps > found.len() { format!(" · {} not recognised (left out)", nsps - found.len()) } else { String::new() };
     match found.len() {
         0 if nsps == 0 => row("DLC", "warn", "No NSP files in that folder"),
-        0 => row("DLC", "warn", "No add-ons of this game found in that folder"),
+        0 => row("DLC", "warn", format!("No known add-ons of this game in that folder{out}")),
         n if found.contains(&100) && !has_keys => row("DLC", "warn",
-            format!("{n} of {} add-ons found · Yo-kai Watch 4++ Upgrade needs prod.keys (choose Keys folder or add later)", t.dlc.len())),
-        n => row("DLC", "ok", format!("{n} of {} add-ons found and checked", t.dlc.len())),
+            format!("{n} of {} add-ons found{out} · Yo-kai Watch 4++ Upgrade needs prod.keys (choose Keys folder or add later)", t.dlc.len())),
+        n => row("DLC", "ok", format!("{n} of {} add-ons found and checked{out}", t.dlc.len())),
     }
 }
 
