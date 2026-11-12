@@ -528,12 +528,11 @@ All captured from the recompiled build on Windows.
 
 ![The Amano house kitchen: Amano house kitchen; Opening scene; LEVEL-5 logo; Opening movie](docs/screenshots/92-screenshots.jpg)
 
-In town with the performance HUD on (F3). The game is a native Windows program: the frame takes about 10 ms of
-work on the CPU and under one core of a 16-core laptop, against the 33 ms the game's 30 frames/s allow; the
-shadows here are our own pass with no graphical improvements applied (SHADOW PASS: CUSTOM in the panel).
+On Ordinary Street with the performance HUD on (F3), at 3840×2160 with DLSS and frame generation: 51 frames a
+second rendered, 103 shown. The game is a native Windows program; here it uses 14% of a 16-core laptop's CPU.
 
 <p align="center">
-  <img src="docs/screenshots/11-hud-in-town.jpg" alt="In town with the performance HUD: frame time, work, GPU, CPU, memory and a frame-time graph" width="820">
+  <img src="docs/screenshots/11-hud-in-town.jpg" alt="Riding a bike down snowy Ordinary Street at 4K, with the performance HUD: 103 frames a second with DLSS, frame times, GPU, CPU, memory and a frame-time graph" width="820">
 </p>
 
 ## Goals
