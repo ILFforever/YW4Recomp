@@ -372,6 +372,11 @@ void gamemenu_message_begin(const char *title, const char *body) {
 }
 int window_repaint(int force) { return 0; }
 void host_sleep_ns(int64_t ns) {}
+/* the main characters' default names (main_name_for): a translation mod's chara_text, or none */
+static const char *mod_chara_text;
+const char *romfs_host_path(const char *path) {
+    return mod_chara_text && !strcmp(path, "data/common/text/ja/chara_text.cfg.bin") ? mod_chara_text : NULL;
+}
 
 static uint64_t last_user_arg;
 static char last_checked_text[128];
@@ -396,7 +401,26 @@ GuestFn yw4_resolve(uint64_t target) {
 
 #include "swkbd.c"
 
-int main(void) {
+/* main_name_for reads its names once per run, so each case is its own run: argv[1] "mod" (argv[2] a file laid
+ * out as the English patch's: 0xFF filler, six names, Neptuna, the six tokens) or "none" (the Japanese names). */
+static int names_test(int argc, char **argv) {
+    if (!strcmp(argv[1], "mod")) {
+        if (argc < 3) return 30;
+        mod_chara_text = argv[2];
+        if (strcmp(main_name_for("<NAME_KETA_8888>") ?: "", "Nate")) return 31;
+        if (strcmp(main_name_for("<NAME_NATSUME_8>") ?: "", "Summer")) return 32;
+        if (strcmp(main_name_for("<NAME_TOUMA_888>") ?: "", "Touma")) return 33;  /* the first, after the filler */
+        if (strcmp(main_name_for("<NAME_FUMI_8888>") ?: "", "Katie")) return 34;
+    } else {
+        if (strcmp(main_name_for("<NAME_KETA_8888>") ?: "", "ケータ")) return 35;
+        if (strcmp(main_name_for("<NAME_FUMI_8888>") ?: "", "フミ")) return 36;
+    }
+    if (main_name_for("<ITEM_NAME>")) return 37;  /* not a main character's token */
+    return 0;
+}
+
+int main(int argc, char **argv) {
+    if (argc > 1) return names_test(argc, argv);
     CPUState c = {0};
     uint8_t a[0x500] = {0};
     char buf[256] = {0};
@@ -463,15 +487,24 @@ class SwkbdCheckTest(unittest.TestCase):
     def test_text_check_callback(self):
         with tempfile.TemporaryDirectory() as t:
             t = Path(t)
-            (t / "drv.c").write_text(SWKBD_DRIVER)
+            (t / "drv.c").write_text(SWKBD_DRIVER, encoding="utf-8")
             exe = t / "swkbd_test.exe"
-            subprocess.run([check.host_cc(), "-std=c17", "-O1", "-Wall",
+            subprocess.run([check.host_cc(), "-std=gnu17", "-O1", "-Wall",
                             f"-I{RUNTIME / 'include'}", f"-I{RUNTIME / 'src'}",
                             f"-I{check.REPO / 'third_party' / 'vulkan' / 'include'}",
                             *POSIX,
                             "-o", str(exe), str(t / "drv.c")], check=True, capture_output=True)
             got = subprocess.run([str(exe)], capture_output=True, text=True, check=True)
             self.assertEqual(got.returncode, 0)
+            # the default names: a translation mod's file (the English patch's layout, made up here), then none
+            names = [b"Touma", b"Summer", b"Akinori", b"Shin", b"Nate", b"Katie", b"Neptuna"]
+            tokens = [b"<NAME_TOUMA_888>", b"<NAME_NATSUME_8>", b"<NAME_AKINORI_8>", b"<NAME_SHIN_8888>",
+                      b"<NAME_KETA_8888>", b"<NAME_FUMI_8888>"]
+            chara = t / "chara_text.cfg.bin"
+            chara.write_bytes(b"\x00" * 16 + b"\xff\xff\xff" + b"\x00".join(names + tokens) + b"\x00Dad\x00")
+            for args in (["mod", str(chara)], ["none"]):
+                got = subprocess.run([str(exe), *args], capture_output=True, text=True)
+                self.assertEqual(got.returncode, 0, f"{args[0]}: {got.stderr}")
 
 
 HID_VIBRATION_DRIVER = r"""
