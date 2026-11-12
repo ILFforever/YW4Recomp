@@ -7,12 +7,18 @@ the decompressed `main`).
 ## Requirements
 
 - Python 3.11+ and Git.
-- A C11 compiler: Clang preferred ([llvm-mingw](https://github.com/mstorsjo/llvm-mingw) on Windows; set `[tools] cc`
-  in your config), GCC works too. The host CPU needs FMA3 (any x86-64 CPU since 2013).
+- A C11 compiler: **Clang 19 or newer** preferred ([llvm-mingw](https://github.com/mstorsjo/llvm-mingw) on Windows;
+  set `[tools] cc` in your config), or GCC 15 or newer. Older ones stop at `#embed` (the built-in fonts,
+  `runtime/src/ui.c`: "invalid preprocessing directive"). The host CPU needs FMA3 (any x86-64 CPU since 2013).
 - A GPU with Vulkan 1.3. The [Vulkan SDK](https://vulkan.lunarg.com/) provides `glslangValidator` for the shader
   step and the validation layer for debugging.
 - SDL3 for the window: `recomp.build` fetches it on Windows (`python -m tools.yw4.deps`, pinned and hash-checked);
-  on Linux install it from your distribution (`pkg-config sdl3`).
+  on Linux install it from your distribution (`pkg-config sdl3` must find it). Where there is no package (Ubuntu
+  24.04), build [SDL3](https://github.com/libsdl-org/SDL/releases) from source with CMake into a folder of your
+  own, then build and run with `PKG_CONFIG_PATH=<folder>/lib/pkgconfig` and `LD_LIBRARY_PATH=<folder>/lib`.
+- Linux is new (first built and started 2026-11-12, Ubuntu 24.04 under WSL with Clang 19, software rendering): it
+  compiles, links and draws the first screens. Not yet tried there: a real GPU, audio, controllers. AMD FSR,
+  NVIDIA DLSS, frame generation and Reflex are Windows only.
 - On Windows the first build also downloads AMD FSR (upscaling, frame generation), NVIDIA DLSS and NVIDIA
   Streamline (DLSS frame generation, Reflex): about 550 MB in all, once, each checked against a pinned SHA-256
   and kept in `work/deps/`. Later builds are offline. Without internet, download the archive yourself and put it
