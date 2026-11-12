@@ -1,13 +1,13 @@
-# 0064 — Holding 30 and 60 frames/s: the vsync tick, or the display's refresh (to measure)
+# 0064 — Holding 30 and 60 frames/s: the vsync tick, or the display's refresh
 <!-- decision
-state: proposed
+state: accepted
 date: 2026-11-12
 replaces: none
 code: runtime/src/framerate.c, runtime/src/vi.c, runtime/src/perf.c
 -->
 
-Status: proposed (2026-11-12). Both ways are in the program; the tick is the default. Nothing is measured yet:
-this record is the plan for the measurement and the rule for choosing.
+Status: accepted (2026-11-12): measured the same day (below); the display's refresh is the default at 30, the
+tick at 60. The sections up to "The measurement" are the plan as it was written before measuring.
 
 ## Context
 
@@ -116,14 +116,15 @@ not be tried), the same walk, no frame generation:
 | 60 | tick | 223 | 0.26 ms | 117 |
 | 60 | refresh | 218 | 0.01 ms | 120 |
 
-(At 60 only one pair is whole: the second pair's runs were cut short, most likely by rebuilds that source edits
-during the runs set off in `tools.dev.run`.) So the gain at 30 does not come from the display's faster refresh:
+(At 60 only one pair is whole: the second pair's runs were cut short, most likely by another session building
+and starting the game in the same minutes: the exe was rebuilt at 22:33 by none of these runs.) So the gain at 30 does not come from the display's faster refresh:
 it is the late-frame rule. A tick wait that misses its tick waits a whole tick more; refresh starts its deadline
 again from the late frame.
 
 Result: refresh is clearly better at 30 on both displays (about one long frame for every eight with the tick),
-the same at 60 with or without frame generation, and costs CPU at 60. Recommended: refresh as the default at 30,
-the tick at 60. The owner decides; not changed yet.
+the same at 60 with or without frame generation, and costs CPU at 60. The owner chose (2026-11-12): **refresh is
+the default at 30, the tick stays at 60** (`framerate_pacing` in `framerate.c`; `YW4_PACE=refresh` or `tick` forces
+one way at both).
 
 ## Consequences
 

@@ -120,7 +120,7 @@ static void print_summary(FILE *f, size_t from, const char *what) {
         size_t late = 0;
         for (size_t i = 0; i < m; i++) late += interval[i] > limit, var += (interval[i] - mean) * (interval[i] - mean);
         fprintf(f, "  pacing %s at %d frames/s: %zu frames over %.0f ms = %.2f%%, standard deviation %.2f ms\n",
-                framerate_pacing() ? "refresh" : "tick", cap, late, limit, 100.0 * (double)late / frames, sqrt(var / frames));
+                framerate_pacing(cap) ? "refresh" : "tick", cap, late, limit, 100.0 * (double)late / frames, sqrt(var / frames));
     }
     fprintf(f, "  game work ms: avg %.1f  p50 %.1f  p95 %.1f  p99 %.1f  max %.1f   (budget at 30 frames/s: 33.3)\n", wsum / frames,
             percentile(work, 0, m, 50), percentile(work, 0, m, 95), percentile(work, 0, m, 99),

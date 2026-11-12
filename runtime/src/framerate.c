@@ -69,12 +69,17 @@ void framerate_cycle(void) {
 
 int framerate_hz(void) { return game_paces ? (game_n ? 60 / game_n : 0) : rates[framerate_index()]; }
 
-/* How 30 and 60 are held: 0 by the emulated vsync thread's tick (ours), 1 by a deadline aligned to the display's
- * refresh (YW4_PACE=refresh). Read once. */
-int framerate_pacing(void) {
-    static int refresh = -1;
-    if (refresh < 0) refresh = getenv("YW4_PACE") && !strcmp(getenv("YW4_PACE"), "refresh");
-    return refresh;
+/* How a cap of hz (30 or 60) is held: 0 by the emulated vsync thread's tick (ours), 1 by a deadline aligned to the
+ * display's refresh (from Quandiy's fork). Measured 2026-11-12 (decision 0064): at 30 refresh has about an eighth
+ * of the tick's long frames on 120 and 60 Hz displays, at 60 the two are the same and refresh costs CPU, so the
+ * default is refresh at 30 and the tick at 60. YW4_PACE=refresh or tick: that way at both. Read once. */
+int framerate_pacing(int hz) {
+    static int force = -2;  /* -1 the default, 0 tick, 1 refresh */
+    if (force == -2) {
+        const char *e = getenv("YW4_PACE");
+        force = e && !strcmp(e, "refresh") ? 1 : e && !strcmp(e, "tick") ? 0 : -1;
+    }
+    return force >= 0 ? force : hz == 30;
 }
 
 void framerate_wait(void) {
@@ -84,13 +89,12 @@ void framerate_wait(void) {
     if (game_paces) return;     /* the game's limiter and interval did it */
     int hz = framerate_hz();
     yw4_vsync_start();
-    /* YW4_PACE=refresh (off by default; from Quandiy's fork, where it was the default): 30 and 60 by a deadline on
-     * this thread, its period a whole number of the display's refreshes (2 x 8.33 ms on a 120 Hz screen, so every
-     * frame shows for the same two refreshes and the phase doesn't drift). There the wait for the emulated 60 Hz
-     * tick (vi.c's thread) lost a whole tick now and then: ~1 frame in 400 showed for 33 ms with 6 ms of work
-     * (2026-11-09, RX 6650 XT, 120 Hz). Here that thread has had the highest priority since (232829c), and the
-     * two ways have not been measured against each other yet, so the tick wait stays unless this is asked for. */
-    int pace_refresh = framerate_pacing();
+    /* Refresh (the default at 30, framerate_pacing; from Quandiy's fork, where it was the default at both): a
+     * deadline on this thread, its period a whole number of the display's refreshes (4 x 8.33 ms on a 120 Hz screen
+     * at 30, so every frame shows for the same refreshes and the phase doesn't drift). A late frame starts the
+     * deadline again from now, where the tick wait would lose a whole tick: at 30 that turned frames a little over
+     * 33 ms into 50 ms ones (decision 0064). */
+    int pace_refresh = framerate_pacing(hz);
     if ((hz == 30 || hz == 60) && pace_refresh) {
         next_flip = 0;
         double refresh = window_refresh_hz();
@@ -104,8 +108,8 @@ void framerate_wait(void) {
         static int64_t said_period;  /* the log names the way and its period, again when either changes */
         if (period != said_period) {
             said_period = period, said_tick = 0;
-            fprintf(stderr, "yw4: pacing: refresh, period %.3f ms at %.2f Hz (%d frames/s, YW4_PACE=refresh)\n",
-                    (double)period / 1e6, refresh, hz);
+            fprintf(stderr, "yw4: pacing: refresh, period %.3f ms at %.2f Hz (%d frames/s)\n", (double)period / 1e6,
+                    refresh, hz);
         }
         int64_t now = host_now_ns();
         if (!due || now - due > period / 2) due = now;  /* first frame, or late: start again from now, no burst */

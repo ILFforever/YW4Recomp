@@ -8,4 +8,4 @@ void framerate_cycle(void);
 int framerate_hz(void);     /* frames per second to hold, 0 = no limit, -1 = the display's refresh (vsync) */
 float framerate_game_dt(void);  /* the game's time step of its latest frame, seconds */
 void framerate_wait(void);  /* at the present, on the presenting thread: until this frame's time is up */
-int framerate_pacing(void); /* at 30 and 60: 0 the vsync tick, 1 the display's refresh (YW4_PACE=refresh) */
+int framerate_pacing(int hz); /* a cap of 30 or 60: 0 the vsync tick, 1 the display's refresh (default at 30; YW4_PACE) */

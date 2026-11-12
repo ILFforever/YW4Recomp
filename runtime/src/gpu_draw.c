@@ -1880,12 +1880,12 @@ int gpu_capture_pending(void) { return ncaps; }
 static void capture_targets(VkCommandBuffer cb, GpuState *s, const char *name);
 static void capture_after_draw(VkCommandBuffer cb, GpuState *s, const Program *g) {
     static const char *want;
-    static uint64_t at[16];
+    static uint64_t at[64];  /* 64 frames: one every 4 over 4 s of a replay (a flash's time series, 2026-11-12) */
     static int init, nat;
     if (!init) {
         init = 1;
         want = getenv("YW4_CAPTURE_FS");
-        for (const char *e = getenv("YW4_DUMP_IMAGE_AT"); e && *e && nat < 16; e += strcspn(e, ","), e += *e == ',')
+        for (const char *e = getenv("YW4_DUMP_IMAGE_AT"); e && *e && nat < 64; e += strcspn(e, ","), e += *e == ',')
             at[nat++] = strtoull(e, NULL, 10);
     }
     if (!want || !g->sh[ST_FRAG]) return;
