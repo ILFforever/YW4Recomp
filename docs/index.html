@@ -4,6 +4,9 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>YW4 Recomp</title>
+<link rel="icon" href="favicon.ico" sizes="any">
+<link rel="icon" type="image/png" href="img/icon-192.png">
+<link rel="apple-touch-icon" href="img/icon-192.png">
 <meta name="description" content="YW4 Recomp: a fan static recompilation of Yo-kai Watch 4++ for PC. 4K, ultrawide, better shadows, anti-aliasing, DLSS and FSR.">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -47,6 +50,18 @@ h1 { font: 800 clamp(2.4rem, 1.6rem + 3.4vw, 4.2rem)/1.04 var(--display); margin
 .btn:hover { color: var(--violet-deep); background: oklch(85% 0.12 85); }
 .btn.ghost { background: transparent; color: var(--gold); }
 .btn.ghost:hover { color: var(--gold); background: oklch(80% 0.12 85 / .12); }
+/* the GitHub button in GitHub's own look: black, the white mark (Octicons mark-github, MIT) */
+.btn.gh { display: inline-flex; align-items: center; gap: 8px; color: #fff; background: #000; border-color: #3d444d; }
+.btn.gh:hover { color: #fff; background: #1f2328; border-color: #656c76; }
+.btn.gh svg { width: 1.15em; height: 1.15em; fill: currentColor; flex: none; }
+/* the header's top bar: our icon and name (home), the GitHub button at the right */
+.sitebar { position: relative; max-width: 1180px; margin: 0 auto; padding: 16px 20px 0; display: flex; align-items: center;
+  justify-content: space-between; gap: 12px; }
+.brand { display: inline-flex; align-items: center; gap: 10px; color: var(--white); text-decoration: none;
+  font: 800 1.05rem/1 var(--display); }
+.brand:hover { color: var(--gold); }
+.brand img { width: 36px; height: 36px; display: block; }
+.sitebar .btn.gh { padding: 9px 14px; font-size: .88rem; }
 .shot { background: var(--white); border-radius: var(--r); padding: 8px; box-shadow: 0 18px 40px oklch(15% 0.08 295 / .5); margin: 0; }
 .shot img { display: block; width: 100%; height: auto; border-radius: 8px; }
 .shot figcaption { color: var(--ink-2); font-size: .8rem; margin: 8px 6px 2px; }
@@ -130,6 +145,10 @@ footer a { color: var(--gold); }
 <body>
 
 <header class="hero">
+  <nav class="sitebar" aria-label="Site">
+    <a class="brand" href="./"><img src="img/icon-192.png" alt="" width="36" height="36">YW4 Recomp</a>
+    <a class="btn gh" href="https://github.com/ILFforever/YW4Recomp"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 0c4.42 0 8 3.58 8 8a8.013 8.013 0 0 1-5.45 7.59c-.4.08-.55-.17-.55-.38 0-.27.01-1.13.01-2.2 0-.75-.25-1.23-.54-1.48 1.78-.2 3.65-.88 3.65-3.95 0-.88-.31-1.59-.82-2.15.08-.2.36-1.02-.08-2.12 0 0-.67-.22-2.2.82-.64-.18-1.32-.27-2-.27-.68 0-1.36.09-2 .27-1.53-1.03-2.2-.82-2.2-.82-.44 1.1-.16 1.92-.08 2.12-.51.56-.82 1.28-.82 2.15 0 3.06 1.86 3.75 3.64 3.95-.23.2-.44.55-.51 1.07-.46.21-1.61.55-2.33-.66-.15-.24-.6-.83-1.23-.82-.67.01-.27.38.01.53.34.19.73.9.82 1.13.16.45.68 1.31 2.69.94 0 .67.01 1.3.01 1.49 0 .21-.15.45-.55.38A7.995 7.995 0 0 1 0 8c0-4.42 3.58-8 8-8Z"/></svg>Project on GitHub</a>
+  </nav>
   <div class="hero-inner">
     <div>
       <span class="eyebrow">Fan static recompilation · work in progress</span>
@@ -144,7 +163,6 @@ footer a { color: var(--gold); }
         <a class="btn" href="compare/">See the comparisons</a>
         <a class="btn ghost" href="showcases/">Showcases</a>
         <a class="btn ghost" href="launcher/">The launcher</a>
-        <a class="btn ghost" href="https://github.com/ILFforever/YW4Recomp">Project on GitHub</a>
       </div>
     </div>
     <figure class="shot slides" aria-roledescription="slideshow" aria-label="Screenshots at 3840×2160">
