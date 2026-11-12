@@ -38,6 +38,12 @@ pub struct Running {
     busy: AtomicBool,
 }
 
+/// Is a build running? (ready.rs: the game set aside by an update is put back only when none is.)
+pub fn building(app: &AppHandle) -> bool {
+    app.try_state::<Arc<Running>>().map_or(false, |r| r.busy.load(Ordering::SeqCst))
+}
+
+
 #[derive(Serialize, Clone)]
 struct StepEvent { id: String, state: String }
 #[derive(Serialize, Clone)]
@@ -94,7 +100,7 @@ pub fn builder_bundled(app: AppHandle) -> bool {
     bundled_dir(&app).is_some()
 }
 
-/// The current build's log file (<install>\logsuild_last.log), so a bug report can attach the last build's log.
+/// The current build's log file (<install>\logs\build_last.log), so a bug report can attach the last build's log.
 static BUILD_LOG: Mutex<Option<std::fs::File>> = Mutex::new(None);
 
 fn emit_log(app: &AppHandle, line: &str) {
@@ -293,6 +299,7 @@ fn run_all(app: &AppHandle, run: &Running, plan: &Plan) -> Result<(), String> {
         std::fs::create_dir_all(inst.join(d)).map_err(|e| format!("can't create {}: {e}", inst.join(d).display()))?;
     }
     if let Ok(mut f) = BUILD_LOG.lock() { *f = std::fs::File::create(inst.join("logs").join("build_last.log")).ok(); }
+    emit_log(app, &format!("YW4 Recomp Launcher {}", crate::update::LAUNCHER.trim()));
     let b = builder(app, &inst);
     let icon_src = b.src.join("work").join("icon");
     let icon_dst = inst.join("work").join("icon");
@@ -353,6 +360,8 @@ pub fn start_build(app: AppHandle, plan: Plan) -> Result<(), String> {
     run.cancel.store(false, Ordering::SeqCst);
     std::thread::spawn(move || {
         let r = run_all(&app, &run, &plan);
+        if let Err(e) = &r { emit_log(&app, &format!("the build failed: {e}")); }
+        if let Ok(mut f) = BUILD_LOG.lock() { *f = None; }  // closed: the player can open or send it
         run.busy.store(false, Ordering::SeqCst);
         let _ = app.emit("build-done", match r {
             Ok(()) => DoneEvent { ok: true, message: String::new() },

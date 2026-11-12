@@ -183,6 +183,9 @@ pub async fn check_updates(app: tauri::AppHandle, install: String, built: String
         }
         let have = ver(&code.version).unwrap_or((0, 0, 0));
         u.game = game.filter(|(v, _)| *v > have).map(|(_, g)| g);
+        // a newer version out than the downloaded one waiting to be built: download that instead of building this
+        // (2026-11-11: a 0.9.3 that didn't build stood in front of the 0.9.4 that fixed it)
+        if u.game.is_some() { u.rebuild = None; u.rebuild_notes.clear(); }
         u.launcher = launcher.filter(|(v, _)| *v > launcher_ver()).map(|(_, l)| l);
         u
     }).await.unwrap_or_default()

@@ -40,6 +40,7 @@ from __future__ import annotations
 import argparse
 import json
 import re
+import time
 import shutil
 import subprocess
 import sys
@@ -1011,9 +1012,19 @@ def one_shader(job) -> tuple[str, str, str | None, list[str] | None]:
     (out / f"{key}.iface").write_text(iface_text(iface, names))
     if not exe:
         return key, stage, None, None
-    r = subprocess.run([exe, "-V", "--target-env", "vulkan1.2", "-o", str(g) + ".spv", str(g)],
-                       capture_output=True, text=True)
-    msgs = [ln for ln in (r.stdout + r.stderr).splitlines() if ln.startswith("ERROR") and "compilation" not in ln]
+    # A failure without an ERROR line isn't the shader's: glslang didn't run through (killed, out of memory, the .spv
+    # held by a virus scanner), so it is tried again, and if it still fails its exit code and output are the message
+    # (2026-11-11: a friend's update stopped at "2 (no message)" for shaders that compile everywhere else).
+    for attempt in range(3):
+        r = subprocess.run([exe, "-V", "--target-env", "vulkan1.2", "-o", str(g) + ".spv", str(g)],
+                           capture_output=True, text=True)
+        msgs = [ln for ln in (r.stdout + r.stderr).splitlines() if ln.startswith("ERROR") and "compilation" not in ln]
+        if not r.returncode or msgs:
+            break
+        time.sleep(0.5 * (attempt + 1))
+    if r.returncode and not msgs:
+        out_lines = [ln.strip() for ln in (r.stdout + r.stderr).splitlines() if ln.strip() and ln.strip() != str(g)]
+        msgs = [f"glslang exit code {r.returncode:#x}" + (f": {out_lines[-1]}" if out_lines else ", no output")]
     return key, stage, None, msgs if r.returncode else None
 
 

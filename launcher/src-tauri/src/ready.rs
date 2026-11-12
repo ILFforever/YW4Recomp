@@ -55,13 +55,41 @@ fn read_state() -> Option<State> {
 }
 
 #[tauri::command]
-pub fn load_state() -> Option<State> {
+pub fn load_state(app: tauri::AppHandle) -> Option<State> {
+    // at the launcher's start, before anything reads the install: a game an update left set aside goes back first
+    if let Some(s) = read_state() {
+        if !exe(&s.install).is_file() && !crate::buildrun::building(&app) { put_back_previous(Path::new(&s.install)); }
+    }
+    current_state()
+}
+
+/// The saved state, if its install is still there (with its icon made when it has none yet).
+pub fn current_state() -> Option<State> {
     let mut s = read_state().filter(|s| exe(&s.install).is_file())?;
     if s.icon.is_none() {
         let dir = Path::new(&s.install).join("work").join("icon");
         s.icon = ensure_icon_image(&dir).map(|p| p.display().to_string());
     }
     Some(s)
+}
+
+/// An update sets the installed game aside in work\previous\ while it builds and puts it back if the build fails;
+/// a launcher closed mid-build left it there, and the next start showed Setup as if nothing were installed
+/// (2026-11-11). The same as tools/yw4/build_install.py's Previous.put_back: build\* and shaders\glsl back.
+fn put_back_previous(inst: &Path) {
+    let work = inst.join("work");
+    let prev = work.join("previous");
+    if !prev.join("build").join("yw4.exe").is_file() { return; }
+    let mut kept: Vec<PathBuf> = std::fs::read_dir(prev.join("build")).into_iter().flatten().flatten().map(|e| e.path()).collect();
+    if prev.join("shaders").join("glsl").exists() { kept.push(prev.join("shaders").join("glsl")); }
+    for src in kept {
+        let Ok(rel) = src.strip_prefix(&prev) else { continue };
+        let dst = work.join(rel);
+        let _ = if dst.is_dir() { std::fs::remove_dir_all(&dst) } else { std::fs::remove_file(&dst) };
+        if let Some(d) = dst.parent() { let _ = std::fs::create_dir_all(d); }
+        let _ = std::fs::rename(&src, &dst);
+    }
+    if exe(&inst.to_string_lossy()).is_file() { let _ = std::fs::remove_dir_all(&prev); }
 }
 
 #[tauri::command]
@@ -367,7 +395,7 @@ pub async fn install_info(app: tauri::AppHandle, install: String) -> Info {
         let icon = ensure_icon_image(&dir).map(|p| p.display().to_string());
         let reclaimable = reclaim_dirs(&inst).iter().map(|d| dir_size(d)).sum();
         let played = load_played(&install);
-        let disabled_mods = load_state().map(|s| s.disabled_mods).unwrap_or_default();
+        let disabled_mods = current_state().map(|s| s.disabled_mods).unwrap_or_default();
         Info { version, dlc, dlc_list, mods: mod_names(&inst.join("mods")), disabled_mods, icon, shots, shot_count, reclaimable,
                last_played: played.last_played, play_secs: played.seconds }
     })
@@ -1304,7 +1332,7 @@ mod tests {
         assert!(res.originals_offered);
 
         // State was saved and can be loaded
-        let loaded = load_state().expect("state should be loadable");
+        let loaded = current_state().expect("state should be loadable");
         assert!(same_folder(&loaded.install, &temp), "{} is not {}", loaded.install, temp.display());
 
         // game.ini was created next to yw4.exe
