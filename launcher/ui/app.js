@@ -655,9 +655,9 @@ let inst = null;  // the launcher's state of the install (Rust: ready.rs, %AppDa
 
 // What's new: written for each release (the launcher ships with the notes of the version it builds)
 const NEWS = {
-  version: '0.8.0',
-  items: ['Contact shadows: soft shadows where things touch', 'Fewer stutters in menus and towns',
-    'XCI cartridge dumps work', 'Version numbers, shown in the game and here'],
+  version: '1.0.0',
+  items: ['Return to title from the in-game menu', 'The launcher installs its own updates',
+    'No freeze at the first Demon Hand', 'Steadier 30 frames/s'],
 };
 
 function chip(text) {

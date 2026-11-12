@@ -38,6 +38,14 @@ game, and a game fix shouldn't need a new launcher. The game version is separate
   bar next to the game's. It rebuilds the game when the project version it would build differs from the one
   `yw4 --version` reports.
 
+## 1.0.0 (2026-11-13)
+
+The first public release: game 1.0.0 and launcher 1.0.0 (owner's choice: the plain number, "beta" only in the
+release's title and the README). The launcher reads only `N.N.N` and skips GitHub's pre-releases (decision 0054),
+so a `1.0.0-beta` tag or a pre-release would never be offered as an update. Bumped in the same places as before:
+`VERSION`, `launcher/VERSION`, `launcher/package.json`, `launcher/src-tauri/Cargo.toml`, `Cargo.lock`,
+`tauri.conf.json`, and the launcher's What's new (`NEWS` in `launcher/ui/app.js`).
+
 ## Consequences
 
 - Every log names its build: a report with a log is enough to find the code.
