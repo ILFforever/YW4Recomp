@@ -470,7 +470,6 @@ the game starts.
 - **Two mods changing the same entries still clash**, as the two Crank-a-kai mods do: keep one on.
 - A mod that adds a new kind of entry to a list isn't merged into it (the later copy is used, and the launcher says so).
 - Mods aren't tested one by one: one made for another game version can still misbehave.
-- The launcher's warning comes from the game itself from game 1.1.1 on; with older games it compares file names only.
 
 How it works: [decision 0067](docs/decisions/0067-mods-merge-cpk-list.md) (the archive list),
 [decision 0068](docs/decisions/0068-mods-merge-data-files.md) (data files).
