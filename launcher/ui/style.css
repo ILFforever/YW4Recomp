@@ -475,6 +475,8 @@ dialog p { margin: 0 0 10px; font-size: 14px; overflow-wrap: anywhere; }
 /* The welcome popup: the website's header band on top */
 .welcome-dialog { width: 560px; padding: 0; overflow: hidden; border-top: 0; }
 #update-dlg { width: 640px; }  /* wider than the others: release notes are long lines (owner, 2026-11-14) */
+#update-dlg > h2 { display: flex; align-items: center; gap: 10px; }
+.update-icon { flex-shrink: 0; }
 .welcome-head { position: relative; padding: 26px 28px 22px; background: var(--violet-deep); color: var(--white);
   border-bottom: 3px solid var(--gold); }
 .welcome-head::before { content: ""; position: absolute; inset: 0; opacity: .14; pointer-events: none;
