@@ -401,6 +401,10 @@ GuestFn yw4_resolve(uint64_t target) {
 
 #include "swkbd.c"
 
+/* the loader's module table: the typed-name hook (decision 0066) reads main's base from it */
+static uint64_t main_base;
+const Yw4Module yw4_modules[] = { { .name = "main", .base = &main_base } };
+
 /* main_name_for reads its names once per run, so each case is its own run: argv[1] "mod" (argv[2] a file laid
  * out as the English patch's: 0xFF filler, six names, Neptuna, the six tokens) or "none" (the Japanese names). */
 static int names_test(int argc, char **argv) {
