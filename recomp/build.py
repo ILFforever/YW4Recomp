@@ -13,6 +13,7 @@ from __future__ import annotations
 import argparse
 import concurrent.futures
 import hashlib
+import json
 import os
 import subprocess
 import sys
@@ -114,6 +115,22 @@ def generated_header(cfg: config.Config, src: Path) -> float:
     names = GENERATED_HEADERS + (("yw4load.h",) if src.name == "image_info.c" else ())
     headers = [RUNTIME / "include" / n for n in names] + list((cfg.work_dir / "recomp").glob("*.h"))
     return max(h.stat().st_mtime for h in headers)
+
+
+# How long each file takes to compile, so the slowest start first. Handed out in name order, the few generated files
+# that take minutes (main_062, main_069, main_070) started late and ran alone at the end: the Linux tester's build
+# spent its last 4-5 of 7 minutes on them with the other cores idle (2026-11-13). A file's cost is its own time from
+# the last build here (<objdir>/compile_times.json), else the time measured on the owner's PC that ships with the
+# code (recomp/compile_cost.json: generated files' names and seconds only, measured at translate.py's CHUNK), else
+# a guess from its size.
+COST_TABLE = Path(__file__).with_name("compile_cost.json")
+
+
+def load_times(path: Path) -> dict[str, float]:
+    try:
+        return {k: float(v) for k, v in json.loads(path.read_text()).items()}
+    except (OSError, ValueError, AttributeError):
+        return {}
 
 
 def compile_one(cc: str, src: Path, obj: Path, includes: list[str]) -> str | None:
@@ -267,6 +284,9 @@ def main(argv: list[str] | None = None) -> int:
     else:
         res.unlink(missing_ok=True)
 
+    times_file = objdir / "compile_times.json"
+    measured = {**load_times(COST_TABLE), **load_times(times_file)}
+    todo.sort(key=lambda t: measured.get(t[0].name, t[0].stat().st_size / 1e6 * 8), reverse=True)  # ~8 s per MB
     t0 = time.time()
     print(f"compiling {len(todo)} of {len(objs)} files with {Path(cc).name} ({args.jobs} jobs)")
     errors = []
@@ -276,10 +296,13 @@ def main(argv: list[str] | None = None) -> int:
     sizes = {src: src.stat().st_size for src, _ in todo}
     total_bytes = sum(sizes.values()) or 1
     started: dict[Path, float] = {}
+    took_s: dict[str, float] = {}
 
     def compile_timed(src: Path, obj: Path) -> str | None:
         started[src] = time.time()
-        return compile_one(cc, src, obj, includes)
+        r = compile_one(cc, src, obj, includes)
+        took_s[src.name] = round(time.time() - started[src], 1)
+        return r
 
     def took(s: float) -> str:
         return f"{s:.0f} s" if s < 90 else f"{s / 60:.0f} min"
@@ -305,6 +328,8 @@ def main(argv: list[str] | None = None) -> int:
                                  reverse=True)
                 print("still compiling: " + ", ".join(f"{n} ({took(s)})" for s, n in running[:6]), flush=True)
                 quiet_since = now
+    times_file.write_text(json.dumps({**load_times(times_file), **took_s}, indent=0, sort_keys=True) + "\n")
+    print(f"compiled in {time.time() - t0:.0f} s", flush=True)
     if errors:
         print("\n".join(errors), file=sys.stderr)
         print(f"{len(errors)} file(s) failed", file=sys.stderr)

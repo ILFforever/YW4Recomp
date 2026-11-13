@@ -37,7 +37,10 @@ from tools.yw4 import config, progress, recon, reloc, sdkref
 
 from . import coverage, function
 
-CHUNK = 500
+# Functions per generated file. 100, not 500 (2026-11-13): a few hundred functions in main (the old main_070's)
+# take minutes to compile, and at 500 a file each they ran alone at the end of the build; at 100 the owner's 16
+# threads stay busy to the end (382 -> ~295 s). recomp/compile_cost.json is measured at this size: change one, remeasure.
+CHUNK = 100
 
 R_RELATIVE, SYMBOL_RELOCS = reloc.R_AARCH64_RELATIVE, (reloc.R_AARCH64_ABS64, reloc.R_AARCH64_GLOB_DAT,
                                                    reloc.R_AARCH64_JUMP_SLOT)
