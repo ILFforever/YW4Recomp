@@ -84,10 +84,24 @@ the flags recompiles only the runtime's own files.
 Run from the repo root: shaders are looked up under `work/shaders/`. Directly:
 
 ```
-./work/build/yw4.exe work/exefs <your romfs folder> work/save
+./work/build/yw4.exe work/exefs <your romfs folder>
 ```
 
-Saves go to the folder given last (`work/save` above). Keyboard and gamepad both work; F12 saves a screenshot.
+Saves go to your user data folder: `$XDG_DATA_HOME/YW4Recomp/save` on Linux (`~/.local/share/YW4Recomp/save` when
+`XDG_DATA_HOME` is not set) and `%APPDATA%\YW4 Recomp\save` on Windows. A third folder on the command line puts them
+there instead (`... <your romfs folder> work/save`); older versions needed it, so to keep saves from such a folder,
+copy its contents into the user data folder or keep naming it. The log's `yw4: saves in` line says which folder a
+run uses. Keyboard and gamepad both work; F12 saves a screenshot.
+
+To start without typing the folders, write them in `work/build/game.ini` (full paths, no `~`) and run
+`./work/build/yw4` alone:
+
+```
+YW4_EXEFS=../exefs
+YW4_ROMFS=/full/path/to/romfs
+```
+
+A `YW4_SAVE=` line there names another save folder.
 Runtime options and debugging tools are in [debugging.md](debugging.md).
 
 ## Tests

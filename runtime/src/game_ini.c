@@ -5,7 +5,7 @@
  *
  *   YW4_EXEFS=../data/exefs        main.bin and sdk.bin (python -m tools.yw4.ingest)
  *   YW4_ROMFS=../data/romfs        the game's RomFS
- *   YW4_SAVE=save                  save data
+ *   YW4_SAVE=save                  save data (optional: main.c's default_save_dir without it)
  *
  * and any other variable of docs/debugging.md (YW4_DLC_DIR, YW4_MODS, YW4_SETTINGS_FILE, YW4_HOME...). A value
  * naming a path (the variable's name ends in _DIR, _FILE, _HOME, or is one of the three above or YW4_MODS) is

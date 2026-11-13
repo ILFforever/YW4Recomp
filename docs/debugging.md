@@ -17,6 +17,10 @@ Started with no arguments (a double-click, a shortcut), the game reads `game.ini
 this page, plus `YW4_EXEFS`, `YW4_ROMFS` and `YW4_SAVE` for the three folders. Paths are relative to `game.ini`'s
 folder; a variable already in the environment wins. Without it a message says to run the launcher.
 
+The save folder is optional, on the command line and in `game.ini`: without one the saves go to
+`$XDG_DATA_HOME/YW4Recomp/save` (`~/.local/share/YW4Recomp/save`) on Linux, `%APPDATA%/YW4 Recomp/save` on Windows.
+The log's `yw4: saves in` line names the folder used.
+
 For reports from other PCs, the log's `window:` lines near the start name the GPU, the driver and its version
 (`driver radv, Mesa 25.1.4`), the window system (`windows`, `wayland`, `x11`) and every screen format the driver
 offers as `format/colour space` numbers (Vulkan's `VkFormat` / `VkColorSpaceKHR`: 44 = B8G8R8A8_UNORM,

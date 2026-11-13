@@ -1,6 +1,9 @@
 /* yw4: load main and the sdk, then start the game the way the Switch does (decision 0014).
  *
- *   yw4 <exefs work directory: main.bin, sdk.bin> <romfs folder> <save data folder>
+ *   yw4 <exefs work directory: main.bin, sdk.bin> <romfs folder> [save data folder]
+ *
+ * Without a save folder (on the command line or as YW4_SAVE in game.ini) the saves go to the user's data folder:
+ * $XDG_DATA_HOME/YW4Recomp/save (~/.local/share/YW4Recomp/save) on Linux, %APPDATA%/YW4 Recomp/save on Windows.
  *
  * rtld is not needed: the loader relocates both modules. Then the main guest thread calls
  * the sdk's nn::init::Start(thread handle, argument region, init, fini), as rtld would. It
@@ -112,6 +115,28 @@ static void go_home(void) {
 #endif
 }
 
+/* The save folder when none is given: the platform's per-user data folder, so the saves don't live inside the
+ * game's folder (deleting or re-cloning it would lose them). Linux follows the XDG Base Directory spec, which says
+ * to ignore an XDG_DATA_HOME that isn't an absolute path. The folder is made at the first save (savefs.c). NULL
+ * when the environment names no home folder. */
+static const char *default_save_dir(void) {
+    static char buf[1024];
+#ifdef _WIN32
+    const char *appdata = getenv("APPDATA");
+    if (!appdata || !*appdata) return NULL;
+    snprintf(buf, sizeof buf, "%s/YW4 Recomp/save", appdata);  /* as the launcher's "appdata" choice */
+#else
+    const char *xdg = getenv("XDG_DATA_HOME"), *home = getenv("HOME");
+    if (xdg && xdg[0] == '/')
+        snprintf(buf, sizeof buf, "%s/YW4Recomp/save", xdg);
+    else if (home && *home)
+        snprintf(buf, sizeof buf, "%s/.local/share/YW4Recomp/save", home);
+    else
+        return NULL;
+#endif
+    return buf;
+}
+
 int main(int argc, char **argv) {
     if (argc == 2 && !strcmp(argv[1], "--version")) {  /* for the launcher and bug reports: one line on stdout */
         printf("YW4 Recomp %s (%s, built %s)\n", yw4_version, yw4_git_commit, yw4_build_date);
@@ -128,9 +153,10 @@ int main(int argc, char **argv) {
     }
     /* No arguments (a double-click, a shortcut): the folders come from game.ini next to the exe (decision 0050) */
     static char *ini_args[4];
-    int from_ini = 0;
+    int from_ini = 0, default_save = 0;
     if (argc == 1 && game_ini_load()) {
         const char *e = getenv("YW4_EXEFS"), *r = getenv("YW4_ROMFS"), *s = getenv("YW4_SAVE");
+        if (!s || !*s) s = default_save_dir(), default_save = 1;
         if (e && r && s) {
             ini_args[0] = argv[0], ini_args[1] = (char *)e, ini_args[2] = (char *)r, ini_args[3] = (char *)s;
             argv = ini_args, argc = 4, from_ini = 1;
@@ -141,6 +167,11 @@ int main(int argc, char **argv) {
                                  "The game isn't set up yet.\n\nStart the YW4 Recomp launcher: it sets up the game "
                                  "from your own copy and then starts it.", NULL);
         return 1;
+    }
+    static char *args3[4];
+    if (argc == 3 && default_save_dir()) {  /* exefs and romfs only: the default save folder */
+        args3[0] = argv[0], args3[1] = argv[1], args3[2] = argv[2], args3[3] = (char *)default_save_dir();
+        argv = args3, argc = 4, default_save = 1;
     }
     static char paths[3][4096];
     for (int i = 1; i < argc && i <= 3; i++) absolute(&argv[i], paths[i - 1], sizeof paths[i - 1]);
@@ -159,9 +190,10 @@ int main(int argc, char **argv) {
     yw4_boot_mark("main() running, guest memory reserved, log open");
     settings_load();
     if (argc != 4) {
-        fprintf(stderr, "usage: yw4 <exefs work directory with main.bin and sdk.bin> <romfs folder> <save data folder>\n");
+        fprintf(stderr, "usage: yw4 <exefs work directory with main.bin and sdk.bin> <romfs folder> [save data folder]\n");
         return 1;
     }
+    fprintf(stderr, "yw4: saves in %s%s\n", argv[3], default_save ? " (the default save folder)" : "");
     window_prestart();
     if (yw4_load_modules(argv[1])) return 1;
     yw4_boot_mark("main and sdk loaded");
