@@ -36,8 +36,6 @@ move to [progress.md](progress.md).
   ([decision 0012](decisions/0012-musl-startup-tls-exceptions-libc.md)).
 - **The window stays blank for about 3.7 s at start**, while Vulkan, DLSS and the game's boot set up. Planned: a
   black screen with the game logo (`gamelogo.c`) until the first frame.
-- **Odd letter spacing ("N A T E") seen once in English text** (owner, 2026-11-12). Not located yet: our name box or
-  the game's own text.
 
 ## Input and menus
 

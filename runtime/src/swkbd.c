@@ -22,6 +22,52 @@
 #define DEFAULT_NAME "Nate"
 #define DEFAULT_GIRL "Katie"  /* the girl's name (the second question of a new game) */
 
+/* Typed text, made full-width (hook on f_9997e0, main+0x9997e0; owner, 2026-11-14). After an OK answer the game's
+ * keyboard handler (f_8aa550 / f_8a9xxx, from f_959be0) runs the typed UTF-8 text through f_9997e0(dst, src), which
+ * maps each character through a 156-entry table at main+0x12be9d0 (u16 from, u16 to): every ASCII character to its
+ * full-width form (A -> Ａ, space -> U+3000) and half-width katakana to normal katakana. Names in English then
+ * became Ｎａｔｅ, which the game draws a wide cell per letter ("N a t e"; decision 0066).
+ * This does the same, with the game's own table, except that ASCII stays as typed: katakana are still made
+ * full-size, so Japanese names are as before. Output as the game's: at most 0x100 bytes with the closing 0. */
+int yw4_hook_kbd_fullwidth(CPUState *ctx) {
+    /* only the answer the game keeps (f_8aa550 calls it from +0xa4): the game's name check converts too and then
+     * allows full-width letters only, so it keeps the game's conversion ("This name cannot be used" otherwise) */
+    if (ctx->x[30] != *yw4_modules[YW4_MAIN].base + 0x8aa5f8) return 0;
+    uint8_t *dst = (uint8_t *)(uintptr_t)ctx->x[0], *end = dst + 0x100;
+    const uint8_t *src = (const uint8_t *)(uintptr_t)ctx->x[1];
+    const uint16_t *table = (const uint16_t *)(uintptr_t)(*yw4_modules[YW4_MAIN].base + 0x12be9d0);
+    enum { ENTRIES = 0x9c };
+    while (*src) {
+        /* one UTF-8 character */
+        uint32_t c = *src;
+        int len = c < 0x80 ? 1 : c >= 0xf0 ? 4 : c >= 0xe0 ? 3 : c >= 0xc0 ? 2 : 1;
+        if (len > 1) c &= 0x3f >> (len - 1);
+        int k = 1;
+        for (; k < len && (src[k] & 0xc0) == 0x80; k++) c = c << 6 | (src[k] & 0x3f);
+        src += k;
+        /* the game's table (sorted by its first column), not for ASCII */
+        if (c >= 0x80)
+            for (int lo = 0, hi = ENTRIES - 2; lo <= hi;) {  /* the last entry is the 0, 0 end */
+                int mid = (lo + hi) / 2;
+                uint16_t from = table[mid * 2];
+                if (from == c) { c = table[mid * 2 + 1]; break; }
+                if (from < c) lo = mid + 1;
+                else hi = mid - 1;
+            }
+        uint8_t out[4];
+        int n = c < 0x80 ? (out[0] = (uint8_t)c, 1)
+              : c < 0x800 ? (out[0] = (uint8_t)(0xc0 | c >> 6), out[1] = (uint8_t)(0x80 | (c & 0x3f)), 2)
+              : (out[0] = (uint8_t)(0xe0 | (c >> 12 & 0x0f)), out[1] = (uint8_t)(0x80 | (c >> 6 & 0x3f)),
+                 out[2] = (uint8_t)(0x80 | (c & 0x3f)), 3);
+        if (dst + n >= end) break;  /* room for the closing 0 */
+        memcpy(dst, out, (size_t)n);
+        dst += n;
+    }
+    *dst = 0;
+    ctx->x[0] = (uint64_t)(uintptr_t)dst;
+    return 1;  /* done: the game's own conversion is skipped */
+}
+
 /* Invokes the game's internal text check callback (SetTextCheckCallback), if registered.
  * Returns 0 if valid (accepted) or if text checking is inactive; non-zero if rejected by the game. */
 static int check_name(CPUState *c, const uint8_t *a, const char *name, int utf8, int max) {

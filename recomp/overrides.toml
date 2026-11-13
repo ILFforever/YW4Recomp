@@ -216,6 +216,12 @@ why = "the job that ends a shadow cascade: our pass is queued here, after the ga
 
 [[hook]]
 module = "main"
+offset = "0x9997e0"
+native = "yw4_hook_kbd_fullwidth"
+why = "typed text after the keyboard: the game makes every ASCII letter full-width (drawn \"N a t e\"); ours keeps ASCII as typed, katakana still made full-size (runtime/src/swkbd.c)"
+
+[[hook]]
+module = "main"
 offset = "0x97f510"
 native = "yw4_hook_camera_update"
 why = "copies every camera's settings into the fields its projection is built from; widescreen sets the aspect there afterwards (runtime/src/widescreen.c)"
