@@ -137,3 +137,14 @@ release file.
 Build in this order: the launcher's own number; `tools.yw4.build_install` with the launcher using it; the game zip in
 `package.py`; setting the old game aside during a rebuild; the update check and the band; then a full test (an old install updated to a newer
 game version, and a launcher update with no rebuild).
+
+## 1.0.0: one release, the launcher's (2026-11-13)
+
+The first public release is the launcher's alone (`launcher-v1.0.0`). Its installer already carries the 1.0.0
+game code (`builder/src`), and its "What's new" text ships inside it, so a `v1.0.0` game-code release would add
+nothing but a second entry on the Releases page with a 3.7 MB zip a player can't run (owner: people would get
+confused). `v1.0.0` is a plain git tag, which the Releases page doesn't show and the update check doesn't read.
+
+The first game-code release comes with the first game update (1.0.1), which is what the two kinds exist for:
+players get it inside the launcher and never download the launcher again for a game change. Then: a title that
+says the launcher downloads it, and not "the latest release", so the launcher's stays the one GitHub shows first.
