@@ -666,6 +666,14 @@ void window_rumble(uint16_t low, uint16_t high, uint32_t duration_ms) {
     last_low = low; last_high = high; last_dur = duration_ms; rumble_called++;
 }
 void window_rumble_test(void) { window_rumble(49152, 49152, 1000); }
+#include "tegra.h"
+/* the icon sheets' patch (bindings_patch_sheet) is not tested here: its GPU and texture-layout calls do nothing */
+void gpu_note_written(uint64_t addr, uint64_t size) { (void)addr; (void)size; }
+void tegra_read_region(const TexLayout *t, const uint8_t *base, uint32_t level, uint32_t layer, uint32_t x, uint32_t y,
+                       uint32_t z, uint32_t w, uint32_t h, uint32_t d, uint8_t *dst) {}
+void tegra_write_region(const TexLayout *t, uint8_t *base, uint32_t level, uint32_t layer, uint32_t x, uint32_t y,
+                        uint32_t z, uint32_t w, uint32_t h, uint32_t d, const uint8_t *src) {}
+uint64_t tegra_total_size(const TexLayout *t) { return 0; }
 
 #include "bindings.c"
 
@@ -760,6 +768,14 @@ int window_rumble_enabled(void) { return 1; }
 void window_rumble_set_enabled(int on) { (void)on; }
 void window_rumble(uint16_t low, uint16_t high, uint32_t duration_ms) { (void)low; (void)high; (void)duration_ms; }
 void window_rumble_test(void) {}
+#include "tegra.h"
+/* the icon sheets' patch (bindings_patch_sheet) is not tested here: its GPU and texture-layout calls do nothing */
+void gpu_note_written(uint64_t addr, uint64_t size) { (void)addr; (void)size; }
+void tegra_read_region(const TexLayout *t, const uint8_t *base, uint32_t level, uint32_t layer, uint32_t x, uint32_t y,
+                       uint32_t z, uint32_t w, uint32_t h, uint32_t d, uint8_t *dst) {}
+void tegra_write_region(const TexLayout *t, uint8_t *base, uint32_t level, uint32_t layer, uint32_t x, uint32_t y,
+                        uint32_t z, uint32_t w, uint32_t h, uint32_t d, const uint8_t *src) {}
+uint64_t tegra_total_size(const TexLayout *t) { return 0; }
 
 #include "bindings.c"
 
