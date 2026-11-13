@@ -71,6 +71,7 @@ static VkSurfaceKHR surface;
 static VkCommandPool pool;
 static VkCommandBuffer cmd;
 static void window_notice(int high, const char *title, const char *fmt, ...);  /* a fading card (below, with the HUD) */
+static void window_notice_keys(void);  /* the same card for the controls, after the one showing (if any) */
 static VkFence fence;
 static VkSemaphore acquired;
 
@@ -493,6 +494,7 @@ static int vk_init(void) {
             window_notice(!low, low ? "Lighter graphics for this PC" : "High graphics for this PC",
                           "%s \xc2\xb7 Change them in Settings", vk.props.deviceName);
         }
+        window_notice_keys();  /* each start: how to see the controls (after the graphics card, when there is one) */
     }
 
     VkCommandPoolCreateInfo pci = {.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO,
@@ -893,6 +895,7 @@ static struct {
 } nb;
 static char note_title[96], note_text[256];
 static int note_on, note_high;
+static int note_keys, note_keys_wait, note_pad, note_style;  /* the controls card: showing, waiting its turn, the device and the controller make it names */
 static uint64_t note_start;  /* SDL ticks of its first frame (0: not shown yet) */
 static int note_bottom;      /* pixels from the card's image top to the card's bottom (a shadow margin below) */
 
@@ -902,8 +905,31 @@ static void window_notice(int high, const char *title, const char *fmt, ...) {
     va_start(ap, fmt);
     vsnprintf(note_text, sizeof note_text, fmt, ap);
     va_end(ap);
-    note_high = high, note_start = 0, nb.s = 0, note_on = 1;
+    note_high = high, note_keys = 0, note_start = 0, nb.s = 0, note_on = 1;
     fprintf(stderr, "yw4: window: notice: %s. %s\n", note_title, note_text);
+}
+
+/* The controls card (the owner's pick, option A of the mockup, 2026-11-13; the CONTROLS HINT setting): one line
+ * that points at the quick look, F2 on a keyboard, the held Back button on a controller (pad_back_hold), with that
+ * button's name as the controller prints it. It follows the device while it shows: the first touch of a pad or a
+ * key rewrites it. It waits for a card that is showing (the first start's graphics) to fade first. */
+static int note_keys_pad(void);  /* 1: the controller's words (below, with the input) */
+static void note_keys_words(int pad) {
+    static const char *const back[] = {"View", "Create", "Minus"};  /* Xbox, PlayStation, Nintendo */
+    if (pad) snprintf(note_title, sizeof note_title, "Hold %s to see the buttons", back[bindings_pad_style() % 3]);
+    else snprintf(note_title, sizeof note_title, "Press F2 to see the keys");
+    snprintf(note_text, sizeof note_text, "%s \xc2\xb7 Change them in Controls", pad ? "Controller" : "Keyboard and mouse");
+    note_pad = pad, note_style = bindings_pad_style(), nb.s = 0;
+}
+static void note_keys_start(void) {
+    note_keys_wait = 0, note_keys = 1, note_start = 0, note_on = 1;
+    note_keys_words(note_keys_pad());
+    fprintf(stderr, "yw4: window: notice: %s. %s\n", note_title, note_text);
+}
+static void window_notice_keys(void) {
+    if (!settings_keys_notice() || settings_legacy_keys()) return;  /* the old menus: no quick look to point at */
+    if (note_on) note_keys_wait = 1;
+    else note_keys_start();
 }
 
 static int nb_resources(void) {
@@ -955,7 +981,8 @@ static int nb_resources(void) {
 
 /* The card, at scale s, into nb.cpu (the owner's pick, option C of the mockup, 2026-11-11): a corner toast, a
  * coloured tile on the left with a gauge (gold: lighter graphics, green: high), then a bold title over a softer
- * second line, on the theme's deep violet, with a soft shadow. A margin around it holds the shadow. */
+ * second line, on the theme's deep violet. The controls card (note_keys) is the same with a lilac tile. A margin around it is
+ * left from the shadow it had until 2026-11-13 (the placement counts on it). */
 static void note_render(float s) {
     const Theme *th = theme_colors();
     const float m = 24, tile = 84, t1 = 26, l1 = t1 * 1.2f, t2 = 19, l2 = t2 * 1.35f, pt = 16, pl = 22, pr = 28;
@@ -965,15 +992,22 @@ static void note_render(float s) {
     if ((ch + 2 * m) * s > NOTE_H) s = NOTE_H / (ch + 2 * m);
     memset(nb.cpu, 0, (size_t)NOTE_W * NOTE_H * 4);
     UiCanvas c = {nb.cpu, NOTE_W, NOTE_H, s, 0, 0};
-    uint32_t tint = note_high ? 0x4cc38a : th->pop_gold;  /* green: high; gold: lighter */
-    ui_shadow(&c, m, m + 8, cw, ch, 16, 22, th->pop_shadow, 0.5f);
-    ui_box(&c, m, m, cw, ch, 16, th->pop_deep, 0, 0);
+    /* green: high; gold: lighter; the theme's lilac: the controls (not a graphics level) */
+    uint32_t tint = note_keys ? th->lilac : note_high ? 0x4cc38a : th->pop_gold;
+    ui_box(&c, m, m, cw, ch, 16, th->pop_deep, 0, 0);  /* no shadow under it (owner, 2026-11-13) */
     ui_box(&c, m, m, tile + 16, ch, 16, tint, 0, 0);  /* the tile, its right corners covered next */
     ui_rect(&c, m + tile, m, 16, ch, th->pop_deep, 1);
     /* the gauge's needle: up to the right for high, low on the left for lighter */
-    ui_icon(&c, note_high ? "<path d=\"M4 15a8 8 0 1 1 16 0\"/><path d=\"M12 15l4-5\"/>"
-                          : "<path d=\"M4 15a8 8 0 1 1 16 0\"/><path d=\"M12 15l-5.5-2.5\"/>",
-            m + (tile - 40) / 2, m + (ch - 40) / 2, 40, 2.6f, th->pop_deep);
+    /* the controls: a keyboard, or a controller's outline (two grips) with its d-pad and two buttons; a little
+     * larger and finer than the gauge, which has less to show */
+    const float isz = note_keys ? 48 : 40;
+    ui_icon(&c, note_keys ? (note_pad ? "<path d=\"M6 6h12a4 4 0 0 1 3.9 3.2l1 6.3a3 3 0 0 1-5.3 1.8L15.5 15h-7l-2.1 2.3a3 3 0 0 1-5.3-1.8l1-6.3A4 4 0 0 1 6 6z\"/>"
+                                        "<path d=\"M8 9v3M6.5 10.5h3M15.2 11.6h.01M17.8 9.4h.01\"/>"
+                                      : "<rect x=\"2.5\" y=\"6\" width=\"19\" height=\"12\" rx=\"2.5\"/>"
+                                        "<path d=\"M6.5 10h.01M10 10h.01M13.5 10h.01M17 10h.01M8 14h8\"/>")
+                : note_high ? "<path d=\"M4 15a8 8 0 1 1 16 0\"/><path d=\"M12 15l4-5\"/>"
+                            : "<path d=\"M4 15a8 8 0 1 1 16 0\"/><path d=\"M12 15l-5.5-2.5\"/>",
+            m + (tile - isz) / 2, m + (ch - isz) / 2, isz, note_keys ? 2.0f : 2.6f, th->pop_deep);
     ui_text(&c, UI_ROUNDED_800, t1, m + tile + pl, m + pt, l1, note_title, th->pop_white);
     ui_text(&c, UI_GOTHIC_500, t2, m + tile + pl, m + pt + l1, l2, note_text, th->on_dark);
     nb.w = (int)ceilf((cw + 2 * m) * s), nb.h = (int)ceilf((ch + 2 * m) * s), note_bottom = (int)ceilf((m + ch) * s);
@@ -983,7 +1017,7 @@ static void note_draw(VkImage dst, uint32_t index, int32_t x0, int32_t y0, uint3
     (void)bw;
     if (!note_on || index >= 8 || !swap_views[index]) return;
     if (hb_resources() || nb_resources()) {
-        note_on = 0;
+        note_on = note_keys_wait = 0;
         return;
     }
     VkPipeline pipe = hb_pipeline(swap_format);
@@ -994,8 +1028,12 @@ static void note_draw(VkImage dst, uint32_t index, int32_t x0, int32_t y0, uint3
     float t = (float)(now - note_start) / 1000.0f, a = t < in ? t / in : t < in + hold ? 1.0f : 1.0f - (t - in - hold) / out;
     if (a <= 0 && t > in) {
         note_on = 0;
+        if (note_keys_wait) note_keys_start();  /* the controls card's turn, from the next frame */
         return;
     }
+    /* the other device was touched, or the controller turned out to be another make (it is read after the start) */
+    if (note_keys && (note_keys_pad() != note_pad || (note_pad && bindings_pad_style() != note_style)))
+        note_keys_words(note_keys_pad());
     float s = overlay_scale(swap_extent.height);
     if (s != nb.s) note_render(s), nb.s = s;
     /* faded: premultiplied, so every channel times the strength */
@@ -2556,8 +2594,17 @@ static int overlay_point(float mx, float my, float *x, float *y) {
 }
 
 static int last_used_pad;  /* the overlay's hints: the controller was used last (else the keyboard or mouse) */
+static int used_keys;      /* a key or the mouse was used this run (the controls card: a pad alone means the pad) */
 static void used_pad(int pad) {
+    if (!pad) used_keys = 1;
     if (pad != last_used_pad) last_used_pad = pad, bindings_pad_only(pad), gamemenu_refresh();
+}
+/* the controls card's device: YW4_HINTS when set; else the controller when one is connected and was used last, or
+ * nothing was used yet (a player who starts the game and picks up the pad) */
+static int note_keys_pad(void) {
+    int forced = bindings_hints_forced();
+    if (forced) return forced >= 2;
+    return gamepad && (last_used_pad || !used_keys);
 }
 static int pad_hints(const char **close) {
     /* YW4_HINTS: one device's hints for the whole run, with or without a controller (screenshots of each style).

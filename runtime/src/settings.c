@@ -139,6 +139,20 @@ int settings_legacy_keys(void) {
 }
 static void legacy_keys_toggle(void) { legacy_keys = !settings_legacy_keys(); }
 
+/* CONTROLS HINT: the corner card at each start that says how to see the controls (window.c). On by default for a
+ * player (a settings file is in use); off in test runs (YW4_SETTINGS_FILE=none), so their pictures stay the game's
+ * alone, unless YW4_KEYS_NOTICE=1 asks. */
+static const char *settings_file(void);
+static int keys_notice = -1;
+int settings_keys_notice(void) {
+    if (keys_notice < 0) {
+        const char *e = getenv("YW4_KEYS_NOTICE");
+        keys_notice = e && *e ? strcmp(e, "0") != 0 : *settings_file() != 0;
+    }
+    return keys_notice;
+}
+static void keys_notice_toggle(void) { keys_notice = !settings_keys_notice(); }
+
 /* The player's settings, in the order shown; a row starts a new group when its category differs from the row
  * before. The last row opens the developer page. The texts use the HUD font's characters (hud.c): upper case,
  * digits, . , : % / - ( ) ' ! ? */
@@ -233,6 +247,12 @@ static const Setting player[] = {
      {"OFF", "ON"},
      {"THE SWITCH'S DEFAULT", "MORE DEPTH IN LEAVES AND UNDER EDGES"}, 2, gpu_contact,
      gpu_contact_toggle, "YW4_CONTACT", {"0", "1"}, contact_disabled},
+    {"ADVANCED", "CONTROLS HINT",
+     "A SMALL CARD IN THE CORNER WHEN THE GAME STARTS THAT SAYS HOW TO SEE THE CONTROLS: F2 ON A KEYBOARD, A HELD "
+     "BUTTON ON A CONTROLLER. IT FADES AFTER A FEW SECONDS.",
+     {"OFF", "ON"},
+     {"NO CARD AT THE START", "SHOWN EACH TIME THE GAME STARTS"}, 2, settings_keys_notice, keys_notice_toggle,
+     "YW4_KEYS_NOTICE", {"0", "1"}},
     {"ADVANCED", "LEGACY MENUS",
      "THE OLD KEYS: F1 OPENS THE OLD SETTINGS PANEL AND ITS DEVELOPER OPTIONS, F2 THE OLD CONTROLS PAGE, F3 SHOWS OR "
      "HIDES THE PERFORMANCE HUD. OFF, F1 AND F2 OPEN THIS MENU'S SETTINGS AND CONTROLS PAGES (IT HAS ALL OF IT, THE "

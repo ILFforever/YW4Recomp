@@ -39,6 +39,21 @@ over a softer line with the GPU's name and "Change them in Settings", on the the
 shadow. It fades in over 0.4 s, stays 6 s and fades out over 1.2 s. It is drawn with the HUD's blend pipeline
 from its own small image, over the game and under the overlay.
 
+**A second card for the controls, at every start (2026-11-13).** The owner wanted new players told where the
+controls are, in the same way. Of three mockups he picked the one-line card: "Press F2 to see the keys" over
+"Keyboard and mouse · Change them in Controls", with a keyboard on a lilac tile (lilac so it doesn't read as a
+graphics level). It only points at the F2 card, which already shows every key, so it can never be out of date.
+
+- **Controllers:** "Hold View to see the buttons" (Create on PlayStation, Minus on Switch), with a controller
+  on the tile. The card follows the device while it shows: a connected controller counts until a key or the
+  mouse is used, and the first touch of the other device rewrites the card.
+- **Every start, with a switch:** unlike the graphics card it shows at each start, because it costs nothing and
+  a player may come back after months. The settings' CONTROLS HINT row (ADVANCED, `YW4_KEYS_NOTICE`) turns it
+  off. Test runs (no settings file) don't show it, so their pictures stay the game's alone. Not with LEGACY
+  MENUS on: there is no quick look to point at.
+- **One at a time:** on a first start it waits for the graphics card to fade, then takes the same corner.
+- **No shadow** under either card (owner, 2026-11-13).
+
 ## Consequences
 
 - `YW4_FIRST_RUN_LEVEL=low|high` forces the level in tests (with `YW4_SETTINGS_FILE` pointing at a file that
