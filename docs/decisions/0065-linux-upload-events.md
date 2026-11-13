@@ -56,8 +56,14 @@ On a host that can't track writes, uploads follow the events the game gives:
 - **Screenshots**, Linux rules against normal, at the same frames of frame-locked replays: they differ only where
   two normal runs also differ (characters' idle animation, an NPC, wind on bushes, minimap dots).
 
+- **The owner's own play session** (late-game save, a battle, Yo-kai Pad screens, 16,385 frames, page tracking on,
+  `YW4_REUPLOAD_LOG=1`): 0 `untracked rule MISSED` for textures and for geometry. All 186,787 geometry copies whose
+  content had changed had been flushed; the 78 unflushed ones were unchanged. Menu icons (64x64, 32x32, 256x16) had
+  their pages written with the same content.
+
+The `MISSED` check only means something with page tracking on: with `YW4_UNTRACKED=1` the rules decide the uploads,
+so a texture they miss is never uploaded and never logged.
+
 ## Not covered
 
-Battles and menus (Yo-kai Pad, Medallium) were not in the scenes. `YW4_REUPLOAD_LOG=1` names every case the rules
-would miss (`untracked rule MISSED`, for both textures and geometry), so a play session with it on settles them.
 The slow street's 12% gap to page tracking is not looked into. Not measured on a real Linux GPU yet.
