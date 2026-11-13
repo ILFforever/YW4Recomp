@@ -172,6 +172,23 @@ def native_shaders(cfg: config.Config) -> bool:
     return True
 
 
+DEV_INI_HEADER = "# Written by recomp.build from config.local.toml"
+
+
+def dev_game_ini(cfg: config.Config) -> None:
+    """<work_dir>/build/game.ini, so `yw4` with no arguments starts the game from this config's folders (decision
+    0050's file): the game files and both DLC folders, which a bare `yw4 <exefs> <romfs>` run doesn't know.
+    A launcher install writes its own game.ini after the build (tools/yw4/build_install.py); that one is left alone."""
+    ini = cfg.work_dir / "build" / "game.ini"
+    if ini.is_file() and not ini.read_text(errors="replace").startswith(DEV_INI_HEADER):
+        return
+    lines = [f"{DEV_INI_HEADER}; rebuilt on every build. Run yw4 with no arguments to use it.",
+             f"YW4_EXEFS={(cfg.work_dir / 'exefs').resolve().as_posix()}",
+             f"YW4_ROMFS={cfg.romfs_dir.resolve().as_posix()}"]
+    lines += [f"{k}={Path(v).resolve().as_posix()}" for k, v in cfg.dlc_env().items()]
+    ini.write_text("\n".join(lines) + "\n")
+
+
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--run", action="store_true", help="run the result on work/exefs/")
@@ -372,6 +389,7 @@ def main(argv: list[str] | None = None) -> int:
     print(f"built {exe} in {time.time() - t0:.0f} s")
     if not native_shaders(cfg):
         return 1
+    dev_game_ini(cfg)
     if args.run:
         save = cfg.work_dir / "save"  # the game's save data (the owner's: never commit)
         save.mkdir(exist_ok=True)

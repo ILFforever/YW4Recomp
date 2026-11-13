@@ -62,12 +62,6 @@ static int64_t newest_file(const char *dir, int depth) {
     return best;
 }
 
-int savefs_init(const char *dir) {
-    if (strlen(dir) >= sizeof save_root - 200) return -1;
-    strcpy(save_root, dir);
-    return 0;
-}
-
 /* mkdir -p */
 static void make_dirs(const char *path) {
     char p[1024];
@@ -84,6 +78,22 @@ static void make_dirs(const char *path) {
 static int is_dir(const char *path) {
     struct stat st;
     return stat(path, &st) == 0 && (st.st_mode & S_IFMT) == S_IFDIR;
+}
+
+/* The save folder is made here when missing (2026-11-13, a Linux tester had to mkdir -p the default
+ * ~/.local/share/YW4Recomp/save by hand), so the default folder and a new one named on the command line just work. */
+int savefs_init(const char *dir) {
+    if (strlen(dir) >= sizeof save_root - 200) return -1;
+    strcpy(save_root, dir);
+    if (!is_dir(dir)) {
+        make_dirs(dir);
+        if (!is_dir(dir)) {
+            fprintf(stderr, "yw4: cannot create the save folder %s\n", dir);
+            return -1;
+        }
+        fprintf(stderr, "yw4: created the save folder %s\n", dir);
+    }
+    return 0;
 }
 
 static void save_dir(char out[1024], uint64_t program_id, const uint8_t uid[16]) {

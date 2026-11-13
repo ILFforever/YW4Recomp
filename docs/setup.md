@@ -81,27 +81,34 @@ DLSS (upscaling) and NVIDIA Streamline (DLSS frame generation and Reflex). The b
 their DLLs out of `work/build/`, and the settings panel greys out what needs them ("NOT IN THIS BUILD"). Switching
 the flags recompiles only the runtime's own files.
 
-Run from the repo root: shaders are looked up under `work/shaders/`. Directly:
+To start the game again later, run the exe on its own:
+
+```
+./work/build/yw4        # yw4.exe on Windows
+```
+
+The build writes `work/build/game.ini` from `config.local.toml`: your game files and both DLC folders. With no
+arguments, `yw4` reads that file, so you need no Python and no environment variables to play. Rebuilding updates
+the file. A `game.ini` the launcher wrote is never replaced.
+
+To name the folders yourself, run it from the repo root (shaders are looked up under `work/shaders/`):
 
 ```
 ./work/build/yw4.exe work/exefs <your romfs folder>
 ```
 
+With folders on the command line, `game.ini` is not read, so the game doesn't find your DLC unless you also set
+`YW4_DLC_DIR` (your DLC NSP folder, `[input] dlc_dir`) and `YW4_DLCROMFS_DIR` (the `dlc-romfs` folder next to your
+romfs folder).
+
 Saves go to your user data folder: `$XDG_DATA_HOME/YW4Recomp/save` on Linux (`~/.local/share/YW4Recomp/save` when
 `XDG_DATA_HOME` is not set) and `%APPDATA%\YW4 Recomp\save` on Windows. A third folder on the command line puts them
 there instead (`... <your romfs folder> work/save`); older versions needed it, so to keep saves from such a folder,
 copy its contents into the user data folder or keep naming it. The log's `yw4: saves in` line says which folder a
-run uses. Keyboard and gamepad both work; F12 saves a screenshot.
+run uses. The game makes the save folder if it is missing. Keyboard and gamepad both work; F12 saves a screenshot.
 
-To start without typing the folders, write them in `work/build/game.ini` (full paths, no `~`) and run
-`./work/build/yw4` alone:
-
-```
-YW4_EXEFS=../exefs
-YW4_ROMFS=/full/path/to/romfs
-```
-
-A `YW4_SAVE=` line there names another save folder.
+A `YW4_SAVE=` line in `game.ini` names another save folder. To keep your own edits to `game.ini`, delete its
+first line: the build then leaves the file alone.
 Runtime options and debugging tools are in [debugging.md](debugging.md).
 
 ## Tests

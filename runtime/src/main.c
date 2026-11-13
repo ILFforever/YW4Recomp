@@ -117,7 +117,7 @@ static void go_home(void) {
 
 /* The save folder when none is given: the platform's per-user data folder, so the saves don't live inside the
  * game's folder (deleting or re-cloning it would lose them). Linux follows the XDG Base Directory spec, which says
- * to ignore an XDG_DATA_HOME that isn't an absolute path. The folder is made at the first save (savefs.c). NULL
+ * to ignore an XDG_DATA_HOME that isn't an absolute path. savefs_init makes the folder when it's missing. NULL
  * when the environment names no home folder. */
 static const char *default_save_dir(void) {
     static char buf[1024];
