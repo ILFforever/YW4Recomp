@@ -674,14 +674,15 @@ int main(void) {
     int r = 0, c = 0;
     char help[256];
     int n = bindings_rows(rows, 64, &r, &c, help, sizeof(help));
-    if (n < 4) return 1;
-    if (strcmp(rows[2].group, "CONTROLLER") != 0) return 2;
-    if (strcmp(rows[2].name, "VIBRATION") != 0) return 3;
-    if (strcmp(rows[2].cells[0], "ON") != 0) return 4;
-    if (strcmp(rows[3].group, "KEYS FOR") != 0) return 20;
+    if (n < 5) return 1;
+    /* rows 0-1: the mouse's sensitivities; row 2: its buttons page (bed09f1); then the vibration toggle */
+    if (strcmp(rows[3].group, "CONTROLLER") != 0) return 2;
+    if (strcmp(rows[3].name, "VIBRATION") != 0) return 3;
+    if (strcmp(rows[3].cells[0], "ON") != 0) return 4;
+    if (strcmp(rows[4].group, "KEYS FOR") != 0) return 20;
 
-    /* select row 2 and toggle off */
-    bindings_select(2, 0);
+    /* select the vibration row and toggle off */
+    bindings_select(3, 0);
     bindings_action(SETTINGS_ACCEPT);
     if (rumble_state != 0) return 5;
 
