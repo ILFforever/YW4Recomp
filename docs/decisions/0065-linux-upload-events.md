@@ -59,7 +59,9 @@ On a host that can't track writes, uploads follow the events the game gives:
 - **The owner's own play session** (late-game save, a battle, Yo-kai Pad screens, 16,385 frames, page tracking on,
   `YW4_REUPLOAD_LOG=1`): 0 `untracked rule MISSED` for textures and for geometry. All 186,787 geometry copies whose
   content had changed had been flushed; the 78 unflushed ones were unchanged. Menu icons (64x64, 32x32, 256x16) had
-  their pages written with the same content.
+  their pages written with the same content. A second session on another map (22,206 frames): 0 `MISSED` again;
+  the map's textures loaded into memory older ones had used (1024x1024 and 512x512 maps, icons) all came with a new
+  registration, and all 651,337 changed geometry copies had been flushed.
 
 The `MISSED` check only means something with page tracking on: with `YW4_UNTRACKED=1` the rules decide the uploads,
 so a texture they miss is never uploaded and never logged.
