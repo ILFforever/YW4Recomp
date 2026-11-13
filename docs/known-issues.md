@@ -13,8 +13,8 @@ move to [progress.md](progress.md).
   frames of 200-660 ms "present"). The other upscaling and frame-generation choices recover at once (2026-11-10).
 - **Switching upscaling modes many times in a row once crashed an 8 GB card** ("device lost", video memory full).
   Made less likely on 2026-11-10 and not seen since, but not proven gone. If it comes back, the log is wanted.
-- **A short shadow flash after unpausing from the game's own pause menu** (the Plus button), not after closing our
-  overlay (2026-11-06). Minor; not looked into.
+- **A short shadow flash after unpausing from the game's own pause menu** (the Plus button), only in the bamboo
+  forest and not after closing our overlay (owner, 2026-11-06 and 2026-11-13). Minor; not looked into.
 - **Battles with special moves can be heavy at 4K ultrawide.** The bloom composite pass took 7–11 ms instead of ~2
   ms in some battles (2026-10-28, maybe a special move's effects); not traced. The freezes at a battle's first
   special move are fixed (2026-11-12), and a spike check at 4K with DLSS and frame generation found three single
