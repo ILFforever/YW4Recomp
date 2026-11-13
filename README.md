@@ -552,34 +552,45 @@ On Ordinary Street with the performance HUD on (F3). The frame takes about 19 ms
 ## Goals
 
 <details>
-<summary><b>Ongoing</b> (7)</summary>
+<summary><b>Ongoing</b> (4)</summary>
 
 | Goal | Where it stands |
 |---|---|
-| **Linux** | Works (2026-11-13): tester [ouni666](https://github.com/ouni666) plays it on AOSC OS with an AMD RX 6600 XT at about 110-120 frames/s, sound and controls included. Built from source for now (the launcher is Windows only). FSR, DLSS, frame generation and Reflex are Windows only for now |
-| **Our own renderer** | Replace the game's renderer pass by pass: the base for the graphics features above; shadows, surfaces, the shadow mask, bloom, distance blur and most screen passes (lighting, sky, tone mapping) are ours already |
-| **Better shadows** | Bigger shadow maps, PCSS soft shadows and contact shadows done; steadier cascades next |
+| **Our own renderer** | Replace the game's renderer pass by pass: the base for the graphics features above. Ours: shadows, surfaces, the shadow mask, bloom, distance blur and most screen passes (lighting, sky, tone mapping). **Left:** choosing and sorting what to draw (the engine still walks its own lists); skipping the engine's per-draw work for good (built; off by default since it gives no speed by itself, but choosing what to draw ourselves needs it); two screen programs (one may be ambient occlusion); the UI and menus |
+| **Steadier shadows** | Shadows still shimmer a little as the camera moves; steadier cascades next |
 | **Better anti-aliasing** | FXAA, SMAA and TAA (steady thin edges: fences, nets, leaves) on the 3D scene before the UI is drawn, so text stays crisp; per-object motion for TAA next (a first version is in, off by default) |
 | **Mouse control for the Yo-kai Pad** | Pointing, clicking and wheel scrolling work on the Yo-kai Pad and the pages opened from it, such as the item and quest lists, Ukiukipedia and Members ([decision 0057](docs/decisions/0057-mouse-menu-lists.md)). On 2026-11-08 some pages still had open issues (Watch skills, Soulmate, Trophies, Treasure photos, Switch moves) |
-| **In-game overlay** | Escape or a controller button pauses the game and opens a side panel: settings, controls, the performance HUD's options, screenshots and exit, drawn like its design ([decision 0053](docs/decisions/0053-in-game-overlay.md)); Preview shows graphics changes live, and themes match the launcher's ([decision 0055](docs/decisions/0055-overlay-themes.md)). Next: testing on more controllers |
-| **Launcher** | A Windows app that takes your game files, checks them, builds the game and starts it, with mods, DLC, saves and screenshots in one place. Works from start to finish. The installer and the portable zip are built ([decision 0052](docs/decisions/0052-launcher-packaging.md)), and a game build was tested on a second PC. Released with 1.0.0 (2026-11-13): [download](https://github.com/ILFforever/YW4Recomp/releases/latest) |
 
 </details>
 
 <details>
-<summary><b>Finished</b> (9)</summary>
+<summary><b>Planned</b> (2)</summary>
+
+| Goal | What it will be |
+|---|---|
+| **Built-in cheats** | Cheats switched on from the panel while playing, such as unlimited Crank-a-kai, with no separate cheat tool |
+| **Launcher for Linux** | The same launcher on Linux, so the game no longer has to be built from source there |
+
+</details>
+
+<details>
+<summary><b>Finished</b> (13)</summary>
 
 | Goal | Where it stands |
 |---|---|
 | **Performance** | The game's 30 frames/s everywhere tested, and well above it with the FRAME RATE setting (60, 120, 144 or no limit) |
 | **Higher frame rates** | 30, 60, 120, 144, VSYNC or no limit, switchable while playing (FRAME RATE in the panel; VSYNC after a restart): the game already moves by the real time between frames, so walking, battles, menus and cutscenes all work (~140 frames/s at 1600×900). At 4K the GPU is the limit; upscaling lifts it, frame generation doubles what is shown |
 | **Sharper distance** | Anisotropic texture filtering and a softer distance blur: distant ground, roads and buildings stay sharp without 4K |
+| **Better shadows** | Bigger shadow maps (up to 4096), PCSS soft shadows and contact shadows ([decisions 0025](docs/decisions/0025-pcss-soft-shadows.md), [0045](docs/decisions/0045-contact-shadows.md)) |
 | **Higher resolution** | The 3D view at 1080p, 1440p or 4K instead of the game's 1600×900 (30 frames/s at 4K on an RTX 4070 laptop) |
 | **Ultrawide and other aspect ratios** | 16:10, 21:9 and 32:9 in the panel: a wider view of the world with the UI kept 16:9 in the middle; exploring, battles and cutscenes work; dialog dimming and the loading screen cover the full width |
 | **Upscaling (NVIDIA DLSS, AMD FSR)** | The world drawn smaller and rebuilt at full size, menus and text kept full size. **DLSS for the cleanest picture (NVIDIA RTX), FSR for the most frames (any GPU).** At 4K 21:9 on an RTX 4070 laptop, instead of ~81 frames/s with TAA: DLSS ~85 / ~92 / ~82 (quality / balanced / performance), FSR ~94 / ~106 / ~118. DLSS keeps fine patterns (far nets, perforated fences) clean where FSR gets grainy ([decisions 0039](docs/decisions/0039-fsr-upscaling.md), [0040](docs/decisions/0040-dlss-upscaling.md)) |
 | **Frame generation (NVIDIA DLSS, AMD FSR)** | A frame made between each two of the game's: about twice as many on screen, the menus kept still. **On RTX 40 and newer use DLSS**: more game frames left and cleaner moving characters. In a busy town at 4K 21:9 on an RTX 4070 laptop, instead of ~70 frames/s: DLSS ~150 shown (~75 game), FSR ~126 shown (~63 game, any GPU). NVIDIA Reflex in the panel too ([decision 0041](docs/decisions/0041-frame-generation.md)) |
 | **Keyboard, mouse and controllers** | Bindings on the panel's CONTROLS page, saved, with separate keys for battles and your controller's own button names; tested with a DualSense. Controller rumble and haptics, on by default, with an on/off switch on the overlay's Controls page ([decision 0058](docs/decisions/0058-controller-rumble.md)). On-screen button icons follow what you play with and your bindings (keyboard, Xbox, PlayStation or Nintendo, [decision 0042](docs/decisions/0042-button-icons-and-mouse.md)). The mouse turns the camera through the game's own unused mouse code |
 | **Mod support** | Mods in the Switch's layout are laid over your game files at start, as on a modded Switch, without touching your dump: the English translation patch runs (see [Features](#features), [decision 0043](docs/decisions/0043-mods-layeredfs.md)) |
+| **In-game overlay** | Escape or a controller button pauses the game and opens a side panel: settings, controls, the performance HUD's options, screenshots and exit, drawn like its design ([decision 0053](docs/decisions/0053-in-game-overlay.md)); Preview shows graphics changes live, and themes match the launcher's ([decision 0055](docs/decisions/0055-overlay-themes.md)) |
+| **Launcher** | A Windows app that takes your game files, checks them, builds the game and starts it, with mods, DLC, saves and screenshots in one place. Installer and portable zip ([decision 0052](docs/decisions/0052-launcher-packaging.md)), tested on a second PC. Released with 1.0.0 (2026-11-13): [download](https://github.com/ILFforever/YW4Recomp/releases/latest) |
+| **Linux** | Tester [ouni666](https://github.com/ouni666) plays it on AOSC OS with an AMD RX 6600 XT at about 110-120 frames/s, sound and controls included (2026-11-13). Built from source (the launcher is Windows only); FSR, DLSS, frame generation and Reflex are Windows only |
 
 </details>
 
