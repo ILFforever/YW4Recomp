@@ -83,6 +83,17 @@ pub fn game_code(own: &Path, install: &Path) -> GameCode {
     best
 }
 
+/// The Play screen's "What's new": the version and change log of the game code builds use, when it is a downloaded
+/// game update (its release's text, kept as notes.md). None for the launcher's own code: the launcher's list is
+/// about that one.
+#[tauri::command]
+pub fn game_news(app: tauri::AppHandle, install: String) -> Option<(String, String)> {
+    let own = crate::buildrun::bundled_src(&app)?;
+    let code = game_code(&own, Path::new(&install));
+    let notes = std::fs::read_to_string(code.dir.join("notes.md")).ok().filter(|n| !n.trim().is_empty())?;
+    Some((code.version, notes))
+}
+
 /// After a build: downloaded game code other than the one just used is no longer needed.
 pub fn drop_other_game_code(install: &Path, used: &Path) {
     if let Ok(rd) = std::fs::read_dir(install.join("builder").join("game")) {

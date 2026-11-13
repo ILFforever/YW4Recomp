@@ -689,6 +689,24 @@ const NEWS = {
     'No freeze at the first Demon Hand', 'Steadier 30 frames/s'],
 };
 
+function showNews(version, items) {
+  $('news-title').textContent = `What's new in ${version}`;
+  $('news-list').replaceChildren(...items.map(chip));
+}
+
+// A release's notes (markdown) as short lines: each bullet's bold lead ("**Better settings.** More words" ->
+// "Better settings"), else the bullet itself; at most five.
+function newsItems(md) {
+  const out = [];
+  for (const raw of md.split(/\r?\n/)) {
+    const m = /^\s*[-*]\s+(.*)$/.exec(raw);
+    if (!m) continue;
+    const bold = /^\*\*(.+?)\*\*/.exec(m[1]);
+    out.push((bold ? bold[1] : m[1]).replace(/\*\*|`/g, '').replace(/[.:]\s*$/, '').trim());
+  }
+  return out.filter(Boolean).slice(0, 5);
+}
+
 function chip(text) {
   const li = document.createElement('li');
   li.textContent = text;
@@ -904,10 +922,13 @@ async function showReady() {
   setGameVersion(info);
   showUpdates(info);
 
-  $('news-title').textContent = `What's new in ${NEWS.version}`;
-  const news = $('news-list');
-  news.textContent = '';
-  for (const n of NEWS.items) news.append(chip(n));
+  showNews(NEWS.version, NEWS.items);
+  // a game update built from a download: its own release's notes, not the launcher's list (2026-11-13: game 1.0.2
+  // built, the box still said "What's new in 1.0.0")
+  invoke('game_news', { install: inst.install }).then((n) => {
+    const items = n && v && n[0] === v ? newsItems(n[1]) : [];
+    if (items.length) showNews(n[0], items);
+  }).catch(() => {});
 
   // screenshots: four on the overview, the newest ones on their tab; none yet: how to take one
   $('recent').hidden = !info.shots.length;
