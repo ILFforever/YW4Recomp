@@ -684,9 +684,8 @@ let inst = null;  // the launcher's state of the install (Rust: ready.rs, %AppDa
 
 // What's new: written for each release (the launcher ships with the notes of the version it builds)
 const NEWS = {
-  version: '1.0.0',
-  items: ['Return to title from the in-game menu', 'The launcher installs its own updates',
-    'No freeze at the first Demon Hand', 'Steadier 30 frames/s'],
+  version: '1.0.1',
+  items: ['New installs build the newest game', "What's new shows your game update", 'The installer carries game 1.0.1'],
 };
 
 function showNews(version, items) {

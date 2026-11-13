@@ -1,6 +1,6 @@
 [package]
 name = "yw4-recomp-launcher"
-version = "1.0.0"
+version = "1.0.1"
 description = "YW4 Recomp launcher: sets up the game from the player's own dump, builds it and starts it"
 license = "MIT"
 edition = "2021"
