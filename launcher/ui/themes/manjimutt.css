@@ -22,6 +22,7 @@
   --danger-hi: #c9302a;
   --danger-press: #8e1c17;
   --select: #6fb88a;      /* selected: outline, on-toggle, chosen radio (the mint tuft) */
+  --select-ink: var(--ink);  /* text on --select (the Mods tab's Used tag): this --select is too light for white */
   --bar: rgb(91 58 46 / .92);
   --bar-btn: #6f4b3b;
   --bar-btn-hover: #82594a;

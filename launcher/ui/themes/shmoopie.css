@@ -22,6 +22,7 @@
   --danger-hi: #c9302a;
   --danger-press: #8e1c17;
   --select: #e0649a;      /* selected: outline, on-toggle, chosen radio (the heart pink) */
+  --select-ink: var(--ink);  /* text on --select (the Mods tab's Used tag): this --select is too light for white */
   --bar: rgb(184 51 111 / .92);
   --bar-btn: #c44a84;
   --bar-btn-hover: #d55d96;

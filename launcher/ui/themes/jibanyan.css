@@ -9,6 +9,7 @@
   --violet-deep: #d9462a; /* title bar, darkest: Jibanyan's fur */
   --violet-soft: #e5532b;
   --select: #eaa51a;      /* selected: outline, on-toggle, chosen radio (the belt and eye yellow, a little deeper to show on white) */
+  --select-ink: var(--ink);  /* text on --select (the Mods tab's Used tag): this --select is too light for white */
   --ink: #2a1410;       /* body text */
   --ink-2: #6b4a40;     /* secondary text */
   --gold: #f4c542;      /* primary button (eye yellow) */

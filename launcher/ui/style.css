@@ -12,6 +12,7 @@
   --lilac-3: oklch(80% 0.06 305);
   --violet: oklch(36% 0.11 295); --violet-deep: oklch(27% 0.09 295); --violet-soft: oklch(50% 0.11 300);
   --select: oklch(50% 0.11 300); /* selected: the outline, the on-toggle, the chosen radio */
+  --select-ink: var(--white);    /* text on --select (the Mods tab's Used tag); a theme with a light --select sets its ink */
   --ink: oklch(25% 0.04 295); --ink-2: oklch(45% 0.04 295);
   --gold: oklch(80% 0.12 85); --gold-deep: oklch(62% 0.12 75); --cream: oklch(96.5% 0.03 90);
   --white: oklch(99.2% 0.004 305); --ok: oklch(50% 0.12 160); --ok-bg: oklch(94% 0.05 160);
@@ -366,6 +367,10 @@ p.list-card { padding: 14px 18px; }
 .mod-name { display: flex; align-items: center; gap: 10px; min-width: 0; }
 .clash-tag { flex-shrink: 0; display: inline-flex; align-items: center; gap: 5px; height: 22px; padding: 0 9px; border-radius: 999px;
   background: var(--cream); border: 1px solid var(--line-gold-strong); font-size: 12px; font-weight: 700; color: var(--warn-ink); }
+/* in a clash group: which mod's copy the game uses (the last one on, in load order) */
+.use-tag { flex-shrink: 0; display: inline-flex; align-items: center; gap: 5px; height: 22px; padding: 0 9px; border-radius: 999px;
+  box-sizing: border-box; font-size: 12px; font-weight: 700; background: var(--white); border: 1px solid var(--lilac-3); color: var(--ink-2); }
+.use-tag.used { background: var(--select); border-color: var(--select); color: var(--select-ink); }
 .list-block { display: flex; flex-direction: column; gap: 6px; }
 .list-label { font-size: 12px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; color: var(--ink-2); }
 /* the clash warning: one white card per group of mods that change the same thing */

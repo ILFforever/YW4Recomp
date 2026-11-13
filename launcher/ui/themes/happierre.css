@@ -23,6 +23,7 @@
   --danger-hi: #c9302a;
   --danger-press: #8e1c17;
   --select: #e8b923;      /* selected: outline, on-toggle, chosen radio (his yellow) */
+  --select-ink: var(--ink);  /* text on --select (the Mods tab's Used tag): this --select is too light for white */
   --bar: rgb(232 185 35 / .94);
   --bar-btn: #d9a91e;
   --bar-btn-hover: #e8b923;

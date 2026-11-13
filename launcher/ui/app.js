@@ -785,7 +785,8 @@ let modsFixed = false;   // a switch settled the last clash since the last scan:
 let modBusy = false;     // one switch at a time: each answer is the whole disabled list
 
 // One mod's row with its switch, for the list ('list') or a clash group ('clash').
-function modRow(m, on, where, clashes) {
+// use: in a clash group, 'used' (the game uses this mod's copy) or 'unused' (another one's); else nothing.
+function modRow(m, on, where, clashes, use) {
   const li = document.createElement('li');
   li.className = 'mod-row';
   if (!on) li.classList.add('disabled');
@@ -799,6 +800,15 @@ function modRow(m, on, where, clashes) {
     const tag = document.createElement('span');
     tag.className = 'clash-tag';
     tag.innerHTML = WARN_ICON(11, 2.8) + 'Clashes';
+    label.append(tag);
+  }
+  if (use) {
+    const tag = document.createElement('span');
+    tag.className = use === 'used' ? 'use-tag used' : 'use-tag';
+    tag.innerHTML = use === 'used'
+      ? '<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3.5" ' +
+        'stroke-linecap="round" aria-hidden="true"><path d="M4 12l5 5L20 6"/></svg>Used'
+      : 'Not used';
     label.append(tag);
   }
   const toggle = document.createElement('button');
@@ -852,7 +862,9 @@ function renderMods() {
   $('mod-clash-groups').replaceChildren(...groups.map((g) => {
     const ul = document.createElement('ul');
     ul.className = 'clash-group';
-    ul.append(...g.map((m) => modRow(m, isOn(m), 'clash', false)));
+    // the group's mods are in load order (the game's: folder names byte by byte): the last one on is the one used
+    const used = g.filter(isOn).pop();
+    ul.append(...g.map((m) => modRow(m, isOn(m), 'clash', false, isOn(m) ? (m === used ? 'used' : 'unused') : null)));
     return ul;
   }));
   const fixed = $('mod-fixed'), showFixed = modsFixed && !groups.length;

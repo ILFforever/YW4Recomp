@@ -22,6 +22,7 @@
   --danger-hi: #c9302a;
   --danger-press: #8e1c17;
   --select: #2f9aa6;      /* selected: outline, on-toggle, chosen radio (the scarf teal) */
+  --select-ink: var(--ink);  /* text on --select (the Mods tab's Used tag): this --select is too light for white */
   --bar: rgb(90 61 28 / .92);
   --bar-btn: #6e4b23;
   --bar-btn-hover: #855a2c;
