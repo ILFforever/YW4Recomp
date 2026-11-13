@@ -461,7 +461,6 @@ the game starts.
 | Two mods ship `cpk_list` (the game's list of which file is in which archive) | The copy made last wins: the other mod's files, often the translation's, come from the Japanese archives again | One copy wins | Merged: every file any mod takes out of the archives stays out, with its real size |
 | Two mods change one data file (items, shops, NPCs...) | One copy wins, the other mod does nothing | One copy wins | Merged entry by entry against the game's own copy: both work unless they change the same entries |
 | Clashes | Found while playing | Found while playing | The launcher names the mods that clash before you play |
-| Your game files | Untouched | Untouched | Untouched: merged files exist only in memory |
 
 **Limitations**
 - **Code patches don't work** (`exefs` `.ips` / `.pchtxt`, such as FPS or name-spacing patches): the game's code is
