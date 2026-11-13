@@ -32,11 +32,14 @@ did not find.
 ## Decision
 
 - After laying the mods over the tree, if two or more mods ship a `cpk_list`, the one used is the **last mod's list
-  with every file any mod freed also freed** (archive set to 0xFFFFFFFF, in place: no string table change). "Freed"
+  with every file any mod freed also freed** (archive set to an empty string, as the mods free files, in place: the
+  offset of a NUL already in the string table). "Freed"
   is measured against the game's own list, per path (a path is loose only if all its entries are). Anything else a
   later mod changed in its list stays as it was. The result lives in memory (`File.mem`); no file is written.
 - If any list can't be read as a cfg.bin, the old behaviour (last one wins) stays and the log says why.
-- A mod folder with `data/` directly is a mod too (runtime `check_add_mod`, launcher `mod_names`).
+- A mod folder with `data/` directly is a mod too (runtime `check_add_mod`, launcher `mod_roots`), and a folder that
+  isn't a mod is looked into one level more: downloads wrap the mod in a folder of their own
+  (`free_tag_battles/Tags/romfs`, found 2026-11-14 when it didn't load from `contents/<title id>/`).
 - Two mods replacing the same file still can't both apply: the later one wins, as before (e.g. three of these mods
   ship `item_config_0.13.66.cfg.bin`).
 

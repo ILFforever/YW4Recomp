@@ -227,8 +227,9 @@ static int is_mod_disabled(const char *name, const char *disabled_list) {
 
 /* A mod's folder: <dir>/romfs, or <dir> itself when it holds data/ directly (mods shared as the romfs contents
  * alone, to be put in a romfs folder on a Switch). */
-static void check_add_mod(DiscoveredMod *mods, int *n, int max, const char *name, const char *dir) {
-    if (*n >= max) return;
+/* Returns 1 when `dir` is a mod (added, or already there). */
+static int check_add_mod(DiscoveredMod *mods, int *n, int max, const char *name, const char *dir) {
+    if (*n >= max) return 0;
     char romfs[1200];
     int is_dir = 0;
     snprintf(romfs, sizeof romfs, "%s/romfs", dir);
@@ -239,15 +240,18 @@ static void check_add_mod(DiscoveredMod *mods, int *n, int max, const char *name
     }
     if (is_dir) {
         for (int i = 0; i < *n; i++) {
-            if (!strcmp(mods[i].romfs, romfs)) return;
+            if (!strcmp(mods[i].romfs, romfs)) return 1;
         }
         mods[*n].name = dup_str(name);
         mods[*n].romfs = dup_str(romfs);
         (*n)++;
     }
+    return is_dir;
 }
 
-static void scan_submods(DiscoveredMod *mods, int *n, int max, const char *dir) {
+/* The mods inside `dir`; a folder that isn't one is looked into `depth` more levels: downloads often wrap the mod
+ * in a folder of their own (free_tag_battles/Tags/romfs), and players drop the whole download in. */
+static void scan_submods(DiscoveredMod *mods, int *n, int max, const char *dir, int depth) {
     DIR *d = opendir(dir);
     if (!d) return;
     struct dirent *e;
@@ -258,7 +262,7 @@ static void scan_submods(DiscoveredMod *mods, int *n, int max, const char *dir) 
         snprintf(sub, sizeof sub, "%s/%s", dir, e->d_name);
         int is_dir = 0;
         if (file_size(sub, &is_dir) >= 0 && is_dir) {
-            check_add_mod(mods, n, max, e->d_name, sub);
+            if (!check_add_mod(mods, n, max, e->d_name, sub) && depth > 0) scan_submods(mods, n, max, sub, depth - 1);
         }
     }
     closedir(d);
@@ -420,12 +424,23 @@ static void merge_cpk_lists(Dir *root, const char *base, char **lists, int nlist
             free(b), free(e);
         }
     }
+    /* A file is freed the way the mods free it: its archive an empty string (0xFFFFFFFF is how the game's own list
+     * marks files that were never in an archive; both read as loose, but the mods' way is the one known to work for
+     * a freed file). Any NUL in the string table is an empty string: one a mod already uses, else the table's last
+     * byte. */
+    uint32_t empty = EMPTY;
+    for (int k = 0; ok && k < nl && empty == EMPTY; k++)
+        if (le[k].loose && get32(last + le[k].archive) != EMPTY) empty = get32(last + le[k].archive);
+    if (ok && empty == EMPTY && last_n >= 16) {
+        uint32_t so = get32(last + 4), sl = get32(last + 8);
+        if (sl && (uint64_t)so + sl <= last_n && last[so + sl - 1] == 0) empty = sl - 1;
+    }
     int added = 0;
     for (int k = 0; ok && k < nl; k++) {
         int j;
         FIND(le[k].path, j);
         if (j >= 0 && freed[j] && !le[k].loose) {
-            memcpy(last + le[k].archive, &(uint32_t){EMPTY}, 4);
+            memcpy(last + le[k].archive, &empty, 4);
             added++;
         }
     }
@@ -565,14 +580,14 @@ static void apply_mods(Dir *root) {
                     int sub_is_dir = 0;
                     if (file_size(sub, &sub_is_dir) >= 0 && sub_is_dir) {
                         check_add_mod(mods, &n, 256, ec->d_name, sub);
-                        scan_submods(mods, &n, 256, sub);
+                        scan_submods(mods, &n, 256, sub, 1);
                     }
                 }
                 closedir(dc);
             }
         } else {
             check_add_mod(mods, &n, 256, e->d_name, path);
-            scan_submods(mods, &n, 256, path);
+            scan_submods(mods, &n, 256, path, 1);
         }
     }
     closedir(d);
@@ -603,7 +618,8 @@ static void apply_mods(Dir *root) {
     }
     merge_cpk_lists(root, base_list, lists, nlists);
     for (int i = 0; i < nlists; i++) free(lists[i]);
-    if (!clash_check) {
+    const char *merge_env = getenv("YW4_MODS_MERGE");  /* "0": no data-file merge, the later copy wins (A/B checks) */
+    if (!clash_check && !(merge_env && !strcmp(merge_env, "0"))) {
         char rel[1024] = "";
         merge_data_files(root, root, rel, 0);
     }

@@ -296,41 +296,40 @@ fn reclaim_dirs(install: &Path) -> Vec<PathBuf> {
 /// Every mod in mods\ as (name, the folder laid over the game's files), found the way the game's romfs.c finds
 /// them (`check_add_mod`), so the launcher lists what the game will load.
 fn mod_roots(mods: &Path) -> Vec<(String, PathBuf)> {
-    let mut out: Vec<(String, PathBuf)> = Vec::new();
-    let read_dirs = |d: &Path| std::fs::read_dir(d).into_iter().flatten().flatten()
-        .filter(|e| e.path().is_dir()).collect::<Vec<_>>();
+    fn read_dirs(d: &Path) -> Vec<std::fs::DirEntry> {
+        std::fs::read_dir(d).into_iter().flatten().flatten()
+            .filter(|e| e.path().is_dir() && !e.file_name().to_string_lossy().starts_with('.')).collect()
+    }
     // romfs/ inside, or data/ directly (a mod shared as a romfs folder's contents), as the game's romfs.c reads them
-    let root_of = |p: &Path| {
+    fn add(out: &mut Vec<(String, PathBuf)>, name: String, p: &Path) -> bool {
         let r = p.join("romfs");
-        if r.is_dir() { Some(r) } else if p.join("data").is_dir() { Some(p.to_path_buf()) } else { None }
-    };
-    let mut add = |name: String, p: &Path| {
-        if let Some(root) = root_of(p) { out.push((name, root)); }
-    };
-
-    add("romfs".into(), mods);
+        let root = if r.is_dir() { r } else if p.join("data").is_dir() { p.to_path_buf() } else { return false };
+        out.push((name, root));
+        true
+    }
+    // the mods inside `dir`; a folder that isn't one is looked into `depth` more levels (romfs.c scan_submods):
+    // downloads often wrap the mod in a folder of their own (free_tag_battles/Tags/romfs)
+    fn submods(out: &mut Vec<(String, PathBuf)>, dir: &Path, depth: u32) {
+        for e in read_dirs(dir) {
+            let name = e.file_name().to_string_lossy().into_owned();
+            if name.eq_ignore_ascii_case("romfs") { continue; }
+            if !add(out, name, &e.path()) && depth > 0 { submods(out, &e.path(), depth - 1); }
+        }
+    }
+    let mut out: Vec<(String, PathBuf)> = Vec::new();
+    add(&mut out, "romfs".into(), mods);
     for entry in read_dirs(mods) {
         let name = entry.file_name().to_string_lossy().into_owned();
         let path = entry.path();
-        if name.eq_ignore_ascii_case("romfs") {
-            continue;
-        }
+        if name.eq_ignore_ascii_case("romfs") { continue; }
         if name.eq_ignore_ascii_case("contents") {
             for sub in read_dirs(&path) {
-                let sub_name = sub.file_name().to_string_lossy().into_owned();
-                let sub_path = sub.path();
-                add(sub_name, &sub_path);
-                for sub2 in read_dirs(&sub_path) {
-                    let sub2_name = sub2.file_name().to_string_lossy().into_owned();
-                    if !sub2_name.eq_ignore_ascii_case("romfs") { add(sub2_name, &sub2.path()); }
-                }
+                add(&mut out, sub.file_name().to_string_lossy().into_owned(), &sub.path());
+                submods(&mut out, &sub.path(), 1);
             }
         } else {
-            add(name, &path);
-            for sub in read_dirs(&path) {
-                let sub_name = sub.file_name().to_string_lossy().into_owned();
-                if !sub_name.eq_ignore_ascii_case("romfs") { add(sub_name, &sub.path()); }
-            }
+            add(&mut out, name, &path);
+            submods(&mut out, &path, 1);
         }
     }
     out.sort();
@@ -1368,9 +1367,15 @@ mod tests {
         std::fs::create_dir_all(temp.join("contents").join("ModB").join("romfs")).unwrap();
         std::fs::create_dir_all(temp.join("contents").join("010086c00af7c000").join("romfs")).unwrap();
         std::fs::create_dir_all(temp.join("ModC").join("romfs")).unwrap();
+        // downloads dropped in whole: the mod one folder inside the download's own (free_tag_battles/Tags/romfs),
+        // in the Atmosphère layout and at the top; one more level is not looked into
+        let tid = temp.join("contents").join("010086c00af7c000");
+        std::fs::create_dir_all(tid.join("free_tag_battles").join("Tags").join("romfs")).unwrap();
+        std::fs::create_dir_all(temp.join("wrapper").join("ModD").join("data")).unwrap();
+        std::fs::create_dir_all(temp.join("a").join("b").join("c").join("TooDeep").join("romfs")).unwrap();
 
         let mods: Vec<String> = mod_roots(&temp).into_iter().map(|(name, _)| name).collect();
-        assert_eq!(mods, vec!["010086c00af7c000", "ModA", "ModB", "ModC"]);
+        assert_eq!(mods, vec!["010086c00af7c000", "ModA", "ModB", "ModC", "ModD", "Tags"]);
 
         let _ = std::fs::remove_dir_all(&temp);
     }
