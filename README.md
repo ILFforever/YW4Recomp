@@ -68,9 +68,12 @@ logs. Its theme is synced with the in-game overlay's, and game updates come thro
 [the launcher's page](https://ilfforever.github.io/YW4Recomp/launcher/). On Linux, or to work on the code,
 [build from source](#building-from-source).
 
-The launcher building the game (video):
+<details>
+<summary>The launcher building the game (video)</summary>
 
 [![YW4 Recomp building process (video on YouTube)](https://i.ytimg.com/vi/Vnpo5EPti9w/maxresdefault.jpg)](https://youtu.be/Vnpo5EPti9w)
+
+</details>
 
 ![The launcher: the first start with the welcome popup; your game files; Play with what's new; Settings](docs/screenshots/99-launcher.jpg)
 
@@ -107,9 +110,14 @@ Memory: Eden's is private + mapped (the emulated console's RAM is mapped memory,
 column leaves out: it shows about 1.3 GB for Eden and 2.8 GB for this project). Ours is everything the game has
 committed.
 
-On an ASUS Zenbook (Ryzen 5 7530U, integrated Radeon graphics): about 35-40 frames/s here, 22-30 in Eden (video; more on the site's [Showcases](https://ilfforever.github.io/YW4Recomp/showcases/) page):
+On an ASUS Zenbook (Ryzen 5 7530U, integrated Radeon graphics): about 35-40 frames/s here, 22-30 in Eden (more on the site's [Showcases](https://ilfforever.github.io/YW4Recomp/showcases/) page).
+
+<details>
+<summary>YW4 Recomp vs Eden on the Zenbook (video)</summary>
 
 [![YW4 Recomp vs Eden comparison on Potato PC (video on YouTube)](https://i.ytimg.com/vi/HfCrAkMDOzs/maxresdefault.jpg)](https://youtu.be/HfCrAkMDOzs)
+
+</details>
 
 ## Features
 
