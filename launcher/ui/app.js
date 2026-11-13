@@ -1424,7 +1424,7 @@ async function showUpdates(info) {
         }
         showUpdates(info);  // now the rebuild question, in the same popup
       }, u.game.notes);
-  } else if (u.launcher && u.launcher.sha256) {
+  } else if (u.launcher && u.launcher.sha256 && !u.launcher.portable) {
     // the release has its installer: downloaded, checked and started here; the launcher closes and comes back new
     const l = u.launcher;
     askUpdate('launcher ' + l.version, `Launcher ${l.version}`,
@@ -1443,9 +1443,11 @@ async function showUpdates(info) {
           popup('Launcher update', String(e));
         }
       }, l.notes);
-  } else if (u.launcher) {  // a release without its installer: its page, to install by hand
-    askUpdate('launcher ' + u.launcher.version, `Launcher ${u.launcher.version}`,
-      'A new launcher is out. Download it and install it over this one; your game and saves stay.', 'Download', () => {
+  } else if (u.launcher) {  // the portable launcher, or a release without its installer: its page, by hand
+    const text = u.launcher.portable
+      ? `A new launcher is out. Download YW4-Recomp-Launcher-${u.launcher.version}-portable.zip and unpack it over this folder; your game and saves stay.`
+      : 'A new launcher is out. Download it and install it over this one; your game and saves stay.';
+    askUpdate('launcher ' + u.launcher.version, `Launcher ${u.launcher.version}`, text, 'Download', () => {
         updateDlg.close();
         invoke('open_release_page', { url: u.launcher.page });
       }, u.launcher.notes);

@@ -108,9 +108,11 @@ pub fn drop_other_game_code(install: &Path, used: &Path) {
 #[derive(Serialize, Clone)]
 pub struct GameOffer { version: String, url: String, sha256: String, size: u64, notes: String }
 /// A newer launcher. url, sha256 and size are its installer's (empty when the release has none with a digest:
-/// then only its page is offered).
+/// then only its page is offered). portable: this launcher is the portable zip's (no uninstaller beside it), which
+/// the installer would not update but install a second time elsewhere: then the page too, for the new zip.
 #[derive(Serialize, Clone)]
-pub struct LauncherOffer { version: String, page: String, notes: String, url: String, sha256: String, size: u64 }
+pub struct LauncherOffer { version: String, page: String, notes: String, url: String, sha256: String, size: u64,
+                           portable: bool }
 
 /// The installer a launcher release carries (package.py's name for it), with the SHA-256 GitHub reports for it.
 fn launcher_installer(release: &serde_json::Value, v: Ver) -> Option<(String, String, u64)> {
@@ -195,7 +197,8 @@ pub async fn check_updates(app: tauri::AppHandle, install: String, built: String
                     let notes = r["body"].as_str().unwrap_or("").to_string();
                     let (url, sha256, size) = launcher_installer(r, v).unwrap_or_default();
                     launcher = Some((v, LauncherOffer { version: format!("{}.{}.{}", v.0, v.1, v.2), page, notes,
-                                                        url, sha256, size }));
+                                                        url, sha256, size,
+                                                        portable: crate::ready::uninstaller().is_none() }));
                 }
             } else if let Some(v) = tag.strip_prefix('v').and_then(ver) {
                 let name = format!("yw4recomp-game-{}.{}.{}.zip", v.0, v.1, v.2);

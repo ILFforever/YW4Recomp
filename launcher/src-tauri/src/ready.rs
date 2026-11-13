@@ -1085,7 +1085,7 @@ fn ours(inst: &Path) -> bool {
         .map(|s| s.starts_with("# Written by the YW4 Recomp launcher")).unwrap_or(false)
 }
 
-fn uninstaller() -> Option<PathBuf> {
+pub(crate) fn uninstaller() -> Option<PathBuf> {
     std::env::current_exe().ok()?.parent().map(|d| d.join("uninstall.exe")).filter(|p| p.is_file())
 }
 
