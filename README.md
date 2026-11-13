@@ -446,6 +446,38 @@ get yours from [GameBanana](https://gamebanana.com/mods/480884)):
 
 </details>
 
+<details>
+<summary><b>YKW Mod Merger™</b>: mods that change the same game file work together, which no Switch or emulator setup does</summary>
+
+![The launcher's Mods tab with six mods on: one group of mods clash, Crank-a-kai Overhaul and Unrestricted Crank; Free Tag Battles, the English translation, Uncapped Training and Unshackled Equipment work alongside](docs/screenshots/91-mod-merger.jpg)
+
+Six mods on at once: the English translation and five gameplay mods, three of which change the same item list.
+The launcher flags one pair only: the two Crank-a-kai mods, which change the same prizes. The rest are merged when
+the game starts.
+
+| | Modded Switch | Emulators | YW4 Recomp |
+|---|---|---|---|
+| Several mods | One `romfs` folder per game: you copy them all into it | A folder per mod, each on or off | A folder per mod, each on or off in the launcher |
+| Two mods ship `cpk_list` (the game's list of which file is in which archive) | The copy made last wins: the other mod's files, often the translation's, come from the Japanese archives again | One copy wins | Merged: every file any mod takes out of the archives stays out, with its real size |
+| Two mods change one data file (items, shops, NPCs...) | One copy wins, the other mod does nothing | One copy wins | Merged entry by entry against the game's own copy: both work unless they change the same entries |
+| Clashes | Found while playing | Found while playing | The launcher names the mods that clash before you play |
+| Your game files | Untouched | Untouched | Untouched: merged files exist only in memory |
+
+**Limitations**
+- **Code patches don't work** (`exefs` `.ips` / `.pchtxt`, such as FPS or name-spacing patches): the game's code is
+  recompiled for PC, so its original bytes are never run. Frame rate, widescreen and English names are built in.
+- **Only data lists are merged**: Level-5's `.cfg.bin` files. Textures, models, sound and whole archives (`.cpk`)
+  can't be: when two mods ship one of those, the one whose folder name sorts later is used.
+- **Two mods changing the same entries still clash**, as the two Crank-a-kai mods do: keep one on.
+- A mod that adds a new kind of entry to a list isn't merged into it (the later copy is used, and the launcher says so).
+- Mods aren't tested one by one: one made for another game version can still misbehave.
+- The launcher's warning comes from the game itself from game 1.1.1 on; with older games it compares file names only.
+
+How it works: [decision 0067](docs/decisions/0067-mods-merge-cpk-list.md) (the archive list),
+[decision 0068](docs/decisions/0068-mods-merge-data-files.md) (data files).
+
+</details>
+
 **Settings**
 
 <details>
@@ -587,7 +619,7 @@ On Ordinary Street with the performance HUD on (F3). The frame takes about 19 ms
 | **Upscaling (NVIDIA DLSS, AMD FSR)** | The world drawn smaller and rebuilt at full size, menus and text kept full size. **DLSS for the cleanest picture (NVIDIA RTX), FSR for the most frames (any GPU).** At 4K 21:9 on an RTX 4070 laptop, instead of ~81 frames/s with TAA: DLSS ~85 / ~92 / ~82 (quality / balanced / performance), FSR ~94 / ~106 / ~118. DLSS keeps fine patterns (far nets, perforated fences) clean where FSR gets grainy ([decisions 0039](docs/decisions/0039-fsr-upscaling.md), [0040](docs/decisions/0040-dlss-upscaling.md)) |
 | **Frame generation (NVIDIA DLSS, AMD FSR)** | A frame made between each two of the game's: about twice as many on screen, the menus kept still. **On RTX 40 and newer use DLSS**: more game frames left and cleaner moving characters. In a busy town at 4K 21:9 on an RTX 4070 laptop, instead of ~70 frames/s: DLSS ~150 shown (~75 game), FSR ~126 shown (~63 game, any GPU). NVIDIA Reflex in the panel too ([decision 0041](docs/decisions/0041-frame-generation.md)) |
 | **Keyboard, mouse and controllers** | Bindings on the panel's CONTROLS page, saved, with separate keys for battles and your controller's own button names; tested with a DualSense. Controller rumble and haptics, on by default, with an on/off switch on the overlay's Controls page ([decision 0058](docs/decisions/0058-controller-rumble.md)). On-screen button icons follow what you play with and your bindings (keyboard, Xbox, PlayStation or Nintendo, [decision 0042](docs/decisions/0042-button-icons-and-mouse.md)). The mouse turns the camera through the game's own unused mouse code |
-| **Mod support** | Mods in the Switch's layout are laid over your game files at start, as on a modded Switch, without touching your dump: the English translation patch runs (see [Features](#features), [decision 0043](docs/decisions/0043-mods-layeredfs.md)) |
+| **Mod support** | Mods in the Switch's layout are laid over your game files at start, as on a modded Switch, without touching your dump: the English translation patch runs (see [Features](#features), [decision 0043](docs/decisions/0043-mods-layeredfs.md)). The YKW Mod Merger™ makes mods that change the same file work together ([0067](docs/decisions/0067-mods-merge-cpk-list.md), [0068](docs/decisions/0068-mods-merge-data-files.md)) |
 | **In-game overlay** | Escape or a controller button pauses the game and opens a side panel: settings, controls, the performance HUD's options, screenshots and exit, drawn like its design ([decision 0053](docs/decisions/0053-in-game-overlay.md)); Preview shows graphics changes live, and themes match the launcher's ([decision 0055](docs/decisions/0055-overlay-themes.md)) |
 | **Launcher** | A Windows app that takes your game files, checks them, builds the game and starts it, with mods, DLC, saves and screenshots in one place. Installer and portable zip ([decision 0052](docs/decisions/0052-launcher-packaging.md)), tested on a second PC. Released with 1.0.0 (2026-11-13): [download](https://github.com/ILFforever/YW4Recomp/releases/latest) |
 | **Linux** | Tester [ouni666](https://github.com/ouni666) plays it on AOSC OS with an AMD RX 6600 XT at about 110-120 frames/s, sound and controls included (2026-11-13). Built from source (the launcher is Windows only); FSR, DLSS, frame generation and Reflex are Windows only |
