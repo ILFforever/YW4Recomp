@@ -76,6 +76,18 @@ field camera (`f_846260`) that the Switch build never feeds.
    fingerprint), go back for other pads. The Controls page then says Back / Start and the overlay hint shows the
    triangles. Known limit: many third-party pads (and Switch-style pads in X-input mode) report as a 360 pad and
    get the triangles too; `YW4_NINTENDO_LAYOUT` still gives the latter the Switch icons.
+7. **The touchpad as a menu pointer (2026-11-14).** A DualSense sends finger positions over Bluetooth too (SDL
+   switches it to its full reports; checked with `tools.dev.padtest`). While one of the game's menus (decision
+   0057's mouse menus) or our overlay is open, the first finger moves the cursor like a laptop trackpad (from where
+   it is; lift and drag again), and the touchpad click chooses: a click at the cursor in the overlay, the left
+   button in a game menu. The owner's picks: trackpad, not the pad as the whole screen; click, not tap or Cross.
+   The cursor really moves (`SDL_WarpMouseInWindow`), so both menu paths take it as the mouse with no new code;
+   that motion still counts as the controller's, so the overlay's hints stay on the controller. Elsewhere the
+   click still opens the overlay; in menus it opens and closes with Create + Options (Share + Options on a PS4
+   pad), which the overlay's hint then names. `YW4_TOUCHPAD_SPEED` scales the movement (one stroke across the pad:
+   55% of the window's width; 90% was too quick). While the touchpad moves it the cursor is a see-through grey disc
+   with a white edge, like a console's pointer (the owner's pick from mockups), 3% of the window's height; the
+   arrow comes back when the mouse moves.
 
 ## Rejected
 

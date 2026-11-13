@@ -2253,6 +2253,14 @@ static int wheel_active[2];                  /* currently pulsing [0] up or [1] 
 static uint64_t wheel_press_until_reads;     /* input_reads until active pulse ends */
 static uint64_t wheel_gap_until_reads;       /* input_reads until release gap ends */
 static int mouse_held_off;         /* the click that gave the game the mouse: no press until it is let go */
+/* The PlayStation touchpad as a menu pointer (owner, 2026-11-14; tp_* below the gamepad code): in the game's menus
+ * and our overlay a finger moves the cursor like a laptop trackpad and a touchpad click chooses; elsewhere the
+ * click still opens the overlay. */
+static int tp_game_click;                   /* a touchpad click begun in a game menu: its left button while held */
+/* when the touchpad last moved the cursor (SDL_GetTicks): cursor motion until 150 ms after is the pad's. By time,
+ * not by place: a quick finger moves it again before the first move's event comes, which then matched no place
+ * and counted as the mouse (the overlay's on-screen keyboard went off and on, 2026-11-14) */
+static uint64_t tp_moved_ms;
 
 /* YW4_MOUSE=0: the game never takes the mouse (no capture, no camera, no clicks or wheel): for test runs, so the
  * person at the PC can go on using it (tools.dev.run sets it). */
@@ -2543,7 +2551,10 @@ static void update_input(void) {
         /* the mouse in the picture's own rectangle (the window minus any black bars) */
         float px = picture_rect[0] * (float)ww, py = picture_rect[1] * (float)wh;
         float pw = picture_rect[2] * (float)ww, ph = picture_rect[3] * (float)wh;
-        uint64_t mm = mousemenu_update(mx - px, my - py, (int)(pw + 0.5f), (int)(ph + 0.5f), SDL_GetMouseState(NULL, NULL), &want);
+        /* a touchpad click begun in the menu is the left button until the touchpad is let go */
+        if (tp_game_click && !(gamepad && SDL_GetGamepadButton(gamepad, SDL_GAMEPAD_BUTTON_TOUCHPAD))) tp_game_click = 0;
+        uint64_t mm = mousemenu_update(mx - px, my - py, (int)(pw + 0.5f), (int)(ph + 0.5f),
+                                       SDL_GetMouseState(NULL, NULL) | (tp_game_click ? SDL_BUTTON_LMASK : 0), &want);
         {
             static uint64_t last_mm;
             if (mm != last_mm && mousemenu_log_on()) fprintf(stderr, "yw4: mouse menus: sends %#llx\n", (unsigned long long)mm);
@@ -2615,14 +2626,18 @@ static int pad_hints(const char **close) {
     int forced = bindings_hints_forced();
     if (forced == 1) return 0;
     if (forced >= 2 && !gamepad) {
-        *close = forced == 3   ? (bindings_ps_model() == 3 ? "Select + Start" : "Touchpad")
+        *close = forced == 3   ? (bindings_ps_model() == 3   ? "Select + Start"
+                                  : bindings_ps_model() == 4 ? "Share + Options"
+                                                             : "Create + Options")
                  : forced == 4 ? "Capture"
                                : (bindings_xbox360() ? "Back + Start (360)" : "Back + Start");
         return forced == 3 ? 2 : 1;
     }
     if (!gamepad || (!last_used_pad && !forced)) return 0;
     int ps = pad_is_playstation();
-    if (ps && SDL_GetGamepadType(gamepad) != SDL_GAMEPAD_TYPE_PS3) *close = "Touchpad";
+    /* in the overlay the touchpad clicks (the menu pointer, tp_click): it closes with the two middle buttons */
+    if (ps && SDL_GetGamepadType(gamepad) != SDL_GAMEPAD_TYPE_PS3)
+        *close = SDL_GetGamepadType(gamepad) == SDL_GAMEPAD_TYPE_PS4 ? "Share + Options" : "Create + Options";
     else if (ps) *close = "Select + Start";  /* a PS3 pad has no touchpad: its Back + Start, by their names */
     else if (SDL_GamepadHasButton(gamepad, SDL_GAMEPAD_BUTTON_MISC1))
         *close = SDL_GetGamepadType(gamepad) == SDL_GAMEPAD_TYPE_NINTENDO_SWITCH_PRO ? "Capture" : "Share";
@@ -2733,6 +2748,124 @@ static void pad_shoulders_overlay(void) {
     held = all;
 }
 
+/* ---- the touchpad as a menu pointer (tp_game_click, tp_moved_ms: above). A PlayStation pad with a touchpad, while
+ * one of the game's menus (mousemenu.c) or our overlay is open: dragging a finger moves the cursor from where it is,
+ * like a laptop trackpad (lift and drag again to go further), and the touchpad click chooses: in the overlay a
+ * click at the cursor, in a game menu the left button (hover moves the focus, a click picks: mousemenu.c). The
+ * cursor really moves (a warp), so both see it as the mouse; that motion still counts as the controller's.
+ * YW4_TOUCHPAD_SPEED scales it (1: one full stroke across the pad is 55% of the window's width). */
+static int tp_pointer_here(void) {
+    if (!gamepad || !pad_is_playstation() || SDL_GetNumGamepadTouchpads(gamepad) < 1) return 0;
+    if (settings_open() || gamemenu_peeking()) return 0;
+    return gamemenu_open() ? !bindings_capturing() : mousemenu_open();
+}
+
+/* The touchpad's cursor: a see-through grey disc with a white edge, like a console's pointer (the owner's pick B
+ * from mockups, 2026-11-14), 3% of the window's height across. Shown while the touchpad moves the pointer; the
+ * usual arrow comes back when the mouse moves (the SDL_EVENT_MOUSE_MOTION case). */
+static SDL_Cursor *tp_cursor;
+static int tp_cursor_size, tp_cursor_on;
+
+static float tp_clamp01(float v) { return v < 0 ? 0 : v > 1 ? 1 : v; }
+
+static void tp_cursor_show(int wh) {
+    int d = (int)(wh * 0.03f + 0.5f);
+    if (d < 20) d = 20;
+    if (!tp_cursor || d != tp_cursor_size) {
+        int pad = 4, n = d + 2 * pad;  /* room for the dark edge and the shadow */
+        SDL_Surface *s = SDL_CreateSurface(n, n, SDL_PIXELFORMAT_RGBA32);
+        if (!s) return;
+        float c = n / 2.0f, R = d / 2.0f;
+        for (int y = 0; y < n; y++) {
+            uint8_t *row = (uint8_t *)s->pixels + y * s->pitch;
+            for (int x = 0; x < n; x++) {
+                float r = sqrtf((x + 0.5f - c) * (x + 0.5f - c) + (y + 0.5f - c) * (y + 0.5f - c));
+                float rs = sqrtf((x + 0.5f - c) * (x + 0.5f - c) + (y - 0.5f - c) * (y - 0.5f - c));  /* 1 px lower */
+                /* layers, bottom up (colour 0..1, alpha 0..1): a soft shadow, a thin dark edge, the grey disc,
+                 * the white ring at its edge (each anti-aliased by its distance from the circle) */
+                float L[4][4] = {
+                    {0, 0, 0, 0.27f * tp_clamp01(1 - (rs - R) / 3.5f) * (rs > R - 1)},
+                    {0.12f, 0.08f, 0.2f, 0.47f * tp_clamp01(R + 1.5f - r) * tp_clamp01(r - R + 1)},
+                    {0.24f, 0.24f, 0.27f, 0.43f * tp_clamp01(R - r + 0.5f)},
+                    {1, 1, 1, 0.92f * tp_clamp01(R - r + 0.5f) * tp_clamp01(r - (R - 2.4f) + 0.5f)}};
+                float cr = 0, cg = 0, cb = 0, ca = 0;  /* "over", straight alpha */
+                for (int k = 0; k < 4; k++) {
+                    float a = L[k][3], na = a + ca * (1 - a);
+                    if (na > 0) {
+                        cr = (L[k][0] * a + cr * ca * (1 - a)) / na;
+                        cg = (L[k][1] * a + cg * ca * (1 - a)) / na;
+                        cb = (L[k][2] * a + cb * ca * (1 - a)) / na;
+                    }
+                    ca = na;
+                }
+                row[x * 4 + 0] = (uint8_t)(cr * 255 + 0.5f), row[x * 4 + 1] = (uint8_t)(cg * 255 + 0.5f);
+                row[x * 4 + 2] = (uint8_t)(cb * 255 + 0.5f), row[x * 4 + 3] = (uint8_t)(ca * 255 + 0.5f);
+            }
+        }
+        SDL_Cursor *cur = SDL_CreateColorCursor(s, n / 2, n / 2);
+        SDL_DestroySurface(s);
+        if (!cur) return;
+        if (tp_cursor_on) SDL_SetCursor(cur);
+        if (tp_cursor) SDL_DestroyCursor(tp_cursor);
+        tp_cursor = cur, tp_cursor_size = d;
+    }
+    if (!tp_cursor_on) SDL_SetCursor(tp_cursor), tp_cursor_on = 1;
+}
+
+static void tp_cursor_hide(void) {
+    if (tp_cursor_on) SDL_SetCursor(SDL_GetDefaultCursor()), tp_cursor_on = 0;
+}
+
+static void tp_touch(Uint32 type, float fx, float fy) {
+    static float lx, ly;
+    static int down;
+    if (type == SDL_EVENT_GAMEPAD_TOUCHPAD_UP) {
+        down = 0;
+        return;
+    }
+    if (type == SDL_EVENT_GAMEPAD_TOUCHPAD_DOWN || !down) {  /* a new stroke: it moves from here */
+        lx = fx, ly = fy, down = 1;
+        return;
+    }
+    float dx = fx - lx, dy = fy - ly;
+    lx = fx, ly = fy;
+    if (!window || !tp_pointer_here()) return;
+    static float speed = -1;
+    if (speed < 0) {
+        const char *e = getenv("YW4_TOUCHPAD_SPEED");
+        speed = e && atof(e) > 0 ? (float)atof(e) : 1.0f;
+    }
+    int ww = 0, wh = 0;
+    SDL_GetWindowSize(window, &ww, &wh);
+    /* the pad's 0..1 is about 2.2 times wider than tall (a DualSense's ~52 x 23 mm): the same finger distance
+     * moves the same screen distance either way */
+    float k = 0.55f * speed * (float)ww, x, y;  /* 0.9 was too quick (owner, 2026-11-14) */
+    SDL_GetMouseState(&x, &y);
+    x += dx * k, y += dy * k * 0.45f;
+    /* kept in the picture (the window minus its black bars) */
+    float px = picture_rect[0] * (float)ww, py = picture_rect[1] * (float)wh;
+    float pw = picture_rect[2] * (float)ww, ph = picture_rect[3] * (float)wh;
+    x = x < px ? px : x > px + pw - 1 ? px + pw - 1 : x;
+    y = y < py ? py : y > py + ph - 1 ? py + ph - 1 : y;
+    tp_moved_ms = SDL_GetTicks();
+    tp_cursor_show(wh);
+    SDL_WarpMouseInWindow(window, x, y);
+    used_pad(1);
+}
+
+/* the touchpad clicked: 1 when it chose in a menu (then it isn't the overlay button) */
+static int tp_click(void) {
+    if (!tp_pointer_here()) return 0;
+    if (gamemenu_open()) {
+        float mx, my, x, y;
+        SDL_GetMouseState(&mx, &my);
+        if (overlay_point(mx, my, &x, &y)) gamemenu_mouse(x, y, 1);
+    } else {
+        tp_game_click = 1;  /* the menu's left button until the touchpad is let go (update_input) */
+    }
+    return 1;
+}
+
 static void panel_pad_button(SDL_GamepadButton button) {
     /* the overlay's controls page waits for an input to bind: it takes the press */
     if (gamemenu_open() && !settings_open() && bindings_capturing() && bindings_capture_button(button)) return;
@@ -2740,6 +2873,7 @@ static void panel_pad_button(SDL_GamepadButton button) {
                SDL_GetGamepadButton(gamepad, SDL_GAMEPAD_BUTTON_START);
     /* buttons a Switch controller doesn't have (or two at once), so the game never sees them alone */
     int ps = pad_is_playstation();
+    if (button == SDL_GAMEPAD_BUTTON_TOUCHPAD && ps && tp_click()) return;  /* in a menu: it chooses */
     if ((button == SDL_GAMEPAD_BUTTON_TOUCHPAD && ps) || (button == SDL_GAMEPAD_BUTTON_MISC1 && !ps) ||
         (both && (button == SDL_GAMEPAD_BUTTON_BACK || button == SDL_GAMEPAD_BUTTON_START))) {
         gamemenu_toggle(), yw4_hid_note_key("MENU");
@@ -3073,6 +3207,12 @@ void window_run(void (*guest)(void *), void *arg) {
         case SDL_EVENT_GAMEPAD_BUTTON_DOWN:
             if (gamepad && SDL_GetGamepadID(gamepad) == e.gbutton.which) used_pad(1), panel_pad_button(e.gbutton.button);
             break;
+        case SDL_EVENT_GAMEPAD_TOUCHPAD_DOWN:
+        case SDL_EVENT_GAMEPAD_TOUCHPAD_MOTION:
+        case SDL_EVENT_GAMEPAD_TOUCHPAD_UP:  /* the first finger moves the menu pointer (tp_touch) */
+            if (gamepad && SDL_GetGamepadID(gamepad) == e.gtouchpad.which && e.gtouchpad.finger == 0)
+                tp_touch(e.type, e.gtouchpad.x, e.gtouchpad.y);
+            break;
         case SDL_EVENT_GAMEPAD_AXIS_MOTION:
             if (gamepad && SDL_GetGamepadID(gamepad) == e.gaxis.which && (settings_open() || gamemenu_open()) &&
                 !bindings_capture_axis(e.gaxis.axis, e.gaxis.value)) {
@@ -3083,7 +3223,11 @@ void window_run(void (*guest)(void *), void *arg) {
                 used_pad(1);  /* F2's quick look: a stick or trigger shows the controller's view */
             }
             break;
-        case SDL_EVENT_MOUSE_MOTION:
+        case SDL_EVENT_MOUSE_MOTION: {
+            /* the touchpad's own cursor move (tp_touch) is the controller's, not the mouse's; the mouse itself
+             * moving brings the usual arrow back */
+            int pad_move = tp_moved_ms && SDL_GetTicks() - tp_moved_ms < 150;
+            if (!pad_move) tp_cursor_hide();
             if (window && SDL_GetWindowRelativeMouseMode(window) && !gamemenu_peeking()) {
                 host_lock(&mouse_lock);  /* the camera's; never while the quick look shows */
                 mouse_accum_x += e.motion.xrel;
@@ -3091,13 +3235,16 @@ void window_run(void (*guest)(void *), void *arg) {
                 host_unlock(&mouse_lock);
             } else if (gamemenu_open() && !settings_open()) {  /* the overlay: hovering chooses */
                 float x, y;
-                if (overlay_point(e.motion.x, e.motion.y, &x, &y))
-                    used_pad(0), gamemenu_mouse(x, y, e.motion.state & SDL_BUTTON_LMASK ? 4 : 0);
+                if (overlay_point(e.motion.x, e.motion.y, &x, &y)) {
+                    if (!pad_move) used_pad(0);
+                    gamemenu_mouse(x, y, e.motion.state & SDL_BUTTON_LMASK ? 4 : 0);
+                }
             } else if (gamemenu_peeking()) {  /* the quick look: the key under the mouse */
                 float x, y;
                 if (overlay_point(e.motion.x, e.motion.y, &x, &y)) gamemenu_peek_point(x, y);
             }
             break;
+        }
         case SDL_EVENT_MOUSE_BUTTON_DOWN:
             if (settings_open() || gamemenu_open()) {  /* not the game's: the panel's or the overlay's */
                 float x, y;

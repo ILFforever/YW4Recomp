@@ -1946,6 +1946,8 @@ static void pv_label(int part, const GameMenuInfo *in, int style, PvLabel *l) {
         if (!strncmp(in->close, "Back + Start", 12) || !strcmp(in->close, "Select + Start"))
             snprintf(l->n2, sizeof l->n2, "No %s button: %s + %s", pv_chip(PV_SHARE, style), pv_chip(PV_MINUS, style),
                      pv_chip(PV_PLUS, style));
+        else if (style == 1)  /* the touchpad: a menu pointer while a menu is open (window.c tp_touch) */
+            snprintf(l->n2, sizeof l->n2, "In menus: drag to point, click to choose");
         l->kind = 3;
         return;
     }
