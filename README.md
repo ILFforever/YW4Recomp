@@ -552,24 +552,24 @@ On Ordinary Street with the performance HUD on (F3). The frame takes about 19 ms
 ## Goals
 
 <details>
-<summary><b>Ongoing</b> (4)</summary>
-
-| Goal | Where it stands |
-|---|---|
-| **Our own renderer** | Replace the game's renderer pass by pass: the base for the graphics features above. Ours: shadows, surfaces, the shadow mask, bloom, distance blur and most screen passes (lighting, sky, tone mapping). **Left:** choosing and sorting what to draw (the engine still walks its own lists); skipping the engine's per-draw work for good (built; off by default since it gives no speed by itself, but choosing what to draw ourselves needs it); two screen programs (one may be ambient occlusion); the UI and menus |
-| **Steadier shadows** | Shadows still shimmer a little as the camera moves; steadier cascades next |
-| **Better anti-aliasing** | FXAA, SMAA and TAA (steady thin edges: fences, nets, leaves) on the 3D scene before the UI is drawn, so text stays crisp; per-object motion for TAA next (a first version is in, off by default) |
-| **Mouse control for the Yo-kai Pad** | Pointing, clicking and wheel scrolling work on the Yo-kai Pad and the pages opened from it, such as the item and quest lists, Ukiukipedia and Members ([decision 0057](docs/decisions/0057-mouse-menu-lists.md)). On 2026-11-08 some pages still had open issues (Watch skills, Soulmate, Trophies, Treasure photos, Switch moves) |
-
-</details>
-
-<details>
 <summary><b>Planned</b> (2)</summary>
 
 | Goal | What it will be |
 |---|---|
 | **Built-in cheats** | Cheats switched on from the panel while playing, such as unlimited Crank-a-kai, with no separate cheat tool |
 | **Launcher for Linux** | The same launcher on Linux, so the game no longer has to be built from source there |
+
+</details>
+
+<details>
+<summary><b>Ongoing</b> (4)</summary>
+
+| Goal | Where it stands |
+|---|---|
+| **Our own renderer** | Ours: shadows, surfaces, bloom, distance blur, lighting, sky, tone mapping. **Left:** choosing what to draw, two screen passes, the UI and menus |
+| **Steadier shadows** | Shadows still shimmer a little as the camera moves; steadier cascades next |
+| **Better anti-aliasing** | FXAA, SMAA and TAA (steady thin edges: fences, nets, leaves) on the 3D scene before the UI is drawn, so text stays crisp; per-object motion for TAA next (a first version is in, off by default) |
+| **Mouse control for the Yo-kai Pad** | Pointing, clicking and wheel scrolling work on the Yo-kai Pad and the pages opened from it, such as the item and quest lists, Ukiukipedia and Members ([decision 0057](docs/decisions/0057-mouse-menu-lists.md)). On 2026-11-08 some pages still had open issues (Watch skills, Soulmate, Trophies, Treasure photos, Switch moves) |
 
 </details>
 
