@@ -1,133 +1,67 @@
 # Known issues
 
-What is known to be missing or wrong, roughly in the order it is likely to matter. Fixed items move to
-[progress.md](progress.md).
+What is known to be missing or wrong (checked 2026-11-13), roughly in the order it is likely to matter. Fixed items
+move to [progress.md](progress.md).
 
 ## Graphics
 
-- **CPU limit at ~70 frames/s in busy scenes; optimize the CPU further** (owner, 2026-10-29). With FRAME RATE
-  unlimited, upscaling (DLSS/FSR) no longer helps there: the GPU is idle part of each frame. Busy late-game spot
-  (`save_base_busy`, ~410 draws), DLSS Performance: game work 12.9 ms per frame, GPU 4.6 ms. The short-sleep fix
-  (`YW4_SHORT_SLEEP`, 61 → 77 frames/s) took most of the main thread's waiting away; left: ~1.8 ms per frame of
-  waits (`YW4_WAITPROF=1`: an SDK mutex taken ~140 times per frame from `main+0x97ae14`, WaitForAddress) and the
-  game code itself. The mutex is the game's job queue (`main+0x97ad10`: lock, take the next job, unlock, run it;
-  the main thread helps the two worker threads while it waits for them). Spinning 5 us before sleeping in
-  ArbitrateLock cut its wait 0.35 → 0.07 ms per frame but gave no frames (70 → 70 frames/s, 2 runs each): the main
-  thread then waits for the same jobs elsewhere, so it was removed. The limit is the jobs' and the main thread's
-  game code: next, profile both in `save_base_busy` (`YW4_PROFILE=1`, and the workers, threads 6 and 7).
-- **Lag after switching ASPECT RATIO from ultra-ultrawide back to 21:9** (owner, 2026-10-29, late-game save): ~7
-  frames/s with the GPU busy ~400 ms per frame for a while, then it recovered. Likely cause: each aspect ratio's set
-  of screen-sized targets (7680×2160 at 32:9) stayed in video memory until 300 frames unused, so cycling through all
-  of them overflowed it. Fix in testing: the old size's targets are freed 8 frames after a size setting changes.
-  **Fixed 2026-11-10** (it came back with DLSS: owner, "performance chugs after switching ultrawide modes"): 4K, DLSS,
-  21:9 -> 32:9 still gave ~25 frames of 200+ ms GPU time (~6 s; video memory 5.8 GB against 4.5 settled), with or
-  without DLSS frame generation; TAA had none. Both sizes' targets were in memory together for the 8 frames. Now
-  the old size's 3D targets are freed at once, before the first image of the new size is made (after waiting for
-  the GPU; with frame generation, for the whole device): 0 slow frames without frame generation, 2 with DLSS frame
-  generation, peak 4.9 GB (`YW4_SIZE_FREE=0`: the old way). Still open: FSR frame generation with DLSS at 32:9 4K is
-  slow after the switch either way (~80 frames of 200-660 ms "present", the same with the old freeing).
-- **Crash (GPU device lost) after switching the upscaling mode several times in a row** (owner, 2026-10-29, DLSS,
-  4K 21:9, right after the aspect-ratio cycling above): `vkWaitSemaphores failed (VkResult -4)`. Memory peaked at
-  5.0 GB against ~3.3 GB normally, so video memory running out is a suspect. Not reproduced since the 8-frame freeing
-  (45b83d3), 2026-10-30, RTX 4070 laptop (8 GB), late-game save at 4K 21:9: 40 upscaling switches with DLSS and with
-  FSR, and 20 aspect-ratio then 20 upscaling switches, all without a crash; no leak (DLSS and FSR contexts are freed
-  after the GPU is done, memory returns to normal). Worst case: changing the aspect ratio every 2-6 frames keeps
-  every size in use at once, ~7.3-7.4 GB of 8 GB, gone once the changes stop. A sturdy fix if it comes back: apply a
-  size change only once the setting has rested a few frames, so the sizes passed over are never made.
-  **Reappeared** (owner, 2026-11-09, frame 47,804, late-game save, 5120×2160 21:9): switching upscaling mode repeatedly
-  (Quality → Balanced → Performance → Off) at 5120×2160 allocated new native-res render targets and triggered
-  `yw4: gpu: device lost in submission 191219` from video memory exhaustion on the 8 GB laptop GPU. Debouncing the
-  setting change remains the planned fix.
-  **Done 2026-11-10** (not reproduced here, so made less likely rather than proven fixed): the images now follow
-  a resolution, upscaling or aspect-ratio choice only once it has rested 15 frames (the panel shows it at once), so
-  stepping Quality, Balanced, Performance, Off in a row makes no set in between (40 switches 4 frames apart: 0
-  rebuilds, where each made a set of targets and an FSR or DLSS context before); and the old size's targets are
-  freed before the new size's are made (the aspect-ratio entry above). Tests at 4K 21:9 full screen, FSR and DLSS,
-  DLSS frame generation, 24 and 40 switches: no crash, peak 4.6 GB (5.3 the old way).
-- **Stutters at 4K ultrawide; to optimize** (owner, 2026-10-28; 4K height at 21:9 = 5120×2160, TAA, full-size effects). From the
-  owner's session logs: bamboo forest (late-game save) GPU 23.2 ms per frame on average, 36.4 ms at the 99th
-  percentile (budget 33.3), 419 of 27,382 frames over 50 ms; school save GPU 18.2 / 27.6 ms, 134 of 5,620 over
-  50 ms. Two sources: the GPU near its limit in heavy scenes, and rare long spikes in the game's own CPU work (up to
-  ~400 ms). Not yet split by pass (F5 per-pass GPU timing) or by cause of the CPU spikes.
-  **Battles, 16:9 against 21:9** (owner, 2026-10-28, late-game save, 4K, TAA, full-size effects, one session each,
-  not the same moments): slow frames (over 40 ms) 3.1% → 6.9%; most are the game's CPU work, not the GPU (GPU busy
-  over 30 ms in 5 → 62 of them). The game's own code on the main thread 5.9 → 9.0 ms per frame on average; its two
-  hottest functions, the skeleton animation math `f_a79c00` and `f_a77390`, about doubled (a wider view animates
-  more characters). GPU in battle 14.2 → 20.7 ms per frame; most of the extra in two 300-frame windows where the
-  bloom composite's pass (with ~12 more draws, maybe a special move's effects) took 7–11 ms against ~2 ms
-  otherwise; not traced yet. A 1.8 s freeze seen once at a battle's start did not come back (no shader builds
-  logged then).
-  **2026-11-12:** three causes of freezes at a battle's first special move, found by Quandiy on a Radeon, are
-  fixed (FSR's context made at start instead of at its first use, 260-755 ms; RomFS reads no longer hold the kernel
-  lock; old-size effect targets freed at once; [progress.md](progress.md)). Whether the 1.8 s one was among them
-  is not known: it was never reproduced.
-- **PCSS (soft shadows) only reaches what the shadow mask covers.** It is in the game's screen-space shadow mask shader, which
-  shadows everything drawn into the G-buffer. Objects the game draws forward (6 other shadow shaders seen so far) keep
-  the game's filter. Its strengths are tuned by eye in the town and the bamboo forest only.
+- **The CPU caps busy scenes at about 70 frames/s** (measured 2026-10-29). With FRAME RATE unlimited, upscaling
+  stops helping there: the GPU sits idle part of each frame. Busy late-game spot (`save_base_busy`, ~410 draws), DLSS
+  Performance: game work 12.9 ms per frame, GPU 4.6 ms. The limit is the game's own code on the main thread and its
+  two job threads (`main+0x97ad10` is the job queue). Next: profile both there (`YW4_PROFILE=1`, threads 6 and 7).
+- **FSR frame generation with DLSS at 32:9 4K is slow for a few seconds after changing the aspect ratio** (~80
+  frames of 200-660 ms "present"). The other upscaling and frame-generation choices recover at once (2026-11-10).
+- **Switching upscaling modes many times in a row once crashed an 8 GB card** ("device lost", video memory full).
+  Made less likely on 2026-11-10 and not seen since, but not proven gone. If it comes back, the log is wanted.
+- **A short shadow flash after unpausing from the game's own pause menu** (the Plus button), not after closing our
+  overlay (2026-11-06). Minor; not looked into.
+- **Battles with special moves can be heavy at 4K ultrawide.** The bloom composite pass took 7–11 ms instead of ~2
+  ms in some battles (2026-10-28, maybe a special move's effects); not traced. The freezes at a battle's first
+  special move are fixed (2026-11-12), and a spike check at 4K with DLSS and frame generation found three single
+  slow frames in 11 minutes ([baseline.md](baseline.md)).
+- **PCSS (soft shadows) only reaches what the shadow mask covers.** Objects the game draws forward (6 other shadow
+  shaders seen so far) keep the game's filter. Its strengths are tuned by eye in the town and the bamboo forest only.
 - **Shadow strength not yet checked against Eden** after the ambient-light fix; indoor shadows may still be a little
   stronger.
 - **Occlusion queries always report 0 samples.** The game issues them in pairs from the house onward; answering
   "visible" changed nothing on screen so far, but the answer is wrong.
 - **Compute shaders that use storage images are skipped** (log line "uses storage images").
-- **The "4++" logo variant** does not show (add-on ownership).
-- **The bridge in the snowy past-world town is a heavy scene** (late game). It used to drop to about 25 frames/s
-  (2026-10-25: about 1,450 draws against the town's 300). Since the later GPU work it holds the game's 30
-  (owner, 2026-10-29), but above 30 (the FRAME RATE setting) looking at the bridge costs about 10 frames/s: the
-  game's own content is that heavy there, not a fault of the port.
+- **The bridge in the snowy past-world town is heavy** (about 1,450 draws against the town's 300). It holds 30
+  frames/s; above 30, looking at the bridge costs about 10 frames/s. That is the game's content, not a port fault.
+
+## Linux
+
+- **No launcher yet**: the game is built from source ([Building on Linux](../README.md#building-on-linux)).
+- **FSR, DLSS, frame generation and Reflex are Windows only.**
+- **A crash on exit** (segfault after "exit game") was seen once on 2026-11-12; later logs exit cleanly. Maybe gone,
+  not confirmed by the tester.
 
 ## Game and system
 
-- **C++ exceptions are not supported**: nothing in `main` throws ([decision 0012](decisions/0012-musl-startup-tls-exceptions-libc.md)).
-- **Startup boot / loading screen (Switch-style)**: During the ~3.7 s (6.2-6.5 s before 2026-11-11, when the game's boot
-  and Streamline's start began to run beside Vulkan's; `yw4: boot:` log lines) between process launch and the first presented
-  frame (milestone Frame 1), the window is created but displays an unpresented blank surface while Vulkan, DLSS/Streamline,
-  and guest engine constructors initialize. A Switch-style startup screen in `window.c` should clear the swapchain to
-  black and render an animated indicator or the game logo (`game_logo` in `gamelogo.c`, decision 0048) in the bottom corner
-  during the event pump until Frame 1 arrives, fading seamlessly into the game's presentation without blocking guest startup.
-
-## Overlay
-
-- ~~**Only Western letters show in the overlay**~~: fixed 2026-11-08. Built-in fonts hold Latin and Latin-1 only;
-  missing letters (Japanese kana/kanji, Cyrillic...) fall back to a system font (Yu Gothic, Meiryo, MS Gothic,
-  Segoe UI on Windows, Noto CJK / DejaVu on Linux) loaded at first need and drawn at the same pixel size through
-  the glyph cache. Letters no font has keep the box.
-- ~~**IME word-choice popup position**~~: fixed 2026-11-08. While a text field has the typing focus, its box and
-  caret offset converted to window coordinates are passed to `SDL_SetTextInputArea`, updating whenever the field
-  or caret moves.
-- ~~**The name popup doesn't run the game's own name check**~~: fixed 2026-11-09. `swkbd.c` now executes the
-  game's `SetTextCheckCallback` callback via `yw4_resolve` on candidate strings; `nn::ngc::ProfanityFilter` is
-  natively overridden (`recomp/overrides.toml`, `swkbd.c`) so nickname validation succeeds without the Switch's
-  `NgWord2` system archive (`0100000000000823`). If rejected by the game, a message popup explains that the name
-  cannot be used and the prompt re-opens for correction.
+- **C++ exceptions are not supported**: nothing in `main` throws
+  ([decision 0012](decisions/0012-musl-startup-tls-exceptions-libc.md)).
+- **The window stays blank for about 3.7 s at start**, while Vulkan, DLSS and the game's boot set up. Planned: a
+  black screen with the game logo (`gamelogo.c`) until the first frame.
+- **Odd letter spacing ("N A T E") seen once in English text** (owner, 2026-11-12). Not located yet: our name box or
+  the game's own text.
 
 ## Input and menus
 
-- **A DualSense over Bluetooth adds about 2.5 s to the start** (2026-11-13, measured on the owner's PC with the
-  same exe and settings): the first frame at 7.4-7.9 s over Bluetooth, 5.2-5.7 s on its USB cable, 5.1-5.2 s with
-  SDL's HID path off (`SDL_JOYSTICK_HIDAPI=0`). Two waits in SDL, each a series of reports read over the wireless
-  link: starting the controller system (`SDL_Init` with `SDL_INIT_GAMEPAD`, ~1.6 s before the window, so the game
-  starts booting later) and opening the pad (`SDL_OpenGamepad` in the window's event loop, ~1.5 s, which holds up
-  the first frames). Starting the controllers after the window and the guest was tried: the second wait then took
-  the time back, no gain, reverted. A fix would open the pad off the window's thread; SDL wants its controller calls
-  on one thread, so it waits for after 1.0. Until then: the USB cable.
-- **Yo-kai Pad mouse support ([decision 0057](decisions/0057-mouse-menu-lists.md))**: open issues from real-mouse testing (owner, 2026-11-08; the rest of the Pad is assumed working):
-  - **Watch skills**: still broken (characters cannot be clicked).
+- **A DualSense over Bluetooth adds about 2.5 s to the start** (first frame at 7.4-7.9 s, against 5.2-5.7 s on its
+  USB cable). Two waits inside SDL while it reads the pad over the wireless link. A fix would open the pad off the
+  window's thread; until then, use the USB cable.
+- **Yo-kai Pad mouse support ([decision 0057](decisions/0057-mouse-menu-lists.md))**: open issues from real-mouse
+  testing (owner, 2026-11-08; the rest of the Pad works):
+  - **Watch skills**: characters cannot be clicked.
   - **Soulmate**: page is buggy.
   - **Slimey marks (Yo-kai Trophies)**: page not working.
-  - **Treasure photos**: only Y axis working.
+  - **Treasure photos**: only up and down work.
   - **Organize Members → Switch moves**: not working.
 
 ## Tools
 
-- `tests/test_kernel.py::test_threads` fails now and then with "cannot reserve the heap and thread-local
-  regions" (seen once on 2026-10-22, then 4 passes in a row): the test program reserves fixed addresses, which
-  something else in the process can occasionally occupy first. Rerun before suspecting a change. The game itself
-  now pre-reserves the 32 GiB guest window at `main()` entry before SDL/Vulkan, logs the colliding allocation/module
-  if reservation fails, and automatically respawns once with a fresh ASLR layout (`YW4_ASLR_RETRY`).
-
-- ~~`YW4_REPLAY` routes drift~~: fixed 2026-10-31. Replays went by the wall clock while the game moves by its own
-  frames, so a slow loading screen or shader build shifted everything after it (the town walk ended in a
-  different place every run). Now, while a replay plays, the game's main loop gets a clock of exactly 1/60 s per
-  frame and the replay goes by frame (kernel.c `yw4_replay_frame_clock`): the town walk ends in the same place
-  every run (3 of 3, 0.1% of pixels differ: swaying trees). `YW4_REPLAY_CLOCK=real` is the old way.
-- The baseline benchmark against Eden ([baseline.md](baseline.md)) still lacks the opening-scene frame-time spread.
+- `tests/test_kernel.py::test_threads` fails now and then with "cannot reserve the heap and thread-local regions":
+  the test program reserves fixed addresses that something else in the process can take first. Rerun before
+  suspecting a change. (The game itself reserves its memory first and retries once with a new layout,
+  `YW4_ASLR_RETRY`.)
+- The baseline benchmark against Eden ([baseline.md](baseline.md)) still lacks the opening scene's frame-time spread.
