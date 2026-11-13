@@ -67,8 +67,8 @@ void settings_hud_set(int opacity, float frac);
 int settings_developer(void);
 /* LEGACY MENUS (YW4_LEGACY_KEYS, default on): 1 if the F1, F2 and F3 keys work. */
 int settings_legacy_keys(void);
-/* CONTROLS HINT (YW4_KEYS_NOTICE): 1 if the corner card that says how to see the controls shows at each start
- * (default: on with a settings file, off without one). */
+/* YW4_KEYS_NOTICE: 1 if the corner card that says how to see the controls shows at each start (default: on with a
+ * settings file, off without one; the launcher's "Controls hint" setting passes 0). */
 int settings_keys_notice(void);
 
 #endif

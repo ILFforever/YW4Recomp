@@ -909,7 +909,7 @@ static void window_notice(int high, const char *title, const char *fmt, ...) {
     fprintf(stderr, "yw4: window: notice: %s. %s\n", note_title, note_text);
 }
 
-/* The controls card (the owner's pick, option A of the mockup, 2026-11-13; the CONTROLS HINT setting): one line
+/* The controls card (the owner's pick, option A of the mockup, 2026-11-13; the launcher's Controls hint setting): one line
  * that points at the quick look, F2 on a keyboard, the held Back button on a controller (pad_back_hold), with that
  * button's name as the controller prints it. It follows the device while it shows: the first touch of a pad or a
  * key rewrites it. It waits for a card that is showing (the first start's graphics) to fade first. */

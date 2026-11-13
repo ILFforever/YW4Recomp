@@ -48,9 +48,12 @@ graphics level). It only points at the F2 card, which already shows every key, s
   on the tile. The card follows the device while it shows: a connected controller counts until a key or the
   mouse is used, and the first touch of the other device rewrites the card.
 - **Every start, with a switch:** unlike the graphics card it shows at each start, because it costs nothing and
-  a player may come back after months. The settings' CONTROLS HINT row (ADVANCED, `YW4_KEYS_NOTICE`) turns it
-  off. Test runs (no settings file) don't show it, so their pictures stay the game's alone. Not with LEGACY
-  MENUS on: there is no quick look to point at.
+  a player may come back after months. The launcher's Settings turns it off ("Controls hint", under "In the
+  game": it starts the game with `YW4_KEYS_NOTICE=0`, kept in `launcher.json` like "Show log"). It was first a
+  row in the game's Advanced settings; the owner couldn't find it there and chose the launcher, where there was
+  room. A game started without the launcher always shows it unless that variable is set. Test runs (no settings
+  file) don't show it, so their pictures stay the game's alone. Not with LEGACY MENUS on: there is no quick
+  look to point at.
 - **One at a time:** on a first start it waits for the graphics card to fade, then takes the same corner.
 - **No shadow** under either card (owner, 2026-11-13).
 
