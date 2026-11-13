@@ -11,8 +11,6 @@ move to [progress.md](progress.md).
   two job threads (`main+0x97ad10` is the job queue). Next: profile both there (`YW4_PROFILE=1`, threads 6 and 7).
 - **FSR frame generation with DLSS at 32:9 4K is slow for a few seconds after changing the aspect ratio** (~80
   frames of 200-660 ms "present"). The other upscaling and frame-generation choices recover at once (2026-11-10).
-- **Switching upscaling modes many times in a row once crashed an 8 GB card** ("device lost", video memory full).
-  Made less likely on 2026-11-10 and not seen since, but not proven gone. If it comes back, the log is wanted.
 - **A short shadow flash after unpausing from the game's own pause menu** (the Plus button), only in the bamboo
   forest and not after closing our overlay (owner, 2026-11-06 and 2026-11-13). Minor; not looked into.
 - **Battles with special moves can be heavy at 4K ultrawide.** The bloom composite pass took 7–11 ms instead of ~2
