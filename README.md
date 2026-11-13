@@ -601,7 +601,7 @@ Requirements: Python 3.11+, Git, a C compiler (Clang 19 or newer recommended:
 [llvm-mingw](https://github.com/mstorsjo/llvm-mingw) on Windows; GCC 15 or newer also works), a GPU with Vulkan 1.3, and
 `glslangValidator` (from the [Vulkan SDK](https://vulkan.lunarg.com/), or a standalone glslang). SDL3 is fetched
 automatically on Windows. Full steps in [docs/setup.md](docs/setup.md), and step by step for Windows and Linux on
-[the build page](https://ilfforever.github.io/YW4Recomp/build/).
+[the build page](https://ilfforever.github.io/YW4Recomp/building/).
 
 Disk space: an install takes about 11.3 GB, or 9.3 GB after "Free up space". Building from an NSP or XCI peaks near
 20.7 GB; from extracted folders, about 11.4 GB ([disk usage](docs/disk-usage.md)).

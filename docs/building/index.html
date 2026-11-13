@@ -1,0 +1,356 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>YW4 Recomp · Building from source</title>
+<link rel="icon" href="../favicon.ico" sizes="any">
+<link rel="icon" type="image/png" href="../img/icon-192.png">
+<link rel="apple-touch-icon" href="../img/icon-192.png">
+<meta name="description" content="Build the PC version of Yo-kai Watch 4++ yourself from your own game files, on Windows or Linux: what you need, the config, the build commands and how to start the game.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=M+PLUS+Rounded+1c:wght@500;700;800&family=Zen+Kaku+Gothic+New:wght@400;500;700&display=swap" rel="stylesheet">
+<style>
+/* The same look as the launcher page (../launcher/): the game's menus, Yo-kai Pad lilac and violet, gold. */
+:root {
+  --lilac-0: oklch(97.5% 0.012 305); --lilac-1: oklch(94% 0.025 305); --lilac-2: oklch(89% 0.04 305);
+  --lilac-3: oklch(80% 0.06 305);
+  --violet: oklch(36% 0.11 295); --violet-deep: oklch(27% 0.09 295); --violet-soft: oklch(50% 0.11 300);
+  --ink: oklch(25% 0.04 295); --ink-2: oklch(45% 0.04 295);
+  --gold: oklch(80% 0.12 85); --gold-deep: oklch(62% 0.12 75); --cream: oklch(96.5% 0.03 90);
+  --cyan: oklch(76% 0.11 215); --white: oklch(99.2% 0.004 305);
+  --term: oklch(20% 0.05 295); --term-ink: oklch(92% 0.02 300); --term-dim: oklch(68% 0.04 300);
+  --r: 14px;
+  --display: "M PLUS Rounded 1c", "Hiragino Maru Gothic ProN", sans-serif;
+  --body: "Zen Kaku Gothic New", "Hiragino Sans", sans-serif;
+  --mono: ui-monospace, "Cascadia Mono", "JetBrains Mono", Consolas, monospace;
+  --step--1: clamp(.8rem, .78rem + .1vw, .88rem);
+  --step-0: clamp(.98rem, .95rem + .15vw, 1.05rem);
+  --step-1: clamp(1.15rem, 1.08rem + .35vw, 1.35rem);
+  --step-2: clamp(1.3rem, 1.18rem + .6vw, 1.7rem);
+  --step-3: clamp(2rem, 1.5rem + 2.4vw, 3.3rem);
+}
+* { box-sizing: border-box; }
+html { scroll-behavior: smooth; scroll-padding-top: 16px; }
+body {
+  margin: 0; overflow-x: hidden; color: var(--ink); font: 400 var(--step-0)/1.7 var(--body);
+  font-variant-numeric: tabular-nums; background-color: var(--lilac-1);
+  background-image: conic-gradient(var(--lilac-0) 25%, transparent 0 50%, var(--lilac-0) 0 75%, transparent 0);
+  background-size: 64px 64px;
+}
+a { color: var(--violet-soft); text-decoration-thickness: 1.5px; text-underline-offset: 3px; }
+a:hover { color: var(--violet); }
+:focus-visible { outline: 2px solid var(--gold-deep); outline-offset: 3px; }
+code { font: 500 .88em/1.4 var(--mono); background: var(--lilac-1); border-radius: 5px; padding: 1px 5px; overflow-wrap: anywhere; }
+
+.hero { color: var(--white); background-color: var(--violet-deep); position: relative; overflow: hidden; border-bottom: 3px solid var(--gold); }
+.hero::before {
+  content: ""; position: absolute; inset: 0; opacity: .12; pointer-events: none;
+  background-image: radial-gradient(circle at 50% 100%, transparent 38%, var(--gold) 39% 42%, transparent 43% 55%, var(--gold) 56% 59%, transparent 60%);
+  background-size: 56px 28px;
+}
+.hero-inner {
+  position: relative; max-width: 1280px; margin: 0 auto; padding: clamp(28px, 5vw, 56px) 20px clamp(28px, 4vw, 44px);
+  display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.2fr); gap: clamp(24px, 4vw, 56px); align-items: center;
+}
+.eyebrow { font: 700 var(--step--1)/1 var(--display); letter-spacing: .16em; text-transform: uppercase; color: var(--gold); }
+.hero h1 { font: 800 var(--step-3)/1.08 var(--display); margin: 12px 0 14px; letter-spacing: -.01em; }
+.hero p { margin: 0 0 22px; color: oklch(88% 0.03 300); max-width: 46ch; }
+.stats { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); border: 1px solid oklch(50% 0.08 295); border-radius: 12px; overflow: hidden; margin: 0 0 22px; }
+.stat { padding: 12px 14px; background: oklch(31% 0.1 295); }
+.stat + .stat { border-left: 1px solid oklch(50% 0.08 295); }
+.stat b { display: block; font: 800 var(--step-1)/1.1 var(--display); color: var(--gold); }
+.stat span { font-size: .78rem; color: oklch(82% 0.03 300); line-height: 1.35; display: block; margin-top: 4px; }
+.links { display: flex; flex-wrap: wrap; gap: 10px; }
+.btn { font: 700 .92rem/1 var(--display); text-decoration: none; border-radius: 999px; padding: 11px 18px; border: 1.5px solid var(--gold);
+  background: var(--gold); color: var(--violet-deep); }
+.btn:hover { color: var(--violet-deep); background: oklch(85% 0.12 85); }
+.btn.ghost { background: transparent; color: var(--gold); }
+.btn.ghost:hover { color: var(--gold); background: oklch(80% 0.12 85 / .12); }
+/* the GitHub button in GitHub's own look: black, the white mark (Octicons mark-github, MIT) */
+.btn.gh { display: inline-flex; align-items: center; gap: 8px; color: #fff; background: #000; border-color: #3d444d; }
+.btn.gh:hover { color: #fff; background: #1f2328; border-color: #656c76; }
+.btn.gh svg { width: 1.15em; height: 1.15em; fill: currentColor; flex: none; }
+.sitebar { position: relative; max-width: 1280px; margin: 0 auto; padding: 16px 20px 0; display: flex; align-items: center;
+  justify-content: space-between; gap: 12px; }
+.brand { display: inline-flex; align-items: center; gap: 10px; color: var(--white); text-decoration: none;
+  font: 800 1.05rem/1 var(--display); }
+.brand:hover { color: var(--gold); }
+.brand img { width: 36px; height: 36px; display: block; }
+.sitebar .btn.gh { padding: 9px 14px; font-size: .88rem; }
+
+/* a terminal card in the gold frame the other pages use for screenshots */
+.shot { background: var(--gold); border-radius: var(--r); padding: 8px; box-shadow: 0 18px 40px oklch(15% 0.08 295 / .5); margin: 0; min-width: 0; }
+.shot figcaption { color: var(--violet-deep); font-size: .8rem; margin: 8px 6px 2px; }
+pre { margin: 0; font: 500 .84rem/1.65 var(--mono); color: var(--term-ink); background: var(--term); border-radius: 8px;
+  padding: 14px 16px; overflow-x: auto; white-space: pre; }
+pre .c { color: var(--term-dim); }
+pre .p { color: var(--gold); user-select: none; }
+
+.shell { max-width: 1280px; margin: 0 auto; padding: 40px 20px 72px; display: grid; grid-template-columns: 236px minmax(0, 1fr); gap: 40px; align-items: start; }
+.shell > * { min-width: 0; }
+.pad { position: sticky; top: 16px; background: var(--white); border-radius: var(--r); overflow: hidden; border: 1px solid var(--lilac-3); }
+.pad h2 { margin: 0; padding: 11px 16px; background: var(--violet); color: var(--white); font: 700 .78rem/1 var(--display); letter-spacing: .14em; text-transform: uppercase; }
+.pad ol { list-style: none; margin: 0; padding: 8px; display: grid; gap: 2px; }
+.pad a { display: flex; gap: 10px; align-items: baseline; text-decoration: none; color: var(--ink); font: 500 .92rem/1.3 var(--body); padding: 7px 10px; border-radius: 8px; }
+.pad a .n { font: 700 .75rem/1 var(--display); color: var(--ink-2); min-width: 1.3em; }
+.pad a:hover { background: var(--lilac-1); }
+
+main { display: grid; gap: 28px; }
+article { background: var(--white); border-radius: var(--r); border: 1px solid var(--lilac-3); overflow: hidden; }
+.bar { display: flex; align-items: center; gap: 12px; padding: 12px 20px; background: var(--violet); color: var(--white); }
+.bar h2 { margin: 0; font: 800 var(--step-2)/1.2 var(--display); flex: 1; }
+.bar .cat { font: 700 .7rem/1 var(--display); letter-spacing: .14em; text-transform: uppercase; color: var(--gold); }
+.bar .q { flex: none; width: 28px; height: 28px; border-radius: 50%; background: var(--cyan); display: grid; place-items: center;
+  font: 800 .9rem/1 var(--display); color: var(--violet-deep); }
+.body { padding: 20px 20px 22px; }
+.top { display: grid; grid-template-columns: minmax(0, 1.5fr) minmax(220px, 1fr); gap: 24px; margin: 0 0 16px; }
+.top:last-child { margin-bottom: 0; }
+.prose p { margin: 0 0 10px; max-width: 66ch; }
+.prose ul, .prose ol { margin: 8px 0 10px; padding-left: 1.2em; }
+.prose li { margin: 0 0 6px; }
+.prose li::marker { color: var(--gold-deep); }
+.prose pre { margin: 6px 0 14px; }
+.spec { background: var(--cream); border-radius: 10px; padding: 4px 14px; font-size: var(--step--1); align-self: start; }
+.spec dl { margin: 0; display: grid; grid-template-columns: auto minmax(0, 1fr); }
+.spec dt, .spec dd { padding: 7px 0; border-bottom: 1px solid oklch(88% 0.04 85); margin: 0; }
+.spec dt { color: var(--ink-2); padding-right: 14px; }
+.spec dd { font-weight: 700; }
+.spec dt:last-of-type, .spec dd:last-of-type { border-bottom: 0; }
+.steps { counter-reset: s; list-style: none; padding: 0 !important; }
+.steps > li { counter-increment: s; display: grid; grid-template-columns: 30px minmax(0, 1fr); gap: 10px; align-items: start; }
+.steps > li::before { content: counter(s); width: 26px; height: 26px; border-radius: 50%; background: var(--gold); color: var(--violet-deep);
+  font: 800 .85rem/26px var(--display); text-align: center; margin-top: 2px; }
+.steps > li > span { min-width: 0; }
+.note { background: var(--lilac-0); border-left: 3px solid var(--cyan); border-radius: 0 8px 8px 0; padding: 10px 14px; margin: 4px 0 0; font-size: var(--step--1); max-width: 72ch; }
+
+footer { background: var(--violet-deep); color: oklch(84% 0.03 300); border-top: 3px solid var(--gold); }
+footer .in { max-width: 1280px; margin: 0 auto; padding: 24px 20px 32px; font-size: var(--step--1); display: grid; gap: 6px; }
+footer a { color: var(--gold); }
+
+@media (max-width: 960px) {
+  .hero-inner { grid-template-columns: minmax(0, 1fr); }
+  .shell { grid-template-columns: minmax(0, 1fr); gap: 20px; padding-top: 0; }
+  .pad { top: 0; z-index: 5; border-radius: 0 0 12px 12px; margin: 0 -20px; border-top: 0; }
+  .pad h2 { display: none; }
+  .pad ol { display: flex; overflow-x: auto; scrollbar-width: none; padding: 6px; }
+  .pad a { white-space: nowrap; }
+  .top { grid-template-columns: minmax(0, 1fr); }
+}
+@media (max-width: 560px) { .stats { grid-template-columns: minmax(0, 1fr); } .stat + .stat { border-left: 0; border-top: 1px solid oklch(50% 0.08 295); } .bar .cat { display: none; } }
+@media (prefers-reduced-motion: reduce) { html { scroll-behavior: auto; } }
+</style>
+</head>
+<body>
+
+<header class="hero">
+  <nav class="sitebar" aria-label="Site">
+    <a class="brand" href="../"><img src="../img/icon-192.png" alt="" width="36" height="36">YW4 Recomp</a>
+    <a class="btn gh" href="https://github.com/ILFforever/YW4Recomp"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 0c4.42 0 8 3.58 8 8a8.013 8.013 0 0 1-5.45 7.59c-.4.08-.55-.17-.55-.38 0-.27.01-1.13.01-2.2 0-.75-.25-1.23-.54-1.48 1.78-.2 3.65-.88 3.65-3.95 0-.88-.31-1.59-.82-2.15.08-.2.36-1.02-.08-2.12 0 0-.67-.22-2.2.82-.64-.18-1.32-.27-2-.27-.68 0-1.36.09-2 .27-1.53-1.03-2.2-.82-2.2-.82-.44 1.1-.16 1.92-.08 2.12-.51.56-.82 1.28-.82 2.15 0 3.06 1.86 3.75 3.64 3.95-.23.2-.44.55-.51 1.07-.46.21-1.61.55-2.33-.66-.15-.24-.6-.83-1.23-.82-.67.01-.27.38.01.53.34.19.73.9.82 1.13.16.45.68 1.31 2.69.94 0 .67.01 1.3.01 1.49 0 .21-.15.45-.55.38A7.995 7.995 0 0 1 0 8c0-4.42 3.58-8 8-8Z"/></svg>Project on GitHub</a>
+  </nav>
+  <div class="hero-inner">
+    <div>
+      <span class="eyebrow">YW4 Recomp · fan PC port</span>
+      <h1>Building from source</h1>
+      <p>Build the PC version of <i>Yo-kai Watch 4++</i> yourself, from your own game files. On Windows the
+        <a href="../launcher/" style="color: var(--gold)">launcher</a> does all of this for you; on Linux, this is the
+        way for now.</p>
+      <div class="stats">
+        <div class="stat"><b>Windows · Linux</b><span>x86-64 with a Vulkan 1.3 GPU</span></div>
+        <div class="stat"><b>10–15 min</b><span>to build the game, once</span></div>
+        <div class="stat"><b>1 line</b><span>to start it afterwards</span></div>
+      </div>
+      <div class="links">
+        <a class="btn" href="../">Home</a>
+        <a class="btn ghost" href="#windows">Windows</a>
+        <a class="btn ghost" href="#linux">Linux</a>
+      </div>
+    </div>
+    <figure class="shot">
+<pre><span class="c"># once: your folders in config.local.toml, then</span>
+<span class="p">$ </span>python -m tools.yw4.ingest
+<span class="p">$ </span>python -m recomp.translate
+<span class="p">$ </span>python -m tools.yw4.shaders
+<span class="p">$ </span>python -m recomp.shader --check
+<span class="p">$ </span>python -m recomp.build --run
+
+<span class="c"># every time after that</span>
+<span class="p">$ </span>./work/build/yw4</pre>
+      <figcaption>The whole build, the same on Windows and Linux</figcaption>
+    </figure>
+  </div>
+</header>
+
+<div class="shell">
+  <nav class="pad" aria-label="Building from source">
+    <h2>Contents</h2>
+    <ol>
+      <li><a href="#before"><span class="n">1</span>Before you start</a></li>
+      <li><a href="#config"><span class="n">2</span>Your config</a></li>
+      <li><a href="#windows"><span class="n">3</span>Windows</a></li>
+      <li><a href="#linux"><span class="n">4</span>Linux</a></li>
+      <li><a href="#play"><span class="n">5</span>Playing</a></li>
+    </ol>
+  </nav>
+
+  <main>
+    <article id="before">
+      <div class="bar"><span class="q">!</span><h2>Before you start</h2><span class="cat">Both</span></div>
+      <div class="body">
+        <div class="top">
+          <div class="prose">
+            <p>You need your own copy of <i>Yo-kai Watch 4++</i> with the <b>2.2.0 update</b>, the last one. The
+              build checks it and stops on any other version.</p>
+            <p><b>Nothing from the game is in the project.</b> The build reads your files and makes the PC
+              version on your own computer; none of it is ever shared.</p>
+          </div>
+          <div class="spec"><dl>
+            <dt>Your game</dt><dd>Yo-kai Watch 4++, update 2.2.0</dd>
+            <dt>Formats</dt><dd>NSP, XCI, or extracted ExeFS + RomFS</dd>
+            <dt>Graphics</dt><dd>Vulkan 1.3</dd>
+            <dt>Disk</dt><dd>About 11.4 GB; 20.7 GB at most from NSP or XCI</dd>
+          </dl></div>
+        </div>
+      </div>
+    </article>
+
+    <article id="config">
+      <div class="bar"><span class="q">!</span><h2>Your config</h2><span class="cat">Both</span></div>
+      <div class="body">
+        <div class="top">
+          <div class="prose">
+            <ol class="steps">
+              <li><span><b>Get the code.</b>
+<pre>git clone https://github.com/ILFforever/YW4Recomp
+cd YW4Recomp</pre></span></li>
+              <li><span><b>Make your config.</b> Copy <code>config.example.toml</code> to <code>config.local.toml</code>
+                and fill in your folders: <code>exefs_dir</code> and <code>romfs_dir</code> for extracted files, or
+                <code>base_nsp</code>, <code>update_nsp</code>, <code>hactool_exe</code> and <code>keys_dir</code>
+                for NSP or XCI files (then run <code>python -m tools.yw4.extract</code> once). <code>dlc_dir</code> is your
+                DLC folder, if you have it.</span></li>
+              <li><span><b>Check it.</b> <code>python tools/yw4/config.py</code> prints your folders, or says what is
+                missing.</span></li>
+            </ol>
+            <p class="note">Keep <code>work_dir</code> out of OneDrive, Dropbox and other synced folders: the build
+              writes thousands of files there.</p>
+          </div>
+          <div class="spec"><dl>
+            <dt>Config</dt><dd>config.local.toml, never committed</dd>
+            <dt>Output</dt><dd>work/ (your build)</dd>
+            <dt>Details</dt><dd><a href="https://github.com/ILFforever/YW4Recomp/blob/master/docs/setup.md">docs/setup.md</a></dd>
+          </dl></div>
+        </div>
+      </div>
+    </article>
+
+    <article id="windows">
+      <div class="bar"><span class="q">!</span><h2>Windows</h2><span class="cat">Build</span></div>
+      <div class="body">
+        <div class="top">
+          <div class="prose">
+            <p>Easiest: <a href="../launcher/">the launcher</a> takes your files and does every step below for you.
+              To build it yourself:</p>
+            <ol class="steps">
+              <li><span><b>Install the tools.</b> Python 3.11+, Git,
+                <a href="https://github.com/mstorsjo/llvm-mingw">llvm-mingw</a> (Clang 19 or newer) and the
+                <a href="https://vulkan.lunarg.com/">Vulkan SDK</a> (for <code>glslangValidator</code>). In your
+                config, set <code>[tools] cc</code> to llvm-mingw's <code>clang.exe</code>.</span></li>
+              <li><span><b>Build.</b> In PowerShell, from the project folder:
+<pre>python -m tools.yw4.ingest
+python -m recomp.translate
+python -m tools.yw4.shaders
+python -m recomp.shader --check
+python -m recomp.build --run</pre></span></li>
+            </ol>
+            <p>SDL3 comes with the build. AMD FSR, NVIDIA DLSS and Streamline are downloaded once (about 550 MB);
+              <code>--no-fsr</code> and <code>--no-dlss</code> leave them out.</p>
+          </div>
+          <div class="spec"><dl>
+            <dt>Compiler</dt><dd>llvm-mingw, Clang 19+</dd>
+            <dt>Shaders</dt><dd>Vulkan SDK</dd>
+            <dt>SDL3</dt><dd>Fetched by the build</dd>
+            <dt>Extras</dt><dd>FSR, DLSS, frame generation, Reflex</dd>
+          </dl></div>
+        </div>
+      </div>
+    </article>
+
+    <article id="linux">
+      <div class="bar"><span class="q">!</span><h2>Linux</h2><span class="cat">Build</span></div>
+      <div class="body">
+        <div class="top">
+          <div class="prose">
+            <ol class="steps">
+              <li><span><b>Install the tools</b> from your distribution: Clang 19 or newer (or GCC 15 or newer),
+                Python 3.11+, Git, pkg-config, glslang and SDL3 with its headers. For example:
+<pre><span class="c"># Arch</span>
+sudo pacman -S clang python git pkgconf glslang sdl3
+<span class="c"># Fedora</span>
+sudo dnf install clang python3 git pkgconf glslang SDL3-devel
+<span class="c"># Debian 13, Ubuntu 25.04 or newer</span>
+sudo apt install clang python3 git pkg-config glslang-tools libsdl3-dev</pre>
+                Set <code>[tools] cc = "clang"</code> in your config (the default is gcc).</span></li>
+              <li><span><b>Build</b>, from the project folder:
+<pre>python3 -m tools.yw4.ingest
+python3 -m recomp.translate
+python3 -m tools.yw4.shaders
+python3 -m recomp.shader --check
+python3 -m recomp.build --run</pre></span></li>
+            </ol>
+            <p class="note"><b>Ubuntu 24.04</b> has no SDL3 package and an older Clang: install <code>clang-19</code>,
+              build <a href="https://github.com/libsdl-org/SDL/releases">SDL3</a> with CMake into a folder of your own,
+              and build and run with <code>PKG_CONFIG_PATH=&lt;folder&gt;/lib/pkgconfig</code> and
+              <code>LD_LIBRARY_PATH=&lt;folder&gt;/lib</code>.</p>
+          </div>
+          <div class="spec"><dl>
+            <dt>Compiler</dt><dd>Clang 19+ or GCC 15+</dd>
+            <dt>Graphics</dt><dd>Mesa (RADV, ANV) or NVIDIA's driver</dd>
+            <dt>SDL3</dt><dd>From your distribution</dd>
+            <dt>Tested</dt><dd>AOSC OS, KDE Plasma (Wayland), RX 6600 XT: about 110–120 frames/s</dd>
+            <dt>Not yet</dt><dd>FSR, DLSS, frame generation, Reflex</dd>
+          </dl></div>
+        </div>
+      </div>
+    </article>
+
+    <article id="play">
+      <div class="bar"><span class="q">!</span><h2>Playing</h2><span class="cat">Every day</span></div>
+      <div class="body">
+        <div class="top">
+          <div class="prose">
+            <p>After the first build, start the game on its own, with no Python and nothing else to type:</p>
+<pre>./work/build/yw4          <span class="c"># Linux</span>
+.\work\build\yw4.exe      <span class="c"># Windows</span></pre>
+            <ul>
+              <li>The build wrote your game and DLC folders into <code>work/build/game.ini</code>, which the game
+                reads when it starts with no arguments. Rebuilding updates it.</li>
+              <li>Saves go to your user folder: <code>~/.local/share/YW4Recomp/save</code> on Linux,
+                <code>%APPDATA%\YW4 Recomp\save</code> on Windows. The game makes the folder itself.</li>
+              <li>After pulling new code, run <code>python -m recomp.translate</code> and
+                <code>python -m recomp.build</code> again.</li>
+            </ul>
+          </div>
+          <div class="spec"><dl>
+            <dt>Settings</dt><dd>In the game: the in-game overlay</dd>
+            <dt>Screenshots</dt><dd>F12</dd>
+            <dt>Logs</dt><dd>work/logs/, send it with a bug report</dd>
+            <dt>Options</dt><dd><a href="https://github.com/ILFforever/YW4Recomp/blob/master/docs/debugging.md">docs/debugging.md</a></dd>
+          </dl></div>
+        </div>
+      </div>
+    </article>
+  </main>
+</div>
+
+<footer>
+  <div class="in">
+    <span>A fan project. Not affiliated with or endorsed by LEVEL-5 or Nintendo; <i>Yo-kai Watch</i> belongs to its
+      owners. You need your own copy of the game.</span>
+    <span>Every step in full: <a href="https://github.com/ILFforever/YW4Recomp/blob/master/docs/setup.md">docs/setup.md</a>.
+      How each part works: <a href="https://github.com/ILFforever/YW4Recomp/tree/master/docs/decisions">docs/decisions</a>.</span>
+  </div>
+</footer>
+
+</body>
+</html>
