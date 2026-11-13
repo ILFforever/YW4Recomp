@@ -237,9 +237,12 @@ def build() -> None:
         z.write(release / "YW4 Recomp.exe", "YW4 Recomp/YW4 Recomp.exe")
         for dll in dlls.values():  # the GNU Rust build's (above); none with MSVC
             z.write(OUT / dll, f"YW4 Recomp/{dll}")
-        for p in (release / "builder").rglob("*"):
-            if p.is_file():
-                z.write(p, Path("YW4 Recomp") / p.relative_to(release))
+        # the installer's resources: builder\ and themes\ (themes.rs finds those next to the exe; the zip had no
+        # themes until 1.1.0, so a portable launcher had none, nor its game's overlay)
+        for folder in ("builder", "themes"):
+            for p in (release / folder).rglob("*"):
+                if p.is_file():
+                    z.write(p, Path("YW4 Recomp") / p.relative_to(release))
     for p in DIST.iterdir():
         print(f"{p.name}: {p.stat().st_size / 1e6:.0f} MB")
 
