@@ -54,6 +54,28 @@ field camera (`f_846260`) that the Switch build never feeds.
 3. **Mouse as input.** The window takes the mouse (relative mode) at start and on a click; Alt and the settings
    panel give it back. Clicks count only while the game has the mouse, and the click that gives it back is not a
    press. Mouse buttons and the wheel can be bound, but the defaults stay keys only (Enter and Escape stay A and B).
+4. **Keyboard or mouse first (2026-11-13).** With keys and mouse, an input's icon is its first bound key, else its
+   mouse button; in battles the mouse comes first (the owner attacks and aims with the mouse there, so the hint
+   shows the mouse button, not the U and O keys bound to the same inputs).
+5. **The PlayStation middle buttons (2026-11-13): two cells' pixels after all.** The game ships only a PS4 sheet;
+   its select-position icon (bt09, the Switch's Minus, auto battle in battles) is the PS4 touchpad, the wrong
+   button on every PlayStation pad: Create on a DualSense, Share on a DualShock 4, Select on a PS3 pad; and its
+   start-position icon (bt10) says OPTIONS, which a PS3 pad calls Start. No icon in any sheet shows those, so
+   swapping names can't help. `bindings_patch_sheet` rewrites the two cells in the game's memory: the pad's word
+   over a pill in the style of the sheet's Options icon (the owner picked the look from mockups). Rows 0-23 are our
+   drawing as BC7 blocks (`gaiji_create.h`, made by `python -m tools.yw4.gaiji_create`); rows 24-47 are the Options
+   icon's own, read from the same texture, so no game pixels are in the repo. The sheet is found before its first
+   upload (`gpu.c` `upload`) by a fingerprint of the touchpad cell's blocks; the hint hook rewrites the cells when
+   the PlayStation model changes (SDL's pad type; `YW4_PS_MODEL` for tests) and calls `gpu_note_written`, after
+   checking they still hold what it wrote. Our own screens follow the model too: the Controls page's names, and on a
+   PS3 pad (no touchpad) the overlay opens with Select + Start. Nintendo pads use the Switch sheet, which is right.
+6. **Xbox 360 pads (2026-11-13).** The Xbox sheet has View and Menu, right for Xbox One and Series pads; a 360
+   pad's buttons there are Back and Start, marked with a left and a right triangle. For a pad SDL reports as a 360
+   one, the middle 6 x 4 blocks of the two circle icons (x 12-35, y 16-31; the circle's edge stays the game's) get
+   our triangles (`gaiji_create.h`), and the game's own middles, kept when the sheet is found (the View icon's
+   fingerprint), go back for other pads. The Controls page then says Back / Start and the overlay hint shows the
+   triangles. Known limit: many third-party pads (and Switch-style pads in X-input mode) report as a 360 pad and
+   get the triangles too; `YW4_NINTENDO_LAYOUT` still gives the latter the Switch icons.
 
 ## Rejected
 

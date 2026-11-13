@@ -2615,15 +2615,18 @@ static int pad_hints(const char **close) {
     int forced = bindings_hints_forced();
     if (forced == 1) return 0;
     if (forced >= 2 && !gamepad) {
-        *close = forced == 3 ? "Touchpad" : forced == 4 ? "Capture" : "Back + Start";
+        *close = forced == 3   ? (bindings_ps_model() == 3 ? "Select + Start" : "Touchpad")
+                 : forced == 4 ? "Capture"
+                               : (bindings_xbox360() ? "Back + Start (360)" : "Back + Start");
         return forced == 3 ? 2 : 1;
     }
     if (!gamepad || (!last_used_pad && !forced)) return 0;
     int ps = pad_is_playstation();
-    if (ps) *close = "Touchpad";
+    if (ps && SDL_GetGamepadType(gamepad) != SDL_GAMEPAD_TYPE_PS3) *close = "Touchpad";
+    else if (ps) *close = "Select + Start";  /* a PS3 pad has no touchpad: its Back + Start, by their names */
     else if (SDL_GamepadHasButton(gamepad, SDL_GAMEPAD_BUTTON_MISC1))
         *close = SDL_GetGamepadType(gamepad) == SDL_GAMEPAD_TYPE_NINTENDO_SWITCH_PRO ? "Capture" : "Share";
-    else *close = "Back + Start";
+    else *close = bindings_xbox360() ? "Back + Start (360)" : "Back + Start";  /* 360: the triangles */
     return ps ? 2 : 1;
 }
 

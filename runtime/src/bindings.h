@@ -10,6 +10,8 @@
 #include <stdint.h>
 #include <stdio.h>
 
+#include "tegra.h"
+
 enum { BIND_KEYS = 2, BIND_COLS = BIND_KEYS + 1, BIND_NAME = 24 };
 
 /* Pseudo-scancodes for mouse buttons and wheel directions */
@@ -91,6 +93,18 @@ int bindings_on_mouse_row(void);
 int bindings_set_shown(void);
 void bindings_input_title(int i, char *s, size_t n);
 
+
+/* The PlayStation icon sheet's Minus icon is the PS4 touchpad, and its Plus icon says OPTIONS: they get the pad's
+ * own names (CREATE, SHARE or SELECT; START on a PS3 pad) over the Options icon's pill (tools/yw4/gaiji_create.py).
+ * Called (gpu.c) before a texture's texels go to the GPU: when it is that sheet with the touchpad icon still in it,
+ * the cells are changed in the game's memory; the hint hook changes them again when the pad changes. */
+void bindings_patch_sheet(const TexLayout *layout, uint32_t nvn_format, uint8_t *texels);
+/* The PlayStation pad last connected: 3, 4 or 5 (5, a DualSense, when none was; YW4_PS_MODEL sets it for tests):
+ * which names its middle buttons have (Select/Start, Share/Options, Create/Options) and whether it has a touchpad. */
+int bindings_ps_model(void);
+/* 1: the Xbox-style pad last connected reports as an Xbox 360 pad (Back and Start, not View and Menu; YW4_XBOX360
+ * sets it for tests). The Xbox sheet's two icons are rewritten for it the same way. */
+int bindings_xbox360(void);
 
 /* The settings file's lines (settings.c): one KEY1_/KEY2_/PAD_<input>=<name> line each, and YW4_MOUSE_SENS. */
 int bindings_load_line(const char *name, const char *value);

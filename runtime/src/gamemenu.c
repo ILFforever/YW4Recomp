@@ -1225,6 +1225,8 @@ static const struct {
     {"Back + Start", {"<rect x=\"4\" y=\"5\" width=\"9\" height=\"9\" rx=\"1\"/><rect x=\"11\" y=\"10\" width=\"9\" "
                       "height=\"9\" rx=\"1\"/>",
                       "<path d=\"M5 7h14M5 12h14M5 17h14\"/>"}},
+    /* an Xbox 360 pad's: Back's left triangle, Start's right one */
+    {"Back + Start (360)", {"<path d=\"M7 12l9-6v12z\"/>", "<path d=\"M17 12l-9-6v12z\"/>"}},
 };
 
 static float hint(const UiCanvas *c, float x, float y, const char *key, const char *label) {
@@ -1905,6 +1907,13 @@ static const char *pv_chip(int part, int style) {
         {"L2", "L1", "R2", "R1", "L stick", "R stick", "D-pad", "\x08", "\x06", "\x07", "\x05", "Create", "Options",
          "Touchpad", "Mic"},
         {"ZL", "L", "ZR", "R", "L stick", "R stick", "D-pad", "B", "A", "Y", "X", "-", "+", "Capture", ""}};
+    if (style == 1 && (part == PV_MINUS || part == PV_PLUS)) {  /* the PlayStation's middle buttons, by model */
+        int m = bindings_ps_model();
+        if (part == PV_MINUS) return m == 3 ? "Select" : m == 4 ? "Share" : "Create";
+        return m == 3 ? "Start" : "Options";
+    }
+    if (style == 0 && (part == PV_MINUS || part == PV_PLUS) && bindings_xbox360())  /* an Xbox 360 pad's */
+        return part == PV_MINUS ? "Back" : "Start";
     return names[style < 0 || style > 2 ? 0 : style][part];
 }
 static float pv_chip_w(const char *s, float px) {
@@ -1934,7 +1943,7 @@ static void pv_label(int part, const GameMenuInfo *in, int style, PvLabel *l) {
     memset(l, 0, sizeof *l);
     if (part == PV_SHARE) {  /* the overlay button; a pad without one opens it with its two middle buttons */
         snprintf(l->n1, sizeof l->n1, "Overlay");
-        if (!strcmp(in->close, "Back + Start"))
+        if (!strncmp(in->close, "Back + Start", 12) || !strcmp(in->close, "Select + Start"))
             snprintf(l->n2, sizeof l->n2, "No %s button: %s + %s", pv_chip(PV_SHARE, style), pv_chip(PV_MINUS, style),
                      pv_chip(PV_PLUS, style));
         l->kind = 3;

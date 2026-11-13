@@ -83,7 +83,7 @@ static int edit_set;  /* the set the controls page shows and changes */
 static int bound_ready, battle_set_known;  /* the battle set was read from the settings file or copied */
 
 /* The battle set's starting keys (the owner's battle set, 2026-11-13), in the order of inputs[]; the controller's
- * inputs are the same as exploring's */
+ * inputs are exploring's but for X and Y (battle_starting_set) */
 static const int battle_keys[NINPUTS][BIND_KEYS] = {
     {SDL_SCANCODE_E, SDL_SCANCODE_RETURN},      /* A */
     {SDL_SCANCODE_SPACE, SDL_SCANCODE_LSHIFT},  /* B */
@@ -139,6 +139,10 @@ static void battle_starting_set(void) {
         for (int k = 0; k < BIND_KEYS; k++) sets[SET_BATTLE][i].keys[k] = battle_keys[i][k];
         sets[SET_BATTLE][i].pad = inputs[i].pad;
     }
+    /* the owner's battle pad (2026-11-14): Y (attack) on the left face button, X on the top one, by place on every
+     * pad (Xbox X / PlayStation square / Nintendo Y attacks); the rest as when exploring */
+    sets[SET_BATTLE][input_by_id("X")].pad = SDL_GAMEPAD_BUTTON_NORTH;
+    sets[SET_BATTLE][input_by_id("Y")].pad = SDL_GAMEPAD_BUTTON_WEST;
     mouse_starting(SET_BATTLE);
 }
 
@@ -297,6 +301,8 @@ static const char *pad_name(int pad) {
 /* What the connected controller prints on its buttons (the settings file keeps the position names above). */
 enum { STYLE_XBOX, STYLE_PLAYSTATION, STYLE_NINTENDO };
 static int pad_style;           /* the connected controller's (bindings_read); Xbox names when there is none */
+static int ps_model = 5;        /* the PlayStation pad last connected: 3, 4, 5 (a DualSense when none was) */
+static int xbox360;             /* the Xbox-style pad last connected reports as an Xbox 360 one (Back, Start) */
 static int using_pad, had_pad;  /* 1 after a gamepad connection or input, 0 after a key or mouse input */
 /* CONTROLLER NINTENDO ICONS (YW4_NINTENDO_LAYOUT): a pad that reports as an Xbox one gets the Switch's button icons
  * and names. Switch-style pads in their X-input mode report as a Microsoft Xbox 360 pad (vendor 045e, product 028e;
@@ -449,8 +455,26 @@ void bindings_read(const bool *keyboard, uint32_t mouse_buttons, int wheel_up, i
         if (e && *e) nintendo_layout = !strcmp(e, "1") || !strcmp(e, "ON") || !strcmp(e, "on");
         layout_env_read = 1;
     }
+    static int model_env = -1;  /* YW4_PS_MODEL=3/4/5: that PlayStation model's names, for tests without the pad */
+    if (model_env < 0) {
+        const char *e = getenv("YW4_PS_MODEL");
+        model_env = e && (atoi(e) == 3 || atoi(e) == 4 || atoi(e) == 5) ? atoi(e) : 0;
+        if (model_env) ps_model = model_env;
+    }
+    static int x360_env = -1;  /* YW4_XBOX360=1 (0): an Xbox 360 pad's names (or not), for tests without the pad */
+    if (x360_env < 0) {
+        const char *e = getenv("YW4_XBOX360");
+        x360_env = e && *e ? 1 : 0;
+        if (x360_env) xbox360 = atoi(e) != 0;
+    }
     if (gamepad) {
         SDL_GamepadType t = SDL_GetGamepadType(gamepad);
+        if (!model_env && (t == SDL_GAMEPAD_TYPE_PS3 || t == SDL_GAMEPAD_TYPE_PS4 || t == SDL_GAMEPAD_TYPE_PS5))
+            ps_model = t == SDL_GAMEPAD_TYPE_PS3 ? 3 : t == SDL_GAMEPAD_TYPE_PS4 ? 4 : 5;
+        /* an Xbox-style pad: a 360 one (or one that says it is: many third-party pads) has Back and Start */
+        if (!x360_env && t != SDL_GAMEPAD_TYPE_PS3 && t != SDL_GAMEPAD_TYPE_PS4 && t != SDL_GAMEPAD_TYPE_PS5 &&
+            !(t >= SDL_GAMEPAD_TYPE_NINTENDO_SWITCH_PRO && t <= SDL_GAMEPAD_TYPE_NINTENDO_SWITCH_JOYCON_PAIR))
+            xbox360 = t == SDL_GAMEPAD_TYPE_XBOX360;
         pad_style = t == SDL_GAMEPAD_TYPE_PS3 || t == SDL_GAMEPAD_TYPE_PS4 || t == SDL_GAMEPAD_TYPE_PS5 ? STYLE_PLAYSTATION
                     : t >= SDL_GAMEPAD_TYPE_NINTENDO_SWITCH_PRO && t <= SDL_GAMEPAD_TYPE_NINTENDO_SWITCH_JOYCON_PAIR
                         ? STYLE_NINTENDO
@@ -770,15 +794,23 @@ static uint32_t gaiji_swap(uint32_t crc, int *sheet) {
     sets_ready();
     const Bound *use = sets[battle_active() ? SET_BATTLE : SET_FIELD];  /* the keys in use now */
     if (!using_pad) {
-        /* the row's first key that has an icon, else its mouse part (the keyboard first: owner, 2026-11-13); groups
-         * (a stick, the whole D-pad) keep the Switch icon: the keyboard sheet has none for a set of keys */
-        for (int k = 0; row >= 0 && k < BIND_KEYS; k++) {
-            const char *name = use[row].keys[k] ? key_gaiji(use[row].keys[k]) : NULL;
-            if (name) return *sheet = SHEET_KEY, gaiji_crc(name);
+        /* the row's first key that has an icon, else its mouse part (the keyboard first: owner, 2026-11-13); in
+         * battles the mouse first (owner, 2026-11-13: you attack and aim with the mouse there, so the hint shows
+         * the mouse button, not U or O). Groups (a stick, the whole D-pad) keep the Switch icon: the keyboard sheet
+         * has none for a set of keys */
+        const int battle = battle_active() != 0;
+        const int *mouse = mouse_map[battle ? SET_BATTLE : SET_FIELD];
+        for (int pass = 0; row >= 0 && pass < 2; pass++) {
+            if (pass == !battle) {  /* the mouse: pass 0 in battles, pass 1 when exploring */
+                for (int p = 0; p < BMOUSE_PARTS; p++)
+                    if (mouse[p] == row) return *sheet = SHEET_KEY, gaiji_crc(key_gaiji(mouse_code[p]));
+            } else {
+                for (int k = 0; k < BIND_KEYS; k++) {
+                    const char *name = use[row].keys[k] ? key_gaiji(use[row].keys[k]) : NULL;
+                    if (name) return *sheet = SHEET_KEY, gaiji_crc(name);
+                }
+            }
         }
-        const int *mouse = mouse_map[battle_active() ? SET_BATTLE : SET_FIELD];
-        for (int p = 0; row >= 0 && p < BMOUSE_PARTS; p++)
-            if (mouse[p] == row) return *sheet = SHEET_KEY, gaiji_crc(key_gaiji(mouse_code[p]));
         return 0;
     }
     int shown = g;
@@ -843,6 +875,8 @@ static struct {
     Box game_box, shown_box;
 } remembered[REMEMBERED];
 
+static void gc_follow(void);  /* the PlayStation sheet's middle buttons, below */
+
 int yw4_hook_gaiji_render(CPUState *ctx) {
     uint64_t main_base = *yw4_modules[YW4_MAIN].base;
     uint64_t sheets = ld64(main_base + 0x58654f8);
@@ -850,6 +884,7 @@ int yw4_hook_gaiji_render(CPUState *ctx) {
     if (!sheets || nsheets < 5 || ctx->x[0] != ld64(sheets)) return 0;  /* only before sheet 0 */
     ready();
     gaiji_init();
+    gc_follow();
     uint64_t ps = ld64(sheets), xbox = ld64(sheets + 8), key = ld64(sheets + 16);
     if (ps) st8(ps + 0x1c, (uint8_t)(using_pad && hint_style() == STYLE_PLAYSTATION));
     if (xbox) st8(xbox + 0x1c, (uint8_t)(using_pad && hint_style() == STYLE_XBOX));
@@ -890,6 +925,138 @@ int yw4_hook_gaiji_render(CPUState *ctx) {
         remembered[slot].game_box = game_box, remembered[slot].shown_box = shown_box;
     }
     return 0;
+}
+
+/* ---- the PlayStation sheet's middle buttons (owner, 2026-11-13). The game ships only a PS4 sheet, so its Minus
+ * icon (gaiji_bt09, at 104,104 in the 256 x 256 BC7 sheet) is the PS4 touchpad: the wrong button on every
+ * PlayStation pad (auto battle is on Create on a DualSense, Share on a DualShock 4, Select on a PS3 pad), and its
+ * Plus icon (gaiji_bt10, at 156,0) says OPTIONS, which a PS3 pad calls Start. Those cells are rewritten in the
+ * game's memory for the pad in use, in the Options icon's style: the word above a small dark pill. Rows 0-23 are
+ * our drawing (gaiji_create.h, from tools/yw4/gaiji_create.py: the word and the pill's top, which Options hides
+ * under its word); rows 24-47 are the Options icon's own, from the same texture, so no game art is in the repo.
+ *
+ * The first time, before the texture's first upload (gpu.c), the sheet is known by the touchpad icon's blocks (a
+ * fingerprint); its Options top half is kept here then, to put back. After that the hint hook (game thread) writes
+ * the cells again when the PlayStation model changes, and tells the GPU layer (gpu_note_written), which uploads the
+ * texture again. Before each such write the cells must still be what we wrote (else the memory is something else
+ * now and is left alone). */
+#include "gaiji_create.h"
+#include "gpu.h"
+
+enum { GC_CELL = 48, GC_TOP = 24, GC_ROW = GC_CELL / 4 * 16, GC_HALF = GC_TOP / 4 * GC_ROW };
+static uint8_t *gc_texels;  /* the sheet's storage once found (set once, by the GPU thread) */
+static TexLayout gc_layout;
+static uint8_t gc_options_top[GC_HALF], gc_body[GC_HALF];  /* bt10's own rows 0-23 and 24-47 */
+static int gc_model;                                       /* the model the cells are written for (3, 4, 5) */
+static uint64_t gc_print9, gc_print10;                     /* what the cells hold now */
+
+/* The Xbox sheet: an Xbox 360 pad's Back and Start (a left and a right triangle) in place of View and Menu, in the
+ * middle 6 x 4 blocks of the two circle icons (x 12-35, y 16-31 of the cell; the circle's edge stays the game's).
+ * Found the same way (the View icon's fingerprint); the game's own middles are kept, to put back for other pads. */
+enum { XB_X = 12, XB_Y = 16, XB_W = 24, XB_H = 16, XB_SIZE = XB_W / 4 * XB_H / 4 * 16 };
+static uint8_t *gc_xb_texels;
+static TexLayout gc_xb_layout;
+static uint8_t gc_xb_view[XB_SIZE], gc_xb_menu[XB_SIZE];
+static int gc_xb_mode = -1;  /* written for: 1 an Xbox 360 pad, 0 others (the game's View and Menu) */
+static uint64_t gc_xb_print9, gc_xb_print10;
+
+int bindings_ps_model(void) { return ps_model; }
+int bindings_xbox360(void) { return xbox360; }
+
+static uint64_t gc_fnv(const uint8_t *p, size_t n) {
+    uint64_t h = 0xcbf29ce484222325ull;
+    for (size_t i = 0; i < n; i++) h = (h ^ p[i]) * 0x100000001b3ull;
+    return h;
+}
+
+/* both cells for a model, into the sheet; their fingerprints kept */
+static void gc_write(uint8_t *texels, int model) {
+    uint8_t cell[2 * GC_HALF];
+    const TexLayout *L = &gc_layout;
+    int word9 = model == 3 ? GAIJI_WORD_SELECT : model == 4 ? GAIJI_WORD_SHARE : GAIJI_WORD_CREATE;
+    memcpy(cell, gaiji_word_top[word9], GC_HALF);
+    memcpy(cell + GC_HALF, gc_body, GC_HALF);
+    tegra_write_region(L, texels, 0, 0, 104, 104, 0, GC_CELL, GC_CELL, 1, cell);
+    gc_print9 = gc_fnv(cell, sizeof cell);
+    memcpy(cell, model == 3 ? gaiji_word_top[GAIJI_WORD_START] : gc_options_top, GC_HALF);
+    tegra_write_region(L, texels, 0, 0, 156, 0, 0, GC_CELL, GC_CELL, 1, cell);
+    gc_print10 = gc_fnv(cell, sizeof cell);
+    gc_model = model;
+    fprintf(stderr, "yw4: hints: PlayStation sheet: %s and %s (PS%d)\n",
+            model == 3 ? "SELECT" : model == 4 ? "SHARE" : "CREATE", model == 3 ? "START" : "OPTIONS", model);
+}
+
+static void xb_found(const TexLayout *L, uint8_t *texels);
+
+void bindings_patch_sheet(const TexLayout *L, uint32_t nvn_format, uint8_t *texels) {
+    if (!texels || (nvn_format != 0x4D && nvn_format != 0x4E) || L->width != 256 || L->height != 256 ||
+        L->depth != 1 || L->layers != 1)
+        return;
+    uint8_t cell[2 * GC_HALF];
+    tegra_read_region(L, texels, 0, 0, 104, 104, 0, GC_CELL, GC_CELL, 1, cell);
+    uint64_t h = gc_fnv(cell, sizeof cell);
+    if (h == GAIJI_XBOX_VIEW_PRINT && !__atomic_load_n(&gc_xb_texels, __ATOMIC_ACQUIRE)) xb_found(L, texels);
+    if (h != GAIJI_TOUCHPAD_PRINT || __atomic_load_n(&gc_texels, __ATOMIC_ACQUIRE)) return;
+    gc_layout = *L;
+    tegra_read_region(L, texels, 0, 0, 156, 0, 0, GC_CELL, GC_CELL, 1, cell);
+    memcpy(gc_options_top, cell, GC_HALF);
+    memcpy(gc_body, cell + GC_HALF, GC_HALF);
+    gc_write(texels, ps_model);  /* before the upload this is called from: nothing more to tell the GPU layer */
+    __atomic_store_n(&gc_texels, texels, __ATOMIC_RELEASE);  /* only now may the hint hook write too */
+}
+
+static void xb_write(uint8_t *texels, int mode) {
+    const TexLayout *L = &gc_xb_layout;
+    const uint8_t *a = mode ? gaiji_xbox_back : gc_xb_view, *b = mode ? gaiji_xbox_start : gc_xb_menu;
+    tegra_write_region(L, texels, 0, 0, 104 + XB_X, 104 + XB_Y, 0, XB_W, XB_H, 1, a);
+    tegra_write_region(L, texels, 0, 0, 156 + XB_X, 0 + XB_Y, 0, XB_W, XB_H, 1, b);
+    gc_xb_print9 = gc_fnv(a, XB_SIZE), gc_xb_print10 = gc_fnv(b, XB_SIZE);
+    gc_xb_mode = mode;
+    fprintf(stderr, "yw4: hints: Xbox sheet: %s\n", mode ? "Back and Start (Xbox 360)" : "View and Menu");
+}
+
+static void xb_found(const TexLayout *L, uint8_t *texels) {
+    gc_xb_layout = *L;
+    tegra_read_region(L, texels, 0, 0, 104 + XB_X, 104 + XB_Y, 0, XB_W, XB_H, 1, gc_xb_view);
+    tegra_read_region(L, texels, 0, 0, 156 + XB_X, 0 + XB_Y, 0, XB_W, XB_H, 1, gc_xb_menu);
+    gc_xb_print9 = gc_fnv(gc_xb_view, XB_SIZE), gc_xb_print10 = gc_fnv(gc_xb_menu, XB_SIZE);
+    gc_xb_mode = 0;
+    if (xbox360) xb_write(texels, 1);  /* before the upload this is called from */
+    __atomic_store_n(&gc_xb_texels, texels, __ATOMIC_RELEASE);
+}
+
+/* the Xbox sheet again when the pad changed between an Xbox 360 pad and others */
+static void xb_follow(void) {
+    uint8_t *texels = __atomic_load_n(&gc_xb_texels, __ATOMIC_ACQUIRE);
+    if (!texels || gc_xb_mode == xbox360) return;
+    uint8_t a[XB_SIZE], b[XB_SIZE];
+    tegra_read_region(&gc_xb_layout, texels, 0, 0, 104 + XB_X, 104 + XB_Y, 0, XB_W, XB_H, 1, a);
+    tegra_read_region(&gc_xb_layout, texels, 0, 0, 156 + XB_X, 0 + XB_Y, 0, XB_W, XB_H, 1, b);
+    if (gc_fnv(a, XB_SIZE) != gc_xb_print9 || gc_fnv(b, XB_SIZE) != gc_xb_print10) {
+        fprintf(stderr, "yw4: hints: Xbox sheet changed under us; its icons are left as they are\n");
+        __atomic_store_n(&gc_xb_texels, NULL, __ATOMIC_RELEASE);
+        return;
+    }
+    xb_write(texels, xbox360);
+    gpu_note_written((uint64_t)(uintptr_t)texels, tegra_total_size(&gc_xb_layout));
+}
+
+/* the hint hook, each frame: the cells again when the PlayStation model (or Xbox 360 or not) changed */
+static void gc_follow(void) {
+    xb_follow();
+    uint8_t *texels = __atomic_load_n(&gc_texels, __ATOMIC_ACQUIRE);
+    if (!texels || gc_model == ps_model) return;
+    uint8_t cell[2 * GC_HALF];
+    tegra_read_region(&gc_layout, texels, 0, 0, 104, 104, 0, GC_CELL, GC_CELL, 1, cell);
+    uint64_t p9 = gc_fnv(cell, sizeof cell);
+    tegra_read_region(&gc_layout, texels, 0, 0, 156, 0, 0, GC_CELL, GC_CELL, 1, cell);
+    if (p9 != gc_print9 || gc_fnv(cell, sizeof cell) != gc_print10) {  /* not ours any more: leave it */
+        fprintf(stderr, "yw4: hints: PlayStation sheet changed under us; its icons are left as they are\n");
+        __atomic_store_n(&gc_texels, NULL, __ATOMIC_RELEASE);
+        return;
+    }
+    gc_write(texels, ps_model);
+    gpu_note_written((uint64_t)(uintptr_t)texels, tegra_total_size(&gc_layout));
 }
 
 /* ---- the panel page */

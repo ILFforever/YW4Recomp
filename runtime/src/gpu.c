@@ -24,6 +24,7 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "bindings.h"
 #include "events.h"
 #include "gbuffer.h"
 #include "gpu_dlssg.h"
@@ -1068,6 +1069,8 @@ static void upload(VkCommandBuffer cb, NvnTexture *t, GpuImage *g) {
     }
     if (t->reg_gen > g->reg_gen) g->reg_gen = t->reg_gen;
     if (t->addr && movie_plane(t)) g->sample = storage_sample(t);
+    if (t->addr && g->aspect == VK_IMAGE_ASPECT_COLOR_BIT)  /* the PS icon sheet's Create icon (bindings.c) */
+        bindings_patch_sheet(&t->layout, t->format, (uint8_t *)(uintptr_t)t->addr);
     upload_texels(cb, t, g);
     gpu_stall_add(STALL_UPLOAD, host_now_ns() - t0);
 }
