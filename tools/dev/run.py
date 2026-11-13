@@ -66,6 +66,7 @@ def run(cfg: config.Config, save: Path | None, replay: Path | None, seconds: int
         k, _, v = pair.partition("=")
         env[k] = v
     if env["YW4_SETTINGS_FILE"] == "none":  # test runs: one fixed size (the game's default follows the monitor)
+        env.setdefault("YW4_FPS", "30")  # and the game's 30 frames/s, so frame numbers in replays and shots keep their timing
         env.setdefault("YW4_WINDOW_SIZE", "1280x720")
     exe = cfg.work_dir / "build" / ("yw4.exe" if os.name == "nt" else "yw4")
     log = log or cfg.work_dir / "logs" / f"dev_run_{time.strftime('%Y%m%d_%H%M%S')}.log"

@@ -612,8 +612,8 @@ static int set_value(const char *env, const char *value, size_t vlen) {
 }
 
 /* First start of a new install (owner, 2026-11-11: integrated GPUs crawled with the high defaults): `low` (an
- * integrated GPU, or under 4 GB of video memory) sets the shadows and effects to the Switch's; else the defaults
- * stay (they are the high ones). A variable set in the environment is left alone. The file is written either way,
+ * integrated GPU, or under 4 GB of video memory) sets the shadows and effects to the Switch's; else the owner's
+ * own high set (below). A variable set in the environment is left alone. The file is written either way,
  * so this runs once. YW4_FIRST_RUN_LEVEL=low|high (tests) overrides the GPU's level. 1 when it ran. */
 int settings_first_run(int low) {
     if (!first_run) return 0;
@@ -622,8 +622,19 @@ int settings_first_run(int low) {
     if (force && *force) low = !strcmp(force, "low");
     static const char *const lowered[][2] = {
         {"YW4_SHADOW_RES", "1024"}, {"YW4_PCSS", "0"}, {"YW4_CONTACT", "0"}, {"YW4_EFFECTS", "0"}};
+    /* A dedicated GPU gets the owner's own settings (owner, 2026-11-13), but 1440p, not 4K, and 120 frames/s
+     * (owner, 2026-11-13; others start at 60). DLSS and its frame generation and Reflex only where the GPU has them;
+     * else FSR anti-aliasing and no frame generation. */
+    const char *aa = gpu_dlss_available() ? "5" : "4", *fg = dlssg_available() ? "2" : "0";
+    const char *reflex = dlssg_reflex_available() ? "1" : "0";
+    const char *const raised[][2] = {
+        {"YW4_RES", "1440"}, {"YW4_FPS", "120"}, {"YW4_AA", aa}, {"YW4_UPSCALE", "0"}, {"YW4_FG", fg}, {"YW4_REFLEX", reflex},
+        {"YW4_ANISO", "16"}, {"YW4_EFFECTS", "1"}, {"YW4_DOF", "2"}, {"YW4_SHADOW_RES", "4096"}, {"YW4_PCSS", "2"},
+        {"YW4_CONTACT", "1"}};
     for (size_t i = 0; low && i < sizeof lowered / sizeof *lowered; i++)
         if (!getenv(lowered[i][0])) set_value(lowered[i][0], lowered[i][1], strlen(lowered[i][1]));
+    for (size_t i = 0; !low && i < sizeof raised / sizeof *raised; i++)
+        if (!getenv(raised[i][0])) set_value(raised[i][0], raised[i][1], strlen(raised[i][1]));
     settings_save();
     fprintf(stderr, "yw4: settings: first start: %s graphics for this GPU, written to %s\n", low ? "lighter" : "high",
             settings_file());

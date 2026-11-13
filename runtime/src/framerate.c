@@ -1,4 +1,4 @@
-/* The frame rate: 30 (the game's), 60, 120, 144, the display's refresh (vsync) or no limit, switchable while playing (YW4_FPS, panel FRAME RATE).
+/* The frame rate: 30 (the game's), 60 (the default), 120, 144, the display's refresh (vsync) or no limit, switchable while playing (YW4_FPS, panel FRAME RATE).
  *
  * nnMain paces itself. A static constructor sets the byte at main+0x56b82e8 to 2 (vsyncs per frame, n) and
  * main+0x56b82e9 to 1 (limiter on). nnMain reads n once at start:
@@ -51,8 +51,8 @@ int framerate_index(void) {
     int i = __atomic_load_n(&index_v, __ATOMIC_ACQUIRE);
     if (i >= 0) return i;
     const char *e = getenv("YW4_FPS");
-    int want = e && !strcmp(e, "vsync") ? -1 : e && *e ? atoi(e) : 30;
-    i = 0;
+    int want = e && !strcmp(e, "vsync") ? -1 : e && *e ? atoi(e) : 60;  /* 60 by default (owner, 2026-11-13); 30 is the game's own */
+    i = 1;  /* an unknown value: 60 */
     for (int k = 0; k < NRATES; k++)
         if (rates[k] == want) i = k;
     __atomic_store_n(&index_v, i, __ATOMIC_RELEASE);
