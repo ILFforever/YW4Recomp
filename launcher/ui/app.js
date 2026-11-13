@@ -743,62 +743,152 @@ function showTab(name) {
 }
 document.querySelectorAll('.ready [data-tab]').forEach((b) => b.addEventListener('click', () => showTab(b.dataset.tab)));
 
+// A mod's name as shown: its folder name without the download site's "_" + 5 hex digits, "_" as spaces, each word
+// capitalised. The folder name stays the mod's identity (the switch, the disabled list, the game's load order).
+function modLabel(folder) {
+  return folder.replace(/_[0-9a-f]{5}$/, '').replace(/_/g, ' ').replace(/(^| )([a-z])/g, (_, a, b) => a + b.toUpperCase());
+}
+
+// Groups of mods that clash now: the mods that replace one same file (info.modOverlaps, every mod on or off), while
+// two or more of them are on. The later mod's file wins in the game, so the others' change does nothing. A set
+// known to work together (o.ok) is no clash while only its mods are on. The player sees groups, never file names.
+function modClashes(info, disabledList) {
+  const off = new Set((disabledList || []).map((s) => s.toLowerCase()));
+  const isOn = (m) => !off.has(m.toLowerCase());
+  const seen = new Set();
+  const groups = [];
+  for (const o of info.modOverlaps || []) {
+    const on = o.mods.filter(isOn), key = o.mods.join('\n');
+    if (on.length < 2 || seen.has(key)) continue;
+    if (o.ok.length && on.every((m) => o.ok.includes(m))) continue;
+    seen.add(key);
+    groups.push(o.mods);
+  }
+  // a group inside a bigger one says nothing new: keeping one on in the bigger group settles it too
+  return groups.filter((g) => !groups.some((h) => h !== g && h.length > g.length && g.every((m) => h.includes(m))));
+}
+
 function modsSummary(totalMods, disabledList) {
   const disabledSet = new Set((disabledList || []).map((s) => s.toLowerCase()));
   const enabled = totalMods.filter((m) => !disabledSet.has(m.toLowerCase()));
   if (!totalMods.length) return 'None';
-  if (!disabledSet.size) return totalMods.length === 1 ? totalMods[0] : `${totalMods.length} mods`;
+  if (!disabledSet.size) return totalMods.length === 1 ? modLabel(totalMods[0]) : `${totalMods.length} mods`;
   return `${enabled.length} of ${totalMods.length} active`;
 }
 
-// the Mods and DLC tabs and their sidebar rows, from install_info (also after their Refresh buttons)
-function renderModsDlc(info) {
+const WARN_ICON = (size, width) => `<svg width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" stroke="currentColor" ` +
+  `stroke-width="${width}" stroke-linejoin="round" aria-hidden="true"><path d="M12 3l10 18H2z"/>` +
+  '<path d="M12 10v4M12 17.5h.01" stroke-linecap="round"/></svg>';
+
+let modsInfo = null;     // the last install_info: the Mods tab is redrawn from it on every switch, without a new scan
+let modsFixed = false;   // a switch settled the last clash since the last scan: the green line shows
+let modBusy = false;     // one switch at a time: each answer is the whole disabled list
+
+// One mod's row with its switch, for the list ('list') or a clash group ('clash').
+function modRow(m, on, where, clashes) {
+  const li = document.createElement('li');
+  li.className = 'mod-row';
+  if (!on) li.classList.add('disabled');
+  const label = document.createElement('span');
+  label.className = 'mod-name';
+  const name = document.createElement('b');
+  name.textContent = modLabel(m);
+  name.title = m;  // the folder, to find it in the mods folder
+  label.append(name);
+  if (clashes) {
+    const tag = document.createElement('span');
+    tag.className = 'clash-tag';
+    tag.innerHTML = WARN_ICON(11, 2.8) + 'Clashes';
+    label.append(tag);
+  }
+  const toggle = document.createElement('button');
+  toggle.className = 'toggle';
+  toggle.type = 'button';
+  toggle.setAttribute('role', 'switch');
+  toggle.setAttribute('aria-label', modLabel(m));
+  toggle.setAttribute('aria-checked', String(on));
+  toggle.dataset.mod = m;
+  toggle.dataset.where = where;
+  toggle.addEventListener('click', () => toggleMod(m, !on, toggle));
+  li.append(label, toggle);
+  return li;
+}
+
+async function toggleMod(m, next, toggle) {
+  if (modBusy) return;
+  modBusy = true;
+  const before = modClashes(modsInfo, inst && inst.disabledMods).length;
+  toggle.setAttribute('aria-checked', String(next));  // the knob slides now; the tab is redrawn once it has
+  try {
+    const [updated] = await Promise.all([invoke('set_mod_enabled', { modName: m, enabled: next }),
+      new Promise((r) => setTimeout(r, 160))]);
+    if (inst) inst.disabledMods = updated;
+    modsInfo.disabledMods = updated;
+    const after = modClashes(modsInfo, updated).length;
+    modsFixed = !after && (before > 0 || modsFixed);
+  } catch (e) {
+    popup('Mod toggle failed', String(e));
+  } finally {
+    modBusy = false;
+  }
+  const where = toggle.dataset.where;
+  renderMods();
+  // the redraw replaced the switch: the keyboard stays on the same mod (in the list if its group is gone)
+  const again = [...document.querySelectorAll('[data-panel="mods"] .toggle')].filter((t) => t.dataset.mod === m);
+  const focus = again.find((t) => t.dataset.where === where) || again[0];
+  if (focus) focus.focus();
+}
+
+// the Mods tab, its tab button and its sidebar row, from modsInfo and the switches' state
+function renderMods() {
+  const info = modsInfo, disabledList = (inst && inst.disabledMods) || info.disabledMods || [];
+  const disabled = new Set(disabledList.map((s) => s.toLowerCase()));
+  const isOn = (m) => !disabled.has(m.toLowerCase());
+  const groups = modClashes(info, disabledList);
+  const clashing = new Set(groups.flat().filter(isOn));
+
+  $('mod-clash').hidden = !groups.length;
+  $('mod-clash-title').textContent = groups.length === 1 ? '1 group of mods clash' : `${groups.length} groups of mods clash`;
+  $('mod-clash-groups').replaceChildren(...groups.map((g) => {
+    const ul = document.createElement('ul');
+    ul.className = 'clash-group';
+    ul.append(...g.map((m) => modRow(m, isOn(m), 'clash', false)));
+    return ul;
+  }));
+  const fixed = $('mod-fixed'), showFixed = modsFixed && !groups.length;
+  if (showFixed !== !!fixed.firstChild) {  // filled only when it changes, so a screen reader hears it once
+    fixed.innerHTML = showFixed ? '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" ' +
+      'stroke-width="3" stroke-linecap="round" aria-hidden="true"><path d="M4 12l5 5L20 6"/></svg>All your mods work together.' : '';
+  }
+
   const mods = $('mod-list');
   mods.textContent = '';
-  const currentDisabled = (info && info.disabledMods) || (inst && inst.disabledMods) || [];
-  if (inst) inst.disabledMods = currentDisabled;
-  const disabled = new Set(currentDisabled.map((s) => s.toLowerCase()));
+  $('mod-list-label').hidden = !info.mods.length;
   if (info.mods.length) {
-    for (const m of info.mods) {
-      const li = document.createElement('li');
-      li.className = 'mod-row';
-      const name = document.createElement('b');
-      name.textContent = m;
-      const toggle = document.createElement('button');
-      toggle.className = 'toggle';
-      toggle.type = 'button';
-      toggle.setAttribute('role', 'switch');
-      toggle.setAttribute('aria-label', `Toggle ${m}`);
-      const on = !disabled.has(m.toLowerCase());
-      toggle.setAttribute('aria-checked', String(on));
-      if (!on) li.classList.add('disabled');
-      toggle.addEventListener('click', async () => {
-        const current = toggle.getAttribute('aria-checked') === 'true';
-        const next = !current;
-        toggle.setAttribute('aria-checked', String(next));
-        li.classList.toggle('disabled', !next);
-        toggle.disabled = true;
-        try {
-          const updated = await invoke('set_mod_enabled', { modName: m, enabled: next });
-          if (inst) inst.disabledMods = updated;
-          $('row-mods').textContent = modsSummary(info.mods, updated);
-        } catch (e) {
-          toggle.setAttribute('aria-checked', String(current));
-          li.classList.toggle('disabled', !current);
-          popup('Mod toggle failed', String(e));
-        } finally {
-          toggle.disabled = false;
-        }
-      });
-      li.append(name, toggle);
-      mods.append(li);
-    }
+    mods.append(...info.mods.map((m) => modRow(m, isOn(m), 'list', clashing.has(m))));
   } else {
     const li = chip('None. Put mods in mods/contents/ (as individual mod folders or the game ID folder).');
     li.className = 'none';
     mods.append(li);
   }
-  $('row-mods').textContent = modsSummary(info.mods, currentDisabled);
+
+  // seen from the other tabs too: a dot on the Mods tab, and the sidebar row says so
+  $('tab-mods-dot').hidden = !groups.length;
+  if (groups.length) $('tab-mods').setAttribute('aria-label', 'Mods, some clash');
+  else $('tab-mods').removeAttribute('aria-label');
+  const row = $('row-mods');
+  row.parentElement.classList.toggle('warn', !!groups.length);
+  if (groups.length) row.innerHTML = WARN_ICON(14, 2.4) + 'Some clash';
+  else row.textContent = modsSummary(info.mods, disabledList);
+}
+
+// the Mods and DLC tabs and their sidebar rows, from install_info (also after their Refresh buttons)
+function renderModsDlc(info) {
+  const currentDisabled = (info && info.disabledMods) || (inst && inst.disabledMods) || [];
+  if (inst) inst.disabledMods = currentDisabled;
+  modsInfo = info;
+  modsFixed = false;  // a new scan: "fixed" is only said about a clash this list showed
+  renderMods();
   const dlcs = $('dlc-list');
   dlcs.textContent = '';
   const needsKeys = info.dlcList.some((d) => d.needsKeys);

@@ -142,6 +142,17 @@ int main(int argc, char **argv) {
         printf("YW4 Recomp %s (%s, built %s)\n", yw4_version, yw4_git_commit, yw4_build_date);
         return 0;
     }
+    /* the launcher's Mods tab: which mods clash, no game start (decision 0068); without a folder, game.ini's RomFS
+     * and mods, as a start without arguments has them */
+    if ((argc == 2 || argc == 3) && !strcmp(argv[1], "--mod-clashes")) {
+        if (argc == 2) game_ini_load();
+        const char *romfs = argc == 3 ? argv[2] : getenv("YW4_ROMFS");
+        if (!romfs || !*romfs) {
+            fprintf(stderr, "yw4: --mod-clashes: no RomFS folder (give one, or a game.ini with YW4_ROMFS)\n");
+            return 1;
+        }
+        return romfs_mod_clashes(romfs, stdout);
+    }
     if (yw4_guest_memory_init()) {
         const char *retried = getenv("YW4_ASLR_RETRY");
         if (!retried || !*retried) {

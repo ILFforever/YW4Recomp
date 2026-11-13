@@ -20,6 +20,11 @@ int romfs_read(uint64_t offset, void *out, uint64_t size);
  * laid over; NULL if the image has no such loose file (a file inside a .cpk isn't one). */
 const char *romfs_host_path(const char *path);
 
+/* yw4 --mod-clashes <romfs>, for the launcher: every pair of mods in YW4_MODS (on or off) that can't both have their
+ * way with one file, as "clash\t<file>\t<mod>\t<mod>" lines on `out` (decision 0068). Returns 0, or 1. */
+#include <stdio.h>
+int romfs_mod_clashes(const char *dir, FILE *out);
+
 /* Another image built the same way, without mods: an add-on's RomFS (fsp-srv OpenDataStorageByDataId, decision
  * 0056). NULL if `dir` can't be read. */
 typedef struct RomfsImage RomfsImage;

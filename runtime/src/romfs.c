@@ -18,6 +18,7 @@
 #include <string.h>
 #include <sys/stat.h>
 #include "host.h"
+#include "modmerge.h"
 
 #define EMPTY 0xFFFFFFFFu
 #define DATA_START 0x200u
@@ -29,7 +30,11 @@ typedef struct {
     uint32_t entry;           /* offset in the file table */
     Dir *parent;
     int read_before;          /* YW4_TRACE_ROMFS: its first read was logged */
-    uint8_t *mem;             /* made here, read from memory instead of path (the merged cpk_list) */
+    uint8_t *mem;             /* made here, read from memory instead of path (a merged file, decisions 0067/0068) */
+    char *game_path;          /* the game's own copy when a mod replaced it (NULL: the game has it in an archive) */
+    char **layers;            /* each mod's copy, in load order (the last is `path`), and the mod it came from */
+    const char **layer_mods;
+    int nlayers;
 } File;
 struct Dir {
     char *name;
@@ -105,11 +110,27 @@ static Dir *scan(const char *path, const char *name, Dir *parent, int depth) {
  * .cpk archives and data/cpk_list.cfg.bin and adds loose files that the new list sends the game to. */
 
 static int mod_replaced, mod_added;
+static const char *mod_now;  /* the mod being laid over (overlay's caller sets it; kept for the life of the run) */
 
 static int count_files(const Dir *d) {
     int n = d->nfiles;
     for (int i = 0; i < d->ndirs; i++) n += count_files(d->dirs[i]);
     return n;
+}
+
+static void add_layer(File *f, char *path) {
+    f->layers = realloc(f->layers, sizeof *f->layers * (size_t)(f->nlayers + 1));
+    f->layer_mods = realloc(f->layer_mods, sizeof *f->layer_mods * (size_t)(f->nlayers + 1));
+    if (!f->layers || !f->layer_mods) yw4_exit(3, __FILE__, __LINE__);
+    f->layers[f->nlayers] = path, f->layer_mods[f->nlayers] = mod_now;
+    f->nlayers++;
+}
+
+/* A folder a mod added: its files are that mod's copies (a later mod replacing one must not take it for the
+ * game's). */
+static void mark_mod_files(Dir *d) {
+    for (int i = 0; i < d->nfiles; i++) add_layer(d->files[i], d->files[i]->path);
+    for (int i = 0; i < d->ndirs; i++) mark_mod_files(d->dirs[i]);
 }
 
 static void overlay(Dir *dst, const char *path, int depth) {
@@ -136,6 +157,7 @@ static void overlay(Dir *dst, const char *path, int depth) {
                 dst->dirs = realloc(dst->dirs, sizeof *dst->dirs * (size_t)(dst->ndirs + 1));
                 dst->dirs[dst->ndirs++] = c;
                 mod_added += count_files(c);
+                mark_mod_files(c);
             }
             free(p);
         } else {
@@ -143,7 +165,7 @@ static void overlay(Dir *dst, const char *path, int depth) {
             for (int i = 0; i < dst->nfiles && !f; i++)
                 if (!strcmp(dst->files[i]->name, e->d_name)) f = dst->files[i];
             if (f) {
-                free(f->path);
+                if (!f->nlayers) f->game_path = f->path;  /* else the old path is an earlier mod's layer */
                 mod_replaced++;
             } else {
                 if (!(f = calloc(1, sizeof *f))) yw4_exit(3, __FILE__, __LINE__);
@@ -153,6 +175,7 @@ static void overlay(Dir *dst, const char *path, int depth) {
                 mod_added++;
             }
             f->path = p, f->size = (uint64_t)size;
+            add_layer(f, p);
         }
     }
     closedir(d);
@@ -270,6 +293,7 @@ static File *find_file(const Dir *d, const char *path) {
 typedef struct {
     const char *path;
     size_t archive;  /* offset of the archive value in the buffer */
+    const char *arch_name;  /* the archive's path ("data/common/gamedata.cpk"), NULL or "" when loose */
     int loose;
 } CpkEntry;
 
@@ -319,6 +343,7 @@ static int cpk_entries(const uint8_t *b, size_t n, CpkEntry **out) {
             if (path < st_len && memchr(st + path, 0, st_len - path)) {
                 e[m].path = st + path;
                 e[m].archive = p + 4;
+                e[m].arch_name = arch != EMPTY && arch < st_len && memchr(st + arch, 0, st_len - arch) ? st + arch : NULL;
                 e[m].loose = arch == EMPTY || (arch < st_len && st[arch] == 0);
                 m++;
             }
@@ -415,6 +440,99 @@ static void merge_cpk_lists(Dir *root, const char *base, char **lists, int nlist
     free(le), free(slot), free(freed), free(be), free(bb);
 }
 
+/* ---- data files several mods replace (decision 0068): Level-5 .cfg.bin lists (items, shops, NPCs...) are merged
+ * entry by entry against the game's own copy (modmerge.c), so mods that change different entries all work. */
+
+static int clash_check;              /* romfs_mod_clashes: every mod laid over, nothing merged */
+static const char *game_list_path;   /* the game's own data/cpk_list.cfg.bin */
+
+/* rel + "/" + name in rel's 1024 bytes (just name at the top); 0 if it doesn't fit. */
+static int rel_join(char *rel, size_t rl, const char *name) {
+    int k = snprintf(rel + rl, 1024 - rl, rl ? "/%s" : "%s", name);
+    if (k < 0 || (size_t)k >= 1024 - rl) {
+        rel[rl] = 0;
+        return 0;
+    }
+    return 1;
+}
+
+static int is_cfgbin(const char *rel) {
+    size_t n = strlen(rel);
+    return n > 8 && !strcmp(rel + n - 8, ".cfg.bin") && strcmp(rel, "data/cpk_list.cfg.bin");
+}
+
+/* The game's own copy of a file: its loose file, or from the archive the game's list puts it in. */
+static uint8_t *game_copy(Dir *root, const File *f, const char *rel, size_t *n) {
+    if (f->game_path) return read_all(f->game_path, n);
+    static uint8_t *lb;
+    static CpkEntry *le;
+    static int nl = -1;
+    static int32_t *slot;
+    static uint32_t cap;
+    if (nl < 0) {  /* once: the game's list and a path -> entry table */
+        size_t ln = 0;
+        lb = game_list_path ? read_all(game_list_path, &ln) : NULL;
+        nl = lb ? cpk_entries(lb, ln, &le) : -1;
+        if (nl < 0) nl = 0;
+        for (cap = 1; cap < 2u * (uint32_t)nl + 1; cap <<= 1) {}
+        slot = malloc(sizeof *slot * cap);
+        if (!slot) yw4_exit(3, __FILE__, __LINE__);
+        for (uint32_t i = 0; i < cap; i++) slot[i] = -1;
+        for (int i = 0; i < nl; i++) {
+            if (!le[i].arch_name || !*le[i].arch_name) continue;  /* loose in the game: it has no archive copy */
+            uint32_t h = path_hash(le[i].path) & (cap - 1);
+            while (slot[h] >= 0 && strcmp(le[slot[h]].path, le[i].path)) h = (h + 1) & (cap - 1);
+            if (slot[h] < 0) slot[h] = i;
+        }
+    }
+    uint32_t h = path_hash(rel) & (cap - 1);
+    for (; slot[h] >= 0; h = (h + 1) & (cap - 1)) {
+        if (strcmp(le[slot[h]].path, rel)) continue;
+        const File *a = find_file(root, le[slot[h]].arch_name);
+        if (!a) return NULL;
+        return cpk_read_file(a->game_path ? a->game_path : a->path, rel, n);  /* the game's archive, not a mod's */
+    }
+    return NULL;
+}
+
+static void merge_data_files(Dir *root, Dir *d, char *rel, size_t rl) {
+    for (int i = 0; i < d->nfiles; i++) {
+        File *f = d->files[i];
+        if (f->nlayers < 2 || !rel_join(rel, rl, f->name)) continue;
+        const char *last = f->layer_mods[f->nlayers - 1];
+        if (is_cfgbin(rel)) {
+            size_t bn = 0, on = 0;
+            uint8_t *base = game_copy(root, f, rel, &bn);
+            uint8_t **m = calloc((size_t)f->nlayers, sizeof *m);
+            size_t *mn = calloc((size_t)f->nlayers, sizeof *mn);
+            if (!m || !mn) yw4_exit(3, __FILE__, __LINE__);
+            int ok = base != NULL, ca = -1, cb = -1;
+            for (int k = 0; k < f->nlayers && ok; k++) ok = (m[k] = read_all(f->layers[k], &mn[k])) != NULL;
+            uint8_t *r = ok ? cfgbin_merge(base, bn, (const uint8_t *const *)m, mn, f->nlayers, &on, &ca, &cb) : NULL;
+            if (r) {
+                f->mem = r, f->size = on;
+                fprintf(stderr, "yw4: mods: %s: merged from %d mods\n", rel, f->nlayers);
+            } else if (ca >= 0) {
+                fprintf(stderr, "yw4: mods: %s: %s and %s change the same entries, %s's copy is used\n", rel,
+                        f->layer_mods[ca], f->layer_mods[cb], last);
+            } else {
+                fprintf(stderr, "yw4: mods: %s: can't be merged (%s), %s's copy is used\n", rel,
+                        base ? "not a list this reads" : "the game's copy wasn't found", last);
+            }
+            for (int k = 0; k < f->nlayers; k++) free(m[k]);
+            free(m), free(mn), free(base);
+        } else if (strcmp(rel, "data/cpk_list.cfg.bin")) {
+            fprintf(stderr, "yw4: mods: %s: in %d mods, %s's copy is used\n", rel, f->nlayers, last);
+        }
+        rel[rl] = 0;
+    }
+    for (int i = 0; i < d->ndirs; i++) {
+        if (!rel_join(rel, rl, d->dirs[i]->name)) continue;
+        merge_data_files(root, d->dirs[i], rel, strlen(rel));
+        rel[rl] = 0;
+    }
+}
+
 /* Every mod in YW4_MODS (default work/mods; "none": no mods), in name order (a later one wins): folders with a
  * romfs/ inside, in Atmosphere's layout contents/<title_id>/<mod>/romfs, contents/<mod>/romfs or simply <mod>/romfs. */
 static void apply_mods(Dir *root) {
@@ -462,16 +580,18 @@ static void apply_mods(Dir *root) {
     qsort(mods, (size_t)n, sizeof *mods, by_mod_name);
     const File *game_list = find_file(root, "data/cpk_list.cfg.bin");
     char *base_list = game_list ? dup_str(game_list->path) : NULL;
+    game_list_path = base_list;  /* kept: merge_data_files looks up archives in it */
     char *lists[256];
     int nlists = 0;
     for (int i = 0; i < n; i++) {
-        if (is_mod_disabled(mods[i].name, disabled_env)) {
+        if (!clash_check && is_mod_disabled(mods[i].name, disabled_env)) {
             fprintf(stderr, "yw4: mods: %s: disabled, skipped\n", mods[i].name);
             free(mods[i].name);
             free(mods[i].romfs);
             continue;
         }
         mod_replaced = mod_added = 0;
+        mod_now = mods[i].name;  /* kept for the life of the run: the files' layers name it */
         overlay(root, mods[i].romfs, 0);
         fprintf(stderr, "yw4: mods: %s: %d files replaced, %d added (%s)\n", mods[i].name, mod_replaced, mod_added,
                 mods[i].romfs);
@@ -479,12 +599,65 @@ static void apply_mods(Dir *root) {
         int is_dir = 0;
         snprintf(list, sizeof list, "%s/data/cpk_list.cfg.bin", mods[i].romfs);
         if (file_size(list, &is_dir) >= 0 && !is_dir) lists[nlists++] = dup_str(list);
-        free(mods[i].name);
         free(mods[i].romfs);
     }
     merge_cpk_lists(root, base_list, lists, nlists);
     for (int i = 0; i < nlists; i++) free(lists[i]);
-    free(base_list);
+    if (!clash_check) {
+        char rel[1024] = "";
+        merge_data_files(root, root, rel, 0);
+    }
+}
+
+/* yw4 --mod-clashes <romfs>: for the launcher's Mods tab (decision 0068). Every mod in YW4_MODS, on or off, is laid
+ * over the game as at a start, and each pair of mods that can't both have their way with one file is printed as
+ * "clash\t<file>\t<mod>\t<mod>": any shared file but the merged ones, unless it is a data file this code merges
+ * and the two change different entries. Pairs, not groups: whether two mods merge doesn't depend on the others. */
+static void print_clashes(Dir *root, Dir *d, char *rel, size_t rl, FILE *out) {
+    for (int i = 0; i < d->nfiles; i++) {
+        File *f = d->files[i];
+        if (f->nlayers < 2) continue;
+        if (!rel_join(rel, rl, f->name)) continue;
+        if (!strcmp(rel, "data/cpk_list.cfg.bin")) {
+            rel[rl] = 0;
+            continue;
+        }
+        size_t bn = 0;
+        uint8_t *base = is_cfgbin(rel) ? game_copy(root, f, rel, &bn) : NULL;
+        for (int a = 0; a < f->nlayers; a++)
+            for (int b = a + 1; b < f->nlayers; b++) {
+                int clash = 1;
+                if (base) {
+                    size_t n[2] = {0, 0}, on = 0;
+                    uint8_t *m[2] = {read_all(f->layers[a], &n[0]), read_all(f->layers[b], &n[1])};
+                    int ca, cb;
+                    uint8_t *r = m[0] && m[1] ? cfgbin_merge(base, bn, (const uint8_t *const *)m, n, 2, &on, &ca, &cb) : NULL;
+                    clash = !r;
+                    free(r), free(m[0]), free(m[1]);
+                }
+                if (clash) fprintf(out, "clash\t%s\t%s\t%s\n", rel, f->layer_mods[a], f->layer_mods[b]);
+            }
+        free(base);
+        rel[rl] = 0;
+    }
+    for (int i = 0; i < d->ndirs; i++) {
+        if (!rel_join(rel, rl, d->dirs[i]->name)) continue;
+        print_clashes(root, d->dirs[i], rel, strlen(rel), out);
+        rel[rl] = 0;
+    }
+}
+
+int romfs_mod_clashes(const char *dir, FILE *out) {
+    Dir *root = scan(dir, "", NULL, 0);
+    if (!root) {
+        fprintf(stderr, "yw4: cannot read the RomFS folder %s\n", dir);
+        return 1;
+    }
+    clash_check = 1;
+    apply_mods(root);
+    char rel[1024] = "";
+    print_clashes(root, root, rel, 0, out);
+    return 0;
 }
 
 /* One image: the flat tables below, its header (0..0x200), file data, then `tables` (from tables_off). The game's

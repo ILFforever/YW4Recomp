@@ -64,6 +64,9 @@
   --state-ok: oklch(52% 0.13 150); --state-ok-bg: oklch(94% 0.05 150);
   --state-warn: oklch(68% 0.14 88); --state-warn-bg: oklch(95% 0.06 95);
   --state-bad: oklch(50% 0.17 30); --state-bad-bg: oklch(95% 0.035 30);
+  /* a warning on cream or white (the mod clash box): its icon and its text. Dark enough to read on every
+     theme's --cream, so themes leave these alone like the states above */
+  --warn-icon: oklch(55% 0.13 70); --warn-ink: oklch(45% 0.13 65);
 }
 * { box-sizing: border-box; }
 html, body { margin: 0; height: 100%; }
@@ -283,6 +286,10 @@ body.pointer :focus-visible { outline: none; }
 .side-row span { color: var(--ink-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .side-row:hover:not(:disabled) { background: var(--lilac-1); border-color: var(--lilac-3); }
 .side-row:disabled { cursor: default; }
+/* some mods clash: the row says so from every tab */
+.side-row.warn, .side-row.warn:hover:not(:disabled) { background: var(--cream); border-color: var(--line-gold-strong); }
+.side-row.warn span { display: flex; align-items: center; gap: 6px; color: var(--warn-ink); }
+.side-row.warn svg { flex-shrink: 0; color: var(--warn-icon); }
 
 .game-main { display: flex; flex-direction: column; min-width: 0; min-height: 0; background: var(--lilac-0); }
 .band { position: relative; height: 128px; flex-shrink: 0; overflow: hidden; background: var(--violet-deep); }
@@ -300,6 +307,11 @@ body.pointer :focus-visible { outline: none; }
   color: var(--white); font: 800 15px/1 var(--display); cursor: pointer; }
 .tabs button:hover { background: var(--bar-btn); }
 .tabs button[aria-selected="true"] { background: var(--lilac-0); color: var(--violet); }
+/* the dot on the Mods tab while mods clash. On an unselected tab it has a ring in the tab's text colour: a theme's tab
+   can be as yellow as the dot (Happierre) */
+.tab-dot { display: inline-block; width: 9px; height: 9px; margin-left: 8px; border-radius: 50%; background: var(--state-warn);
+  box-shadow: 0 0 0 2px var(--white); }
+.tabs button[aria-selected="true"] .tab-dot { box-shadow: 0 0 0 2px var(--lilac-0); }
 
 .tab-body { flex: 1; min-height: 0; display: flex; flex-direction: column; gap: 14px; padding: 18px 24px 20px; overflow: auto; }
 .offer { display: flex; align-items: center; gap: 10px; padding: 9px 12px 9px 16px; border-radius: 12px; background: var(--cream);
@@ -351,6 +363,27 @@ p.list-card { padding: 14px 18px; }
 .mod-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
 .mod-row b { font-weight: 700; overflow-wrap: anywhere; }
 .mod-row.disabled b { color: var(--ink-2); font-weight: 400; }
+.mod-name { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.clash-tag { flex-shrink: 0; display: inline-flex; align-items: center; gap: 5px; height: 22px; padding: 0 9px; border-radius: 999px;
+  background: var(--cream); border: 1px solid var(--line-gold-strong); font-size: 12px; font-weight: 700; color: var(--warn-ink); }
+.list-block { display: flex; flex-direction: column; gap: 6px; }
+.list-label { font-size: 12px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; color: var(--ink-2); }
+/* the clash warning: one white card per group of mods that change the same thing */
+.clash-box { flex-shrink: 0; display: flex; flex-direction: column; gap: 12px; padding: 16px 18px; border-radius: 14px;
+  background: var(--cream); border: 1px solid var(--line-gold-strong); }
+.clash-head { display: flex; gap: 12px; align-items: flex-start; }
+.clash-head svg { flex-shrink: 0; margin-top: 1px; color: var(--warn-icon); }
+.clash-head div { display: flex; flex-direction: column; gap: 2px; }
+.clash-head b { font-size: 15px; font-weight: 700; color: var(--violet); }
+.clash-head span { font-size: 13px; color: var(--ink-2); }
+.clash-groups { display: flex; flex-direction: column; gap: 12px; }
+.clash-group { margin: 0; padding: 4px 14px; list-style: none; border-radius: 10px; background: var(--white);
+  border: 1px solid var(--line-gold); font-size: 14px; }
+.clash-group li { height: 44px; border-top: 1px solid var(--line-gold); }
+.clash-group li:first-child { border-top: 0; }
+.fixed-line { flex-shrink: 0; display: flex; align-items: center; gap: 10px; padding: 12px 18px; border-radius: 14px; background: var(--ok-bg);
+  font-size: 14px; font-weight: 700; color: var(--ok); }
+.fixed-line:empty { display: none; }
 .file-list { margin: 0 0 12px; padding: 10px 12px 10px 28px; border-radius: 10px; background: var(--lilac-0);
   font: 12px/1.7 ui-monospace, Consolas, monospace; color: var(--ink-2); max-height: 180px; overflow: auto; overflow-wrap: anywhere; }
 #originals-dlg, #free { width: 520px; }

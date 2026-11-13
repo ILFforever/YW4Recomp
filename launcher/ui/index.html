@@ -445,7 +445,7 @@
         <div class="tabs" role="tablist">
           <button type="button" role="tab" data-tab="overview" aria-selected="true">Overview</button>
           <button type="button" role="tab" data-tab="shots" aria-selected="false">Screenshots</button>
-          <button type="button" role="tab" data-tab="mods" aria-selected="false">Mods</button>
+          <button type="button" role="tab" data-tab="mods" aria-selected="false" id="tab-mods">Mods<span class="tab-dot" id="tab-mods-dot" aria-hidden="true" hidden></span></button>
           <button type="button" role="tab" data-tab="dlc" aria-selected="false">DLC</button>
         </div>
       </div>
@@ -482,7 +482,18 @@
 
       <div class="tab-body" data-panel="mods" hidden>
         <div class="panel-head"><span>Mods load the next time you play.</span><span class="panel-actions"><button class="icon-btn small" type="button" data-refresh="mods" aria-label="Refresh" title="Refresh"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><path d="M12.5 5a7 7 0 1 0 6.5 7"/><path d="M11 1.8 15.6 5 11 8.2z" fill="currentColor" stroke-linejoin="round"/></svg></button><button class="btn small" type="button" data-open="mods">Open folder</button></span></div>
-        <ul class="list-card" id="mod-list"></ul>
+        <!-- mods that replace the same file: only one of them works (app.js modClashes) -->
+        <section class="clash-box" id="mod-clash" aria-label="Mods that clash" hidden>
+          <div class="clash-head"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linejoin="round" aria-hidden="true"><path d="M12 3l10 18H2z"/><path d="M12 10v4M12 17.5h.01" stroke-linecap="round"/></svg>
+            <div><b id="mod-clash-title"></b><span>Mods in the same group change the same thing, so only one of them works. Keep one on in each group.</span></div>
+          </div>
+          <div class="clash-groups" id="mod-clash-groups"></div>
+        </section>
+        <div class="fixed-line" id="mod-fixed" role="status"></div>
+        <div class="list-block">
+          <span class="list-label" id="mod-list-label" hidden>All mods</span>
+          <ul class="list-card" id="mod-list"></ul>
+        </div>
       </div>
 
       <div class="tab-body" data-panel="dlc" hidden>

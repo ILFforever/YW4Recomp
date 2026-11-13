@@ -320,7 +320,7 @@ class RomfsTest(unittest.TestCase):
             exe = t / "romfs.exe"
             # host.c: romfs.c's own lock around file reads and yw4_exit (every exit names its source line)
             subprocess.run([check.host_cc(), "-std=c11", "-O1", "-Wall", *POSIX, f"-I{RUNTIME / 'src'}", "-o", str(exe),
-                            str(t / "drv.c"), str(RUNTIME / "src" / "romfs.c"), str(RUNTIME / "src" / "host.c"),
+                            str(t / "drv.c"), str(RUNTIME / "src" / "romfs.c"), str(RUNTIME / "src" / "modmerge.c"), str(RUNTIME / "src" / "host.c"),
                             "-pthread", *(["-lwinmm"] if sys.platform == "win32" else [])],
                            check=True, capture_output=True)
             subprocess.run([str(exe), str(root), str(t / "image.bin")], capture_output=True, check=True)
@@ -376,7 +376,7 @@ class RomfsTest(unittest.TestCase):
             (t / "drv.c").write_text(ROMFS_DRIVER)
             exe = t / "romfs.exe"
             subprocess.run([check.host_cc(), "-std=c11", "-O1", "-Wall", *POSIX, f"-I{RUNTIME / 'src'}", "-o", str(exe),
-                            str(t / "drv.c"), str(RUNTIME / "src" / "romfs.c"), str(RUNTIME / "src" / "host.c"),
+                            str(t / "drv.c"), str(RUNTIME / "src" / "romfs.c"), str(RUNTIME / "src" / "modmerge.c"), str(RUNTIME / "src" / "host.c"),
                             "-pthread", *(["-lwinmm"] if sys.platform == "win32" else [])],
                            check=True, capture_output=True)
             r = subprocess.run([str(exe), str(t / "romfs"), str(t / "image.bin")], capture_output=True, text=True,
@@ -389,6 +389,58 @@ class RomfsTest(unittest.TestCase):
             self.assertEqual(archives(romfs_lookup(img, "data/cpk_list.cfg.bin")),
                              [("data/a", None), ("data/b", None), ("data/b", None), ("data/c", None),
                               ("data/d", "x.cpk")])
+
+    def test_mods_data_files_merged(self):
+        """Mods changing different entries of one .cfg.bin all keep their changes; two changing the same entry
+        clash, the later mod's copy is used, and `--mod-clashes` names them (decision 0068)."""
+        import struct as st
+
+        def cfg(vals):  # entries of one int each: (crc, value)
+            body = b"".join(st.pack("<IB", crc, 1) + bytes([0b01]) + b"\xff\xff" + st.pack("<I", v) for crc, v in vals)
+            return st.pack("<4I", len(vals), 16 + len(body), 0, 0) + body
+
+        def entries(b):
+            n = st.unpack_from("<I", b)[0]
+            return [st.unpack_from("<I", b, 16 + 12 * i)[0:1] + st.unpack_from("<I", b, 16 + 12 * i + 8) for i in range(n)]
+
+        base = [(i, 100 + i) for i in range(1, 9)]
+        items_a = [(c, 999 if c == 2 else v) for c, v in base]                       # A changes entry 2
+        items_b = [(c, 555 if c == 6 else v) for c, v in base[:7]] + [(77, 7)] + base[7:]  # B: entry 6, adds one
+        shop_a = [(c, 1 if c == 3 else v) for c, v in base]                          # A and C: both entry 3
+        shop_c = [(c, 2 if c == 3 else v) for c, v in base]
+        drv_clash = '#include <stdio.h>\n#include "romfs.h"\nint main(int c, char **v) { return romfs_mod_clashes(v[1], stdout); }\n'
+        with tempfile.TemporaryDirectory() as t:
+            t = Path(t)
+            files = {"romfs/data/items.cfg.bin": cfg(base), "romfs/data/shop.cfg.bin": cfg(base),
+                     "romfs/data/pic.bin": b"game",
+                     "mods/A/romfs/data/items.cfg.bin": cfg(items_a), "mods/A/romfs/data/shop.cfg.bin": cfg(shop_a),
+                     "mods/A/romfs/data/pic.bin": b"A",
+                     "mods/B/romfs/data/items.cfg.bin": cfg(items_b),
+                     "mods/C/romfs/data/shop.cfg.bin": cfg(shop_c), "mods/C/romfs/data/pic.bin": b"C"}
+            for path, data in files.items():
+                (t / path).parent.mkdir(parents=True, exist_ok=True)
+                (t / path).write_bytes(data)
+            (t / "drv.c").write_text(ROMFS_DRIVER)
+            (t / "clash.c").write_text(drv_clash)
+            srcs = [str(RUNTIME / "src" / n) for n in ("romfs.c", "modmerge.c", "host.c")]
+            libs = ["-pthread", *(["-lwinmm"] if sys.platform == "win32" else [])]
+            for drv, exe in (("drv.c", "romfs.exe"), ("clash.c", "clash.exe")):
+                subprocess.run([check.host_cc(), "-std=c11", "-O1", "-Wall", *POSIX, f"-I{RUNTIME / 'src'}", "-o",
+                                str(t / exe), str(t / drv), *srcs, *libs], check=True, capture_output=True)
+            env = {**os.environ, "YW4_MODS": str(t / "mods")}
+            r = subprocess.run([str(t / "romfs.exe"), str(t / "romfs"), str(t / "image.bin")], capture_output=True,
+                               text=True, env=env)
+            self.assertEqual(r.returncode, 0, r.stderr)
+            self.assertIn("data/items.cfg.bin: merged from 2 mods", r.stderr)
+            self.assertIn("data/shop.cfg.bin: A and C change the same entries, C's copy is used", r.stderr)
+            img = (t / "image.bin").read_bytes()
+            want = [(c, 999 if c == 2 else 555 if c == 6 else v) for c, v in base[:7]] + [(77, 7)] + base[7:]
+            self.assertEqual(entries(romfs_lookup(img, "data/items.cfg.bin")), want)
+            self.assertEqual(entries(romfs_lookup(img, "data/shop.cfg.bin")), shop_c)
+            r = subprocess.run([str(t / "clash.exe"), str(t / "romfs")], capture_output=True, text=True, env=env)
+            self.assertEqual(r.returncode, 0, r.stderr)
+            self.assertEqual(sorted(r.stdout.splitlines()),
+                             ["clash\tdata/pic.bin\tA\tC", "clash\tdata/shop.cfg.bin\tA\tC"])
 
 
 SWKBD_DRIVER = r"""

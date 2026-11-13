@@ -162,7 +162,7 @@ fn releases(fresh: bool) -> Option<serde_json::Value> {
 }
 
 /// The version in `yw4 --version`'s line ("YW4 Recomp 0.7.0 (commit, built day)").
-fn built_version(line: &str) -> Option<Ver> {
+pub(crate) fn built_version(line: &str) -> Option<(u32, u32, u32)> {
     ver(line.split_whitespace().skip_while(|w| *w != "Recomp").nth(1)?)
 }
 

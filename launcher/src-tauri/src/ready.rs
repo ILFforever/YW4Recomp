@@ -239,6 +239,8 @@ pub struct Info {
     mods: Vec<String>,        // mod folders in mods\ (Atmosphère's layout or plain)
     #[serde(rename = "disabledMods")]
     disabled_mods: Vec<String>, // disabled mod names from state
+    #[serde(rename = "modOverlaps")]
+    mod_overlaps: Vec<ModOverlap>, // mods that replace the same file (the Mods tab's clash warning)
     icon: Option<String>,     // the game's icon, from the player's own files (the build makes it)
     shots: Vec<String>,       // screenshots, newest first (at most SHOTS)
     #[serde(rename = "shotCount")]
@@ -291,16 +293,22 @@ fn reclaim_dirs(install: &Path) -> Vec<PathBuf> {
          install.join("builder").join("toolchain")]
 }
 
-fn mod_names(mods: &Path) -> Vec<String> {
-    let mut out = Vec::new();
+/// Every mod in mods\ as (name, the folder laid over the game's files), found the way the game's romfs.c finds
+/// them (`check_add_mod`), so the launcher lists what the game will load.
+fn mod_roots(mods: &Path) -> Vec<(String, PathBuf)> {
+    let mut out: Vec<(String, PathBuf)> = Vec::new();
     let read_dirs = |d: &Path| std::fs::read_dir(d).into_iter().flatten().flatten()
         .filter(|e| e.path().is_dir()).collect::<Vec<_>>();
     // romfs/ inside, or data/ directly (a mod shared as a romfs folder's contents), as the game's romfs.c reads them
-    let has_romfs = |p: &Path| p.join("romfs").is_dir() || p.join("data").is_dir();
+    let root_of = |p: &Path| {
+        let r = p.join("romfs");
+        if r.is_dir() { Some(r) } else if p.join("data").is_dir() { Some(p.to_path_buf()) } else { None }
+    };
+    let mut add = |name: String, p: &Path| {
+        if let Some(root) = root_of(p) { out.push((name, root)); }
+    };
 
-    if has_romfs(mods) {
-        out.push("romfs".into());
-    }
+    add("romfs".into(), mods);
     for entry in read_dirs(mods) {
         let name = entry.file_name().to_string_lossy().into_owned();
         let path = entry.path();
@@ -311,31 +319,129 @@ fn mod_names(mods: &Path) -> Vec<String> {
             for sub in read_dirs(&path) {
                 let sub_name = sub.file_name().to_string_lossy().into_owned();
                 let sub_path = sub.path();
-                if has_romfs(&sub_path) {
-                    out.push(sub_name);
-                }
+                add(sub_name, &sub_path);
                 for sub2 in read_dirs(&sub_path) {
                     let sub2_name = sub2.file_name().to_string_lossy().into_owned();
-                    if !sub2_name.eq_ignore_ascii_case("romfs") && has_romfs(&sub2.path()) {
-                        out.push(sub2_name);
-                    }
+                    if !sub2_name.eq_ignore_ascii_case("romfs") { add(sub2_name, &sub2.path()); }
                 }
             }
         } else {
-            if has_romfs(&path) {
-                out.push(name);
-            }
+            add(name, &path);
             for sub in read_dirs(&path) {
                 let sub_name = sub.file_name().to_string_lossy().into_owned();
-                if !sub_name.eq_ignore_ascii_case("romfs") && has_romfs(&sub.path()) {
-                    out.push(sub_name);
-                }
+                if !sub_name.eq_ignore_ascii_case("romfs") { add(sub_name, &sub.path()); }
             }
         }
     }
     out.sort();
+    out.dedup_by(|a, b| a.0 == b.0);  // one row per name: the on/off switch goes by name
+    out
+}
+
+/// Mods that replace the same file: the game lays them over each other in name order, so only the last one's copy
+/// is used and the others' change does nothing. The Mods tab warns about these.
+#[derive(Serialize, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub struct ModOverlap {
+    mods: Vec<String>,  // every mod with the file, on or off (the screen knows which are on)
+    ok: Vec<String>,    // of those, a set known to work together: no warning while only these are on
+}
+
+/// Files two mods may share without harm, as (file, a word in each of the two folder names). Keep it short:
+/// only pairs someone checked.
+/// - item_text: Crank-a-kai Overhaul's item text is the English translation's with its own changes, and it loads
+///   after the translation, so nothing of either is lost.
+const HARMLESS_OVERLAPS: &[(&str, [&str; 2])] = &[
+    ("data/common/text/ja/item_text.cfg.bin", ["overhaul", "translation"]),
+];
+
+/// The game merges the mods' copies of this one (decision 0067), so sharing it is no clash.
+const MERGED_FILE: &str = "data/cpk_list.cfg.bin";
+
+/// A mod's files as paths from its root, with `/`. Names only: nothing is opened (the translation has ~3,000
+/// files). Dot names are skipped and the depth is capped, as the game's overlay does.
+fn mod_files(dir: &Path, rel: &str, depth: u32, out: &mut Vec<String>) {
+    if depth >= 32 { return; }
+    for e in std::fs::read_dir(dir).into_iter().flatten().flatten() {
+        let name = e.file_name().to_string_lossy().into_owned();
+        if name.starts_with('.') { continue; }
+        let path = if rel.is_empty() { name } else { format!("{rel}/{name}") };
+        let p = e.path();
+        if p.is_dir() { mod_files(&p, &path, depth + 1, out); } else { out.push(path); }
+    }
+}
+
+/// For each file two or more mods have (names compared exactly, as the game does), the mods that have it; the same
+/// set of mods is listed once. Only the sets go to the screen, never file lists or names.
+fn mod_overlaps(roots: &[(String, PathBuf)]) -> Vec<ModOverlap> {
+    let mut by_file: HashMap<String, Vec<String>> = HashMap::new();
+    for (name, root) in roots {
+        let mut files = Vec::new();
+        mod_files(root, "", 0, &mut files);
+        for f in files {
+            if f != MERGED_FILE { by_file.entry(f).or_default().push(name.clone()); }
+        }
+    }
+    overlaps_of(by_file.into_iter().filter(|(_, mods)| mods.len() > 1).collect())
+}
+
+/// The known-harmless set among a file's mods (HARMLESS_OVERLAPS), if any. It counts only when it is clear which
+/// two mods are meant: one folder per word.
+fn harmless(file: &str, mods: &[String]) -> Vec<String> {
+    HARMLESS_OVERLAPS.iter().find(|(f, _)| *f == file).and_then(|(_, words)| {
+        let hits: Vec<Vec<&String>> = words.iter()
+            .map(|w| mods.iter().filter(|m| m.to_lowercase().contains(w)).collect()).collect();
+        hits.iter().all(|h| h.len() == 1).then(|| hits.into_iter().flatten().cloned().collect::<Vec<_>>())
+    }).unwrap_or_default()
+}
+
+/// file -> its mods, as the screen's list: the same set of mods once.
+fn overlaps_of(by_file: HashMap<String, Vec<String>>) -> Vec<ModOverlap> {
+    let mut out: Vec<ModOverlap> = by_file.into_iter().map(|(file, mods)| {
+        let ok = harmless(&file, &mods);
+        ModOverlap { mods, ok }
+    }).collect();
+    out.sort();
     out.dedup();
     out
+}
+
+/// The game's own answer (`yw4 --mod-clashes`, decision 0068): which mods really clash once the game has merged the
+/// data files it can. A file only counts with the mods in a pair that can't be merged: mods that change different
+/// items of one list are no clash. None if the game can't answer (it predates 1.1.1, or doesn't answer in 20 s):
+/// then the file names decide (mod_overlaps). Game folders and mods come from game.ini, as for a start.
+fn game_clashes(exe: &Path, version: &str) -> Option<Vec<ModOverlap>> {
+    // an older yw4 takes the flag for a start: it writes a log before giving up, which would push the last real
+    // log (the one a bug report sends) aside
+    if crate::update::built_version(version)? <= (1, 1, 0) { return None; }
+    let mut child = hidden(Command::new(exe).arg("--mod-clashes")).current_dir(exe.parent()?)
+        .stdout(std::process::Stdio::piped()).stderr(std::process::Stdio::null()).spawn().ok()?;
+    let mut stdout = child.stdout.take()?;
+    // read on another thread: a long answer would fill the pipe while this one waits for the exit
+    let reader = std::thread::spawn(move || { use std::io::Read; let mut s = String::new(); let _ = stdout.read_to_string(&mut s); s });
+    let started = std::time::Instant::now();
+    let ok = loop {
+        match child.try_wait() {
+            Ok(Some(status)) => break status.success(),
+            Ok(None) if started.elapsed() < std::time::Duration::from_secs(20) => std::thread::sleep(std::time::Duration::from_millis(50)),
+            _ => { let _ = child.kill(); let _ = child.wait(); break false; }
+        }
+    };
+    let out = reader.join().ok()?;
+    if !ok { return None; }
+    Some(clashes_from(&out))
+}
+
+/// `yw4 --mod-clashes`' lines ("clash\t<file>\t<mod>\t<mod>") as the screen's list.
+fn clashes_from(out: &str) -> Vec<ModOverlap> {
+    let mut by_file: HashMap<String, Vec<String>> = HashMap::new();
+    for line in out.lines() {
+        let f: Vec<&str> = line.split('\t').collect();
+        if f.len() != 4 || f[0] != "clash" { continue; }
+        let mods = by_file.entry(f[1].to_string()).or_default();
+        for m in &f[2..] { if !mods.iter().any(|x| x == m) { mods.push(m.to_string()); } }
+    }
+    for mods in by_file.values_mut() { mods.sort(); }
+    overlaps_of(by_file)
 }
 
 /// The game's picture for the launcher. An existing icon.jpg or icon.png is preferred; if only yw4.ico
@@ -421,7 +527,10 @@ pub async fn install_info(app: tauri::AppHandle, install: String) -> Info {
         let reclaimable = reclaim_dirs(&inst).iter().map(|d| dir_size(d)).sum();
         let played = load_played(&install);
         let disabled_mods = current_state().map(|s| s.disabled_mods).unwrap_or_default();
-        Info { version, dlc, dlc_list, mods: mod_names(&inst.join("mods")), disabled_mods, icon, shots, shot_count, reclaimable,
+        let roots = mod_roots(&inst.join("mods"));
+        let mod_overlaps = game_clashes(&exe(&install), &version).unwrap_or_else(|| mod_overlaps(&roots));
+        Info { version, dlc, dlc_list, mods: roots.into_iter().map(|(name, _)| name).collect(), disabled_mods, mod_overlaps,
+               icon, shots, shot_count, reclaimable,
                last_played: played.last_played, play_secs: played.seconds }
     })
     .await
@@ -1260,10 +1369,56 @@ mod tests {
         std::fs::create_dir_all(temp.join("contents").join("010086c00af7c000").join("romfs")).unwrap();
         std::fs::create_dir_all(temp.join("ModC").join("romfs")).unwrap();
 
-        let mods = mod_names(&temp);
+        let mods: Vec<String> = mod_roots(&temp).into_iter().map(|(name, _)| name).collect();
         assert_eq!(mods, vec!["010086c00af7c000", "ModA", "ModB", "ModC"]);
 
         let _ = std::fs::remove_dir_all(&temp);
+    }
+
+    #[test]
+    fn test_mod_overlaps() {
+        let temp = std::env::temp_dir().join("yw4_test_mod_overlaps");
+        let _ = std::fs::remove_dir_all(&temp);
+        let file = |m: &str, f: &str| {
+            let p = temp.join(m).join(f);
+            std::fs::create_dir_all(p.parent().unwrap()).unwrap();
+            std::fs::write(p, b"").unwrap();
+        };
+        let item_text = "data/common/text/ja/item_text.cfg.bin";
+        // A and B: two shared files (listed once); the merged list never counts; C has data/ directly
+        for m in ["A/romfs", "B/romfs", "C"] { file(m, "data/cpk_list.cfg.bin"); }
+        for m in ["A/romfs", "B/romfs"] { file(m, "data/x/one.bin"); file(m, "data/x/two.bin"); }
+        file("B/romfs", "data/y.bin");
+        file("C", "data/y.bin");
+        file("C", "data/only_c.bin");
+        // the known-harmless pair, then the same file with a third mod in it
+        file("EN Translation/romfs", item_text);
+        file("my_overhaul_1a2b3", item_text);
+        let s = |v: &[&str]| v.iter().map(|x| x.to_string()).collect::<Vec<_>>();
+        let ok = s(&["my_overhaul_1a2b3", "EN Translation"]);
+        assert_eq!(mod_overlaps(&mod_roots(&temp)), vec![
+            ModOverlap { mods: s(&["A", "B"]), ok: vec![] },
+            ModOverlap { mods: s(&["B", "C"]), ok: vec![] },
+            ModOverlap { mods: s(&["EN Translation", "my_overhaul_1a2b3"]), ok: ok.clone() },
+        ]);
+        file("C", item_text);
+        assert!(mod_overlaps(&mod_roots(&temp))
+            .contains(&ModOverlap { mods: s(&["C", "EN Translation", "my_overhaul_1a2b3"]), ok }));
+        let _ = std::fs::remove_dir_all(&temp);
+    }
+
+    #[test]
+    fn test_clashes_from() {
+        // the game's answer for the owner's six mods (2026-11-14): the item list merges, so it isn't there
+        let out = "clash\tdata/common/gamedata/capsule/capsule_config.cfg.bin\tcrank-a-kai_overhaul_15d50\tunrestricted_crank_ff38b\n\
+                   clash\tdata/common/text/ja/item_text.cfg.bin\tYW4 EN Translation\tcrank-a-kai_overhaul_15d50\n\
+                   something else\n";
+        let s = |v: &[&str]| v.iter().map(|x| x.to_string()).collect::<Vec<_>>();
+        let pair = s(&["YW4 EN Translation", "crank-a-kai_overhaul_15d50"]);
+        assert_eq!(clashes_from(out), vec![
+            ModOverlap { mods: pair.clone(), ok: s(&["crank-a-kai_overhaul_15d50", "YW4 EN Translation"]) },
+            ModOverlap { mods: s(&["crank-a-kai_overhaul_15d50", "unrestricted_crank_ff38b"]), ok: vec![] },
+        ]);
     }
 
     #[test]
