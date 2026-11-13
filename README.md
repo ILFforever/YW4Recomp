@@ -13,6 +13,7 @@
   <img alt="Platform: Windows, Linux" src="https://img.shields.io/badge/platform-Windows%20%7C%20Linux-informational">
   <img alt="Graphics" src="https://img.shields.io/badge/graphics-Vulkan-ac162c">
   <img alt="Version: 1.0.2" src="https://img.shields.io/badge/version-1.0.2-blue">
+  <a href="https://buymeacoffee.com/ilfforever"><img alt="Buy Me a Coffee" src="https://img.shields.io/badge/Buy%20Me%20a%20Coffee-ilfforever-FFDD00?style=flat&logo=buy-me-a-coffee&logoColor=black"></a>
 </p>
 
 <p align="center">
@@ -45,7 +46,7 @@
 ## Status
 
 > [!TIP]
-> **1.0.0 is out (beta):** the first release, with the launcher.
+> **1.0.2 is out (beta):** get the launcher, it installs the game and keeps it up to date.
 > [**Download it here**](https://github.com/ILFforever/YW4Recomp/releases/latest), then see [How to play](#how-to-play).
 
 **Playable, but not finished.** Nobody has played the game from start to finish yet.
@@ -661,6 +662,12 @@ Set `[tools] cc = "clang"` in `config.local.toml`, then build as in steps 1-5. A
 - **[SDL3](https://www.libsdl.org/)** and the **[Vulkan](https://www.vulkan.org/)** headers.
 - **Eden** (a Switch emulator) - used only as a visual and performance reference; none of its code is used.
 - **LEVEL-5** for Yo-kai Watch 4. This project is not affiliated with or endorsed by LEVEL-5 or Nintendo.
+
+## Support
+
+YW4 Recomp is free and for the community. If you enjoy it, a coffee is always appreciated.
+
+[![Buy Me a Coffee](https://img.shields.io/badge/Buy%20Me%20a%20Coffee-ilfforever-FFDD00?style=flat&logo=buy-me-a-coffee&logoColor=black)](https://buymeacoffee.com/ilfforever)
 
 ## License
 
