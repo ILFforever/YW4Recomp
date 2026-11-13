@@ -633,8 +633,8 @@ sudo apt install clang python3 git pkg-config glslang-tools libsdl3-dev     # De
 ```
 
 Set `[tools] cc = "clang"` in `config.local.toml`, then build as in steps 1-5. After that, start the game with
-`./work/build/yw4` alone: the build writes your game and DLC folders into `work/build/game.ini`, and the game makes
-its save folder (`~/.local/share/YW4Recomp/save`) itself. Ubuntu 24.04 has no SDL3 package: see
+`./work/build/yw4` alone: the build writes your game and DLC folders into `work/build/game.ini`. Saves go to
+`~/.local/share/YW4Recomp/save`. Ubuntu 24.04 has no SDL3 package: see
 [docs/setup.md](docs/setup.md#requirements). AMD FSR, NVIDIA DLSS, frame generation and Reflex are Windows only for now.
 
 ## Project layout
