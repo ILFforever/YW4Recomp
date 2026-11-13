@@ -295,7 +295,8 @@ fn mod_names(mods: &Path) -> Vec<String> {
     let mut out = Vec::new();
     let read_dirs = |d: &Path| std::fs::read_dir(d).into_iter().flatten().flatten()
         .filter(|e| e.path().is_dir()).collect::<Vec<_>>();
-    let has_romfs = |p: &Path| p.join("romfs").is_dir();
+    // romfs/ inside, or data/ directly (a mod shared as a romfs folder's contents), as the game's romfs.c reads them
+    let has_romfs = |p: &Path| p.join("romfs").is_dir() || p.join("data").is_dir();
 
     if has_romfs(mods) {
         out.push("romfs".into());

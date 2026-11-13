@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import os
 import random
 import subprocess
 import shutil
@@ -329,6 +330,65 @@ class RomfsTest(unittest.TestCase):
                 self.assertEqual(romfs_lookup(img, path), data, path)
             self.assertIsNone(romfs_lookup(img, "dir1/missing"))
             self.assertIsNone(romfs_lookup(img, "nodir/x"))
+
+    def test_mods_cpk_lists_merged(self):
+        """Two mods each free their own files in a copy of data/cpk_list.cfg.bin: the game sees both sets freed
+        (decision 0067). One mod uses the data/-only layout; one file is listed in two archives."""
+        import struct as st
+
+        def cfg(entries):  # Level-5 cfg.bin: (path, archive or None for 0xFFFFFFFF or "" for an empty string, size)
+            strs, offs = bytearray(), {}
+
+            def s(x):
+                if x not in offs:
+                    offs[x] = len(strs)
+                    strs.extend(x.encode() + b"\0")
+                return offs[x]
+            body = bytearray()
+            for path, arch, size in entries:
+                body += st.pack("<IB", 0x36F3E0D3, 3) + bytes([0b010000]) + b"\0\0"  # types: string, string, int
+                body += st.pack("<III", s(path), 0xFFFFFFFF if arch is None else s(arch), size)
+            st_off = 0x10 + len(body)
+            return st.pack("<4I", len(entries), st_off, len(strs), len(offs)) + body + bytes(strs)
+
+        def archives(b):
+            n, st_off, _, _ = st.unpack_from("<4I", b)
+            out, p = [], 0x10
+            for _ in range(n):
+                path, arch, _ = st.unpack_from("<III", b, p + 8)
+                name = lambda o: b[st_off + o:b.index(b"\0", st_off + o)].decode()
+                out.append((name(path), None if arch == 0xFFFFFFFF else name(arch) or None))
+                p += 20
+            return out
+
+        game = [("data/a", "x.cpk", 4), ("data/b", "x.cpk", 4), ("data/b", "y.cpk", 4), ("data/c", "x.cpk", 4),
+                ("data/d", "x.cpk", 4)]
+        free = lambda names: [(p, "" if p in names else a, n) for p, a, n in game]
+        with tempfile.TemporaryDirectory() as t:
+            t = Path(t)
+            files = {"romfs/data/cpk_list.cfg.bin": cfg(game),
+                     "mods/A mod/romfs/data/cpk_list.cfg.bin": cfg(free({"data/a", "data/b"})),
+                     "mods/A mod/romfs/data/a": b"modA", "mods/A mod/romfs/data/b": b"modB",
+                     "mods/b_mod/data/cpk_list.cfg.bin": cfg(free({"data/c"})), "mods/b_mod/data/c": b"modC"}
+            for path, data in files.items():
+                (t / path).parent.mkdir(parents=True, exist_ok=True)
+                (t / path).write_bytes(data)
+            (t / "drv.c").write_text(ROMFS_DRIVER)
+            exe = t / "romfs.exe"
+            subprocess.run([check.host_cc(), "-std=c11", "-O1", "-Wall", *POSIX, f"-I{RUNTIME / 'src'}", "-o", str(exe),
+                            str(t / "drv.c"), str(RUNTIME / "src" / "romfs.c"), str(RUNTIME / "src" / "host.c"),
+                            "-pthread", *(["-lwinmm"] if sys.platform == "win32" else [])],
+                           check=True, capture_output=True)
+            r = subprocess.run([str(exe), str(t / "romfs"), str(t / "image.bin")], capture_output=True, text=True,
+                               env={**os.environ, "YW4_MODS": str(t / "mods")})
+            self.assertEqual(r.returncode, 0, r.stderr)
+            self.assertIn("b_mod: 1 files replaced, 1 added", r.stderr)  # the data/-only layout is found
+            self.assertIn("2 mods' lists merged, 3 entries freed", r.stderr)
+            img = (t / "image.bin").read_bytes()
+            self.assertEqual(romfs_lookup(img, "data/c"), b"modC")
+            self.assertEqual(archives(romfs_lookup(img, "data/cpk_list.cfg.bin")),
+                             [("data/a", None), ("data/b", None), ("data/b", None), ("data/c", None),
+                              ("data/d", "x.cpk")])
 
 
 SWKBD_DRIVER = r"""

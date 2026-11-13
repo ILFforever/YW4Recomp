@@ -29,6 +29,7 @@ typedef struct {
     uint32_t entry;           /* offset in the file table */
     Dir *parent;
     int read_before;          /* YW4_TRACE_ROMFS: its first read was logged */
+    uint8_t *mem;             /* made here, read from memory instead of path (the merged cpk_list) */
 } File;
 struct Dir {
     char *name;
@@ -201,12 +202,19 @@ static int is_mod_disabled(const char *name, const char *disabled_list) {
     return 0;
 }
 
+/* A mod's folder: <dir>/romfs, or <dir> itself when it holds data/ directly (mods shared as the romfs contents
+ * alone, to be put in a romfs folder on a Switch). */
 static void check_add_mod(DiscoveredMod *mods, int *n, int max, const char *name, const char *dir) {
     if (*n >= max) return;
     char romfs[1200];
     int is_dir = 0;
     snprintf(romfs, sizeof romfs, "%s/romfs", dir);
-    if (file_size(romfs, &is_dir) >= 0 && is_dir) {
+    if (file_size(romfs, &is_dir) < 0 || !is_dir) {
+        snprintf(romfs, sizeof romfs, "%s/data", dir);
+        if (file_size(romfs, &is_dir) >= 0 && is_dir) snprintf(romfs, sizeof romfs, "%s", dir);
+        else is_dir = 0;
+    }
+    if (is_dir) {
         for (int i = 0; i < *n; i++) {
             if (!strcmp(mods[i].romfs, romfs)) return;
         }
@@ -231,6 +239,180 @@ static void scan_submods(DiscoveredMod *mods, int *n, int max, const char *dir) 
         }
     }
     closedir(d);
+}
+
+static File *find_file(const Dir *d, const char *path) {
+    while (d && *path) {
+        const char *slash = strchr(path, '/');
+        size_t n = slash ? (size_t)(slash - path) : strlen(path);
+        if (!slash) {
+            for (int i = 0; i < d->nfiles; i++)
+                if (strlen(d->files[i]->name) == n && !strncmp(d->files[i]->name, path, n)) return d->files[i];
+            return NULL;
+        }
+        const Dir *next = NULL;
+        for (int i = 0; i < d->ndirs && !next; i++)
+            if (strlen(d->dirs[i]->name) == n && !strncmp(d->dirs[i]->name, path, n)) next = d->dirs[i];
+        d = next, path = slash + 1;
+    }
+    return NULL;
+}
+
+/* ---- data/cpk_list.cfg.bin from several mods. The list names every file and the archive it is in; the game reads
+ * a file with no archive (the value 0xFFFFFFFF or an empty string) from the folder. A mod "frees" the files it ships
+ * loose by clearing their archive, in a copy of the whole list. Two mods' copies can't both be used, and the later
+ * one would send the earlier one's files back to the archives (the English patch frees ~3,000; a gameplay mod made
+ * from the original list frees only its own). So the list used is the last mod's with every file any mod freed
+ * also freed. The format is Level-5's cfg.bin: a count, the string table's offset and size, then entries of
+ * (crc32 u32, value count u8, 2-bit value types padded to 4 bytes, u32 values); a file's entry has 3 values:
+ * path (string), archive (string), size. */
+
+typedef struct {
+    const char *path;
+    size_t archive;  /* offset of the archive value in the buffer */
+    int loose;
+} CpkEntry;
+
+static uint8_t *read_all(const char *path, size_t *n) {
+    FILE *f = fopen(path, "rb");
+    if (!f) return NULL;
+    uint8_t *b = NULL;
+    int is_dir = 0;
+    int64_t size = file_size(path, &is_dir);
+    if (size > 0 && size < (1 << 28) && (b = malloc((size_t)size)) && fread(b, 1, (size_t)size, f) != (size_t)size) {
+        free(b);
+        b = NULL;
+    }
+    fclose(f);
+    *n = b ? (size_t)size : 0;
+    return b;
+}
+
+static uint32_t get32(const uint8_t *p) {
+    uint32_t v;
+    memcpy(&v, p, 4);
+    return v;
+}
+
+/* The file entries of a cpk_list, or -1 if it isn't one. */
+static int cpk_entries(const uint8_t *b, size_t n, CpkEntry **out) {
+    *out = NULL;
+    if (n < 16) return -1;
+    uint32_t count = get32(b), st_off = get32(b + 4), st_len = get32(b + 8);
+    if (st_off > n || st_len > n - st_off || count > n / 8) return -1;
+    const char *st = (const char *)b + st_off;
+    CpkEntry *e = malloc(sizeof *e * (count ? count : 1));
+    if (!e) yw4_exit(3, __FILE__, __LINE__);
+    int m = 0;
+    size_t p = 16;
+    for (uint32_t i = 0; i < count; i++) {
+        if (p + 5 > st_off) goto bad;
+        unsigned k = b[p + 4];
+        p += 5;
+        size_t tl = (k + 3) / 4;
+        if (p + tl > st_off) goto bad;
+        const uint8_t *types = b + p;
+        p = (p + tl + 3) & ~(size_t)3;
+        if (p + 4 * (size_t)k > st_off) goto bad;
+        if (k == 3 && (types[0] & 0xF) == 0) {  /* path and archive are strings */
+            uint32_t path = get32(b + p), arch = get32(b + p + 4);
+            if (path < st_len && memchr(st + path, 0, st_len - path)) {
+                e[m].path = st + path;
+                e[m].archive = p + 4;
+                e[m].loose = arch == EMPTY || (arch < st_len && st[arch] == 0);
+                m++;
+            }
+        }
+        p += 4 * (size_t)k;
+    }
+    *out = e;
+    return m;
+bad:
+    free(e);
+    return -1;
+}
+
+static uint32_t path_hash(const char *s) {
+    uint32_t h = 2166136261u;
+    while (*s) h = (h ^ (uint8_t)*s++) * 16777619u;
+    return h;
+}
+
+/* base: the game's own list; lists: each mod's, in load order (the last one is what the tree points to now). */
+static void merge_cpk_lists(Dir *root, const char *base, char **lists, int nlists) {
+    File *target = find_file(root, "data/cpk_list.cfg.bin");
+    if (nlists < 2 || !target || !base) return;
+    size_t bn = 0;
+    uint8_t *bb = read_all(base, &bn);
+    CpkEntry *be = NULL;
+    int nb = bb ? cpk_entries(bb, bn, &be) : -1;
+    if (nb <= 0) {
+        fprintf(stderr, "yw4: mods: cpk_list: cannot read the game's list (%s), the last mod's is used\n", base);
+        free(bb), free(be);
+        return;
+    }
+    uint32_t cap = 1;
+    while (cap < 2u * (uint32_t)nb) cap <<= 1;
+    int32_t *slot = malloc(sizeof *slot * cap);
+    uint8_t *freed = calloc((size_t)nb, 1);
+    if (!slot || !freed) yw4_exit(3, __FILE__, __LINE__);
+    for (uint32_t i = 0; i < cap; i++) slot[i] = -1;
+    /* A path can be listed several times (the same file in several archives; 8,504 in 2.2.0): one slot per path, at
+     * its first entry, "loose" only if every entry is (a mod frees them all). */
+    for (int i = 0; i < nb; i++) {
+        uint32_t h = path_hash(be[i].path) & (cap - 1);
+        while (slot[h] >= 0 && strcmp(be[slot[h]].path, be[i].path)) h = (h + 1) & (cap - 1);
+        if (slot[h] >= 0) be[slot[h]].loose &= be[i].loose;
+        else slot[h] = i;
+    }
+#define FIND(p, j)                                                                         \
+    do {                                                                                   \
+        uint32_t h_ = path_hash(p) & (cap - 1);                                            \
+        for ((j) = -1; slot[h_] >= 0; h_ = (h_ + 1) & (cap - 1))                           \
+            if (!strcmp(be[slot[h_]].path, (p))) { (j) = slot[h_]; break; }                \
+    } while (0)
+    uint8_t *last = NULL;
+    size_t last_n = 0;
+    CpkEntry *le = NULL;
+    int nl = -1, ok = 1;
+    for (int i = 0; i < nlists && ok; i++) {
+        size_t n = 0;
+        uint8_t *b = read_all(lists[i], &n);
+        CpkEntry *e = NULL;
+        int ne = b ? cpk_entries(b, n, &e) : -1;
+        if (ne < 0) {
+            fprintf(stderr, "yw4: mods: cpk_list: cannot read %s, the last mod's list is used\n", lists[i]);
+            ok = 0;
+        }
+        for (int k = 0; k < ne; k++) {
+            int j;
+            FIND(e[k].path, j);
+            if (j >= 0 && e[k].loose && !be[j].loose) freed[j] = 1;
+        }
+        if (i == nlists - 1 && ok) {
+            last = b, last_n = n, le = e, nl = ne;
+        } else {
+            free(b), free(e);
+        }
+    }
+    int added = 0;
+    for (int k = 0; ok && k < nl; k++) {
+        int j;
+        FIND(le[k].path, j);
+        if (j >= 0 && freed[j] && !le[k].loose) {
+            memcpy(last + le[k].archive, &(uint32_t){EMPTY}, 4);
+            added++;
+        }
+    }
+#undef FIND
+    if (ok) {
+        target->mem = last, target->size = last_n;
+        fprintf(stderr, "yw4: mods: cpk_list: %d mods' lists merged, %d entries freed by an earlier mod kept loose\n",
+                nlists, added);
+    } else {
+        free(last);
+    }
+    free(le), free(slot), free(freed), free(be), free(bb);
 }
 
 /* Every mod in YW4_MODS (default work/mods; "none": no mods), in name order (a later one wins): folders with a
@@ -278,6 +460,10 @@ static void apply_mods(Dir *root) {
     closedir(d);
     const char *disabled_env = getenv("YW4_MODS_DISABLED");
     qsort(mods, (size_t)n, sizeof *mods, by_mod_name);
+    const File *game_list = find_file(root, "data/cpk_list.cfg.bin");
+    char *base_list = game_list ? dup_str(game_list->path) : NULL;
+    char *lists[256];
+    int nlists = 0;
     for (int i = 0; i < n; i++) {
         if (is_mod_disabled(mods[i].name, disabled_env)) {
             fprintf(stderr, "yw4: mods: %s: disabled, skipped\n", mods[i].name);
@@ -289,9 +475,16 @@ static void apply_mods(Dir *root) {
         overlay(root, mods[i].romfs, 0);
         fprintf(stderr, "yw4: mods: %s: %d files replaced, %d added (%s)\n", mods[i].name, mod_replaced, mod_added,
                 mods[i].romfs);
+        char list[1300];
+        int is_dir = 0;
+        snprintf(list, sizeof list, "%s/data/cpk_list.cfg.bin", mods[i].romfs);
+        if (file_size(list, &is_dir) >= 0 && !is_dir) lists[nlists++] = dup_str(list);
         free(mods[i].name);
         free(mods[i].romfs);
     }
+    merge_cpk_lists(root, base_list, lists, nlists);
+    for (int i = 0; i < nlists; i++) free(lists[i]);
+    free(base_list);
 }
 
 /* One image: the flat tables below, its header (0..0x200), file data, then `tables` (from tables_off). The game's
@@ -424,21 +617,8 @@ int romfs_open(const char *dir) {
 }
 
 const char *romfs_host_path(const char *path) {
-    const Dir *d = game_root;
-    while (d && *path) {
-        const char *slash = strchr(path, '/');
-        size_t n = slash ? (size_t)(slash - path) : strlen(path);
-        if (!slash) {
-            for (int i = 0; i < d->nfiles; i++)
-                if (strlen(d->files[i]->name) == n && !strncmp(d->files[i]->name, path, n)) return d->files[i]->path;
-            return NULL;
-        }
-        const Dir *next = NULL;
-        for (int i = 0; i < d->ndirs && !next; i++)
-            if (strlen(d->dirs[i]->name) == n && !strncmp(d->dirs[i]->name, path, n)) next = d->dirs[i];
-        d = next, path = slash + 1;
-    }
-    return NULL;
+    const File *f = find_file(game_root, path);
+    return f && !f->mem ? f->path : NULL;  /* a merged file has no host copy */
 }
 
 RomfsImage *romfs_image_open(const char *dir) {
@@ -472,6 +652,11 @@ static FILE *file_handle(const File *f) {
 }
 
 static int read_file_part_locked(const File *f, uint64_t at, uint8_t *out, uint64_t n) {
+    if (f->mem) {
+        if (at > f->size || n > f->size - at) return -1;
+        memcpy(out, f->mem + at, (size_t)n);
+        return 0;
+    }
     FILE *fp = file_handle(f);
     if (!fp) return -1;
 #ifdef _WIN32

@@ -75,3 +75,4 @@ lists later records that replace a record, or part of it.
 | 0064 | [Holding 30 and 60 frames/s: the vsync tick, or the display's refresh](0064-pacing-tick-or-refresh.md) | accepted | 2026-11-12 |  | `runtime/src/framerate.c`, `runtime/src/vi.c`, `runtime/src/perf.c` |
 | 0065 | [Linux: textures and geometry follow the game's events, not page tracking](0065-linux-upload-events.md) | accepted | 2026-11-13 |  | `runtime/src/gpu.c`, `runtime/src/nvn_objects.c`, `runtime/src/gpu.h`, `docs/debugging.md` |
 | 0066 | [Typed names keep their plain letters](0066-typed-names-half-width.md) | accepted | 2026-11-14 |  | `runtime/src/swkbd.c`, `recomp/overrides.toml` |
+| 0067 | [Several mods' cpk_list files are merged](0067-mods-merge-cpk-list.md) | accepted | 2026-11-14 |  | `runtime/src/romfs.c`, `launcher/src-tauri/src/ready.rs` |
