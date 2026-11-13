@@ -132,6 +132,16 @@ release file.
   `@tauri-apps/cli` 2.12.4, the version this repo pins.
 - Works from the first launcher that has it: players on an older one still get the page.
 
+## Later: a first build takes the newest game code (2026-11-13)
+
+After 1.0.1, a new player's first build still made the game code the installer carries (1.0.0), and only the Play
+screen then offered 1.0.1, so they built twice. Now a first build asks GitHub first (`check_updates`) and downloads a
+newer game update (`download_game_update`) before it starts; the build takes the newest code it finds, as for any
+update. The status line under the bar says so for those seconds, with no step of its own in the list (the owner's
+pick). No GitHub or a failed download: the build goes on with the code the launcher carries, and a log line says
+why. Cancel is hidden for those seconds, as stopping there wouldn't stop the build that follows. Reaches players
+with the next launcher release.
+
 ## Then
 
 Build in this order: the launcher's own number; `tools.yw4.build_install` with the launcher using it; the game zip in

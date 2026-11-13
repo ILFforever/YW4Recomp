@@ -536,6 +536,7 @@ async function startBuild(kind = build ? build.kind : 'first') {
   $('build-back').hidden = true;
   renderBuildSteps();
   renderBuildBar();
+  if (kind === 'first') await newestGameCode();
   const paths = foundFrom ? { exefs: `${foundFrom}\\data\\exefs`, romfs: `${foundFrom}\\data\\romfs`, dlc: `${foundFrom}\\data\\dlc` } : chosen[mode];
   const plan = { mode: foundFrom ? 'folders' : mode, paths, install: options.install, fsr: options.fsr, dlss: options.dlss && rtx, saves: options.saves, fresh: freshFiles };
   try {
@@ -543,6 +544,29 @@ async function startBuild(kind = build ? build.kind : 'first') {
   } catch (e) {
     buildFinished({ ok: false, message: String(e) });
   }
+}
+
+// A first build uses the newest game code. The installer carries the code of its own release day, so a game update
+// out since then is downloaded first, into the install's builder\game, and the build takes the newest code there
+// (update.rs game_code). Without it a new player built the old version, then got the update on the Play screen
+// and built again (2026-11-13). No GitHub, or a failed download: the build goes on with the code it has.
+async function newestGameCode() {
+  const now = $('build-now'), cancel = $('build-cancel');
+  cancel.hidden = true;  // a few seconds; stopping here wouldn't stop the build that follows
+  now.textContent = 'Checking for a newer game version…';
+  try {
+    const u = await invoke('check_updates', { install: options.install, built: '', fresh: true });
+    if (u && u.game) {
+      now.textContent = `Downloading game update ${u.game.version} (${gb(u.game.size)})…`;
+      await invoke('download_game_update', { install: options.install, version: u.game.version, url: u.game.url,
+        sha256: u.game.sha256, notes: u.game.notes });
+      logLine(`game update ${u.game.version} downloaded: this build uses it`);
+    }
+  } catch (e) {
+    logLine(`no game update this time (${e}): building the version this launcher carries`);
+  }
+  now.textContent = '';
+  cancel.hidden = false;
 }
 
 function buildFinished({ ok, message }) {
