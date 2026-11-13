@@ -98,6 +98,24 @@ def game_tree(ref: str, dest: Path) -> str:
     return commit
 
 
+WRONG_FILE_NAME = "WRONG FILE - READ ME.txt"
+WRONG_FILE_NOTE = """\
+You downloaded the wrong file.
+
+This zip is a game update for the YW4 Recomp launcher. It isn't the game,
+and there is nothing in it to open or install yourself.
+
+What you want is the launcher. Download it here:
+https://github.com/ILFforever/YW4Recomp/releases/latest
+
+  - YW4-Recomp-Launcher-<version>-setup.exe      (installer)
+  - YW4-Recomp-Launcher-<version>-portable.zip   (no install)
+
+The launcher sets up the game from your own copy and downloads updates
+like this one by itself: press Update on the Play screen.
+""".replace("\n", "\r\n")  # Windows line ends, so Notepad shows the lines on any version
+
+
 def game(ref: str) -> None:
     """The game update: the game code as one zip, files at its top level."""
     tree = OUT / "game-tree"
@@ -109,6 +127,9 @@ def game(ref: str) -> None:
         for p in sorted(tree.rglob("*")):
             if p.is_file():
                 z.write(p, p.relative_to(tree).as_posix())
+        # Players who download this zip by hand from the release page find only build code in it: say what to get
+        # instead (owner, 2026-11-14). The launcher unpacks it with the rest and never reads it.
+        z.writestr(WRONG_FILE_NAME, WRONG_FILE_NOTE)
     shutil.rmtree(tree)
     digest = hashlib.sha256(out.read_bytes()).hexdigest()
     print(f"{out.name}: {out.stat().st_size / 1e6:.1f} MB, {ref} = {commit}, SHA-256 {digest}")
