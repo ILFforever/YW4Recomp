@@ -29,12 +29,14 @@ fn open_project_page() -> Result<(), String> {
     r.map(|_| ()).map_err(|e| e.to_string())
 }
 
-/// Help's links, a fixed set: the project page and its issues (Report a problem). Nothing else can be opened.
+/// The launcher's links, a fixed set: the project page and its issues (Help, Report a problem) and Settings'
+/// Buy me a coffee. Nothing else can be opened.
 #[tauri::command]
 fn open_link(which: String) -> Result<(), String> {
     let url = match which.as_str() {
         "project" => "https://github.com/ILFforever/YW4Recomp",
         "issues" => "https://github.com/ILFforever/YW4Recomp/issues",
+        "coffee" => "https://buymeacoffee.com/ilfforever",
         _ => return Err("unknown link".into()),
     };
     std::process::Command::new("explorer").arg(url).spawn().map(|_| ()).map_err(|e| e.to_string())

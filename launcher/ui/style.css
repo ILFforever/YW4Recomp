@@ -476,6 +476,9 @@ dialog p { margin: 0 0 10px; font-size: 14px; overflow-wrap: anywhere; }
 .welcome-dialog { width: 560px; padding: 0; overflow: hidden; border-top: 0; }
 #update-dlg { width: 640px; }  /* wider than the others: release notes are long lines (owner, 2026-11-14) */
 #update-dlg > h2 { display: flex; align-items: center; gap: 10px; }
+/* Settings' Buy me a coffee: Buy Me a Coffee's own yellow in every theme, as on the site (docs/index.html) */
+.btn.coffee { flex-shrink: 0; gap: 8px; color: #000; background: #ffdd00; border-color: #e6c700; }
+.btn.coffee:hover { color: #000; background: #ffe633; border-color: #ffdd00; }
 .update-icon { flex-shrink: 0; }
 .welcome-head { position: relative; padding: 26px 28px 22px; background: var(--violet-deep); color: var(--white);
   border-bottom: 3px solid var(--gold); }
