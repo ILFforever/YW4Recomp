@@ -1285,7 +1285,7 @@ static int locked_on(const char *why) { return !strncmp(why, "ALWAYS ON", 9); }
 static void sentence_case(const char *in, char *out, size_t n) {
     static const char *const keep[] = {"HUD", "FXAA", "SMAA", "TAA", "FSR", "DLSS", "GPU", "GPUS", "CPU", "AMD",
                                        "NVIDIA", "RTX", "HD", "MS", "F3", "F11", "AI", "ZL", "ZR", "LB", "RB", "LT",
-                                       "RT", "L1", "R1", "L2", "R2", "L3", "R3", "PS"};
+                                       "RT", "L1", "R1", "L2", "R2", "L3", "R3", "PS", "NINTENDO"};
     /* the F1 panel font's own symbols (bindings.c): arrows, and PlayStation's shapes by name */
     static const char *const sym[9] = {NULL, "\xe2\x86\x91", "\xe2\x86\x93", "\xe2\x86\x90", "\xe2\x86\x92",
                                        "Triangle", "Circle", "Square", "Cross"};
@@ -2505,7 +2505,7 @@ static void draw_controls_page(const UiCanvas *c, const GameMenuInfo *in) {
             ui_icon(c, ICON_NEXT, x + w - 46, y + (rh - 24) / 2, 24, 2.6f, PLUM);
             continue;
         }
-        if (r->value && !strcmp(r->group, "CONTROLLER") && !strcmp(r->name, "VIBRATION")) {
+        if (r->value && !strcmp(r->group, "CONTROLLER")) {  /* VIBRATION, NINTENDO LAYOUT: an On/Off pill */
             int on_state = !strcmp(r->cells[0], "ON");
             const char *label = on_state ? "On" : "Off";
             float sx = x + cw[0] + 22, sh = rh - 16, sy = y + 8, aw = 24;

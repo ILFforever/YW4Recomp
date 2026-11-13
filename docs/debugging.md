@@ -196,6 +196,7 @@ Saved screenshots get the same sRGB decode as the window, so their colours match
 | `YW4_RUMBLE_GAIN=<float>` | Scale vibration intensity on the host gamepad (default 1.0; e.g. 0.5 for half strength, 1.5 for stronger rumble) |
 | `YW4_RUMBLE_SHAPE=0` | The game's vibration as sent (linear), instead of shaped for PC pads' motors: faint texture dropped, a kick at each swell's start, cut while it fades ([decision 0058](decisions/0058-controller-rumble.md), 2026-11-10) |
 | `YW4_RUMBLE_TRIGGERS=0` | Xbox One / Series pads: no trigger-motor kicks for the high band (default on) |
+| `YW4_NINTENDO_LAYOUT=1` | A controller that reports as an Xbox pad gets the Switch's button icons and names, so hints match the letters printed on a Switch-style pad; the buttons keep their places (the bottom one confirms). For Switch-style pads that show up as an Xbox 360 controller on PC (vendor 045e, product 028e). The Controls page's CONTROLLER NINTENDO ICONS row; `python -m tools.dev.padtest` shows what a pad reports |
 | `YW4_RUMBLE_LOG=1` | A log line per change: what the game asked (both bands' amplitude and frequency) and the motor and trigger speeds sent |
 | `YW4_INPUT=2400:1:10` | Scripted presses, `tick:buttons(hex):length`, comma separated; `1` is A |
 

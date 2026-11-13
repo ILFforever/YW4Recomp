@@ -2453,6 +2453,7 @@ void window_vibration(float amp_low, float freq_low, float amp_high, float freq_
 
 /* The keyboard, mouse, and the gamepad through the controls (bindings.c; the settings panel's second page). */
 static void pad_back_hold(void);  /* below, with the gamepad */
+static void pad_shoulders_overlay(void);
 static uint32_t pad_parts_held(void);
 static void update_input(void) {
     uint64_t b;
@@ -2491,6 +2492,7 @@ static void update_input(void) {
     host_unlock(&mouse_lock);
 
     pad_back_hold();
+    pad_shoulders_overlay();
     bindings_read(SDL_GetKeyboardState(NULL), mb, wup, wdwn, gamepad, &b, s);
     /* the overlay's keyboard and controller views light up what is pressed */
     gamemenu_held(SDL_GetKeyboardState(NULL), SDL_GetMouseState(NULL, NULL), pad_parts_held());
@@ -2564,7 +2566,8 @@ static void update_input(void) {
 
 /* The gamepad outside the game: the overlay button opens or closes the in-game overlay (gamemenu.h): the touchpad
  * on PlayStation pads, the button SDL calls MISC1 on the others (Share on Xbox Series, Capture on Switch Pro), and
- * Back + Start together on any pad (Xbox One and older have no Share); on a DualSense MISC1 is the mic button,
+ * Back + Start together on any pad (Xbox One and older have no Share), and L + R + ZL + ZR together
+ * (pad_shoulders_overlay); on a DualSense MISC1 is the mic button,
  * which shows or hides the performance HUD (F3). (Not Home / PS: Steam takes that one and opens Big Picture.) In
  * the overlay the D-pad or the left stick choose, A selects, B resumes. In the settings panel the D-pad or the left
  * stick choose (up/down) and change (left/right); B closes; on the controls page A changes a binding and X clears
@@ -2710,6 +2713,21 @@ static void pad_back_hold(void) {
     if (gamemenu_peeking() && last_used_pad) locked = 1;
     else if (locked && !pad_parts_held()) locked = 0;
     bindings_pad_lock(locked);
+}
+
+/* All four shoulder buttons held together (L + R + ZL + ZR) open or close the overlay too, once per hold. For
+ * Switch-style pads in X-input mode (owner, 2026-11-13): they send a Guide press of their own with Back + Start,
+ * so Windows' Game Bar and Steam's overlay open with ours. Four at once is hard to press by accident, unlike the
+ * two stick presses. Not while the controls wait for an input (a shoulder or trigger being bound). */
+static void pad_shoulders_overlay(void) {
+    static int held;
+    int all = gamepad && SDL_GetGamepadButton(gamepad, SDL_GAMEPAD_BUTTON_LEFT_SHOULDER) &&
+              SDL_GetGamepadButton(gamepad, SDL_GAMEPAD_BUTTON_RIGHT_SHOULDER) &&
+              SDL_GetGamepadAxis(gamepad, SDL_GAMEPAD_AXIS_LEFT_TRIGGER) > 16000 &&
+              SDL_GetGamepadAxis(gamepad, SDL_GAMEPAD_AXIS_RIGHT_TRIGGER) > 16000;
+    if (all && !held && !bindings_capturing())
+        gamemenu_toggle(), yw4_hid_note_key("MENU");
+    held = all;
 }
 
 static void panel_pad_button(SDL_GamepadButton button) {

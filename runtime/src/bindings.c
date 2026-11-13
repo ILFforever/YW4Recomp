@@ -64,7 +64,8 @@ enum { NINPUTS = sizeof inputs / sizeof *inputs, NMOUSE = 2,
        SENS_ROW = 0,
        MOUSE_ROW = SENS_ROW + NMOUSE,
        RUMBLE_ROW = MOUSE_ROW + 1,
-       SET_ROW = RUMBLE_ROW + 1,
+       LAYOUT_ROW = RUMBLE_ROW + 1,
+       SET_ROW = LAYOUT_ROW + 1,
        FIRST_INPUT = SET_ROW + 1,
        RESET_ROW = FIRST_INPUT + NINPUTS, NROWS };
 
@@ -297,9 +298,16 @@ static const char *pad_name(int pad) {
 enum { STYLE_XBOX, STYLE_PLAYSTATION, STYLE_NINTENDO };
 static int pad_style;           /* the connected controller's (bindings_read); Xbox names when there is none */
 static int using_pad, had_pad;  /* 1 after a gamepad connection or input, 0 after a key or mouse input */
+/* CONTROLLER NINTENDO ICONS (YW4_NINTENDO_LAYOUT): a pad that reports as an Xbox one gets the Switch's button icons
+ * and names. Switch-style pads in their X-input mode report as a Microsoft Xbox 360 pad (vendor 045e, product 028e;
+ * tools/dev/padtest), so nothing tells them apart: the player says so here. The buttons keep their places (owner,
+ * 2026-11-13: swap the hints, not the buttons): the bottom one still confirms, and its hint shows the B printed on
+ * it. pad_style stays what the pad reports (which button does what); hint_style is what the icons follow. */
+static int nintendo_layout;
+static int hint_style(void) { return nintendo_layout && pad_style == STYLE_XBOX ? STYLE_NINTENDO : pad_style; }
 
-int bindings_pad_nintendo(void) { return pad_style == STYLE_NINTENDO; }
-int bindings_pad_style(void) { return pad_style; }
+int bindings_pad_nintendo(void) { return pad_style == STYLE_NINTENDO; }  /* which button confirms: by place */
+int bindings_pad_style(void) { return hint_style(); }                    /* the controller drawn, its names */
 
 /* YW4_HINTS: the device the button icons (and the overlay's views) follow for the whole run, for screenshots of
  * each style without a controller: 0 not set, 1 the keys, 2 + a style (Xbox, PlayStation, Nintendo). */
@@ -362,7 +370,7 @@ static const char *pad_label(int pad) {
         {SDL_GAMEPAD_BUTTON_RIGHT_STICK, {"R STICK PRESS", "R3", "R STICK PRESS"}},
     };
     for (size_t i = 0; i < sizeof labels / sizeof *labels; i++)
-        if (labels[i].pad == pad) return labels[i].name[pad_style];
+        if (labels[i].pad == pad) return labels[i].name[hint_style()];
     return pad_name(pad);  /* the D-pad, the sticks' directions: the same on every controller */
 }
 
@@ -435,6 +443,12 @@ void bindings_read(const bool *keyboard, uint32_t mouse_buttons, int wheel_up, i
     sets_ready();
     int battle = battle_active();
     const Bound *use = sets[battle ? SET_BATTLE : SET_FIELD];
+    static int layout_env_read;
+    if (!layout_env_read) {  /* YW4_NINTENDO_LAYOUT from the environment, with or without a settings file line */
+        const char *e = getenv("YW4_NINTENDO_LAYOUT");
+        if (e && *e) nintendo_layout = !strcmp(e, "1") || !strcmp(e, "ON") || !strcmp(e, "on");
+        layout_env_read = 1;
+    }
     if (gamepad) {
         SDL_GamepadType t = SDL_GetGamepadType(gamepad);
         pad_style = t == SDL_GAMEPAD_TYPE_PS3 || t == SDL_GAMEPAD_TYPE_PS4 || t == SDL_GAMEPAD_TYPE_PS5 ? STYLE_PLAYSTATION
@@ -772,7 +786,7 @@ static uint32_t gaiji_swap(uint32_t crc, int *sheet) {
         int p = glyph_for_pad(resolve(use[row].pad));
         if (p >= 0) shown = p;
     }
-    if (pad_style != STYLE_NINTENDO) return *sheet = SHEET_PAD, pad_crc[shown];
+    if (hint_style() != STYLE_NINTENDO) return *sheet = SHEET_PAD, pad_crc[shown];
     if (shown == g) return 0;
     char name[48];
     nx_name(shown, style, name, sizeof name);
@@ -837,8 +851,8 @@ int yw4_hook_gaiji_render(CPUState *ctx) {
     ready();
     gaiji_init();
     uint64_t ps = ld64(sheets), xbox = ld64(sheets + 8), key = ld64(sheets + 16);
-    if (ps) st8(ps + 0x1c, (uint8_t)(using_pad && pad_style == STYLE_PLAYSTATION));
-    if (xbox) st8(xbox + 0x1c, (uint8_t)(using_pad && pad_style == STYLE_XBOX));
+    if (ps) st8(ps + 0x1c, (uint8_t)(using_pad && hint_style() == STYLE_PLAYSTATION));
+    if (xbox) st8(xbox + 0x1c, (uint8_t)(using_pad && hint_style() == STYLE_XBOX));
     if (key) st8(key + 0x1c, 1);
     uint64_t reqs = ctx->x[2];
     uint32_t n = (uint32_t)ctx->x[3];
@@ -923,6 +937,8 @@ void bindings_action(int action) {
             window_rumble_set_enabled(next);
             if (next) window_rumble_test();
             settings_save();
+        } else if (row == LAYOUT_ROW) {
+            nintendo_layout = !nintendo_layout, settings_save();
         } else if (row == MOUSE_ROW) {  /* the Mouse buttons row opens its page (gamemenu.c): nothing here */
         } else if (!pad_only) {  /* a pad stays on its own column */
             col = action == SETTINGS_LEFT ? (col > 0 ? col - 1 : 0) : (col < BIND_COLS - 1 ? col + 1 : BIND_COLS - 1);
@@ -938,6 +954,8 @@ void bindings_action(int action) {
             window_rumble_set_enabled(next);
             if (next) window_rumble_test();
             settings_save();
+        } else if (row == LAYOUT_ROW) {
+            nintendo_layout = !nintendo_layout, settings_save();
         } else if (row == RESET_ROW) {
             /* the exploring set back to the starting keys; the battle set to a copy of the exploring set */
             if (edit_set == SET_BATTLE) copy_exploring_to_battle();
@@ -955,6 +973,7 @@ void bindings_action(int action) {
             window_rumble_test();
             settings_save();
         }
+        if (row == LAYOUT_ROW) nintendo_layout = 0, settings_save();
         if (row < FIRST_INPUT || row == RESET_ROW) break;
         if (col < BIND_KEYS) bound[row - FIRST_INPUT].keys[col] = 0;
         else bound[row - FIRST_INPUT].pad = PAD_NONE;
@@ -1074,6 +1093,12 @@ int bindings_rows(BindRow *rows, int max, int *sel_row, int *sel_col, char *help
     if (n < max) {
         BindRow *r = &rows[n++];
         memset(r, 0, sizeof *r);
+        r->group = "CONTROLLER", r->name = "NINTENDO ICONS", r->value = 1;
+        snprintf(r->cells[0], BIND_NAME, "%s", nintendo_layout ? "ON" : "OFF");
+    }
+    if (n < max) {
+        BindRow *r = &rows[n++];
+        memset(r, 0, sizeof *r);
         r->group = "KEYS FOR", r->name = "SET", r->value = 1;
         snprintf(r->cells[0], BIND_NAME, "%s", edit_set ? "BATTLES" : "EXPLORING");
     }
@@ -1113,6 +1138,14 @@ int bindings_rows(BindRow *rows, int max, int *sel_row, int *sel_col, char *help
                  "WHETHER CONTROLLER VIBRATION AND HAPTICS ARE ENABLED: %s. LEFT/RIGHT OR ENTER/A: TOGGLE. "
                  "WHEN TURNED ON, THE CONTROLLER RUMBLES FOR A SECOND AS A TEST.",
                  window_rumble_enabled() ? "ON" : "OFF");
+        return n;
+    }
+    if (row == LAYOUT_ROW) {
+        snprintf(help, (size_t)help_size,
+                 "FOR NINTENDO-STYLE CONTROLLERS THAT THE GAME SEES AS AN XBOX CONTROLLER: %s. WHEN ON, THE BUTTON "
+                 "ICONS SHOW THE LETTERS PRINTED ON YOUR CONTROLLER. THE BUTTONS KEEP THEIR PLACES. "
+                 "LEFT/RIGHT OR ENTER/A: TOGGLE.",
+                 nintendo_layout ? "ON" : "OFF");
         return n;
     }
     if (row == SET_ROW) {
@@ -1164,6 +1197,12 @@ int bindings_load_line(const char *name, const char *value) {
     }
     if (!strcmp(name, "YW4_RUMBLE")) {
         if (!getenv(name)) window_rumble_set_enabled(!strcmp(value, "1") || !strcmp(value, "ON") || !strcmp(value, "on"));
+        return 1;
+    }
+    if (!strcmp(name, "YW4_NINTENDO_LAYOUT")) {
+        const char *e = getenv(name);  /* the environment wins, as for every setting */
+        if (e) value = e;
+        nintendo_layout = !strcmp(value, "1") || !strcmp(value, "ON") || !strcmp(value, "on");
         return 1;
     }
     ready();
@@ -1225,4 +1264,5 @@ void bindings_save(FILE *f) {
     }
     for (int a = 0; a < NMOUSE; a++) fprintf(f, "%s=%s\n", sens_env[a], sens_values[sens_index(a)]);
     fprintf(f, "YW4_RUMBLE=%d\n", window_rumble_enabled());
+    fprintf(f, "YW4_NINTENDO_LAYOUT=%d\n", nintendo_layout);
 }
