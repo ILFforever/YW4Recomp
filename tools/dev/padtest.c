@@ -4,7 +4,9 @@
  * For each button press it prints the button's place on the pad (bottom, right, left, top), the letter SDL thinks is
  * printed on it, and the Switch button the game gives for it. The game picks Xbox, PlayStation or Nintendo names from
  * the type the pad reports (bindings.c, bindings_read): a pad that reports "Xbox 360" but has A on the right gets
- * the Xbox meaning, so its printed letters and the game's disagree. Quit: Back + Start together, or Ctrl+C. */
+ * the Xbox meaning, so its printed letters and the game's disagree. It also shows how the pad is connected (USB or
+ * Bluetooth) and finger positions on a touchpad (PlayStation pads; over Bluetooth only once SDL has switched the pad
+ * to its full reports). Quit: Back + Start together, or Ctrl+C. */
 #include <stdio.h>
 
 #include <SDL3/SDL.h>
@@ -26,6 +28,7 @@ static const char *place(int b) {
     case SDL_GAMEPAD_BUTTON_DPAD_DOWN: return "D-pad down";
     case SDL_GAMEPAD_BUTTON_DPAD_LEFT: return "D-pad left";
     case SDL_GAMEPAD_BUTTON_DPAD_RIGHT: return "D-pad right";
+    case SDL_GAMEPAD_BUTTON_TOUCHPAD: return "Touchpad click";
     default: return "other button";
     }
 }
@@ -94,6 +97,12 @@ int main(int argc, char **argv) {
                 printf("  reports type: %s (vendor %04x, product %04x)\n", SDL_GetGamepadStringForType(t),
                        SDL_GetGamepadVendor(pad), SDL_GetGamepadProduct(pad));
                 printf("  the game uses: %s button names\n", style_name[style]);
+                SDL_JoystickConnectionState cs = SDL_GetGamepadConnectionState(pad);
+                printf("  connected by: %s\n", cs == SDL_JOYSTICK_CONNECTION_WIRED      ? "USB"
+                                               : cs == SDL_JOYSTICK_CONNECTION_WIRELESS ? "wireless (Bluetooth)"
+                                                                                        : "unknown");
+                printf("  touchpads: %d%s\n", SDL_GetNumGamepadTouchpads(pad),
+                       SDL_GetNumGamepadTouchpads(pad) ? " (drag a finger on it)" : "");
                 printf("  SDL mapping: %s\n\n", map ? map : "(none)");
                 SDL_free(map);
             }
@@ -107,6 +116,20 @@ int main(int argc, char **argv) {
                 fflush(stdout);
             }
             break;
+        case SDL_EVENT_GAMEPAD_TOUCHPAD_DOWN:
+        case SDL_EVENT_GAMEPAD_TOUCHPAD_UP:
+        case SDL_EVENT_GAMEPAD_TOUCHPAD_MOTION: {
+            /* a finger: x, y from 0 to 1 across the touchpad; moves at most ten times a second */
+            static Uint64 last;
+            Uint64 now = SDL_GetTicks();
+            if (e.type == SDL_EVENT_GAMEPAD_TOUCHPAD_MOTION && now - last < 100) break;
+            last = now;
+            printf("Touch finger %d %-5s x %.3f  y %.3f\n", (int)e.gtouchpad.finger,
+                   e.type == SDL_EVENT_GAMEPAD_TOUCHPAD_DOWN ? "down" : e.type == SDL_EVENT_GAMEPAD_TOUCHPAD_UP ? "up" : "move",
+                   e.gtouchpad.x, e.gtouchpad.y);
+            fflush(stdout);
+            break;
+        }
         case SDL_EVENT_GAMEPAD_BUTTON_DOWN: {
             if (!pad || SDL_GetGamepadID(pad) != e.gbutton.which) break;
             int b = e.gbutton.button;
