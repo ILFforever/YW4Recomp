@@ -600,7 +600,8 @@ On Ordinary Street with the performance HUD on (F3). The frame takes about 19 ms
 Requirements: Python 3.11+, Git, a C compiler (Clang 19 or newer recommended:
 [llvm-mingw](https://github.com/mstorsjo/llvm-mingw) on Windows; GCC 15 or newer also works), a GPU with Vulkan 1.3, and
 `glslangValidator` (from the [Vulkan SDK](https://vulkan.lunarg.com/), or a standalone glslang). SDL3 is fetched
-automatically on Windows. Full steps in [docs/setup.md](docs/setup.md).
+automatically on Windows. Full steps in [docs/setup.md](docs/setup.md), and step by step for Windows and Linux on
+[the build page](https://ilfforever.github.io/YW4Recomp/build/).
 
 Disk space: an install takes about 11.3 GB, or 9.3 GB after "Free up space". Building from an NSP or XCI peaks near
 20.7 GB; from extracted folders, about 11.4 GB ([disk usage](docs/disk-usage.md)).
@@ -619,6 +620,22 @@ Runtime options are environment variables, for example `YW4_SHADOW_RES=1024`: in
 Runtime options, capture keys, input replay and the frame-inspection tools are in
 [docs/debugging.md](docs/debugging.md). Every run writes its log to `work/logs/`: it names the GPU and driver in use,
 and is the file to send with a bug report.
+
+### Building on Linux
+
+The same steps as above, with the tools from your distribution: Clang 19+ (or GCC 15+), Python 3.11+, Git,
+pkg-config, glslang and SDL3 with its headers, plus a Vulkan driver (Mesa or NVIDIA's).
+
+```
+sudo pacman -S clang python git pkgconf glslang sdl3                        # Arch
+sudo dnf install clang python3 git pkgconf glslang SDL3-devel               # Fedora
+sudo apt install clang python3 git pkg-config glslang-tools libsdl3-dev     # Debian 13, Ubuntu 25.04+
+```
+
+Set `[tools] cc = "clang"` in `config.local.toml`, then build as in steps 1-5. After that, start the game with
+`./work/build/yw4` alone: the build writes your game and DLC folders into `work/build/game.ini`, and the game makes
+its save folder (`~/.local/share/YW4Recomp/save`) itself. Ubuntu 24.04 has no SDL3 package: see
+[docs/setup.md](docs/setup.md#requirements). AMD FSR, NVIDIA DLSS, frame generation and Reflex are Windows only for now.
 
 ## Project layout
 
