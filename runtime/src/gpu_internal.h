@@ -124,6 +124,10 @@ struct GpuImage {
     uint64_t uploaded_frame;  /* YW4_GPU_REUPLOAD: the frame it was last uploaded in */
     uint32_t upload_gen;      /* write generation (gpu.c) when it was last uploaded */
     uint32_t checked_gen;     /* ... when its pages were last found unchanged */
+    uint32_t reg_gen;         /* the newest registration (NvnTexture.reg_gen) it was uploaded for */
+    uint64_t sample;          /* hosts without write tracking, movie planes: a sample of the content uploaded */
+    uint64_t print;           /* YW4_REUPLOAD_LOG: its storage's content when last uploaded */
+    uint32_t flush_seen;      /* YW4_REUPLOAD_LOG: flush_count (gpu.c) when last uploaded */
 };
 
 /* Effects resolution: t (a distance-blur image) keeps the game's size ratio (gpu.c). */

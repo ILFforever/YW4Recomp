@@ -354,7 +354,19 @@ typedef struct {
     VkBuffer buf;
     uint32_t *page_gen;  /* per 4 KiB page: the write generation it was last seen written in */
     int untracked;       /* the host can't track writes to it: every page counts as written */
+    uint32_t *flush_seq; /* per 4 KiB page: the last FlushMappedRange that covered it (flush_count's value) */
 } GpuPool;
+
+static uint32_t flush_count;  /* FlushMappedRange calls so far (gpu_note_flushed) */
+
+/* Has a FlushMappedRange covered a page of [addr, addr + size) since flush_count was `seen`? */
+static int flushed_since(const NvnPool *p, uint64_t addr, uint64_t size, uint32_t seen) {
+    const GpuPool *gp = p->gpu;
+    uint64_t end = addr + size < p->storage + p->size ? addr + size : p->storage + p->size;
+    for (uint64_t a = (addr - p->storage) >> 12, z = (end - 1 - p->storage) >> 12; a <= z; a++)
+        if (__atomic_load_n(&gp->flush_seq[a], __ATOMIC_RELAXED) > seen) return 1;
+    return 0;
+}
 
 /* CPU writes to the pools (decision 0021): once a frame, the pages written since the last
  * frame get the new write generation (host_written_pages; Windows tracks writes per page).
@@ -378,7 +390,7 @@ static NvnPool *pool_of(uint64_t addr) {
 }
 
 static void scan_writes(void) {
-    write_gen++;
+    __atomic_add_fetch(&write_gen, 1, __ATOMIC_RELAXED);  /* gpu_note_written counts too, on game threads */
     for (int i = 0; i < npools; i++) {
         NvnPool *p = pools[i];
         GpuPool *g = p->gpu;
@@ -387,13 +399,71 @@ static void scan_writes(void) {
     }
 }
 
+/* Where the host can't see which pages the game writes (Linux for now: host.c), a texture is uploaded again on the
+ * events that change it, not on a guess. Page tracking can't work there: the pools are host memory imported into
+ * the GPU driver, and amdgpu and i915 take every page of them for writing at each submission, so a write-protect
+ * or a soft-dirty bit would see every page written (kernel 6.12 source, 2026-11-13). Measured on Windows with
+ * YW4_REUPLOAD_LOG over 7 scenes (town, busy spots, late game, cutscene): the game rewrites a texture without
+ * WriteTexels only for the title movie's planes (one level of R8: Y 1920x1080, U and V 960x540); every other
+ * texture's content never changed after its first upload. So, on such a host, t is uploaded again when
+ *  - a newer registration of it than the image's last upload is drawn with (the game loaded a new texture
+ *    into memory an old one used: it registers it before drawing with it),
+ *  - our own code wrote its pages (WriteTexels: gpu_note_written),
+ *  - it is a movie plane and a sample of its content differs from the last upload's. */
+static int movie_plane(const NvnTexture *t) {
+    return t->format == 0x01 && t->layout.levels <= 1 && t->target == TARGET_2D;
+}
+
+/* Every 64th 8-byte word and the last: a movie frame changes nearly every texel, so this sees every new frame for
+ * ~1/64 of the reading (a 1920x1080 plane: 4 KB instead of 2 MB) */
+static uint64_t storage_sample(const NvnTexture *t) {
+    uint64_t n = tegra_total_size(&t->layout) / 8, h = 0xcbf29ce484222325ull;
+    const uint64_t *m = (const uint64_t *)(uintptr_t)t->addr;
+    for (uint64_t i = 0; i < n; i += 64) h = (h ^ m[i]) * 0x100000001b3ull;
+    if (n) h = (h ^ m[n - 1]) * 0x100000001b3ull;
+    return h | 1;
+}
+
+void gpu_note_written(uint64_t addr, uint64_t size) {
+    NvnPool *p = size ? pool_of(addr) : NULL;
+    if (!p || !p->gpu || !((GpuPool *)p->gpu)->untracked) return;  /* tracked: the host saw the write itself */
+    uint64_t end = addr + size < p->storage + p->size ? addr + size : p->storage + p->size;
+    uint32_t gen = __atomic_add_fetch(&write_gen, 1, __ATOMIC_RELAXED);  /* newer than every upload so far */
+    for (uint64_t a = (addr - p->storage) >> 12, z = (end - 1 - p->storage) >> 12; a <= z; a++)
+        __atomic_store_n(&((GpuPool *)p->gpu)->page_gen[a], gen, __ATOMIC_RELAXED);
+}
+
+/* nvnMemoryPoolFlushMappedRange / nvnBufferFlushMappedRange: the game says the CPU wrote [addr, addr + size) for
+ * the GPU (on the console a CPU-cached pool needs it). Measured for now (YW4_REUPLOAD_LOG). */
+void gpu_note_flushed(uint64_t addr, uint64_t size) {
+    NvnPool *p = size ? pool_of(addr) : NULL;
+    if (!p || !p->gpu) return;
+    uint64_t end = addr + size < p->storage + p->size ? addr + size : p->storage + p->size;
+    uint32_t seq = __atomic_add_fetch(&flush_count, 1, __ATOMIC_RELAXED);
+    for (uint64_t a = (addr - p->storage) >> 12, z = (end - 1 - p->storage) >> 12; a <= z; a++)
+        __atomic_store_n(&((GpuPool *)p->gpu)->flush_seq[a], seq, __ATOMIC_RELAXED);
+}
+
+static int untracked_changed(const NvnTexture *t, GpuImage *g) {
+    if (t->reg_gen > g->reg_gen) return 1;
+    NvnPool *p = pool_of(t->addr);  /* pages our own code wrote (gpu_note_written) */
+    const GpuPool *gp = p->gpu;
+    uint64_t end = t->addr + tegra_total_size(&t->layout);
+    if (end > p->storage + p->size) end = p->storage + p->size;
+    for (uint64_t a = (t->addr - p->storage) >> 12, z = (end - 1 - p->storage) >> 12; a <= z; a++)
+        if (__atomic_load_n(&gp->page_gen[a], __ATOMIC_RELAXED) > g->upload_gen) return 1;
+    if (movie_plane(t) && storage_sample(t) != g->sample) return 1;
+    g->checked_gen = write_gen;  /* asked again this frame (gpu_needs_transfer, then image_of): the same answer */
+    return 0;
+}
+
 /* Has the CPU written t's storage since its image g was last uploaded? */
 static int cpu_changed(const NvnTexture *t, GpuImage *g) {
     if (!g || !t->addr || t->pool_flags & POOL_CPU_NO_ACCESS || g->checked_gen == write_gen) return 0;
     NvnPool *p = pool_of(t->addr);
     if (!p) return 0;
     const GpuPool *gp = p->gpu;
-    if (gp->untracked) return 1;
+    if (gp->untracked) return untracked_changed(t, g);
     uint64_t end = t->addr + tegra_total_size(&t->layout);
     if (end > p->storage + p->size) end = p->storage + p->size;
     for (uint64_t a = (t->addr - p->storage) >> 12, z = (end - 1 - p->storage) >> 12; a <= z; a++)
@@ -449,9 +519,16 @@ static void pool_import(NvnPool *p) {
     CHECK(vkAllocateMemory(vk.device, &mai, NULL, &g->mem));
     CHECK(vkBindBufferMemory(vk.device, g->buf, g->mem, 0));
     g->page_gen = calloc(p->size >> 12, sizeof *g->page_gen);
-    if (!g->page_gen) gpu_stop("no memory for write tracking");
+    g->flush_seq = calloc(p->size >> 12, sizeof *g->flush_seq);
+    if (!g->page_gen || !g->flush_seq) gpu_stop("no memory for write tracking");
+    if (getenv("YW4_REUPLOAD_LOG") && atoi(getenv("YW4_REUPLOAD_LOG")))
+        fprintf(stderr, "yw4: reupload: pool %#" PRIx64 " + %#" PRIx64 " flags %#x\n", p->storage, p->size, p->flags);
     p->gpu = g;
-    host_written_pages(p->storage, p->size, mark_written, p);  /* writes before now: uploads read them anyway */
+    /* writes before now: uploads read them anyway. YW4_UNTRACKED=1 (tests): as a host that can't track writes
+     * (Linux), so its rules run on Windows at full speed */
+    static int untracked_test = -1;
+    if (untracked_test < 0) untracked_test = getenv("YW4_UNTRACKED") && atoi(getenv("YW4_UNTRACKED"));
+    if (untracked_test || host_written_pages(p->storage, p->size, mark_written, p) < 0) g->untracked = 1;
     host_lock(&gpu_lock);
     pools[npools++] = p;
     host_unlock(&gpu_lock);
@@ -468,6 +545,7 @@ void gpu_pool_finalize(NvnPool *p) {
     vkDestroyBuffer(vk.device, g->buf, NULL);
     vkFreeMemory(vk.device, g->mem, NULL);
     free(g->page_gen);
+    free(g->flush_seq);
     free(g);
     p->gpu = NULL;
 }
@@ -487,8 +565,12 @@ typedef struct {
     uint32_t copied_gen, checked_gen;
     uint32_t copies;             /* made again this many times: GEO_DYNAMIC and it stays in the pool */
     uint64_t print;              /* a small range's contents when copied (geo_print) */
+    uint64_t lprint;             /* YW4_REUPLOAD_LOG: the whole range's contents when copied */
+    uint32_t flush_seen;         /* YW4_REUPLOAD_LOG: flush_count when copied */
+    uint32_t made;               /* copied at least once */
 } GeoCopy;
 static GeoCopy geo[GEO_SLOTS];
+static int reupload_log(void);
 static VkBuffer geo_buf;
 static VkDeviceMemory geo_mem;
 static uint64_t geo_used;   /* in the current half */
@@ -545,8 +627,13 @@ static GeoCopy *geo_find(uint64_t addr, uint64_t size, int add) {
 /* Does the range's copy need making (again)? Its pages, checked once a frame. */
 static int geo_stale(GeoCopy *c, const NvnPool *p) {
     if (!c->copied_gen) return 1;
-    if (c->checked_gen == write_gen) return 0;
     const GpuPool *gp = p->gpu;
+    /* a host that can't see the game's writes: the game's flushes say what it wrote. Measured on Windows over two
+     * scenes (2026-11-13, YW4_REUPLOAD_LOG): all 31,522 copies made again whose content had changed were of
+     * ranges the game had flushed since; the 32 unflushed ones were unchanged. Checked at every use, as flushes
+     * come any time (game threads), not once a frame. */
+    if (gp->untracked) return flushed_since(p, c->addr, c->size, c->flush_seen);
+    if (c->checked_gen == write_gen) return 0;
     for (uint64_t a = (c->addr - p->storage) >> 12, z = (c->addr + c->size - 1 - p->storage) >> 12; a <= z; a++)
         if (gp->page_gen[a] > c->copied_gen) return 1;
     c->checked_gen = write_gen;
@@ -576,7 +663,7 @@ static int geo_print_on(void) {
 int gpu_geometry_needs_copy(uint64_t addr, uint64_t size) {
     if (!gpu_vram_geometry() || !size) return 0;
     NvnPool *p = pool_of(addr);
-    if (!p || addr + size > p->storage + p->size || ((GpuPool *)p->gpu)->untracked) return 0;
+    if (!p || addr + size > p->storage + p->size) return 0;
     GeoCopy *c = geo_find(addr, size, 1);
     if (!c || c->copies >= GEO_DYNAMIC) return 0;
     if (geo_stale(c, p)) return 1;
@@ -611,7 +698,18 @@ void gpu_geometry_copy(VkCommandBuffer cb, uint64_t addr, uint64_t size) {
     GeoCopy *c = geo_find(addr, size, 0);
     if (!c) return;
     VkBufferCopy bc = {.srcOffset = addr - p->storage, .dstOffset = c->at, .size = size};
+    uint32_t flushes = __atomic_load_n(&flush_count, __ATOMIC_RELAXED);  /* before the copy's reading is recorded */
     vkCmdCopyBuffer(cb, ((GpuPool *)p->gpu)->buf, geo_buf, 1, &bc);
+    if (reupload_log()) {  /* a copy made again: did the content change, and did the game flush it? */
+        uint64_t print = geo_print(addr, size);
+        if (c->made)
+            fprintf(stderr, "yw4: regeo: frame %" PRIu64 " addr %#" PRIx64 " bytes %" PRIu64 " copies %u content %s flushed %s%s\n",
+                    present_count + 1, addr, size, c->copies, print == c->lprint ? "same" : "changed",
+                    flushed_since(p, addr, size, c->flush_seen) ? "yes" : "no",
+                    print != c->lprint && !flushed_since(p, addr, size, c->flush_seen) ? " untracked rule MISSED" : "");
+        c->lprint = print, c->made = 1;
+    }
+    c->flush_seen = flushes;  /* flushes after this make it stale */
     if (c->copied_gen && ++c->copies == GEO_DYNAMIC) {
         static int logged;
         if (logged++ < 8)
@@ -626,7 +724,10 @@ void gpu_geometry_copy(VkCommandBuffer cb, uint64_t addr, uint64_t size) {
 static int geometry_at(uint64_t addr, uint64_t size, VkBuffer *buf, VkDeviceSize *off) {
     if (!gpu_vram_geometry() || !geo_buf) return 0;
     GeoCopy *c = geo_find(addr, size, 0);
-    if (!c || !c->copied_gen || c->checked_gen != write_gen || c->copies >= GEO_DYNAMIC) return 0;
+    if (!c || !c->copied_gen || c->copies >= GEO_DYNAMIC) return 0;
+    const NvnPool *p = pool_of(addr);
+    if (p && ((GpuPool *)p->gpu)->untracked ? flushed_since(p, addr, size, c->flush_seen) : c->checked_gen != write_gen)
+        return 0;
     *buf = geo_buf, *off = c->at;
     return 1;
 }
@@ -930,8 +1031,43 @@ static uint32_t detile(VkCommandBuffer cb, NvnTexture *t, GpuImage *g) {
     return mask;
 }
 
+/* YW4_REUPLOAD_LOG=1 (diagnostic): a line for every upload of a texture that already had its image: what made it
+ * due (WriteTexels, or its pages written), whether this texture object was used before, how many frames ago the
+ * image was last uploaded, and whether the storage's content differs from what was uploaded then. To learn which
+ * textures the game rewrites without telling NVN (the hosts that can't track page writes need to know). */
+static int reupload_log(void) {
+    static int on = -1;
+    if (on < 0) on = getenv("YW4_REUPLOAD_LOG") && atoi(getenv("YW4_REUPLOAD_LOG"));
+    return on;
+}
+
+static uint64_t storage_print(const NvnTexture *t) {
+    uint64_t n = tegra_total_size(&t->layout) / 8, h = 0xcbf29ce484222325ull;
+    const uint64_t *m = (const uint64_t *)(uintptr_t)t->addr;
+    for (uint64_t i = 0; i < n; i++) h = (h ^ m[i]) * 0x100000001b3ull;
+    return h | 1;
+}
+
 static void upload(VkCommandBuffer cb, NvnTexture *t, GpuImage *g) {
     int64_t t0 = host_now_ns();
+    if (reupload_log() && t->addr && !(t->pool_flags & POOL_CPU_NO_ACCESS) && g->aspect == VK_IMAGE_ASPECT_COLOR_BIT) {
+        uint64_t print = storage_print(t);
+        /* "untracked rule MISSED": the content changed and none of the untracked rule's events say so (a WriteTexels
+         * on Windows shows here too: tracked pools don't note them) */
+        int missed = print != g->print && t->reg_gen <= g->reg_gen && !movie_plane(t);
+        if (g->print)
+            fprintf(stderr, "yw4: reupload: frame %" PRIu64 " addr %#" PRIx64 " %ux%u depth %u layers %u levels %u format %#x bytes %" PRIu64
+                            " cause %s object %s age %" PRIu64 " content %s%s flushed %s\n",
+                    present_count + 1, t->addr, t->layout.width, t->layout.height, t->layout.depth, t->layout.layers,
+                    t->layout.levels, t->format, (uint64_t)tegra_total_size(&t->layout),
+                    t->cpu_written ? "writetexels" : "pages", t->reg_gen > g->reg_gen ? "new" : "used",
+                    present_count - g->uploaded_frame, print == g->print ? "same" : "changed",
+                    missed ? " untracked rule MISSED" : "",
+                    flushed_since(pool_of(t->addr), t->addr, tegra_total_size(&t->layout), g->flush_seen) ? "yes" : "no");
+        g->print = print, g->flush_seen = __atomic_load_n(&flush_count, __ATOMIC_RELAXED);
+    }
+    if (t->reg_gen > g->reg_gen) g->reg_gen = t->reg_gen;
+    if (t->addr && movie_plane(t)) g->sample = storage_sample(t);
     upload_texels(cb, t, g);
     gpu_stall_add(STALL_UPLOAD, host_now_ns() - t0);
 }
@@ -1637,8 +1773,8 @@ GpuImage *image_of(VkCommandBuffer cb, NvnTexture *t) {
     if (g) {
         g->last_frame = present_count, g->last_seq = cur ? cur->seq : g->last_seq;
         if (reupload_due(t, g) || t->cpu_written) {
-            t->cpu_written = 0;
             upload(cb, t, g);
+            t->cpu_written = 0;
         }
         return g;
     }

@@ -79,6 +79,11 @@ int gpu_pcss_filter8(void);
 void gpu_pcss_filter8_toggle(void);
 
 void gpu_pool_init(NvnPool *p);  /* imports the pool's memory into Vulkan */
+/* Our own code wrote [addr, addr + size) of a pool (WriteTexels): marked as written where the host can't see
+ * writes, so textures there are uploaded again (gpu.c cpu_changed). */
+void gpu_note_written(uint64_t addr, uint64_t size);
+/* The game's FlushMappedRange of [addr, addr + size) (gpu.c). */
+void gpu_note_flushed(uint64_t addr, uint64_t size);
 void gpu_pool_finalize(NvnPool *p);
 void gpu_texture_finalize(NvnTexture *t);
 void gpu_program_finalize(NvnProgram *p);

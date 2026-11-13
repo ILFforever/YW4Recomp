@@ -72,6 +72,7 @@ typedef struct {
     int pool_id;          /* the id it was registered at last (the takeover finds textures by it) */
     void *found;          /* the image gpu.c found for it last, valid while found_epoch is current */
     uint32_t found_epoch;
+    uint32_t reg_gen;     /* pool entries' copies: which registration this is (nvn_objects.c counts them; 0: none) */
 } NvnTexture;
 
 typedef struct {

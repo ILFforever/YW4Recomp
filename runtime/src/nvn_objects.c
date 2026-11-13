@@ -287,7 +287,8 @@ NVN(nvnMemoryPoolFinalize) {
 }
 NVN(nvnMemoryPoolMap) { RET(HOST(NvnPool, A(0))->storage); }
 NVN(nvnMemoryPoolGetFlags) { RET(HOST(NvnPool, A(0))->flags); }
-NVN(nvnMemoryPoolFlushMappedRange) { (void)c; }       /* CPU writes visible to the GPU: shared memory already */
+/* CPU writes visible to the GPU: shared memory already. Noted: the game says what it wrote (pool, offset, size). */
+NVN(nvnMemoryPoolFlushMappedRange) { gpu_note_flushed(HOST(NvnPool, A(0))->storage + A(1), A(2)); }
 NVN(nvnMemoryPoolInvalidateMappedRange) { (void)c; }
 
 /* ================================================================== buffers
@@ -307,7 +308,7 @@ NVN(nvnBufferInitialize) {
 NVN(nvnBufferFinalize) { (void)c; }
 NVN(nvnBufferMap) { RET(G(uint64_t, A(0), 0)); }
 NVN(nvnBufferGetAddress) { RET(G(uint64_t, A(0), 0)); }
-NVN(nvnBufferFlushMappedRange) { (void)c; }
+NVN(nvnBufferFlushMappedRange) { gpu_note_flushed(G(uint64_t, A(0), 0) + A(1), A(2)); }  /* (buffer, offset, size) */
 NVN(nvnBufferInvalidateMappedRange) { (void)c; }
 
 /* ================================================================== textures
@@ -459,6 +460,7 @@ NVN(nvnTextureWriteTexels) {
     } else {
         tegra_write_region(&t->layout, (uint8_t *)(uintptr_t)t->addr, level, layer, x, y, z, rw, rh, rd, src);
     }
+    gpu_note_written(t->addr, tegra_total_size(&t->layout));  /* after the bytes: draws use the registration's copy */
 }
 
 /* Texture views: our layout of the 0x28-byte NVNtextureView, a set-mask and the fields */
@@ -531,6 +533,10 @@ static void *desc_entry(CPUState *c, size_t entry) {  /* (pool, id, ...) */
 
 NVN(nvnTexturePoolInitialize) { desc_pool_init(c, sizeof(NvnTexEntry)); }
 NVN(nvnTexturePoolFinalize) { desc_pool_finalize(c); }
+/* Every registration gets the next number: a newer one of the same memory than the image's last upload is a
+ * reason to upload it again where the host can't see the game's writes (gpu.c cpu_changed). */
+static uint32_t registrations;
+
 static void register_texture(CPUState *c) {  /* (pool, id, texture, view or NULL) */
     NvnTexEntry *e = desc_entry(c, sizeof *e);
     NvnTexture *t = HOST(NvnTexture, A(2));
@@ -538,6 +544,7 @@ static void register_texture(CPUState *c) {  /* (pool, id, texture, view or NULL
     t->pool_id = (int)A(1);
     e->snap = *t;  /* a copy, as the hardware's descriptor is */
     e->snap.gpu = NULL;
+    e->snap.reg_gen = __atomic_add_fetch(&registrations, 1, __ATOMIC_RELAXED);
     e->tex = &e->snap;
     e->has_view = A(3) != 0;
     e->guest = A(2);

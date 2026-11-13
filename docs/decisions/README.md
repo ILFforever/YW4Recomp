@@ -73,3 +73,4 @@ lists later records that replace a record, or part of it.
 | 0062 | [First start: graphics picked for the GPU, two levels](0062-first-start-graphics.md) | accepted | 2026-11-11 |  | `runtime/src/settings.c`, `runtime/src/window.c` |
 | 0063 | [Pipeline cache and journal on disk, and when they are thrown away](0063-pipeline-cache.md) | accepted | 2026-11-12 |  | `runtime/src/gpu_pcache.c`, `runtime/src/gpu_draw.c` |
 | 0064 | [Holding 30 and 60 frames/s: the vsync tick, or the display's refresh](0064-pacing-tick-or-refresh.md) | accepted | 2026-11-12 |  | `runtime/src/framerate.c`, `runtime/src/vi.c`, `runtime/src/perf.c` |
+| 0065 | [Linux: textures and geometry follow the game's events, not page tracking](0065-linux-upload-events.md) | accepted | 2026-11-13 |  | `runtime/src/gpu.c`, `runtime/src/nvn_objects.c`, `runtime/src/gpu.h`, `docs/debugging.md` |
