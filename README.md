@@ -45,32 +45,28 @@
 ## Status
 
 > [!TIP]
-> **1.0.0 releasing soon:** the first release, with the launcher. See [How to play](#how-to-play).
+> **1.0.0 is out (beta):** the first release, with the launcher.
+> [**Download it here**](https://github.com/ILFforever/YW4Recomp/releases/latest), then see [How to play](#how-to-play).
 
-Work in progress: not tested from start to finish yet. What runs so far: from boot through the start of a new
-game (logos, title menu, name entry in a popup, Yo-kai nicknames included, the opening cutscenes, the Amano house
-and town, the Yo-kai Pad menus, the diary and autosave), and from late-game saves: towns at night, the bamboo forest, the Yo-kai World, and battles.
-Most of the game has not been tried.
+**Playable, but not finished.** Nobody has played the game from start to finish yet.
 
-- **Frame rate**: the game's 30 frames/s, or 60, 120, 144 or no limit (FRAME RATE in Settings, F1). The game
-  moves by real time, so walking, battles, menus and cutscenes all work at any rate. The game's own 30 holds
-  everywhere tested.
-- **Graphics**: up to 4K and ultrawide, sharper shadows and textures, TAA, and upscaling with NVIDIA DLSS or AMD FSR
-  for high frame rates at 4K (~85-118 frames/s at 4K 21:9 with DLSS or FSR on an RTX 4070 laptop), and frame generation
-  with NVIDIA DLSS or AMD FSR (about twice as many frames on screen). Parts of the game's renderer already run as our
-  own code (shadows, surfaces, the shadow mask, bloom, distance blur, most screen passes).
+- **Tested:** from boot through the start of a new game (the opening, the Amano house and the town), and from
+  late-game saves: towns at night, the bamboo forest, the Yo-kai World and battles.
+- **Not tested:** most of the story in between. Expect missing effects and crashes in places nobody has reached.
+- **Found a bug?** Use **Report a bug** in the launcher or in the game's overlay.
 
-Expect missing effects and crashes in places nobody has reached yet.
-
-- How it got here, step by step: [docs/progress.md](docs/progress.md)
-- What is known to be missing or wrong: [docs/known-issues.md](docs/known-issues.md)
+More: [what is known to be missing or wrong](docs/known-issues.md) · [how it got here, step by step](docs/progress.md)
 
 ## How to play
 
-The launcher is coming out soon. It takes your game files (NSP, XCI or extracted folders), checks them, builds the
-game on your PC once (about 10 to 15 minutes) and starts it. After that it opens on **Play**, with what's new, your
-screenshots, mods, DLC, saves and logs. Its theme is synced with the in-game overlay's. Until it is out, you can
-[build from source](#building-from-source). Every step and screen is on [the launcher's page](https://ilfforever.github.io/YW4Recomp/launcher/).
+**[Download the launcher](https://github.com/ILFforever/YW4Recomp/releases/latest)** (Windows): the installer, or
+the portable zip, which is the same app with no installer.
+
+It takes your game files (NSP, XCI or extracted folders), checks them, builds the game on your PC once (about 10 to
+15 minutes) and starts it. After that it opens on **Play**, with what's new, your screenshots, mods, DLC, saves and
+logs. Its theme is synced with the in-game overlay's, and game updates come through it. Every step and screen is on
+[the launcher's page](https://ilfforever.github.io/YW4Recomp/launcher/). On Linux, or to work on the code,
+[build from source](#building-from-source).
 
 The launcher building the game (video):
 
@@ -557,7 +553,7 @@ On Ordinary Street with the performance HUD on (F3). The frame takes about 19 ms
 | **Better anti-aliasing** | FXAA, SMAA and TAA (steady thin edges: fences, nets, leaves) on the 3D scene before the UI is drawn, so text stays crisp; per-object motion for TAA next (a first version is in, off by default) |
 | **Mouse control for the Yo-kai Pad** | Pointing, clicking and wheel scrolling work on the Yo-kai Pad and the pages opened from it, such as the item and quest lists, Ukiukipedia and Members ([decision 0057](docs/decisions/0057-mouse-menu-lists.md)). On 2026-11-08 some pages still had open issues (Watch skills, Soulmate, Trophies, Treasure photos, Switch moves) |
 | **In-game overlay** | Escape or a controller button pauses the game and opens a side panel: settings, controls, the performance HUD's options, screenshots and exit, drawn like its design ([decision 0053](docs/decisions/0053-in-game-overlay.md)); Preview shows graphics changes live, and themes match the launcher's ([decision 0055](docs/decisions/0055-overlay-themes.md)). Next: testing on more controllers |
-| **Launcher** | A Windows app that takes your game files, checks them, builds the game and starts it, with mods, DLC, saves and screenshots in one place. Works from start to finish. The installer and the portable zip are built ([decision 0052](docs/decisions/0052-launcher-packaging.md)), and a game build was tested on a second PC. Not released yet: until it is, [build from source](#building-from-source) |
+| **Launcher** | A Windows app that takes your game files, checks them, builds the game and starts it, with mods, DLC, saves and screenshots in one place. Works from start to finish. The installer and the portable zip are built ([decision 0052](docs/decisions/0052-launcher-packaging.md)), and a game build was tested on a second PC. Released with 1.0.0 (2026-11-13): [download](https://github.com/ILFforever/YW4Recomp/releases/latest) |
 
 </details>
 
