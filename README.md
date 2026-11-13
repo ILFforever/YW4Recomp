@@ -10,7 +10,7 @@
 
 <p align="center">
   <img alt="Phase 4: renderer" src="https://img.shields.io/badge/phase-4%20·%20renderer-6f42c1">
-  <img alt="Platform: Windows, Linux experimental" src="https://img.shields.io/badge/platform-Windows%20(Linux%20experimental)-informational">
+  <img alt="Platform: Windows, Linux" src="https://img.shields.io/badge/platform-Windows%20%7C%20Linux-informational">
   <img alt="Graphics" src="https://img.shields.io/badge/graphics-Vulkan-ac162c">
   <img alt="Status: work in progress" src="https://img.shields.io/badge/status-work%20in%20progress-yellow">
 </p>
@@ -33,9 +33,9 @@
 > - Windows - x86-64, Vulkan graphics backend (this is what is built and tested): NVIDIA RTX, and AMD Radeon
 >   ([decision 0059](docs/decisions/0059-amd-depth-format-fallback.md)): a Ryzen 5 7530U laptop's integrated graphics
 >   runs it at about 35-40 frames/s at native resolution, where the Eden emulator gets 22-30
-> - Linux - x86-64, Vulkan: experimental. It builds from source and draws the first screens (Ubuntu 24.04 under
->   WSL, software rendering); a real GPU, audio and controllers are not tested yet. FSR, DLSS, frame generation
->   and Reflex are Windows only for now
+> - Linux - x86-64, Vulkan: works. Tester [ouni666](https://github.com/ouni666) plays it on AOSC OS (KDE Plasma, Wayland) with an AMD RX 6600 XT at
+>   about 110-120 frames/s, the GPU at full load, with sound and controls working. Built from source for now (the launcher is Windows only). FSR,
+>   DLSS, frame generation and Reflex are Windows only for now
 
 > [!NOTE]
 > **Bring your own game.** Nothing from the game is in this repository. You need files from your own copy of
@@ -547,7 +547,7 @@ On Ordinary Street with the performance HUD on (F3). The frame takes about 19 ms
 
 | Goal | Where it stands |
 |---|---|
-| **Linux** | Builds from source and starts (2026-11-12, Ubuntu 24.04 under WSL): the first screens draw. Next: a real GPU, audio and controllers. FSR, DLSS, frame generation and Reflex are Windows only for now |
+| **Linux** | Works (2026-11-13): tester [ouni666](https://github.com/ouni666) plays it on AOSC OS with an AMD RX 6600 XT at about 110-120 frames/s, sound and controls included. Built from source for now (the launcher is Windows only). FSR, DLSS, frame generation and Reflex are Windows only for now |
 | **Our own renderer** | Replace the game's renderer pass by pass: the base for the graphics features above; shadows, surfaces, the shadow mask, bloom, distance blur and most screen passes (lighting, sky, tone mapping) are ours already |
 | **Better shadows** | Bigger shadow maps, PCSS soft shadows and contact shadows done; steadier cascades next |
 | **Better anti-aliasing** | FXAA, SMAA and TAA (steady thin edges: fences, nets, leaves) on the 3D scene before the UI is drawn, so text stays crisp; per-object motion for TAA next (a first version is in, off by default) |

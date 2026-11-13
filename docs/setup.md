@@ -16,8 +16,8 @@ the decompressed `main`).
   on Linux install it from your distribution (`pkg-config sdl3` must find it). Where there is no package (Ubuntu
   24.04), build [SDL3](https://github.com/libsdl-org/SDL/releases) from source with CMake into a folder of your
   own, then build and run with `PKG_CONFIG_PATH=<folder>/lib/pkgconfig` and `LD_LIBRARY_PATH=<folder>/lib`.
-- Linux is new (first built and started 2026-11-12, Ubuntu 24.04 under WSL with Clang 19, software rendering): it
-  compiles, links and draws the first screens. Not yet tried there: a real GPU, audio, controllers. AMD FSR,
+- Linux works: first built 2026-11-12 (Ubuntu 24.04 under WSL, Clang 19); on 2026-11-13 tester [ouni666](https://github.com/ouni666) played it on
+  AOSC OS (KDE Plasma, Wayland, Mesa RADV) with an AMD RX 6600 XT at about 110-120 frames/s. AMD FSR,
   NVIDIA DLSS, frame generation and Reflex are Windows only: their rows in the settings are locked with "Not
   supported on Linux yet", and anti-aliasing offers FXAA, SMAA and TAA.
 - On Windows the first build also downloads AMD FSR (upscaling, frame generation), NVIDIA DLSS and NVIDIA
