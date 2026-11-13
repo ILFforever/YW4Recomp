@@ -17,10 +17,12 @@ sha2 = "0.10"
 toml = "0.8"
 
 [profile.release]
-# a small launcher: it only shows screens and runs the build steps
+# a small launcher: it only shows screens and runs the build steps. Thin LTO over 16 units, not full LTO on 1:
+# packaging after a launcher change went from ~163 s of Rust compile to ~47 s (2026-11-13, owner's 16 threads),
+# for 8.9 MB instead of 8.0 MB; the launcher's own speed doesn't matter
 opt-level = "s"
-lto = true
-codegen-units = 1
+lto = "thin"
+codegen-units = 16
 strip = true
 
 # Windows' own API, already in the build through Tauri: free disk space, starting tools without a console window
