@@ -510,6 +510,34 @@ static uint8_t *game_copy(Dir *root, const File *f, const char *rel, size_t *n) 
     return NULL;
 }
 
+/* The list's sizes of loose files must be the files the game reads: it reads a loose file by the size its entry
+ * gives. A mod that frees a file writes its own copy's size in its list (the English patch: 2,168 of its 2,984
+ * files); the list that wins is one mod's, and a merged data file has a size no list has. Measured 2026-11-14: the
+ * translation's item text (177,072 bytes) listed with the game's 324,736 by another mod's list drew every item
+ * name blank, and a merged item list read past its end emptied the menu. So every loose entry gets the size of the
+ * file at its path after all the laying over and merging. */
+static void fix_list_sizes(Dir *root) {
+    File *list = find_file(root, "data/cpk_list.cfg.bin");
+    if (!list || !list->nlayers) return;  /* the game's own list: its sizes are its files' */
+    size_t n = list->mem ? list->size : 0;
+    uint8_t *b = list->mem ? list->mem : read_all(list->path, &n);
+    CpkEntry *e = NULL;
+    int ne = b ? cpk_entries(b, n, &e) : -1, fixed = 0;
+    for (int i = 0; i < ne; i++) {
+        if (!e[i].loose) continue;
+        const File *f = find_file(root, e[i].path);
+        size_t at = e[i].archive + 4;  /* the size: the value after the archive */
+        if (!f || f->size > 0xFFFFFFFFu || at + 4 > n || get32(b + at) == (uint32_t)f->size) continue;
+        uint32_t sz = (uint32_t)f->size;
+        memcpy(b + at, &sz, 4);
+        fixed++;
+    }
+    free(e);
+    if (fixed && !list->mem) list->mem = b, list->size = n;
+    else if (b != list->mem) free(b);
+    if (fixed) fprintf(stderr, "yw4: mods: cpk_list: %d loose files' sizes set to the files read\n", fixed);
+}
+
 static void merge_data_files(Dir *root, Dir *d, char *rel, size_t rl) {
     for (int i = 0; i < d->nfiles; i++) {
         File *f = d->files[i];
@@ -623,6 +651,7 @@ static void apply_mods(Dir *root) {
         char rel[1024] = "";
         merge_data_files(root, root, rel, 0);
     }
+    if (!clash_check) fix_list_sizes(root);
 }
 
 /* yw4 --mod-clashes <romfs>: for the launcher's Mods tab (decision 0068). Every mod in YW4_MODS, on or off, is laid

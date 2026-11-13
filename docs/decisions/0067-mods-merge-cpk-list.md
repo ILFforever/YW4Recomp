@@ -37,6 +37,14 @@ did not find.
   is measured against the game's own list, per path (a path is loose only if all its entries are). Anything else a
   later mod changed in its list stays as it was. The result lives in memory (`File.mem`); no file is written.
 - If any list can't be read as a cfg.bin, the old behaviour (last one wins) stays and the log says why.
+- **Sizes** (found 2026-11-14): a file's entry also holds its size, and the game reads a loose file by that size.
+  A mod that frees a file writes its own copy's size (the English patch: 2,168 of its 2,984 files). The merged list
+  first kept the last mod's sizes, so with Unshackled Equipment's list last the translation's item text (177,072
+  bytes) was read as 324,736 (the game's): every item name blank; with a merged item list (decision 0068) the
+  menu was empty. Now, after all the laying over and merging, every loose entry gets the size of the file the game
+  will read at that path (4,344 entries with the owner's six mods). Found by replaying the owner's own route into
+  Items and Quests with one mod set after another (the cause looked like a mod incompatibility until a test with
+  one hand-made list showed the merge was it).
 - A mod folder with `data/` directly is a mod too (runtime `check_add_mod`, launcher `mod_roots`), and a folder that
   isn't a mod is looked into one level more: downloads wrap the mod in a folder of their own
   (`free_tag_battles/Tags/romfs`, found 2026-11-14 when it didn't load from `contents/<title id>/`).

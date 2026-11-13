@@ -368,7 +368,7 @@ class RomfsTest(unittest.TestCase):
             t = Path(t)
             files = {"romfs/data/cpk_list.cfg.bin": cfg(game),
                      "mods/A mod/romfs/data/cpk_list.cfg.bin": cfg(free({"data/a", "data/b"})),
-                     "mods/A mod/romfs/data/a": b"modA", "mods/A mod/romfs/data/b": b"modB",
+                     "mods/A mod/romfs/data/a": b"modA-longer", "mods/A mod/romfs/data/b": b"modB",
                      "mods/b_mod/data/cpk_list.cfg.bin": cfg(free({"data/c"})), "mods/b_mod/data/c": b"modC"}
             for path, data in files.items():
                 (t / path).parent.mkdir(parents=True, exist_ok=True)
@@ -384,8 +384,15 @@ class RomfsTest(unittest.TestCase):
             self.assertEqual(r.returncode, 0, r.stderr)
             self.assertIn("b_mod: 1 files replaced, 1 added", r.stderr)  # the data/-only layout is found
             self.assertIn("2 mods' lists merged, 3 entries freed", r.stderr)
+            # a loose file's listed size is the file read (A's data/a is 11 bytes, every list says 4): the game reads a
+            # loose file by its entry's size (2026-11-14: a wrong one blanked the English patch's item names)
+            self.assertIn("cpk_list: 1 loose files' sizes set to the files read", r.stderr)
             img = (t / "image.bin").read_bytes()
             self.assertEqual(romfs_lookup(img, "data/c"), b"modC")
+            lst = romfs_lookup(img, "data/cpk_list.cfg.bin")
+            sizes = {name: st.unpack_from("<I", lst, 16 + 20 * i + 16)[0]
+                     for i, (name, _) in enumerate(archives(lst))}
+            self.assertEqual(sizes, {"data/a": 11, "data/b": 4, "data/c": 4, "data/d": 4})
             self.assertEqual(archives(romfs_lookup(img, "data/cpk_list.cfg.bin")),
                              [("data/a", None), ("data/b", None), ("data/b", None), ("data/c", None),
                               ("data/d", "x.cpk")])
