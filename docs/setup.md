@@ -41,6 +41,11 @@ the decompressed `main`).
    folders, and run `python -m tools.yw4.extract`. `base_nsp` may be an NSP or an XCI (a game-card image); leave
    `update_nsp` empty when your XCI already holds the 2.2.0 update. An XCI alone needs only `prod.keys`; an NSP
    also needs `title.keys`.
+   Add-on content (DLC): with `dlc_dir` set, the same run unpacks each recognised add-on into
+   `<romfs_dir>/../dlc-romfs/<index>/`. To unpack add-ons again later (new DLC files, or after an update that
+   recognises more of them), run `python -m tools.yw4.extract --dlc-only`: it leaves the base game alone, needs no
+   emptied folders, and skips add-ons already unpacked. A plain re-run stops when `exefs_dir` or `romfs_dir` holds
+   files.
 3. Keep `work_dir` outside any cloud-synced folder.
 4. Check it: `python tools/yw4/config.py` prints the resolved paths, or a clear error saying what is missing.
 5. Decompress and verify the ExeFS modules: `python -m tools.yw4.ingest`. It refuses to continue unless `main`
