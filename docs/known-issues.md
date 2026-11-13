@@ -13,19 +13,15 @@ move to [progress.md](progress.md).
   frames of 200-660 ms "present"). The other upscaling and frame-generation choices recover at once (2026-11-10).
 - **A short shadow flash after unpausing from the game's own pause menu** (the Plus button), only in the bamboo
   forest and not after closing our overlay (owner, 2026-11-06 and 2026-11-13). Minor; not looked into.
-- **Battles with special moves can be heavy at 4K ultrawide.** The bloom composite pass took 7–11 ms instead of ~2
-  ms in some battles (2026-10-28, maybe a special move's effects); not traced. The freezes at a battle's first
-  special move are fixed (2026-11-12), and a spike check at 4K with DLSS and frame generation found three single
-  slow frames in 11 minutes ([baseline.md](baseline.md)).
+- **The first battle after loading a save stutters for its first few seconds**: about 25 frames of 70-80 ms
+  ("window present" in the log) over ~4 s; the second battle in the same run had none (owner, 2026-11-13, late-game
+  save, 4K 21:9, DLSS, DLSS frame generation). Cause not found. During the battles themselves frames were steady:
+  ~38 game frames/s, GPU ~19-20 ms, no heavier than the bamboo forest around them.
 - **PCSS (soft shadows) only reaches what the shadow mask covers.** Objects the game draws forward (6 other shadow
   shaders seen so far) keep the game's filter. Its strengths are tuned by eye in the town and the bamboo forest only.
-- **Shadow strength not yet checked against Eden** after the ambient-light fix; indoor shadows may still be a little
-  stronger.
 - **Occlusion queries always report 0 samples.** The game issues them in pairs from the house onward; answering
   "visible" changed nothing on screen so far, but the answer is wrong.
 - **Compute shaders that use storage images are skipped** (log line "uses storage images").
-- **The bridge in the snowy past-world town is heavy** (about 1,450 draws against the town's 300). It holds 30
-  frames/s; above 30, looking at the bridge costs about 10 frames/s. That is the game's content, not a port fault.
 
 ## Linux
 
