@@ -285,8 +285,19 @@ NVN(nvnCommandBufferSetStencilValueMask) { record(c, CMD_SET_STENCIL, 0)->x[6] =
 PLAIN(nvnCommandBufferSetDepthClamp, CMD_SET_DEPTH_CLAMP)                   /* (cmd, enable) */
 PLAIN(nvnCommandBufferSetPolygonOffsetClamp, CMD_SET_POLYGON_OFFSET)        /* (cmd, factor, units, clamp) */
 PLAIN(nvnCommandBufferSetSampleMask, CMD_SET_SAMPLE_MASK)                   /* (cmd, mask) */
-PLAIN(nvnCommandBufferSetRenderEnable, CMD_SET_RENDER_ENABLE)               /* (cmd, enable) */
-NVN(nvnCommandBufferSetRenderEnableConditional) { record(c, CMD_SET_RENDER_ENABLE, 0)->x[6] = 1; }  /* (cmd, mode, counter address) */
+NVN(nvnCommandBufferSetRenderEnable) {  /* (cmd, enable) */
+    record(c, CMD_SET_RENDER_ENABLE, 0)->x[6] = 0;
+    cb_of(A(0))->cond_mode = 0;
+}
+NVN(nvnCommandBufferSetRenderEnableConditional) {  /* (cmd, mode, counter address) */
+    record(c, CMD_SET_RENDER_ENABLE, 0)->x[6] = 1;
+    cb_of(A(0))->cond_mode = (int)A(1) + 1, cb_of(A(0))->cond_addr = A(2);
+}
+int nvn_record_condition(uint64_t cmd, uint64_t *addr) {
+    const NvnCmdBuf *cb = cb_of(cmd);
+    *addr = cb->cond_addr;
+    return cb->cond_mode;
+}
 PLAIN(nvnCommandBufferSetRasterizerDiscard, CMD_SET_RASTERIZER_DISCARD)     /* (cmd, discard) */
 PLAIN(nvnCommandBufferSetConservativeRasterEnable, CMD_SET_CONSERVATIVE_RASTER)
 PLAIN(nvnCommandBufferSetShaderScratchMemory, CMD_SET_SCRATCH_MEMORY)       /* (cmd, pool, offset, size) */

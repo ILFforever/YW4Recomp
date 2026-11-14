@@ -383,7 +383,7 @@ static int vk_init(void) {
     int core_bda = q12.bufferDeviceAddress;
     /* DLSS lists the old VK_EXT_buffer_device_address, but allocates with the core feature's flag (validation,
      * 2026-10-29): the core feature is kept where the GPU has it (Vulkan 1.2), the EXT only without it */
-    int bda_ext = 0, has_present_id = 0, has_derivatives = 0;
+    int bda_ext = 0, has_present_id = 0, has_derivatives = 0, has_conditional = 0;
     {
         uint32_t n = 0;
         vkEnumerateDeviceExtensionProperties(vk.gpu, NULL, &n, NULL);
@@ -394,6 +394,7 @@ static int vk_init(void) {
             if (!strcmp(e[i].extensionName, VK_EXT_MEMORY_BUDGET_EXTENSION_NAME)) vk.memory_budget = 1;
             if (!strcmp(e[i].extensionName, VK_KHR_PRESENT_ID_EXTENSION_NAME)) has_present_id = 1;
             if (!strcmp(e[i].extensionName, VK_KHR_COMPUTE_SHADER_DERIVATIVES_EXTENSION_NAME)) has_derivatives = 1;
+            if (!strcmp(e[i].extensionName, VK_EXT_CONDITIONAL_RENDERING_EXTENSION_NAME)) has_conditional = 1;
         }
         for (unsigned k = 0; k < ndlss && ndexts < 20; k++)
             for (uint32_t i = 0; i < n; i++)
@@ -427,6 +428,9 @@ static int vk_init(void) {
     VkPhysicalDevicePresentIdFeaturesKHR fpid = {.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PRESENT_ID_FEATURES_KHR};
     VkPhysicalDeviceComputeShaderDerivativesFeaturesKHR fder = {
         .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_COMPUTE_SHADER_DERIVATIVES_FEATURES_KHR};
+    VkPhysicalDeviceConditionalRenderingFeaturesEXT fcond = {
+        .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_CONDITIONAL_RENDERING_FEATURES_EXT};
+    if (has_conditional) fcond.pNext = have.pNext, have.pNext = &fcond;
     if (has_present_id) fpid.pNext = have.pNext, have.pNext = &fpid;
     if (has_derivatives) fder.pNext = have.pNext, have.pNext = &fder;
     vkGetPhysicalDeviceFeatures2(vk.gpu, &have);
@@ -463,7 +467,17 @@ static int vk_init(void) {
                      .vertexPipelineStoresAndAtomics = h->vertexPipelineStoresAndAtomics,
                      .shaderStorageImageWriteWithoutFormat = h->shaderStorageImageWriteWithoutFormat,
                      .imageCubeArray = h->imageCubeArray, .dualSrcBlend = h->dualSrcBlend, .logicOp = h->logicOp,
-                     .multiDrawIndirect = h->multiDrawIndirect, .textureCompressionBC = h->textureCompressionBC}};
+                     .multiDrawIndirect = h->multiDrawIndirect, .textureCompressionBC = h->textureCompressionBC,
+                     .occlusionQueryPrecise = h->occlusionQueryPrecise}};
+    /* the game's occlusion queries and the draws it makes conditional on them (gpu_query.c) */
+    vk.occlusion_precise = h->occlusionQueryPrecise;
+    VkPhysicalDeviceConditionalRenderingFeaturesEXT econd = {
+        .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_CONDITIONAL_RENDERING_FEATURES_EXT, .conditionalRendering = VK_TRUE};
+    if (has_conditional && fcond.conditionalRendering && ndexts < 24) {
+        dexts[ndexts++] = VK_EXT_CONDITIONAL_RENDERING_EXTENSION_NAME;
+        econd.pNext = (void *)enable.pNext, enable.pNext = &econd;
+        vk.conditional_rendering = 1;
+    }
     /* NVIDIA's libraries, not our shaders (validation, 2026-11-14). Streamline adds the extensions it lists itself
      * while it wraps vkCreateDevice, but not VK_KHR_present_id, which its VK_NV_low_latency2 (Reflex) requires; it
      * also asks for descriptor indexing and makes private-data slots. DLSS's compute shaders use 16-bit integers

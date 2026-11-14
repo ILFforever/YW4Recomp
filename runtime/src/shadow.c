@@ -1242,6 +1242,10 @@ int yw4_hook_submesh_draw(CPUState *ctx) {
         const Caster *c = caster_of(obj, sub);
         int n = c ? ours(c, &k->vp, k->device, &p->d[p->n], PASS_DRAWS - (int)p->n) : -1;
         if (n >= 0) {
+            uint64_t cond_addr = 0;  /* the game's occlusion condition for this object goes with our draws */
+            int cond_mode = nvn_record_condition(U64(k->device + 0x10d0) + 0xd8, &cond_addr);
+            for (int i = 0; i < n; i++)
+                p->d[p->n + (uint32_t)i].cond_mode = (uint32_t)cond_mode, p->d[p->n + (uint32_t)i].cond_addr = cond_addr;
             p->n += (uint32_t)n;
             __atomic_add_fetch(&draws_replaced, 1, __ATOMIC_RELAXED);
             /* YW4_SHADOWS_BOTH=1: the game draws too (ours on top), to tell our draws' errors

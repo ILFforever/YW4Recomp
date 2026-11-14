@@ -165,6 +165,8 @@ typedef struct {
     const NvnProgram *program; /* bound last (YW4_TRACE_DRAW_CALLERS) */
     uint64_t program_guest;    /* ... its guest NVNprogram* */
     uint32_t target_w, target_h, target_colors, target_depth;  /* set last (YW4_TRACE_DRAW_CALLERS) */
+    int cond_mode;             /* SetRenderEnableConditional in force while recording: 0 none, else NVN's mode + 1, */
+    uint64_t cond_addr;        /* and its counter address (our shadow pass takes it along, gpu_query.c) */
     uint64_t trace_vb0, trace_ub[2][16];  /* bound last, vertex and fragment stage (YW4_TRACE_DRAWLIST) */
     uint64_t trace_vb[8], trace_streams[8];  /* vertex buffers 0-7 and stream states 0-7 bound last */
     uint64_t trace_tex[2][TRACE_TEXTURES];  /* texture handles bound last, vertex and fragment stage */
@@ -220,6 +222,9 @@ enum {
 typedef void (*NvnNativePass)(void *vk_cb, void *gpu_state, const void *data, uint32_t size);
 /* Records a native pass into the NVN command buffer `cmd` (guest address); copies `size` bytes. */
 void nvn_record_native(const CPUState *c, uint64_t cmd, NvnNativePass fn, const void *data, uint32_t size);
+/* The condition the game's draws are being recorded under in `cmd` (SetRenderEnableConditional): 0 none,
+ * else NVN's mode + 1 and its counter address. */
+int nvn_record_condition(uint64_t cmd, uint64_t *addr);
 
 /* YW4_TRACE_TEXPOOL (nvn_objects.c): 0 off, 1 trace id in detail (UINT32_MAX: any), -1 only
  * summaries for it. */

@@ -44,6 +44,8 @@
     X(vkCmdSetDepthBias) X(vkCmdSetDepthBiasEnable) X(vkCmdSetBlendConstants) X(vkCmdPushConstants)          \
     X(vkCmdSetRasterizerDiscardEnable) X(vkCmdSetDepthBoundsTestEnable) X(vkCmdSetPrimitiveRestartEnable)  \
     X(vkCreateComputePipelines) X(vkCmdDispatch) X(vkCreateQueryPool) X(vkCmdResetQueryPool) X(vkCmdWriteTimestamp) X(vkGetQueryPoolResults) \
+    X(vkCmdBeginQuery) X(vkCmdEndQuery) X(vkCmdCopyQueryPoolResults) X(vkCmdFillBuffer)                       \
+    X(vkCmdBeginConditionalRenderingEXT) X(vkCmdEndConditionalRenderingEXT)                                   \
     X(vkCreatePipelineCache) X(vkGetPipelineCacheData) X(vkDestroyPipeline) X(vkDestroyPipelineLayout)        \
     X(vkDestroyShaderModule) X(vkDestroyDescriptorSetLayout)
 
@@ -64,6 +66,8 @@ typedef struct {
     VkPhysicalDeviceProperties props;
     int host_import;               /* VK_EXT_external_memory_host is enabled */
     int memory_budget;             /* VK_EXT_memory_budget is enabled: video memory use (gpu_vram) */
+    int occlusion_precise;         /* the occlusionQueryPrecise feature is enabled: sample counts, not just 0 or not */
+    int conditional_rendering;     /* VK_EXT_conditional_rendering is enabled (gpu_query.c) */
     int sampler_anisotropy;        /* the samplerAnisotropy feature is enabled */
     VkDeviceSize host_import_align;
 } VkContext;

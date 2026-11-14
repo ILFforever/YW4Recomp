@@ -30,6 +30,10 @@ typedef struct {
      * and through the old id the leaves were alpha-tested away for 20 frames after closing the Yo-kai Pad */
     uint32_t has_sampler;
     uint8_t sampler[64];
+    /* the condition the game drew this caster under (SetRenderEnableConditional; gpu_query.c): 0 none, else
+     * NVN's mode + 1 and the counter address. Ours is skipped on the GPU when the game's would be. */
+    uint32_t cond_mode;
+    uint64_t cond_addr;
 } ShadowDraw;
 
 /* One copy of an instanced caster in the copies ring (shadow_instanced.vert's Copy): projection x

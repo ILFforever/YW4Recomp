@@ -1255,7 +1255,9 @@ void gpu_state_init(GpuState *s) {
 void gpu_end_rendering(VkCommandBuffer cb, GpuState *s) {
     if (!s->rendering) return;
     gpu_passes_note(1);
+    gpu_query_rendering_ends(cb);
     vkCmdEndRendering(cb);
+    gpu_query_rendering_ended(cb);
     full_barrier(cb);
     s->rendering = 0;
 }
@@ -2583,6 +2585,7 @@ static void draw(VkCommandBuffer cb, GpuState *s, const CmdRec *r) {
     uint32_t pos_fix = nvn_depth_mode == 0 ? (g->sh[ST_GEOM] ? 2u : 1u) : 0u;
     vkCmdPushConstants(cb, g->layout, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_GEOMETRY_BIT, 0, 4, &pos_fix);
 
+    gpu_query_before_draw(cb, s);  /* the game's occlusion query or condition around this draw, if any */
     for (int pass = 0; pass <= edges; pass++) {  /* edges: the strips above and below too (16:10) */
     if (pass) dyn_edge = pass, gpu_dynamic_state(cb, s, k.depth, w, h);
     if (quads) {  /* (primitive, first, count, base instance, instances) */
@@ -2606,6 +2609,7 @@ static void draw(VkCommandBuffer cb, GpuState *s, const CmdRec *r) {
                          (uint32_t)r->x[5]);
     }
     }
+    gpu_query_after_draw(cb);
     capture_after_draw(cb, s, g);
     /* the bloom composite, the last 3D pass before the UI: anti-aliasing here (gpu_aa.c) */
     if (g->sh[ST_FRAG] && g->sh[ST_FRAG]->dof) gpu_dof_after_composite(cb, s);  /* YW4_DOF_PASS=check */

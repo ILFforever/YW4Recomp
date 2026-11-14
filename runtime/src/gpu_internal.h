@@ -190,7 +190,26 @@ typedef struct GpuState {
     int after_composite;  /* this command list drew the bloom composite: what follows (but the copy into the
                            * window's image) is the UI (gpu_draw.c) */
     int skip_next_draw;   /* the next draw is a game shadow draw ours replaces (gpu_shadow_game_draw, A/B runs) */
+    int cond_mode;        /* SetRenderEnableConditional: 0 none, 1 draw if the two counter values at cond_addr are */
+    uint64_t cond_addr;   /* equal, 2 if not equal (gpu_query.c) */
 } GpuState;
+
+/* ---- gpu_query.c: the game's occlusion queries and its draws conditional on them */
+/* ReportCounter(SAMPLES_PASSED, addr): the first or second report of a pair. */
+void gpu_query_report(VkCommandBuffer cb, GpuState *s, uint64_t addr);
+/* SetRenderEnable (mode 0) / SetRenderEnableConditional (mode 1 or 2, as cond_mode). */
+void gpu_query_render_enable(VkCommandBuffer cb, GpuState *s, int mode, uint64_t addr);
+/* Around each draw call of the game's or in its place (rendering is on). */
+void gpu_query_before_draw(VkCommandBuffer cb, GpuState *s);
+void gpu_query_after_draw(VkCommandBuffer cb);
+/* Before a draw of our own pass that stands for a game draw recorded under a condition (mode 0: none);
+ * gpu_query_after_draw after it. */
+void gpu_query_condition(VkCommandBuffer cb, int mode, uint64_t addr);
+/* For gpu_end_rendering: just before and just after vkCmdEndRendering. */
+void gpu_query_rendering_ends(VkCommandBuffer cb);
+void gpu_query_rendering_ended(VkCommandBuffer cb);
+/* Writes the counts that are due into the game's memory (ends rendering if it is on). */
+void gpu_query_flush(VkCommandBuffer cb, GpuState *s);
 
 void gpu_state_init(GpuState *s);
 void gpu_end_rendering(VkCommandBuffer cb, GpuState *s);

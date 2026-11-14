@@ -511,12 +511,14 @@ static void draw_pass(VkCommandBuffer cb, GpuState *s, const ShadowPass *p) {
             vkCmdPushConstants(cb, layout(kind), VK_SHADER_STAGE_VERTEX_BIT, 0, push_size[kind], d->mvp);
         }
         uint32_t instances = d->copies ? d->copies : 1, first = d->copies ? d->first_copy : 0;
+        gpu_query_condition(cb, (int)d->cond_mode, d->cond_addr);  /* skipped when the game's draw would be */
         if (d->index_count) {
             vkCmdBindIndexBuffer(cb, ib, ioff, d->index_type == 2 ? VK_INDEX_TYPE_UINT32 : VK_INDEX_TYPE_UINT16);
             vkCmdDrawIndexed(cb, d->index_count, instances, 0, 0, first);
         } else {
             vkCmdDraw(cb, d->vertex_count, instances, 0, first);
         }
+        gpu_query_after_draw(cb);
     }
     if (skipped) __atomic_add_fetch(&draws_skipped, skipped, __ATOMIC_RELAXED);
     {

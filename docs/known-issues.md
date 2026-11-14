@@ -19,8 +19,10 @@ move to [progress.md](progress.md).
   ~38 game frames/s, GPU ~19-20 ms, no heavier than the bamboo forest around them.
 - **PCSS (soft shadows) only reaches what the shadow mask covers.** Objects the game draws forward (6 other shadow
   shaders seen so far) keep the game's filter. Its strengths are tuned by eye in the town and the bamboo forest only.
-- **Occlusion queries always report 0 samples.** The game issues them in pairs from the house onward; answering
-  "visible" changed nothing on screen so far, but the answer is wrong.
+- **Occlusion culling needs a GPU extension.** The game hides objects on the GPU from its occlusion queries
+  (`runtime/src/gpu_query.c`). Without `VK_EXT_conditional_rendering` every such object is drawn, as before
+  2026-11-14: the picture is the same, the GPU does more work. `SetRenderEnable(false)` is not done either (the
+  game has not been seen to call it).
 - **Compute shaders that use storage images are skipped** (log line "uses storage images").
 
 ## Linux

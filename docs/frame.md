@@ -135,8 +135,16 @@ found yet: where the material keeps its texture objects (searching the draw obje
 **What a replaced shadow pass needs per frame:** the three cascade matrices (renderer object); the shadow layer's
 objects (draw list, layer kind 1, `object+0x1d1` set); per object its world matrix, geometry and submesh records
 (vertex/index data, counts, stride), bones if skinned, instance transforms if instanced, and the cut-out texture
-if alpha-tested. Still open: the vertex attribute layout per shader, where the material's texture handle comes
-from, and how the engine culls objects per cascade (the occlusion boxes).
+if alpha-tested. Still open: the vertex attribute layout per shader, and where the material's texture handle comes
+from.
+
+**The occlusion boxes** (measured 2026-11-14, `YW4_COUNTER_LOG`; `runtime/src/gpu_query.c`): before each cascade and
+before the main view, `f_9ab8c0` draws one 36-vertex box per object into the 240×135 depth target, each between two
+`ReportCounter(SAMPLES_PASSED)` calls whose results lie 16 bytes apart. The model renderer then wraps that object's
+draws in `SetRenderEnableConditional(RENDER_IF_NOT_EQUAL, address)` (`a4a18c`; `SetRenderEnable(true)` at `a4a1ac`
+for objects without a query, and at `a4c67c` after the list): the GPU compares the two counts and skips the draws
+of an object whose box had no visible sample. The CPU does not need the counts. The bamboo forest: 37 pairs a frame,
+nothing hidden. The evening town street: 270 pairs, 878 draws under a condition, 498 of them skipped.
 
 ## The model renderer `f_a45890`
 

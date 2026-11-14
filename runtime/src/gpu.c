@@ -505,7 +505,9 @@ static void pool_import(NvnPool *p) {
         .sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO, .pNext = &ext, .size = p->size,
         .usage = VK_BUFFER_USAGE_TRANSFER_SRC_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT |
                  VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_INDEX_BUFFER_BIT |
-                 VK_BUFFER_USAGE_VERTEX_BUFFER_BIT | VK_BUFFER_USAGE_INDIRECT_BUFFER_BIT};
+                 VK_BUFFER_USAGE_VERTEX_BUFFER_BIT | VK_BUFFER_USAGE_INDIRECT_BUFFER_BIT |
+                 /* the game's conditional draws read its counters where they lie (gpu_query.c) */
+                 (vk.conditional_rendering ? VK_BUFFER_USAGE_CONDITIONAL_RENDERING_BIT_EXT : 0)};
     GpuPool *g = calloc(1, sizeof *g);
     CHECK(vkCreateBuffer(vk.device, &bci, NULL, &g->buf));
     VkMemoryRequirements mr;
@@ -2373,14 +2375,26 @@ void gpu_execute(uint64_t handle) {
                 fprintf(stderr, "yw4: gpu: ReportCounter type %u (first use)\n", (unsigned)r->x[0]);
             }
             uint64_t *out = (uint64_t *)(uintptr_t)r->x[1];
-            out[0] = 0;
+            /* 1 = SAMPLES_PASSED: the value comes from an occlusion query, on the GPU (gpu_query.c) */
+            if (r->x[0] == 1) gpu_query_report(cb, &s, r->x[1]);
+            else out[0] = 0;
             out[1] = (uint64_t)((unsigned __int128)(uint64_t)host_now_ns() * 384 / 625);
+            break;
+        }
+        case CMD_SET_RENDER_ENABLE: {  /* (enable), or x[6] = 1: (mode, counter address) */
+            if (!r->x[6] && !r->x[0]) {
+                static int logged;
+                if (!logged++)
+                    fprintf(stderr, "yw4: gpu: SetRenderEnable(false): not done, its draws are made (first use)\n");
+            }
+            gpu_query_render_enable(cb, &s, r->x[6] ? (int)r->x[0] + 1 : 0, r->x[1]);
             break;
         }
         }
         at += r->size;
     }
     gpu_end_rendering(cb, &s);
+    gpu_query_flush(cb, &s);
     submit(cb);
     host_unlock(&gpu_lock);
     gpu_in_work = 0;
