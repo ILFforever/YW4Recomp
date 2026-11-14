@@ -422,8 +422,8 @@ battle's Stopwatching menu and the overlay's wheel are newer than the last relea
 
 | Where | Point and click | Wheel | Right button |
 |---|---|---|---|
-| Exploring | The mouse turns the camera; left is Interact (A) | Minimap size (R) | Watch scan (ZL) |
-| Battles | Left attacks (Y) | Picks the character | Aims (ZL) |
+| Exploring ✎ | The mouse turns the camera; left is Interact (A) | Minimap size (R) | Watch scan (ZL) |
+| Battles ✎ | Left attacks (Y) | Picks the character | Aims (ZL) |
 | Yo-kai Pad (X menu) and its pages | Yes: hover moves the cursor, a click chooses | Scrolls lists; on the Pad's grid, changes page | Back (B) |
 | Title screen and the save list | Left chooses what is selected (A); no hover | Moves the selection | Back (B) |
 | Conversations, their choices, and what opens from them (shops, the Crank-a-kai) | Left confirms or moves the text on (A); no hover | Moves between choices; on a Yes / No box, Yes (up) and No (down) | Cancel / back (B) |
@@ -431,8 +431,9 @@ battle's Stopwatching menu and the overlay's wheel are newer than the last relea
 | The overlay (Escape) | Yes: hover, click, drag the sliders | Moves the selection | Back (Escape) |
 | The battle's Stopwatching menu (Pin, Items, Switch Members) and its pages | Left confirms (A); back in the fight it attacks again | Moves the selection (the battle's wheel) | Back (B); back in the fight it aims again |
 
-Exploring and battle buttons are the defaults: each is changed on the overlay's Mouse buttons page. The menus' mouse
-is fixed.
+✎ Remappable: these rows are the defaults; left, right, the wheel and its press can each be set to any button on
+the overlay's Mouse buttons page (Controls), for exploring and for battles. The other rows are fixed: they are the
+menus' own.
 
 </details>
 
