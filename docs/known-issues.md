@@ -23,7 +23,10 @@ move to [progress.md](progress.md).
   (`runtime/src/gpu_query.c`). Without `VK_EXT_conditional_rendering` every such object is drawn, as before
   2026-11-14: the picture is the same, the GPU does more work. `SetRenderEnable(false)` is not done either (the
   game has not been seen to call it).
-- **Compute shaders that use storage images are skipped** (log line "uses storage images").
+- **The one compute shader that writes an image has never been seen to run.** It is a plain texture copy
+  (`2f3ceeb96f58c522`, the only one of the game's 5396 shaders with a storage image) and is supported since
+  2026-11-14, but untested: no log so far (1278 of them) shows it. The log says `writes a storage image (first use`
+  when it does.
 
 ## Linux
 

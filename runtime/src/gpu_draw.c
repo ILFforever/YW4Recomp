@@ -1754,6 +1754,20 @@ static int bind_stage_set(VkCommandBuffer cb, const GpuState *s, const Shader *s
                 w[i].dstBinding = (b->kind == 'd' ? 96 : 16) + b->slot;
                 w[i].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
                 w[i].pImageInfo = &ii[i];
+            } else if (b->kind == 'i') {
+                /* a storage image: NVN keeps image handles after its 32 texture handles in the bound-handle buffer
+                 * (recomp/shader.py numbers slots by that offset), so slot 32 is image unit 0 (BindImage). No game
+                 * shader samples a texture above slot 22 (all 5396 checked, 2026-11-14) */
+                enum { IMAGE_HANDLE_BASE = 32 };
+                uint32_t unit = b->slot >= IMAGE_HANDLE_BASE ? b->slot - IMAGE_HANDLE_BASE : TEXTURES;
+                NvnTexEntry *e = unit < TEXTURES ? tex_entry(s, s->img[ns][unit]) : NULL;
+                ii[i].imageView = e ? gpu_storage_view(cb, e->tex) : VK_NULL_HANDLE;
+                if (!ii[i].imageView) return 0;  /* nothing bound, or a format that can't be written */
+                ii[i].sampler = VK_NULL_HANDLE;
+                ii[i].imageLayout = VK_IMAGE_LAYOUT_GENERAL;
+                w[i].dstBinding = 16 + b->slot;
+                w[i].descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
+                w[i].pImageInfo = &ii[i];
             } else {
                 return 0;
             }
@@ -1854,11 +1868,23 @@ void gpu_dispatch(VkCommandBuffer cb, GpuState *s, const CmdRec *r) {
         for (int i = 0; i < nseen; i++) known |= seen[i] == g->comp->key;
         if (!known && nseen < 16) {
             seen[nseen++] = g->comp->key;
-            fprintf(stderr, "yw4: gpu: compute shader %016" PRIx64 " uses storage images: dispatch skipped for now\n",
-                    g->comp->key);
+            fprintf(stderr, "yw4: gpu: compute shader %016" PRIx64 " has a storage image with nothing bound or a "
+                    "format that can't be written: dispatch skipped\n", g->comp->key);
         }
         return;
     }
+    for (int i = 0; i < g->comp->nb; i++)
+        if (g->comp->b[i].kind == 'i') {  /* rare (none seen in 1278 logs before 2026-11-14): say when it happens */
+            static uint64_t told[8];
+            int t = 0;
+            while (t < 8 && told[t] && told[t] != g->comp->key) t++;
+            if (t < 8 && !told[t]) {
+                told[t] = g->comp->key;
+                fprintf(stderr, "yw4: gpu: compute shader %016" PRIx64 " writes a storage image (first use, %ux%u groups)\n",
+                        g->comp->key, (unsigned)r->x[0], (unsigned)r->x[1]);
+            }
+            break;
+        }
     record_compute(s, g->comp, r);
     vkCmdDispatch(cb, (uint32_t)r->x[0], (uint32_t)r->x[1], (uint32_t)r->x[2]);
     full_barrier(cb);

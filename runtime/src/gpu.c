@@ -1972,6 +1972,18 @@ VkImageView gpu_sample_view(VkCommandBuffer cb, NvnTexture *t, const NvnTextureV
     return view_of(g, type, fmt, level0, nlevels, layer0, nlayers, sw, aspect);
 }
 
+/* A view a compute shader writes into (imageStore): level 0, layer 0, no swizzle (storage views allow none). NULL when
+ * the format can't be written that way: such an image was made without storage use (image creation above). The game's
+ * one compute shader with an image so far is a plain texture copy (2f3ceeb96f58c522). */
+VkImageView gpu_storage_view(VkCommandBuffer cb, NvnTexture *t) {
+    GpuImage *g = image_of(cb, t);
+    if (g->aspect != VK_IMAGE_ASPECT_COLOR_BIT || t->target == TARGET_3D) return VK_NULL_HANDLE;
+    VkFormatProperties fp;
+    vkGetPhysicalDeviceFormatProperties(vk.gpu, g->format, &fp);
+    if (!(fp.optimalTilingFeatures & VK_FORMAT_FEATURE_STORAGE_IMAGE_BIT)) return VK_NULL_HANDLE;
+    return view_of(g, VK_IMAGE_VIEW_TYPE_2D, g->format, 0, 1, 0, 1, (VkComponentMapping){0}, VK_IMAGE_ASPECT_COLOR_BIT);
+}
+
 /* A black 1x1 texture of each view type, for unbound texture slots. */
 VkImageView gpu_dummy_view(VkCommandBuffer cb, VkImageViewType type) {
     static NvnTexture dummies[8];

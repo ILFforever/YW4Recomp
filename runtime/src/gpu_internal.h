@@ -145,6 +145,8 @@ int gpu_format_alpha_one(uint32_t nvn_format);  /* RGBX-style: alpha reads as 1 
  * v's format, levels, layers and swizzle). */
 VkImageView gpu_render_view(VkCommandBuffer cb, NvnTexture *t, const NvnTextureView *v, int has_view, uint32_t *w,
                             uint32_t *h);
+/* A storage view (imageStore) of level 0, layer 0; VK_NULL_HANDLE if the format can't be written that way. */
+VkImageView gpu_storage_view(VkCommandBuffer cb, NvnTexture *t);
 VkImageView gpu_sample_view(VkCommandBuffer cb, NvnTexture *t, const NvnTextureView *v, int has_view,
                             VkImageViewType type);
 VkImageView gpu_dummy_view(VkCommandBuffer cb, VkImageViewType type);
