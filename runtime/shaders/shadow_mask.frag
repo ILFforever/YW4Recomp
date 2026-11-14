@@ -1,5 +1,6 @@
 #version 460
 #extension GL_KHR_shader_subgroup_quad : require
+#extension GL_EXT_texture_shadow_lod : require
 // Our version of the shadow mask's fragment program 06d03ad7 (docs/frame.md "Lighting stage"): per
 // half-size pixel, how much of the sun reaches the surface there, from the cascaded shadow maps.
 // Same interface as the game's program (with the soft shadows of decision 0025 in it, as the
@@ -63,9 +64,18 @@ float yw4_pcss_remember(vec2 key, float lit) {
     }
     return lit;
 }
+// One depth compare at level 0 (the maps have one level). The game's program uses an implicit level, which reads
+// the neighbouring pixels' coordinates; ours skips the lookups for some pixels (main, "ours, faster") and the soft
+// shadows return early per pixel, so a neighbour may not be running, and the implicit level is then undefined.
+// NVIDIA didn't mind; AMD's Windows driver made the shadows flicker (issue #8). An explicit level asks nothing
+// of the neighbours. (Ours only: the translated program keeps texture(), its control flow stays the game's.)
+float shadow_cmp(sampler2DArrayShadow s, vec4 c) {
+    return textureLod(s, c, 0.0);
+}
+
 float yw4_shadow(sampler2DArrayShadow s, sampler2DArray d, vec4 c) {
-    if (yw4_pcss.mode.x < 0.5) return texture(s, c);
-    if (yw4_pcss.tune.y == 3.0) return texture(s, vec4(c.xy, c.z, c.w));
+    if (yw4_pcss.mode.x < 0.5) return shadow_cmp(s, c);
+    if (yw4_pcss.tune.y == 3.0) return shadow_cmp(s, vec4(c.xy, c.z, c.w));
     if (yw4_pcss.tune.y == 4.0) return textureLod(d, vec3(c.xy, c.z), 0.0).r;
     if (yw4_pcss.tune.y == 5.0) return c.w > textureLod(d, vec3(c.xy, c.z), 0.0).r ? 1.0 : 0.0;
     if (yw4_pcss.tune.y == 6.0) return c.w;
@@ -74,7 +84,7 @@ float yw4_shadow(sampler2DArrayShadow s, sampler2DArray d, vec4 c) {
     mat2 rot = yw4_pcss_rotation();
     float r;
     if (yw4_pcss.tune.z > 0.5 && yw4_search_layer == c.z) {
-        if (yw4_search_r < 0.0) return yw4_pcss_remember(c.zw, texture(s, vec4(c.xy, c.z, c.w)));
+        if (yw4_search_r < 0.0) return yw4_pcss_remember(c.zw, shadow_cmp(s, vec4(c.xy, c.z, c.w)));
         r = yw4_search_r;
     } else {
         float gaps = 0.0, casters = 0.0;
@@ -86,7 +96,7 @@ float yw4_shadow(sampler2DArrayShadow s, sampler2DArray d, vec4 c) {
         }
         if (yw4_pcss.tune.y == 1.0) return casters * (float(step) / 16.0);
         yw4_search_layer = c.z, yw4_search_r = -1.0;
-        if (casters == 0.0) return yw4_pcss_remember(c.zw, texture(s, vec4(c.xy, c.z, c.w)));
+        if (casters == 0.0) return yw4_pcss_remember(c.zw, shadow_cmp(s, vec4(c.xy, c.z, c.w)));
         r = clamp(gaps / casters * yw4_pcss.scale[min(int(c.z + 0.5), 3)], yw4_pcss.mode.w, yw4_pcss.mode.z);
         yw4_search_r = r;
     }
@@ -94,7 +104,7 @@ float yw4_shadow(sampler2DArrayShadow s, sampler2DArray d, vec4 c) {
     float lit = 0.0;
     int fstep = (int(yw4_pcss.mode.y) & 4) != 0 ? 2 : 1;  // ours, faster: every other tap, turned each frame
     for (int i = 0; i < 16; i += fstep)
-        lit += texture(s, vec4(c.xy + rot * YW4_DISK[i] * r, c.z, c.w));
+        lit += shadow_cmp(s, vec4(c.xy + rot * YW4_DISK[i] * r, c.z, c.w));
     return yw4_pcss_remember(c.zw, lit * (float(fstep) / 16.0));
 }
 
