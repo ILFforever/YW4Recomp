@@ -10,6 +10,7 @@
 
 #include "battle.h"
 #include "bindings.h"
+#include "gaiji_create.h"
 #include "mousemenu.h"
 #include "pause.h"
 #include "settings.h"
@@ -827,6 +828,22 @@ static int nx_has(const char *name) {
 
 enum { SHEET_NX, SHEET_KEY, SHEET_PAD };
 
+/* "N/A" for a button with nothing bound (owner, 2026-11-15): one icon per style, our drawings (gaiji_create.h),
+ * written over keyboard-sheet cells the hints never show (bindings_patch_sheet); that sheet is always on. */
+static int na_written;
+static int na_ready(void) { return __atomic_load_n(&na_written, __ATOMIC_ACQUIRE); }
+static uint32_t na_crc(int i) {
+    static uint32_t crcs[GAIJI_NAS];
+    if (!crcs[i]) crcs[i] = gaiji_crc(gaiji_na_at[i].name);
+    return crcs[i];
+}
+static int na_style(uint32_t crc) {  /* which N/A icon a name is, or -1 */
+    if (!na_ready()) return -1;
+    for (int i = 0; i < GAIJI_NAS; i++)
+        if (na_crc(i) == crc) return i;
+    return -1;
+}
+
 /* The icon to show for a Switch icon name the game asked for, or 0 to leave it; *sheet: which sheet it is in. */
 static uint32_t gaiji_swap(uint32_t crc, int *sheet) {
     int i = 0;
@@ -863,6 +880,7 @@ static uint32_t gaiji_swap(uint32_t crc, int *sheet) {
         if (battle && row == hl && hls >= 0 && mousemenu_stopwatch() && !use[hl].keys[0] && !use[hl].keys[1] &&
             (use[hls].keys[0] || use[hls].keys[1]))
             row = hls;  /* only when L has no key of its own: else its own key shows */
+        int has_key = 0;
         for (int pass = 0; row >= 0 && pass < 2; pass++) {
             if (pass == !battle) {  /* the mouse: pass 0 in battles, pass 1 when exploring */
                 for (int p = 0; p < BMOUSE_PARTS; p++)
@@ -870,14 +888,21 @@ static uint32_t gaiji_swap(uint32_t crc, int *sheet) {
             } else {
                 for (int k = 0; k < BIND_KEYS; k++) {
                     const char *name = use[row].keys[k] ? key_gaiji(use[row].keys[k]) : NULL;
+                    has_key |= use[row].keys[k] != 0;
                     if (name) return *sheet = SHEET_KEY, gaiji_crc(name);
                 }
             }
         }
+        /* nothing bound to it (a key without an icon of its own keeps the Switch icon): N/A (owner, 2026-11-15) */
+        if (row >= 0 && !has_key && na_ready()) return *sheet = SHEET_KEY, na_crc(GAIJI_NA_KEY);
         return 0;
     }
     int shown = g;
     if (row >= 0) {
+        if (use[row].pad == PAD_NONE && na_ready())  /* no pad input bound to it: N/A, in the hints' style */
+            return *sheet = SHEET_KEY, na_crc(hint_style() == STYLE_PLAYSTATION ? GAIJI_NA_PS
+                                              : hint_style() == STYLE_XBOX      ? GAIJI_NA_XBOX
+                                                                                : GAIJI_NA_NX);
         int p = glyph_for_pad(resolve(use[row].pad));
         if (p >= 0) shown = p;
     }
@@ -971,6 +996,8 @@ int yw4_hook_gaiji_render(CPUState *ctx) {
         if (sheet != SHEET_NX) {
             float mk = sheet == SHEET_KEY ? mouse_icon_scale(shown) : 1.0f;
             float k = icon_scale(sheet) * mk;
+            int na = na_style(shown);  /* N/A in the keyboard sheet: the size of its style's own icons */
+            if (na >= 0) k = na == GAIJI_NA_KEY ? icon_scale(SHEET_KEY) : na == GAIJI_NA_NX ? 1.0f : icon_scale(SHEET_PAD);
             /* the box is whole pixels of the HUD's 1080-line space: rounded to the nearest (the mouse icons were
              * rounded down while they were only 1.3% smaller, under half a pixel) */
             float round_add = 0.5f;
@@ -1003,7 +1030,6 @@ int yw4_hook_gaiji_render(CPUState *ctx) {
  * the cells again when the PlayStation model changes, and tells the GPU layer (gpu_note_written), which uploads the
  * texture again. Before each such write the cells must still be what we wrote (else the memory is something else
  * now and is left alone). */
-#include "gaiji_create.h"
 #include "gpu.h"
 
 enum { GC_CELL = 48, GC_TOP = 24, GC_ROW = GC_CELL / 4 * 16, GC_HALF = GC_TOP / 4 * GC_ROW };
@@ -1052,6 +1078,20 @@ static void gc_write(uint8_t *texels, int model) {
 static void xb_found(const TexLayout *L, uint8_t *texels);
 
 void bindings_patch_sheet(const TexLayout *L, uint32_t nvn_format, uint8_t *texels) {
+    if (texels && (nvn_format == 0x4D || nvn_format == 0x4E) && L->width == 620 && L->height == 620 && L->depth == 1 &&
+        L->layers == 1 && !__atomic_load_n(&na_written, __ATOMIC_ACQUIRE)) {
+        /* the keyboard sheet (known by its E key's blocks): the four N/A icons over cells the hints never show,
+         * once, before its first upload */
+        uint8_t cell[2 * GC_HALF];
+        tegra_read_region(L, texels, 0, 0, 52, 156, 0, GC_CELL, GC_CELL, 1, cell);
+        if (gc_fnv(cell, sizeof cell) == GAIJI_KEY_E_PRINT) {
+            for (int i = 0; i < GAIJI_NAS; i++)
+                tegra_write_region(L, texels, 0, 0, gaiji_na_at[i].x, gaiji_na_at[i].y, 0, GC_CELL, GC_CELL, 1, gaiji_na[i]);
+            __atomic_store_n(&na_written, 1, __ATOMIC_RELEASE);
+            fprintf(stderr, "yw4: hints: keyboard sheet: N/A icons written\n");
+        }
+        return;
+    }
     if (!texels || (nvn_format != 0x4D && nvn_format != 0x4E) || L->width != 256 || L->height != 256 ||
         L->depth != 1 || L->layers != 1)
         return;

@@ -236,13 +236,97 @@ def draw_xbox360(direction: str) -> Image.Image:
     return im
 
 
+# ---- "N/A": the hint for a button with nothing bound (owner, 2026-11-15: "N/A", one per style so they match).
+# All four live in cells of the keyboard sheet the hints never use (that sheet is always on; the pad sheets have no
+# free cell); the runtime draws each at its style's size (its NA scale, of the keyboard sheet's). Drawn here from
+# shapes and colours measured off the game's icons (no game pixels): the keycap (E: 24 x 24 at 12-35, grey 37-46
+# lighter downwards, a light top edge, a faint white glow), the Xbox and PlayStation circles (28 across at 10-37, near
+# black with a black rim / grey 36 with a darker rim, a faint white glow) and the Switch circle (48 across in its 64
+# cell: lavender 225,225,251, a darker rim at the bottom, a soft purple shadow), each with "N/A" in its glyph colour.
+
+NA_STYLES = ["key", "xbox", "ps", "nx"]  # the order of gaiji_na[] in the header
+# the cells they take: gaiji_alt, gaiji_shift, gaiji_ctrl, gaiji_mouse_all (the hints show only the sided keys and
+# the mouse's parts, never these)
+NA_KEY_AT = {"key": (156, 104), "xbox": (260, 260), "ps": (208, 312), "nx": (468, 208)}
+NA_KEY_NAMES = {"key": "gaiji_alt", "xbox": "gaiji_shift", "ps": "gaiji_ctrl", "nx": "gaiji_mouse_all"}
+KEY_E_AT = (52, 156)  # gaiji_e: the keyboard sheet's fingerprint
+NA_FONT = "C:/Windows/Fonts/arialbd.ttf"
+
+
+def _na_text(d: ImageDraw.ImageDraw, S: int, cx: float, cy: float, height: float, color) -> None:
+    """ "N/A" centred at (cx, cy), the letters set a little apart (no kerning), `height` px tall."""
+    f = ImageFont.truetype(NA_FONT, 200)
+    boxes = [d.textbbox((0, 0), ch, font=f) for ch in "N/A"]
+    hh = max(b[3] for b in boxes) - min(b[1] for b in boxes)
+    f = ImageFont.truetype(NA_FONT, max(1, int(200 * height * S / hh)))
+    boxes = [d.textbbox((0, 0), ch, font=f) for ch in "N/A"]
+    top = min(b[1] for b in boxes)
+    hh = max(b[3] for b in boxes) - top
+    gap = 0.12 * hh
+    x = cx * S - (sum(b[2] - b[0] for b in boxes) + gap * 2) / 2
+    for ch, b in zip("N/A", boxes):
+        d.text((x - b[0], cy * S - hh / 2 - top), ch, font=f, fill=color)
+        x += b[2] - b[0] + gap
+
+
+def draw_na(style: str) -> Image.Image:
+    """A 48 x 48 "N/A" icon in a style's look, its shape the size it has in its own sheet's cell."""
+    S = 8
+    big = Image.new("RGBA", (CELL * S, CELL * S), (0, 0, 0, 0))
+    c = CELL / 2
+    if style == "key":
+        glow = Image.new("RGBA", big.size, (0, 0, 0, 0))
+        ImageDraw.Draw(glow).rounded_rectangle((11 * S, 11 * S, 37 * S, 37 * S), radius=5 * S, fill=(255, 255, 255, 14))
+        face = Image.new("RGBA", big.size, (0, 0, 0, 0))
+        fd = ImageDraw.Draw(face)
+        for y in range(12 * S, 36 * S):  # grey 37 at the top to 46 low down, a darker last row
+            g = 33 if y >= 35 * S else int(37 + 9 * (y - 12 * S) / (24 * S))
+            fd.line([(0, y), (big.width, y)], fill=(g, g, g, 255))
+        mask = Image.new("L", big.size, 0)
+        ImageDraw.Draw(mask).rounded_rectangle((12 * S, 12 * S, 36 * S - 1, 36 * S - 1), radius=4 * S, fill=255)
+        big.alpha_composite(glow)
+        big.paste(face, (0, 0), mask)
+        d = ImageDraw.Draw(big)
+        d.line([(15 * S, 12 * S + S // 2), (33 * S, 12 * S + S // 2)], fill=(131, 131, 131, 255), width=S // 2)
+        _na_text(d, S, c, c, 7.5, (255, 255, 255, 255))
+    elif style in ("xbox", "ps"):
+        r = 14
+        a = 24 if style == "xbox" else 12
+        d = ImageDraw.Draw(big)
+        d.ellipse(((c - r - 2) * S, (c - r - 2) * S, (c + r + 2) * S, (c + r + 2) * S), fill=(255, 255, 255, a // 2))
+        d.ellipse(((c - r - 1) * S, (c - r - 1) * S, (c + r + 1) * S, (c + r + 1) * S), fill=(255, 255, 255, a))
+        d.ellipse(((c - r) * S, (c - r) * S, (c + r) * S, (c + r) * S), fill=(0, 0, 0, 255) if style == "xbox" else (16, 16, 16, 255))
+        m = Image.new("L", big.size, 0)
+        inset = 1 if style == "xbox" else 1.5
+        ImageDraw.Draw(m).ellipse(((c - r + inset) * S, (c - r + inset) * S, (c + r - inset) * S, (c + r - inset) * S), fill=255)
+        face = Image.new("RGBA", big.size, (36, 36, 36, 255))
+        if style == "xbox":  # near black, a little lighter low down (4 at the top half to 13)
+            fd = ImageDraw.Draw(face)
+            for y in range(big.height):
+                g = int(4 + 9 * max(0.0, (y / S - c) / (r - 1)))
+                fd.line([(0, y), (big.width, y)], fill=(g, g, g, 255))
+        big.paste(face, (0, 0), m)
+        _na_text(ImageDraw.Draw(big), S, c, c, 9.5 if style == "xbox" else 8.5,
+                 (255, 255, 255, 255) if style == "xbox" else (225, 225, 230, 255))
+    else:  # the Switch circle: its 64 cell's look at 48 (x 0.75)
+        r = 24 * 0.75
+        shadow = Image.new("RGBA", big.size, (0, 0, 0, 0))
+        ImageDraw.Draw(shadow).ellipse(((c - r - 1) * S, (c - r) * S, (c + r + 1) * S, (c + r + 2.5) * S), fill=(34, 20, 120, 90))
+        big.alpha_composite(shadow.filter(ImageFilter.GaussianBlur(1.6 * S)))
+        d = ImageDraw.Draw(big)
+        d.ellipse(((c - r) * S, (c - r + 0.8) * S, (c + r) * S, (c + r + 0.8) * S), fill=(154, 154, 203, 255))  # the rim
+        d.ellipse(((c - r) * S, (c - r) * S, (c + r) * S, (c + r - 0.6) * S), fill=(225, 225, 251, 255))
+        _na_text(d, S, c, c, 12, (90, 90, 134, 255))
+    return big.resize((CELL, CELL), Image.LANCZOS)
+
+
 def region_blocks(linear: bytes, sheet_w: int, x: int, y: int, w: int, h: int) -> bytes:
     pitch = sheet_w // 4 * 16
     return b"".join(linear[by * pitch + x // 4 * 16: by * pitch + (x + w) // 4 * 16] for by in range(y // 4, (y + h) // 4))
 
 
 def load_sheet(name: str) -> bytes:
-    """A sheet from the owner's font.cpk, as linear rows of BC7 blocks (256 x 256)."""
+    """A sheet from the owner's font.cpk, as linear rows of BC7 blocks (256 x 256; the keyboard sheet 620 x 620)."""
     font_cpk = config.load().romfs_dir / "data" / "nx" / "font" / "font.cpk"
     entry = next(f for f in cpk.list_files(font_cpk).files if f.path.endswith("/" + name))
     data = cpk.read(font_cpk, entry)
@@ -250,8 +334,9 @@ def load_sheet(name: str) -> bytes:
     nxtch = 4 * (u16(0x0A) + u16(0x3E))
     w = int.from_bytes(data[nxtch + 0x14:nxtch + 0x18], "little")
     h = int.from_bytes(data[nxtch + 0x18:nxtch + 0x1C], "little")
-    if (w, h) != (256, 256):
-        raise SystemExit(f"error: {name} is {w}x{h}, expected 256x256")
+    want = (620, 620) if name == "gaiji_key.g4tx" else (256, 256)
+    if (w, h) != want:
+        raise SystemExit(f"error: {name} is {w}x{h}, expected {want[0]}x{want[1]}")
     return bytes(deswizzle_bc7(data[nxtch + 0x100:], w, h))
 
 
@@ -272,6 +357,9 @@ def main(argv: list[str] | None = None) -> int:
     xb = load_sheet("gaiji_xinput.g4tx")
     print_ = fnv1a64(cell_blocks(ps, 256, TOUCHPAD_AT))
     view_print = fnv1a64(cell_blocks(xb, 256, XBOX_VIEW_AT))
+    key = load_sheet("gaiji_key.g4tx")
+    key_print = fnv1a64(cell_blocks(key, 620, KEY_E_AT))
+    na = [encode(draw_na(style)) for style in NA_STYLES]
 
     tops = [encode(draw_top(word)) for word in WORDS]
     back, start = encode(draw_xbox360("left")), encode(draw_xbox360("right"))
@@ -294,8 +382,23 @@ def main(argv: list[str] | None = None) -> int:
         fp.write("};\n")
         c_array(fp, "gaiji_xbox_back", back)
         c_array(fp, "gaiji_xbox_start", start)
-    print(f"wrote {args.out}: {len(WORDS)} words of {n // 16} blocks, Back and Start of {len(back) // 16}; "
-          f"prints {print_:016x} {view_print:016x}")
+        fp.write("/* Keyboard sheet (620 x 620): \"N/A\", for a button with nothing bound, in each style's look, 12 x 12 BC7\n"
+                 " * blocks each, written over cells the hints never show; the fingerprint of the E key's blocks. */\n")
+        fp.write(f"#define GAIJI_KEY_E_PRINT 0x{key_print:016x}ull\n")
+        fp.write("enum { " + ", ".join(f"GAIJI_NA_{s.upper()}" for s in NA_STYLES) + ", GAIJI_NAS };\n")
+        fp.write("static const struct { int x, y; const char *name; } gaiji_na_at[GAIJI_NAS] = {\n")
+        for s in NA_STYLES:
+            fp.write(f"    {{{NA_KEY_AT[s][0]}, {NA_KEY_AT[s][1]}, \"{NA_KEY_NAMES[s]}\"}},\n")
+        fp.write("};\n")
+        fp.write(f"static const unsigned char gaiji_na[GAIJI_NAS][{len(na[0])}] = {{\n")
+        for s, blocks in zip(NA_STYLES, na):
+            fp.write(f"    /* {s} */ {{\n")
+            for i in range(0, len(blocks), 16):
+                fp.write("        " + ", ".join(f"0x{b:02x}" for b in blocks[i:i + 16]) + ",\n")
+            fp.write("    },\n")
+        fp.write("};\n")
+    print(f"wrote {args.out}: {len(WORDS)} words of {n // 16} blocks, Back and Start of {len(back) // 16}, "
+          f"{len(na)} N/A icons; prints {print_:016x} {view_print:016x} {key_print:016x}")
 
     if args.preview:
         # each icon as the runtime builds it, decoded: the PlayStation words over the Options icon's pill; the
