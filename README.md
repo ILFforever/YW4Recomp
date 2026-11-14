@@ -620,7 +620,7 @@ On Ordinary Street with the performance HUD on (F3). The frame takes about 19 ms
 | **Mod support** | Mods in the Switch's layout are laid over your game files at start, as on a modded Switch, without touching your dump: the English translation patch runs (see [Features](#features), [decision 0043](docs/decisions/0043-mods-layeredfs.md)). The YKW Mod Merger™ makes mods that change the same file work together ([0067](docs/decisions/0067-mods-merge-cpk-list.md), [0068](docs/decisions/0068-mods-merge-data-files.md)) |
 | **In-game overlay** | Escape or a controller button pauses the game and opens a side panel: settings, controls, the performance HUD's options, screenshots and exit, drawn like its design ([decision 0053](docs/decisions/0053-in-game-overlay.md)); Preview shows graphics changes live, and themes match the launcher's ([decision 0055](docs/decisions/0055-overlay-themes.md)) |
 | **Launcher** | A Windows app that takes your game files, checks them, builds the game and starts it, with mods, DLC, saves and screenshots in one place. Installer and portable zip ([decision 0052](docs/decisions/0052-launcher-packaging.md)), tested on a second PC. Released with 1.0.0 (2026-11-13): [download](https://github.com/ILFforever/YW4Recomp/releases/latest) |
-| **Linux** | Tester [ouni666](https://github.com/ouni666) plays it on AOSC OS with an AMD RX 6600 XT at about 110-120 frames/s, sound and controls included (2026-11-13). Built from source (the launcher is Windows only); FSR, DLSS, frame generation and Reflex are Windows only |
+| **Linux** | Tester [ouni666](https://github.com/ouni666) plays it on AOSC OS with an AMD RX 6600 XT at about 110-120 frames/s, sound and controls included (2026-11-13). Built from source (the launcher is Windows only); DLSS and FSR upscaling are built on Linux too, frame generation and Reflex are Windows only |
 
 </details>
 
@@ -677,7 +677,8 @@ sudo apt install clang python3 git pkg-config glslang-tools libsdl3-dev     # De
 Set `[tools] cc = "clang"` in `config.local.toml`, then build as in steps 1-5. After that, start the game with
 `./work/build/yw4` alone: the build writes your game and DLC folders into `work/build/game.ini`. Saves go to
 `~/.local/share/YW4Recomp/save`. Ubuntu 24.04 has no SDL3 package: see
-[docs/setup.md](docs/setup.md#requirements). AMD FSR, NVIDIA DLSS, frame generation and Reflex are Windows only for now.
+[docs/setup.md](docs/setup.md#requirements). AMD FSR and NVIDIA DLSS upscaling are built on Linux too (FSR from
+AMD's own source, during the build: about a minute); frame generation and Reflex are Windows only for now.
 
 ## Project layout
 
@@ -701,6 +702,8 @@ Set `[tools] cc = "clang"` in `config.local.toml`, then build as in steps 1-5. A
 - **[musl](https://musl.libc.org/)** - the math library (`third_party/musl`, MIT).
 - **[SMAA](https://github.com/iryoku/smaa)** by Jorge Jimenez et al. - the SMAA anti-aliasing shader and lookup textures (`third_party/smaa`, MIT).
 - **[SDL3](https://www.libsdl.org/)** and the **[Vulkan](https://www.vulkan.org/)** headers.
+- **[xplane-fsr3](https://github.com/JonathanOrr/xplane-fsr3)** by Jonathan Orr - the Linux port of AMD's FidelityFX SDK
+  that FSR on Linux is built with (`third_party/fsr3-linux`, MIT).
 - **Eden** (a Switch emulator) - used only as a visual and performance reference; none of its code is used.
 - **LEVEL-5** for Yo-kai Watch 4. This project is not affiliated with or endorsed by LEVEL-5 or Nintendo.
 
