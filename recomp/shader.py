@@ -745,16 +745,34 @@ class Translator:
             o.append(f"layout(set = {s}, binding = {STORAGE_BINDING + n}, std430) buffer SB{n} {{ uint d[]; }} sb{n};")
         if p.shared:
             o.append(f"shared uint shared_mem[{max(p.shared_size, 4) // 4}];")
+        # Varyings between stages: the game's attribute 31 goes at location 7. Its vertex programs write up to
+        # attribute 31 (the Switch's GPU has 32 plus the position), but desktop Vulkan counts the position too:
+        # location 31 and gl_Position are 132 components, over the usual limit of 128 (VUID-RuntimeSpirv-Location-
+        # 06272, 3 programs). No program of the game uses attributes 7 to 13, so 7 is free in every stage; the
+        # names keep the game's number. Vertex inputs (a<n>) and colour outputs are not varyings.
+        moved = {31: 7}
+        varyings = set(p.outputs) | (set() if p.stage == "vert" else set(p.input_locs))
+        def vloc(loc: int) -> int:
+            if loc in moved and moved[loc] in varyings:
+                raise ShaderError(f"varying {loc} can't move to {moved[loc]}: in use")
+            return moved.get(loc, loc)
         for loc in sorted(p.input_locs):
             t = p.inputs.get(loc, "f")
             if p.stage == "vert":
                 o.append(f"layout(location = {loc}) in {'vec4' if t == 'f' else 'uvec4'} a{loc};")
             elif p.stage == "geom":
-                o.append(f"layout(location = {loc}) in vec4 i_attr{loc}[];")
+                o.append(f"layout(location = {vloc(loc)}) in vec4 i_attr{loc}[];")
             else:
-                o.append(f"layout(location = {loc}) {'flat ' if loc in p.flat_inputs else ''}in vec4 i_attr{loc};")
+                o.append(f"layout(location = {vloc(loc)}) {'flat ' if loc in p.flat_inputs else ''}in vec4 i_attr{loc};")
         for loc in sorted(p.outputs):
-            o.append(f"layout(location = {loc}) out vec4 o_attr{loc};")
+            o.append(f"layout(location = {vloc(loc)}) out vec4 o_attr{loc};")
+        if p.stage == "vert":
+            # Only the position: undeclared, glslang's block also holds gl_PointSize and one clip and one cull
+            # distance, which no game shader writes. Those 7 built-in components on top of an output at location 30
+            # (components up to 124) went over desktop Vulkan's 128 (VUID-RuntimeSpirv-Location-06272, 19 shaders).
+            o.append("out gl_PerVertex { vec4 gl_Position; };")
+        elif p.stage == "geom":  # the same block on both sides, or it doesn't match the vertex shader's (08746)
+            o += ["in gl_PerVertex { vec4 gl_Position; } gl_in[];", "out gl_PerVertex { vec4 gl_Position; };"]
         for loc in sorted(p.colors):
             o.append(f"layout(location = {loc}) out vec4 o_color{loc};")
         if p.stage in ("vert", "geom"):
