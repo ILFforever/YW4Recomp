@@ -62,9 +62,8 @@ they were still good. That costs one run of first-time builds, after a game upda
 - Three small files in `work/`, next to the other run-time files; the cache is replaced in place and its stale
   entries go whenever it is thrown away. `YW4_PIPELINE_CACHE` and `YW4_PIPELINE_JOURNAL` move them or turn them
   off (`none`).
-- Open: the journal's records (shader keys and pipeline state) would still be right after a shader rebuild, and
-  keeping it would let the next start prewarm the new cache in the background. It is deleted with the cache for
-  now, as decided; keeping it is a small change in `gpu_pcache_init`.
+- Done in [decision 0070](0070-pipeline-cache-kept-on-shader-change.md): when only the shaders change, the cache
+  and the journal are kept and the journal's pipelines are built again at start.
 - Not taken from the fork: FSR 3.1 as the default on Radeons without RDNA 4 (it belongs with decision 0062, whose
   first start only writes settings the panel has). The same fork commit's refresh-aligned pacing for 30 and 60
   frames/s is in as an option, to be measured: decision 0064.

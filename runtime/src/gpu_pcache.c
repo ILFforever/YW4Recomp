@@ -18,7 +18,8 @@
  *     shader build writes thousands of files and hashing their contents at every start would cost more than the
  *     cache saves on a warm run. A rebuilt shader has a new time even when its bytes are the same; then the files
  *     go although they were still good, which costs one run of first-time builds.
- * A stamp that differs, or none: the cache and the journal are deleted before either is read. The cache file's
+ * Another GPU or driver, or no stamp: the cache and the journal are deleted before either is read. Only the
+ * shaders changed: both are kept and the journal's pipelines are built again at start (decision 0070). The cache file's
  * own header (Vulkan's VkPipelineCacheHeaderVersionOne: the same three values) is checked as well before it is
  * handed to the driver, so a damaged or foreign file is never loaded; the specification asks applications to do
  * this themselves and not to rely on the driver. */
@@ -170,7 +171,25 @@ void gpu_pcache_init(void) {
         was[strcspn(was, "\r\n")] = 0;
         fclose(f);
     }
-    if (strcmp(now, was) != 0) {
+    /* Only the shaders changed (a game update): both files stay (decision 0070). The cache's entries are keyed by
+     * the shaders' bytes, so the old ones just don't match; the unchanged ones still do. The journal's records name
+     * shaders by the game's keys and the pipeline state, which a rebuild doesn't change: at start the prewarm builds
+     * them again from the new files in the background, before the game asks for them. A cache that grew past
+     * 64 MiB through updates goes (the journal fills it again). */
+    const char *now_sh = strstr(now, " shaders "), *was_sh = strstr(was, " shaders ");
+    if (strcmp(now, was) != 0 && now_sh && was_sh && now_sh - now == was_sh - was && !strncmp(now, was, (size_t)(now_sh - now))) {
+        f = cache_on ? fopen(path, "rb") : NULL;
+        long len = 0;
+        if (f) fseek(f, 0, SEEK_END), len = ftell(f), fclose(f);
+        int too_big = len > 64l << 20;
+        if (too_big) remove(path);
+        fprintf(stderr, "yw4: gpu: pipeline cache%s and journal kept: the shaders changed; the journal's pipelines are "
+                "built again in the background at start\n", too_big ? " (over 64 MiB: emptied)" : "");
+        if ((f = fopen(stamp_path, "wb")) != NULL) {
+            fprintf(f, "%s\n", now);
+            fclose(f);
+        }
+    } else if (strcmp(now, was) != 0) {
         char tmp[1040];
         snprintf(tmp, sizeof tmp, "%s.tmp", path);
         int had = 0;
