@@ -36,6 +36,9 @@ pub struct State {
     /// Settings: the game's corner card at each start that says how to see the controls (on by default)
     #[serde(rename = "controlsHint", default = "yes")]
     controls_hint: bool,
+    /// Settings: the game's Cheats page (on by default; off starts the game with YW4_CHEATS=0)
+    #[serde(default = "yes")]
+    cheats: bool,
     /// Disabled mods by name: skipped during LayeredFS overlay
     #[serde(rename = "disabledMods", default)]
     pub disabled_mods: Vec<String>,
@@ -571,7 +574,7 @@ pub fn set_mod_enabled(mod_name: String, enabled: bool) -> Result<Vec<String>, S
 /// Settings (Play): with `mods` off the game starts with none (YW4_MODS=none: an environment variable wins over
 /// game.ini's line); `on_play` says what the launcher's window does meanwhile, and "hide" brings it back afterwards.
 #[tauri::command]
-pub fn play(app: tauri::AppHandle, install: String, mods: Option<bool>, on_play: Option<String>, theme: Option<String>, show_log: Option<bool>, disabled_mods: Option<Vec<String>>, controls_hint: Option<bool>) -> Result<(), String> {
+pub fn play(app: tauri::AppHandle, install: String, mods: Option<bool>, on_play: Option<String>, theme: Option<String>, show_log: Option<bool>, disabled_mods: Option<Vec<String>>, controls_hint: Option<bool>, cheats: Option<bool>) -> Result<(), String> {
     use tauri::{Emitter, Manager};
     crate::buildrun::ensure_dlc_extracted(&app, Path::new(&install));
     let e = exe(&install);
@@ -592,6 +595,8 @@ pub fn play(app: tauri::AppHandle, install: String, mods: Option<bool>, on_play:
     }
     // Settings' "Controls hint" off: no corner card at the start (YW4_KEYS_NOTICE; on is the game's default)
     if controls_hint == Some(false) { cmd.env("YW4_KEYS_NOTICE", "0"); }
+    // Settings' "Cheats" off: the game's Cheats page hidden and every cheat off (YW4_CHEATS; on is the game's default)
+    if cheats == Some(false) { cmd.env("YW4_CHEATS", "0"); }
     // the game reads the launcher's theme files (decision 0055): its folder, so an installed game finds them
     if let Some(dir) = crate::themes::themes_dir(&app) { cmd.env("YW4_THEMES_DIR", dir); }
     // the theme goes both ways: the game opens in the launcher's theme, and a theme chosen in the game comes back

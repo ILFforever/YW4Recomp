@@ -52,6 +52,9 @@ int settings_rows(SettingRow *rows, int max, int *selected);
  * `row` one option forward (dir 1) or back (-1), as Right / Left on it. */
 int settings_player_rows(SettingRow *rows, int max);
 void settings_change(int row, int dir);
+/* The overlay's Cheats page: its rows (none when the launcher turned cheats off, cheats.h), and changing one. */
+int settings_cheat_rows(SettingRow *rows, int max);
+void settings_cheat_change(int row, int dir);
 /* YW4_SET_AT=<frame>:<NAME>=<value>,...: tests change settings at those presented frames (gpu.c calls it). */
 void settings_test_at(uint64_t frame);
 /* A new install's first start (no settings file yet): picks the graphics for the GPU once (low: an integrated GPU

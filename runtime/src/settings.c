@@ -17,6 +17,7 @@
 #include "gbuffer.h"
 #include "gpu.h"
 #include "hud.h"
+#include "cheats.h"
 #include "settings.h"
 #include "theme.h"
 #include "shadow.h"
@@ -314,11 +315,24 @@ static const Setting developer[] = {
      {"16 SAMPLES", "8 SAMPLES, TURNED EACH FRAME"}, 2, gpu_pcss_filter8, gpu_pcss_filter8_toggle, "YW4_PCSS_FILTER_TAPS",
      {"16", "8"}, mask_speedup_disabled},
 };
+/* The overlay's Cheats page (gamemenu.c; owner, 2026-11-15, canvas https://claude.ai/artifact/XcwzdE1gju4aNQJgxgE2e5
+ * option B): its own page in the side menu, never on the Settings page or the old panel; hidden, and every cheat off,
+ * with the launcher's "Cheats" off (YW4_CHEATS=0, cheats.h). Saved in the settings file like the rest. */
+static const Setting cheats[] = {
+    {"CHEATS", "UNLIMITED CRANK-A-KAI",
+     "THE DAY'S CRANKS NEVER GO DOWN, SO YOU CAN CRANK AS LONG AS YOU HAVE COINS. EACH CRANK STILL COSTS A COIN. "
+     "IT TAKES EFFECT AT ONCE. OFF: THE GAME'S OWN DAILY LIMIT.",
+     {"OFF", "ON"},
+     {"THE GAME'S OWN DAILY LIMIT", "CRANKS NEVER RUN OUT, COINS STILL USED"}, 2, cheat_crank_get, cheat_crank_toggle,
+     "YW4_CHEAT_CRANK", {"0", "1"}},
+};
 enum { NPLAYER = sizeof player / sizeof *player, NDEVELOPER = sizeof developer / sizeof *developer,
-       NSETTINGS = NPLAYER + NDEVELOPER, LINK_ROW = NPLAYER };
+       NCHEATS = sizeof cheats / sizeof *cheats, NSETTINGS = NPLAYER + NDEVELOPER + NCHEATS, LINK_ROW = NPLAYER };
 
-/* Every setting, both pages: for the settings file. */
-static const Setting *setting(int i) { return i < NPLAYER ? &player[i] : &developer[i - NPLAYER]; }
+/* Every setting, both pages and the cheats: for the settings file. */
+static const Setting *setting(int i) {
+    return i < NPLAYER ? &player[i] : i < NPLAYER + NDEVELOPER ? &developer[i - NPLAYER] : &cheats[i - NPLAYER - NDEVELOPER];
+}
 
 static const char *const link_help =
     "SWITCHES FOR TESTING THE PORT: WHO DRAWS EACH PART OF THE PICTURE, THE GAME OR OUR OWN RENDERER, AND "
@@ -688,5 +702,15 @@ void settings_change(int row, int dir) {
     if (!s) return;
     if (s->disabled && s->disabled()) return;  /* greyed out */
     setting_step(s, dir);
+    settings_save();
+}
+
+int settings_cheat_rows(SettingRow *rows, int max) {
+    return cheats_allowed() ? fill_rows(rows, max, cheats, NCHEATS) : 0;
+}
+
+void settings_cheat_change(int row, int dir) {
+    if (!cheats_allowed() || row < 0 || row >= NCHEATS) return;
+    setting_step(&cheats[row], dir);
     settings_save();
 }

@@ -14,6 +14,12 @@ void yw4_thread_role(int role);
 /* The guest thread id of the calling thread (the performance report's "thread N"); 0 if none. */
 uint64_t yw4_thread_id(void);
 void yw4_thread_cpu_report(FILE *f, int64_t interval_ns);
+/* The writable regions of the game's memory (heap, data, mappings), up to max; their count. */
+int yw4_memory_rw_regions(uint64_t *addr, uint64_t *size, int max);
+/* YW4_MEMSCAN (memscan.c): the memory search's work for this presented frame. */
+void yw4_memscan_frame(uint64_t frame);
+/* YW4_MEMSCAN=<value>@live: Insert was pressed (window.c): a sample at the next frame. */
+void yw4_memscan_key(void);
 /* YW4_WAITPROF=1: where the main thread blocked over the last `frames` frames (then cleared). */
 void yw4_wait_report(FILE *f, int frames);
 

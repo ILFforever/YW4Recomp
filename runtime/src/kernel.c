@@ -84,6 +84,18 @@ static void region_remove(uint64_t addr) {
         }
 }
 
+/* The writable regions (heap, the modules' data, mappings), up to max: for memscan.c (YW4_MEMSCAN). Stacks and
+ * thread-local regions are left out. */
+int yw4_memory_rw_regions(uint64_t *addr, uint64_t *size, int max) {
+    host_lock(&klock);
+    int n = 0;
+    for (int i = 0; i < nregions && n < max; i++)
+        if (regions[i].perm == PERM_RW && regions[i].type != MEM_STACK && regions[i].type != MEM_THREAD_LOCAL)
+            addr[n] = regions[i].addr, size[n] = regions[i].size, n++;
+    host_unlock(&klock);
+    return n;
+}
+
 /* svcQueryMemory's MemoryInfo: the region containing addr, or the unmapped gap around it. */
 static void query_memory(uint64_t addr, uint64_t out) {
     struct {

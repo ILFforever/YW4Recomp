@@ -16,7 +16,8 @@
 
 #include "ui.h"
 
-enum { GM_RESUME, GM_SETTINGS, GM_CONTROLS, GM_PERF, GM_BUG, GM_TITLE, GM_EXIT, GM_ITEMS };
+/* GM_CHEATS: shown only while cheats are allowed (cheats.h); the keys and the mouse pass over it otherwise */
+enum { GM_RESUME, GM_SETTINGS, GM_CONTROLS, GM_PERF, GM_CHEATS, GM_BUG, GM_TITLE, GM_EXIT, GM_ITEMS };
 /* GM_BACK: one step back (B, Escape, Backspace, the right mouse button): a page to the side panel, the side panel
  * to the game. GM_LEAVE: as GM_BACK on a page (older recordings' A key). GM_PREV / GM_NEXT: the page's previous /
  * next section (LB / RB, LT / RT, Q / E). Lists stop at their ends. */

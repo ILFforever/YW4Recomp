@@ -29,6 +29,7 @@
 
 #include "events.h"
 #include "host.h"
+#include "kernel.h"
 #include "bindings.h"
 #include "framerate.h"
 #include "gpu_dlss.h"
@@ -3379,6 +3380,8 @@ void window_run(void (*guest)(void *), void *arg) {
                 else window_fullscreen_cycle(), settings_save();
             }
             if (e.key.key == SDLK_F10) gpu_request_dump(), yw4_hid_note_key("F10");      /* shadow maps etc.: work/dump/ */
+            /* YW4_MEMSCAN=<v>@live (memscan.c): a sample. F8 too: laptops often have no Insert key */
+            if ((e.key.key == SDLK_INSERT || e.key.key == SDLK_F8) && !e.key.repeat) yw4_memscan_key();
             if (e.key.key == SDLK_F3 && settings_legacy_keys()) window_hud_toggle(), settings_save();  /* the HUD */
             /* LEGACY MENUS off (the default): F1 and F2 open the overlay on its Settings and Controls pages instead
              * (owner, 2026-11-08); the same key again resumes. F3 cycles the HUD (owner, 2026-11-11). Not while the

@@ -681,7 +681,7 @@ async function afterBuild() {
     dlss: options.dlss && rtx, freeUp: options.freeUp, desktop: options.desktop, startMenu: options.startMenu,
     originalsOffered: inst && inst.install === options.install ? !!inst.originalsOffered : false,
     onPlay: (inst && inst.onPlay) || 'hide', mods: !(inst && inst.mods === false), showLog: !!(inst && inst.showLog),
-    controlsHint: !(inst && inst.controlsHint === false), disabledMods: (inst && inst.disabledMods) || [], icon: inst && inst.icon };  // Settings' choices stay
+    controlsHint: !(inst && inst.controlsHint === false), cheats: !(inst && inst.cheats === false), disabledMods: (inst && inst.disabledMods) || [], icon: inst && inst.icon };  // Settings' choices stay
   syncSettingsButton();
   try { await invoke('save_state', { state: inst }); } catch (e) { logLine('could not remember the install: ' + e); }
   // the icon the build just made: a first build has none cached, and Ready's install_info (DLC checks) is slow, so
@@ -1185,7 +1185,7 @@ $('play').addEventListener('click', async () => {
   }
   try {
     await invoke('play', { install: inst.install, mods: inst.mods !== false, showLog: !!inst.showLog, onPlay: inst.onPlay || 'hide',
-      controlsHint: inst.controlsHint !== false, theme: THEMES[themeAt] ? THEMES[themeAt].id : 'recomp', disabledMods: (inst && inst.disabledMods) || [] });
+      controlsHint: inst.controlsHint !== false, cheats: inst.cheats !== false, theme: THEMES[themeAt] ? THEMES[themeAt].id : 'recomp', disabledMods: (inst && inst.disabledMods) || [] });
     $('stat-last').textContent = 'Today';
   } catch (e) { popup('Something went wrong', String(e)); }
 });
@@ -1216,6 +1216,7 @@ async function showSettings() {
   setToggle('set-mods', inst.mods !== false);
   setToggle('set-showlog', !!inst.showLog);
   setToggle('set-hint', inst.controlsHint !== false);
+  setToggle('set-cheats', inst.cheats !== false);
   try { setToggle('set-full', await invoke('game_full_screen', { install: inst.install, saves: inst.saves })); } catch (e) { /* off */ }
   setToggle('set-desktop', inst.desktop);
   setToggle('set-startmenu', inst.startMenu);
@@ -1296,6 +1297,8 @@ document.querySelectorAll('[data-onplay]').forEach((b) => b.addEventListener('cl
 $('set-mods').addEventListener('click', async () => { inst.mods = inst.mods === false; setToggle('set-mods', inst.mods); await saveInst(); });
 $('set-showlog').addEventListener('click', async () => { inst.showLog = !inst.showLog; setToggle('set-showlog', inst.showLog); await saveInst(); });
 $('set-hint').addEventListener('click', async () => { inst.controlsHint = inst.controlsHint === false; setToggle('set-hint', inst.controlsHint); await saveInst(); });
+// the game's Cheats page (on by default); off starts the game with YW4_CHEATS=0: the page hidden, every cheat off
+$('set-cheats').addEventListener('click', async () => { inst.cheats = inst.cheats === false; setToggle('set-cheats', inst.cheats); await saveInst(); });
 $('set-full').addEventListener('click', async () => {
   const full = $('set-full').getAttribute('aria-checked') !== 'true';
   try {

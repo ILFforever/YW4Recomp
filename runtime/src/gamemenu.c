@@ -12,6 +12,7 @@
 #include "battle.h"
 #include "bindings.h"
 #include "bugreport.h"
+#include "cheats.h"
 #include "savefs.h"
 #include "settings.h"
 #include "textin.h"
@@ -45,6 +46,7 @@ static int kv_mouse_held, kv_focus;
 static int preview, preview_hidden;  /* Preview: the game runs under the bar; the bar hidden (only its chip shows) */
 static float pv_rect[4];             /* the part of the overlay the window shows while previewing (design units) */
 static int bug_page, brow;           /* Report a bug: its page and chosen row (below, with the rest of it) */
+static int crow;                     /* the chosen row on the Cheats page (settings_cheat_rows) */
 
 /* name entry (gamemenu.h): the popup's state; the game's thread waits in swkbd.c meanwhile */
 static int prompting, prompt_finished;  /* prompt_finished: 1 answered, 2 cancelled */
@@ -456,6 +458,7 @@ static void accept(void) {
     case GM_SETTINGS: focus = 1, in_rows = 0; break;  /* into its page: its sections first */
     case GM_CONTROLS: focus = 1, mb_open = 0; break;
     case GM_PERF: focus = 1; break;
+    case GM_CHEATS: focus = 1; break;
     case GM_BUG: focus = 1, bug_page = 0, brow = 0; break;  /* the report's first page (below) */
     case GM_TITLE:  /* "keep playing" chosen first; greyed out (window_pause_title_state): nothing */
         if (window_pause_title_state() > 0) confirm = GM_TITLE, choice = 0;
@@ -493,6 +496,7 @@ static void preview_stop(void) {
 
 void gamemenu_open_page(int item) {
     if (gamemenu_prompting() || item <= GM_RESUME || item >= GM_TITLE) return;  /* the items with a page */
+    if (item == GM_CHEATS && !cheats_allowed()) return;
     if (gamemenu_open() && sel == item && focus && !preview && !confirm) {  /* the same key again: back to the game */
         close_and_resume();
         return;
@@ -650,6 +654,22 @@ static void controls_page_action(int a) {
     } else if (a == GM_UP || a == GM_DOWN || a == GM_LEFT || a == GM_RIGHT || a == GM_ACCEPT || a == GM_CLEAR) {
         bindings_action(map[a]);
     }
+}
+
+/* the Cheats page (canvas https://claude.ai/artifact/XcwzdE1gju4aNQJgxgE2e5 option B): Up / Down choose a cheat, Left /
+ * Right (or Enter) change it, Back to the side panel */
+static void cheats_page_action(int a) {
+    SettingRow rows[8];
+    int n = settings_cheat_rows(rows, 8);
+    if (a == GM_BACK || a == GM_LEAVE || n <= 0) {
+        focus = 0;
+        return;
+    }
+    if (crow >= n) crow = n - 1;
+    if (a == GM_UP) crow = crow > 0 ? crow - 1 : 0;
+    else if (a == GM_DOWN) crow = crow < n - 1 ? crow + 1 : n - 1;
+    else if (a == GM_LEFT || a == GM_RIGHT) settings_cheat_change(crow, a == GM_RIGHT ? 1 : -1);
+    else if (a == GM_ACCEPT) settings_cheat_change(crow, 1);
 }
 
 /* the performance page: its rows are the mode (Off / Compact / Detailed), the corner, the detailed HUD's four parts,
@@ -838,15 +858,19 @@ void gamemenu_action(int a) {
         if (sel == GM_CONTROLS) controls_page_action(a);
         else if (sel == GM_PERF) perf_page_action(a);
         else if (sel == GM_BUG) bug_page_action(a);
+        else if (sel == GM_CHEATS) cheats_page_action(a);
         else settings_page_action(a);
         return;
     }
     if (a == GM_UP) sel = sel > 0 ? sel - 1 : 0;
     else if (a == GM_DOWN) sel = sel < GM_ITEMS - 1 ? sel + 1 : GM_ITEMS - 1;
+    if ((a == GM_UP || a == GM_DOWN) && sel == GM_CHEATS && !cheats_allowed())
+        sel = a == GM_UP ? GM_PERF : GM_BUG;  /* hidden (the launcher's "Cheats" off): passed over */
     if ((a == GM_UP || a == GM_DOWN) && sel == GM_TITLE && window_pause_title_state() <= 0)
         sel = a == GM_UP ? GM_BUG : GM_EXIT;  /* greyed out: passed over */
     else if (a == GM_ACCEPT ||
-             (a == GM_RIGHT && (sel == GM_SETTINGS || sel == GM_CONTROLS || sel == GM_PERF || sel == GM_BUG)))
+             (a == GM_RIGHT && (sel == GM_SETTINGS || sel == GM_CONTROLS || sel == GM_PERF || sel == GM_CHEATS ||
+                                sel == GM_BUG)))
         accept();
     else if (a == GM_BACK) close_and_resume();  /* Escape, Backspace, B on the side panel: back to the game */
 }
@@ -956,7 +980,7 @@ void gamemenu_mouse(float x, float y, int button) {
     if (button == 1 && textin_has(&bug_text) && (!found || h.kind != HIT_BUG_TEXT)) textin_edit(TI_DONE), changed();
     if (!found) return;
     int click = button == 1, drag = button == 4;  /* 4: moved with the left button held (a slider's thumb) */
-    int before = sel * 1000 + focus * 100 + srow + prow * 37 + choice * 7 + in_rows * 500 + brow * 11 + bug_page * 3;
+    int before = sel * 1000 + focus * 100 + srow + prow * 37 + choice * 7 + in_rows * 500 + brow * 11 + bug_page * 3 + crow * 13;
     switch (h.kind) {
     case HIT_SIDE:
         /* hovering chooses on the side panel; on a page, only a click goes to another item */
@@ -967,6 +991,11 @@ void gamemenu_mouse(float x, float y, int button) {
         if (click) srow = h.a, focus = 1, in_rows = 0;
         break;
     case HIT_ROW: case HIT_ROW_PREV: case HIT_ROW_NEXT:
+        if (sel == GM_CHEATS) {  /* the Cheats page's rows */
+            crow = h.a, focus = 1;
+            if (click) settings_cheat_change(h.a, h.kind == HIT_ROW_PREV ? -1 : 1);
+            break;
+        }
         srow = h.a, focus = 1, in_rows = 1;
         if (click) settings_change(h.a, h.kind == HIT_ROW_PREV ? -1 : 1);
         break;
@@ -1081,7 +1110,7 @@ void gamemenu_mouse(float x, float y, int button) {
         if (click) focus = 1, bug_done_btn = h.a, bug_done_press(h.a);
         break;
     }
-    if (click || sel * 1000 + focus * 100 + srow + prow * 37 + choice * 7 + in_rows * 500 + brow * 11 + bug_page * 3 != before)
+    if (click || sel * 1000 + focus * 100 + srow + prow * 37 + choice * 7 + in_rows * 500 + brow * 11 + bug_page * 3 + crow * 13 != before)
         changed();
 }
 
@@ -1172,6 +1201,9 @@ static const char *const ICON_PERF = "<path d=\"M3 20h18M5 16l4-5 4 3 6-8\"/>";
 static const char *const ICON_BUG =
     "<path d=\"M8 10a4 4 0 0 1 8 0v4a4 4 0 0 1-8 0zM12 10v8M4 12h4M16 12h4M5 7.5l3 2M19 7.5l-3 2M5 18.5l3-2M19 18.5"
     "l-3-2M10 6.5L8.5 4M14 6.5L15.5 4\"/>";
+/* a five-pointed star: the Cheats page */
+static const char *const ICON_CHEATS =
+    "<path d=\"M12 3l2.6 5.6 6 .7-4.5 4.1 1.2 6L12 16.4l-5.3 3 1.2-6-4.5-4.1 6-.7z\"/>";
 static const char *const ICON_EXIT = "<path d=\"M12 3v9M6.3 6.3a8 8 0 1 0 11.4 0\"/>";
 static const char *const ICON_TITLE = "<path d=\"M3 11l9-7 9 7M5 10v10h14V10\"/>";  /* a house: back to the start */
 /* the value arrows (‹ ›): drawn as icons, not the font's characters, which sit low in their line */
@@ -1524,6 +1556,56 @@ static void draw_settings_page(const UiCanvas *c, const GameMenuInfo *in) {
     ui_box(c, x, bottom - dh, w, dh, 14, NIGHT, 0, 0);
     ui_text(c, UI_ROUNDED_800, 15, x + 20, bottom - dh + 16, lh, dname, SNOW);
     ui_text_wrap(c, UI_GOTHIC_500, 15, 0, x + 20, bottom - dh + 16 + lh + 4, w - 40, lh, 0, dprose, ON_DARK);
+}
+
+/* The Cheats page (canvas https://claude.ai/artifact/XcwzdE1gju4aNQJgxgE2e5 option B): the title and a line under
+ * it, the cheats as the Settings page's rows (full width, no sections), the chosen one's description at the bottom. */
+static void draw_cheats_page(const UiCanvas *c, const GameMenuInfo *in) {
+    (void)in;
+    SettingRow rows[8];
+    int n = settings_cheat_rows(rows, 8);
+    char t[160];
+    ui_box(c, 448, 40, 1104, 764, 20, PAPER, 0, 0);
+    ui_text(c, UI_ROUNDED_800, 34, 488, 76, 34 * 1.25f, "Cheats", NIGHT);
+    float x = 488, w = 1104 - 80, lead = 15 * 1.5f, top = 76 + 34 * 1.25f + 6;
+    ui_text_wrap(c, UI_GOTHIC_500, 15, 0, x, top, w, lead, 0,
+                 "All off by default. They change the game while it runs; turn one off and the game goes back to its own "
+                 "rules.", MUTED);
+    if (n <= 0) return;
+    int cur = crow < n ? crow : n - 1;
+    float y = top + lead + 22, bottom = 40 + 764 - 36;
+    for (int i = 0; i < n; i++) {
+        const SettingRow *r = &rows[i];
+        int on = focus && i == cur;
+        ui_box(c, x, y, w, 72, 14, WHITE, on ? 3 : 2, on ? RING : LINE);
+        hit_add(x, y, w, 72, HIT_ROW, i, 0);
+        sentence_case(r->name, t, sizeof t);
+        ui_text_in(c, UI_GOTHIC_500, 18, x + 20, y, 0, 72, 0, t, INK);
+        float nx = x + w - 12 - 44, vx = nx - 10 - 340, px = vx - 10 - 44, by = y + 14;
+        hit_add(px, by, 44, 44, HIT_ROW_PREV, i, 0), hit_add(nx, by, 44, 44, HIT_ROW_NEXT, i, 0);
+        for (int k = 0; k < 2; k++) {  /* ‹ and ›; darker under the mouse */
+            float bx = k ? nx : px;
+            int hv = hovered(k ? HIT_ROW_NEXT : HIT_ROW_PREV, i, 0);
+            ui_box(c, bx, by, 44, 44, 10, hv ? LILAC : SOFT, 2, hv ? PLUM : LINE);
+            ui_icon(c, k ? ICON_NEXT : ICON_PREV, bx + 11, by + 11, 22, 2.4f, PLUM);
+        }
+        char prose[200];
+        sentence_case(r->options[r->current] ? r->options[r->current] : "", t, sizeof t);
+        prose_case(r->notes[r->current] ? r->notes[r->current] : "", prose, sizeof prose);
+        float vh = 18 * 1.4f, nh = *prose ? 13 * 1.3f : 0, vy = y + (72 - vh - (nh ? 2 + nh : 0)) / 2;
+        ui_text_in(c, UI_ROUNDED_700, 18, vx, vy, 340, vh, 1, t, NIGHT);
+        if (nh) ui_text_in(c, UI_GOTHIC_500, 13, vx, vy + vh + 2, 340, nh, 1, prose, MUTED);
+        y += 72 + 10;
+    }
+    /* the chosen cheat's name in bold white, then what it does */
+    const SettingRow *dr = &rows[cur];
+    char dprose[600], dname[160];
+    prose_case(dr->help, dprose, sizeof dprose);
+    sentence_case(dr->name, dname, sizeof dname);
+    float dh = lead + 4 + ui_text_wrap(NULL, UI_GOTHIC_500, 15, 0, 0, 0, w - 40, lead, 0, dprose, 0) + 32;
+    ui_box(c, x, bottom - dh, w, dh, 14, NIGHT, 0, 0);
+    ui_text(c, UI_ROUNDED_800, 15, x + 20, bottom - dh + 16, lead, dname, SNOW);
+    ui_text_wrap(c, UI_GOTHIC_500, 15, 0, x + 20, bottom - dh + 16 + lead + 4, w - 40, lead, 0, dprose, ON_DARK);
 }
 
 /* A binding's name (bindings.c pad_label, key names) with its symbols drawn as icons, as the old F2 page's pixel
@@ -3149,11 +3231,14 @@ void gamemenu_draw(const UiCanvas *c, const GameMenuInfo *in) {
         __atomic_store_n(&hit_front, hk, __ATOMIC_RELEASE);
         return;
     }
-    int page = (sel == GM_SETTINGS || sel == GM_CONTROLS || sel == GM_PERF || sel == GM_BUG) && !confirm;  /* these show a page */
+    int cheats = cheats_allowed();
+    int page = (sel == GM_SETTINGS || sel == GM_CONTROLS || sel == GM_PERF || (sel == GM_CHEATS && cheats) ||
+                sel == GM_BUG) && !confirm;  /* these show a page */
     ui_rect(c, 0, T - 1, W, H + 2 * E + 2, SHADE, page ? 0.62f : 0.35f);  /* the tint over the game, darker behind a page */
     if (page && sel == GM_SETTINGS) draw_settings_page(c, in);
     if (page && sel == GM_CONTROLS) draw_controls_page(c, in);
     if (page && sel == GM_PERF) draw_perf_page(c, in);
+    if (page && sel == GM_CHEATS) draw_cheats_page(c, in);
     if (page && sel == GM_BUG) draw_bug_page(c, in);
 
     /* the side panel: 400 wide with a 4 px gold edge towards the game */
@@ -3170,12 +3255,14 @@ void gamemenu_draw(const UiCanvas *c, const GameMenuInfo *in) {
     ui_text(c, UI_ROUNDED_800, 21, 100, ty, th, "Yo-kai Watch 4 Recomp", SNOW);
     ui_text(c, UI_GOTHIC_400, 14, 100, ty + th + 4, sh, "Game version " GAME_VERSION, ON_DARK);
 
-    static const char *const labels[] = {"Resume", "Settings", "Controls", "Overlay", "Report a bug"};
-    const char *icons[] = {ICON_RESUME, ICON_SETTINGS, ICON_CONTROLS, ICON_PERF, ICON_BUG};
-    for (int i = 0; i < 5; i++) {
-        const char *l = labels[i];
-        side_button(c, 20, T + 128 + i * 66, 356, icons[i], l, sel == i, PLUM);
-        hit_add(20, T + 128 + i * 66, 356, 56, HIT_SIDE, i, 0);
+    /* the items with a page, GM_RESUME..GM_BUG; Cheats only while the launcher allows them (cheats.h) */
+    static const char *const labels[] = {"Resume", "Settings", "Controls", "Overlay", "Cheats", "Report a bug"};
+    const char *icons[] = {ICON_RESUME, ICON_SETTINGS, ICON_CONTROLS, ICON_PERF, ICON_CHEATS, ICON_BUG};
+    for (int i = 0, k = 0; i <= GM_BUG; i++) {
+        if (i == GM_CHEATS && !cheats) continue;
+        side_button(c, 20, T + 128 + k * 66, 356, icons[i], labels[i], sel == i, PLUM);
+        hit_add(20, T + 128 + k * 66, 356, 56, HIT_SIDE, i, 0);
+        k++;
     }
     /* Return to title and Exit game at the bottom, under a line (the ways out of the game); the version under them */
     float vy = H + E - 20 - 19, ey = vy - 14 - 56, ry = ey - 10 - 56;

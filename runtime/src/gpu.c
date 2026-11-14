@@ -32,6 +32,7 @@
 #include "post.h"
 #include "gpu_internal.h"
 #include "host.h"
+#include "kernel.h"
 #include "settings.h"
 #include "shadow.h"
 #include "tegra.h"
@@ -2688,6 +2689,7 @@ void gpu_present(NvnTexture *t, uint64_t frame, const int crop[4]) {
         gpu_compute_trace(present_count);
     }
     gpu_fg_test_switch(present_count);
+    yw4_memscan_frame(present_count);  /* YW4_MEMSCAN (memscan.c, tests) */
     settings_test_at(present_count);
     int fg_slot = -1;  /* frame generation (gpu_fg.c): the frames go to its pacing thread */
     if (gpu_fg()) {

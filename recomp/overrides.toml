@@ -348,3 +348,10 @@ module = "main"
 offset = "0x3bd260"
 native = "yw4_hook_time_changed"
 why = "the game's \"the console's time was changed\" check (clock moved by the user, time zone or device id differ from the save's): answered no, a PC has no console clock and imported saves differ through no doing of the player (runtime/src/svc_time.c)"
+
+[[hook]]
+module = "main"
+offset = "0x296560"
+at = "0x2966a8"
+native = "yw4_hook_save_byte"
+why = "the \"save one byte by ID\" script command, just before its store (x9 the ID, x20 the value): YW4_TRACE_SAVEBYTE logs the IDs that go through it; the Crank-a-kai's cranks left today are one of them (runtime/src/cheats.c)"
