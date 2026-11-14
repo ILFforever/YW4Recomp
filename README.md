@@ -417,6 +417,22 @@ back. The mouse also works in the Yo-kai Pad and its pages: hover, click, and th
 progress, [decision 0057](docs/decisions/0057-mouse-menu-lists.md)). By default the left button attacks and the right
 button aims in battles, and the wheel selects characters; each is set on the Mouse buttons page.
 
+**Where the mouse works** (the code on GitHub, 2026-11-15; the title screen, conversations, shops and the overlay's
+wheel are newer than the last release):
+
+| Where | Point and click | Wheel | Right button |
+|---|---|---|---|
+| Exploring | The mouse turns the camera; left is Interact (A) | Minimap size (R) | Watch scan (ZL) |
+| Battles | Left attacks (Y) | Picks the character | Aims (ZL) |
+| Yo-kai Pad (X menu) and its pages | Yes: hover moves the cursor, a click chooses | Scrolls lists; on the Pad's grid, changes page | Back (B) |
+| Title screen and the save list | Left chooses what is selected (A); no hover | Moves the selection | Back (B) |
+| Conversations, their choices, and shops opened from them | Left confirms or moves the text on (A); no hover | Moves between choices; on a Yes / No box, Yes (up) and No (down) | Cancel / back (B) |
+| The overlay (Escape) | Yes: hover, click, drag the sliders | Moves the selection | Back (Escape) |
+| Other menus: Crank-a-kai, the Plus menu, battle menus, the map | Not yet: left is still Interact (A), so it confirms | Not yet (does its exploring or battle job) | Not yet (does its exploring or battle job) |
+
+Exploring and battle buttons are the defaults: each is changed on the overlay's Mouse buttons page. The menus' mouse
+is fixed.
+
 </details>
 
 <details>

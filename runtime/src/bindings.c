@@ -10,6 +10,7 @@
 
 #include "battle.h"
 #include "bindings.h"
+#include "mousemenu.h"
 #include "pause.h"
 #include "settings.h"
 #include "window.h"
@@ -491,14 +492,20 @@ void bindings_read(const bool *keyboard, uint32_t mouse_buttons, int wheel_up, i
     const int held[BMOUSE_PARTS] = {(mouse_buttons & SDL_BUTTON_LMASK) != 0, (mouse_buttons & SDL_BUTTON_RMASK) != 0,
                                     (mouse_buttons & SDL_BUTTON_MMASK) != 0, wheel_up != 0, wheel_down != 0};
     const int *mouse = mouse_map[battle ? SET_BATTLE : SET_FIELD];
-    /* the title screen's menus (pause.c scene_on_title): the mouse as a menu's, whatever the sets say (owner,
-     * 2026-11-15): left A, right B (back), the wheel D-pad up and down; the wheel press nothing */
-    static int title_mouse[BMOUSE_PARTS] = {-2};
+    /* the title screen's menus (pause.c scene_on_title) and conversations outside battles (mousemenu.c
+     * mousemenu_talking): the mouse as a menu's, whatever the sets say (owner, 2026-11-15): left A (confirm), right
+     * B (back, cancel), the wheel D-pad up and down (between choices); the wheel press nothing */
+    static int title_mouse[BMOUSE_PARTS] = {-2}, sideways_mouse[BMOUSE_PARTS];
     if (title_mouse[0] == -2) {
         static const char *const ids[BMOUSE_PARTS] = {"A", "B", NULL, "DPAD_UP", "DPAD_DOWN"};
-        for (int p = 0; p < BMOUSE_PARTS; p++) title_mouse[p] = ids[p] ? input_by_id(ids[p]) : -1;
+        static const char *const side[BMOUSE_PARTS] = {"A", "B", NULL, "DPAD_LEFT", "DPAD_RIGHT"};
+        for (int p = 0; p < BMOUSE_PARTS; p++) {
+            title_mouse[p] = ids[p] ? input_by_id(ids[p]) : -1;
+            sideways_mouse[p] = side[p] ? input_by_id(side[p]) : -1;
+        }
     }
-    if (scene_on_title()) mouse = title_mouse;
+    /* a Yes / No box with its buttons side by side (mousemenu_sideways): the wheel steps left (up) and right (down) */
+    if (scene_on_title() || (mousemenu_talking() && !battle)) mouse = mousemenu_sideways() ? sideways_mouse : title_mouse;
     for (int i = 0; i < NINPUTS; i++) {
         int key = 0;
         for (int k = 0; k < BIND_KEYS; k++) {

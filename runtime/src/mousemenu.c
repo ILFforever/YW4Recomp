@@ -137,6 +137,25 @@ int mousemenu_open(void) {
     return enabled() && __atomic_load_n(&pad_open, __ATOMIC_ACQUIRE);
 }
 
+/* Conversations (owner, 2026-11-15): the talk window is one menu class for the whole conversation (its text pages
+ * one-item controls, a choice list a control of N items, hash 0xac75395 for Eyepo's three); the field's HUD menu
+ * focuses and reopens its layers when the conversation ends (seen with YW4_MOUSE_LOG at a save point). */
+#define TALK_VTABLE 0x14c8598u
+#define FIELD_HUD_VTABLE 0x14c5698u
+static int talking;
+int mousemenu_talking(void) { return enabled() && __atomic_load_n(&talking, __ATOMIC_ACQUIRE); }
+static void talk_note(uint64_t vt) {
+    if (vt == TALK_VTABLE) __atomic_store_n(&talking, 1, __ATOMIC_RELEASE);
+    else if (vt == FIELD_HUD_VTABLE) __atomic_store_n(&talking, 0, __ATOMIC_RELEASE);
+}
+
+/* The Yes / No box (yw::CMenuGeneralWindow, its two buttons side by side, hash 0xf51efb06: the shop's "Is that
+ * correct?", seen 2026-11-15) has the focus: the wheel steps left and right there. Cleared by any other focus. */
+#define GENERAL_WINDOW_VTABLE 0x14bfa78u
+#define YES_NO_HASH 0xf51efb06u
+static int sideways;
+int mousemenu_sideways(void) { return enabled() && __atomic_load_n(&sideways, __ATOMIC_ACQUIRE); }
+
 int mousemenu_log_on(void) {
     return menu_log_on();
 }
@@ -198,6 +217,8 @@ int yw4_hook_menu_focus(CPUState *ctx) {
                     (unsigned long long)menu, (unsigned long long)vt, hash);
         }
     }
+    talk_note(vt);
+    __atomic_store_n(&sideways, vt == GENERAL_WINDOW_VTABLE && hash == YES_NO_HASH, __ATOMIC_RELEASE);
     if (vt == PAD_VTABLE && hash == PAD_GRID_HASH)
         __atomic_store_n(&pad_open, 1, __ATOMIC_RELEASE);
     if (!__atomic_load_n(&pad_open, __ATOMIC_ACQUIRE)) return 0;
@@ -278,6 +299,7 @@ int yw4_hook_menu_layer_opened(CPUState *ctx) {
     uint64_t vt = ld64(menu) - yw4_image_base;
     if (menu_log_on())
         fprintf(stderr, "yw4: menu_layer_opened: menu=%#llx vt=%#llx\n", (unsigned long long)menu, (unsigned long long)vt);
+    talk_note(vt);
     if (menu == __atomic_load_n(&active_menu, __ATOMIC_ACQUIRE)) {
         int n = __atomic_add_fetch(&layers_open, 1, __ATOMIC_ACQ_REL);
         if (__atomic_load_n(&page, __ATOMIC_ACQUIRE) == PAGE_OPENING && n > __atomic_load_n(&page_base, __ATOMIC_ACQUIRE))

@@ -6,6 +6,12 @@
 /* Returns 1 while the Yo-kai Pad or any of its sub-pages is open, 0 otherwise. */
 int mousemenu_open(void);
 
+/* Returns 1 during a conversation (the talk window, from its first focus until the field's HUD comes back): the
+ * mouse works it as a menu (bindings.c): the wheel moves between choices, left confirms, right cancels. */
+int mousemenu_talking(void);
+/* Returns 1 while a Yes / No box with its buttons side by side has the focus: the wheel steps left and right. */
+int mousemenu_sideways(void);
+
 /* Returns 1 when YW4_MOUSE_LOG=1 or YW4_MOUSE_SCRIPT is set. */
 int mousemenu_log_on(void);
 
