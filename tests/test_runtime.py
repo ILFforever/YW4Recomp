@@ -797,6 +797,12 @@ void tegra_read_region(const TexLayout *t, const uint8_t *base, uint32_t level, 
 void tegra_write_region(const TexLayout *t, uint8_t *base, uint32_t level, uint32_t layer, uint32_t x, uint32_t y,
                         uint32_t z, uint32_t w, uint32_t h, uint32_t d, const uint8_t *src) {}
 uint64_t tegra_total_size(const TexLayout *t) { return 0; }
+/* the menu and scene checks that switch the mouse's buttons (mousemenu.c, pause.c): never on here */
+int scene_on_title(void) { return 0; }
+int mousemenu_talking(void) { return 0; }
+int mousemenu_map(void) { return 0; }
+int mousemenu_sideways(void) { return 0; }
+int mousemenu_stopwatch(void) { return 0; }
 
 #include "bindings.c"
 
@@ -899,6 +905,12 @@ void tegra_read_region(const TexLayout *t, const uint8_t *base, uint32_t level, 
 void tegra_write_region(const TexLayout *t, uint8_t *base, uint32_t level, uint32_t layer, uint32_t x, uint32_t y,
                         uint32_t z, uint32_t w, uint32_t h, uint32_t d, const uint8_t *src) {}
 uint64_t tegra_total_size(const TexLayout *t) { return 0; }
+/* the menu and scene checks that switch the mouse's buttons (mousemenu.c, pause.c): never on here */
+int scene_on_title(void) { return 0; }
+int mousemenu_talking(void) { return 0; }
+int mousemenu_map(void) { return 0; }
+int mousemenu_sideways(void) { return 0; }
+int mousemenu_stopwatch(void) { return 0; }
 
 #include "bindings.c"
 
