@@ -93,7 +93,7 @@ void gpu_fg_step(int dir) {
 
 void gpu_fg_cycle(void) { gpu_fg_step(1); }
 
-#ifdef YW4_FSR
+#if defined(YW4_FSR) && defined(_WIN32)  /* Linux's FSR build is the upscaler only (decision 0073) */
 #include <windows.h>
 #ifndef _WINDOWS
 #define _WINDOWS  /* ffx_api_loader.h looks for MSBuild's name for Windows (as gpu_fsr.c) */

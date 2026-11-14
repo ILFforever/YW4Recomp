@@ -371,7 +371,7 @@ static int vk_init(void) {
         fprintf(stderr, "yw4: window: driver %s, %s (id %d), window system %s\n", dp.driverName, dp.driverInfo,
                 (int)dp.driverID, wsys ? wsys : "?");
     }
-    const char *dexts[24] = {VK_KHR_SWAPCHAIN_EXTENSION_NAME};
+    static const char *dexts[24] = {VK_KHR_SWAPCHAIN_EXTENSION_NAME};  /* kept: vk.device_exts */
     uint32_t ndexts = 1;
     /* NVIDIA DLSS's device extensions (gpu_dlss.c, decision 0040), those the GPU has */
     const char **dlss_exts;
@@ -536,6 +536,8 @@ static int vk_init(void) {
     }
     r = vkCreateDevice(vk.gpu, &dci, NULL, &vk.device);
     if (r != VK_SUCCESS) return vk_fail("vkCreateDevice", r);
+    vk.device_exts = dexts, vk.ndevice_exts = ndexts;
+    vk.shader_f16 = e12.shaderFloat16, vk.shader_i16 = enable.features.shaderInt16, vk.sync2 = e13.synchronization2;
     yw4_boot_mark("Vulkan device");
 #define LOAD_DEVICE(f) f = (PFN_##f)vkGetDeviceProcAddr(vk.device, #f);
     VK_DEVICE_FNS(LOAD_DEVICE)

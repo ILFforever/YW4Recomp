@@ -69,6 +69,10 @@ typedef struct {
     int occlusion_precise;         /* the occlusionQueryPrecise feature is enabled: sample counts, not just 0 or not */
     int conditional_rendering;     /* VK_EXT_conditional_rendering is enabled (gpu_query.c) */
     int sampler_anisotropy;        /* the samplerAnisotropy feature is enabled */
+    /* what the device was created with, for AMD FSR's Linux build (gpu_fsr.c): it may use only what is enabled */
+    const char *const *device_exts;
+    uint32_t ndevice_exts;
+    int shader_f16, shader_i16, sync2;
     VkDeviceSize host_import_align;
 } VkContext;
 extern VkContext vk;

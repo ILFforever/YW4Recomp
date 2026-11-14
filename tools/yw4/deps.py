@@ -144,19 +144,28 @@ DLSS_FILES = {
     "include/nvsdk_ngx_params.h": "943bc8cc5cdae03b6303016fbad3183636f2335ae27a2d18776798c3b4efabbc",
     "include/nvsdk_ngx_helpers_vk.h": "c192bff72138f12f770db48e12c1d8f712dfc81ea0e8e055ebb27d8dd1b31623",
     "include/nvsdk_ngx_vk.h": "2d364ce7132881eb669e9498fd570d74cba563b1fbebc82c235f8e1ad2dd8b6d",
+}
+# per system: the static NGX library and NVIDIA's DLSS model library, loaded from the game's folder (decision 0073)
+DLSS_FILES_WINDOWS = {
     "lib/Windows_x86_64/x64/nvsdk_ngx_d.lib": "bc43df9ec032004fde681d3e3afd01cde239e03a0125b822e88674c84287f99c",
     "lib/Windows_x86_64/rel/nvngx_dlss.dll": "d00b5b0ab29c3ca101b70c3a5ecb3a01b7ef33766a3383a28a18623083e6123e",
+}
+DLSS_SO = f"libnvidia-ngx-dlss.so.{DLSS_VERSION}"
+DLSS_FILES_LINUX = {
+    "lib/Linux_x86_64/libnvsdk_ngx.a": "d3c50bb0d9624fc35e502a8e929b8fc1e2b505017ebdb84c0d5b627e11a235df",
+    f"lib/Linux_x86_64/rel/{DLSS_SO}": "30982c937afed85c96b8d313323de9a650a2eec6de1bb0f714b21750f4ce98f6",
 }
 
 
 def dlss_dir(cfg: config.Config) -> Path:
-    """The DLSS files at their repository paths: include/, lib/Windows_x86_64/..., LICENSE.txt."""
+    """The DLSS files at their repository paths: include/, lib/Windows_x86_64/... or lib/Linux_x86_64/..., LICENSE.txt."""
     return cfg.work_dir / "deps" / f"dlss-{DLSS_VERSION}"
 
 
 def fetch_dlss(cfg: config.Config) -> Path:
     out = dlss_dir(cfg)
-    for rel, want in DLSS_FILES.items():
+    files = {**DLSS_FILES, **(DLSS_FILES_WINDOWS if sys.platform == "win32" else DLSS_FILES_LINUX)}
+    for rel, want in files.items():
         dst = out / rel
         if dst.is_file() and hashlib.sha256(dst.read_bytes()).hexdigest() == want:
             continue

@@ -6,7 +6,9 @@
  * Used by gpu_aa.c in place of TAA's blend: the same jitter point (3D draws shifted in the viewport), the game's
  * motion (copied at the end of the G-buffer pass) and the scene's depth. The colour goes in through the
  * anti-aliasing's reversible curve (perceptual, 0..1), so FSR is told the colour is non-linear.
- * Windows only for now: elsewhere gpu_fsr_available() says no and TAA is used. */
+ * Linux (decision 0073): AMD ships no Linux build, so tools/yw4/fsr_linux.py builds FSR 3.1.5 from AMD's SDK v1.1.4
+ * source (with xplane-fsr3's Linux port, third_party/fsr3-linux) into libamd_fidelityfx_vk.so next to yw4: the same
+ * five functions, opened with dlopen. Upscaling only; no frame generation there yet. */
 #include <inttypes.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -17,6 +19,7 @@
 #include "host.h"
 
 #ifdef YW4_FSR
+#ifdef _WIN32
 #include <windows.h>
 #ifndef _WINDOWS
 #define _WINDOWS  /* ffx_api_loader.h looks for MSBuild's name for Windows; without it ffxLoadFunctions is empty */
@@ -27,6 +30,29 @@
 #include "ffx_api_types.h"
 #include "vk/ffx_api_vk.h"
 #include "../../upscalers/include/ffx_upscale.h"
+#else
+/* Linux: FidelityFX SDK v1.1.4's ffx-api, built here as libamd_fidelityfx_vk.so next to yw4 (decision 0073). Its
+ * loader header is Windows-only (HMODULE), so the five functions are looked up with dlsym. */
+#include <SDL3/SDL_filesystem.h>
+#include <SDL3/SDL_vulkan.h>
+#include <dlfcn.h>
+
+#include "ffx_api.h"
+#include "ffx_api_types.h"
+#include "vk/ffx_api_vk.h"
+#include "ffx_upscale.h"
+typedef struct {
+    PfnFfxCreateContext CreateContext;
+    PfnFfxDestroyContext DestroyContext;
+    PfnFfxConfigure Configure;
+    PfnFfxQuery Query;
+    PfnFfxDispatch Dispatch;
+} ffxFunctions;
+/* the library's own: what our device enabled, so AMD's backend uses no feature or extension it wasn't given */
+typedef void (*Yw4FfxHostSet)(PFN_vkGetInstanceProcAddr, VkInstance, const char *const *, uint32_t, uint32_t, uint32_t,
+                              uint32_t);
+static Yw4FfxHostSet host_set;
+#endif
 
 static ffxFunctions fx;
 static int loaded = -1;  /* -1 not tried, 0 failed, 1 loaded */
@@ -42,6 +68,7 @@ int gpu_fsr_built(void) { return 1; }
 
 int gpu_fsr_available(void) {
     if (loaded >= 0) return loaded;
+#ifdef _WIN32
     HMODULE m = LoadLibraryA("amd_fidelityfx_loader_vk.dll");
     if (!m) {
         fprintf(stderr, "yw4: fsr: amd_fidelityfx_loader_vk.dll not found next to yw4.exe (python -m recomp.build "
@@ -49,6 +76,28 @@ int gpu_fsr_available(void) {
         return loaded = 0;
     }
     ffxLoadFunctions(&fx, m);
+#else
+    char path[1024];
+    const char *base = SDL_GetBasePath();
+    snprintf(path, sizeof path, "%slibamd_fidelityfx_vk.so", base ? base : "");
+    void *m = dlopen(path, RTLD_NOW | RTLD_LOCAL);
+    if (!m) {
+        fprintf(stderr, "yw4: fsr: %s: TAA instead\n", dlerror());
+        return loaded = 0;
+    }
+    fx.CreateContext = (PfnFfxCreateContext)dlsym(m, "ffxCreateContext");
+    fx.DestroyContext = (PfnFfxDestroyContext)dlsym(m, "ffxDestroyContext");
+    fx.Configure = (PfnFfxConfigure)dlsym(m, "ffxConfigure");
+    fx.Query = (PfnFfxQuery)dlsym(m, "ffxQuery");
+    fx.Dispatch = (PfnFfxDispatch)dlsym(m, "ffxDispatch");
+    host_set = (Yw4FfxHostSet)dlsym(m, "yw4FfxHostSet");
+    if (!host_set) {
+        fprintf(stderr, "yw4: fsr: %s lacks yw4FfxHostSet: TAA instead\n", path);
+        return loaded = 0;
+    }
+    host_set((PFN_vkGetInstanceProcAddr)SDL_Vulkan_GetVkGetInstanceProcAddr(), vk.instance, vk.device_exts,
+             vk.ndevice_exts, (uint32_t)vk.shader_f16, (uint32_t)vk.shader_i16, (uint32_t)vk.sync2);
+#endif
     if (!fx.CreateContext || !fx.Dispatch || !fx.Query || !fx.DestroyContext) {
         fprintf(stderr, "yw4: fsr: the loader DLL lacks its functions: TAA instead\n");
         return loaded = 0;
@@ -70,13 +119,19 @@ static int create(uint32_t rw, uint32_t rh, uint32_t ow, uint32_t oh) {
     ctx_rw = rw, ctx_rh = rh, ctx_ow = ow, ctx_oh = oh, ctx_failed = 0;
     struct ffxCreateBackendVKDesc backend = {
         .header = {.type = FFX_API_CREATE_CONTEXT_DESC_TYPE_BACKEND_VK},
+#ifdef _WIN32
         .deviceContext = {.vkDevice = vk.device, .vkPhysicalDevice = vk.gpu, .vkDeviceProcAddr = vkGetDeviceProcAddr}};
+#else  /* SDK v1.1.4: the same three fields, not yet in a VkDeviceContext */
+        .vkDevice = vk.device, .vkPhysicalDevice = vk.gpu, .vkDeviceProcAddr = vkGetDeviceProcAddr};
+#endif
     struct ffxCreateContextDescUpscale desc = {
         .header = {.type = FFX_API_CREATE_CONTEXT_DESC_TYPE_UPSCALE, .pNext = &backend.header},
         .flags = FFX_UPSCALE_ENABLE_NON_LINEAR_COLORSPACE,
         .maxRenderSize = {rw, rh}, .maxUpscaleSize = {ow, oh}, .fpMessage = message};
     if (getenv("YW4_FSR_DEBUG")) desc.flags |= FFX_UPSCALE_ENABLE_DEBUG_CHECKING;
+#ifdef _WIN32  /* SDK 2.x; v1.1.4 (Linux) has the debug view as a dispatch flag only */
     if (getenv("YW4_FSR_DEBUG_VIEW")) desc.flags |= FFX_UPSCALE_ENABLE_DEBUG_VISUALIZATION;
+#endif
     /* The upscalers the DLL offers on this GPU, logged once; YW4_FSR_VERSION=<name> (e.g. 2.3.4) picks one */
     struct ffxOverrideVersion over = {.header = {.type = FFX_API_DESC_TYPE_OVERRIDE_VERSION}};
     {
@@ -84,7 +139,12 @@ static int create(uint32_t rw, uint32_t rh, uint32_t ow, uint32_t oh) {
         const char *names[16] = {0};
         struct ffxQueryDescGetVersions qv = {.header = {.type = FFX_API_QUERY_DESC_TYPE_GET_VERSIONS},
                                              .createDescType = FFX_API_CREATE_CONTEXT_DESC_TYPE_UPSCALE,
-                                             .device = &backend.deviceContext, .outputCount = &count, .versionIds = ids,
+#ifdef _WIN32
+                                             .device = &backend.deviceContext,
+#else  /* v1.1.4 reads it for DX12 only */
+                                             .device = vk.device,
+#endif
+                                             .outputCount = &count, .versionIds = ids,
                                              .versionNames = names};
         fx.Query(NULL, &qv.header);
         static int listed;

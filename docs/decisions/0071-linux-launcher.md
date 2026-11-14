@@ -57,7 +57,8 @@ an SDL3 from outside the system folders next to `yw4` and links with run path `$
 
 **The screens.** The page sees Linux in WebKitGTK's user agent. It leaves out what only Windows has (the FSR and
 DLSS options, their mentions, the DLSS slide), says "App menu entry" and "In your home folder", and suggests
-`~/Games/YW4 Recomp`.
+`~/Games/YW4 Recomp`. Since [decision 0073](0073-dlss-fsr-on-linux.md) the DLSS and FSR options are back on Linux,
+as upscaling only; only frame generation is left out.
 
 ## Found on the way
 

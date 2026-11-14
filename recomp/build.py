@@ -15,6 +15,7 @@ import concurrent.futures
 import hashlib
 import json
 import os
+import platform
 import subprocess
 import sys
 import time
@@ -24,6 +25,7 @@ from pathlib import Path
 import shutil
 
 from tools.yw4 import config, deps, progress
+from tools.yw4 import fsr_linux as fsr_linux_build
 
 from . import check
 
@@ -247,6 +249,24 @@ def main(argv: list[str] | None = None) -> int:
         except (subprocess.CalledProcessError, FileNotFoundError):
             print("error: SDL3 not found via pkg-config (install sdl3 / libsdl3-dev)", file=sys.stderr)
             return 1
+        # NVIDIA DLSS upscaling on Linux (decision 0073): NVIDIA's static NGX library (built with GCC: C++ runtime and
+        # dlopen) and its DLSS library, copied next to yw4 below. No frame generation or Reflex: Streamline is Windows only
+        if not args.no_dlss and platform.machine() in ("x86_64", "AMD64"):
+            dlss = deps.fetch_dlss(cfg)
+            includes.append(f"-I{dlss / 'include'}")
+            feature_defs.append("-DYW4_DLSS=1")
+            sdl_libs += [str(dlss / "lib" / "Linux_x86_64" / "libnvsdk_ngx.a"), "-lstdc++", "-ldl"]
+        # AMD FSR upscaling on Linux (decision 0073): built from AMD's SDK v1.1.4 source (tools/yw4/fsr_linux.py), its
+        # headers here, libamd_fidelityfx_vk.so copied next to yw4 below and opened at run time (dlopen)
+        if not args.no_fsr and platform.machine() in ("x86_64", "AMD64"):
+            try:
+                fsr_linux = fsr_linux_build.fetch_fsr_linux(cfg)
+            except (RuntimeError, OSError) as e:  # an optional extra: the game builds without it (TAA in its place)
+                print(f"fsr: could not build AMD FSR for Linux, the game is built without it:\n{e}", file=sys.stderr)
+            else:
+                includes.append(f"-I{fsr_linux / 'include' / 'ffx_api'}")
+                feature_defs.append("-DYW4_FSR=1")
+                sdl_libs.append("-ldl")
     includes += feature_defs
     hdr = newest_header(cfg)
     # runtime/src/*.h are private to the runtime: changing one doesn't rebuild generated code
@@ -386,6 +406,17 @@ def main(argv: list[str] | None = None) -> int:
             (exe.parent / "libSDL3.so.0").unlink(missing_ok=True)
             shutil.copy2(so.resolve(), exe.parent / "libSDL3.so.0")
             libs.append("-Wl,-rpath,$ORIGIN")
+        # NGX finds the DLSS library in the folder gpu_dlss.c names: yw4's own
+        dlss_so = exe.parent / deps.DLSS_SO
+        if "-DYW4_DLSS=1" in feature_defs:
+            shutil.copy2(deps.dlss_dir(cfg) / "lib" / "Linux_x86_64" / "rel" / deps.DLSS_SO, dlss_so)
+        else:
+            dlss_so.unlink(missing_ok=True)
+        fsr_so = exe.parent / "libamd_fidelityfx_vk.so"
+        if "-DYW4_FSR=1" in feature_defs:
+            shutil.copy2(fsr_linux_build.out_dir(cfg) / "lib" / fsr_linux_build.LIB, fsr_so)
+        else:
+            fsr_so.unlink(missing_ok=True)
     progress.report("link", 0, 1)
     print(f"linking {len(objs)} objects into {exe.name}", flush=True)
     t_link = time.time()

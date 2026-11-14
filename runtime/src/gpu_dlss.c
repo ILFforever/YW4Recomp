@@ -1,7 +1,8 @@
 /* NVIDIA DLSS upscaling (decision 0040). NVIDIA's NGX SDK (fetched by tools/yw4/deps.py under NVIDIA's own
  * licence, never committed): its static library, linked with runtime/src/msvc_shim.c, finds NGX in the NVIDIA
- * driver, which loads nvngx_dlss.dll from yw4.exe's folder. DLSS needs a few device extensions, which window.c
- * enables on NVIDIA GPUs (gpu_dlss_device_extensions).
+ * driver, which loads nvngx_dlss.dll from yw4.exe's folder (on Linux libnvidia-ngx-dlss.so.<version> from yw4's,
+ * decision 0073). DLSS needs a few device extensions, which window.c enables on NVIDIA GPUs
+ * (gpu_dlss_device_extensions).
  *
  * Used by gpu_aa.c like FSR: the same inputs (the encoded scene, its depth, the game's motion, the jitter), the
  * same output image and the same upscaling plumbing (gpu.c). DLSS is told the colour is not HDR (the encoded
@@ -19,7 +20,9 @@
 #include "host.h"
 
 #ifdef YW4_DLSS
+#include <SDL3/SDL_filesystem.h>
 #include <SDL3/SDL_vulkan.h>
+#include <wchar.h>
 
 #include "nvsdk_ngx_helpers_vk.h"
 #include "nvsdk_ngx_vk.h"
@@ -61,9 +64,22 @@ int gpu_dlss_available(void) {
     if (vk.props.vendorID != 0x10de) return 0;
     PFN_vkGetInstanceProcAddr gipa = dlssg_loader();  /* Streamline's while it runs (DLSS frame generation) */
     if (!gipa) gipa = (PFN_vkGetInstanceProcAddr)SDL_Vulkan_GetVkGetInstanceProcAddr();
+    NVSDK_NGX_FeatureCommonInfo *info = NULL;
+#ifndef _WIN32
+    /* Linux (decision 0073): libnvidia-ngx-dlss.so.<version> sits next to yw4 (recomp/build.py). NGX's default is
+     * the application's folder too; naming it leaves nothing to how NGX finds that folder. */
+    static wchar_t dir[1024];
+    static const wchar_t *dirs[1] = {dir};
+    static NVSDK_NGX_FeatureCommonInfo common;
+    const char *base = SDL_GetBasePath();
+    if (base && mbstowcs(dir, base, sizeof dir / sizeof dir[0] - 1) != (size_t)-1) {
+        common.PathListInfo.Path = dirs, common.PathListInfo.Length = 1;
+        info = &common;
+    }
+#endif
     NVSDK_NGX_Result r = NVSDK_NGX_VULKAN_Init_with_ProjectID(
         "4f6c2e1a-8b3d-4c7e-9a52-1d0e7b6c3f88", NVSDK_NGX_ENGINE_TYPE_CUSTOM, "1.0", L".", vk.instance, vk.gpu,
-        vk.device, gipa, vkGetDeviceProcAddr, NULL, NVSDK_NGX_Version_API);
+        vk.device, gipa, vkGetDeviceProcAddr, info, NVSDK_NGX_Version_API);
     if (NVSDK_NGX_FAILED(r)) {
         fprintf(stderr, "yw4: dlss: NGX did not start (%#x): FSR or TAA instead\n", (unsigned)r);
         return 0;

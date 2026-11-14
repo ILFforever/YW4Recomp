@@ -4,7 +4,7 @@
  * the /GS stack cookie and its check, the two GS exception filters named in its unwind tables, two MSVC STL
  * error functions, and thread-safe local statics. It throws no C++ exceptions (no __CxxFrameHandler). Empty
  * stand-ins for libmsvcprt.a and libOLDNAMES.a (recomp/build.py) satisfy its default-library requests. */
-#ifdef YW4_DLSS
+#if defined(YW4_DLSS) && defined(_WIN32)  /* NVIDIA's Linux library is built with GCC and needs none of this */
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
