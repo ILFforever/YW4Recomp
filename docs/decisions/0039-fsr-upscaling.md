@@ -108,3 +108,20 @@ is output-sized too until the present (`gpu_upscale_also`, `runtime/src/gpu.c`, 
 46 (native 62, plain stretch 18), FSR quality ~16 -> 97 (native 137); the UI is sharp in upscaled modes too. 21:9
 with DLSS frame generation and the Vulkan validation layer: no errors. Not yet checked with upscaling: battles,
 menus, cutscenes. Found by a Fable 5.2 session; the earlier mip-bias fix (per draw) was right but not the cause.
+
+## Fix 2026-11-15: black blurred stills (issue #10)
+
+With upscaling on, the blurred still behind the pause menu, battle transitions and results and the capsule scene
+was black. The game keeps the last finished picture in a full-size image (`0x7271d7f000`, `0x72725ef000` seen) that
+it draws once, after the composite, and then only reads for many frames. `gpu_upscale_also` named such images
+output-sized only until the present, so from the next frame on the reads found the render-sized image under the
+same address, which nothing ever draws into. A probe of reads at the render size of images once named output-sized
+showed them on the frames after each still was drawn (with and without an anti-aliasing point in the frame);
+keeping the names only across frames without one was not enough.
+
+Now the named images stay output-sized (`upscaled_more`, 8 slots, the oldest replaced when full) until one is drawn
+into before the composite (a 3D target: the engine reuses addresses, `0x72664e3000` was named at frame 0 and is a
+3D target later; `gpu_upscale_drop`), becomes the scene's colour or depth, or upscaling is off. Cost: those images'
+render-sized twins stay in video memory until the 300-frame eviction. Checked with DLSS quality at 1080p (the
+reporter's settings: pause menu, a battle, no render-sized reads left) and 4K (bamboo forest, same spot: sharpness
+66.3 before, 67.0 after). Not checked: FSR, other ratios, 21:9, frame generation, the capsule scene.

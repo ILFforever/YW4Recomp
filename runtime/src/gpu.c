@@ -1227,11 +1227,17 @@ static int upscale_mode = -1, upscale_used = -1;  /* the choice, and the one the
 static const float upscale_ratio[4] = {1.0f, 1.5f, 1.7f, 2.0f};
 static uint64_t upscaled_scene, upscaled_depth;  /* the scene's colour and depth images' addresses while they
                                                   * name output-sized images (GPU thread) */
-/* ... and the other full-size images drawn into between the anti-aliasing point and the present
- * (gpu_upscale_also): the game copies the finished scene into a second image, draws most of the UI there and
- * copies that one into the window's image. */
-enum { UPSCALED_MORE = 4 };
+/* ... and the other full-size images drawn into after the anti-aliasing point (gpu_upscale_also): the game
+ * copies the finished scene into a second image, draws most of the UI there and copies that one into the
+ * window's image. They stay output-sized across frames (not only until the present): the game also keeps a
+ * still of the finished picture in such an image (pause menu, battle transitions and results, the capsule
+ * scene) and reads it for many frames without drawing into it; named only for the frame it was drawn in, the
+ * later reads got the render-sized image under the same address, never drawn into: a black still (issue #10,
+ * 2026-11-15). An image drawn into before the anti-aliasing point (a 3D target: the engine reuses addresses)
+ * or that becomes the scene leaves the list (gpu_upscale_drop); so does all of it when upscaling is off. */
+enum { UPSCALED_MORE = 8 };
 static uint64_t upscaled_more[UPSCALED_MORE];
+static unsigned upscaled_more_next;  /* the slot a new one takes when all are used (the oldest) */
 
 int gpu_upscale_setting(void) {
     int m = __atomic_load_n(&upscale_mode, __ATOMIC_ACQUIRE);
@@ -1283,16 +1289,34 @@ int gpu_render_height(void) {
     return m ? (int)((float)h / upscale_ratio[m] + 0.5f) : h;
 }
 
+static void more_remove(uint64_t addr) {
+    if (!addr) return;
+    for (int i = 0; i < UPSCALED_MORE; i++) {
+        uint64_t a = addr;
+        __atomic_compare_exchange_n(&upscaled_more[i], &a, 0, 0, __ATOMIC_ACQ_REL, __ATOMIC_ACQUIRE);
+    }
+}
+
+/* color != 0: the anti-aliasing point (gpu_aa.c); 0: the present, or the upscale failed. */
 void gpu_upscale_begin(uint64_t color, uint64_t depth) {
     __atomic_store_n(&upscaled_depth, depth, __ATOMIC_RELEASE);
     __atomic_store_n(&upscaled_scene, color, __ATOMIC_RELEASE);
-    for (int i = 0; i < UPSCALED_MORE; i++) __atomic_store_n(&upscaled_more[i], 0, __ATOMIC_RELEASE);
+    if (!gpu_upscale()) {
+        for (int i = 0; i < UPSCALED_MORE; i++) __atomic_store_n(&upscaled_more[i], 0, __ATOMIC_RELEASE);
+        return;
+    }
+    more_remove(color), more_remove(depth);  /* the scene's images are named by upscaled_scene/depth instead */
+}
+
+/* A colour target drawn into before the anti-aliasing point: a 3D target, at the render size. */
+void gpu_upscale_drop(const NvnTexture *t) {
+    if (t && t->addr) more_remove(t->addr);
 }
 
 int gpu_upscaled(const NvnTexture *t) {
     uint64_t a = __atomic_load_n(&upscaled_scene, __ATOMIC_ACQUIRE), d = __atomic_load_n(&upscaled_depth, __ATOMIC_ACQUIRE);
-    if (!t || !t->addr || !a) return 0;
-    if (t->addr == a || t->addr == d) return 1;
+    if (!t || !t->addr) return 0;
+    if (a && (t->addr == a || t->addr == d)) return 1;
     for (int i = 0; i < UPSCALED_MORE; i++)
         if (__atomic_load_n(&upscaled_more[i], __ATOMIC_ACQUIRE) == t->addr) return 1;
     return 0;
@@ -1301,7 +1325,7 @@ int gpu_upscaled(const NvnTexture *t) {
 static int screen_sized(const NvnTexture *t);
 
 /* A colour target of a draw that follows the anti-aliasing point (the caller checks). While the scene image is
- * the output-sized one, a full-size screen image drawn into is output-sized too until the present: without
+ * the output-sized one, a full-size screen image drawn into is output-sized too (and stays so, see upscaled_more): without
  * this the game's copy of the upscaled scene into its second image shrank it back to the render size, and the
  * copy into the window's image stretched that (DLSS and FSR quality looked like a plain 1.5x stretch,
  * 2026-11-10). Smaller images (the game's half-size copies) keep the render size's ratio. */
@@ -1310,11 +1334,14 @@ void gpu_upscale_also(const NvnTexture *t) {
     if (!screen_sized(t) || gpu_is_presented(t->addr)) return;
     if (!((t->layout.width == 1600 && t->layout.height == 900) || (t->layout.width == 1920 && t->layout.height == 1080)))
         return;
-    for (int i = 0; i < UPSCALED_MORE; i++)
-        if (!__atomic_load_n(&upscaled_more[i], __ATOMIC_ACQUIRE)) {
-            __atomic_store_n(&upscaled_more[i], t->addr, __ATOMIC_RELEASE);
+    for (int i = 0; i < UPSCALED_MORE; i++) {
+        uint64_t empty = 0;
+        if (__atomic_compare_exchange_n(&upscaled_more[i], &empty, t->addr, 0, __ATOMIC_ACQ_REL, __ATOMIC_ACQUIRE))
             return;
-        }
+    }
+    /* all used: the oldest goes (its image is made again at the render size on its next use) */
+    unsigned i = __atomic_fetch_add(&upscaled_more_next, 1, __ATOMIC_ACQ_REL) % UPSCALED_MORE;
+    __atomic_store_n(&upscaled_more[i], t->addr, __ATOMIC_RELEASE);
 }
 
 /* The screen-sized targets: GPU-only 2D images of one of these sizes. The window image (1920x1080)
