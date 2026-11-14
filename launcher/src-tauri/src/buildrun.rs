@@ -18,6 +18,7 @@ use std::process::{Child, Command, Stdio};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use tauri::{AppHandle, Emitter, Manager};
+use crate::platform;
 
 #[derive(Deserialize, Clone)]
 pub struct Plan {
@@ -53,7 +54,9 @@ struct DoneEvent { ok: bool, message: String }
 
 /// What runs the build (decision 0052). A download has builder\ next to the launcher (launcher/package.py): its own
 /// Python, the build code and tools, nothing taken from the PC. A launcher built with plain `cargo build` has no
-/// builder\ and uses the repo it was built from, with the repo's Python and config.local.toml.
+/// builder\ and uses the repo it was built from, with the repo's Python and config.local.toml. On Linux a download's
+/// builder/ holds the build code and hactool only: Python, the compiler, glslang and SDL3 are the distribution's
+/// (decision 0071; tools/yw4/system.py checks them as the build's first step).
 struct Builder {
     python: PathBuf,
     src: PathBuf,        // the folder the build's Python modules run from
@@ -62,7 +65,7 @@ struct Builder {
 
 fn bundled_dir(app: &AppHandle) -> Option<PathBuf> {
     let b = plain_path(app.path().resource_dir().ok()?).join("builder");
-    b.join("python").join("python.exe").is_file().then_some(b)
+    if cfg!(windows) { b.join("python").join("python.exe").is_file().then_some(b) } else { b.join("src").is_dir().then_some(b) }
 }
 
 /// Windows' long-path form `\\?\C:\...` (Tauri gives the resource folder that way) back to `C:\...`, for the
@@ -85,11 +88,12 @@ fn builder(app: &AppHandle, inst: &Path) -> Builder {
     match bundled_dir(app) {
         Some(b) => {
             let code = crate::update::game_code(&b.join("src"), inst);
-            Builder { python: b.join("python").join("python.exe"), src: code.dir, tools: Some(b.join("tools")) }
+            let python = if cfg!(windows) { b.join("python").join("python.exe") } else { platform::python() };
+            Builder { python, src: code.dir, tools: Some(b.join("tools")) }
         }
         None => {
             let p = Path::new(env!("CARGO_MANIFEST_DIR")).join("..").join("..");
-            Builder { python: PathBuf::from("python"), src: p.canonicalize().unwrap_or(p), tools: None }
+            Builder { python: platform::python(), src: p.canonicalize().unwrap_or(p), tools: None }
         }
     }
 }
@@ -134,8 +138,7 @@ fn code_protocol(b: &Builder) -> i64 {
     let mut cmd = Command::new(&b.python);
     cmd.arg("-u").arg("-c").arg(BOOT).arg(&b.src).arg("tools.yw4.build_install").arg("--protocol")
         .current_dir(&b.src).stdout(Stdio::piped()).stderr(Stdio::null());
-    #[cfg(windows)]
-    { use std::os::windows::process::CommandExt; cmd.creation_flags(0x0800_0000); }
+    platform::hidden(&mut cmd);
     cmd.output().ok()
         .and_then(|o| String::from_utf8(o.stdout).ok())
         .and_then(|s| s.trim().parse::<i64>().ok())
@@ -150,8 +153,13 @@ fn write_config(b: &Builder, plan: &Plan, inst: &Path) -> std::io::Result<PathBu
     if let Some(u) = get("update") { s += &format!("update_nsp = {}\n", lit(&u)); }
     s += &format!("dlc_dir = {}\n[output]\nwork_dir = {}\n[tools]\n", lit(&inst.join("data/dlc")), lit(&inst.join("work")));
     if let Some(tools) = &b.tools {
-        s += &format!("cc = {}\n", lit(&inst.join("builder/toolchain/llvm-mingw/bin/clang.exe")));
-        s += &format!("glslang = {}\nhactool_exe = {}\n", lit(&tools.join("glslang.exe")), lit(&tools.join("hactool.exe")));
+        if cfg!(windows) {
+            s += &format!("cc = {}\n", lit(&inst.join("builder/toolchain/llvm-mingw/bin/clang.exe")));
+            s += &format!("glslang = {}\nhactool_exe = {}\n", lit(&tools.join("glslang.exe")), lit(&tools.join("hactool.exe")));
+        } else if tools.join("hactool").is_file() {
+            // Linux: the compiler and glslang are the system's (tools/yw4/system.py finds them)
+            s += &format!("hactool_exe = {}\n", lit(&tools.join("hactool")));
+        }
     } else {
         let tools = repo_tools(&b.src);
         for key in ["cc", "glslang", "hactool_exe"] {
@@ -181,13 +189,17 @@ fn python(app: &AppHandle, run: &Running, b: &Builder, cfg: &Path, module: &str,
     cmd.arg("-u").arg("-c").arg(BOOT).arg(&b.src).arg(module).args(args).current_dir(&b.src)
         .env("YW4_CONFIG", cfg).env("YW4_PROGRESS", "1").env("PYTHONIOENCODING", "utf-8")
         .stdout(Stdio::piped()).stderr(Stdio::piped());
+    platform::own_group(&mut cmd);  // Cancel ends the step and everything it started
     if b.tools.is_some() {
         // A player's own CC would override the compiler we tested. Python's caches go in the build folder: the
         // launcher's folder stays as installed, so uninstalling leaves nothing.
         cmd.env_remove("CC").env("PYTHONPYCACHEPREFIX", cfg.with_file_name("work").join("pycache"));
+        // Linux: the download's SDL3, used only where the system has none (tools/yw4/system.py, decision 0071)
+        if let Some(sdl) = b.tools.as_ref().and_then(|t| t.parent()).map(|d| d.join("sdl3")).filter(|d| d.is_dir()) {
+            cmd.env("YW4_SDL3_DIR", sdl);
+        }
     }
-    #[cfg(windows)]
-    { use std::os::windows::process::CommandExt; cmd.creation_flags(0x0800_0000); }
+    platform::hidden(&mut cmd);
     emit_log(app, &format!("> python -m {module} {}", args.join(" ")));
     let mut child = cmd.spawn().map_err(|e| format!("couldn't start Python ({e})"))?;
     let out = child.stdout.take().unwrap();
@@ -279,8 +291,7 @@ pub fn ensure_dlc_extracted(app: &AppHandle, inst: &Path) {
     cmd.args(["-u", "-c", BOOT]).arg(&b.src).args(["tools.yw4.extract", "--dlc-only"]).current_dir(&b.src)
         .env("YW4_CONFIG", &cfg).env("PYTHONIOENCODING", "utf-8");
     if b.tools.is_some() { cmd.env("PYTHONPYCACHEPREFIX", inst.join("work").join("pycache")); }
-    #[cfg(windows)]
-    { use std::os::windows::process::CommandExt; cmd.creation_flags(0x0800_0000); }
+    platform::hidden(&mut cmd);
     let _ = cmd.status();
 }
 
@@ -320,7 +331,8 @@ fn run_all(app: &AppHandle, run: &Running, plan: &Plan) -> Result<(), String> {
         let get = |k: &str| plan.paths.get(k).cloned().unwrap_or_default();
         args.extend(["--exefs".into(), get("exefs"), "--romfs".into(), get("romfs")]);
     }
-    if b.tools.is_some() {  // a download: the compiler comes on the first build; from the repo, the repo's own
+    if b.tools.is_some() && cfg!(windows) {  // a download: the compiler comes on the first build; from the repo the
+                                             // repo's own, on Linux the system's
         args.extend(["--toolchain".into(), inst.join("builder").join("toolchain").to_string_lossy().into_owned()]);
     }
     if plan.fresh {
@@ -380,10 +392,6 @@ pub fn cancel_build(app: AppHandle) {
     run.cancel.store(true, Ordering::SeqCst);
     let pid = run.child.lock().unwrap().as_ref().map(|c| c.id());
     if let Some(pid) = pid {
-        let mut kill = Command::new("taskkill");
-        kill.args(["/T", "/F", "/PID", &pid.to_string()]);
-        #[cfg(windows)]
-        { use std::os::windows::process::CommandExt; kill.creation_flags(0x0800_0000); }
-        let _ = kill.status();
+        platform::kill_tree(pid);
     }
 }

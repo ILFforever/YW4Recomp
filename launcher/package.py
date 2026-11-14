@@ -1,6 +1,7 @@
 """Make the downloads of a release (decisions 0052, 0054).
 
     python launcher/package.py [launcher]    the launcher: the NSIS installer and a portable zip, into work/package/dist/
+                                             (on Linux: an AppImage, decision 0071)
     python launcher/package.py --stage-only  only work/package/builder/ (no Rust build)
     python launcher/package.py game          the game's build code alone (~3 MB), into work/package/game/: a game
                                              update the launcher downloads (tag vX.Y.Z)
@@ -11,6 +12,9 @@ What ships next to the launcher, in a folder called builder/:
     src/       this repo's build code at one commit (git archive: committed files only, never the working tree)
     tools/     glslang.exe and hactool.exe, from their official releases
     licenses/  the licence of each
+
+On Linux builder/ holds src/, tools/hactool (built here from its pinned source: hactool has no Linux release),
+sdl3/ (built here too: Ubuntu 24.04 has no SDL3 package; a system SDL3 wins) and licenses/ only: Python, the compiler, glslang and SDL3 are the distribution's (decision 0071).
 
 Every download is pinned to an exact version and SHA-256. Nothing from the game is ever in here (rule 1): src/ holds
 only committed files, and the stage is refused if a game-data file type turns up. The compiler is not shipped: the
@@ -23,6 +27,7 @@ import argparse
 import hashlib
 import io
 import json
+import os
 import re
 import shutil
 import subprocess
@@ -47,6 +52,10 @@ HACTOOL_ZIP = ("https://github.com/SciresM/hactool/releases/download/1.4.0/hacto
                "36e9a221c8a7949c86ada9388eb703c90663aedfe9f65b6032429614c5e1abe8")
 GLSLANG_LICENSE = ("https://raw.githubusercontent.com/KhronosGroup/glslang/16.6.0/LICENSE.txt",
                    "17e70c676e1521ff3e4686f04a2053d93a7e28a33be8de7ec37ab0ff72feb677")
+HACTOOL_SRC = ("https://github.com/SciresM/hactool/archive/refs/tags/1.4.0.tar.gz",
+               "1373c98ef8c58da42cb1e81b361283955caad0e1b8b5ad389b0ee49b7a21da43")
+SDL3_SRC = ("https://github.com/libsdl-org/SDL/releases/download/release-3.4.18/SDL3-3.4.18.tar.gz",
+            "9c75cf16330322c217dedd2e0609f1124f1b54b8633e763467b4684d0f4334a3")
 HACTOOL_LICENSE = ("https://raw.githubusercontent.com/SciresM/hactool/1.4.0/LICENSE",
                    "bde8a8c9f1fdcecaec2dd6f4733ed939a5ff2317a72126668e61ecae049eb5ab")
 
@@ -136,10 +145,58 @@ def game(ref: str) -> None:
     print(f"publish: gh release create v{version} --target {commit} --title \"YW4 Recomp {version}\" \"{out}\"")
 
 
+def linux_hactool() -> None:
+    """hactool for Linux, built from its pinned 1.4.0 source with the system's compiler (only libc linked)."""
+    src = CACHE / "hactool-build"
+    shutil.rmtree(src, ignore_errors=True)
+    src.mkdir(parents=True)
+    with tarfile.open(fileobj=io.BytesIO(fetch(HACTOOL_SRC, "hactool-1.4.0.tar.gz"))) as t:
+        t.extractall(src, filter="data")
+    top = src / "hactool-1.4.0"
+    shutil.copy(top / "config.mk.template", top / "config.mk")
+    subprocess.run(["make", f"-j{os.cpu_count() or 4}"], cwd=top, check=True, capture_output=True)
+    shutil.copy(top / "hactool", STAGE / "tools" / "hactool")
+    (STAGE / "tools" / "hactool").chmod(0o755)
+    shutil.copy(top / "LICENSE", STAGE / "licenses" / "hactool.txt")
+
+
+def linux_sdl3() -> None:
+    """SDL3 for Linux players whose distribution has none (Ubuntu 24.04), built from the pinned source of the version
+    the Windows build uses (tools/yw4/deps.py SDL_VERSION). SDL loads X11, Wayland, PulseAudio and PipeWire at run time
+    (dlopen), so one build works across distributions; the packager's system needs their headers to build them in.
+    Its pkg-config file is made relocatable (${pcfiledir}): the AppImage is mounted at a different path each run."""
+    src = CACHE / "sdl3-build"
+    shutil.rmtree(src, ignore_errors=True)
+    src.mkdir(parents=True)
+    with tarfile.open(fileobj=io.BytesIO(fetch(SDL3_SRC, "SDL3-3.4.18.tar.gz"))) as t:
+        t.extractall(src, filter="data")
+    top, build_dir, prefix = src / "SDL3-3.4.18", src / "build", STAGE / "sdl3"
+    subprocess.run(["cmake", "-S", str(top), "-B", str(build_dir), "-G", "Ninja", "-DCMAKE_BUILD_TYPE=Release",
+                    f"-DCMAKE_INSTALL_PREFIX={prefix}", "-DCMAKE_INSTALL_LIBDIR=lib", "-DSDL_SHARED=ON",
+                    "-DSDL_STATIC=OFF", "-DSDL_TESTS=OFF", "-DSDL_EXAMPLES=OFF", "-DSDL_INSTALL_DOCS=OFF"],
+                   check=True, capture_output=True)
+    subprocess.run(["cmake", "--build", str(build_dir)], check=True, capture_output=True)
+    subprocess.run(["cmake", "--install", str(build_dir)], check=True, capture_output=True)
+    pc = prefix / "lib" / "pkgconfig" / "sdl3.pc"
+    pc.write_text(re.sub(r"^prefix=.*$", "prefix=${pcfiledir}/../..", pc.read_text(), count=1, flags=re.M))
+    shutil.rmtree(prefix / "lib" / "cmake", ignore_errors=True)  # the build reads pkg-config only
+    shutil.copy(top / "LICENSE.txt", STAGE / "licenses" / "sdl3.txt")
+    # the video and audio parts this build can load: a missing one means its headers were missing here
+    cache = (build_dir / "CMakeCache.txt").read_text()
+    for opt in ("SDL_X11", "SDL_WAYLAND", "SDL_PULSEAUDIO", "SDL_PIPEWIRE", "SDL_ALSA"):
+        m = re.search(rf"^{opt}:BOOL=(\w+)", cache, re.M)
+        print(f"sdl3: {opt} {m[1] if m else '?'}")
+
+
 def stage(ref: str) -> None:
     shutil.rmtree(STAGE, ignore_errors=True)
     (STAGE / "tools").mkdir(parents=True)
     (STAGE / "licenses").mkdir()
+    if sys.platform != "win32":
+        linux_hactool()
+        linux_sdl3()
+        stage_src(ref)
+        return
 
     py = STAGE / "python"
     with zipfile.ZipFile(io.BytesIO(fetch(PYTHON_ZIP, "python.zip"))) as z:
@@ -157,6 +214,10 @@ def stage(ref: str) -> None:
     (STAGE / "licenses" / "glslang.txt").write_bytes(fetch(GLSLANG_LICENSE, "glslang-license.txt"))
     (STAGE / "licenses" / "hactool.txt").write_bytes(fetch(HACTOOL_LICENSE, "hactool-license.txt"))
 
+    stage_src(ref)
+
+
+def stage_src(ref: str) -> None:
     commit = game_tree(ref, STAGE / "src")
     shutil.copy(STAGE / "src" / "LICENSE", STAGE / "licenses" / "yw4recomp.txt")
 
@@ -176,7 +237,37 @@ def rust_host() -> str:
     return next((line.split(":", 1)[1].strip() for line in out.splitlines() if line.startswith("host:")), "")
 
 
+def build_linux() -> None:
+    """The AppImage (tauri.linux.conf.json), with builder/ and themes/ as its resources. Cargo builds in a folder of
+    its own (YW4_LINUX_TARGET, default ~/.cache/yw4-launcher-target), never the repo's target/ that the Windows build
+    uses; the Tauri CLI is cargo's (`cargo install tauri-cli --version 2.12.4`): node_modules holds Windows' CLI."""
+    launcher = REPO / "launcher"
+    version = (launcher / "VERSION").read_text().strip()
+    target = Path(os.environ.get("YW4_LINUX_TARGET", Path.home() / ".cache" / "yw4-launcher-target"))
+    overrides = OUT / "tauri.package.linux.json"
+    overrides.write_text(json.dumps({
+        "version": version,
+        "bundle": {"resources": {STAGE.as_posix() + "/": "builder/", (launcher / "ui" / "themes").as_posix() + "/": "themes/"}},
+    }, indent=2))
+    # linuxdeploy (the AppImage tool Tauri fetches) is an AppImage itself: unpacked instead of mounted, so no FUSE
+    env = {**os.environ, "CARGO_TARGET_DIR": str(target), "APPIMAGE_EXTRACT_AND_RUN": "1"}
+    subprocess.run(["cargo", "tauri", "build", "--bundles", "appimage", "--config", str(overrides)],
+                   cwd=launcher, env=env, check=True)
+    shutil.rmtree(DIST, ignore_errors=True)
+    DIST.mkdir(parents=True)
+    images = list((target / "release" / "bundle" / "appimage").glob(f"*{version}*.AppImage"))
+    if len(images) != 1:
+        raise SystemExit(f"expected one AppImage, found {images}")
+    out = DIST / f"YW4-Recomp-Launcher-{version}-x86_64.AppImage"
+    shutil.copy(images[0], out)
+    out.chmod(0o755)
+    print(f"{out.name}: {out.stat().st_size / 1e6:.0f} MB")
+
+
 def build() -> None:
+    if sys.platform != "win32":
+        build_linux()
+        return
     launcher = REPO / "launcher"
     version = (REPO / "launcher" / "VERSION").read_text().strip()  # the launcher's own number (0054)
     # only for this build: a plain `cargo build` has no stage and must keep working without one
@@ -253,8 +344,6 @@ def main() -> int:
     ap.add_argument("--stage-only", action="store_true")
     ap.add_argument("--ref", default="HEAD", help="the commit whose build code ships (default: HEAD)")
     args = ap.parse_args()
-    if sys.platform != "win32":
-        raise SystemExit("the launcher's download is Windows only for now")
     if args.what == "game":
         game(args.ref)
         return 0

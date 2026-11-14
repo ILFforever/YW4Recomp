@@ -27,7 +27,9 @@ move to [progress.md](progress.md).
 
 ## Linux
 
-- **No launcher yet**: the game is built from source ([Building on Linux](../README.md#building-on-linux)).
+- **No launcher download yet**: the launcher builds as an AppImage ([decision 0071](decisions/0071-linux-launcher.md)),
+  but it was checked only in WSL with software rendering, never on a real Linux desktop, and none is published.
+  Until then the game is built from source ([Building on Linux](../README.md#building-on-linux)).
 - **FSR, DLSS, frame generation and Reflex are Windows only.**
 - **A crash on exit** (segfault after "exit game") was seen once on 2026-11-12; later logs exit cleanly. Maybe gone,
   not confirmed by the tester.

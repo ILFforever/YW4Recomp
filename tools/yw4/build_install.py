@@ -31,7 +31,7 @@ import sys
 import tomllib
 from pathlib import Path
 
-from . import config, deps, progress
+from . import config, deps, progress, system
 
 PROTOCOL = 2  # 2 adds --fresh-files; the @steps/@step/@progress lines and the options above; a launcher that knows less refuses
 # The oldest launcher that can build this game code (release.toml, decision 0054): raise it when a change here needs
@@ -46,6 +46,8 @@ def steps(mode: str, toolchain: bool) -> list[dict]:
         out.append({"id": "tools", "label": "Downloading the compiler", "seconds": 30,
                     "parts": {"compiler": [0, 0.6, "Downloading the compiler", "bytes"],
                               "compilerunpack": [0.6, 1, "Unpacking the compiler", "bytes"]}})
+    elif sys.platform != "win32":  # Linux: the distribution's compiler and tools (decision 0071)
+        out.append({"id": "tools", "label": "Checking the build tools", "seconds": 1, "parts": {}})
     out += [
         {"id": "game", "label": "Unpacking your game files" if mode == "files" else "Copying your game files",
          "seconds": 60, "parts": {"unpack": [0, 0.07, "Unpacking the NSP or XCI", "bytes"],
@@ -152,11 +154,20 @@ def new_game_files(cfg: config.Config, args: argparse.Namespace) -> None:
     run("tools.yw4.extract")
 
 
+def data_home() -> Path:
+    """The "appdata" saves' folder: the launcher's data_dir (launcher/src-tauri/src/platform.rs) and the game's
+    default (runtime/src/main.c default_save_dir): %APPDATA%/YW4 Recomp, or $XDG_DATA_HOME/YW4Recomp on Linux."""
+    if sys.platform == "win32":
+        return Path(os.environ.get("APPDATA", "")) / "YW4 Recomp"
+    xdg = os.environ.get("XDG_DATA_HOME", "")
+    return Path(xdg) / "YW4Recomp" if xdg.startswith("/") else Path.home() / ".local" / "share" / "YW4Recomp"
+
+
 def game_ini(cfg: config.Config, saves: str) -> None:
     """game.ini next to yw4.exe: its folders relative to it (decision 0050), so the install folder can move."""
     inst = cfg.work_dir.parent
     if saves == "appdata":
-        base = Path(os.environ.get("APPDATA", "")) / "YW4 Recomp"
+        base = data_home()
         save, settings = str(base / "save"), str(base / "settings.ini")
         (base / "save").mkdir(parents=True, exist_ok=True)
     else:
@@ -230,6 +241,16 @@ def game_runtime_files(work: Path) -> list[str]:
     return [f"build/{n}" for n in names]
 
 
+def tools(args: argparse.Namespace, cfg: config.Config) -> None:
+    """Windows: the compiler, downloaded. Linux: the system's tools checked; the compiler found goes to every later
+    step through CC (recomp/check.py host_cc reads it first)."""
+    if args.toolchain:
+        say(f"compiler: {deps.fetch_toolchain(Path(args.toolchain))}")
+        return
+    os.environ["CC"] = system.check(cfg)
+    say(f"compiler: {os.environ['CC']}")
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--mode", choices=("files", "folders"))
@@ -269,7 +290,7 @@ def main() -> int:
         say("a stopped build had set the game aside: it is back")
     build_args = [*(["--no-fsr"] if args.no_fsr else []), *(["--no-dlss"] if args.no_dlss else [])]
     actions = {
-        "tools": lambda: say(f"compiler: {deps.fetch_toolchain(Path(args.toolchain))}"),
+        "tools": lambda: tools(args, cfg),
         "game": lambda: game_files(cfg, args),
         "version": lambda: run("tools.yw4.ingest"),
         "translate": lambda: run("recomp.translate"),

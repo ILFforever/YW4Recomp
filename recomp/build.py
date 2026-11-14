@@ -373,6 +373,19 @@ def main(argv: list[str] | None = None) -> int:
             (exe.parent / "nvngx_dlss.dll").unlink(missing_ok=True)
             for dll in deps.SL_DLLS:
                 (exe.parent / dll).unlink(missing_ok=True)
+    else:
+        # Linux: an SDL3 outside the system's folders (the launcher's own builder/sdl3, decision 0071, or one built by
+        # hand) goes next to yw4, which finds it there through its run path ($ORIGIN): no LD_LIBRARY_PATH to set
+        try:
+            libdir = subprocess.run(["pkg-config", "--variable=libdir", "sdl3"], capture_output=True, text=True,
+                                    check=True).stdout.strip()
+        except (subprocess.CalledProcessError, FileNotFoundError):
+            libdir = ""
+        so = Path(libdir) / "libSDL3.so.0" if libdir else None
+        if so and so.is_file() and not libdir.startswith(("/usr/", "/lib")):
+            (exe.parent / "libSDL3.so.0").unlink(missing_ok=True)
+            shutil.copy2(so.resolve(), exe.parent / "libSDL3.so.0")
+            libs.append("-Wl,-rpath,$ORIGIN")
     progress.report("link", 0, 1)
     print(f"linking {len(objs)} objects into {exe.name}", flush=True)
     t_link = time.time()

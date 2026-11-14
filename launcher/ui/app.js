@@ -2,6 +2,18 @@
 const T = window.__TAURI__ || null;
 const invoke = T ? T.core.invoke : null;
 const $ = (id) => document.getElementById(id);
+// Linux (decision 0071): WebKitGTK names it in its user agent. FSR, DLSS, frame generation and Reflex are Windows
+// only, so their options and mentions go (.win-only, style.css); shortcut, saves and folder words follow the system.
+// Nothing changes on Windows.
+const LINUX = /Linux/.test(navigator.userAgent) && !/Windows|Android/.test(navigator.userAgent);
+if (LINUX) document.documentElement.classList.add('os-linux');
+const SAVES_PLACE = LINUX ? 'your home folder' : 'AppData';
+if (LINUX) {
+  document.querySelectorAll('.saves-place').forEach((b) => { b.textContent = 'In your home folder'; });
+  document.querySelectorAll('.startmenu-name').forEach((b) => { b.textContent = 'App menu entry'; });
+  $('set-startmenu').setAttribute('aria-label', 'App menu entry');
+  document.querySelectorAll('#hero .slide.win-only').forEach((img) => img.remove());  // the slideshow counts what's left
+}
 // the focus ring only after keyboard use (style.css body.pointer): a click hides it, a key brings it back
 document.addEventListener('pointerdown', () => document.body.classList.add('pointer'), true);
 document.addEventListener('keydown', () => document.body.classList.remove('pointer'), true);
@@ -295,9 +307,13 @@ $('continue').addEventListener('click', () => {
 // ---- 3 · Options: downloads (by the graphics card), where the game goes, saves, shortcuts
 const GB = 1024 ** 3;
 const options = {
-  fsr: true, dlss: false, freeUp: false, desktop: true, startMenu: false,
-  install: 'C:\\Games\\YW4 Recomp', saves: 'install',
+  fsr: !LINUX, dlss: false, freeUp: false, desktop: true, startMenu: false,
+  install: LINUX ? '' : 'C:\\Games\\YW4 Recomp', saves: 'install',
 };
+// Linux: ~/Games/YW4 Recomp, once the home folder is known
+if (LINUX && T && T.path) T.path.homeDir().then((h) => {
+  if (!options.install) { options.install = h.replace(/\/$/, '') + '/Games/YW4 Recomp'; renderSummary(); }
+}).catch(() => {});
 let rtx = false;
 let spaceFree = null;
 // A download brings everything but the compiler, which the first build fetches (decision 0052): 182 MB, 737 MB
@@ -306,22 +322,24 @@ let bundled = false;
 if (invoke) invoke('builder_bundled').then((b) => { bundled = b; renderSwitches(); renderSummary(); });
 // What the install folder takes: the copied RomFS (8.5 GB) + ExeFS, the tools (1.5 GB) and build files (0.7 GB),
 // the game itself, and the downloads (target.toml [extracted], measured sizes: FSR 240 MB, DLSS + Streamline 325 MB)
-const downloadMB = () => (bundled ? 182 : 0) + (options.fsr ? 240 : 0) + (options.dlss ? 325 : 0);
-const diskNeeded = () => (usingFound() && options.install === inst.install ? 0 : 8.5 * GB) + 2.4 * GB + (bundled ? 737 * 1024 ** 2 : 0) + downloadMB() * 1024 ** 2;
+// Linux downloads no compiler: the system's builds (tools/yw4/system.py)
+const downloadMB = () => (bundled && !LINUX ? 182 : 0) + (options.fsr ? 240 : 0) + (options.dlss ? 325 : 0);
+const diskNeeded = () => (usingFound() && options.install === inst.install ? 0 : 8.5 * GB) + 2.4 * GB + (bundled && !LINUX ? 737 * 1024 ** 2 : 0) + downloadMB() * 1024 ** 2;
 
 const SWITCHES = [
-  { key: 'fsr', title: 'AMD FSR', note: () => 'Upscaling and frame generation, any graphics card · about 240 MB' },
+  { key: 'fsr', title: 'AMD FSR', note: () => 'Upscaling and frame generation, any graphics card · about 240 MB', winOnly: true },
   { key: 'dlss', title: 'NVIDIA DLSS', note: () => rtx ? 'Upscaling, frame generation, Reflex · about 325 MB'
-    : 'Needs an NVIDIA RTX graphics card', needsRtx: true },
+    : 'Needs an NVIDIA RTX graphics card', needsRtx: true, winOnly: true },
   { key: 'freeUp', title: 'Free up space after building', note: () => `Deletes the tools and build files (${bundled ? '2 GB' : '1.3 GB'}). Updates then download them and rebuild` },
   { key: 'desktop', title: 'Desktop shortcut', note: () => 'Opens the launcher' },
-  { key: 'startMenu', title: 'Start menu entry', note: () => 'Opens the launcher' },
+  { key: 'startMenu', title: LINUX ? 'App menu entry' : 'Start menu entry', note: () => 'Opens the launcher' },
 ];
 
 function renderSwitches() {
   const box = $('switches');
   box.textContent = '';
   for (const s of SWITCHES) {
+    if (LINUX && s.winOnly) continue;
     const off = s.needsRtx && !rtx;
     const row = document.createElement('div');
     row.className = 'switch-row' + (off ? ' off-limits' : '');
@@ -413,7 +431,7 @@ async function confirmNewFolder(next) {
   $('newfolder-text').textContent = `The game is built again in ${next}. The old copy stays in ${inst.install} and keeps taking up ${gb(total)}: delete that folder yourself when the new one works.`;
   $('newfolder-keep').textContent = inFolder
     ? 'Your saves, settings, screenshots and mods are in the old folder and the new copy starts without them. Copy them across before you delete it.'
-    : 'Your screenshots and mods are in the old folder. Copy them across before you delete it. Your saves are safe in AppData.';
+    : `Your screenshots and mods are in the old folder. Copy them across before you delete it. Your saves are safe in ${SAVES_PLACE}.`;
   const dlg = $('newfolder-dlg');
   dlg.showModal();
   return new Promise((done) => {
@@ -1298,7 +1316,7 @@ document.querySelectorAll('[data-move]').forEach((b) => b.addEventListener('clic
   if (b.dataset.move === inst.saves) return;
   moveDlg.dataset.to = b.dataset.move;
   $('move-text').textContent = b.dataset.move === 'appdata'
-    ? 'Your saves and settings move to AppData. They stay there if the game folder is deleted.'
+    ? `Your saves and settings move to ${SAVES_PLACE}. They stay there if the game folder is deleted.`
     : 'Your saves and settings move into the game folder, next to the game.';
   moveDlg.showModal();
 }));

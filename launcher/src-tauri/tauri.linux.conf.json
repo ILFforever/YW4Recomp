@@ -1,0 +1,28 @@
+{
+  "app": {
+    "windows": [
+      {
+        "title": "Yo-kai Watch 4 Recomp",
+        "width": 1100,
+        "height": 732,
+        "minWidth": 900,
+        "minHeight": 600,
+        "center": true,
+        "decorations": false,
+        "transparent": false,
+        "maximizable": false,
+        "maxWidth": 1600,
+        "maxHeight": 1000,
+        "resizable": false
+      }
+    ]
+  },
+  "bundle": {
+    "targets": ["appimage"],
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png"
+    ]
+  }
+}

@@ -3,25 +3,10 @@
 use serde::Serialize;
 use std::path::Path;
 
-/// The graphics cards Windows reports, by name (Win32_VideoController, through PowerShell with no window).
+/// The graphics cards' names (platform.rs: Windows' Win32_VideoController, Linux's Vulkan devices or lspci).
 #[tauri::command]
 pub async fn gpu_names() -> Vec<String> {
-    tauri::async_runtime::spawn_blocking(|| {
-        let mut cmd = std::process::Command::new("powershell");
-        cmd.args(["-NoProfile", "-NonInteractive", "-Command",
-                  "Get-CimInstance Win32_VideoController | ForEach-Object { $_.Name }"]);
-        #[cfg(windows)]
-        {
-            use std::os::windows::process::CommandExt;
-            cmd.creation_flags(0x0800_0000); // CREATE_NO_WINDOW: no console flashing up
-        }
-        cmd.output().ok()
-            .map(|o| String::from_utf8_lossy(&o.stdout).lines().map(str::trim).filter(|l| !l.is_empty())
-                .map(String::from).collect())
-            .unwrap_or_default()
-    })
-    .await
-    .unwrap_or_default()
+    tauri::async_runtime::spawn_blocking(crate::platform::gpu_names).await.unwrap_or_default()
 }
 
 #[derive(Serialize)]
@@ -38,22 +23,5 @@ pub fn disk_space(path: String) -> Option<Space> {
         p = p.parent()?;
     }
     let drive = p.components().next().map(|c| c.as_os_str().to_string_lossy().into_owned()).unwrap_or_default();
-    free_bytes(p).map(|free| Space { free, drive })
-}
-
-#[cfg(windows)]
-fn free_bytes(p: &Path) -> Option<u64> {
-    use std::os::windows::ffi::OsStrExt;
-    let wide: Vec<u16> = p.as_os_str().encode_wide().chain(Some(0)).collect();
-    let mut free: u64 = 0;
-    // SAFETY: a NUL-terminated wide path and a valid out pointer; the other two outputs are optional
-    let ok = unsafe {
-        windows_sys::Win32::Storage::FileSystem::GetDiskFreeSpaceExW(wide.as_ptr(), &mut free, std::ptr::null_mut(), std::ptr::null_mut())
-    };
-    (ok != 0).then_some(free)
-}
-
-#[cfg(not(windows))]
-fn free_bytes(_: &Path) -> Option<u64> {
-    None
+    crate::platform::free_bytes(p).map(|free| Space { free, drive })
 }

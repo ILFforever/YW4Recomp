@@ -7,6 +7,7 @@
 mod buildrun;
 mod check;
 mod options;
+mod platform;
 mod ready;
 mod themes;
 mod update;
@@ -21,12 +22,7 @@ fn launcher_version() -> String {
 /// The project's GitHub page in the player's browser. Only this one address: the screens can't open others.
 #[tauri::command]
 fn open_project_page() -> Result<(), String> {
-    const URL: &str = "https://github.com/ILFforever/YW4Recomp";
-    #[cfg(windows)]
-    let r = std::process::Command::new("explorer").arg(URL).spawn();
-    #[cfg(not(windows))]
-    let r = std::process::Command::new("xdg-open").arg(URL).spawn();
-    r.map(|_| ()).map_err(|e| e.to_string())
+    platform::open("https://github.com/ILFforever/YW4Recomp")
 }
 
 /// The launcher's links, a fixed set: the project page and its issues (Help, Report a problem) and Settings'
@@ -39,7 +35,7 @@ fn open_link(which: String) -> Result<(), String> {
         "coffee" => "https://buymeacoffee.com/ilfforever",
         _ => return Err("unknown link".into()),
     };
-    std::process::Command::new("explorer").arg(url).spawn().map(|_| ()).map_err(|e| e.to_string())
+    platform::open(url)
 }
 
 /// Help: the licence texts that ship with the launcher (builder\licenses, from launcher/package.py), if any.
@@ -48,7 +44,7 @@ fn licences_folder(app: tauri::AppHandle, open: bool) -> bool {
     use tauri::Manager;
     let Some(dir) = app.path().resource_dir().ok().map(|d| d.join("builder").join("licenses")).filter(|d| d.is_dir())
         else { return false };
-    if open { let _ = std::process::Command::new("explorer").arg(&dir).spawn(); }
+    if open { let _ = platform::open(&dir); }
     true
 }
 

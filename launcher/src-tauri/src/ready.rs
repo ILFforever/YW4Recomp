@@ -5,6 +5,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::process::Command;
+use crate::platform::{self, GAME_EXE};
 
 /// The launcher's own bookkeeping, in %AppData%\YW4 Recomp\launcher.json: which install it built and with what.
 /// Not the game's saves or settings (those go where the player chose, game.ini says where).
@@ -50,7 +51,7 @@ fn state_path() -> PathBuf {
     if let Ok(p) = std::env::var("YW4_LAUNCHER_STATE") {  // tests: keep their state out of the player's AppData
         return PathBuf::from(p);
     }
-    PathBuf::from(std::env::var("APPDATA").unwrap_or_default()).join("YW4 Recomp").join("launcher.json")
+    platform::data_dir().join("launcher.json")
 }
 
 fn read_state() -> Option<State> {
@@ -82,7 +83,7 @@ pub fn current_state() -> Option<State> {
 fn put_back_previous(inst: &Path) {
     let work = inst.join("work");
     let prev = work.join("previous");
-    if !prev.join("build").join("yw4.exe").is_file() { return; }
+    if !prev.join("build").join(GAME_EXE).is_file() { return; }
     let mut kept: Vec<PathBuf> = std::fs::read_dir(prev.join("build")).into_iter().flatten().flatten().map(|e| e.path()).collect();
     if prev.join("shaders").join("glsl").exists() { kept.push(prev.join("shaders").join("glsl")); }
     for src in kept {
@@ -104,15 +105,15 @@ pub fn save_state(state: State) -> Result<(), String> {
 
 fn exe(install: &str) -> PathBuf {
     let p = Path::new(install);
-    let wb = p.join("work").join("build").join("yw4.exe");
+    let wb = p.join("work").join("build").join(GAME_EXE);
     if wb.is_file() {
         return wb;
     }
-    let gm = p.join("game").join("yw4.exe");
+    let gm = p.join("game").join(GAME_EXE);
     if gm.is_file() {
         return gm;
     }
-    let rt = p.join("yw4.exe");
+    let rt = p.join(GAME_EXE);
     if rt.is_file() {
         return rt;
     }
@@ -130,7 +131,7 @@ fn normalize_path(p: PathBuf) -> PathBuf {
 
 pub fn resolve_install_dir(path: &Path) -> Option<PathBuf> {
     let p = if path.is_file() {
-        if path.file_name().map_or(false, |n| n.eq_ignore_ascii_case("yw4.exe")) {
+        if path.file_name().map_or(false, |n| n.eq_ignore_ascii_case(GAME_EXE)) {
             let parent = path.parent()?;
             if parent.file_name().map_or(false, |n| n.eq_ignore_ascii_case("build"))
                 && parent.parent().and_then(|gp| gp.file_name()).map_or(false, |n| n.eq_ignore_ascii_case("work"))
@@ -152,7 +153,7 @@ pub fn resolve_install_dir(path: &Path) -> Option<PathBuf> {
     };
 
     // 1. Root folder containing work/build/yw4.exe or game/yw4.exe
-    if p.join("work").join("build").join("yw4.exe").is_file() || p.join("game").join("yw4.exe").is_file() {
+    if p.join("work").join("build").join(GAME_EXE).is_file() || p.join("game").join(GAME_EXE).is_file() {
         return Some(p.to_path_buf());
     }
 
@@ -161,7 +162,7 @@ pub fn resolve_install_dir(path: &Path) -> Option<PathBuf> {
         && p.parent().and_then(|gp| gp.file_name()).map_or(false, |n| n.eq_ignore_ascii_case("work"))
     {
         if let Some(root) = p.parent().and_then(|gp| gp.parent()) {
-            if root.join("work").join("build").join("yw4.exe").is_file() {
+            if root.join("work").join("build").join(GAME_EXE).is_file() {
                 return Some(root.to_path_buf());
             }
         }
@@ -170,8 +171,8 @@ pub fn resolve_install_dir(path: &Path) -> Option<PathBuf> {
     // 3. Subfolder game
     if p.file_name().map_or(false, |n| n.eq_ignore_ascii_case("game")) {
         if let Some(root) = p.parent() {
-            if root.join("game").join("yw4.exe").is_file()
-                || root.join("work").join("build").join("yw4.exe").is_file()
+            if root.join("game").join(GAME_EXE).is_file()
+                || root.join("work").join("build").join(GAME_EXE).is_file()
             {
                 return Some(root.to_path_buf());
             }
@@ -179,16 +180,16 @@ pub fn resolve_install_dir(path: &Path) -> Option<PathBuf> {
     }
 
     // 4. Flat root folder containing yw4.exe directly
-    if p.join("yw4.exe").is_file() {
+    if p.join(GAME_EXE).is_file() {
         return Some(p.to_path_buf());
     }
 
     // 5. Subfolder data
     if p.file_name().map_or(false, |n| n.eq_ignore_ascii_case("data")) {
         if let Some(root) = p.parent() {
-            if root.join("work").join("build").join("yw4.exe").is_file()
-                || root.join("game").join("yw4.exe").is_file()
-                || root.join("yw4.exe").is_file()
+            if root.join("work").join("build").join(GAME_EXE).is_file()
+                || root.join("game").join(GAME_EXE).is_file()
+                || root.join(GAME_EXE).is_file()
             {
                 return Some(root.to_path_buf());
             }
@@ -197,9 +198,9 @@ pub fn resolve_install_dir(path: &Path) -> Option<PathBuf> {
 
     // 6. Generic child directory of the root
     if let Some(root) = p.parent() {
-        if root.join("work").join("build").join("yw4.exe").is_file()
-            || root.join("game").join("yw4.exe").is_file()
-            || root.join("yw4.exe").is_file()
+        if root.join("work").join("build").join(GAME_EXE).is_file()
+            || root.join("game").join(GAME_EXE).is_file()
+            || root.join(GAME_EXE).is_file()
         {
             return Some(root.to_path_buf());
         }
@@ -208,11 +209,7 @@ pub fn resolve_install_dir(path: &Path) -> Option<PathBuf> {
     None
 }
 
-fn hidden(cmd: &mut Command) -> &mut Command {
-    #[cfg(windows)]
-    { use std::os::windows::process::CommandExt; cmd.creation_flags(0x0800_0000); }
-    cmd
-}
+use platform::hidden;
 
 fn dir_size(p: &Path) -> u64 {
     if p.is_file() { return p.metadata().map(|m| m.len()).unwrap_or(0); }
@@ -583,6 +580,8 @@ pub fn play(app: tauri::AppHandle, install: String, mods: Option<bool>, on_play:
     // the game is a console program: its window shows the log live. Off unless Settings asks for it (the log file is written either way)
     #[cfg(windows)]
     if show_log != Some(true) { use std::os::windows::process::CommandExt; cmd.creation_flags(0x0800_0000); }  // CREATE_NO_WINDOW
+    #[cfg(not(windows))]
+    let _ = show_log;  // Linux: a program started from the launcher has no console window either way
     if mods == Some(false) {
         cmd.env("YW4_MODS", "none");
     } else {
@@ -763,7 +762,7 @@ fn utc_stamp(secs: u64) -> (String, String) {
 }
 
 fn open_url(url: &str) {
-    if std::env::var("YW4_REPORT_OPEN").as_deref() != Ok("0") { let _ = Command::new("explorer").arg(url).spawn(); }
+    if std::env::var("YW4_REPORT_OPEN").as_deref() != Ok("0") { let _ = platform::open(url); }
 }
 
 /// Every file under `dir`, named `prefix/<path inside>` (the save folder, a few files).
@@ -841,7 +840,7 @@ pub fn show_report(install: String, zip: String) -> Result<(), String> {
     if p.parent() != Some(Path::new(&install).join("reports").as_path()) || !p.is_file() {
         return Err("not a report".into());
     }
-    Command::new("explorer").arg(format!("/select,{}", p.display())).spawn().map(|_| ()).map_err(|e| e.to_string())
+    platform::reveal(&p)
 }
 
 /// The theme the game saved (its settings.ini line YW4_THEME=<id>), if the game's settings file can be found: the
@@ -872,12 +871,12 @@ pub fn open_folder(install: String, which: String, saves: String) -> Result<(), 
         "screenshots" | "logs" | "reports" => inst.join(&which),
         "install" => inst.clone(),
         "dlc" => inst.join("data").join("dlc"),
-        "save" if saves == "appdata" => PathBuf::from(std::env::var("APPDATA").unwrap_or_default()).join("YW4 Recomp").join("save"),
+        "save" if saves == "appdata" => platform::data_dir().join("save"),
         "save" => inst.join("save"),
         _ => return Err("unknown folder".into()),
     };
     std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
-    Command::new("explorer").arg(&dir).spawn().map(|_| ()).map_err(|e| e.to_string())
+    platform::open(&dir)
 }
 
 /// Opens one screenshot in the player's picture viewer: only a file directly in the install's screenshots folder.
@@ -888,7 +887,7 @@ pub fn open_shot(install: String, path: String) -> Result<(), String> {
     if p.parent() != Some(dir.as_path()) || !p.is_file() {
         return Err("not a screenshot".into());
     }
-    Command::new("explorer").arg(&p).spawn().map(|_| ()).map_err(|e| e.to_string())
+    platform::open(&p)
 }
 
 /// Deletes what only a rebuild needs; returns the bytes freed. The game keeps working.
@@ -957,29 +956,17 @@ pub async fn delete_originals(state: State) -> Result<u64, String> {
 #[tauri::command]
 pub fn make_shortcuts(state: State) -> Result<(), String> {
     let target = std::env::current_exe().map_err(|e| e.to_string())?;
-    let icon = Path::new(&state.install).join("work").join("icon").join("yw4.ico");
-    let icon = if icon.is_file() { icon } else { target.clone() };
-    let mut places = Vec::new();
-    if state.desktop { places.push("[Environment]::GetFolderPath('Desktop')"); }
-    if state.start_menu { places.push("[Environment]::GetFolderPath('Programs')"); }
-    // the ones switched off go (Settings): only our own shortcut's name, nothing else in those folders
-    for (on, place) in [(state.desktop, "[Environment]::GetFolderPath('Desktop')"),
-                        (state.start_menu, "[Environment]::GetFolderPath('Programs')")] {
-        if !on {
-            let script = format!("Remove-Item -LiteralPath (Join-Path ({place}) 'Yo-kai Watch 4 Recomp.lnk') -ErrorAction SilentlyContinue");
-            let _ = hidden(Command::new("powershell").args(["-NoProfile", "-NonInteractive", "-Command", &script])).status();
-        }
+    let icons = Path::new(&state.install).join("work").join("icon");
+    // Windows takes the .ico; a Linux .desktop file a PNG (ensure_icon_image takes it out of the .ico)
+    let icon = if cfg!(windows) { Some(icons.join("yw4.ico")).filter(|p| p.is_file()) } else { ensure_icon_image(&icons) };
+    let icon = icon.unwrap_or_else(|| target.clone());
+    // the ones switched off go first (Settings): only our own shortcut's name, nothing else in those folders
+    let wanted = [(true, state.desktop), (false, state.start_menu)];
+    for (desktop, on) in wanted {
+        if !on { platform::shortcut(desktop, false, &target, &icon)?; }
     }
-    for place in places {
-        // ({place}): a .NET call given straight to a command is read as text, not run (Join-Path then fails and no
-        // shortcut was ever made: found 2026-11-04 in the first full Home -> Ready test)
-        let script = format!(
-            "$s=(New-Object -ComObject WScript.Shell).CreateShortcut((Join-Path ({place}) 'Yo-kai Watch 4 Recomp.lnk')); \
-             $s.TargetPath=$env:YW4_LNK_TARGET; $s.WorkingDirectory=(Split-Path $env:YW4_LNK_TARGET); \
-             $s.IconLocation=$env:YW4_LNK_ICON; $s.Save()");
-        let ok = hidden(Command::new("powershell").args(["-NoProfile", "-NonInteractive", "-Command", &script])
-            .env("YW4_LNK_TARGET", &target).env("YW4_LNK_ICON", &icon)).status().map(|s| s.success()).unwrap_or(false);
-        if !ok { return Err("couldn't make a shortcut".into()); }
+    for (desktop, on) in wanted {
+        if on { platform::shortcut(desktop, true, &target, &icon)?; }
     }
     Ok(())
 }
@@ -987,7 +974,7 @@ pub fn make_shortcuts(state: State) -> Result<(), String> {
 /// Where the saves and settings.ini live for `saves` ("install" or "appdata").
 fn saves_place(install: &Path, saves: &str) -> (PathBuf, PathBuf) {
     if saves == "appdata" {
-        let base = PathBuf::from(std::env::var("APPDATA").unwrap_or_default()).join("YW4 Recomp");
+        let base = platform::data_dir();
         (base.join("save"), base.join("settings.ini"))
     } else {
         (install.join("save"), install.join("settings.ini"))
@@ -1004,8 +991,7 @@ fn copy_dir(from: &Path, to: &Path) -> std::io::Result<()> {
 }
 
 fn game_running() -> bool {
-    hidden(Command::new("tasklist").args(["/FI", "IMAGENAME eq yw4.exe", "/NH"])).output()
-        .map(|o| String::from_utf8_lossy(&o.stdout).to_lowercase().contains("yw4.exe")).unwrap_or(false)
+    platform::game_running()
 }
 
 /// This install's own game is running: Windows won't open a running program for writing (5 or 32), and a build
@@ -1014,7 +1000,7 @@ fn game_running() -> bool {
 pub fn exe_in_use(install: &str) -> bool {
     match std::fs::OpenOptions::new().write(true).open(exe(install)) {
         Ok(_) => false,
-        Err(e) => matches!(e.raw_os_error(), Some(5) | Some(32)),
+        Err(e) => platform::busy_error(e.raw_os_error()),
     }
 }
 
@@ -1137,7 +1123,7 @@ pub async fn uninstall(app: tauri::AppHandle, install: String, saves: String, ke
     let state = state_path();
     remove(&state);
     remove(&played_path());
-    let appdata = PathBuf::from(std::env::var("APPDATA").unwrap_or_default()).join("YW4 Recomp");
+    let appdata = platform::data_dir();
     remove(&appdata.join("releases.json"));
     let _ = std::fs::remove_dir(&appdata);
     if launcher {
@@ -1184,7 +1170,7 @@ pub fn locate_installed_game_path(raw_path: PathBuf) -> Result<State, String> {
     let install_str = install_dir.display().to_string();
     let exe_file = exe(&install_str);
     if !exe_file.is_file() {
-        return Err(format!("No yw4.exe found in '{}'.", install_str));
+        return Err(format!("No {GAME_EXE} found in '{}'.", install_str));
     }
 
     let ver = game_version(&exe_file);
@@ -1278,10 +1264,13 @@ pub fn locate_installed_game_path(raw_path: PathBuf) -> Result<State, String> {
     if let Some(parent) = exe_file.parent() {
         let ini_path = parent.join("game.ini");
         if !ini_path.is_file() {
+            // the real folder: game.ini expands no %APPDATA% (runtime/src/game_ini.c), a value like that was read
+            // as a folder named %APPDATA% under work/build
             let (save, settings) = if state.saves == "appdata" {
-                ("%APPDATA%/YW4 Recomp/save", "%APPDATA%/YW4 Recomp/settings.ini")
+                let base = platform::data_dir();
+                (base.join("save").display().to_string(), base.join("settings.ini").display().to_string())
             } else {
-                ("../../save", "../../settings.ini")
+                ("../../save".to_string(), "../../settings.ini".to_string())
             };
             let text = format!(
                 "# Written by the YW4 Recomp launcher: how yw4.exe runs on its own (decision 0050).\n\
@@ -1461,13 +1450,13 @@ mod tests {
         let wb = temp.join("work").join("build");
         std::fs::create_dir_all(&wb).unwrap();
         std::fs::create_dir_all(temp.join("data")).unwrap();
-        std::fs::write(wb.join("yw4.exe"), b"").unwrap();
+        std::fs::write(wb.join(GAME_EXE), b"").unwrap();
 
         assert_eq!(resolve_install_dir(&temp), Some(temp.clone()));
         assert_eq!(resolve_install_dir(&wb), Some(temp.clone()));
-        assert_eq!(resolve_install_dir(&wb.join("yw4.exe")), Some(temp.clone()));
+        assert_eq!(resolve_install_dir(&wb.join(GAME_EXE)), Some(temp.clone()));
         assert_eq!(resolve_install_dir(&temp.join("data")), Some(temp.clone()));
-        assert_eq!(exe(&temp.display().to_string()), wb.join("yw4.exe"));
+        assert_eq!(exe(&temp.display().to_string()), wb.join(GAME_EXE));
 
         let _ = std::fs::remove_dir_all(&temp);
     }
@@ -1479,12 +1468,12 @@ mod tests {
 
         let gm = temp.join("game");
         std::fs::create_dir_all(&gm).unwrap();
-        std::fs::write(gm.join("yw4.exe"), b"").unwrap();
+        std::fs::write(gm.join(GAME_EXE), b"").unwrap();
 
         assert_eq!(resolve_install_dir(&temp), Some(temp.clone()));
         assert_eq!(resolve_install_dir(&gm), Some(temp.clone()));
-        assert_eq!(resolve_install_dir(&gm.join("yw4.exe")), Some(temp.clone()));
-        assert_eq!(exe(&temp.display().to_string()), gm.join("yw4.exe"));
+        assert_eq!(resolve_install_dir(&gm.join(GAME_EXE)), Some(temp.clone()));
+        assert_eq!(exe(&temp.display().to_string()), gm.join(GAME_EXE));
 
         let _ = std::fs::remove_dir_all(&temp);
     }
@@ -1507,7 +1496,7 @@ mod tests {
         // 2. Mock valid install
         let wb = temp.join("work").join("build");
         std::fs::create_dir_all(&wb).unwrap();
-        std::fs::write(wb.join("yw4.exe"), b"").unwrap();
+        std::fs::write(wb.join(GAME_EXE), b"").unwrap();
         std::fs::create_dir_all(temp.join("data").join("exefs")).unwrap();
         std::fs::create_dir_all(temp.join("data").join("romfs")).unwrap();
         std::fs::write(temp.join("config.toml"), "[input]\nbase_nsp = \"C:\\\\dump\\\\base.nsp\"\n").unwrap();
@@ -1530,7 +1519,7 @@ mod tests {
         assert!(same_folder(&res_sub.install, &temp), "{} is not {}", res_sub.install, temp.display());
 
         // Locating by selecting yw4.exe file directly also works
-        let res_exe = locate_installed_game_path(temp.join("work").join("build").join("yw4.exe")).unwrap();
+        let res_exe = locate_installed_game_path(temp.join("work").join("build").join(GAME_EXE)).unwrap();
         assert!(same_folder(&res_exe.install, &temp), "{} is not {}", res_exe.install, temp.display());
 
         let _ = std::fs::remove_dir_all(&temp);
@@ -1540,7 +1529,7 @@ mod tests {
 
     #[test]
     fn test_locate_installed_game_current_repo() {
-        if !Path::new("work").join("build").join("yw4.exe").is_file() {
+        if !Path::new("work").join("build").join(GAME_EXE).is_file() {
             return;
         }
         let _guard = TEST_LOCK.lock().unwrap();
@@ -1568,7 +1557,7 @@ mod tests {
         std::env::set_var("YW4_LAUNCHER_STATE", &temp_state);
 
         std::fs::create_dir_all(&temp).unwrap();
-        std::fs::write(temp.join("yw4.exe"), b"").unwrap();
+        std::fs::write(temp.join(GAME_EXE), b"").unwrap();
         std::fs::write(temp.join("game.ini"), "YW4_SAVE=%APPDATA%/YW4 Recomp/save\nYW4_SETTINGS_FILE=%APPDATA%/YW4 Recomp/settings.ini\n").unwrap();
 
         let res = locate_installed_game_path(temp.clone()).unwrap();

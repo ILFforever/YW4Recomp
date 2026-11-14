@@ -10,8 +10,9 @@
 //                replaces it and starts the new one. A release without that file: its page, to install by hand.
 //
 // The check is one request to GitHub's list of releases (no account), at most once an hour (cached beside the
-// launcher's state). If GitHub can't be reached nothing is offered and nothing breaks. Windows' own curl.exe and
-// tar.exe do the transfer and the unpacking (Windows 10 1803 and newer have both).
+// launcher's state). If GitHub can't be reached nothing is offered and nothing breaks. The system's curl does the
+// transfer (Windows 10 1803 and newer have curl.exe), Windows' tar.exe or Linux's Python the unpacking (platform.rs).
+// On Linux a newer launcher is offered as its release page, as for the portable zip (decision 0071).
 
 use serde::Serialize;
 use sha2::{Digest, Sha256};
@@ -35,16 +36,7 @@ fn launcher_ver() -> Ver {
     ver(LAUNCHER).unwrap_or((0, 0, 0))
 }
 
-fn hidden(cmd: &mut Command) -> &mut Command {
-    #[cfg(windows)]
-    { use std::os::windows::process::CommandExt; cmd.creation_flags(0x0800_0000); }
-    cmd
-}
-
-fn system_tool(name: &str) -> PathBuf {
-    let root = std::env::var("SystemRoot").unwrap_or_else(|_| r"C:\Windows".into());
-    PathBuf::from(root).join("System32").join(name)
-}
+use crate::platform::{hidden, tool};
 
 /// A folder of game code this launcher can build with: its version, else None (no release.toml, too new a protocol
 /// or a newer launcher needed). Err says why, for the player.
@@ -132,7 +124,7 @@ pub struct Updates {
 }
 
 fn cache_path() -> PathBuf {
-    PathBuf::from(std::env::var("APPDATA").unwrap_or_default()).join("YW4 Recomp").join("releases.json")
+    crate::platform::data_dir().join("releases.json")
 }
 
 fn now() -> u64 {
@@ -152,7 +144,7 @@ fn releases(fresh: bool) -> Option<serde_json::Value> {
             return Some(c["releases"].clone());
         }
     }
-    let out = hidden(Command::new(system_tool("curl.exe")).args([
+    let out = hidden(Command::new(tool("curl")).args([
         "-sSfL", "--max-time", "10", "-H", "Accept: application/vnd.github+json", "-H", "User-Agent: YW4-Recomp-Launcher",
         RELEASES,
     ])).output().ok()?;
@@ -232,7 +224,7 @@ pub fn open_release_page(url: String) -> Result<(), String> {
     if !url.starts_with("https://github.com/ILFforever/YW4Recomp/releases/") || url.contains(['"', ' ', '&', '|']) {
         return Err("not a release page".into());
     }
-    hidden(Command::new("explorer").arg(&url)).spawn().map(|_| ()).map_err(|e| e.to_string())
+    crate::platform::open(&url)
 }
 
 /// Downloads a game update into <install>\builder\game\<version>\: checked against GitHub's SHA-256 before it is
@@ -248,7 +240,7 @@ pub async fn download_game_update(install: String, version: String, url: String,
         let dir = PathBuf::from(&install).join("builder").join("game");
         std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
         let (zip, tmp, dst) = (dir.join(format!("{version}.zip.part")), dir.join(format!("{version}.unpack")), dir.join(&version));
-        let ok = hidden(Command::new(system_tool("curl.exe")).args(["-sSfL", "--max-time", "300", "-o"]).arg(&zip).arg(&url))
+        let ok = hidden(Command::new(tool("curl")).args(["-sSfL", "--max-time", "300", "-o"]).arg(&zip).arg(&url))
             .status().map(|s| s.success()).unwrap_or(false);
         if !ok {
             let _ = std::fs::remove_file(&zip);
@@ -262,9 +254,8 @@ pub async fn download_game_update(install: String, version: String, url: String,
         }
         let _ = std::fs::remove_dir_all(&tmp);
         std::fs::create_dir_all(&tmp).map_err(|e| e.to_string())?;
-        // Windows' bsdtar refuses absolute paths and ".." in an archive unless told otherwise (-P)
-        let ok = hidden(Command::new(system_tool("tar.exe")).arg("-xf").arg(&zip).arg("-C").arg(&tmp))
-            .status().map(|s| s.success()).unwrap_or(false);
+        // Windows' bsdtar and Python's zipfile both refuse absolute paths and ".." in an archive
+        let ok = crate::platform::unzip(&zip, &tmp);
         let _ = std::fs::remove_file(&zip);
         let checked = if ok { usable(&tmp) } else { Err("couldn't unpack the update".into()) };
         match checked {
@@ -307,7 +298,7 @@ pub async fn download_launcher_update(app: tauri::AppHandle, version: String, ur
         std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
         let (part, exe) = (dir.join(format!("{name}.part")), dir.join(&name));
         let _ = std::fs::remove_file(&exe);
-        let ok = hidden(Command::new(system_tool("curl.exe")).args(["-sSfL", "--max-time", "600", "-o"]).arg(&part).arg(&url))
+        let ok = hidden(Command::new(tool("curl")).args(["-sSfL", "--max-time", "600", "-o"]).arg(&part).arg(&url))
             .status().map(|s| s.success()).unwrap_or(false);
         if !ok {
             let _ = std::fs::remove_file(&part);

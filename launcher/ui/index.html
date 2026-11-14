@@ -46,7 +46,7 @@
       <div class="art" id="hero" aria-roledescription="carousel" aria-label="What the port looks like">
         <img class="slide on" src="hero/1-yokai-world.jpg" alt="Yo-kai World, cherry blossoms" data-caption="Up to 4K, with TAA or SMAA">
         <img class="slide" src="hero/2-schoolyard.jpg" alt="The schoolyard in 21:9" data-caption="Ultrawide: 21:9 and 32:9">
-        <img class="slide" src="hero/3-dusk.jpg" alt="Yo-kai World at dusk" data-caption="DLSS, FSR and frame generation">
+        <img class="slide win-only" src="hero/3-dusk.jpg" alt="Yo-kai World at dusk" data-caption="DLSS, FSR and frame generation">
         <span class="art-cap" id="hero-cap">Up to 4K, with TAA or SMAA</span>
         <span class="art-title">Yo-kai Watch 4 Recomp</span>
         <span class="art-sub">Developed by ILFforever</span>
@@ -70,7 +70,7 @@
         <ul class="checklist">
           <li><span class="tick" aria-hidden="true"></span><span><b>Yo-kai Watch 4++ 2.2.0</b><small>NSP, XCI or extracted folders</small></span></li>
           <li><span class="tick" aria-hidden="true"></span><span><b>prod.keys</b><small>Not needed for extracted folders</small></span></li>
-          <li><span class="tick" aria-hidden="true"></span><span><b>Vulkan 1.3 GPU</b><small>RTX cards also get DLSS</small></span></li>
+          <li><span class="tick" aria-hidden="true"></span><span><b>Vulkan 1.3 GPU</b><small class="win-only">RTX cards also get DLSS</small></span></li>
           <li><span class="tick" aria-hidden="true"></span><span><b>11 GB free</b><small>The game files are copied in</small></span></li>
         </ul>
       </div>
@@ -164,7 +164,7 @@
             <span class="dot" aria-hidden="true"></span><span><b>In the install folder</b><small>One folder, easy to back up</small></span>
           </button>
           <button type="button" class="radio" role="radio" data-saves="appdata" aria-checked="false">
-            <span class="dot" aria-hidden="true"></span><span><b>In AppData</b><small>Kept if the game folder is deleted</small></span>
+            <span class="dot" aria-hidden="true"></span><span><b class="saves-place">In AppData</b><small>Kept if the game folder is deleted</small></span>
           </button>
         </div>
         <dl class="summary">
@@ -260,7 +260,7 @@
               <span class="dot" aria-hidden="true"></span><span><b>In the game folder</b><small>One folder, easy to back up</small></span>
             </button>
             <button type="button" class="radio" role="radio" data-move="appdata" aria-checked="false">
-              <span class="dot" aria-hidden="true"></span><span><b>In AppData</b><small>Kept if the game folder is deleted</small></span>
+              <span class="dot" aria-hidden="true"></span><span><b class="saves-place">In AppData</b><small>Kept if the game folder is deleted</small></span>
             </button>
           </div>
         </section>
@@ -271,7 +271,7 @@
             <button class="toggle" type="button" role="switch" aria-label="Desktop shortcut" id="set-desktop"></button>
           </div>
           <div class="switch-row">
-            <span><b>Start menu entry</b></span>
+            <span><b class="startmenu-name">Start menu entry</b></span>
             <button class="toggle" type="button" role="switch" aria-label="Start menu entry" id="set-startmenu"></button>
           </div>
         </section>
@@ -348,8 +348,8 @@
             <p>Show details says why. Build again keeps the finished steps.</p>
             <b>The game doesn't start</b>
             <p>Update your graphics driver (Vulkan 1.3 is needed), then check the logs.</p>
-            <b>DLSS is greyed out</b>
-            <p>DLSS needs an NVIDIA RTX card. FSR works on any card.</p>
+            <b class="win-only">DLSS is greyed out</b>
+            <p class="win-only">DLSS needs an NVIDIA RTX card. FSR works on any card.</p>
 </div>
 </section>
         </div>
@@ -371,7 +371,7 @@
           <ul class="credits">
             <li><b>YW4 Recomp</b> (ILFforever), <b>LAS Recomp</b> (Peiikai) · MIT</li>
             <li><b>AMD FSR</b>, <b>Streamline</b>, <b>SMAA</b>, <b>musl</b>, <b>stb</b>, <b>Tauri</b> · MIT</li>
-            <li><b>NVIDIA DLSS, Reflex</b> · NVIDIA RTX SDK</li>
+            <li class="win-only"><b>NVIDIA DLSS, Reflex</b> · NVIDIA RTX SDK</li>
             <li><b>SDL 3</b>, <b>nanosvg</b> · zlib; <b>hactool</b> · ISC</li>
             <li><b>Vulkan headers</b>, <b>LLVM</b> · Apache 2.0; <b>glslang</b> · BSD</li>
             <li><b>Fonts</b> · OFL; <b>Python</b> · PSF</li>
@@ -537,7 +537,7 @@
     <h3 class="sub">Features</h3>
     <ul class="chips">
       <li>Up to 4K</li><li>21:9 and 32:9</li><li>Soft and contact shadows</li><li>TAA · SMAA</li>
-      <li>DLSS · FSR</li><li>Frame generation</li><li>60 to 144 fps</li><li>Mods, like the English patch</li>
+      <li class="win-only">DLSS · FSR</li><li class="win-only">Frame generation</li><li>60 to 144 fps</li><li>Mods, like the English patch</li>
     </ul>
     <p class="fine">A fan project, not affiliated with Nintendo or LEVEL-5. You need your own copy of the game.</p>
   </div>

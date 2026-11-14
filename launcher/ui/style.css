@@ -110,6 +110,8 @@ body.pointer :focus-visible { outline: none; }
 .win-close:hover { background: var(--close-hover); color: var(--white); }
 
 [hidden] { display: none !important; }
+/* Linux (app.js LINUX, decision 0071): what only Windows has (FSR, DLSS, frame generation) isn't mentioned */
+.os-linux .win-only { display: none !important; }
 
 /* the setup steps in the top bar */
 .steps-bar { display: flex; gap: 6px; margin: 0 12px 0 0; padding: 0; list-style: none; font: 700 13px/1 var(--display); }
