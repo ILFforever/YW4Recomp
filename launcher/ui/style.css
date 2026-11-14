@@ -552,6 +552,10 @@ dialog p { margin: 0 0 10px; font-size: 14px; overflow-wrap: anywhere; }
 .settings-col { display: flex; flex-direction: column; gap: 14px; min-width: 0; }
 .settings-grid .card { padding: 0; overflow: hidden; }
 .settings-grid .card h2 { margin: 0; padding: 10px 16px 9px; border-bottom: 1px solid var(--lilac-2); background: var(--lilac-0); }
+/* a title with a link at its right (Cheats: Manage): the bar is the head's, the title inside it plain */
+.settings-grid .card-head { margin: 0; padding-right: 10px; border-bottom: 1px solid var(--lilac-2); background: var(--lilac-0); }
+.settings-grid .card-head h2 { border-bottom: 0; background: none; }
+.settings-grid .card-head .btn.small { height: 28px; padding: 0 12px; font-size: 12px; }
 .set-row { display: flex; align-items: center; gap: 14px; padding: 11px 16px; border-bottom: 1px solid var(--lilac-2); }
 .set-row:last-child { border-bottom: 0; }
 .set-row > span { flex: 1; min-width: 0; }

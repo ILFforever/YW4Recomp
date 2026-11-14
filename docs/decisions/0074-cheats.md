@@ -56,11 +56,20 @@ The owner chose option B of the design canvas (<https://claude.ai/artifact/Xcwzd
 page in the overlay's side menu, between Overlay and Report a bug, with the cheats as rows like the Settings page's.
 The choice is saved in the settings file like any setting.
 
-The launcher's Settings has a **Cheats** switch (on by default). Off, the game starts with `YW4_CHEATS=0`: the page is
-hidden, the keys pass over its place, and no cheat acts whatever the settings file says.
+The launcher's Settings has a **Cheats** card of its own (under Playing) with a **Cheats page** switch (on by
+default). Off, the game starts with `YW4_CHEATS=0`: the page is hidden, the keys pass over its place, and no cheat
+acts whatever the settings file says.
+
+The card's **Manage** button opens **Manage cheats** (owner, 2026-11-15): "Toggleable in game" lists the cheats the
+game's page also switches, read from and written to the game's settings.ini (the same `YW4_CHEAT_CRANK` line, so the
+last change wins; `ready.rs` `game_cheats` / `set_game_cheat`, which write only the known cheat lines); "Launcher
+only (needs game restart)" is for cheats that can't change while playing (none yet). While any `yw4` runs, its
+switches are locked (the game rewrites the file as it plays); the page looks every 2 s, so a game started from a
+shortcut locks it too.
 
 ## Not done
 
-- The overlay page and the launcher switch have not been seen running.
+- The launcher's switches have been seen (screenshots) but not used end to end: a launcher change picked up by the
+  game, or the Cheats page switch off from the launcher.
 - Report a bug moved one place down the side menu: a recording that reaches it with Down from Resume now lands on
   Cheats.

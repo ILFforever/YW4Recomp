@@ -96,7 +96,7 @@ fn main() {
             themes::list_themes, themes::read_theme, options::gpu_names, options::disk_space, buildrun::start_build, buildrun::cancel_build, buildrun::builder_bundled, update::check_updates, update::download_game_update, update::game_news, update::open_release_page,
             update::download_launcher_update, update::run_launcher_update,
             ready::load_state, ready::save_state, ready::install_info, ready::set_dlc_keys, ready::set_mod_enabled, ready::play, ready::open_folder, ready::open_shot,
-            ready::free_space, ready::originals, ready::delete_originals, ready::make_shortcuts, ready::move_saves, ready::game_full_screen, ready::set_game_full_screen, ready::uninstall_info, ready::uninstall, ready::save_report, ready::open_report_github, ready::show_report,
+            ready::free_space, ready::originals, ready::delete_originals, ready::make_shortcuts, ready::move_saves, ready::game_full_screen, ready::set_game_full_screen, ready::game_cheats, ready::set_game_cheat, ready::uninstall_info, ready::uninstall, ready::save_report, ready::open_report_github, ready::show_report,
             ready::locate_installed_game, ready::locate_game])
         .run(tauri::generate_context!())
         .expect("the launcher window could not start");

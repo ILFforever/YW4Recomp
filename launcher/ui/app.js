@@ -1196,7 +1196,7 @@ document.querySelectorAll('[data-open]').forEach((b) => b.addEventListener('clic
 
 // ---- Settings (the top bar's gear): every change is saved at once (launcher.json); moving the saves asks first
 const onScreen = (name) => !document.querySelector(`.screen[data-screen="${name}"]`).hidden;
-function setToggle(id, on) { $(id).setAttribute('aria-checked', String(!!on)); }
+function setToggle(id, on) { (typeof id === 'string' ? $(id) : id).setAttribute('aria-checked', String(!!on)); }
 async function saveInst() {
   try { await invoke('save_state', { state: inst }); } catch (e) { popup('Settings', 'Could not save: ' + e); }
 }
@@ -1240,6 +1240,38 @@ function settingsPage(n) {
 $('page-prev').addEventListener('click', () => settingsPage(1));
 $('page-next').addEventListener('click', () => settingsPage(2));
 $('settings-back').addEventListener('click', () => showReady());
+
+// Settings › Cheats › Manage: the game's own cheat lines in its settings.ini (ready.rs game_cheats), so the launcher
+// and the game's Cheats page change the same thing; locked while the game runs (it rewrites the file as it plays)
+async function showCheats() {
+  show('cheats');
+  let st = { running: false, on: [] };
+  try { st = await invoke('game_cheats', { install: inst.install, saves: inst.saves }); } catch (e) { /* none on */ }
+  document.querySelectorAll('[data-cheat]').forEach((b) => {
+    setToggle(b, st.on.includes(b.dataset.cheat));
+    b.disabled = st.running;
+  });
+  $('cheats-note').textContent = st.running ? 'The game is running: close it to change these'
+    : inst.cheats === false ? 'The Cheats page is off in Settings: no cheat works until it is on' : '';
+}
+$('set-cheats-manage').addEventListener('click', () => showCheats());
+$('cheats-back').addEventListener('click', () => showSettings().then(() => settingsPage(1)));
+document.querySelectorAll('[data-cheat]').forEach((b) => b.addEventListener('click', async () => {
+  const on = b.getAttribute('aria-checked') !== 'true';
+  try {
+    await invoke('set_game_cheat', { install: inst.install, saves: inst.saves, key: b.dataset.cheat, on });
+    setToggle(b, on);
+  } catch (e) { popup('Cheats', String(e)); showCheats(); }
+}));
+// A game started some other way (a shortcut, or before the launcher opened) sends no "played": while the page shows,
+// it looks every 2 s and locks or unlocks to match (the write itself is refused while the game runs either way)
+setInterval(async () => {
+  if (!invoke || currentScreen() !== 'cheats') return;
+  let st;
+  try { st = await invoke('game_cheats', { install: inst.install, saves: inst.saves }); } catch (e) { return; }
+  const locked = document.querySelector('[data-cheat]').disabled;
+  if (st.running !== locked) showCheats();
+}, 2000);
 
 // Uninstall: the popup lists what goes (sizes from the install); kept by default: saves and screenshots
 const unDlg = $('uninstall-dlg');
@@ -1554,6 +1586,14 @@ $('welcome-close').addEventListener('click', closeWelcome);
     screen = 'files';
   }
   if (screen === 'options') { show('options'); loadOptions(); return; }
+  if (screen === 'settings' || screen === 'cheats') {  // screenshots of Settings and Settings › Cheats › Manage
+    try { inst = invoke ? await invoke('load_state') : null; } catch (e) { inst = null; }
+    if (inst) {
+      if (screen === 'cheats') await showCheats();
+      else await showSettings();
+      return;
+    }
+  }
   if (screen && screen !== 'ready') { show(screen); return; }
   // a built install: straight to Play (the welcome popup is for the first run)
   try { inst = invoke ? await invoke('load_state') : null; } catch (e) { inst = null; }

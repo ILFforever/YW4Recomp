@@ -216,6 +216,13 @@
             <button type="button" class="radio" role="radio" data-onplay="close"><span class="dot" aria-hidden="true"></span><span><b>Close it</b><small>Play time isn't counted</small></span></button>
           </div>
         </section>
+        <section class="card">
+          <div class="card-head"><h2>Cheats</h2><button class="btn small" type="button" id="set-cheats-manage">Manage &rsaquo;</button></div>
+          <div class="switch-row">
+            <span><b>Cheats page</b><small>In the game's menu. Off hides it and turns every cheat off</small></span>
+            <button class="toggle" type="button" role="switch" aria-label="Cheats page" id="set-cheats"></button>
+          </div>
+        </section>
         </div>
         <div class="settings-col">
         <section class="card">
@@ -235,10 +242,6 @@
           <div class="switch-row">
             <span><b>Controls hint</b><small>A card at the start says how to see the controls</small></span>
             <button class="toggle" type="button" role="switch" aria-label="Controls hint" id="set-hint"></button>
-          </div>
-          <div class="switch-row">
-            <span><b>Cheats</b><small>A Cheats page in the game's menu. Off hides it and turns every cheat off</small></span>
-            <button class="toggle" type="button" role="switch" aria-label="Cheats" id="set-cheats"></button>
           </div>
         </section>
         <section class="card">
@@ -314,6 +317,40 @@
       <span class="foot-note"></span>
       <button class="btn" type="button" id="set-rebuild-now">Rebuild</button>
       <button class="btn danger" type="button" id="set-uninstall">Uninstall</button>
+    </div>
+  </main>
+
+  <!-- Settings › Cheats › Manage (design canvas https://claude.ai/artifact/XcwzdE1gju4aNQJgxgE2e5, launcher boards):
+       cheats that only the launcher can set (none yet), then the ones the game's menu switches too, written to the
+       game's settings.ini; every switch locked while the game runs -->
+  <main class="screen setup" data-screen="cheats" hidden>
+    <div class="setup-body settings-body">
+      <div class="settings-head">
+        <h1>Manage cheats</h1>
+      </div>
+      <div class="settings-grid two">
+        <div class="settings-col">
+        <section class="card">
+          <h2>Toggleable in game</h2>
+          <div class="switch-row">
+            <span><b>Unlimited Crank-a-kai</b><small>Cranks never run out, so crank away!</small></span>
+            <button class="toggle" type="button" role="switch" aria-label="Unlimited Crank-a-kai" data-cheat="YW4_CHEAT_CRANK"></button>
+          </div>
+        </section>
+        </div>
+        <div class="settings-col">
+        <section class="card">
+          <h2>Launcher only (needs game restart)</h2>
+          <div class="switch-row off-limits">
+            <span><b>None yet</b></span>
+          </div>
+        </section>
+        </div>
+      </div>
+    </div>
+    <div class="setup-foot">
+      <button class="btn" type="button" id="cheats-back">Back</button>
+      <span class="foot-note" id="cheats-note"></span>
     </div>
   </main>
 

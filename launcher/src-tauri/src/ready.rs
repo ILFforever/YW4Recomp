@@ -1066,6 +1066,37 @@ pub fn set_game_full_screen(install: String, saves: String, full: bool) -> Resul
     std::fs::write(&ini, lines.join("\n") + "\n").map_err(|e| e.to_string())
 }
 
+/// Settings › Cheats › Manage: the cheats the game also switches in its own menu, read from and written to its
+/// settings.ini (the lines its Cheats page saves, decision 0074), so the launcher and the game never disagree: the
+/// last change wins. Only these lines may be written here.
+const GAME_CHEATS: [&str; 1] = ["YW4_CHEAT_CRANK"];
+
+#[derive(Serialize)]
+pub struct GameCheats { running: bool, on: Vec<String> }
+
+/// Whether the game is running (the page locks its switches then: the game rewrites the file as it plays) and which
+/// cheats its settings.ini has on.
+#[tauri::command]
+pub fn game_cheats(install: String, saves: String) -> GameCheats {
+    let (_, ini) = saves_place(Path::new(&install), &saves);
+    let text = std::fs::read_to_string(ini).unwrap_or_default();
+    let on = GAME_CHEATS.iter().filter(|k| text.lines().any(|l| l.trim() == format!("{k}=1"))).map(|k| k.to_string()).collect();
+    GameCheats { running: game_running(), on }
+}
+
+#[tauri::command]
+pub fn set_game_cheat(install: String, saves: String, key: String, on: bool) -> Result<(), String> {
+    if !GAME_CHEATS.contains(&key.as_str()) { return Err(format!("{key} is not a cheat")); }
+    if game_running() { return Err("Close the game first.".into()); }
+    let (_, ini) = saves_place(Path::new(&install), &saves);
+    let old = std::fs::read_to_string(&ini).unwrap_or_default();
+    let prefix = format!("{key}=");
+    let mut lines: Vec<String> = old.lines().filter(|l| !l.starts_with(&prefix)).map(String::from).collect();
+    lines.push(format!("{key}={}", if on { 1 } else { 0 }));
+    if let Some(dir) = ini.parent() { std::fs::create_dir_all(dir).map_err(|e| e.to_string())?; }
+    std::fs::write(&ini, lines.join("\n") + "\n").map_err(|e| e.to_string())
+}
+
 // ---- Uninstall (Settings). Only the launcher's own parts of the install folder are deleted, by name, and only in
 // a folder whose config.toml the launcher wrote; the folder itself goes only if nothing else is left in it.
 
