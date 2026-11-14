@@ -58,17 +58,19 @@ Why this and not the alternatives:
 
 - Running jump, same replay and save: 30 +1.39 / 0.63 s in the air, 60 +1.38 / 0.65 s, 120 +1.38 / 0.68 s (was
   +0.62). Screenshots 0.1 s apart look the same at 60 and 120.
-- Standing jump: the same with the fix on and off at 60; at 120 a little closer to 60 with it.
+- Standing jump: the same at 30, 60 and 120 (see Standing jump).
 - Town walk at 60 frames/s with the fix on and off: it ends in the same place; the pictures at frames 5000 and
   7300 differ by a frame or so of timing (camera and running pose a little apart). Expected: at 60 a motion whose
   least time lies between 1/60 and 1/30 s can now be left after one frame, as on the Switch, instead of two. With
   60 frames/s a real frame's step also jitters around 1/60 s, so a least time of one 60 Hz frame could be missed at
   60 too; counting 1/30 covers that.
 
-## Not done
+## Standing jump
 
-The standing jump falls faster at 60 and 120 than at 30 (back on the ground about 0.15 s after the peak, against
-0.35 s). It is the same with this fix off, so it is older than this change and was left for another time.
+A first measurement suggested the standing jump fell faster at 60 and 120 than at 30. Measured again on its own
+(walk a moment, stop, wait, jump): peak +1.37 to +1.39 about 0.5 s after take-off and back on the ground at about
+0.9 s at 30, 60 and 120, within one 30 Hz frame of each other (at 30 gravity starts one bigger step later). The
+first reading came from a jump taken right after a run toward a building; nothing to fix.
 
 ## Test tools added for this
 
