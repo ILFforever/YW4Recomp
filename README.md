@@ -446,6 +446,11 @@ show those instead of the Switch buttons. Below, the shortcut wheel and the mini
 
 ![Switch (the game's): Switch icons: ZL, ZR and R; Keyboard icons: the bound keys 1, 3 and E; Xbox icons: LT, RT and RB; PlayStation icons: L2, R2 and R1](docs/screenshots/89-button-icons.png)
 
+A button with nothing bound to it shows **N/A** in the same style (a keycap, an Xbox, PlayStation or Switch
+button) instead of a key you can't press; bind one on the Controls page and its key shows.
+
+![N/A in the game's hint bar for Switch ally with no key bound, and the N/A icon in each style: Keyboard, Xbox, PlayStation and Switch](docs/screenshots/89-button-icons-na.png)
+
 </details>
 
 **Mods**
