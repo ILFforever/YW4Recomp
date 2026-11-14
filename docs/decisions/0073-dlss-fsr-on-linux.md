@@ -4,11 +4,12 @@
 state: accepted
 date: 2026-11-14
 replaces: none
-code: tools/yw4/fsr_linux.py, third_party/fsr3-linux, tools/yw4/deps.py, recomp/build.py, runtime/src/gpu_fsr.c, runtime/src/gpu_dlss.c, runtime/src/settings.c, runtime/src/window.c
+code: tools/yw4/fsr_linux.py, third_party/fsr3-linux, tools/yw4/deps.py, recomp/build.py, runtime/src/gpu_fsr.c, runtime/src/gpu_fg.c, runtime/src/gpu_dlss.c, runtime/src/settings.c, runtime/src/window.c, runtime/src/host.c, launcher/ui/app.js
 -->
 
-Status: accepted. FSR checked in WSL on Lavapipe (software Vulkan) against AMD's own Windows library; DLSS only builds
-and links. Neither has run on a real Linux GPU yet.
+Status: accepted, experimental on Linux. FSR upscaling checked in WSL on Lavapipe (software Vulkan) against AMD's own Windows library; FSR
+frame generation checked there too (added later on 2026-11-14, below); DLSS only builds and links. None has run on a
+real Linux GPU yet.
 
 ## Context
 
@@ -66,16 +67,38 @@ and its 16-bit and synchronization2 features first: AMD's backend picks fp16, wa
 If the FSR build fails on a player's PC (an unusual compiler), the game is built without it and says why: FSR is an
 optional extra, and TAA takes its place.
 
-No FSR frame generation on Linux yet (its swapchain is not built); the settings say "NOT SUPPORTED ON LINUX YET".
+## FSR frame generation (added 2026-11-14)
+
+First the Linux build was the upscaler only. Frame generation is now in the same library:
+
+- `tools/yw4/fsr_linux.py` also builds AMD's frame interpolation, optical flow and frame generation provider, with the
+  sources and shader options AMD's own CMake files give them. Which ones they are follows
+  **[NX2navi](https://github.com/tangerineturtle1/NX2navi)**'s pull request #455 (MIT), which builds on the same
+  xplane-fsr3 port; its `%s` to `%ls` fix in AMD's provider is in our patch, credited in
+  `third_party/fsr3-linux/README.md`. No file of theirs is copied.
+- Our ffx-api patch now takes in the frame generation provider and leaves out FSR 2 and AMD's frame generation
+  swapchain: the game presents and paces frames itself, as on Windows (decision 0041).
+- `gpu_fsr.c` opens the library once for both (`gpu_ffx_library()`); `gpu_fg.c` finds the functions with `dlsym`.
+  v1.1.4 has no `PrepareV2`: Linux sends `Prepare` with a chained `PrepareCameraInfo`, and has no reset field (unused
+  in v1.1.4). Its backend description has the three Vulkan fields flat, not in a `VkDeviceContext`.
+- Linux thread stacks now get at least 8 MiB (glibc's default; was 1 MiB, `host.c`). AMD's frame interpolation puts
+  a 142 KiB frame on the GPU worker's stack, which overflowed at the first generated frame (signal 11).
+- The settings lock only what comes through Streamline on Linux: DLSS frame generation and Reflex.
+
+Checked in WSL on Lavapipe (late-game save, frame 2600): a generated frame against the real one next to it, mean
+difference 1 of 255, no pixel more than 64 apart, no holes or speckles; only soft edges differ. An earlier run had
+black holes on characters and white speckles; they were gone after fixes in the same session, and which change fixed
+them was not recorded. Not compared against Windows frame generation, no speed numbers.
 
 ## The launcher
 
-Its Linux screens (decision 0071) now offer DLSS (RTX cards) and FSR, as upscaling only: about 60 MB and 200 MB.
-Frame generation stays a Windows-only mention.
+Its Linux screens (decision 0071) now offer DLSS (RTX cards, upscaling only, about 60 MB) and FSR (upscaling and
+frame generation, about 200 MB). The frame generation slide and chip show on Linux too.
 
 ## Not done
 
 - No real Linux GPU yet: AMD, Intel or NVIDIA. No speed numbers.
+- FSR frame generation on Linux not compared against the same shot on Windows.
 - FSR's wave64 and 16-bit shader variants are built but only used where the game enabled the features they need.
 - The SDK archive is not on our deps-mirror yet (uploading is the owner's): until then GitHub's generated archive is
   the only source, and GitHub has changed such archives' bytes before.

@@ -17,9 +17,9 @@ the decompressed `main`).
   24.04), build [SDL3](https://github.com/libsdl-org/SDL/releases) from source with CMake into a folder of your
   own, then build and run with `PKG_CONFIG_PATH=<folder>/lib/pkgconfig` and `LD_LIBRARY_PATH=<folder>/lib`.
 - Linux works: first built 2026-11-12 (Ubuntu 24.04 under WSL, Clang 19); on 2026-11-13 tester [ouni666](https://github.com/ouni666) played it on
-  AOSC OS (KDE Plasma, Wayland, Mesa RADV) with an AMD RX 6600 XT at about 110-120 frames/s. Frame generation and
-  Reflex are Windows only: their rows in the settings are locked with "Not supported on Linux yet". AMD FSR and NVIDIA
-  DLSS upscaling are built on Linux too ([decision 0073](decisions/0073-dlss-fsr-on-linux.md)): the first build
+  AOSC OS (KDE Plasma, Wayland, Mesa RADV) with an AMD RX 6600 XT at about 110-120 frames/s. DLSS frame
+  generation and Reflex are Windows only: their rows in the settings are locked with "Not supported on Linux yet". AMD
+  FSR (upscaling and frame generation) and NVIDIA DLSS upscaling are now supported for Linux (Experimental) ([decision 0073](decisions/0073-dlss-fsr-on-linux.md)): the first build
   downloads NVIDIA's DLSS files (~60 MB) and AMD's FidelityFX SDK source (~200 MB) and builds FSR from it (about a
   minute; it needs a C++ compiler, which comes with Clang or GCC). `--no-fsr` / `--no-dlss` leave either out.
 - On Windows the first build also downloads AMD FSR (upscaling, frame generation), NVIDIA DLSS and NVIDIA

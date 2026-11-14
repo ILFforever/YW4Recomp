@@ -33,9 +33,9 @@ move to [progress.md](progress.md).
 - **No launcher download yet**: the launcher builds as an AppImage ([decision 0071](decisions/0071-linux-launcher.md)),
   but it was checked only in WSL with software rendering, never on a real Linux desktop, and none is published.
   Until then the game is built from source ([Building on Linux](../README.md#building-on-linux)).
-- **Frame generation and Reflex are Windows only.** DLSS and FSR upscaling are built on Linux too
-  ([decision 0073](decisions/0073-dlss-fsr-on-linux.md)), but have not run on a real Linux GPU yet: FSR was checked on
-  software Vulkan only, DLSS only builds.
+- **DLSS frame generation and Reflex are Windows only** (they come through Streamline). AMD FSR (upscaling and
+  frame generation) and NVIDIA DLSS upscaling are now supported for Linux (Experimental)
+  ([decision 0073](decisions/0073-dlss-fsr-on-linux.md)), but have not run on a real Linux GPU yet: FSR was checked on software Vulkan only, DLSS only builds.
 - **A crash on exit** (segfault after "exit game") was seen once on 2026-11-12; later logs exit cleanly. Maybe gone,
   not confirmed by the tester.
 
