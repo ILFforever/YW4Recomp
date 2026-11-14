@@ -152,18 +152,28 @@ static int map_shown;
 int mousemenu_map(void) { return enabled() && __atomic_load_n(&map_shown, __ATOMIC_ACQUIRE); }
 
 /* The battle's Stopwatching menu (Pin / Items / Switch Members, vt main+0x14c6e58) and the pages it opens (Switch
- * Members, vt main+0x14c7028, a grid six wide; Items, vt main+0x14c73c8): open from a focus on any of them until the
- * fight's HUD menu (vt main+0x14c3548) takes the focus again, which it does each time the fight goes on (after Back,
- * after an item is used), or the Stopwatching menu closes a layer while it is the one in front (its pages focus first,
- * then it closes a layer under them: that one doesn't count). Seen 2026-11-15 (the owner: after an item, the clicks
- * stayed the menu's until the HUD rule). While open the clicks confirm and go back (bindings.c); the wheel already
- * moves it. */
+ * Members, vt main+0x14c7028, a grid six wide; Items, vt main+0x14c73c8): up while the last menu focus was one of
+ * them (or a Yes / No box over them); the fight's own menus focus as soon as it goes on. Seen 2026-11-15. Two rules
+ * failed first (the owner: after an item, the clicks stayed the menu's): "until the menu closes a layer while in
+ * front" (other menus focus first) and "until the fight's HUD focuses" (the menu's list focuses again after it); its
+ * layer counts don't balance either. While up the clicks confirm and go back (bindings.c); the wheel already moves
+ * it. */
 #define STOPWATCH_VTABLE 0x14c6e58u
 #define STOPWATCH_MEMBERS_VTABLE 0x14c7028u
 #define STOPWATCH_ITEMS_VTABLE 0x14c73c8u
-#define BATTLE_HUD_VTABLE 0x14c3548u
-static int stopwatch, last_focus_vt;
-int mousemenu_stopwatch(void) { return enabled() && __atomic_load_n(&stopwatch, __ATOMIC_ACQUIRE); }
+#define STOPWATCH_LIST_HASH 0xbd8d7086u  /* Pin / Items / Switch Members */
+#define BATTLE_START_HASH 0xa4f85585u    /* the battle's start: Start Battle / Stopwatching (same class) */
+static int stopwatch;
+static uint64_t stopwatch_off_at;  /* SDL ms: when a focus outside it turns it off, unless it focuses again first */
+int mousemenu_stopwatch(void) {
+    if (!enabled()) return 0;
+    uint64_t at = __atomic_load_n(&stopwatch_off_at, __ATOMIC_ACQUIRE);
+    if (at && SDL_GetTicks() >= at) {
+        __atomic_store_n(&stopwatch, 0, __ATOMIC_RELEASE);
+        __atomic_store_n(&stopwatch_off_at, 0, __ATOMIC_RELEASE);
+    }
+    return __atomic_load_n(&stopwatch, __ATOMIC_ACQUIRE);
+}
 
 static void talk_note(uint64_t vt) {
     if (vt == TALK_VTABLE) __atomic_store_n(&talking, 1, __ATOMIC_RELEASE);
@@ -244,11 +254,19 @@ int yw4_hook_menu_focus(CPUState *ctx) {
     }
     talk_note(vt);
     __atomic_store_n(&sideways, vt == GENERAL_WINDOW_VTABLE && hash == YES_NO_HASH, __ATOMIC_RELEASE);
-    __atomic_store_n(&last_focus_vt, (int)vt, __ATOMIC_RELEASE);
-    if (vt == STOPWATCH_VTABLE || vt == STOPWATCH_MEMBERS_VTABLE || vt == STOPWATCH_ITEMS_VTABLE)
+    /* the last focus decides: the Stopwatching menu's choice list or the battle's start choice, its pages, or a Yes /
+     * No box over them: on. The class's info-card controls (0x81f8dde3, 0xcf634eb0: the ally or enemy picked with L or
+     * R in the menu, and after the fight goes on) change nothing. Anything else (the fight's HUD menus): off, 0.4 s
+     * later, unless the menu focuses or picks again first: Switch Members focuses the fight's HUD for a moment between
+     * its picks (owner, 2026-11-15: after Tab the hints went back; the members' second pick). */
+    if ((vt == STOPWATCH_VTABLE && (hash == STOPWATCH_LIST_HASH || hash == BATTLE_START_HASH)) ||
+        vt == STOPWATCH_MEMBERS_VTABLE || vt == STOPWATCH_ITEMS_VTABLE || vt == GENERAL_WINDOW_VTABLE) {
         __atomic_store_n(&stopwatch, 1, __ATOMIC_RELEASE);
-    else if (vt == BATTLE_HUD_VTABLE)
-        __atomic_store_n(&stopwatch, 0, __ATOMIC_RELEASE);  /* the fight goes on */
+        __atomic_store_n(&stopwatch_off_at, 0, __ATOMIC_RELEASE);
+    } else if (!(vt == STOPWATCH_VTABLE && (hash == 0x81f8dde3u || hash == 0xcf634eb0u)) &&
+               __atomic_load_n(&stopwatch, __ATOMIC_ACQUIRE) && !__atomic_load_n(&stopwatch_off_at, __ATOMIC_ACQUIRE)) {
+        __atomic_store_n(&stopwatch_off_at, SDL_GetTicks() + 400, __ATOMIC_RELEASE);
+    }
     if (vt == PAD_VTABLE && hash == PAD_GRID_HASH)
         __atomic_store_n(&pad_open, 1, __ATOMIC_RELEASE);
     if (!__atomic_load_n(&pad_open, __ATOMIC_ACQUIRE)) return 0;
@@ -313,6 +331,8 @@ int yw4_hook_menu_decide(CPUState *ctx) {
     uint64_t vt = ld64(menu) - yw4_image_base;
     if (menu_log_on())
         fprintf(stderr, "yw4: menu_decide: menu=%#llx vt=%#llx\n", (unsigned long long)menu, (unsigned long long)vt);
+    if (vt == STOPWATCH_VTABLE || vt == STOPWATCH_MEMBERS_VTABLE || vt == STOPWATCH_ITEMS_VTABLE)
+        __atomic_store_n(&stopwatch_off_at, 0, __ATOMIC_RELEASE);  /* a pick in it: still open */
     if (menu == __atomic_load_n(&active_menu, __ATOMIC_ACQUIRE) &&
         __atomic_load_n(&page, __ATOMIC_ACQUIRE) == PAGE_NONE) {
         __atomic_store_n(&page_base, __atomic_load_n(&layers_open, __ATOMIC_ACQUIRE), __ATOMIC_RELEASE);
@@ -348,8 +368,6 @@ int yw4_hook_menu_layer_closed(CPUState *ctx) {
     uint64_t vt = ld64(menu) - yw4_image_base;
     if (menu_log_on())
         fprintf(stderr, "yw4: menu_layer_closed: menu=%#llx vt=%#llx\n", (unsigned long long)menu, (unsigned long long)vt);
-    if (vt == STOPWATCH_VTABLE && (uint32_t)__atomic_load_n(&last_focus_vt, __ATOMIC_ACQUIRE) == STOPWATCH_VTABLE)
-        __atomic_store_n(&stopwatch, 0, __ATOMIC_RELEASE);  /* the Stopwatching menu closed (not under a page) */
     if (menu == __atomic_load_n(&active_menu, __ATOMIC_ACQUIRE)) {
         int n = __atomic_sub_fetch(&layers_open, 1, __ATOMIC_ACQ_REL);
         if (__atomic_load_n(&page, __ATOMIC_ACQUIRE) == PAGE_OPEN && n <= __atomic_load_n(&page_base, __ATOMIC_ACQUIRE))

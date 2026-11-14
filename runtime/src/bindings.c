@@ -517,12 +517,26 @@ void bindings_read(const bool *keyboard, uint32_t mouse_buttons, int wheel_up, i
         memcpy(stopwatch_mouse, mouse, sizeof stopwatch_mouse);
         stopwatch_mouse[BMOUSE_LEFT] = input_by_id("A"), stopwatch_mouse[BMOUSE_RIGHT] = input_by_id("B");
         mouse = stopwatch_mouse;
+    } else if (mousemenu_stopwatch() && mouse != map_mouse) {
+        /* before the fight's frames run (the battle's start choice, Start Battle / Stopwatching), and Yes / No boxes:
+         * a menu's mouse, the wheel as the D-pad (left and right on a Yes / No box) */
+        mouse = mousemenu_sideways() ? sideways_mouse : title_mouse;
     }
+    /* the battle's Stopwatching menu switches the ally with L, the fight with the left stick press (the owner's Tab;
+     * owner, 2026-11-15: "I really don't know why they did it this way"): there, the left stick press's keys press
+     * L too, so the same key switches the ally in both */
+    static int in_l = -2, in_ls;
+    if (in_l == -2) in_l = input_by_id("L"), in_ls = input_by_id("LS_PRESS");
+    const int ally_too = battle && mousemenu_stopwatch() && in_l >= 0 && in_ls >= 0;
     for (int i = 0; i < NINPUTS; i++) {
         int key = 0;
         for (int k = 0; k < BIND_KEYS; k++) {
             int sc = use[i].keys[k];
             if (sc && keyboard && sc < SDL_SCANCODE_COUNT) key |= keyboard[sc];
+            if (ally_too && i == in_l) {
+                int ls = use[in_ls].keys[k];
+                if (ls && keyboard && ls < SDL_SCANCODE_COUNT) key |= keyboard[ls];
+            }
         }
         for (int p = 0; p < BMOUSE_PARTS; p++)
             if (mouse[p] == i && held[p]) key = 1;
@@ -828,6 +842,27 @@ static uint32_t gaiji_swap(uint32_t crc, int *sheet) {
          * has none for a set of keys */
         const int battle = battle_active() != 0;
         const int *mouse = mouse_map[battle ? SET_BATTLE : SET_FIELD];
+        /* the battle's Stopwatching menu: Switch enemy is R, and ZR does it too. When every key of R is also an A
+         * key (the default battle set's E), pressing it chooses the menu's line instead, so the hint shows ZR's key,
+         * the one that works there (the owner's F; owner, 2026-11-15) */
+        static int in_a = -2, in_r, in_zr;
+        if (in_a == -2) in_a = input_by_id("A"), in_r = input_by_id("R"), in_zr = input_by_id("ZR");
+        if (battle && row == in_r && in_a >= 0 && in_zr >= 0 && mousemenu_stopwatch()) {
+            int clash = 1, any = 0;
+            for (int k = 0; k < BIND_KEYS; k++) {
+                int sc = use[in_r].keys[k];
+                if (!sc) continue;
+                any = 1;
+                if (sc != use[in_a].keys[0] && sc != use[in_a].keys[1]) clash = 0;
+            }
+            if (any && clash && (use[in_zr].keys[0] || use[in_zr].keys[1])) row = in_zr;
+        }
+        /* and L (switch ally there) shows the left stick press's key, which presses it there (bindings_read) */
+        static int hl = -2, hls;
+        if (hl == -2) hl = input_by_id("L"), hls = input_by_id("LS_PRESS");
+        if (battle && row == hl && hls >= 0 && mousemenu_stopwatch() && !use[hl].keys[0] && !use[hl].keys[1] &&
+            (use[hls].keys[0] || use[hls].keys[1]))
+            row = hls;  /* only when L has no key of its own: else its own key shows */
         for (int pass = 0; row >= 0 && pass < 2; pass++) {
             if (pass == !battle) {  /* the mouse: pass 0 in battles, pass 1 when exploring */
                 for (int p = 0; p < BMOUSE_PARTS; p++)
