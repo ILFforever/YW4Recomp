@@ -495,17 +495,21 @@ void bindings_read(const bool *keyboard, uint32_t mouse_buttons, int wheel_up, i
     /* the title screen's menus (pause.c scene_on_title) and conversations outside battles (mousemenu.c
      * mousemenu_talking): the mouse as a menu's, whatever the sets say (owner, 2026-11-15): left A (confirm), right
      * B (back, cancel), the wheel D-pad up and down (between choices); the wheel press nothing */
-    static int title_mouse[BMOUSE_PARTS] = {-2}, sideways_mouse[BMOUSE_PARTS];
+    static int title_mouse[BMOUSE_PARTS] = {-2}, sideways_mouse[BMOUSE_PARTS], map_mouse[BMOUSE_PARTS];
     if (title_mouse[0] == -2) {
         static const char *const ids[BMOUSE_PARTS] = {"A", "B", NULL, "DPAD_UP", "DPAD_DOWN"};
         static const char *const side[BMOUSE_PARTS] = {"A", "B", NULL, "DPAD_LEFT", "DPAD_RIGHT"};
+        static const char *const map[BMOUSE_PARTS] = {"A", "B", NULL, "RS_UP", "RS_DOWN"};  /* the map zooms on RS */
         for (int p = 0; p < BMOUSE_PARTS; p++) {
             title_mouse[p] = ids[p] ? input_by_id(ids[p]) : -1;
             sideways_mouse[p] = side[p] ? input_by_id(side[p]) : -1;
+            map_mouse[p] = map[p] ? input_by_id(map[p]) : -1;
         }
     }
     /* a Yes / No box with its buttons side by side (mousemenu_sideways): the wheel steps left (up) and right (down) */
     if (scene_on_title() || (mousemenu_talking() && !battle)) mouse = mousemenu_sideways() ? sideways_mouse : title_mouse;
+    /* the map (mousemenu_map): the wheel zooms (the right stick up and down); its moving pans (window.c) */
+    if (mousemenu_map() && !battle) mouse = map_mouse;
     for (int i = 0; i < NINPUTS; i++) {
         int key = 0;
         for (int k = 0; k < BIND_KEYS; k++) {

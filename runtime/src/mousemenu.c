@@ -144,9 +144,20 @@ int mousemenu_open(void) {
 #define FIELD_HUD_VTABLE 0x14c5698u
 static int talking;
 int mousemenu_talking(void) { return enabled() && __atomic_load_n(&talking, __ATOMIC_ACQUIRE); }
+
+/* The map (its menu class, vt main+0x14c14f8, opened as SceneMenu ee2d9d06; seen 2026-11-15): open from its first
+ * focus until the field's HUD comes back, as a conversation. The left stick pans it, the right stick zooms. */
+#define MAP_VTABLE 0x14c14f8u
+static int map_shown;
+int mousemenu_map(void) { return enabled() && __atomic_load_n(&map_shown, __ATOMIC_ACQUIRE); }
+
 static void talk_note(uint64_t vt) {
     if (vt == TALK_VTABLE) __atomic_store_n(&talking, 1, __ATOMIC_RELEASE);
-    else if (vt == FIELD_HUD_VTABLE) __atomic_store_n(&talking, 0, __ATOMIC_RELEASE);
+    else if (vt == MAP_VTABLE) __atomic_store_n(&map_shown, 1, __ATOMIC_RELEASE);
+    else if (vt == FIELD_HUD_VTABLE) {
+        __atomic_store_n(&talking, 0, __ATOMIC_RELEASE);
+        __atomic_store_n(&map_shown, 0, __ATOMIC_RELEASE);
+    }
 }
 
 /* The Yes / No box (yw::CMenuGeneralWindow, its two buttons side by side, hash 0xf51efb06: the shop's "Is that

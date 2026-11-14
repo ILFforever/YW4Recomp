@@ -2319,6 +2319,7 @@ static HostLock input_lock = HOST_LOCK_INIT;
 static HostLock mouse_lock = HOST_LOCK_INIT;
 static float mouse_accum_x;
 static float mouse_accum_y;
+static float map_accum_x, map_accum_y;  /* the same moves, for panning the map (update_input, mousemenu_map) */
 static int wheel_queue[2];                   /* queued wheel notches [0] up, [1] down */
 static int wheel_active[2];                  /* currently pulsing [0] up or [1] down */
 static uint64_t wheel_press_until_reads;     /* input_reads until active pulse ends */
@@ -2573,6 +2574,29 @@ static void update_input(void) {
     pad_back_hold();
     pad_shoulders_overlay();
     bindings_read(SDL_GetKeyboardState(NULL), mb, wup, wdwn, gamepad, &b, s);
+    {   /* the map (owner, 2026-11-15): moving the mouse pans it, as the left stick, from the movement since the last
+         * read, smoothed over a few reads. As a real stick (the owner: it only began to move after half the screen):
+         * any movement pushes it past the game's dead zone at once (a third of the way), more movement further; still,
+         * it lets go. The keys and a pad that push the stick themselves win. (Edge scrolling with a free cursor was
+         * tried the same day and turned down.) */
+        static float vx, vy;
+        host_lock(&mouse_lock);
+        float ax = map_accum_x, ay = map_accum_y;
+        map_accum_x = map_accum_y = 0.0f;
+        host_unlock(&mouse_lock);
+        if (mousemenu_map() && !mouse_off() && window && SDL_GetWindowRelativeMouseMode(window)) {
+            vx = vx * 0.5f + ax * 0.5f, vy = vy * 0.5f + ay * 0.5f;
+            const float start = 11000.0f, gain = 6000.0f;  /* stick units: the first push, then per pixel per read */
+            float fx = vx > 0.3f ? start + vx * gain : vx < -0.3f ? -start + vx * gain : 0.0f;
+            float fy = vy > 0.3f ? start + vy * gain : vy < -0.3f ? -start + vy * gain : 0.0f;
+            int32_t sx = (int32_t)(fx > 32767.0f ? 32767.0f : fx < -32767.0f ? -32767.0f : fx);
+            int32_t sy = (int32_t)(fy > 32767.0f ? -32767.0f : fy < -32767.0f ? 32767.0f : -fy);
+            if (!s[0] && sx) s[0] = sx;
+            if (!s[1] && sy) s[1] = sy;
+        } else {
+            vx = vy = 0.0f;
+        }
+    }
     /* the overlay's keyboard and controller views light up what is pressed */
     gamemenu_held(SDL_GetKeyboardState(NULL), SDL_GetMouseState(NULL, NULL), pad_parts_held());
     /* The settings panel takes the keyboard, mouse, and the gamepad while it is open, and after it closes until
@@ -3303,6 +3327,8 @@ void window_run(void (*guest)(void *), void *arg) {
                 host_lock(&mouse_lock);  /* the camera's; never while the quick look shows */
                 mouse_accum_x += e.motion.xrel;
                 mouse_accum_y += e.motion.yrel;
+                map_accum_x += e.motion.xrel;
+                map_accum_y += e.motion.yrel;
                 host_unlock(&mouse_lock);
             } else if (gamemenu_open() && !settings_open()) {  /* the overlay: hovering chooses */
                 float x, y;

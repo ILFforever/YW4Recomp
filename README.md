@@ -417,8 +417,8 @@ back. The mouse also works in the Yo-kai Pad and its pages: hover, click, and th
 progress, [decision 0057](docs/decisions/0057-mouse-menu-lists.md)). By default the left button attacks and the right
 button aims in battles, and the wheel selects characters; each is set on the Mouse buttons page.
 
-**Where the mouse works** (the code on GitHub, 2026-11-15; the title screen, conversations, shops and the overlay's
-wheel are newer than the last release):
+**Where the mouse works** (the code on GitHub, 2026-11-15; the title screen, conversations, shops, the map and the
+overlay's wheel are newer than the last release):
 
 | Where | Point and click | Wheel | Right button |
 |---|---|---|---|
@@ -426,9 +426,10 @@ wheel are newer than the last release):
 | Battles | Left attacks (Y) | Picks the character | Aims (ZL) |
 | Yo-kai Pad (X menu) and its pages | Yes: hover moves the cursor, a click chooses | Scrolls lists; on the Pad's grid, changes page | Back (B) |
 | Title screen and the save list | Left chooses what is selected (A); no hover | Moves the selection | Back (B) |
-| Conversations, their choices, and shops opened from them | Left confirms or moves the text on (A); no hover | Moves between choices; on a Yes / No box, Yes (up) and No (down) | Cancel / back (B) |
+| Conversations, their choices, and what opens from them (shops, the Crank-a-kai) | Left confirms or moves the text on (A); no hover | Moves between choices; on a Yes / No box, Yes (up) and No (down) | Cancel / back (B) |
+| The map | Moving the mouse pans the map (as the left stick); left is A | Zooms in and out | Closes it (B) |
 | The overlay (Escape) | Yes: hover, click, drag the sliders | Moves the selection | Back (Escape) |
-| Other menus: Crank-a-kai, the Plus menu, battle menus, the map | Not yet: left is still Interact (A), so it confirms | Not yet (does its exploring or battle job) | Not yet (does its exploring or battle job) |
+| Other menus: battle menus | Not yet: left is still Attack (Y) | Not yet (picks the character) | Not yet (aims) |
 
 Exploring and battle buttons are the defaults: each is changed on the overlay's Mouse buttons page. The menus' mouse
 is fixed.

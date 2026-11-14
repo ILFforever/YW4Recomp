@@ -9,6 +9,9 @@ int mousemenu_open(void);
 /* Returns 1 during a conversation (the talk window, from its first focus until the field's HUD comes back): the
  * mouse works it as a menu (bindings.c): the wheel moves between choices, left confirms, right cancels. */
 int mousemenu_talking(void);
+/* Returns 1 while the map is open: moving the mouse pans it (the left stick, window.c), the wheel zooms (the
+ * right stick, bindings.c). */
+int mousemenu_map(void);
 /* Returns 1 while a Yes / No box with its buttons side by side has the focus: the wheel steps left and right. */
 int mousemenu_sideways(void);
 
