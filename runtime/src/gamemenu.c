@@ -25,14 +25,14 @@ static int open_, sel, confirm, choice;
 static int focus;             /* 0 the side panel, 1 the page it shows (Settings) */
 static int srow;              /* the chosen row on the settings page (settings_player_rows) */
 static int in_rows;           /* the settings page: 0 the sections list has the focus, 1 the chosen section's rows */
-/* the settings page's rows as last drawn: the first shown of the section, how many it has and fit, their rows */
-static int set_first, set_count, set_visible, set_idx[48];
+/* the settings page's rows as last drawn: the first shown of the section */
+static int set_first;
 static int prow;              /* the chosen row on the performance page: mode, corner, the four parts */
 static uint32_t changes;      /* counts every change of what shows */
 static int toast_wanted;      /* the note (toast_msg, top right) starts at the next look */
 static uint64_t toast_until;  /* ms */
 static int hover_kind = -1, hover_a, hover_b;  /* what the mouse is over (HIT_*, -1 nothing), for the hover looks */
-static int ctrl_first, ctrl_rows, ctrl_visible;  /* the Controls table: its first row shown, rows, rows that fit */
+static int ctrl_first;  /* the Controls table: its first row shown */
 /* the Controls page's view: 1 the Bindings table (where it opens, as before), 0 the keyboard view (the owner's
  * mockup, 2026-11-11), switched by one button or P; the keyboard view's mode: 0 exploring, 1 battles, 2 cutscenes
  * (the exploring keys, only those that do something there) */
@@ -1115,40 +1115,14 @@ void gamemenu_mouse(float x, float y, int button) {
 }
 
 void gamemenu_wheel(int dy) {
-    /* only a page that scrolls takes the wheel (the Controls table): its rows shown, one a notch; elsewhere it does
-     * nothing (owner, 2026-11-06: the wheel scrolls, it doesn't choose) */
-    if (!gamemenu_open() || settings_open() || bindings_capturing() || confirm) return;
-    if (sel == GM_SETTINGS) {  /* a section longer than the space (Advanced): its rows, one a notch */
-        if (set_visible <= 0 || set_count <= set_visible) return;
-        int f = set_first + (dy > 0 ? -1 : 1);
-        if (f > set_count - set_visible) f = set_count - set_visible;
-        if (f < 0) f = 0;
-        set_first = f;
-        /* the chosen row stays among the ones shown, when the rows have the focus (else the drawing scrolls back) */
-        int pos = -1;
-        for (int k = 0; k < set_count; k++)
-            if (set_idx[k] == srow) pos = k;
-        if (in_rows && pos >= 0 && pos < f) srow = set_idx[f];
-        else if (in_rows && pos >= f + set_visible) srow = set_idx[f + set_visible - 1];
-        hover_kind = -1;
-        changed();
-        return;
-    }
-    if (sel != GM_CONTROLS || mb_open) return;  /* the Mouse buttons page doesn't scroll */
-    if (ctrl_visible <= 0 || ctrl_rows <= ctrl_visible) return;  /* not drawn yet, or it all fits */
-    int f = ctrl_first + (dy > 0 ? -1 : 1);  /* one row a notch (owner: no fast scroll) */
-    if (f > ctrl_rows - ctrl_visible) f = ctrl_rows - ctrl_visible;
-    if (f < 0) f = 0;
-    ctrl_first = f;
-    /* the chosen row stays among the ones shown (else the drawing would scroll back to it) */
-    static BindRow rows[64];
-    char help[8];
-    int row, col;
-    bindings_rows(rows, 64, &row, &col, help, sizeof help);
-    if (row < f) bindings_select(f, -1);
-    else if (row >= f + ctrl_visible) bindings_select(f + ctrl_visible - 1, -1);
-    hover_kind = -1;
-    changed();
+    /* the wheel moves the selection, one row a notch, as Up / Down do (owner, 2026-11-15: like the game's own menus,
+     * mousemenu.c; before, 2026-11-06, it only scrolled the long lists). A list longer than its space scrolls to keep
+     * the chosen row in view, as with the keys. Not in a popup, while a key is being bound or text is being typed, or
+     * on the Controls page's keyboard view (nothing there to choose). */
+    if (!gamemenu_open() || settings_open() || bindings_capturing() || confirm || preview || gamemenu_prompting()) return;
+    if (sel == GM_BUG && textin_has(&bug_text)) return;
+    if (focus && sel == GM_CONTROLS && !ctrl_view) return;
+    gamemenu_action(dy > 0 ? GM_UP : GM_DOWN);
 }
 
 /* ---- the look (Main.dc.html) */
@@ -1501,8 +1475,6 @@ static void draw_settings_page(const UiCanvas *c, const GameMenuInfo *in) {
     if (in_rows && pos >= set_first + visible) set_first = pos - visible + 1;
     if (set_first > cnt - visible) set_first = cnt - visible;
     if (set_first < 0) set_first = 0;
-    set_count = cnt, set_visible = visible;
-    memcpy(set_idx, idx, sizeof idx);
     y = top;
     for (int k = set_first; k < cnt && k < set_first + visible; k++) {
         int i = idx[k];
@@ -2542,13 +2514,12 @@ static void draw_controls_page(const UiCanvas *c, const GameMenuInfo *in) {
     int visible = (int)((bottom - hh - 22 - top - hdr - 4) / rh);
     if (visible < 1) visible = 1;
     float th = hdr + visible * rh + 4;
-    /* the rows shown: they move only when the chosen row leaves them (keys, the pad), or by the wheel
-     * (gamemenu_wheel), never because the mouse hovers a row, so the table doesn't run away under the cursor */
+    /* the rows shown: they move only when the chosen row leaves them (keys, the pad, the wheel), never because the
+     * mouse hovers a row, so the table doesn't run away under the cursor */
     if (row < ctrl_first) ctrl_first = row;
     if (row >= ctrl_first + visible) ctrl_first = row - visible + 1;
     if (ctrl_first > n - visible) ctrl_first = n - visible;
     if (ctrl_first < 0) ctrl_first = 0;
-    ctrl_rows = n, ctrl_visible = visible;
     int first = ctrl_first;
     /* the table: a white box, its header row lilac */
     ui_box(c, x, top, w, th, 16, WHITE, 2, LINE);

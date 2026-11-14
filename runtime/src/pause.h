@@ -15,5 +15,7 @@ void pause_request(void);  /* before pressing Plus for the player */
 int pause_resume(void);    /* paused -> resume asked; 0 if the game isn't paused */
 int pause_to_title(void);  /* paused -> Return to Title asked; 0 if the game isn't paused */
 void pause_forget(void);   /* give up (the game didn't pause, or didn't resume) */
+/* 1 while the title screen's menus are up (SceneTitle until SceneRpg): the mouse works them as a menu (bindings.c) */
+int scene_on_title(void);
 
 #endif

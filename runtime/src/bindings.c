@@ -10,6 +10,7 @@
 
 #include "battle.h"
 #include "bindings.h"
+#include "pause.h"
 #include "settings.h"
 #include "window.h"
 #include "yw4fp.h"
@@ -490,6 +491,14 @@ void bindings_read(const bool *keyboard, uint32_t mouse_buttons, int wheel_up, i
     const int held[BMOUSE_PARTS] = {(mouse_buttons & SDL_BUTTON_LMASK) != 0, (mouse_buttons & SDL_BUTTON_RMASK) != 0,
                                     (mouse_buttons & SDL_BUTTON_MMASK) != 0, wheel_up != 0, wheel_down != 0};
     const int *mouse = mouse_map[battle ? SET_BATTLE : SET_FIELD];
+    /* the title screen's menus (pause.c scene_on_title): the mouse as a menu's, whatever the sets say (owner,
+     * 2026-11-15): left A, right B (back), the wheel D-pad up and down; the wheel press nothing */
+    static int title_mouse[BMOUSE_PARTS] = {-2};
+    if (title_mouse[0] == -2) {
+        static const char *const ids[BMOUSE_PARTS] = {"A", "B", NULL, "DPAD_UP", "DPAD_DOWN"};
+        for (int p = 0; p < BMOUSE_PARTS; p++) title_mouse[p] = ids[p] ? input_by_id(ids[p]) : -1;
+    }
+    if (scene_on_title()) mouse = title_mouse;
     for (int i = 0; i < NINPUTS; i++) {
         int key = 0;
         for (int k = 0; k < BIND_KEYS; k++) {

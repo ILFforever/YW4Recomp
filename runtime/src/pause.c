@@ -17,6 +17,7 @@
  * (again until the game has resumed) and when to show the live picture again, without guessing from the picture. */
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 
 #include "kernel.h"
 #include "pause.h"
@@ -39,9 +40,22 @@ void pause_forget(void) { __atomic_store_n(&state, PAUSE_OFF, __ATOMIC_RELEASE);
 
 /* f_880750(out, scene name, flag, params): opens a scene. params: entries of 0x14 bytes, a type (2) and a hash;
  * for SceneMenu the first is the menu, the second the sub-menu. */
+/* The title screen's menus (New Game, Continue, Languages, DLC, then the save list): from SceneTitle opening until
+ * SceneRpg (the game itself) opens. Seen in order at a start, 2026-11-15: SceneRoot, SceneMain, SceneTitle,
+ * SceneMenu (the save list), SceneRpg; Return to Title opens SceneTitle again. */
+static int on_title;
+int scene_on_title(void) { return __atomic_load_n(&on_title, __ATOMIC_RELAXED); }
+
 int yw4_hook_scene_open(CPUState *ctx) {
     static int log = -1;
     if (log < 0) log = getenv("YW4_MENU_LOG") != NULL;
+    if (ctx->x[1]) {
+        char n[12] = {0};
+        for (int i = 0; i < 11; i++)
+            if (!(n[i] = (char)ld8(ctx->x[1] + i))) break;
+        if (!strcmp(n, "SceneTitle")) __atomic_store_n(&on_title, 1, __ATOMIC_RELAXED);
+        else if (!strcmp(n, "SceneRpg")) __atomic_store_n(&on_title, 0, __ATOMIC_RELAXED);
+    }
     if (log) {  /* which scene, with what, from where: how the pause was found */
         char name[40] = {0};
         for (int i = 0; i < 39 && ctx->x[1]; i++)

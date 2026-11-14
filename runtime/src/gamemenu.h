@@ -77,8 +77,7 @@ void gamemenu_open_page(int item);
 void gamemenu_action(int action);  /* GM_UP... while it is open and no settings page covers it */
 /* The mouse at (x, y) in the design's units (1600 x 900 for 16:9): button 0 moved (hovering chooses), 1 the left
  * button pressed (as Enter on what is under it), 3 the right one (back, as Escape), 4 moved with the left one held
- * (a slider follows it). gamemenu_wheel: the wheel (dy > 0 up) scrolls the Controls table one row a notch;
- * nothing elsewhere. */
+ * (a slider follows it). gamemenu_wheel: the wheel (dy > 0 up) moves the selection one row a notch, as Up / Down. */
 void gamemenu_mouse(float x, float y, int button);
 void gamemenu_wheel(int dy);
 /* Draw it again (the hints changed between keyboard and controller). */
