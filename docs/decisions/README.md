@@ -77,3 +77,4 @@ lists later records that replace a record, or part of it.
 | 0066 | [Typed names keep their plain letters](0066-typed-names-half-width.md) | accepted | 2026-11-14 |  | `runtime/src/swkbd.c`, `recomp/overrides.toml` |
 | 0067 | [Several mods' cpk_list files are merged](0067-mods-merge-cpk-list.md) | accepted | 2026-11-14 |  | `runtime/src/romfs.c`, `launcher/src-tauri/src/ready.rs` |
 | 0068 | [Mods' copies of one data file are merged entry by entry](0068-mods-merge-data-files.md) | accepted | 2026-11-14 |  | `runtime/src/modmerge.c`, `runtime/src/romfs.c`, `runtime/src/main.c`, `launcher/src-tauri/src/ready.rs`, `launcher/ui/app.js` |
+| 0069 | [Above 30 frames/s a motion's time counts at least 1/30 s for its least time](0069-motion-least-time.md) | accepted | 2026-11-14 |  | `runtime/src/framerate.c`, `recomp/overrides.toml`, `runtime/src/kernel.c`, `runtime/src/dispatch.c` |

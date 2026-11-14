@@ -158,3 +158,47 @@ int yw4_hook_nnmain(CPUState *ctx) {
     *n = (uint8_t)v;
     return 0;
 }
+
+/* Motions that must last a moment before a character may leave them, above 30 frames/s (issue #9).
+ *
+ * main+0x1c6170(action, dt) runs once a frame for each character's action state machine (main+0x1bcd70). It adds
+ * dt to the time spent in the current motion (action+0xafc) and, once that reaches the motion's least time
+ * (motion+0xb8, motion = action+0xae8, when bit 0 of motion+0xc1 is set), sets "may leave" (action+0xb1e). The
+ * state machine (main+0x1c2aa0) only moves on from some states once that is set; while it waits it asks for the
+ * same state again, which starts the motion again and sets its time back to 0.
+ *
+ * The jump's take-off (state 0x11) has a least time of about one 60 Hz frame. At 30 and 60 frames/s the first
+ * frame's dt reaches it, the jump moves on to the air (state 0x10) with its full height (1.4). At 120 one dt
+ * (1/120 s) falls short, the take-off restarts every frame and its time never grows: the player stays in the
+ * take-off, whose height is 0.8, and a running jump is a small hop (measured 2026-11-14 with YW4_REPLAY_HZ: peak
+ * +0.63 at 120 against +1.38 at 60).
+ *
+ * The game was made for 30 frames/s, where a motion's first frame always counts 1/30 s. So here a motion's time
+ * counts at least 1/30 s for this check: after the game's own update, a motion that hasn't reached its least time
+ * but whose least time is 1/30 s or less may be left, as it could after one frame on the Switch. Longer least
+ * times are counted as before, and at 30 frames/s (dt >= 1/30) nothing changes. YW4_MOTION_TIME_FIX=0 turns it
+ * off (to compare). */
+static _Thread_local int motion_in_original;
+
+int yw4_hook_motion_time(CPUState *ctx) {
+    static int on = -1;
+    if (on < 0) on = !(getenv("YW4_MOTION_TIME_FIX") && !strcmp(getenv("YW4_MOTION_TIME_FIX"), "0"));
+    if (!on || motion_in_original) return 0;
+    static GuestFn original;
+    if (!original) original = yw4_lookup(*yw4_modules[YW4_MAIN].base + 0x1c6170);
+    if (!original) return 0;
+    const float least_frame = 1.0f / 30.0f;
+    uint64_t action = ctx->x[0];
+    float dt = ctx->v[0].f[0];
+    motion_in_original = 1;
+    original(ctx);
+    motion_in_original = 0;
+    if (!(dt < least_frame)) return 1;
+    uint8_t *may_leave = (uint8_t *)(uintptr_t)(action + 0xb1e);
+    uint64_t motion = *(const uint64_t *)(uintptr_t)(action + 0xae8);
+    if (*may_leave || !motion || !(*(const uint8_t *)(uintptr_t)(motion + 0xc1) & 1)) return 1;
+    float in_motion = *(const float *)(uintptr_t)(action + 0xafc);
+    float least = *(const float *)(uintptr_t)(motion + 0xb8);
+    if (in_motion < least_frame && least <= least_frame) *may_leave = 1;
+    return 1;
+}

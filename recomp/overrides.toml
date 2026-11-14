@@ -270,6 +270,12 @@ why = "nnMain's start: YW4_FRAME_VSYNCS sets the game's vsyncs per frame before 
 
 [[hook]]
 module = "main"
+offset = "0x1c6170"
+native = "yw4_hook_motion_time"
+why = "a character action's per-frame motion update: above 30 frames/s a motion's time counts at least 1/30 s for its least time, as on the Switch (issue #9, the running jump; runtime/src/framerate.c)"
+
+[[hook]]
+module = "main"
 offset = "0x897d90"
 native = "yw4_hook_battle_blur"
 why = "the battles' blur, a render job with its own rounds: BATTLE BLUR fast hands it a job with a quarter of the rounds (runtime/src/dof.c)"
