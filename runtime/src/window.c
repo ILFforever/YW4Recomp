@@ -2856,16 +2856,19 @@ static int tp_pointer_here(void) {
 }
 
 /* The touchpad's cursor: a see-through grey disc with a white edge, like a console's pointer (the owner's pick B
- * from mockups, 2026-11-14), 3% of the window's height across. Shown while the touchpad moves the pointer; the
- * usual arrow comes back when the mouse moves (the SDL_EVENT_MOUSE_MOTION case). */
+ * from mockups, 2026-11-14), 3.5% of the window's height across, at least 32 px. Shown while the touchpad moves the pointer, and for
+ * the mouse in the game's menus with a cursor (the Yo-kai Pad); the usual arrow comes back when the mouse moves
+ * anywhere else (the SDL_EVENT_MOUSE_MOTION case). */
 static SDL_Cursor *tp_cursor;
 static int tp_cursor_size, tp_cursor_on;
 
 static float tp_clamp01(float v) { return v < 0 ? 0 : v > 1 ? 1 : v; }
 
 static void tp_cursor_show(int wh) {
-    int d = (int)(wh * 0.03f + 0.5f);
-    if (d < 20) d = 20;
+    /* 3.5% of the window's height, at least 32 px: a small window kept it too small to find (owner, 2026-11-15:
+     * "bigger in smaller screens, somewhat consistent"; was 3%, at least 20) */
+    int d = (int)(wh * 0.035f + 0.5f);
+    if (d < 32) d = 32;
     if (!tp_cursor || d != tp_cursor_size) {
         int pad = 4, n = d + 2 * pad;  /* room for the dark edge and the shadow */
         SDL_Surface *s = SDL_CreateSurface(n, n, SDL_PIXELFORMAT_RGBA32);
@@ -3322,7 +3325,16 @@ void window_run(void (*guest)(void *), void *arg) {
             /* the touchpad's own cursor move (tp_touch) is the controller's, not the mouse's; the mouse itself
              * moving brings the usual arrow back */
             int pad_move = tp_moved_ms && SDL_GetTicks() - tp_moved_ms < 150;
-            if (!pad_move) tp_cursor_hide();
+            /* in the game's menus with a cursor (the Yo-kai Pad and its pages: mousemenu.c) the mouse gets the
+             * touchpad's disc too, the console look (owner, 2026-11-15: "much cleaner"); elsewhere the arrow */
+            if (!pad_move && window && mousemenu_open() && !gamemenu_open() && !settings_open() &&
+                !SDL_GetWindowRelativeMouseMode(window)) {
+                int ww = 0, wh = 0;
+                SDL_GetWindowSize(window, &ww, &wh);
+                tp_cursor_show(wh);
+            } else if (!pad_move) {
+                tp_cursor_hide();
+            }
             if (window && SDL_GetWindowRelativeMouseMode(window) && !gamemenu_peeking()) {
                 host_lock(&mouse_lock);  /* the camera's; never while the quick look shows */
                 mouse_accum_x += e.motion.xrel;
