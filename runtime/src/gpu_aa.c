@@ -106,7 +106,9 @@ static void image_make(AaImage *im, VkFormat fmt, uint32_t w, uint32_t h, VkImag
     CHECK(vkBindImageMemory(vk.device, im->image, im->mem, 0));
     VkImageViewCreateInfo vci = {.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO, .image = im->image,
                                  .viewType = VK_IMAGE_VIEW_TYPE_2D, .format = fmt,
-                                 .subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1}};
+                                 .subresourceRange = {fmt == VK_FORMAT_D32_SFLOAT ? VK_IMAGE_ASPECT_DEPTH_BIT
+                                                                                  : VK_IMAGE_ASPECT_COLOR_BIT,
+                                                      0, 1, 0, 1}};
     CHECK(vkCreateImageView(vk.device, &vci, NULL, &im->view));
     im->w = w, im->h = h;
 }
@@ -122,14 +124,16 @@ static void image_free(AaImage *im) {
     memset(im, 0, sizeof *im);
 }
 
-static void to_general(VkCommandBuffer cb, VkImage image) {
+static void to_general_aspect(VkCommandBuffer cb, VkImage image, VkImageAspectFlags aspect) {
     VkImageMemoryBarrier b = {.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER, .dstAccessMask = VK_ACCESS_MEMORY_WRITE_BIT,
                               .oldLayout = VK_IMAGE_LAYOUT_UNDEFINED, .newLayout = VK_IMAGE_LAYOUT_GENERAL,
                               .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED, .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
-                              .image = image, .subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1}};
+                              .image = image, .subresourceRange = {aspect, 0, 1, 0, 1}};
     vkCmdPipelineBarrier(cb, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, 0, 0, NULL, 0, NULL, 1,
                          &b);
 }
+
+static void to_general(VkCommandBuffer cb, VkImage image) { to_general_aspect(cb, image, VK_IMAGE_ASPECT_COLOR_BIT); }
 
 static AaImage encoded, edges, weights, area, search, history[2], fsr_out;
 static int history_valid;  /* history[taa_cur] holds last frame's result */
@@ -514,22 +518,54 @@ static void dlss_jitter(uint32_t w, uint32_t ow, uint64_t n, float *jx, float *j
     *jx = halton(i, 2) - 0.5f, *jy = halton(i, 3) - 0.5f;
 }
 
+/* The depth as FSR gets it (upscaler and frame generation). FSR's Vulkan backend reads the depth through a view
+ * it makes itself in a depth-only format (D32_SFLOAT for D32S8, X8_D24 for D24S8), which Vulkan does not allow
+ * on an image that also holds stencil (VUID-VkImageViewCreateInfo-image-01761). With D32S8, the stand-in for
+ * D24S8 on AMD GPUs, that lost the device on NVIDIA (issue #8). A D32S8 depth goes to FSR as a plain D32_SFLOAT
+ * copy instead: one full-screen pass, made once per depth image and frame. D24S8 (NVIDIA) keeps going in as it is:
+ * as invalid, but it never showed a fault, and most players are there. */
+static AaImage fsr_depth;
+static void fsr_depth_of(VkCommandBuffer cb, GpuImage *d, VkImageView src, uint32_t w, uint32_t h, VkImage *image,
+                         VkFormat *format) {
+    *image = d->image, *format = d->format;
+    if (!src || d->format != VK_FORMAT_D32_SFLOAT_S8_UINT) return;
+    static uint64_t copied_frame = ~0ull;
+    static VkImage copied_from;
+    if (!fsr_depth.image || fsr_depth.w != w || fsr_depth.h != h) {
+        if (fsr_depth.image) gpu_wait(gpu_submitted(), UINT64_MAX), image_free(&fsr_depth);
+        image_make(&fsr_depth, VK_FORMAT_D32_SFLOAT, w, h,
+                   VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT);
+        to_general_aspect(cb, fsr_depth.image, VK_IMAGE_ASPECT_DEPTH_BIT);
+        copied_frame = ~0ull;
+    }
+    uint64_t now = gpu_frames();
+    if (copied_frame != now || copied_from != d->image) {
+        full_barrier(cb);
+        depth_pass(cb, fsr_depth.view, VK_FORMAT_D32_SFLOAT, w, h, src);  /* ends with a full barrier */
+        copied_frame = now, copied_from = d->image;
+    }
+    *image = fsr_depth.image, *format = VK_FORMAT_D32_SFLOAT;
+}
+
 /* FSR in place of TAA's blend: the encoded scene, the scene's depth and the game's motion in (w x h), FSR's
  * result out (ow x oh: larger when upscaling) through the curve's inverse (no extra sharpening: FSR has its
  * own). 0: FSR could not run. */
-static int fsr(VkCommandBuffer cb, GpuImage *d, VkImageView target, VkFormat fmt, uint32_t w, uint32_t h, uint32_t ow,
-               uint32_t oh) {
+static int fsr(VkCommandBuffer cb, GpuImage *d, VkImageView depth_in, VkImageView target, VkFormat fmt, uint32_t w,
+               uint32_t h, uint32_t ow, uint32_t oh) {
     uint64_t now = gpu_frames();
     gpu_fsr_prepare(w, h, ow, oh);  /* made now if it isn't: before the first frame FSR can run (gpu_fsr.c) */
     if (!motion.image || motion_frame + 1 < now || motion_frame > now + 1) return 0;
     if (!d || d->width != w || d->height != h || motion.w != w || motion.h != h) return 0;
     output_image(cb, ow, oh);
+    VkImage depth_image;
+    VkFormat depth_format;
+    fsr_depth_of(cb, d, depth_in, w, h, &depth_image, &depth_format);
     static uint64_t last = ~0ull;
     static uint32_t last_ow;
     static int64_t last_ns;
     int64_t t = host_now_ns();
-    GpuFsrInputs in = {.color = encoded.image, .depth = d->image, .motion = motion.image, .output = fsr_out.image,
-                       .color_format = VK_FORMAT_R16G16B16A16_SFLOAT, .depth_format = d->format,
+    GpuFsrInputs in = {.color = encoded.image, .depth = depth_image, .motion = motion.image, .output = fsr_out.image,
+                       .color_format = VK_FORMAT_R16G16B16A16_SFLOAT, .depth_format = depth_format,
                        .output_format = VK_FORMAT_R16G16B16A16_SFLOAT, .render_w = w, .render_h = h, .output_w = ow,
                        .output_h = oh, .reset = last + 1 != now || last_ow != ow,
                        .frame_ms = last_ns ? (float)(t - last_ns) / 1e6f : 16.7f};
@@ -633,8 +669,12 @@ static void fg_prepare(VkCommandBuffer cb, GpuImage *d, VkImageView dv, uint32_t
     }
     float sy = nvn_window_origin == 1 ? -1.0f : 1.0f;
     p.motion_scale[0] = -(float)w, p.motion_scale[1] = -(float)h * sy;
-    if (dlssg) gpu_fg_hudless_copy(cb, &p), dlssg_tag(cb, &p, ow, oh);
-    else gpu_fg_prepare(cb, &p);
+    if (dlssg) {
+        gpu_fg_hudless_copy(cb, &p), dlssg_tag(cb, &p, ow, oh);
+    } else {  /* FSR's: a depth with stencil as a plain copy (fsr_depth_of) */
+        fsr_depth_of(cb, d, dv, w, h, &p.depth, &p.depth_format);
+        gpu_fg_prepare(cb, &p);
+    }
 }
 
 void gpu_aa_apply(VkCommandBuffer cb, GpuState *s) {
@@ -695,7 +735,7 @@ void gpu_aa_apply(VkCommandBuffer cb, GpuState *s) {
     int zoom = g && gpu_zoom_step(g->key.width, g->key.height);
     if (mode == 5 && !debug && !zoom && depth && dlss(cb, depth, depth_in, out, fmt, w, h, ow, oh)) {
         /* done: DLSS wrote the output's size */
-    } else if (mode >= 4 && !debug && !zoom && depth && fsr(cb, depth, out, fmt, w, h, ow, oh)) {
+    } else if (mode >= 4 && !debug && !zoom && depth && fsr(cb, depth, depth_in, out, fmt, w, h, ow, oh)) {
         /* done: FSR wrote the output's size (also when DLSS can't run) */
     } else {
         if (mode >= 3) {
