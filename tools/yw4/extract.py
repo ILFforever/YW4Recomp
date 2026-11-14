@@ -193,12 +193,18 @@ def find_programs(hactool: Path, home: Path, ncas: list[Path], app_id: int) -> t
 
 
 def extract_dlc(cfg: config.Config) -> int:
-    """Extract each recognised add-on's RomFS into <romfs_dir>/../dlc-romfs/<index>/ (decision 0056)."""
+    """Extract each recognised add-on's RomFS into <romfs_dir>/../dlc-romfs/<index>/ (decision 0056).
+
+    Add-ons are optional: a missing dlc_dir, hactool or prod.keys is said and skipped, never an error (the
+    launcher's build step runs --dlc-only and stops on a non-zero exit)."""
     if not cfg.dlc_dir or not cfg.dlc_dir.is_dir():
+        print("dlc: none (dlc_dir in the config is not set or not a folder)")
         return 0
     if cfg.hactool_exe is None or not cfg.hactool_exe.is_file():
+        print("dlc: skipped (hactool_exe is not set or not a file)")
         return 0
     if cfg.keys_dir is None or not (cfg.keys_dir / "prod.keys").is_file():
+        print("dlc: skipped (keys_dir is not set or has no prod.keys)")
         return 0
     # SHA-256 of a content NCA's body, past its 0xC00-byte header (decision 0049): the same with or without a ticket
     known = {h.lower(): i for i, h in tomllib.loads(TARGET.read_text()).get("dlc", {}).items()}
@@ -258,6 +264,8 @@ def extract_dlc(cfg: config.Config) -> int:
                             done += 1
             except (ExtractError, pfs0.Pfs0Error, OSError) as ex:
                 print(f"dlc ({nsp.name}): {ex}", file=sys.stderr)
+    print(f"dlc: {done} add-on(s) ready in {out_root}" if done else
+          f"dlc: no recognised add-on in {cfg.dlc_dir} (the game's log names each file it left out and why)")
     return done
 
 
@@ -284,8 +292,9 @@ def main(argv: list[str] | None = None) -> int:
         return 1
 
     if any(cfg.exefs_dir.iterdir()) or any(cfg.romfs_dir.iterdir()):
-        print(f"exefs_dir or romfs_dir is not empty; empty them first:\n  {cfg.exefs_dir}\n  {cfg.romfs_dir}",
-              file=sys.stderr)
+        print(f"exefs_dir or romfs_dir is not empty; empty them first:\n  {cfg.exefs_dir}\n  {cfg.romfs_dir}\n"
+              "Only adding DLC to a game you already extracted? Leave them as they are and run:\n"
+              "  python -m tools.yw4.extract --dlc-only", file=sys.stderr)
         return 1
 
     nca_dir = cfg.work_dir / "nca"
