@@ -52,8 +52,4 @@ move to [progress.md](progress.md).
 
 ## Tools
 
-- `tests/test_kernel.py::test_threads` fails now and then with "cannot reserve the heap and thread-local regions":
-  the test program reserves fixed addresses that something else in the process can take first. Rerun before
-  suspecting a change. (The game itself reserves its memory first and retries once with a new layout,
-  `YW4_ASLR_RETRY`.)
 - The baseline benchmark against Eden ([baseline.md](baseline.md)) still lacks the opening scene's frame-time spread.

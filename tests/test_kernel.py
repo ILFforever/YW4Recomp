@@ -68,7 +68,8 @@ static void lock(CPUState *c, uint32_t *m) {
         if ((v & ~W) == self) FAIL("thread %#x: the mutex is already mine", self);
         if (!(v & W) && !__atomic_compare_exchange_n(m, &v, v | W, 0, __ATOMIC_ACQUIRE, __ATOMIC_ACQUIRE)) continue;
         __atomic_add_fetch(&arbitrations, 1, __ATOMIC_RELAXED);
-        if (sv(c, 0x1A, v & ~W, A(m), self, 0)) FAIL("ArbitrateLock failed");
+        uint32_t r = (uint32_t)sv(c, 0x1A, v & ~W, A(m), self, 0);
+        if (r) FAIL("ArbitrateLock failed: %#x", r);
         v = __atomic_load_n(m, __ATOMIC_ACQUIRE);
         if ((v & ~W) == self) return;
     }
@@ -222,6 +223,13 @@ static void protected_call(CPUState *ctx) {
 
 int main(int argc, char **argv) {
     CPUState *c = &main_ctx;
+    /* as main.c: reserve the guest ranges before anything else maps memory, and when the process's layout
+       already has something there, once more in a fresh process (new ASLR layout) */
+    if (yw4_guest_memory_init()) {
+        const char *retried = getenv("YW4_ASLR_RETRY");
+        if (!retried || !*retried) host_respawn(argc, argv);
+        FAIL("cannot reserve the guest ranges, even in a fresh process");
+    }
     c->x[28] = yw4_kernel_init(c, 0x7000000000ull, 0x1000);
     sv(c, 0x45, 0, 0, 0, 0);
     ev_w = (uint32_t)c->x[1], ev_r = (uint32_t)c->x[2];

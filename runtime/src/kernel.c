@@ -705,10 +705,11 @@ static void release_lock(uint64_t mutex) {
 
 static uint32_t arbitrate_lock(uint32_t owner, uint64_t mutex, uint32_t tag) {
     if (mutex & 3) return R_INVALID_ADDRESS;
-    if (!thread_get(owner)) return R_INVALID_HANDLE;
     /* Wait only if the word still says "owner, with waiters"; otherwise it changed in the
-     * meantime and the guest tries again. */
+     * meantime and the guest tries again. The word first, then the handle, as mesosphere: the
+     * owner may have unlocked, exited and had its handle closed since the guest read the word. */
     if (__atomic_load_n(u32p(mutex), __ATOMIC_SEQ_CST) != (owner | WAITERS_BIT)) return R_OK;
+    if (!thread_get(owner)) return R_INVALID_HANDLE;
     cur->wait = WAIT_LOCK;
     cur->addr = mutex;
     cur->tag = tag;
