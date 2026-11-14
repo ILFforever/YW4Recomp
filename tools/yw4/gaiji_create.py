@@ -240,8 +240,8 @@ def draw_xbox360(direction: str) -> Image.Image:
 # All four live in cells of the keyboard sheet the hints never use (that sheet is always on; the pad sheets have no
 # free cell); the runtime draws each at its style's size (its NA scale, of the keyboard sheet's). Drawn here from
 # shapes and colours measured off the game's icons (no game pixels): the keycap (E: 24 x 24 at 12-35, grey 37-46
-# lighter downwards, a light top edge, a faint white glow), the Xbox and PlayStation circles (28 across at 10-37, near
-# black with a black rim / grey 36 with a darker rim, a faint white glow) and the Switch circle (48 across in its 64
+# lighter downwards, a light top edge, a faint white glow), the Xbox circle (28 across at 10-37, near black with a
+# black rim, a faint white glow), the PlayStation shoulder chip (see draw_na) and the Switch circle (48 across in its 64
 # cell: lavender 225,225,251, a darker rim at the bottom, a soft purple shadow), each with "N/A" in its glyph colour.
 
 NA_STYLES = ["key", "xbox", "ps", "nx"]  # the order of gaiji_na[] in the header
@@ -253,8 +253,9 @@ KEY_E_AT = (52, 156)  # gaiji_e: the keyboard sheet's fingerprint
 NA_FONT = "C:/Windows/Fonts/arialbd.ttf"
 
 
-def _na_text(d: ImageDraw.ImageDraw, S: int, cx: float, cy: float, height: float, color) -> None:
-    """ "N/A" centred at (cx, cy), the letters set a little apart (no kerning), `height` px tall."""
+def _na_text(d: ImageDraw.ImageDraw, S: int, cx: float, cy: float, height: float, color, edge=None) -> None:
+    """ "N/A" centred at (cx, cy), the letters set a little apart (no kerning), `height` px tall; `edge`: a 1 px
+    outline in that colour (the PlayStation chips' gold)."""
     f = ImageFont.truetype(NA_FONT, 200)
     boxes = [d.textbbox((0, 0), ch, font=f) for ch in "N/A"]
     hh = max(b[3] for b in boxes) - min(b[1] for b in boxes)
@@ -265,7 +266,8 @@ def _na_text(d: ImageDraw.ImageDraw, S: int, cx: float, cy: float, height: float
     gap = 0.12 * hh
     x = cx * S - (sum(b[2] - b[0] for b in boxes) + gap * 2) / 2
     for ch, b in zip("N/A", boxes):
-        d.text((x - b[0], cy * S - hh / 2 - top), ch, font=f, fill=color)
+        d.text((x - b[0], cy * S - hh / 2 - top), ch, font=f, fill=color,
+               **({"stroke_width": S, "stroke_fill": edge} if edge else {}))
         x += b[2] - b[0] + gap
 
 
@@ -289,6 +291,16 @@ def draw_na(style: str) -> Image.Image:
         d = ImageDraw.Draw(big)
         d.line([(15 * S, 12 * S + S // 2), (33 * S, 12 * S + S // 2)], fill=(131, 131, 131, 255), width=S // 2)
         _na_text(d, S, c, c, 7.5, (255, 255, 255, 255))
+    elif style == "ps":
+        # the shoulder and trigger chip (L1: 40 x 24 at 4-43, 12-35, grey 35, a lighter top edge, a darker bottom,
+        # a faint white glow; cream letters with a gold edge): on PlayStation an unbound button is nearly always one
+        # of those, and a circle looked out of place beside them (owner, 2026-11-15)
+        d = ImageDraw.Draw(big)
+        d.rounded_rectangle((3 * S, 11 * S, 45 * S, 37 * S), radius=6 * S, fill=(255, 255, 255, 14))
+        d.rounded_rectangle((4 * S, 12 * S, 44 * S, 36 * S), radius=5 * S, fill=(31, 31, 31, 255))
+        d.rounded_rectangle((4 * S, 12 * S + S // 2, 44 * S, 35 * S), radius=5 * S, fill=(35, 35, 35, 255))
+        d.line([(9 * S, 12 * S + S // 2), (39 * S, 12 * S + S // 2)], fill=(72, 72, 72, 255), width=S)
+        _na_text(d, S, c, 24, 12, (255, 247, 207, 255), edge=(150, 126, 58, 255))
     elif style in ("xbox", "ps"):
         r = 14
         a = 24 if style == "xbox" else 12
