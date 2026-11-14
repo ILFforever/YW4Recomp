@@ -218,11 +218,37 @@ void yw4_probe(CPUState *ctx, uint64_t addr) {
     }
     for (int i = 0; i < nprobes; i++) {
         if (probes[i] != addr) continue;
+        /* YW4_PROBE_X0=<hex>: only calls with that x0; YW4_PROBE_DUMP=<bytes>: then x0's first bytes as floats */
+        static uint64_t only_x0 = ~0ull, dump = ~0ull;
+        if (only_x0 == ~0ull) only_x0 = getenv("YW4_PROBE_X0") ? strtoull(getenv("YW4_PROBE_X0"), NULL, 16) : 0;
+        if (dump == ~0ull) dump = getenv("YW4_PROBE_DUMP") ? strtoull(getenv("YW4_PROBE_DUMP"), NULL, 0) : 0;
+        if (only_x0 && ctx->x[0] != only_x0) continue;
+        /* YW4_PROBE_DUMP_PTR=<off>[,<off>...]: dump at the pointer found at x0+off (then at that +off, ...) */
+        uint64_t at = ctx->x[0];
+        for (const char *pp = getenv("YW4_PROBE_DUMP_PTR"); pp && *pp && at;) {
+            char *pe;
+            uint64_t off = strtoull(pp, &pe, 0);
+            at = host_readable(at + off, 8) ? *(const uint64_t *)(uintptr_t)(at + off) : 0;
+            pp = *pe == ',' ? pe + 1 : "";
+        }
+        if (dump && at && host_readable(at, dump)) {
+            fprintf(stderr, "yw4: dump %s frame %" PRIu64 ":", yw4_describe(addr, (char[48]){0}),
+                    __atomic_load_n(&yw4_frames_presented, __ATOMIC_RELAXED));
+            for (uint64_t o = 0; o + 4 <= dump; o += 4) {
+                float f;
+                memcpy(&f, (const void *)(uintptr_t)(at + o), 4);
+                fprintf(stderr, " %g", (double)f);
+            }
+            fputc('\n', stderr);
+        }
         long n = __atomic_add_fetch(&probe_hits[i], 1, __ATOMIC_RELAXED);
         if (probe_unique ? !stack_is_new(ctx, addr) : n > probe_limit) return;
         char a[48], b[48];
-        fprintf(stderr, "yw4: probe %s #%ld from %s: x0=%#" PRIx64 " x1=%#" PRIx64 " x2=%#" PRIx64 " x3=%#" PRIx64 "\n",
-                yw4_describe(addr, a), n, yw4_describe(ctx->x[30] - 4, b), ctx->x[0], ctx->x[1], ctx->x[2], ctx->x[3]);
+        fprintf(stderr, "yw4: probe %s #%ld from %s: x0=%#" PRIx64 " x1=%#" PRIx64 " x2=%#" PRIx64 " x3=%#" PRIx64
+                " s0=%g s1=%g s2=%g (frame %" PRIu64 ")\n",
+                yw4_describe(addr, a), n, yw4_describe(ctx->x[30] - 4, b), ctx->x[0], ctx->x[1], ctx->x[2], ctx->x[3],
+                (double)ctx->v[0].f[0], (double)ctx->v[1].f[0], (double)ctx->v[2].f[0],
+                __atomic_load_n(&yw4_frames_presented, __ATOMIC_RELAXED));
         /* YW4_PROBE_MEM=x0+0xf4:1,x0+0xa0:8,...: also print memory at register + offset
          * (size 1, 2, 4 or 8 bytes), to see the fields a function tests */
         static const char *mem = (const char *)1;

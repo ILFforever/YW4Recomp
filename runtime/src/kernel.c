@@ -1175,11 +1175,22 @@ static uint64_t real_cntpct(void);
 /* CNTPCT_EL0 counts at 19.2 MHz from boot on the Switch: here, from the first call. */
 uint64_t yw4_cntpct(void) {
     if (!cur || !(cur->roles & YW4_ROLE_PRESENT)) return real_cntpct();
-    static uint64_t base, base_frame, last, offset;  /* the main loop's thread only */
+    static uint64_t base, last, offset;  /* the main loop's thread only */
     if (yw4_replay_frame_clock()) {
+        /* YW4_REPLAY_HZ=<rate> (tests): from presented frame YW4_REPLAY_HZ_AT on, each frame moves 1/rate s instead
+         * of 1/60, so the game's logic steps as at that frame rate (issue #9: a running jump at 30 vs 120 fps) */
+        static uint64_t step_hz, hz_at, acc, acc_frame;
+        static int hz_read;
+        if (!hz_read) {
+            const char *e = getenv("YW4_REPLAY_HZ"), *a = getenv("YW4_REPLAY_HZ_AT");
+            step_hz = e && atoi(e) > 0 ? 19200000u / (uint64_t)atoi(e) : 320000u;
+            hz_at = a ? strtoull(a, NULL, 10) : 0;
+            hz_read = 1;
+        }
         uint64_t f = __atomic_load_n(&yw4_frames_presented, __ATOMIC_RELAXED);
-        if (!base) base = real_cntpct(), base_frame = f;
-        uint64_t v = base + (f - base_frame) * 320000u;  /* 19.2 MHz / 60 */
+        if (!base) base = real_cntpct(), acc_frame = f;
+        for (; acc_frame < f; acc_frame++) acc += acc_frame >= hz_at ? step_hz : 320000u;  /* 19.2 MHz / 60 */
+        uint64_t v = base + acc;
         last = v > last ? v : last + 1;
         return last;
     }
