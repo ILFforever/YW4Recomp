@@ -371,7 +371,7 @@ static int vk_init(void) {
         fprintf(stderr, "yw4: window: driver %s, %s (id %d), window system %s\n", dp.driverName, dp.driverInfo,
                 (int)dp.driverID, wsys ? wsys : "?");
     }
-    const char *dexts[16] = {VK_KHR_SWAPCHAIN_EXTENSION_NAME};
+    const char *dexts[24] = {VK_KHR_SWAPCHAIN_EXTENSION_NAME};
     uint32_t ndexts = 1;
     /* NVIDIA DLSS's device extensions (gpu_dlss.c, decision 0040), those the GPU has */
     const char **dlss_exts;
@@ -383,17 +383,19 @@ static int vk_init(void) {
     int core_bda = q12.bufferDeviceAddress;
     /* DLSS lists the old VK_EXT_buffer_device_address, but allocates with the core feature's flag (validation,
      * 2026-10-29): the core feature is kept where the GPU has it (Vulkan 1.2), the EXT only without it */
-    int bda_ext = 0;
+    int bda_ext = 0, has_present_id = 0, has_derivatives = 0;
     {
         uint32_t n = 0;
         vkEnumerateDeviceExtensionProperties(vk.gpu, NULL, &n, NULL);
         VkExtensionProperties *e = calloc(n, sizeof *e);
         vkEnumerateDeviceExtensionProperties(vk.gpu, NULL, &n, e);
-        for (uint32_t i = 0; i < n; i++)
+        for (uint32_t i = 0; i < n; i++) {
             if (!strcmp(e[i].extensionName, VK_EXT_EXTERNAL_MEMORY_HOST_EXTENSION_NAME)) vk.host_import = 1;
-        for (uint32_t i = 0; i < n; i++)
             if (!strcmp(e[i].extensionName, VK_EXT_MEMORY_BUDGET_EXTENSION_NAME)) vk.memory_budget = 1;
-        for (unsigned k = 0; k < ndlss && ndexts < 14; k++)
+            if (!strcmp(e[i].extensionName, VK_KHR_PRESENT_ID_EXTENSION_NAME)) has_present_id = 1;
+            if (!strcmp(e[i].extensionName, VK_KHR_COMPUTE_SHADER_DERIVATIVES_EXTENSION_NAME)) has_derivatives = 1;
+        }
+        for (unsigned k = 0; k < ndlss && ndexts < 20; k++)
             for (uint32_t i = 0; i < n; i++)
                 if (!strcmp(e[i].extensionName, dlss_exts[k])) {
                     int bda = !strcmp(dlss_exts[k], "VK_EXT_buffer_device_address");
@@ -413,7 +415,7 @@ static int vk_init(void) {
         vk.host_import_align = hp.minImportedHostPointerAlignment;
     }
     fprintf(stderr, "yw4: window: host memory import: %s\n", vk.host_import ? "yes" : "no (no draw path)");
-    if (vk.memory_budget && ndexts < 16) dexts[ndexts++] = VK_EXT_MEMORY_BUDGET_EXTENSION_NAME;  /* gpu_vram */
+    if (vk.memory_budget && ndexts < 24) dexts[ndexts++] = VK_EXT_MEMORY_BUDGET_EXTENSION_NAME;  /* gpu_vram */
     else vk.memory_budget = 0;
 
     /* Features: what the translated shaders (0020) and NVN's state use, where the GPU has it. */
@@ -421,6 +423,12 @@ static int vk_init(void) {
     VkPhysicalDeviceVulkan12Features f12 = {.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES, .pNext = &f13};
     VkPhysicalDeviceVulkan11Features f11 = {.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_1_FEATURES, .pNext = &f12};
     VkPhysicalDeviceFeatures2 have = {.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2, .pNext = &f11};
+    /* the extensions' own feature structs, asked about only where the GPU has the extension */
+    VkPhysicalDevicePresentIdFeaturesKHR fpid = {.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PRESENT_ID_FEATURES_KHR};
+    VkPhysicalDeviceComputeShaderDerivativesFeaturesKHR fder = {
+        .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_COMPUTE_SHADER_DERIVATIVES_FEATURES_KHR};
+    if (has_present_id) fpid.pNext = have.pNext, have.pNext = &fpid;
+    if (has_derivatives) fder.pNext = have.pNext, have.pNext = &fder;
     vkGetPhysicalDeviceFeatures2(vk.gpu, &have);
     const VkPhysicalDeviceFeatures *h = &have.features;
     vk.sampler_anisotropy = h->samplerAnisotropy;
@@ -456,6 +464,30 @@ static int vk_init(void) {
                      .shaderStorageImageWriteWithoutFormat = h->shaderStorageImageWriteWithoutFormat,
                      .imageCubeArray = h->imageCubeArray, .dualSrcBlend = h->dualSrcBlend, .logicOp = h->logicOp,
                      .multiDrawIndirect = h->multiDrawIndirect, .textureCompressionBC = h->textureCompressionBC}};
+    /* NVIDIA's libraries, not our shaders (validation, 2026-11-14). Streamline adds the extensions it lists itself
+     * while it wraps vkCreateDevice, but not VK_KHR_present_id, which its VK_NV_low_latency2 (Reflex) requires; it
+     * also asks for descriptor indexing and makes private-data slots. DLSS's compute shaders use 16-bit integers
+     * and compute-shader derivatives. Each only where the GPU has it. */
+    VkPhysicalDevicePresentIdFeaturesKHR epid = {.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PRESENT_ID_FEATURES_KHR,
+                                                 .presentId = VK_TRUE};
+    VkPhysicalDeviceComputeShaderDerivativesFeaturesKHR eder = {
+        .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_COMPUTE_SHADER_DERIVATIVES_FEATURES_KHR,
+        .computeDerivativeGroupLinear = VK_TRUE};
+    if (sl) {
+        e13.privateData = f13.privateData;
+        e12.descriptorIndexing = f12.descriptorIndexing;
+        if (has_present_id && fpid.presentId && ndexts < 24) {
+            dexts[ndexts++] = VK_KHR_PRESENT_ID_EXTENSION_NAME;
+            epid.pNext = (void *)enable.pNext, enable.pNext = &epid;
+        }
+    }
+    if (ndlss) {
+        enable.features.shaderInt16 = h->shaderInt16;
+        if (has_derivatives && fder.computeDerivativeGroupLinear && ndexts < 24) {
+            dexts[ndexts++] = VK_KHR_COMPUTE_SHADER_DERIVATIVES_EXTENSION_NAME;
+            eder.pNext = (void *)enable.pNext, enable.pNext = &eder;
+        }
+    }
     if (!f13.dynamicRendering || !f12.timelineSemaphore || !f11.shaderDrawParameters) {
         fprintf(stderr, "yw4: window: the GPU lacks dynamic rendering, timeline semaphores or draw parameters\n");
         return -1;
@@ -466,6 +498,28 @@ static int vk_init(void) {
                                    .queueCount = 1, .pQueuePriorities = &prio};
     VkDeviceCreateInfo dci = {.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO, .pNext = &enable, .queueCreateInfoCount = 1,
                               .pQueueCreateInfos = &qci, .enabledExtensionCount = ndexts, .ppEnabledExtensionNames = dexts};
+    {  /* for reports: what Streamline asks for (it adds these extensions itself while it wraps vkCreateDevice) */
+        const char *se[32], *sf[32];
+        unsigned nse = 0, nsf = 0;
+        dlssg_device_requirements(se, 32, &nse, sf, 32, &nsf);
+        if (nse) {
+            fprintf(stderr, "yw4: window: Streamline asks for (%u):", nse);
+            for (unsigned i = 0; i < nse; i++) fprintf(stderr, " %s", se[i]);
+            fprintf(stderr, "; features (%u):", nsf);
+            for (unsigned i = 0; i < nsf; i++) fprintf(stderr, " %s", sf[i]);
+            fputc('\n', stderr);
+        }
+    }
+    {  /* the device extensions, for reports (and what DLSS asked for that the GPU lacks or didn't fit) */
+        fprintf(stderr, "yw4: window: device extensions (%u):", ndexts);
+        for (uint32_t i = 0; i < ndexts; i++) fprintf(stderr, " %s", dexts[i]);
+        fputc('\n', stderr);
+        for (unsigned k = 0; k < ndlss; k++) {
+            uint32_t i = 0;
+            while (i < ndexts && strcmp(dexts[i], dlss_exts[k])) i++;
+            if (i == ndexts) fprintf(stderr, "yw4: window: DLSS's %s left out\n", dlss_exts[k]);
+        }
+    }
     r = vkCreateDevice(vk.gpu, &dci, NULL, &vk.device);
     if (r != VK_SUCCESS) return vk_fail("vkCreateDevice", r);
     yw4_boot_mark("Vulkan device");

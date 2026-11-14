@@ -16,6 +16,10 @@ int dlssg_start(void);
 /* sl.interposer.dll's vkGetInstanceProcAddr while Streamline runs (every Vulkan function from it: Vulkan's own,
  * Streamline's for the instance, device, surface, swapchain and present), else NULL: SDL's loader. */
 PFN_vkGetInstanceProcAddr dlssg_loader(void);
+/* What Streamline's features need from the device: extension names and Vulkan 1.2 / 1.3 feature names (none
+ * unless Streamline runs). window.c enables those the GPU has. */
+void dlssg_device_requirements(const char **exts, unsigned max_exts, unsigned *n_exts, const char **feats,
+                               unsigned max_feats, unsigned *n_feats);
 /* The window's surface through Streamline (hwnd: the window's HWND); VK_NULL_HANDLE: make it as usual. */
 VkSurfaceKHR dlssg_create_surface(void *hwnd);
 /* 1 when DLSS frame generation runs on this GPU (checked once, after the device). */

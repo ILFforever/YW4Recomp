@@ -148,6 +148,30 @@ extern "C" int dlssg_start(void) {
 
 extern "C" PFN_vkGetInstanceProcAddr dlssg_loader(void) { return started == 1 ? sl_gipa : NULL; }
 
+/* What Streamline's features need from the Vulkan device (slGetFeatureRequirements), all three together: device
+ * extensions and the names of Vulkan 1.2 and 1.3 features. Streamline adds some extensions itself while it wraps
+ * vkCreateDevice, but not all their dependencies (VK_NV_low_latency2 without VK_KHR_present_id, validation
+ * 2026-11-14), so window.c enables what the GPU has of these. Pointers stay valid while Streamline runs. */
+static void add_unique(const char **list, unsigned max, unsigned *n, const char *s) {
+    for (unsigned i = 0; i < *n; i++)
+        if (!strcmp(list[i], s)) return;
+    if (*n < max) list[(*n)++] = s;
+}
+
+extern "C" void dlssg_device_requirements(const char **exts, unsigned max_exts, unsigned *n_exts, const char **feats,
+                                          unsigned max_feats, unsigned *n_feats) {
+    *n_exts = *n_feats = 0;
+    if (started != 1 || !p_slGetFeatureRequirements) return;
+    static const sl::Feature features[] = {sl::kFeatureDLSS_G, sl::kFeatureReflex, sl::kFeaturePCL};
+    for (sl::Feature f : features) {
+        sl::FeatureRequirements req{};
+        if (slGetFeatureRequirements(f, req) != sl::Result::eOk) continue;
+        for (uint32_t i = 0; i < req.vkNumDeviceExtensions; i++) add_unique(exts, max_exts, n_exts, req.vkDeviceExtensions[i]);
+        for (uint32_t i = 0; i < req.vkNumFeatures12; i++) add_unique(feats, max_feats, n_feats, req.vkFeatures12[i]);
+        for (uint32_t i = 0; i < req.vkNumFeatures13; i++) add_unique(feats, max_feats, n_feats, req.vkFeatures13[i]);
+    }
+}
+
 /* VK_KHR_win32_surface's create info (the repo's Vulkan headers leave out the platform headers) */
 struct Win32SurfaceInfo {
     VkStructureType sType;
@@ -419,6 +443,11 @@ extern "C" {
 }
 extern "C" int dlssg_start(void) { return 0; }
 extern "C" PFN_vkGetInstanceProcAddr dlssg_loader(void) { return NULL; }
+extern "C" void dlssg_device_requirements(const char **exts, unsigned max_exts, unsigned *n_exts, const char **feats,
+                                          unsigned max_feats, unsigned *n_feats) {
+    (void)exts, (void)max_exts, (void)feats, (void)max_feats;
+    *n_exts = *n_feats = 0;
+}
 extern "C" VkSurfaceKHR dlssg_create_surface(void *hwnd) { (void)hwnd; return VK_NULL_HANDLE; }
 extern "C" int dlssg_available(void) { return 0; }
 extern "C" int dlssg_reflex_available(void) { return 0; }
