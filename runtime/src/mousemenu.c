@@ -151,6 +151,20 @@ int mousemenu_talking(void) { return enabled() && __atomic_load_n(&talking, __AT
 static int map_shown;
 int mousemenu_map(void) { return enabled() && __atomic_load_n(&map_shown, __ATOMIC_ACQUIRE); }
 
+/* The battle's Stopwatching menu (Pin / Items / Switch Members, vt main+0x14c6e58) and the pages it opens (Switch
+ * Members, vt main+0x14c7028, a grid six wide; Items, vt main+0x14c73c8): open from a focus on any of them until the
+ * fight's HUD menu (vt main+0x14c3548) takes the focus again, which it does each time the fight goes on (after Back,
+ * after an item is used), or the Stopwatching menu closes a layer while it is the one in front (its pages focus first,
+ * then it closes a layer under them: that one doesn't count). Seen 2026-11-15 (the owner: after an item, the clicks
+ * stayed the menu's until the HUD rule). While open the clicks confirm and go back (bindings.c); the wheel already
+ * moves it. */
+#define STOPWATCH_VTABLE 0x14c6e58u
+#define STOPWATCH_MEMBERS_VTABLE 0x14c7028u
+#define STOPWATCH_ITEMS_VTABLE 0x14c73c8u
+#define BATTLE_HUD_VTABLE 0x14c3548u
+static int stopwatch, last_focus_vt;
+int mousemenu_stopwatch(void) { return enabled() && __atomic_load_n(&stopwatch, __ATOMIC_ACQUIRE); }
+
 static void talk_note(uint64_t vt) {
     if (vt == TALK_VTABLE) __atomic_store_n(&talking, 1, __ATOMIC_RELEASE);
     else if (vt == MAP_VTABLE) __atomic_store_n(&map_shown, 1, __ATOMIC_RELEASE);
@@ -230,6 +244,11 @@ int yw4_hook_menu_focus(CPUState *ctx) {
     }
     talk_note(vt);
     __atomic_store_n(&sideways, vt == GENERAL_WINDOW_VTABLE && hash == YES_NO_HASH, __ATOMIC_RELEASE);
+    __atomic_store_n(&last_focus_vt, (int)vt, __ATOMIC_RELEASE);
+    if (vt == STOPWATCH_VTABLE || vt == STOPWATCH_MEMBERS_VTABLE || vt == STOPWATCH_ITEMS_VTABLE)
+        __atomic_store_n(&stopwatch, 1, __ATOMIC_RELEASE);
+    else if (vt == BATTLE_HUD_VTABLE)
+        __atomic_store_n(&stopwatch, 0, __ATOMIC_RELEASE);  /* the fight goes on */
     if (vt == PAD_VTABLE && hash == PAD_GRID_HASH)
         __atomic_store_n(&pad_open, 1, __ATOMIC_RELEASE);
     if (!__atomic_load_n(&pad_open, __ATOMIC_ACQUIRE)) return 0;
@@ -329,6 +348,8 @@ int yw4_hook_menu_layer_closed(CPUState *ctx) {
     uint64_t vt = ld64(menu) - yw4_image_base;
     if (menu_log_on())
         fprintf(stderr, "yw4: menu_layer_closed: menu=%#llx vt=%#llx\n", (unsigned long long)menu, (unsigned long long)vt);
+    if (vt == STOPWATCH_VTABLE && (uint32_t)__atomic_load_n(&last_focus_vt, __ATOMIC_ACQUIRE) == STOPWATCH_VTABLE)
+        __atomic_store_n(&stopwatch, 0, __ATOMIC_RELEASE);  /* the Stopwatching menu closed (not under a page) */
     if (menu == __atomic_load_n(&active_menu, __ATOMIC_ACQUIRE)) {
         int n = __atomic_sub_fetch(&layers_open, 1, __ATOMIC_ACQ_REL);
         if (__atomic_load_n(&page, __ATOMIC_ACQUIRE) == PAGE_OPEN && n <= __atomic_load_n(&page_base, __ATOMIC_ACQUIRE))

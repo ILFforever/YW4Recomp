@@ -510,6 +510,14 @@ void bindings_read(const bool *keyboard, uint32_t mouse_buttons, int wheel_up, i
     if (scene_on_title() || (mousemenu_talking() && !battle)) mouse = mousemenu_sideways() ? sideways_mouse : title_mouse;
     /* the map (mousemenu_map): the wheel zooms (the right stick up and down); its moving pans (window.c) */
     if (mousemenu_map() && !battle) mouse = map_mouse;
+    /* the battle's Stopwatching menu and its pages (mousemenu_stopwatch): the clicks confirm (A) and go back (B); the
+     * wheel and its press keep the battle set's (the wheel's D-pad already moves the menu) */
+    static int stopwatch_mouse[BMOUSE_PARTS];
+    if (battle && mousemenu_stopwatch()) {
+        memcpy(stopwatch_mouse, mouse, sizeof stopwatch_mouse);
+        stopwatch_mouse[BMOUSE_LEFT] = input_by_id("A"), stopwatch_mouse[BMOUSE_RIGHT] = input_by_id("B");
+        mouse = stopwatch_mouse;
+    }
     for (int i = 0; i < NINPUTS; i++) {
         int key = 0;
         for (int k = 0; k < BIND_KEYS; k++) {

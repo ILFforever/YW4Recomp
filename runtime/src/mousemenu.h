@@ -12,6 +12,8 @@ int mousemenu_talking(void);
 /* Returns 1 while the map is open: moving the mouse pans it (the left stick, window.c), the wheel zooms (the
  * right stick, bindings.c). */
 int mousemenu_map(void);
+/* Returns 1 while the battle's Stopwatching menu or a page it opened is up: the clicks confirm and go back. */
+int mousemenu_stopwatch(void);
 /* Returns 1 while a Yes / No box with its buttons side by side has the focus: the wheel steps left and right. */
 int mousemenu_sideways(void);
 
