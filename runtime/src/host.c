@@ -413,9 +413,11 @@ int host_thread_start(void (*fn)(void *), void *arg, size_t stack_size) {
     pthread_t t;
     pthread_attr_init(&a);
     /* glibc takes the thread's static thread-local storage out of its stack, and refuses a stack too small for it
-     * (EINVAL): the vsync thread's 64 KiB was refused on Linux (2026-11-12). Stack pages are only used when
-     * touched, so a 1 MiB floor costs nothing. */
-    if (stack_size < ((size_t)1 << 20)) stack_size = (size_t)1 << 20;
+     * (EINVAL): the vsync thread's 64 KiB was refused on Linux (2026-11-12). The floor is glibc's own default, 8 MiB:
+     * AMD's FSR frame interpolation built for Linux (decision 0073) puts a 142 KiB frame on the GPU worker's already
+     * deep stack, which overflowed its 1 MiB at the first generated frame (2026-11-14). Stack pages are only used
+     * when touched, so the floor costs address space, not memory. */
+    if (stack_size < ((size_t)8 << 20)) stack_size = (size_t)8 << 20;
     pthread_attr_setstacksize(&a, stack_size);
     pthread_attr_setdetachstate(&a, PTHREAD_CREATE_DETACHED);
     int r = pthread_create(&t, &a, thread_entry, s);

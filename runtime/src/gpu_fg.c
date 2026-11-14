@@ -93,7 +93,8 @@ void gpu_fg_step(int dir) {
 
 void gpu_fg_cycle(void) { gpu_fg_step(1); }
 
-#if defined(YW4_FSR) && defined(_WIN32)  /* Linux's FSR build is the upscaler only (decision 0073) */
+#ifdef YW4_FSR
+#ifdef _WIN32
 #include <windows.h>
 #ifndef _WINDOWS
 #define _WINDOWS  /* ffx_api_loader.h looks for MSBuild's name for Windows (as gpu_fsr.c) */
@@ -107,6 +108,24 @@ void gpu_fg_cycle(void) { gpu_fg_step(1); }
 #pragma clang diagnostic ignored "-Wunknown-pragmas"  /* MSVC's warning pragmas in the header */
 #include "../../framegeneration/include/ffx_framegeneration.h"
 #pragma clang diagnostic pop
+#else
+/* Linux (decision 0073): FidelityFX SDK v1.1.4's frame generation in libamd_fidelityfx_vk.so, opened by gpu_fsr.c;
+ * without AMD's swapchain, as here (FFX_FRAMEGENERATION_FLAG_NO_SWAPCHAIN_CONTEXT_NOTIFY) */
+#include <dlfcn.h>
+
+#include "ffx_api.h"
+#include "ffx_api_types.h"
+#include "vk/ffx_api_vk.h"
+#include "ffx_framegeneration.h"
+#include "gpu_fsr.h"
+typedef struct {
+    PfnFfxCreateContext CreateContext;
+    PfnFfxDestroyContext DestroyContext;
+    PfnFfxConfigure Configure;
+    PfnFfxQuery Query;
+    PfnFfxDispatch Dispatch;
+} ffxFunctions;
+#endif
 
 static ffxFunctions fx;
 static int loaded = -1;  /* -1 not tried, 0 failed, 1 loaded */
@@ -117,12 +136,25 @@ static int ctx_failed;
 
 static int available(void) {
     if (loaded >= 0) return loaded;
+#ifdef _WIN32
     HMODULE m = LoadLibraryA("amd_fidelityfx_loader_vk.dll");
     if (!m) {
         fprintf(stderr, "yw4: fg: amd_fidelityfx_loader_vk.dll not found next to yw4.exe: no frame generation\n");
         return loaded = 0;
     }
     ffxLoadFunctions(&fx, m);
+#else
+    void *m = gpu_ffx_library();
+    if (!m) {
+        fprintf(stderr, "yw4: fg: no frame generation\n");
+        return loaded = 0;
+    }
+    fx.CreateContext = (PfnFfxCreateContext)dlsym(m, "ffxCreateContext");
+    fx.DestroyContext = (PfnFfxDestroyContext)dlsym(m, "ffxDestroyContext");
+    fx.Configure = (PfnFfxConfigure)dlsym(m, "ffxConfigure");
+    fx.Query = (PfnFfxQuery)dlsym(m, "ffxQuery");
+    fx.Dispatch = (PfnFfxDispatch)dlsym(m, "ffxDispatch");
+#endif
     if (!fx.CreateContext || !fx.Dispatch || !fx.Configure || !fx.DestroyContext) {
         fprintf(stderr, "yw4: fg: the loader DLL lacks its functions: no frame generation\n");
         return loaded = 0;
@@ -183,7 +215,11 @@ static int create(uint32_t dw, uint32_t dh, uint32_t rw, uint32_t rh, VkFormat f
     }
     struct ffxCreateBackendVKDesc backend = {
         .header = {.type = FFX_API_CREATE_CONTEXT_DESC_TYPE_BACKEND_VK},
+#ifdef _WIN32
         .deviceContext = {.vkDevice = vk.device, .vkPhysicalDevice = vk.gpu, .vkDeviceProcAddr = vkGetDeviceProcAddr}};
+#else  /* SDK v1.1.4 (gpu_fsr.c): the same three fields, not yet in a VkDeviceContext */
+        .vkDevice = vk.device, .vkPhysicalDevice = vk.gpu, .vkDeviceProcAddr = vkGetDeviceProcAddr};
+#endif
     struct ffxCreateContextDescFrameGeneration desc = {
         .header = {.type = FFX_API_CREATE_CONTEXT_DESC_TYPE_FRAMEGENERATION, .pNext = &backend.header},
         .displaySize = {dw, dh}, .maxRenderSize = {rw, rh}, .backBufferFormat = surface_format(fmt)};
@@ -302,7 +338,17 @@ void gpu_fg_prepare(VkCommandBuffer cb, const GpuFgPrepare *p) {
     uint64_t id = next_id;
     gpu_fg_hudless_copy(cb, p);
     if (!configure(id, ctx_dw, ctx_dh)) return;
+#ifdef _WIN32
     struct ffxDispatchDescFrameGenerationPrepareV2 d = {.header = {.type = FFX_API_DISPATCH_DESC_TYPE_FRAMEGENERATION_PREPARE_V2}};
+    d.reset = prepared_reset;
+#define CAM d
+#else  /* SDK v1.1.4: the camera's vectors in a description of their own, chained on; no reset (its field is unused) */
+    struct ffxDispatchDescFrameGenerationPrepare d = {.header = {.type = FFX_API_DISPATCH_DESC_TYPE_FRAMEGENERATION_PREPARE}};
+    struct ffxDispatchDescFrameGenerationPrepareCameraInfo cam = {
+        .header = {.type = FFX_API_DISPATCH_DESC_TYPE_FRAMEGENERATION_PREPARE_CAMERAINFO}};
+    d.header.pNext = &cam.header;
+#define CAM cam
+#endif
     d.frameID = id, d.flags = debug_flags(), d.commandList = cb;
     d.renderSize.width = p->render_w, d.renderSize.height = p->render_h;
     float mx = 1.0f, my = 1.0f, jx = 1.0f, jy = 1.0f;  /* tests: YW4_FG_MV_SIGN / YW4_FG_JITTER_SIGN=x,y scale them */
@@ -311,12 +357,12 @@ void gpu_fg_prepare(VkCommandBuffer cb, const GpuFgPrepare *p) {
     d.jitterOffset.x = p->jitter[0] * jx, d.jitterOffset.y = p->jitter[1] * jy;
     d.motionVectorScale.x = p->motion_scale[0] * mx, d.motionVectorScale.y = p->motion_scale[1] * my;
     d.frameTimeDelta = p->frame_ms;
-    d.reset = prepared_reset;
     d.cameraNear = p->cam_near, d.cameraFar = p->cam_far, d.cameraFovAngleVertical = p->fov_y;
     d.viewSpaceToMetersFactor = 1.0f;
     d.depth = resource(p->depth, p->depth_format, p->render_w, p->render_h, FFX_API_RESOURCE_USAGE_DEPTHTARGET);
     d.motionVectors = resource(p->motion, VK_FORMAT_R16G16_SFLOAT, p->render_w, p->render_h, FFX_API_RESOURCE_USAGE_READ_ONLY);
-    d.cameraForward[2] = 1.0f, d.cameraUp[1] = 1.0f, d.cameraRight[0] = 1.0f;  /* not known: a plain frame */
+    CAM.cameraForward[2] = 1.0f, CAM.cameraUp[1] = 1.0f, CAM.cameraRight[0] = 1.0f;  /* not known: a plain frame */
+#undef CAM
     full_barrier(cb);
     ffxReturnCode_t r = fx.Dispatch(&ctx, &d.header);
     full_barrier(cb);

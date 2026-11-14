@@ -25,3 +25,7 @@ void gpu_fsr_prepare(uint32_t rw, uint32_t rh, uint32_t ow, uint32_t oh);
 void gpu_fsr_jitter(uint32_t w, uint32_t ow, uint64_t n, float *jx, float *jy);
 /* Records FSR's passes into cb (outside rendering). 0 if FSR could not run. */
 int gpu_fsr_dispatch(VkCommandBuffer cb, const GpuFsrInputs *in);
+#if defined(YW4_FSR) && !defined(_WIN32)
+/* Linux: libamd_fidelityfx_vk.so (decision 0073), opened once for FSR and its frame generation; NULL without it. */
+void *gpu_ffx_library(void);
+#endif

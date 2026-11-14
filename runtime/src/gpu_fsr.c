@@ -8,7 +8,7 @@
  * anti-aliasing's reversible curve (perceptual, 0..1), so FSR is told the colour is non-linear.
  * Linux (decision 0073): AMD ships no Linux build, so tools/yw4/fsr_linux.py builds FSR 3.1.5 from AMD's SDK v1.1.4
  * source (with xplane-fsr3's Linux port, third_party/fsr3-linux) into libamd_fidelityfx_vk.so next to yw4: the same
- * five functions, opened with dlopen. Upscaling only; no frame generation there yet. */
+ * five functions, opened with dlopen once for this file and gpu_fg.c (gpu_ffx_library). */
 #include <inttypes.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -51,7 +51,31 @@ typedef struct {
 /* the library's own: what our device enabled, so AMD's backend uses no feature or extension it wasn't given */
 typedef void (*Yw4FfxHostSet)(PFN_vkGetInstanceProcAddr, VkInstance, const char *const *, uint32_t, uint32_t, uint32_t,
                               uint32_t);
-static Yw4FfxHostSet host_set;
+
+/* libamd_fidelityfx_vk.so from yw4's folder, opened once for FSR and its frame generation (gpu_fg.c), and told what
+ * the device enabled; NULL (said why, once) without it */
+void *gpu_ffx_library(void) {
+    static void *m;
+    static int tried;
+    if (tried) return m;
+    tried = 1;
+    char path[1024];
+    const char *base = SDL_GetBasePath();
+    snprintf(path, sizeof path, "%slibamd_fidelityfx_vk.so", base ? base : "");
+    void *lib = dlopen(path, RTLD_NOW | RTLD_LOCAL);
+    if (!lib) {
+        fprintf(stderr, "yw4: fsr: %s\n", dlerror());
+        return NULL;
+    }
+    Yw4FfxHostSet host_set = (Yw4FfxHostSet)dlsym(lib, "yw4FfxHostSet");
+    if (!host_set) {
+        fprintf(stderr, "yw4: fsr: %s lacks yw4FfxHostSet\n", path);
+        return NULL;
+    }
+    host_set((PFN_vkGetInstanceProcAddr)SDL_Vulkan_GetVkGetInstanceProcAddr(), vk.instance, vk.device_exts,
+             vk.ndevice_exts, (uint32_t)vk.shader_f16, (uint32_t)vk.shader_i16, (uint32_t)vk.sync2);
+    return m = lib;
+}
 #endif
 
 static ffxFunctions fx;
@@ -77,12 +101,9 @@ int gpu_fsr_available(void) {
     }
     ffxLoadFunctions(&fx, m);
 #else
-    char path[1024];
-    const char *base = SDL_GetBasePath();
-    snprintf(path, sizeof path, "%slibamd_fidelityfx_vk.so", base ? base : "");
-    void *m = dlopen(path, RTLD_NOW | RTLD_LOCAL);
+    void *m = gpu_ffx_library();
     if (!m) {
-        fprintf(stderr, "yw4: fsr: %s: TAA instead\n", dlerror());
+        fprintf(stderr, "yw4: fsr: TAA instead\n");
         return loaded = 0;
     }
     fx.CreateContext = (PfnFfxCreateContext)dlsym(m, "ffxCreateContext");
@@ -90,13 +111,6 @@ int gpu_fsr_available(void) {
     fx.Configure = (PfnFfxConfigure)dlsym(m, "ffxConfigure");
     fx.Query = (PfnFfxQuery)dlsym(m, "ffxQuery");
     fx.Dispatch = (PfnFfxDispatch)dlsym(m, "ffxDispatch");
-    host_set = (Yw4FfxHostSet)dlsym(m, "yw4FfxHostSet");
-    if (!host_set) {
-        fprintf(stderr, "yw4: fsr: %s lacks yw4FfxHostSet: TAA instead\n", path);
-        return loaded = 0;
-    }
-    host_set((PFN_vkGetInstanceProcAddr)SDL_Vulkan_GetVkGetInstanceProcAddr(), vk.instance, vk.device_exts,
-             vk.ndevice_exts, (uint32_t)vk.shader_f16, (uint32_t)vk.shader_i16, (uint32_t)vk.sync2);
 #endif
     if (!fx.CreateContext || !fx.Dispatch || !fx.Query || !fx.DestroyContext) {
         fprintf(stderr, "yw4: fsr: the loader DLL lacks its functions: TAA instead\n");

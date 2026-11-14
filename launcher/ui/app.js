@@ -2,9 +2,9 @@
 const T = window.__TAURI__ || null;
 const invoke = T ? T.core.invoke : null;
 const $ = (id) => document.getElementById(id);
-// Linux (decision 0071): WebKitGTK names it in its user agent. Frame generation and Reflex are Windows only (DLSS and
-// FSR upscaling aren't, decision 0073), so their mentions go (.win-only, style.css); shortcut, saves and folder words
-// follow the system. Nothing changes on Windows.
+// Linux (decision 0071): WebKitGTK names it in its user agent. DLSS upscaling and FSR with its frame generation work
+// there too (decision 0073); what is still Windows only is marked .win-only (style.css). Shortcut, saves and folder
+// words follow the system. Nothing changes on Windows.
 const LINUX = /Linux/.test(navigator.userAgent) && !/Windows|Android/.test(navigator.userAgent);
 if (LINUX) document.documentElement.classList.add('os-linux');
 const SAVES_PLACE = LINUX ? 'your home folder' : 'AppData';
@@ -323,14 +323,13 @@ if (invoke) invoke('builder_bundled').then((b) => { bundled = b; renderSwitches(
 // What the install folder takes: the copied RomFS (8.5 GB) + ExeFS, the tools (1.5 GB) and build files (0.7 GB),
 // the game itself, and the downloads (target.toml [extracted], measured sizes: FSR 240 MB, DLSS + Streamline 325 MB)
 // Linux downloads no compiler: the system's builds (tools/yw4/system.py)
-// Linux's DLSS and FSR are upscaling only (decision 0073): NVIDIA's library alone, no Streamline; AMD's SDK source (built
-// on the PC, about a minute)
+// Linux (decision 0073): DLSS is NVIDIA's library alone (no Streamline: upscaling only); FSR is AMD's SDK source, built
+// on the PC in about a minute
 const downloadMB = () => (bundled && !LINUX ? 182 : 0) + (options.fsr ? (LINUX ? 200 : 240) : 0) + (options.dlss ? (LINUX ? 60 : 325) : 0);
 const diskNeeded = () => (usingFound() && options.install === inst.install ? 0 : 8.5 * GB) + 2.4 * GB + (bundled && !LINUX ? 737 * 1024 ** 2 : 0) + downloadMB() * 1024 ** 2;
 
 const SWITCHES = [
-  { key: 'fsr', title: 'AMD FSR', note: () => LINUX ? 'Upscaling, any graphics card · about 200 MB'
-    : 'Upscaling and frame generation, any graphics card · about 240 MB' },
+  { key: 'fsr', title: 'AMD FSR', note: () => `Upscaling and frame generation, any graphics card · about ${LINUX ? 200 : 240} MB` },
   { key: 'dlss', title: 'NVIDIA DLSS', note: () => !rtx ? 'Needs an NVIDIA RTX graphics card'
     : LINUX ? 'Upscaling · about 60 MB' : 'Upscaling, frame generation, Reflex · about 325 MB', needsRtx: true },
   { key: 'freeUp', title: 'Free up space after building', note: () => `Deletes the tools and build files (${bundled ? '2 GB' : '1.3 GB'}). Updates then download them and rebuild` },

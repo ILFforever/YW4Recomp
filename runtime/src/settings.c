@@ -100,24 +100,24 @@ static const char *mask_speedup_disabled(void) {
 static const char *contact_disabled(void) { return shadow_mask_native() ? NULL : "NEEDS SHADOW MASK SET TO CUSTOM"; }
 /* Why a row is locked when AMD FSR and NVIDIA DLSS are not in the program. On Windows the builder left them out
  * (recomp.build --no-fsr / --no-dlss). On Linux what isn't there can't be built in yet, and "not in this build" read
- * like something had gone wrong (owner, 2026-11-12). Linux has DLSS and FSR upscaling (decision 0073) but no frame
- * generation or Reflex yet: NVIDIA's come through Streamline, Windows only; FSR's Linux build is the upscaler only. */
+ * like something had gone wrong (owner, 2026-11-12). Linux has DLSS and FSR upscaling and FSR frame generation (decision
+ * 0073), but not NVIDIA's frame generation or Reflex: those come through Streamline, which is Windows only. */
 #ifdef _WIN32
 #define NOT_BUILT "NOT IN THIS BUILD"
-#define NO_FRAME_GENERATION 0
+#define NO_STREAMLINE 0
 #else
 #define NOT_BUILT "NOT SUPPORTED ON LINUX YET"
-#define NO_FRAME_GENERATION 1
+#define NO_STREAMLINE 1
 #endif
 static int reflex_index(void) { return dlssg_reflex(); }  /* what runs: on while DLSS frame generation is */
 static const char *reflex_disabled(void) {
-    if (NO_FRAME_GENERATION || !gpu_dlss_built()) return NOT_BUILT;
+    if (NO_STREAMLINE || !gpu_dlss_built()) return NOT_BUILT;
     if (!dlssg_reflex_available()) return "NEEDS AN NVIDIA GPU";
     /* locked on, not off: the panels show a reason starting "ALWAYS ON" without their "Off for now" */
     return gpu_fg() == 2 && dlssg_available() ? "ALWAYS ON WITH DLSS FRAME GENERATION. NVIDIA REQUIRES IT" : NULL;
 }
 static const char *fg_disabled(void) {
-    if (NO_FRAME_GENERATION || (!gpu_fsr_built() && !gpu_dlss_built())) return NOT_BUILT;
+    if (!gpu_fsr_built() && (NO_STREAMLINE || !gpu_dlss_built())) return NOT_BUILT;
     if (!gpu_fsr_built() && !dlssg_available()) return "NOT SUPPORTED ON THIS GPU";
     return gpu_aa() >= 3 ? NULL : (gpu_dlss_available() ? "NEEDS ANTI-ALIASING SET TO TAA, FSR OR DLSS"
                                                         : "NEEDS ANTI-ALIASING SET TO TAA OR FSR");

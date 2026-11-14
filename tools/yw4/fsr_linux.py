@@ -1,17 +1,18 @@
-"""AMD FSR 3.1 upscaling for Linux, built from AMD's FidelityFX SDK v1.1.4 source (decision 0073).
+"""AMD FSR 3.1 upscaling and frame generation for Linux, built from AMD's FidelityFX SDK v1.1.4 source (decision 0073).
 
     python -m tools.yw4.fsr_linux        (recomp/build.py runs it on Linux unless --no-fsr)
 
 AMD ships the SDK for Windows only (SDK 2.x has no Vulkan backend at all), so the Linux library is made here, once
 per SDK and patch set, into <work_dir>/deps/fsr-linux-1.1.4/:
 
-    lib/libamd_fidelityfx_vk.so   the five ffx-api functions the game calls (runtime/src/gpu_fsr.c), the FSR 3.1.5
-                                  upscaler, AMD's Vulkan backend, and yw4FfxHostSet
+    lib/libamd_fidelityfx_vk.so   the five ffx-api functions the game calls (runtime/src/gpu_fsr.c, gpu_fg.c), the FSR
+                                  3.1.5 upscaler, frame generation (frame interpolation and optical flow, without AMD's
+                                  swapchain: the game presents and paces itself), AMD's Vulkan backend, yw4FfxHostSet
     include/ffx_api/              the matching headers, for gpu_fsr.c
 
 Steps: the SDK's source archive (pinned by SHA-256, its sdk/ and ffx-api/ folders only); xplane-fsr3's Linux patches
 and ours (third_party/fsr3-linux, README.md there says which is whose); AMD's shader compiler, ported, built with the
-system's C++ compiler; the upscaler's shader permutations generated with it and glslang; the library linked with
+system's C++ compiler; the three components' shader permutations generated with it and glslang; the library linked with
 its C++ runtime inside, so it needs nothing but the C library. About a minute on 8 threads. A stamp of the inputs
 skips all of it when nothing changed.
 """
@@ -36,35 +37,51 @@ SDK_SHA256 = "25c46398a656150397597f78d44bf7cb445e9e177dd116b309bbfdf50d50cc9f"
 PORT = config.REPO_ROOT / "third_party" / "fsr3-linux"
 LIB = "libamd_fidelityfx_vk.so"
 
-# the upscaler's library sources (xplane-fsr3's CMakeLists.txt, FidelityFX SDK v1.1.4 layout) and the ffx-api layer
+# the library's sources (xplane-fsr3's CMakeLists.txt, with frame generation's as NX2navi's PR #455 adds them; FidelityFX
+# SDK v1.1.4 layout) and the ffx-api layer
 SDK_SOURCES = [
     "sdk/src/components/fsr3upscaler/ffx_fsr3upscaler.cpp",
+    "sdk/src/components/frameinterpolation/ffx_frameinterpolation.cpp",
+    "sdk/src/components/opticalflow/ffx_opticalflow.cpp",
     "sdk/src/backends/vk/ffx_vk.cpp",
     "sdk/src/backends/shared/ffx_shader_blobs.cpp",
     "sdk/src/backends/shared/blob_accessors/ffx_fsr3upscaler_shaderblobs.cpp",
+    "sdk/src/backends/shared/blob_accessors/ffx_frameinterpolation_shaderblobs.cpp",
+    "sdk/src/backends/shared/blob_accessors/ffx_opticalflow_shaderblobs.cpp",
     "sdk/src/shared/ffx_assert.cpp",
     "sdk/src/shared/ffx_message.cpp",
     "sdk/src/shared/ffx_breadcrumbs_list.cpp",
     "sdk/src/shared/ffx_object_management.cpp",
 ]
 API_SOURCES = ["ffx-api/src/ffx_api.cpp", "ffx-api/src/ffx_provider.cpp", "ffx-api/src/ffx_provider_fsr3upscale.cpp",
-               "ffx-api/src/backends.cpp", "ffx-api/src/validation.cpp"]
+               "ffx-api/src/ffx_provider_framegeneration.cpp", "ffx-api/src/backends.cpp", "ffx-api/src/validation.cpp"]
 PORT_SOURCES = ["ffx_host_vk.cpp", "ffx_fg_stub.cpp", "yw4_ffx_host.cpp"]
 # the backend's direct Vulkan calls, routed to the game's through the host shim (ffx_host_vk.h)
 WRAPPED = ["vkGetPhysicalDeviceProperties", "vkGetPhysicalDeviceProperties2", "vkGetPhysicalDeviceFeatures",
            "vkGetPhysicalDeviceFeatures2", "vkGetPhysicalDeviceMemoryProperties", "vkEnumerateDeviceExtensionProperties",
            "vkGetDeviceProcAddr", "vkCreateBuffer"]
-# the shader compiler's permutations (xplane-fsr3's gen_shaders.sh, after the SDK's CMakeCompileFSR3UpscalerShaders.txt)
-SHADER_BASE = ["-reflection", "-deps=gcc", "-DFFX_GPU=1",
-               "-DFFX_FSR3UPSCALER_OPTION_UPSAMPLE_SAMPLERS_USE_DATA_HALF=0",
-               "-DFFX_FSR3UPSCALER_OPTION_ACCUMULATE_SAMPLERS_USE_DATA_HALF=0",
-               "-DFFX_FSR3UPSCALER_OPTION_REPROJECT_SAMPLERS_USE_DATA_HALF=1",
-               "-DFFX_FSR3UPSCALER_OPTION_POSTPROCESSLOCKSTATUS_SAMPLERS_USE_DATA_HALF=0",
-               "-DFFX_FSR3UPSCALER_OPTION_UPSAMPLE_USE_LANCZOS_TYPE=2",
-               "-compiler=glslang", "-e", "CS", "--target-env", "vulkan1.2", "-S", "comp", "-Os", "-DFFX_GLSL=1"]
-SHADER_PERMUTATIONS = [f"-DFFX_FSR3UPSCALER_OPTION_{o}={{0,1}}" for o in
-                       ("REPROJECT_USE_LANCZOS_TYPE", "HDR_COLOR_INPUT", "LOW_RESOLUTION_MOTION_VECTORS",
-                        "JITTERED_MOTION_VECTORS", "INVERTED_DEPTH", "APPLY_SHARPENING")]
+# the shader compiler's arguments per component: the SDK's gpu/<component>/CMakeCompile*Shaders.txt for its GLSL path
+# (as xplane-fsr3's gen_shaders.sh and NX2navi's do): fixed options, then the permutation options
+SHADER_API = ["-reflection", "-deps=gcc", "-DFFX_GPU=1",
+              "-compiler=glslang", "-e", "CS", "--target-env", "vulkan1.2", "-S", "comp", "-Os", "-DFFX_GLSL=1"]
+SHADER_COMPONENTS = {
+    "fsr3upscaler": (["-DFFX_FSR3UPSCALER_OPTION_UPSAMPLE_SAMPLERS_USE_DATA_HALF=0",
+                      "-DFFX_FSR3UPSCALER_OPTION_ACCUMULATE_SAMPLERS_USE_DATA_HALF=0",
+                      "-DFFX_FSR3UPSCALER_OPTION_REPROJECT_SAMPLERS_USE_DATA_HALF=1",
+                      "-DFFX_FSR3UPSCALER_OPTION_POSTPROCESSLOCKSTATUS_SAMPLERS_USE_DATA_HALF=0",
+                      "-DFFX_FSR3UPSCALER_OPTION_UPSAMPLE_USE_LANCZOS_TYPE=2"],
+                     [f"-DFFX_FSR3UPSCALER_OPTION_{o}={{0,1}}" for o in
+                      ("REPROJECT_USE_LANCZOS_TYPE", "HDR_COLOR_INPUT", "LOW_RESOLUTION_MOTION_VECTORS",
+                       "JITTERED_MOTION_VECTORS", "INVERTED_DEPTH", "APPLY_SHARPENING")]),
+    "frameinterpolation": (["-DFFX_FRAMEINTERPOLATION_OPTION_UPSAMPLE_SAMPLERS_USE_DATA_HALF=0",
+                            "-DFFX_FRAMEINTERPOLATION_OPTION_ACCUMULATE_SAMPLERS_USE_DATA_HALF=0",
+                            "-DFFX_FRAMEINTERPOLATION_OPTION_REPROJECT_SAMPLERS_USE_DATA_HALF=1",
+                            "-DFFX_FRAMEINTERPOLATION_OPTION_POSTPROCESSLOCKSTATUS_SAMPLERS_USE_DATA_HALF=0",
+                            "-DFFX_FRAMEINTERPOLATION_OPTION_UPSAMPLE_USE_LANCZOS_TYPE=2"],
+                           [f"-DFFX_FRAMEINTERPOLATION_OPTION_{o}={{0,1}}" for o in
+                            ("LOW_RES_MOTION_VECTORS", "JITTER_MOTION_VECTORS", "INVERTED_DEPTH")]),
+    "opticalflow": ([], ["-DFFX_OPTICALFLOW_OPTION_HDR_COLOR_INPUT={0,1}"]),
+}
 SHADER_VARIANTS = [("", 0), ("_wave64", 0), ("_16bit", 1), ("_wave64_16bit", 1)]
 
 
@@ -72,9 +89,9 @@ def out_dir(cfg: config.Config) -> Path:
     return cfg.work_dir / "deps" / f"fsr-linux-{SDK_VERSION}"
 
 
-def compilers() -> tuple[str, str]:
-    """(C, C++) compilers: the build's (CC, set by tools/yw4/system.py) and its C++ sibling."""
-    cc = os.environ.get("CC") or shutil.which("cc") or "cc"
+def compilers(cfg: config.Config) -> tuple[str, str]:
+    """(C, C++) compilers: the build's (CC, set by tools/yw4/system.py, else [tools] cc) and its C++ sibling."""
+    cc = os.environ.get("CC") or cfg.cc or shutil.which("cc") or "cc"
     name = Path(cc).name
     for c, cxx in (("clang", "clang++"), ("gcc", "g++")):
         if name.startswith(c):
@@ -144,13 +161,16 @@ def build_shader_compiler(src: Path, build: Path, cc: str, cxx: str) -> Path:
 
 def generate_shaders(src: Path, sc: Path, glslang: str, shaders: Path) -> None:
     gpu = src / "sdk" / "include" / "FidelityFX" / "gpu"
-    files = sorted((src / "sdk" / "src" / "backends" / "vk" / "shaders" / "fsr3upscaler").glob("*.glsl"))
-    jobs = [(f, suffix, half) for f in files for suffix, half in SHADER_VARIANTS]
+    jobs = []
+    for comp, (fixed, perms) in SHADER_COMPONENTS.items():
+        for f in sorted((src / "sdk" / "src" / "backends" / "vk" / "shaders" / comp).glob("*.glsl")):
+            for suffix, half in SHADER_VARIANTS:
+                jobs.append([str(sc), *SHADER_API, *fixed, *perms, f"-glslangexe={glslang}", f"-name={f.stem}{suffix}",
+                             f"-DFFX_HALF={half}", f"-I{gpu}", f"-I{gpu / comp}", f"-output={shaders}", str(f)])
     shaders.mkdir(parents=True, exist_ok=True)
-    for i, (f, suffix, half) in enumerate(jobs):  # each run uses every core for its permutations
+    for i, job in enumerate(jobs):  # each run uses every core for its permutations
         progress.report("fsrshaders", i, len(jobs))
-        run([str(sc), *SHADER_BASE, *SHADER_PERMUTATIONS, f"-glslangexe={glslang}", f"-name={f.stem}{suffix}",
-             f"-DFFX_HALF={half}", f"-I{gpu}", f"-I{gpu / 'fsr3upscaler'}", f"-output={shaders}", str(f)])
+        run(job)
     progress.report("fsrshaders", len(jobs), len(jobs))
 
 
@@ -160,10 +180,11 @@ def build_library(src: Path, build: Path, shaders: Path, cxx: str, out: Path) ->
               "-DFFX_GCC", "-DFFX_SDK_DEFAULT_CONTEXT_SIZE=(1024 * 256)",
               f"-I{config.REPO_ROOT / 'third_party' / 'vulkan' / 'include'}", f"-I{sdk / 'include'}",
               f"-I{sdk / 'include' / 'FidelityFX' / 'host'}", f"-I{PORT}"]
-    sdk_flags = ["-DFFX_FSR3UPSCALER", f"-I{sdk / 'src' / 'shared'}", f"-I{sdk / 'src' / 'backends' / 'shared'}",
-                 f"-I{sdk / 'src' / 'components'}", f"-I{shaders}", f"-I{sdk / 'include' / 'FidelityFX' / 'gpu'}",
-                 f"-I{sdk / 'include' / 'FidelityFX' / 'gpu' / 'fsr3upscaler'}"]
-    api_flags = ["-DFFX_BACKEND_VK", "-DFFX_UPSCALE_ONLY", "-DFFXDLL_VERSION_MAJOR=1", "-DFFXDLL_VERSION_MINOR=0",
+    sdk_flags = ["-DFFX_FSR3UPSCALER", "-DFFX_FI", "-DFFX_OF", f"-I{sdk / 'src' / 'shared'}",
+                 f"-I{sdk / 'src' / 'backends' / 'shared'}", f"-I{sdk / 'src' / 'components'}", f"-I{shaders}",
+                 f"-I{sdk / 'include' / 'FidelityFX' / 'gpu'}",
+                 *(f"-I{sdk / 'include' / 'FidelityFX' / 'gpu' / c}" for c in SHADER_COMPONENTS)]
+    api_flags = ["-DFFX_BACKEND_VK", "-DFFX_YW4_LINUX", "-DFFXDLL_VERSION_MAJOR=1", "-DFFXDLL_VERSION_MINOR=0",
                  "-DFFXDLL_VERSION_PATCH=1", "-DFFXDLL_VERSION_API=VK", "-DCI_PIPELINE_ID=0",
                  f"-I{src / 'ffx-api' / 'include'}", f"-I{src / 'ffx-api' / 'src'}"]
     jobs = [(src / s, sdk_flags) for s in SDK_SOURCES] + [(src / s, api_flags) for s in API_SOURCES] + \
@@ -200,7 +221,7 @@ def fetch_fsr_linux(cfg: config.Config) -> Path:
     glslang = shader.glslang(cfg)
     if not glslang:
         raise RuntimeError("FSR for Linux needs glslang (glslangValidator)")
-    cc, cxx = compilers()
+    cc, cxx = compilers(cfg)
     dl = cfg.work_dir / "deps" / f"fsr-linux-{SDK_VERSION}-dl"  # the archive alone in its own folder
     dl.mkdir(parents=True, exist_ok=True)
     archive = dl / f"{SDK_NAME}.tar.gz"
