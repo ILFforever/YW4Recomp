@@ -85,6 +85,19 @@ class SettingsTexts(unittest.TestCase):
                     missing = {c for c in text.upper() if c not in glyphs}
                     self.assertFalse(missing, f"characters without a glyph: {sorted(missing)}")
 
+    def test_sharpening_row(self):
+        """SHARPENING (decision 0076): five steps saved as 0..4, never greyed out (it works with every
+        anti-aliasing), and the runtime's default is MEDIUM."""
+        src = (ROOT / "runtime/src/settings.c").read_text(encoding="utf-8")
+        row = next(r for r in settings() if r["name"] == "SHARPENING")
+        self.assertEqual(row["options"], ["OFF", "LOW", "MEDIUM", "HIGH", "MAX"])
+        self.assertEqual(row["values"], ["0", "1", "2", "3", "4"])
+        entry = src[src.index('"SHARPENING",'):]
+        entry = entry[:entry.index("}},") + 3]
+        self.assertTrue(entry.rstrip().endswith('"4"}},'), "no greyed-out reason after the values")
+        aa = (ROOT / "runtime/src/gpu_aa.c").read_text(encoding="utf-8")
+        self.assertRegex(aa, r'getenv\("YW4_SHARPEN"\);\s*l = e && \*e \? atoi\(e\) : 2;')
+
 
 if __name__ == "__main__":
     unittest.main()

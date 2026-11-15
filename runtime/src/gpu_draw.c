@@ -2644,7 +2644,7 @@ static void draw(VkCommandBuffer cb, GpuState *s, const CmdRec *r) {
     if (g->sh[ST_FRAG] && g->sh[ST_FRAG]->key == COMPOSITE_SHADER) {
         gpu_bloom_after_composite(cb, s);  /* YW4_BLOOM=check: the game's results, before anti-aliasing */
         s->after_composite = 1;
-        if (gpu_aa() || gpu_upscale()) gpu_aa_apply(cb, s);
+        gpu_aa_apply(cb, s);  /* anti-aliasing, upscaling, SHARPENING: it returns at once when none is on */
     }
 }
 

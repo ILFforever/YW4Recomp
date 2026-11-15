@@ -12,7 +12,8 @@
  * FSR (mode 4, gpu_fsr.c): AMD's upscaler in place of TAA's blend, from the same jitter, motion and the scene's
  * depth; at the scene's own size for now (native anti-aliasing), falling back to TAA when FSR can't run.
  * DLSS (mode 5, gpu_dlss.c): NVIDIA's upscaler in the same place, on NVIDIA RTX GPUs; FSR, then TAA, when it can't.
- * YW4_AA=0 off / 1 FXAA / 2 SMAA / 3 TAA / 4 FSR / 5 DLSS at start; the settings panel (F1) cycles it. */
+ * YW4_AA=0 off / 1 FXAA / 2 SMAA / 3 TAA / 4 FSR / 5 DLSS at start; the settings panel (F1) cycles it.
+ * SHARPENING (gpu_sharpen, decision 0076) comes after any of them, OFF included. */
 #include <inttypes.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -63,6 +64,43 @@ void gpu_aa_step(int dir) {
 }
 
 void gpu_aa_cycle(void) { gpu_aa_step(1); }
+
+/* SHARPENING (decision 0076): 0 off, 1 low, 2 medium (the default), 3 high, 4 max; YW4_SHARPEN at start, the
+ * settings panel cycles. One choice for every anti-aliasing: TAA and DLSS get it in their last pass (taa_output.frag),
+ * FSR as its own sharpener's amount (RCAS, so nothing is sharpened twice), OFF / FXAA / SMAA as a pass of its own. */
+static int sharpen_level = -1;
+
+int gpu_sharpen(void) {
+    int l = __atomic_load_n(&sharpen_level, __ATOMIC_ACQUIRE);
+    if (l < 0) {
+        const char *e = getenv("YW4_SHARPEN");
+        l = e && *e ? atoi(e) : 2;
+        if (l < 0 || l > 4) l = 2;
+        __atomic_store_n(&sharpen_level, l, __ATOMIC_RELEASE);
+    }
+    return l;
+}
+
+void gpu_sharpen_cycle(void) {
+    int l = (gpu_sharpen() + 1) % 5;
+    __atomic_store_n(&sharpen_level, l, __ATOMIC_RELEASE);
+    static const char *const name[5] = {"off", "low", "medium", "high", "max"};
+    fprintf(stderr, "yw4: gpu: sharpening %s\n", name[l]);
+}
+
+/* The amount, 0..1 (0.25 a step). YW4_TAA_SHARPEN / YW4_FSR_SHARPNESS (testing) override it for TAA (and DLSS and
+ * the others, which share its pass) / for FSR with any value. */
+static float sharpen_amount(int fsr) {
+    static float taa_env = -2.0f, fsr_env = -2.0f;  /* -1: not set */
+    if (taa_env < -1.5f) {
+        const char *e = getenv("YW4_TAA_SHARPEN");
+        taa_env = e && *e ? (float)atof(e) : -1.0f;
+        e = getenv("YW4_FSR_SHARPNESS");
+        fsr_env = e && *e ? (float)atof(e) : -1.0f;
+    }
+    float env = fsr ? fsr_env : taa_env;
+    return env >= 0.0f ? env : (float)gpu_sharpen() * 0.25f;
+}
 
 VkShaderModule gpu_native_shader(const char *name) {
     const char *dir = getenv("YW4_NATIVE_SHADER_DIR");
@@ -502,10 +540,8 @@ static void taa(VkCommandBuffer cb, VkImageView target, VkFormat fmt, uint32_t w
         result = weights.view;
     }
     memset(pass_params, 0, sizeof pass_params);
-    /* sharpening after the blend (YW4_TAA_SHARPEN, 0 none; the debug views: none) */
-    static float sharpen = -1.0f;
-    if (sharpen < 0.0f) sharpen = getenv("YW4_TAA_SHARPEN") ? (float)atof(getenv("YW4_TAA_SHARPEN")) : 0.5f;
-    pass_params[0] = result == history[next].view ? sharpen : 0.0f;
+    /* SHARPENING after the blend (the debug views: none) */
+    pass_params[0] = result == history[next].view ? sharpen_amount(0) : 0.0f;
     pass(cb, P_TAA_OUT, target, fmt, w, h, 0, result);
     pass_params[0] = 0.0f;
     taa_cur = next, history_valid = 1;
@@ -579,13 +615,13 @@ static int fsr(VkCommandBuffer cb, GpuImage *d, VkImageView depth_in, VkImageVie
     if (e) sscanf(e, "%f,%f", &jsx, &jsy);
     in.motion_scale[0] = -(float)w * mx, in.motion_scale[1] = -(float)h * sy * my;
     in.jitter[0] *= jsx, in.jitter[1] *= jsy;
-    static float sharp = -1.0f, cnear = -1.0f, cfar = -1.0f;
-    if (sharp < 0.0f) {
-        sharp = getenv("YW4_FSR_SHARPNESS") ? (float)atof(getenv("YW4_FSR_SHARPNESS")) : 0.5f;
+    static float cnear = -1.0f, cfar = -1.0f;
+    if (cnear < 0.0f) {
         cnear = getenv("YW4_FSR_NEAR") ? (float)atof(getenv("YW4_FSR_NEAR")) : 0.1f;
         cfar = getenv("YW4_FSR_FAR") ? (float)atof(getenv("YW4_FSR_FAR")) : 1000.0f;
     }
-    in.sharpness = sharp, in.cam_near = cnear, in.cam_far = cfar, in.fov_y = 0.785398f;  /* 45 degrees, town's */
+    /* SHARPENING as FSR's own sharpener's amount (0 turns it off, gpu_fsr.c) */
+    in.sharpness = sharpen_amount(1), in.cam_near = cnear, in.cam_far = cfar, in.fov_y = 0.785398f;  /* 45 degrees, town's */
     {   /* YW4_FSR_LOG: every 300 frames, how often FSR was asked and how often it started over */
         static int calls, resets, on = -1;
         if (on < 0) on = getenv("YW4_FSR_LOG") != NULL;
@@ -597,7 +633,7 @@ static int fsr(VkCommandBuffer cb, GpuImage *d, VkImageView depth_in, VkImageVie
     full_barrier(cb);
     if (!gpu_fsr_dispatch(cb, &in)) return 0;
     full_barrier(cb);
-    pass(cb, P_TAA_OUT, target, fmt, ow, oh, 0, fsr_out.view);  /* sharpen 0 (pass_params cleared) */
+    pass(cb, P_TAA_OUT, target, fmt, ow, oh, 0, fsr_out.view);  /* not sharpened again (pass_params cleared) */
     last = now, last_ow = ow, last_ns = t;
     history_valid = 0;  /* TAA's history is stale when it takes over again */
     return 1;
@@ -633,8 +669,10 @@ static int dlss(VkCommandBuffer cb, GpuImage *d, VkImageView depth_view, VkImage
     gpu_passes_other(cb, "DLSS itself", 0);  /* the per-pass timer (F5): DLSS apart from our passes around it */
     if (!gpu_dlss_dispatch(cb, &in)) return 0;
     full_barrier(cb);
-    gpu_passes_other(cb, "DLSS: its output written back", 0);
+    gpu_passes_other(cb, "DLSS: its output written back (SHARPENING)", 0);
+    pass_params[0] = sharpen_amount(0);  /* DLSS has no sharpening of its own any more: ours, at the output's size */
     pass(cb, P_TAA_OUT, target, fmt, ow, oh, 0, fsr_out.view);
+    pass_params[0] = 0.0f;
     last = now, last_ow = ow, last_ns = t;
     history_valid = 0;
     return 1;
@@ -678,9 +716,9 @@ static void fg_prepare(VkCommandBuffer cb, GpuImage *d, VkImageView dv, uint32_t
 }
 
 void gpu_aa_apply(VkCommandBuffer cb, GpuState *s) {
-    int mode = gpu_aa(), up = gpu_upscale() != 0;
+    int mode = gpu_aa(), up = gpu_upscale() != 0, sharpen = gpu_sharpen() != 0;
     NvnTexture *t = s->ncolor ? s->rt.color[0] : NULL;
-    if ((!mode && !up) || !t || gpu_upscaled(t)) return;
+    if ((!mode && !up && !sharpen) || !t || gpu_upscaled(t)) return;
     gpu_end_rendering(cb, s);
     GpuImage *g = image_of(cb, t);
     uint32_t w, h;
@@ -725,7 +763,7 @@ void gpu_aa_apply(VkCommandBuffer cb, GpuState *s) {
      * of the scene, anti-aliased as usual */
     static int debug = -1;
     if (debug < 0) debug = getenv("YW4_AA_DEBUG") ? atoi(getenv("YW4_AA_DEBUG")) : 0;
-    static const char *const label[6] = {"upscaling (plain)", "anti-aliasing: FXAA", "anti-aliasing: SMAA",
+    static const char *const label[6] = {"anti-aliasing off: SHARPENING", "anti-aliasing: FXAA", "anti-aliasing: SMAA",
                                          "anti-aliasing: TAA", "anti-aliasing: FSR", "anti-aliasing: DLSS"};
     gpu_passes_other(cb, label[mode], 0);  /* its own line in the per-pass timer (F5) */
     pass(cb, debug == 3 ? P_TEST : P_ENCODE, encoded.view, VK_FORMAT_R16G16B16A16_SFLOAT, w, h, 0, scene);
@@ -746,6 +784,14 @@ void gpu_aa_apply(VkCommandBuffer cb, GpuState *s) {
             pass(cb, P_EDGE, edges.view, VK_FORMAT_R8G8_UNORM, w, h, 1, NULL);
             pass(cb, P_WEIGHT, weights.view, VK_FORMAT_R8G8B8A8_UNORM, w, h, 1, NULL);
             pass(cb, debug == 1 ? P_SHOW_EDGES : debug == 2 ? P_SHOW_WEIGHTS : P_BLEND, target, fmt, w, h, 0, NULL);
+        }
+        if (mode < 3 && sharpen && !debug) {  /* SHARPENING without TAA's pass: one of its own, TAA's last pass */
+            gpu_passes_other(cb, "SHARPENING (anti-aliasing off, FXAA or SMAA)", 0);
+            /* off: the scene is already encoded; FXAA / SMAA wrote theirs into the target, so encoded again */
+            if (mode) pass(cb, P_ENCODE, encoded.view, VK_FORMAT_R16G16B16A16_SFLOAT, w, h, 0, scene);
+            pass_params[0] = sharpen_amount(0);
+            pass(cb, P_TAA_OUT, target, fmt, w, h, 0, encoded.view);
+            pass_params[0] = 0.0f;
         }
         if (out != target) {  /* upscaling without FSR: the anti-aliased 3D stretched to the output's size */
             pass(cb, P_ENCODE, encoded.view, VK_FORMAT_R16G16B16A16_SFLOAT, w, h, 0, scene);
