@@ -149,7 +149,19 @@ int mousemenu_talking(void) { return enabled() && __atomic_load_n(&talking, __AT
  * focus until the field's HUD comes back, as a conversation. The left stick pans it, the right stick zooms. */
 #define MAP_VTABLE 0x14c14f8u
 static int map_shown;
+static uint64_t map_event_ms;  /* the map's last focus, back or layer (SDL ticks) */
 int mousemenu_map(void) { return enabled() && __atomic_load_n(&map_shown, __ATOMIC_ACQUIRE); }
+
+/* The field HUD's shortcut cross was updated (shortcutwheel.c's hook): the field is back. Mirapo's list is this map
+ * class too, and backed out of (B twice) the field's HUD menu doesn't focus again, so the map stayed "shown" and the
+ * shortcut wheel never opened again (owner, 2026-11-16). The cross isn't updated while the map is up; half a second
+ * after the map's last event, so an update just as it opens doesn't count. */
+void mousemenu_field_hud_seen(void) {
+    if (!__atomic_load_n(&map_shown, __ATOMIC_ACQUIRE)) return;
+    if (SDL_GetTicks() - __atomic_load_n(&map_event_ms, __ATOMIC_ACQUIRE) < 500) return;
+    __atomic_store_n(&map_shown, 0, __ATOMIC_RELEASE);
+    if (menu_log_on()) fprintf(stderr, "yw4: menu: map gone (the field's HUD is updated again)\n");
+}
 
 /* The battle's Stopwatching menu (Pin / Items / Switch Members, vt main+0x14c6e58) and the pages it opens (Switch
  * Members, vt main+0x14c7028, a grid six wide; Items, vt main+0x14c73c8): up while the last menu focus was one of
@@ -177,7 +189,10 @@ int mousemenu_stopwatch(void) {
 
 static void talk_note(uint64_t vt) {
     if (vt == TALK_VTABLE) __atomic_store_n(&talking, 1, __ATOMIC_RELEASE);
-    else if (vt == MAP_VTABLE) __atomic_store_n(&map_shown, 1, __ATOMIC_RELEASE);
+    else if (vt == MAP_VTABLE) {
+        __atomic_store_n(&map_event_ms, SDL_GetTicks(), __ATOMIC_RELEASE);
+        __atomic_store_n(&map_shown, 1, __ATOMIC_RELEASE);
+    }
     else if (vt == FIELD_HUD_VTABLE) {
         __atomic_store_n(&talking, 0, __ATOMIC_RELEASE);
         __atomic_store_n(&map_shown, 0, __ATOMIC_RELEASE);
@@ -259,8 +274,11 @@ int yw4_hook_menu_focus(CPUState *ctx) {
      * R in the menu, and after the fight goes on) change nothing. Anything else (the fight's HUD menus): off, 0.4 s
      * later, unless the menu focuses or picks again first: Switch Members focuses the fight's HUD for a moment between
      * its picks (owner, 2026-11-15: after Tab the hints went back; the members' second pick). */
+    /* a Yes / No box only while the menu is already up: Mirapo's "warp here?" turned it on in the field, where
+     * nothing turns it off, and the shortcut wheel stopped opening (owner, 2026-11-16) */
     if ((vt == STOPWATCH_VTABLE && (hash == STOPWATCH_LIST_HASH || hash == BATTLE_START_HASH)) ||
-        vt == STOPWATCH_MEMBERS_VTABLE || vt == STOPWATCH_ITEMS_VTABLE || vt == GENERAL_WINDOW_VTABLE) {
+        vt == STOPWATCH_MEMBERS_VTABLE || vt == STOPWATCH_ITEMS_VTABLE ||
+        (vt == GENERAL_WINDOW_VTABLE && __atomic_load_n(&stopwatch, __ATOMIC_ACQUIRE))) {
         __atomic_store_n(&stopwatch, 1, __ATOMIC_RELEASE);
         __atomic_store_n(&stopwatch_off_at, 0, __ATOMIC_RELEASE);
     } else if (!(vt == STOPWATCH_VTABLE && (hash == 0x81f8dde3u || hash == 0xcf634eb0u)) &&
@@ -309,6 +327,9 @@ int yw4_hook_menu_back(CPUState *ctx) {
     uint64_t vt = ld64(menu) - yw4_image_base;
     if (menu_log_on())
         fprintf(stderr, "yw4: menu_back: menu=%#llx vt=%#llx\n", (unsigned long long)menu, (unsigned long long)vt);
+    /* backing out: the next field HUD update ends it at once (the half second guards only the map's opening; a
+     * press right after closing it was still refused, owner 2026-11-16) */
+    if (vt == MAP_VTABLE) __atomic_store_n(&map_event_ms, 0, __ATOMIC_RELEASE);
     if (vt == PAD_VTABLE) {
         __atomic_store_n(&pad_open, 0, __ATOMIC_RELEASE);
         __atomic_store_n(&active_idx, -1, __ATOMIC_RELEASE);
