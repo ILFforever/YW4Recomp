@@ -15,6 +15,8 @@ int mousemenu_map(void);
 /* The field HUD's shortcut cross was updated (shortcutwheel.c): the field is back, so a map closed without the field's
  * menu focusing again (Mirapo's list backed out of) stops counting as open. */
 void mousemenu_field_hud_seen(void);
+/* Returns 1 while Naviwoof Guide's row of pins is up: the wheel steps left and right (bindings.c). */
+int mousemenu_naviwoof(void);
 /* Returns 1 while the battle's Stopwatching menu or a page it opened is up: the clicks confirm and go back. */
 int mousemenu_stopwatch(void);
 /* Returns 1 while a Yes / No box with its buttons side by side has the focus: the wheel steps left and right. */

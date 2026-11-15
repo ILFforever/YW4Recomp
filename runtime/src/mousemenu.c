@@ -156,9 +156,22 @@ int mousemenu_map(void) { return enabled() && __atomic_load_n(&map_shown, __ATOM
  * class too, and backed out of (B twice) the field's HUD menu doesn't focus again, so the map stayed "shown" and the
  * shortcut wheel never opened again (owner, 2026-11-16). The cross isn't updated while the map is up; half a second
  * after the map's last event, so an update just as it opens doesn't count. */
+/* Naviwoof Guide (vt main+0x14c2df8, seen 2026-11-16): a row of pins, left and right; the row is one control, so
+ * moving along it focuses nothing. Up from its first focus until it is backed out of or the field is back; while up
+ * the mouse's wheel steps left and right, its clicks confirm and go back (bindings.c; owner, 2026-11-16). */
+#define NAVIWOOF_VTABLE 0x14c2df8u
+static int naviwoof;
+static uint64_t naviwoof_ms;
+int mousemenu_naviwoof(void) { return enabled() && __atomic_load_n(&naviwoof, __ATOMIC_ACQUIRE); }
+
 void mousemenu_field_hud_seen(void) {
+    uint64_t now = SDL_GetTicks();
+    if (__atomic_load_n(&naviwoof, __ATOMIC_ACQUIRE) && now - __atomic_load_n(&naviwoof_ms, __ATOMIC_ACQUIRE) >= 500) {
+        __atomic_store_n(&naviwoof, 0, __ATOMIC_RELEASE);
+        if (menu_log_on()) fprintf(stderr, "yw4: menu: Naviwoof Guide gone (the field's HUD is updated again)\n");
+    }
     if (!__atomic_load_n(&map_shown, __ATOMIC_ACQUIRE)) return;
-    if (SDL_GetTicks() - __atomic_load_n(&map_event_ms, __ATOMIC_ACQUIRE) < 500) return;
+    if (now - __atomic_load_n(&map_event_ms, __ATOMIC_ACQUIRE) < 500) return;
     __atomic_store_n(&map_shown, 0, __ATOMIC_RELEASE);
     if (menu_log_on()) fprintf(stderr, "yw4: menu: map gone (the field's HUD is updated again)\n");
 }
@@ -192,10 +205,14 @@ static void talk_note(uint64_t vt) {
     else if (vt == MAP_VTABLE) {
         __atomic_store_n(&map_event_ms, SDL_GetTicks(), __ATOMIC_RELEASE);
         __atomic_store_n(&map_shown, 1, __ATOMIC_RELEASE);
+    } else if (vt == NAVIWOOF_VTABLE) {
+        __atomic_store_n(&naviwoof_ms, SDL_GetTicks(), __ATOMIC_RELEASE);
+        __atomic_store_n(&naviwoof, 1, __ATOMIC_RELEASE);
     }
     else if (vt == FIELD_HUD_VTABLE) {
         __atomic_store_n(&talking, 0, __ATOMIC_RELEASE);
         __atomic_store_n(&map_shown, 0, __ATOMIC_RELEASE);
+        __atomic_store_n(&naviwoof, 0, __ATOMIC_RELEASE);
     }
 }
 
@@ -330,6 +347,7 @@ int yw4_hook_menu_back(CPUState *ctx) {
     /* backing out: the next field HUD update ends it at once (the half second guards only the map's opening; a
      * press right after closing it was still refused, owner 2026-11-16) */
     if (vt == MAP_VTABLE) __atomic_store_n(&map_event_ms, 0, __ATOMIC_RELEASE);
+    if (vt == NAVIWOOF_VTABLE) __atomic_store_n(&naviwoof, 0, __ATOMIC_RELEASE);  /* backed out of: gone */
     if (vt == PAD_VTABLE) {
         __atomic_store_n(&pad_open, 0, __ATOMIC_RELEASE);
         __atomic_store_n(&active_idx, -1, __ATOMIC_RELEASE);

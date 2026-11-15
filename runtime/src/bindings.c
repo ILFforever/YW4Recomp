@@ -514,6 +514,9 @@ void bindings_read(const bool *keyboard, uint32_t mouse_buttons, int wheel_up, i
     if (scene_on_title() || (mousemenu_talking() && !battle)) mouse = mousemenu_sideways() ? sideways_mouse : title_mouse;
     /* the map (mousemenu_map): the wheel zooms (the right stick up and down); its moving pans (window.c) */
     if (mousemenu_map() && !battle) mouse = map_mouse;
+    /* Naviwoof Guide's row of pins (mousemenu_naviwoof): the wheel steps left and right, left click confirms (Start
+     * guiding), right click goes back (owner, 2026-11-16) */
+    if (mousemenu_naviwoof() && !battle) mouse = sideways_mouse;
     /* the battle's Stopwatching menu and its pages (mousemenu_stopwatch): the clicks confirm (A) and go back (B); the
      * wheel and its press keep the battle set's (the wheel's D-pad already moves the menu) */
     static int stopwatch_mouse[BMOUSE_PARTS];
