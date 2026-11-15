@@ -334,6 +334,9 @@ int gamemenu_prompt_take(char *out, size_t n) {
 
 int gamemenu_open(void) { return __atomic_load_n(&open_, __ATOMIC_ACQUIRE); }
 int gamemenu_previewing(void) { return __atomic_load_n(&preview, __ATOMIC_ACQUIRE); }
+int gamemenu_preview_bar_hidden(void) {
+    return __atomic_load_n(&preview, __ATOMIC_ACQUIRE) && __atomic_load_n(&preview_hidden, __ATOMIC_ACQUIRE);
+}
 
 /* F2 with a keyboard (owner, 2026-11-11: "no need to pause, a quick toggle"): the Controls page's keyboard Overview
  * alone over the running game, not paused, the player's input still going to the game; its mode follows the game
@@ -2569,7 +2572,8 @@ static void draw_controls_page(const UiCanvas *c, const GameMenuInfo *in) {
             ui_icon(c, ICON_NEXT, x + w - 46, y + (rh - 24) / 2, 24, 2.6f, PLUM);
             continue;
         }
-        if (r->value && !strcmp(r->group, "CONTROLLER")) {  /* VIBRATION, NINTENDO LAYOUT: an On/Off pill */
+        /* VIBRATION, NINTENDO LAYOUT, the mouse's SHORTCUT WHEEL: an On/Off pill */
+        if (r->value && (!strcmp(r->group, "CONTROLLER") || !strcmp(r->name, "SHORTCUT WHEEL"))) {
             int on_state = !strcmp(r->cells[0], "ON");
             const char *label = on_state ? "On" : "Off";
             float sx = x + cw[0] + 22, sh = rh - 16, sy = y + 8, aw = 24;

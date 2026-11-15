@@ -785,6 +785,10 @@ static int rumble_state = 1;
 
 int window_rumble_enabled(void) { return rumble_state; }
 void window_rumble_set_enabled(int on) { rumble_state = on; }
+/* the shortcut wheel's On / Off row (shortcutwheel.c) */
+static int wheel_state = 1;
+int swheel_enabled(void) { return wheel_state; }
+void swheel_set_enabled(int on) { wheel_state = on; }
 void window_rumble(uint16_t low, uint16_t high, uint32_t duration_ms) {
     last_low = low; last_high = high; last_dur = duration_ms; rumble_called++;
 }
@@ -814,14 +818,26 @@ int main(void) {
     if (n < 6) return 1;
     /* rows 0-1: the mouse's sensitivities; row 2: its buttons page (bed09f1); then the vibration toggle and
      * the Nintendo icons switch (04d8bba) */
-    if (strcmp(rows[3].group, "CONTROLLER") != 0) return 2;
-    if (strcmp(rows[3].name, "VIBRATION") != 0) return 3;
-    if (strcmp(rows[3].cells[0], "ON") != 0) return 4;
-    if (strcmp(rows[4].name, "NINTENDO ICONS") != 0) return 21;
-    if (strcmp(rows[5].group, "KEYS FOR") != 0) return 20;
+    if (strcmp(rows[3].name, "SHORTCUT WHEEL") != 0 || strcmp(rows[3].cells[0], "ON") != 0) return 22;
+    if (strcmp(rows[4].group, "CONTROLLER") != 0) return 2;
+    if (strcmp(rows[4].name, "VIBRATION") != 0) return 3;
+    if (strcmp(rows[4].cells[0], "ON") != 0) return 4;
+    if (strcmp(rows[5].name, "NINTENDO ICONS") != 0) return 21;
+    if (strcmp(rows[6].group, "KEYS FOR") != 0) return 20;
+
+    /* the shortcut wheel's row (decision 0075): Enter turns it off and on, saved as YW4_SHORTCUT_WHEEL */
+    bindings_select(3, 0);
+    bindings_action(SETTINGS_ACCEPT);
+    if (wheel_state != 0) return 23;
+    bindings_action(SETTINGS_RIGHT);
+    if (wheel_state != 1) return 24;
+    bindings_load_line("YW4_SHORTCUT_WHEEL", "0");
+    if (wheel_state != 0) return 25;
+    bindings_load_line("YW4_SHORTCUT_WHEEL", "1");
+    if (wheel_state != 1) return 26;
 
     /* select the vibration row and toggle off */
-    bindings_select(3, 0);
+    bindings_select(4, 0);
     bindings_action(SETTINGS_ACCEPT);
     if (rumble_state != 0) return 5;
 
@@ -895,6 +911,8 @@ const Yw4Module yw4_modules[2] = {0};
 
 int window_rumble_enabled(void) { return 1; }
 void window_rumble_set_enabled(int on) { (void)on; }
+int swheel_enabled(void) { return 1; }
+void swheel_set_enabled(int on) { (void)on; }
 void window_rumble(uint16_t low, uint16_t high, uint32_t duration_ms) { (void)low; (void)high; (void)duration_ms; }
 void window_rumble_test(void) {}
 #include "tegra.h"

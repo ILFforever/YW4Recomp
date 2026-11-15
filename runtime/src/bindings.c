@@ -14,6 +14,7 @@
 #include "mousemenu.h"
 #include "pause.h"
 #include "settings.h"
+#include "shortcutwheel.h"
 #include "window.h"
 #include "yw4fp.h"
 #include "yw4load.h"
@@ -62,11 +63,13 @@ static const Input inputs[] = {
     {"RIGHT STICK", "RIGHT", "RS_RIGHT", -1, 2, 1, {SDL_SCANCODE_L}, AXIS(SDL_GAMEPAD_AXIS_RIGHTX, 1)},
 };
 /* The controls page's rows: the mouse's two sensitivities, its buttons (a page of their own in the overlay), the
- * vibration toggle, which set is shown, the inputs, the reset row. */
+ * shortcut wheel's On / Off (shortcutwheel.h), the vibration toggle, which set is shown, the inputs, the reset
+ * row. */
 enum { NINPUTS = sizeof inputs / sizeof *inputs, NMOUSE = 2,
        SENS_ROW = 0,
        MOUSE_ROW = SENS_ROW + NMOUSE,
-       RUMBLE_ROW = MOUSE_ROW + 1,
+       WHEEL_ROW = MOUSE_ROW + 1,
+       RUMBLE_ROW = WHEEL_ROW + 1,
        LAYOUT_ROW = RUMBLE_ROW + 1,
        SET_ROW = LAYOUT_ROW + 1,
        FIRST_INPUT = SET_ROW + 1,
@@ -1209,6 +1212,8 @@ void bindings_action(int action) {
             settings_save();
         } else if (row == LAYOUT_ROW) {
             nintendo_layout = !nintendo_layout, settings_save();
+        } else if (row == WHEEL_ROW) {
+            swheel_set_enabled(!swheel_enabled()), settings_save();
         } else if (row == MOUSE_ROW) {  /* the Mouse buttons row opens its page (gamemenu.c): nothing here */
         } else if (!pad_only) {  /* a pad stays on its own column */
             col = action == SETTINGS_LEFT ? (col > 0 ? col - 1 : 0) : (col < BIND_COLS - 1 ? col + 1 : BIND_COLS - 1);
@@ -1226,6 +1231,8 @@ void bindings_action(int action) {
             settings_save();
         } else if (row == LAYOUT_ROW) {
             nintendo_layout = !nintendo_layout, settings_save();
+        } else if (row == WHEEL_ROW) {
+            swheel_set_enabled(!swheel_enabled()), settings_save();
         } else if (row == RESET_ROW) {
             /* the exploring set back to the starting keys; the battle set to a copy of the exploring set */
             if (edit_set == SET_BATTLE) copy_exploring_to_battle();
@@ -1244,6 +1251,7 @@ void bindings_action(int action) {
             settings_save();
         }
         if (row == LAYOUT_ROW) nintendo_layout = 0, settings_save();
+        if (row == WHEEL_ROW) swheel_set_enabled(1), settings_save();  /* back to its start: on */
         if (row < FIRST_INPUT || row == RESET_ROW) break;
         if (col < BIND_KEYS) bound[row - FIRST_INPUT].keys[col] = 0;
         else bound[row - FIRST_INPUT].pad = PAD_NONE;
@@ -1354,6 +1362,12 @@ int bindings_rows(BindRow *rows, int max, int *sel_row, int *sel_col, char *help
         r->group = "MOUSE", r->name = "BUTTONS", r->value = 1;
         snprintf(r->cells[0], BIND_NAME, "OPEN");
     }
+    if (n < max) {  /* the shortcut wheel: an On / Off pill (gamemenu.c) */
+        BindRow *r = &rows[n++];
+        memset(r, 0, sizeof *r);
+        r->group = "MOUSE", r->name = "SHORTCUT WHEEL", r->value = 1;
+        snprintf(r->cells[0], BIND_NAME, "%s", swheel_enabled() ? "ON" : "OFF");
+    }
     if (n < max) {
         BindRow *r = &rows[n++];
         memset(r, 0, sizeof *r);
@@ -1401,6 +1415,14 @@ int bindings_rows(BindRow *rows, int max, int *sel_row, int *sel_col, char *help
         snprintf(help, (size_t)help_size,
                  "WHAT THE LEFT AND RIGHT BUTTONS, THE WHEEL PRESS AND TURNING THE WHEEL DO, FOR EXPLORING AND FOR "
                  "BATTLES. ENTER OR CLICK: OPEN.");
+        return n;
+    }
+    if (row == WHEEL_ROW) {
+        snprintf(help, (size_t)help_size,
+                 "WHILE EXPLORING, HOLD THE L KEY (1 TO START) AND POINT THE MOUSE AT A SHORTCUT, THEN LET GO TO USE IT. "
+                 "LET GO IN THE MIDDLE TO USE NOTHING. L AND THE ARROW KEYS STILL WORK. NOW %s. LEFT/RIGHT OR "
+                 "ENTER/A: TOGGLE.",
+                 swheel_enabled() ? "ON" : "OFF");
         return n;
     }
     if (row == RUMBLE_ROW) {
@@ -1469,6 +1491,11 @@ int bindings_load_line(const char *name, const char *value) {
         if (!getenv(name)) window_rumble_set_enabled(!strcmp(value, "1") || !strcmp(value, "ON") || !strcmp(value, "on"));
         return 1;
     }
+    if (!strcmp(name, "YW4_SHORTCUT_WHEEL")) {  /* the environment wins, as for the others */
+        const char *v = getenv(name) ? getenv(name) : value;
+        swheel_set_enabled(!strcmp(v, "1") || !strcmp(v, "ON") || !strcmp(v, "on"));
+        return 1;
+    }
     if (!strcmp(name, "YW4_NINTENDO_LAYOUT")) {
         const char *e = getenv(name);  /* the environment wins, as for every setting */
         if (e) value = e;
@@ -1534,5 +1561,6 @@ void bindings_save(FILE *f) {
     }
     for (int a = 0; a < NMOUSE; a++) fprintf(f, "%s=%s\n", sens_env[a], sens_values[sens_index(a)]);
     fprintf(f, "YW4_RUMBLE=%d\n", window_rumble_enabled());
+    fprintf(f, "YW4_SHORTCUT_WHEEL=%d\n", swheel_enabled());
     fprintf(f, "YW4_NINTENDO_LAYOUT=%d\n", nintendo_layout);
 }

@@ -355,3 +355,15 @@ offset = "0x296560"
 at = "0x2966a8"
 native = "yw4_hook_save_byte"
 why = "the \"save one byte by ID\" script command, just before its store (x9 the ID, x20 the value): YW4_TRACE_SAVEBYTE logs the IDs that go through it; the Crank-a-kai's cranks left today are one of them (runtime/src/cheats.c)"
+
+[[hook]]
+module = "main"
+offset = "0x755ea0"
+native = "yw4_hook_field_guide"
+why = "the field HUD's shortcut cross being updated (x0 the HUD object): the shortcut wheel keeps the object to read which shortcuts are on, as the HUD's green disc shows (runtime/src/shortcutwheel.c, decision 0075)"
+
+[[hook]]
+module = "main"
+offset = "0x756520"
+native = "yw4_hook_field_guide_button"
+why = "the field HUD's shortcut cross setting one button's state (x1 the button 0xc-0x12, w2 / w3 its flags): the shortcut wheel keeps them to show which shortcut is on (runtime/src/shortcutwheel.c, decision 0075)"

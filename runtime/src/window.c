@@ -42,6 +42,7 @@
 #include "pause.h"
 #include "mousemenu.h"
 #include "settings.h"
+#include "shortcutwheel.h"
 #include "textin.h"
 #include "theme.h"
 #include "ui.h"
@@ -1734,8 +1735,13 @@ static void peek_blur(VkImage dst, int32_t x0, int32_t y0, uint32_t bw, uint32_t
 
 static void menu_draw(VkImage dst, uint32_t index, int32_t x0, int32_t y0, uint32_t bw, uint32_t bh) {
     int peek = gamemenu_peeking();  /* F2's quick look: the keyboard card alone over the running game, not paused */
-    if ((!gamemenu_open() && !peek) || settings_open()) return;
-    int pv = gamemenu_previewing() || peek;  /* Preview: only its bar, over the live picture (no kept picture needed) */
+    /* the shortcut wheel (shortcutwheel.h): drawn as the quick look is, see-through and blended, but no blur */
+    int wheel = swheel_visible() && !gamemenu_open() && !peek;
+    if ((!gamemenu_open() && !peek && !wheel) || settings_open()) return;
+    int pv = gamemenu_previewing() || peek || wheel;  /* Preview: only its bar, over the live picture (no kept picture needed) */
+    /* the preview's bar hidden: its "Show bar" chip has rounded corners; copied as a rectangle they showed the bar's
+     * older drawing (a white strip, square corners: owner, 2026-11-16), so it is blended like the quick look */
+    int chip = !peek && !wheel && gamemenu_preview_bar_hidden();
     if (peek) peek_blur(dst, x0, y0, bw, bh);
     if (!pv && overlay_background(bw, bh)) return;
     if (ov.img.image && (ov.img.w != bw || ov.img.h != bh)) {  /* the window changed size */
@@ -1752,26 +1758,31 @@ static void menu_draw(VkImage dst, uint32_t index, int32_t x0, int32_t y0, uint3
     uint64_t now = SDL_GetTicks();
     uint32_t look = gamemenu_look(now);
     if (pv) look ^= 0x80000000u | (uint32_t)(now / 500) << 20;  /* the bar's frame rate, twice a second */
+    if (wheel) look = 0x40000000u ^ swheel_look();               /* the wheel: only when the pick changes */
     int redrawn = !ov.uploaded || look != ov.look;
     if (redrawn) {  /* draw it again: on the CPU, then one copy into the upload buffer */
         if (!ov.px && !(ov.px = malloc((size_t)bw * bh * 4))) return;
         if (!pv) memcpy(ov.px, ov.bg, (size_t)bw * bh * 4);  /* the bar is opaque: drawn over anything */
-        if (peek) memset(ov.px, 0, (size_t)bw * bh * 4);       /* the quick look: see-through around its card */
+        if (peek || wheel || chip) memset(ov.px, 0, (size_t)bw * bh * 4);  /* see-through around the card, wheel, chip */
         float fs, fx, fy;
         overlay_fit((float)bw, (float)bh, &fs, &fx, &fy);
         UiCanvas c = {ov.px, (int)bw, (int)bh, fs, fx, fy};
-        const char *close = "Esc";
-        GameMenuInfo info = {hud_enabled(), yw4_version, pad_hints(&close), close, NULL, 0, 0, now};
-        info.logo = game_logo(&info.logo_w, &info.logo_h);
-        info.pad_name = pad_name();
-        info.pad_mic = pad_has_mic();
-        info.picture = pv ? NULL : ov.bg, info.picture_w = (int)bw, info.picture_h = (int)bh;
-        if (pv) {
-            static HudContent hc;
-            yw4_perf_hud(&hc, 1, 0);
-            info.fps = hc.fps, info.shown_fps = hc.shown_fps;
+        if (wheel) {
+            swheel_draw(&c);
+        } else {
+            const char *close = "Esc";
+            GameMenuInfo info = {hud_enabled(), yw4_version, pad_hints(&close), close, NULL, 0, 0, now};
+            info.logo = game_logo(&info.logo_w, &info.logo_h);
+            info.pad_name = pad_name();
+            info.pad_mic = pad_has_mic();
+            info.picture = pv ? NULL : ov.bg, info.picture_w = (int)bw, info.picture_h = (int)bh;
+            if (pv) {
+                static HudContent hc;
+                yw4_perf_hud(&hc, 1, 0);
+                info.fps = hc.fps, info.shown_fps = hc.shown_fps;
+            }
+            gamemenu_draw(&c, &info);
         }
-        gamemenu_draw(&c, &info);
         memcpy(ov.img.ptr, ov.px, (size_t)bw * bh * 4);
         barrier(ov.img.image, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 0, VK_ACCESS_TRANSFER_WRITE_BIT);
         VkBufferImageCopy copy = {.imageSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1}, .imageExtent = {bw, bh, 1}};
@@ -1786,7 +1797,8 @@ static void menu_draw(VkImage dst, uint32_t index, int32_t x0, int32_t y0, uint3
     if (pv) {
         float r[4], s, fx, fy;
         overlay_fit((float)bw, (float)bh, &s, &fx, &fy);
-        gamemenu_preview_rect(r);
+        if (wheel) swheel_rect(r);
+        else gamemenu_preview_rect(r);
         rx = (int32_t)(fx + r[0] * s), ry = (int32_t)(fy + r[1] * s), rw = (int32_t)(r[2] * s + 0.5f),
         rh = (int32_t)(r[3] * s + 0.5f);
         if (rx < 0) rx = 0;
@@ -1795,7 +1807,11 @@ static void menu_draw(VkImage dst, uint32_t index, int32_t x0, int32_t y0, uint3
         if (ry + rh > (int32_t)bh) rh = (int32_t)bh - ry;
         if (rw <= 0 || rh <= 0) return;
         /* the quick look: blended, so its rounded corners show the (blurred) picture; the blit below if that fails */
-        if (peek && !pk_draw(dst, index, ov.px, bw, rx, ry, rw, rh, x0, y0, redrawn)) return;
+        if ((peek || chip) && !pk_draw(dst, index, ov.px, bw, rx, ry, rw, rh, x0, y0, redrawn)) return;
+        if (wheel) {  /* blended or not at all: a plain copy would show a black square round the disc */
+            pk_draw(dst, index, ov.px, bw, rx, ry, rw, rh, x0, y0, redrawn);
+            return;
+        }
     }
     VkImageBlit blit = {.srcSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1},
                         .srcOffsets = {{rx, ry, 0}, {rx + rw, ry + rh, 1}},
@@ -1873,17 +1889,20 @@ static void hud_onto(uint8_t *rgba, uint32_t w, uint32_t h) {
                 for (int k = 0; k < 3; k++) dp[k] = (uint8_t)(sp[k] + dp[k] * (255 - sp[3]) / 255);
             }
     }
-    if (!shot_menu || !(gamemenu_open() || gamemenu_peeking()) || settings_open() || !ov.px || !ov.uploaded) return;
+    int wheel = swheel_visible() && !gamemenu_open() && !gamemenu_peeking();  /* the shortcut wheel, as menu_draw */
+    if (!shot_menu || !(gamemenu_open() || gamemenu_peeking() || wheel) || settings_open() || !ov.px || !ov.uploaded)
+        return;
     /* the part shown: all, or in the preview only its bar (the rest of ov.px is an older drawing), as menu_draw */
     float fs, fx, fy, f = (float)h / (float)ov.img.h;  /* f: the overlay's pixels to the frame's */
     overlay_fit((float)ov.img.w, (float)ov.img.h, &fs, &fx, &fy);
     float r[4] = {-fx / fs, -fy / fs, (float)ov.img.w / fs, (float)ov.img.h / fs};  /* all of it */
-    if (gamemenu_previewing() || gamemenu_peeking()) gamemenu_preview_rect(r);
+    if (wheel) swheel_rect(r);
+    else if (gamemenu_previewing() || gamemenu_peeking()) gamemenu_preview_rect(r);
     float k = fs * f;  /* design units to the frame's pixels */
     float l = (fx + r[0] * fs) * f, t = (fy + r[1] * fs) * f, rgt = l + r[2] * k, bot = t + r[3] * k;
     /* F2's quick look is see-through around its card (premultiplied, blended as the window does); the full overlay
      * is opaque (its background is the kept game picture, whose alpha means nothing): copied */
-    int blend = gamemenu_peeking();
+    int blend = gamemenu_peeking() || wheel || gamemenu_preview_bar_hidden();
     for (uint32_t y = 0; y < h; y++)  /* the overlay's picture (the window's size) scaled to the frame's */
         for (uint32_t x = 0; x < w; x++) {
             if ((float)x < l || (float)x >= rgt || (float)y < t || (float)y >= bot) continue;
@@ -2535,6 +2554,21 @@ void window_vibration(float amp_low, float freq_low, float amp_high, float freq_
 static void pad_back_hold(void);  /* below, with the gamepad */
 static void pad_shoulders_overlay(void);
 static uint32_t pad_parts_held(void);
+int battle_active(void);  /* battle.c */
+/* The shortcut wheel's key (shortcutwheel.h): a key bound to L in the exploring set is held (1 to start). Only
+ * asked while L is pressed at all, so the keys are looked through only then. */
+static int wheel_key_held(const bool *keys) {
+    static int l = -2;  /* L's input number */
+    if (l == -2) {
+        l = -1;
+        for (int i = 0; i < 32 && *bindings_input_id(i); i++)
+            if (!strcmp(bindings_input_id(i), "L")) l = i;
+    }
+    if (l < 0) return 0;
+    for (int sc = 1; sc < SDL_SCANCODE_COUNT; sc++)
+        if (keys[sc] && (bindings_key_inputs(0, sc) >> l & 1)) return 1;
+    return 0;
+}
 static void update_input(void) {
     uint64_t b;
     int32_t s[4];
@@ -2660,6 +2694,99 @@ static void update_input(void) {
         else if (!want && freed) {
             freed = 0;
             if (SDL_GetWindowFlags(window) & SDL_WINDOW_INPUT_FOCUS) SDL_SetWindowRelativeMouseMode(window, true);
+        }
+    }
+    {   /* the shortcut wheel (decision 0075): while exploring, the key bound to L shows it and the mouse picks */
+        /* YW4_WHEEL_TEST=<read>:<slot>[,<read>:<slot>...] (tests, no real mouse needed): from each of those game
+         * input reads the wheel's key is held for 40 reads and the pointer goes to the slot (1-8) once it is open;
+         * then the key is let go. Slot 0: let go in the middle. <read>:<slot>><slot2>: 15 reads after pointing at the
+         * slot the pointer moves on to slot2 (the lens's glide). */
+        static int t_n = -1, t_cur = -1, t_moved, t_slot, t_slot2;
+        static uint64_t t_reads[8];
+        static int t_slots[8], t_slots2[8];
+        if (t_n < 0) {
+            t_n = 0;
+            const char *e = getenv("YW4_WHEEL_TEST");
+            unsigned long long a;
+            int sl, used;
+            while (e && t_n < 8 && sscanf(e, "%llu:%d%n", &a, &sl, &used) == 2 && sl >= 0 && sl <= 8) {
+                t_reads[t_n] = a, t_slots[t_n] = sl, t_slots2[t_n] = 0;
+                e += used;
+                int s2, used2;
+                if (*e == '>' && sscanf(e + 1, "%d%n", &s2, &used2) == 1 && s2 >= 1 && s2 <= 8) t_slots2[t_n] = s2, e += 1 + used2;
+                t_n++;
+                if (*e != ',') break;
+                e++;
+            }
+        }
+        uint64_t reads = window_input_reads();
+        int test = 0;
+        for (int i = 0; i < t_n; i++)
+            if (reads >= t_reads[i] && reads < t_reads[i] + 40) {
+                test = 1;
+                if (i != t_cur) t_cur = i, t_moved = 0, t_slot = t_slots[i], t_slot2 = t_slots2[i];
+            }
+        if (test) b |= 1ull << 6;  /* as the key would: L */
+        int key = test || ((b & (1ull << 6)) && wheel_key_held(SDL_GetKeyboardState(NULL)));
+        int menus = !is_open && !peek && !window_paused() && !battle_active() && !mousemenu_open() && !mousemenu_talking() &&
+                    !mousemenu_map() && !mousemenu_stopwatch() && swheel_hud_ready();
+        /* a test run has no mouse of its own (YW4_MOUSE=0): the mouse's conditions are left out for the whole run */
+        /* the mouse: the camera's (relative), or not taken back yet after a game menu but the window has the keyboard
+         * (owner, 2026-11-16: after Mirapo's list the wheel said "mouse not captured" until a click); the wheel then
+         * takes it, as that click would (below) */
+        int mouse_ok = window && !mouse_off() && !mouse_held_off &&
+                       (SDL_GetWindowRelativeMouseMode(window) || (SDL_GetWindowFlags(window) & SDL_WINDOW_INPUT_FOCUS));
+        int ok = menus && (t_n > 0 || mouse_ok);
+        {  /* the key pressed and the wheel not opening: why, in the log (owner, 2026-11-16: after Mirapo it didn't
+            * come up again) */
+            static int key_before;
+            if (key && !key_before && !ok && swheel_enabled())
+                fprintf(stderr, "yw4: shortcut wheel: key down, not opened:%s%s%s%s%s%s%s%s%s%s%s%s\n",
+                        is_open ? " overlay open" : "", peek ? " quick look" : "", window_paused() ? " paused" : "",
+                        battle_active() ? " battle" : "", mousemenu_open() ? " a game menu open" : "",
+                        mousemenu_talking() ? " talking" : "", mousemenu_map() ? " map" : "",
+                        mousemenu_stopwatch() ? " stopwatch" : "", !swheel_hud_ready() ? " no field HUD seen" : "",
+                        menus && mouse_off() ? " mouse off" : "", menus && mouse_held_off ? " mouse held off" : "",
+                        menus && !mouse_ok ? " the window doesn't have the keyboard" : "");
+            key_before = key;
+        }
+        b = swheel_update(b, key, ok, reads);
+        if (swheel_open() && window && !mouse_off() && !SDL_GetWindowRelativeMouseMode(window))
+            SDL_SetWindowRelativeMouseMode(window, true);  /* the pointer's moves come as the camera's do */
+        if (test && !t_moved && swheel_open()) {
+            if (t_slot) {
+                int i = t_slot <= 4 ? (t_slot - 1) * 2 : (t_slot - 5) * 2 + 1;  /* its place round the ring */
+                float a = (float)i * 45.0f * 3.14159265f / 180.0f;
+                swheel_motion(100.0f * sinf(a), -100.0f * cosf(a));
+            }
+            t_moved = 1;
+        }
+        static int t_moved2 = -1;
+        if (test && t_slot && t_slot2 && t_moved2 != t_cur && reads >= t_reads[t_cur] + 15 && swheel_open()) {
+            int i = t_slot <= 4 ? (t_slot - 1) * 2 : (t_slot - 5) * 2 + 1, k = t_slot2 <= 4 ? (t_slot2 - 1) * 2 : (t_slot2 - 5) * 2 + 1;
+            float a = (float)i * 45.0f * 3.14159265f / 180.0f, b2 = (float)k * 45.0f * 3.14159265f / 180.0f;
+            swheel_motion(100.0f * (sinf(b2) - sinf(a)), -100.0f * (cosf(b2) - cosf(a)));
+            t_moved2 = t_cur;
+        }
+        /* screenshots of the wheel (input reads come faster than frames, so --shots can't aim at it): 20 reads into
+         * each test, or YW4_WHEEL_SHOTS=<reads>,<reads>,... after each test's start (past 40: its use or cancel) */
+        static int s_n = -1, s_next, s_test = -1;
+        static int s_at[16];
+        if (s_n < 0) {
+            s_n = 0;
+            const char *e = getenv("YW4_WHEEL_SHOTS");
+            int v, used;
+            while (e && s_n < 16 && sscanf(e, "%d%n", &v, &used) == 1) {
+                s_at[s_n++] = v, e += used;
+                if (*e != ',') break;
+                e++;
+            }
+        }
+        if (!s_n) {
+            if (test && t_moved == 1 && swheel_open() && reads >= t_reads[t_cur] + 20) window_request_screenshot(), t_moved = 2;
+        } else if (t_cur >= 0) {
+            if (s_test != t_cur) s_test = t_cur, s_next = 0;
+            if (s_next < s_n && reads >= t_reads[t_cur] + (uint64_t)s_at[s_next]) window_request_screenshot(), s_next++;
         }
     }
     if (window_paused()) b = 0, memset(s, 0, sizeof s);  /* the overlay's pause: the player's input held back */
@@ -3335,7 +3462,9 @@ void window_run(void (*guest)(void *), void *arg) {
             } else if (!pad_move) {
                 tp_cursor_hide();
             }
-            if (window && SDL_GetWindowRelativeMouseMode(window) && !gamemenu_peeking()) {
+            if (window && SDL_GetWindowRelativeMouseMode(window) && !gamemenu_peeking() && swheel_open()) {
+                swheel_motion(e.motion.xrel, e.motion.yrel);  /* the shortcut wheel's pointer; the camera holds still */
+            } else if (window && SDL_GetWindowRelativeMouseMode(window) && !gamemenu_peeking()) {
                 host_lock(&mouse_lock);  /* the camera's; never while the quick look shows */
                 mouse_accum_x += e.motion.xrel;
                 mouse_accum_y += e.motion.yrel;

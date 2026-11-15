@@ -31,6 +31,9 @@ enum { GM_UP, GM_DOWN, GM_LEFT, GM_RIGHT, GM_ACCEPT, GM_BACK, GM_LEAVE, GM_PREV,
  * window draws only gamemenu_preview_rect's part of the overlay (design units: x, y, w, h; w 0: nothing) over
  * the live picture. */
 int gamemenu_previewing(void);
+/* The preview's bar hidden (H / the controller's button): only a small rounded chip shows ("Show bar"), so the
+ * window blends it over the picture as the quick look, instead of copying its rectangle with the corners. */
+int gamemenu_preview_bar_hidden(void);
 /* F2's quick look (keyboard): the Controls page's keyboard Overview alone over the running game, not paused; drawn
  * like the preview (only gamemenu_preview_rect's part). F2 again hides it, opening the overlay too. */
 int gamemenu_peeking(void);
