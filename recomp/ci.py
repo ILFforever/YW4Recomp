@@ -62,7 +62,8 @@ def main(argv: list[str] | None = None) -> int:
                 includes += [f"-I{deps.fetch_dlss(cfg) / 'include'}", "-DYW4_DLSS=1",
                              f"-I{deps.fetch_streamline(cfg) / 'include'}", "-DYW4_STREAMLINE=1"]
         srcs = (sorted((build.RUNTIME / "src").glob("*.c")) + sorted((build.RUNTIME / "src").glob("*.cpp"))
-                + build.musl_sources() + [build.version_source(cfg), build.dlc_source(cfg)])
+                + build.musl_sources() + [build.version_source(cfg), build.dlc_source(cfg),
+                                          build.wheel_icons_source(cfg)])
         objdir = work / "ci_obj"
         objdir.mkdir(exist_ok=True)
         version = subprocess.run([cc, "--version"], capture_output=True, text=True).stdout.splitlines()[:1]

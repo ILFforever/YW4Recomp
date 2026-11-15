@@ -237,6 +237,16 @@ def ensure_install_icon(cfg: config.Config) -> None:
         pass
 
 
+def ensure_wheel_icons(cfg: config.Config) -> None:
+    """The shortcut wheel's icons from the player's RomFS (decision 0075); without them the wheel draws arrows."""
+    if (cfg.work_dir / "wheel" / "icons.bin").is_file():
+        return
+    try:
+        run("tools.yw4.wheel_icons")
+    except Exception:
+        pass
+
+
 def game_runtime_files(work: Path) -> list[str]:
     b = work / "build"
     exe_name = "yw4.exe" if sys.platform == "win32" else "yw4"
@@ -298,7 +308,8 @@ def main() -> int:
         "version": lambda: run("tools.yw4.ingest"),
         "translate": lambda: run("recomp.translate"),
         "shaders": lambda: (prev.keep(["shaders/glsl"]), run("tools.yw4.shaders"), run("recomp.shader", "--check")),
-        "compile": lambda: (ensure_install_icon(cfg), prev.keep(game_runtime_files(cfg.work_dir)), run("recomp.build", *build_args)),
+        "compile": lambda: (ensure_install_icon(cfg), ensure_wheel_icons(cfg), prev.keep(game_runtime_files(cfg.work_dir)),
+                            run("recomp.build", *build_args)),
         "finish": lambda: game_ini(cfg, args.saves),
     }
     current = None
