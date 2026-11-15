@@ -88,7 +88,10 @@ static int shadow_res_index(void) {
     return r == 2048 ? 1 : r == 4096 ? 2 : 0;
 }
 static int pcss_index(void) { return gpu_pcss_level() & 3; }
-static int shadow_pass_index(void) { return !strcmp(shadow_mode_name(), "CUSTOM"); }
+/* shadow_pass_ours, not shadow_mode_name: the mode is set only when the first shadows are drawn, and before that
+ * the name said ORIGINAL, so the row showed GAME and a save then (the first start's, at boot) wrote
+ * YW4_SHADOWS=game: every new install got the game's shadow pass, not ours (found 2026-11-16) */
+static int shadow_pass_index(void) { return shadow_pass_ours(); }
 static int gbuffer_index(void) { return gbuffer_native(); }
 static int bloom_index(void) { return bloom_native(); }
 static int shadow_mask_index(void) { return shadow_mask_native(); }
