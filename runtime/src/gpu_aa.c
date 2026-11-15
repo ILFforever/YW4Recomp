@@ -88,18 +88,45 @@ void gpu_sharpen_cycle(void) {
     fprintf(stderr, "yw4: gpu: sharpening %s\n", name[l]);
 }
 
-/* The amount, 0..1 (0.25 a step). YW4_TAA_SHARPEN / YW4_FSR_SHARPNESS (testing) override it for TAA (and DLSS and
- * the others, which share its pass) / for FSR with any value. */
+/* The amount, 0..1. Our pass: 0.25 a step. FSR's own sharpener (RCAS) grows much faster with its amount (it is in
+ * stops of 2x, and nothing holds it to the neighbours' range: at 1.0 it gave 2.4x the detail where ours gave 1.6x),
+ * so FSR gets its own table, measured so each step adds about as much detail as ours (decision 0076). Testing:
+ * YW4_FSR_SHARPEN_MAP=<low>,<medium>,<high>,<max> replaces that table; YW4_TAA_SHARPEN / YW4_FSR_SHARPNESS override
+ * the amount with any value for our pass (TAA, DLSS, off, FXAA, SMAA, text and menus) / for FSR. */
 static float sharpen_amount(int fsr) {
     static float taa_env = -2.0f, fsr_env = -2.0f;  /* -1: not set */
+    static float fsr_map[5] = {0.0f, 0.25f, 0.5f, 0.6f, 0.7f};
     if (taa_env < -1.5f) {
         const char *e = getenv("YW4_TAA_SHARPEN");
         taa_env = e && *e ? (float)atof(e) : -1.0f;
         e = getenv("YW4_FSR_SHARPNESS");
         fsr_env = e && *e ? (float)atof(e) : -1.0f;
+        if ((e = getenv("YW4_FSR_SHARPEN_MAP")) != NULL)
+            sscanf(e, "%f,%f,%f,%f", &fsr_map[1], &fsr_map[2], &fsr_map[3], &fsr_map[4]);
     }
     float env = fsr ? fsr_env : taa_env;
-    return env >= 0.0f ? env : (float)gpu_sharpen() * 0.25f;
+    if (env >= 0.0f) return env;
+    return fsr ? fsr_map[gpu_sharpen()] : (float)gpu_sharpen() * 0.25f;
+}
+
+/* SHARPEN TEXT AND MENUS (decision 0076): 0 only the 3D is sharpened (the default), 1 the game's UI too, at
+ * the present (gpu_sharpen_ui_present); YW4_SHARPEN_UI at start, the settings panel switches it. */
+static int sharpen_ui = -1;
+
+int gpu_sharpen_ui(void) {
+    int on = __atomic_load_n(&sharpen_ui, __ATOMIC_ACQUIRE);
+    if (on < 0) {
+        const char *e = getenv("YW4_SHARPEN_UI");
+        on = e && atoi(e) == 1;
+        __atomic_store_n(&sharpen_ui, on, __ATOMIC_RELEASE);
+    }
+    return on;
+}
+
+void gpu_sharpen_ui_toggle(void) {
+    int on = !gpu_sharpen_ui();
+    __atomic_store_n(&sharpen_ui, on, __ATOMIC_RELEASE);
+    fprintf(stderr, "yw4: gpu: sharpen text and menus %s\n", on ? "on" : "off");
 }
 
 VkShaderModule gpu_native_shader(const char *name) {
@@ -239,7 +266,7 @@ static void output_image(VkCommandBuffer cb, uint32_t w, uint32_t h) {
 
 /* ---- pipelines: one layout (5 sampled images, the size as a push constant), one pipeline per pass */
 
-enum { P_ENCODE, P_FXAA, P_EDGE, P_WEIGHT, P_BLEND, P_SHOW_EDGES, P_SHOW_WEIGHTS, P_TEST, P_TAA, P_TAA_OUT, P_UPSCALE, P_DEPTH, PASSES };
+enum { P_ENCODE, P_FXAA, P_EDGE, P_WEIGHT, P_BLEND, P_SHOW_EDGES, P_SHOW_WEIGHTS, P_TEST, P_TAA, P_TAA_OUT, P_UPSCALE, P_DEPTH, P_UI_SHARPEN, PASSES };
 
 static VkDescriptorSetLayout set_layout;
 static VkPipelineLayout pipe_layout;
@@ -277,11 +304,13 @@ static VkPipeline pipeline(int pass, VkFormat out) {
     static const char *const vs_name[PASSES] = {"aa_fullscreen.vert", "aa_fullscreen.vert", "smaa_edge.vert",
                                                 "smaa_weight.vert",   "smaa_blend.vert",    "aa_fullscreen.vert",
                                                 "aa_fullscreen.vert", "aa_fullscreen.vert", "aa_fullscreen.vert",
-                                                "aa_fullscreen.vert", "aa_fullscreen.vert", "aa_fullscreen.vert"};
+                                                "aa_fullscreen.vert", "aa_fullscreen.vert", "aa_fullscreen.vert",
+                                                "aa_fullscreen.vert"};
     static const char *const fs_name[PASSES] = {"aa_encode.frag",   "fxaa.frag",           "smaa_edge.frag",
                                                 "smaa_weight.frag", "smaa_blend.frag",     "aa_show_edges.frag",
                                                 "aa_show_weights.frag", "aa_test.frag", "taa_resolve.frag",
-                                                "taa_output.frag", "aa_upscale.frag", "aa_depth_upscale.frag"};
+                                                "taa_output.frag", "aa_upscale.frag", "aa_depth_upscale.frag",
+                                                "ui_sharpen.frag"};
     static VkShaderModule vs[PASSES], fs[PASSES];
     if (!vs[pass]) vs[pass] = gpu_native_shader(vs_name[pass]), fs[pass] = gpu_native_shader(fs_name[pass]);
     VkPipelineShaderStageCreateInfo st[2] = {
@@ -715,6 +744,79 @@ static void fg_prepare(VkCommandBuffer cb, GpuImage *d, VkImageView dv, uint32_t
     }
 }
 
+/* ---- SHARPEN TEXT AND MENUS (decision 0076). The game draws its UI into the scene image after the anti-aliasing
+ * point, then copies scene and UI into the window image that is presented. With the option on, the scene as it is at
+ * the anti-aliasing point (sharpened already) is copied into an image like the window image, where the window shows
+ * it (as frame generation's HUD-less copy, gpu_fg.c); at the present, the pixels of the window image that differ from
+ * it (the UI) are sharpened, the others left alone, so the 3D isn't sharpened twice. Frames with no 3D (the title,
+ * full-screen menus, videos) have no copy: all of them is sharpened. Our own overlay is drawn later (window.c). */
+static AaImage ui_before, ui_copy;
+static VkFormat ui_before_fmt, ui_copy_fmt;
+static uint64_t ui_before_frame = ~0ull;  /* gpu_frames() when it was made: valid for the present that follows */
+static VkFormat shown_fmt;                /* the last present's window image and the part of it the window shows */
+static uint32_t shown_w, shown_h;
+static VkRect2D shown_rect;
+
+void gpu_aa_note_present(VkFormat format, uint32_t w, uint32_t h, VkRect2D rect) {
+    shown_fmt = format, shown_w = w, shown_h = h, shown_rect = rect;
+}
+
+static int ui_sharpening(void) { return gpu_sharpen_ui() && gpu_sharpen(); }
+
+static void ui_before_copy(VkCommandBuffer cb, GpuImage *scene) {
+    VkRect2D r = shown_rect;
+    if (!ui_sharpening() || !scene || !shown_fmt || scene->width != r.extent.width || scene->height != r.extent.height ||
+        r.offset.x < 0 || r.offset.y < 0 || r.offset.x + r.extent.width > shown_w || r.offset.y + r.extent.height > shown_h)
+        return;
+    if (!ui_before.image || ui_before.w != shown_w || ui_before.h != shown_h || ui_before_fmt != shown_fmt) {
+        if (ui_before.image) gpu_wait(gpu_submitted(), UINT64_MAX), image_free(&ui_before);
+        image_make(&ui_before, shown_fmt, shown_w, shown_h, VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT);
+        to_general(cb, ui_before.image);
+        ui_before_fmt = shown_fmt;
+    }
+    full_barrier(cb);
+    int32_t x = r.offset.x, y = r.offset.y;
+    VkImageBlit b = {.srcSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1},
+                     .srcOffsets = {{0, 0, 0}, {(int32_t)scene->width, (int32_t)scene->height, 1}},
+                     .dstSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1},
+                     .dstOffsets = {{x, y, 0}, {x + (int32_t)scene->width, y + (int32_t)scene->height, 1}}};
+    vkCmdBlitImage(cb, scene->image, VK_IMAGE_LAYOUT_GENERAL, ui_before.image, VK_IMAGE_LAYOUT_GENERAL, 1, &b,
+                   VK_FILTER_NEAREST);
+    full_barrier(cb);
+    ui_before_frame = gpu_frames();
+}
+
+void gpu_sharpen_ui_present(VkCommandBuffer cb, NvnTexture *t) {
+    if (!ui_sharpening()) return;
+    GpuImage *g = image_of(cb, t);
+    uint32_t w, h;
+    NvnTextureView none = {0};
+    VkImageView target = g ? gpu_render_view(cb, t, &none, 0, &w, &h) : NULL;
+    if (!target || !w || !h) return;
+    layouts();
+    lookup_textures(cb);
+    if (!ui_copy.image || ui_copy.w != w || ui_copy.h != h || ui_copy_fmt != g->format) {
+        if (ui_copy.image) gpu_wait(gpu_submitted(), UINT64_MAX), image_free(&ui_copy);
+        image_make(&ui_copy, g->format, w, h, VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT);
+        to_general(cb, ui_copy.image);
+        ui_copy_fmt = g->format;
+    }
+    gpu_passes_other(cb, "SHARPEN TEXT AND MENUS", 0);
+    full_barrier(cb);
+    VkImageCopy c = {.srcSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1},
+                     .dstSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1}, .extent = {w, h, 1}};
+    vkCmdCopyImage(cb, g->image, VK_IMAGE_LAYOUT_GENERAL, ui_copy.image, VK_IMAGE_LAYOUT_GENERAL, 1, &c);
+    full_barrier(cb);
+    int before = ui_before.image && ui_before_frame + 1 == gpu_frames() && ui_before.w == w && ui_before.h == h &&
+                 ui_before_fmt == g->format;
+    pass_params[0] = sharpen_amount(0), pass_params[1] = before ? 1.0f : 0.0f;
+    pass_with(cb, P_UI_SHARPEN, target, g->format, w, h, 0, ui_copy.view, before ? ui_before.view : ui_copy.view,
+              ui_copy.view);
+    memset(pass_params, 0, sizeof pass_params);
+    gpu_passes_other(cb, "after SHARPEN TEXT AND MENUS (the present)", 0);  /* F5: its time ends here, not next frame */
+    gpu_dynamic_forget();
+}
+
 void gpu_aa_apply(VkCommandBuffer cb, GpuState *s) {
     int mode = gpu_aa(), up = gpu_upscale() != 0, sharpen = gpu_sharpen() != 0;
     NvnTexture *t = s->ncolor ? s->rt.color[0] : NULL;
@@ -803,6 +905,7 @@ void gpu_aa_apply(VkCommandBuffer cb, GpuState *s) {
         GpuImage *sc = image_of(cb, t);  /* the scene image now: output-sized when upscaling */
         fg_prepare(cb, depth, depth_in, w, h, ow, oh, sc);
     }
+    if (!debug) ui_before_copy(cb, image_of(cb, t));  /* SHARPEN TEXT AND MENUS: the 3D before the UI */
     gpu_dynamic_forget();  /* our pipelines set viewport and scissor: the game's next draw sets its own again */
     gpu_passes_other(cb, "after anti-aliasing (the UI)", 0);
 }

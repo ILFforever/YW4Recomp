@@ -4,7 +4,7 @@
 state: accepted
 date: 2026-11-15
 replaces: none
-code: runtime/src/gpu_aa.c, runtime/shaders/taa_output.frag, runtime/src/settings.c, runtime/src/gpu_draw.c, runtime/src/gpu_post.c
+code: runtime/src/gpu_aa.c, runtime/shaders/sharpen.glsl, runtime/shaders/taa_output.frag, runtime/shaders/ui_sharpen.frag, runtime/src/gpu.c, runtime/src/settings.c, runtime/src/gpu_draw.c, runtime/src/gpu_post.c
 -->
 
 Status: accepted (owner, 2026-11-15, through the relay session). Measured in the game on every anti-aliasing
@@ -34,14 +34,14 @@ Where it happens:
 |---|---|
 | TAA | its last pass (`taa_output.frag`), as before, now with the setting's amount |
 | DLSS | the same pass, which already copied DLSS's output back: nothing extra to run |
-| FSR | FSR's own RCAS, given the setting's amount (0 turns it off). Not our pass too: sharpening twice brings rings and grain |
+| FSR | FSR's own RCAS, with its own table of amounts (below; 0 turns it off). Not our pass too: sharpening twice brings rings and grain |
 | OFF | the scene encoded (as for the others) and our pass: two full-screen passes |
 | FXAA / SMAA | their result encoded again and our pass |
 
 With OFF, the two places that start the anti-aliasing (`gpu_draw.c`, `gpu_post.c`) used to skip it. They now always
 call `gpu_aa_apply`, which returns at once when nothing (anti-aliasing, upscaling, sharpening) is on.
 
-The sharpen in `taa_output.frag` became **contrast-adaptive**, after the method AMD published as FidelityFX CAS (our
+The sharpen (`sharpen.glsl`, used by `taa_output.frag`) became **contrast-adaptive**, after the method AMD published as FidelityFX CAS (our
 code, from the idea). The old one pushed every pixel away from its four neighbours' average by the same amount. The
 new one scales that push by `sqrt(darkest / brightest)` of the 3x3 neighbourhood, in the perceptual curve (`aa.glsl`,
 values 0..1). Soft, flat detail (textures) gets the full push, and edges with strong contrast get little, so they
@@ -53,8 +53,39 @@ Why the clamp and not CAS's own way of limiting: CAS limits its weight so the re
 already keeps it in range, and the clamp is what kept TAA free of rims before. It costs nothing extra (the min and
 max are already there).
 
-`YW4_TAA_SHARPEN` (TAA, DLSS, OFF, FXAA, SMAA: our pass) and `YW4_FSR_SHARPNESS` (FSR) still override the setting
-with any value, for testing.
+### FSR's own table
+
+FSR's RCAS grows much faster with its amount than our pass: its amount is in stops of 2x, and nothing holds the result
+to the neighbours' range. With the plain 0.25 a step, FSR's MAX (1.0) added 142% detail where DLSS's added 50-64%, and
+looked crunchy. FSR now gets **LOW 0.25 / MEDIUM 0.5 / HIGH 0.6 / MAX 0.7**: measured to add about as much at each step
+as DLSS and TAA (table below). `YW4_FSR_SHARPEN_MAP=<low>,<medium>,<high>,<max>` replaces it, for measuring.
+
+### SHARPEN TEXT AND MENUS
+
+Where things are drawn: the game draws the 3D into its scene image, our anti-aliasing (and with it every sharpening
+above, FSR's RCAS included) runs on that image right after the bloom composite, then the game draws its UI (HUD,
+menus, text) into the same image and copies the whole into the window image that is presented. So until this record,
+**nothing of the UI was sharpened**, in any mode. Our own overlay (settings, controls, F3 HUD) is drawn later still,
+onto the window (`window.c`).
+
+Some players at low resolutions want the text sharpened too. A row **SHARPEN TEXT AND MENUS < OFF / ON >**, right
+under SHARPENING, default **OFF**, saved as `YW4_SHARPEN_UI=0/1`, greyed out while SHARPENING is OFF. With ON:
+
+- At the anti-aliasing point, the 3D as it is there (already sharpened) is copied into an image like the window image,
+  where the window shows it: the same copy frame generation makes as its HUD-less image (`gpu_fg.c`).
+- At the present (`gpu_present`, before the captures, screenshots and frame generation), `ui_sharpen.frag` sharpens the
+  window image with the same filter and amount, in its own values, **only where it differs from that copy** (by more
+  than 1.5/255): the pixels the UI drew. The 3D is left as it was, so it isn't sharpened twice, and frame generation's
+  HUD-less image still matches the 3D of the picture it gets.
+- A frame with no 3D (the title, full-screen menus, videos) has no copy: it is sharpened whole.
+
+Why not one pass over the finished picture instead of two places: the 3D would then be sharpened by our filter after
+the UI, FSR's RCAS would have to step aside, and the HUD-less image frame generation compares with would differ from
+the picture everywhere (FSR's frame generation reads such differences as UI). Why not the 3D again with the UI: twice
+sharpened is grainy.
+
+`YW4_TAA_SHARPEN` (our pass: TAA, DLSS, OFF, FXAA, SMAA, text and menus) and `YW4_FSR_SHARPNESS` (FSR) still override
+the amount with any value, for testing.
 
 ## Alternatives
 
@@ -83,11 +114,36 @@ character and the camera move a little between the shots, the wall doesn't chang
 | DLSS (DLAA) | 3.80 | 4.94 (+30%) | 5.71 (+50%) | the write-back pass 0.16 -> 0.30 ms |
 | DLSS Quality | 3.60 | 5.02 (+39%) | 5.82 (+62%) | 0.30 ms |
 
-- MEDIUM adds about the same everywhere (+30-40%). MAX differs: FSR's RCAS keeps getting stronger (its amount is in
-  stops, and nothing holds it to the neighbours), while ours is held to the neighbours' range, so it levels off. FSR at
-  MAX looks crunchy (dark specks along shadow edges); ours at MAX has no rims. If players want a stronger MAX with
-  TAA / DLSS, the clamp would have to loosen at MAX: a choice for later, not made here.
+- That first table had FSR at 0.25 a step. MEDIUM added about the same everywhere (+30-40%), but FSR's MAX added 142%
+  and looked crunchy (dark specks along shadow edges): hence FSR's own table.
 - The cost is a fraction of a millisecond at 4K: about a quarter of that at 1080p.
 - What also makes the background soft is the game's own DISTANCE BLUR (on, at HALF, by default). Sharpening doesn't
   undo it; DISTANCE BLUR set to OFF does. Worth telling a player who finds the picture soft.
 - The full test suite passes (`pytest tests`: 66 tests), with a test for the row (`tests/test_settings_texts.py`).
+
+### Every level, FSR on its own table (second round)
+
+Same scene and method, the setting stepped OFF, LOW, MEDIUM, HIGH, MAX every 40 frames in one run; detail gained
+over OFF, averaged over three areas (a brick wall, the ground, a house):
+
+| | LOW | MEDIUM | HIGH | MAX |
+|---|---|---|---|---|
+| DLSS (DLAA) | +17% | +29% | +39% | +49% |
+| TAA | +20% | +36% | +50% | +61% |
+| FSR, 0.25 / 0.5 / 0.6 / 0.7 (chosen) | +21% | +35% | +43% | +58% |
+| FSR, 0.35 / 0.55 / 0.65 / 0.8 (tried) | +24% | +39% | +46% | +73% |
+
+The chosen table falls between DLSS and TAA at every step; FSR at MAX no longer looks crunchy.
+
+### SHARPEN TEXT AND MENUS, OFF against ON (MEDIUM, TAA)
+
+| 3D view | 3D (brick wall) | Minimap | Objective text | GPU time of the pass |
+|---|---|---|---|---|
+| 1600x900 | 7.42 -> 7.34 (same) | +18% | +18% | not timed |
+| 1920x1080 | 7.19 -> 7.15 (same) | +13% | +18% | 0.31-0.34 ms |
+| 3840x2160 | 5.19 -> 5.20 (same) | +25% | +20% | 0.80 ms |
+
+The 3D measures the same with ON (not sharpened twice); the UI is crisper. The copy at the anti-aliasing point adds a
+blit of the 3D (counted in the anti-aliasing's own line). A 720p window shows the 900-line picture made smaller: the
+sharpening happens before that, so it looks like the 900 line. Seen at 4x zoom: the filter works per colour channel (as
+CAS does), so hard UI edges can get a faint coloured edge; at normal size it doesn't show.

@@ -98,6 +98,17 @@ class SettingsTexts(unittest.TestCase):
         aa = (ROOT / "runtime/src/gpu_aa.c").read_text(encoding="utf-8")
         self.assertRegex(aa, r'getenv\("YW4_SHARPEN"\);\s*l = e && \*e \? atoi\(e\) : 2;')
 
+    def test_sharpen_text_row(self):
+        """SHARPEN TEXT AND MENUS: right under SHARPENING, OFF / ON saved as 0 / 1, off unless YW4_SHARPEN_UI=1."""
+        rows = settings()
+        names = [r["name"] for r in rows]
+        i = names.index("SHARPEN TEXT AND MENUS")
+        self.assertEqual(names[i - 1], "SHARPENING")
+        self.assertEqual(rows[i]["options"], ["OFF", "ON"])
+        self.assertEqual(rows[i]["values"], ["0", "1"])
+        aa = (ROOT / "runtime/src/gpu_aa.c").read_text(encoding="utf-8")
+        self.assertRegex(aa, r'getenv\("YW4_SHARPEN_UI"\);\s*on = e && atoi\(e\) == 1;')
+
 
 if __name__ == "__main__":
     unittest.main()

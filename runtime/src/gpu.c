@@ -2692,6 +2692,11 @@ void gpu_present(NvnTexture *t, uint64_t frame, const int crop[4]) {
         submit(cb);
     }
     g->last_frame = present_count;
+    if (gpu_sharpen_ui()) {  /* SHARPEN TEXT AND MENUS (gpu_aa.c): before the captures, screenshots and frame generation */
+        VkCommandBuffer cb = begin();
+        gpu_sharpen_ui_present(cb, t);
+        submit(cb);
+    }
     if (gpu_capture_pending()) {
         gpu_wait(gpu_submitted(), UINT64_MAX);
         gpu_capture_flush();
@@ -2740,6 +2745,7 @@ void gpu_present(NvnTexture *t, uint64_t frame, const int crop[4]) {
     if (crop[2] > 0 && crop[3] > 0 && crop[0] >= 0 && crop[1] >= 0 && cx + cw <= g->width && cy + ch <= g->height)
         r = (VkRect2D){{(int32_t)cx, (int32_t)cy}, {cw, ch}};
     gpu_fg_note_present(g->format, g->width, g->height, r);
+    gpu_aa_note_present(g->format, g->width, g->height, r);
     if (fg_slot >= 0) {
         gpu_fg_show(fg_slot, r, frame);
         return;

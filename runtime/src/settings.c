@@ -123,6 +123,7 @@ static const char *fg_disabled(void) {
     return gpu_aa() >= 3 ? NULL : (gpu_dlss_available() ? "NEEDS ANTI-ALIASING SET TO TAA, FSR OR DLSS"
                                                         : "NEEDS ANTI-ALIASING SET TO TAA OR FSR");
 }
+static const char *sharpen_ui_disabled(void) { return gpu_sharpen() ? NULL : "NEEDS SHARPENING"; }
 static const char *upscale_disabled(void) {
     if (!gpu_fsr_built() && !gpu_dlss_built()) return NOT_BUILT;
     if (!gpu_fsr_built() && !gpu_dlss_available()) return "NEEDS AN NVIDIA RTX GPU FOR DLSS";
@@ -211,6 +212,13 @@ static const Setting player[] = {
      {"AS THE ANTI-ALIASING LEAVES IT", "A LITTLE CRISPER", "CRISPER (RECOMMENDED)", "CRISPER STILL",
       "THE MOST: FINE DETAIL CAN LOOK GRAINY"}, 5,
      gpu_sharpen, gpu_sharpen_cycle, "YW4_SHARPEN", {"0", "1", "2", "3", "4"}},
+    {"ANTI-ALIASING AND UPSCALING", "SHARPEN TEXT AND MENUS",
+     /* (decision 0076: at the present, only the pixels the game's UI changed; our overlay is never sharpened) */
+     "SHARPENS THE GAME'S MENUS, TEXT AND HUD TOO, AS MUCH AS SHARPENING DOES THE WORLD. HELPS AT LOW RESOLUTIONS. "
+     "THIS OVERLAY IS NOT CHANGED.",
+     {"OFF", "ON"},
+     {"ONLY THE WORLD IS SHARPENED", "MENUS, TEXT AND HUD TOO"}, 2,
+     gpu_sharpen_ui, gpu_sharpen_ui_toggle, "YW4_SHARPEN_UI", {"0", "1"}, sharpen_ui_disabled},
     {"FRAME GENERATION AND LATENCY", "FRAME GENERATION",
      "MAKES A PICTURE BETWEEN EACH TWO OF THE GAME'S: ABOUT TWICE AS MANY SHOWN. ADDS A LITTLE INPUT DELAY: BEST "
      "WHEN THE GAME ALREADY RUNS AT 60 OR MORE. FRAME RATE STILL LIMITS THE GAME'S OWN PICTURES. NEEDS "
