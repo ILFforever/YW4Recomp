@@ -1,16 +1,23 @@
 // SHARPENING's filter (decision 0076), shared by taa_output.frag (the 3D, in the perceptual curve) and
 // ui_sharpen.frag (text and menus, in the window image's own values). Both have values in 0..1.
 //
-// Contrast-adaptive, after the method AMD published as FidelityFX CAS: the pixel c is pushed away from its four
-// neighbours' average, by less where the 3x3 neighbourhood already has strong contrast (its darkest against its
-// brightest). Soft, low-contrast detail gets the most; edges that are already crisp get little, so they don't ring.
-// The result stays within the four neighbours' range: no bright or dark rims. (Our own code from the published
-// idea, not AMD's.) The push is 2x the amount where the area is flat (MEDIUM 0.5 -> 1.0, MAX 1.0 -> 2.0).
-vec3 sharpen(vec3 c, vec3 n, vec3 s, vec3 w, vec3 e, vec3 nw, vec3 ne, vec3 sw, vec3 se, float amount) {
-    vec3 lo = min(c, min(min(n, s), min(w, e))), hi = max(c, max(max(n, s), max(w, e)));
-    // the diagonals widen the range the contrast is judged on (CAS's "soft" min and max); the clamp stays the cross's
-    vec3 lo9 = min(lo, min(min(nw, ne), min(sw, se))), hi9 = max(hi, max(max(nw, ne), max(sw, se)));
-    // 1 where the neighbourhood is flat, toward 0 where it spans dark to bright
-    vec3 adapt = sqrt(clamp(lo9 / max(hi9, vec3(1e-4)), 0.0, 1.0));
-    return clamp(c + (c - 0.25 * (n + s + w + e)) * (2.0 * amount * adapt), lo, hi);
+// The method of AMD FidelityFX RCAS ("robust contrast-adaptive sharpening", FSR's own sharpener, MIT licence), so
+// TAA, DLSS, OFF, FXAA and SMAA sharpen the way FSR does at the same setting. The pixel e is pushed away from its
+// four neighbours (b above, h below, d left, f right) by one weight (a "lobe") for all three colours, as large as
+// the neighbours allow without the result leaving 0..1 in any colour, at most RCAS_LIMIT, then scaled by the amount.
+// Soft detail gets a strong push; strong edges get less, so they don't ring. The amount is FSR's sharpness: 0..1,
+// in stops (1.0 the full lobe, 0.5 half of it, 0.0 a quarter); 0 or below means none (the callers skip it).
+// The first filter here (a push clamped to the neighbours' range) stopped gaining on soft texture: on DLSS its MAX
+// came out like FSR's MEDIUM, and stronger looked blocky before it caught up (issue #11, 2026-11-16).
+const float RCAS_LIMIT = 0.25 - 1.0 / 16.0;
+
+vec3 sharpen(vec3 e, vec3 b, vec3 h, vec3 d, vec3 f, float amount) {
+    float con = exp2(-2.0 * (1.0 - clamp(amount, 0.0, 1.0)));  // FSR's sharpness -> RCAS's weight, 2 stops down to 0
+    vec3 mn4 = min(min(b, h), min(d, f)), mx4 = max(max(b, h), max(d, f));
+    // the most negative lobe each colour takes before the result would go below 0 (hit_min) or above 1 (hit_max)
+    vec3 hit_min = min(mn4, e) / max(4.0 * mx4, vec3(1e-5));
+    vec3 hit_max = (1.0 - max(mx4, e)) / min(4.0 * mn4 - 4.0, vec3(-1e-5));
+    vec3 l = max(-hit_min, hit_max);
+    float lobe = max(-RCAS_LIMIT, min(max(l.r, max(l.g, l.b)), 0.0)) * con;
+    return (lobe * (b + h + d + f) + e) / (4.0 * lobe + 1.0);
 }

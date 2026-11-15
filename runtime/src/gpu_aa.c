@@ -88,25 +88,32 @@ void gpu_sharpen_cycle(void) {
     fprintf(stderr, "yw4: gpu: sharpening %s\n", name[l]);
 }
 
-/* The amount, 0..1. Our pass: 0.25 a step. FSR's own sharpener (RCAS) grows much faster with its amount (it is in
- * stops of 2x, and nothing holds it to the neighbours' range: at 1.0 it gave 2.4x the detail where ours gave 1.6x),
- * so FSR gets its own table, measured so each step adds about as much detail as ours (decision 0076). Testing:
- * YW4_FSR_SHARPEN_MAP=<low>,<medium>,<high>,<max> replaces that table; YW4_TAA_SHARPEN / YW4_FSR_SHARPNESS override
- * the amount with any value for our pass (TAA, DLSS, off, FXAA, SMAA, text and menus) / for FSR. */
-static float sharpen_amount(int fsr) {
+/* The amount, 0..1, as FSR's sharpness: FSR's own sharpener (RCAS) takes it, and our pass (sharpen.glsl) is the
+ * same method. The steps are FSR's measured ones (decision 0076: RCAS grows fast with its amount, so MAX is 0.7,
+ * not 1.0). DLSS has its own, stronger steps: its picture starts much softer than FSR's (1080p school scene: 15-30%
+ * less detail with SHARPENING OFF), so on FSR's steps DLSS's MAX only looked like FSR's MEDIUM (issue #11). Its steps
+ * are measured so each looks about as sharp as FSR's at the same step; 0.85 is still clean, 1.0 rings.
+ * Testing: YW4_SHARPEN_MAP / YW4_DLSS_SHARPEN_MAP=<low>,<medium>,<high>,<max> replace a table; YW4_TAA_SHARPEN /
+ * YW4_FSR_SHARPNESS override the amount with any value for our pass (TAA, DLSS, off, FXAA, SMAA, text and menus) /
+ * for FSR. */
+enum { SHARPEN_OURS, SHARPEN_FSR, SHARPEN_DLSS };
+static float sharpen_amount(int which) {
     static float taa_env = -2.0f, fsr_env = -2.0f;  /* -1: not set */
-    static float fsr_map[5] = {0.0f, 0.25f, 0.5f, 0.6f, 0.7f};
+    static float level_map[5] = {0.0f, 0.25f, 0.5f, 0.6f, 0.7f};
+    static float dlss_map[5] = {0.0f, 0.6f, 0.75f, 0.8f, 0.85f};
     if (taa_env < -1.5f) {
         const char *e = getenv("YW4_TAA_SHARPEN");
         taa_env = e && *e ? (float)atof(e) : -1.0f;
         e = getenv("YW4_FSR_SHARPNESS");
         fsr_env = e && *e ? (float)atof(e) : -1.0f;
-        if ((e = getenv("YW4_FSR_SHARPEN_MAP")) != NULL)
-            sscanf(e, "%f,%f,%f,%f", &fsr_map[1], &fsr_map[2], &fsr_map[3], &fsr_map[4]);
+        if ((e = getenv("YW4_SHARPEN_MAP")) != NULL)
+            sscanf(e, "%f,%f,%f,%f", &level_map[1], &level_map[2], &level_map[3], &level_map[4]);
+        if ((e = getenv("YW4_DLSS_SHARPEN_MAP")) != NULL)
+            sscanf(e, "%f,%f,%f,%f", &dlss_map[1], &dlss_map[2], &dlss_map[3], &dlss_map[4]);
     }
-    float env = fsr ? fsr_env : taa_env;
+    float env = which == SHARPEN_FSR ? fsr_env : taa_env;
     if (env >= 0.0f) return env;
-    return fsr ? fsr_map[gpu_sharpen()] : (float)gpu_sharpen() * 0.25f;
+    return which == SHARPEN_DLSS ? dlss_map[gpu_sharpen()] : level_map[gpu_sharpen()];
 }
 
 /* SHARPEN TEXT AND MENUS (decision 0076): 0 only the 3D is sharpened (the default), 1 the game's UI too, at
@@ -570,7 +577,7 @@ static void taa(VkCommandBuffer cb, VkImageView target, VkFormat fmt, uint32_t w
     }
     memset(pass_params, 0, sizeof pass_params);
     /* SHARPENING after the blend (the debug views: none) */
-    pass_params[0] = result == history[next].view ? sharpen_amount(0) : 0.0f;
+    pass_params[0] = result == history[next].view ? sharpen_amount(SHARPEN_OURS) : 0.0f;
     pass(cb, P_TAA_OUT, target, fmt, w, h, 0, result);
     pass_params[0] = 0.0f;
     taa_cur = next, history_valid = 1;
@@ -650,7 +657,7 @@ static int fsr(VkCommandBuffer cb, GpuImage *d, VkImageView depth_in, VkImageVie
         cfar = getenv("YW4_FSR_FAR") ? (float)atof(getenv("YW4_FSR_FAR")) : 1000.0f;
     }
     /* SHARPENING as FSR's own sharpener's amount (0 turns it off, gpu_fsr.c) */
-    in.sharpness = sharpen_amount(1), in.cam_near = cnear, in.cam_far = cfar, in.fov_y = 0.785398f;  /* 45 degrees, town's */
+    in.sharpness = sharpen_amount(SHARPEN_FSR), in.cam_near = cnear, in.cam_far = cfar, in.fov_y = 0.785398f;  /* 45 degrees, town's */
     {   /* YW4_FSR_LOG: every 300 frames, how often FSR was asked and how often it started over */
         static int calls, resets, on = -1;
         if (on < 0) on = getenv("YW4_FSR_LOG") != NULL;
@@ -699,7 +706,7 @@ static int dlss(VkCommandBuffer cb, GpuImage *d, VkImageView depth_view, VkImage
     if (!gpu_dlss_dispatch(cb, &in)) return 0;
     full_barrier(cb);
     gpu_passes_other(cb, "DLSS: its output written back (SHARPENING)", 0);
-    pass_params[0] = sharpen_amount(0);  /* DLSS has no sharpening of its own any more: ours, at the output's size */
+    pass_params[0] = sharpen_amount(SHARPEN_DLSS);  /* DLSS has none of its own any more: ours, on DLSS's steps */
     pass(cb, P_TAA_OUT, target, fmt, ow, oh, 0, fsr_out.view);
     pass_params[0] = 0.0f;
     last = now, last_ow = ow, last_ns = t;
@@ -809,7 +816,7 @@ void gpu_sharpen_ui_present(VkCommandBuffer cb, NvnTexture *t) {
     full_barrier(cb);
     int before = ui_before.image && ui_before_frame + 1 == gpu_frames() && ui_before.w == w && ui_before.h == h &&
                  ui_before_fmt == g->format;
-    pass_params[0] = sharpen_amount(0), pass_params[1] = before ? 1.0f : 0.0f;
+    pass_params[0] = sharpen_amount(SHARPEN_OURS), pass_params[1] = before ? 1.0f : 0.0f;
     pass_with(cb, P_UI_SHARPEN, target, g->format, w, h, 0, ui_copy.view, before ? ui_before.view : ui_copy.view,
               ui_copy.view);
     memset(pass_params, 0, sizeof pass_params);
@@ -891,7 +898,7 @@ void gpu_aa_apply(VkCommandBuffer cb, GpuState *s) {
             gpu_passes_other(cb, "SHARPENING (anti-aliasing off, FXAA or SMAA)", 0);
             /* off: the scene is already encoded; FXAA / SMAA wrote theirs into the target, so encoded again */
             if (mode) pass(cb, P_ENCODE, encoded.view, VK_FORMAT_R16G16B16A16_SFLOAT, w, h, 0, scene);
-            pass_params[0] = sharpen_amount(0);
+            pass_params[0] = sharpen_amount(SHARPEN_OURS);
             pass(cb, P_TAA_OUT, target, fmt, w, h, 0, encoded.view);
             pass_params[0] = 0.0f;
         }

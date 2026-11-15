@@ -25,7 +25,6 @@ void main() {
         }
     }
     vec3 sharp = sharpen(c.rgb, at(p + ivec2(0, -1)).rgb, at(p + ivec2(0, 1)).rgb, at(p + ivec2(-1, 0)).rgb,
-                         at(p + ivec2(1, 0)).rgb, at(p + ivec2(-1, -1)).rgb, at(p + ivec2(1, -1)).rgb,
-                         at(p + ivec2(-1, 1)).rgb, at(p + ivec2(1, 1)).rgb, aa.params.x);
+                         at(p + ivec2(1, 0)).rgb, aa.params.x);
     o_color = vec4(sharp, c.a);
 }

@@ -18,7 +18,6 @@ void main() {
         return;
     }
     vec3 sharp = sharpen(c, at(p + ivec2(0, -1)), at(p + ivec2(0, 1)), at(p + ivec2(-1, 0)), at(p + ivec2(1, 0)),
-                         at(p + ivec2(-1, -1)), at(p + ivec2(1, -1)), at(p + ivec2(-1, 1)), at(p + ivec2(1, 1)),
                          aa.params.x);
     o_color = vec4(aa_decode(sharp), 1.0);
 }

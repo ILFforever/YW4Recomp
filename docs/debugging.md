@@ -125,7 +125,8 @@ line then says WARNING.
 | `YW4_FSR_TEST_RATIO=1.5` / `YW4_FSR_MV_SIGN=x,y` / `YW4_FSR_JITTER_SIGN=x,y` | Testing: FSR told the 3D used 1 / ratio of the images (its cost at a mode without upscaling; the picture is wrong) / flips of the motion or the jitter told to FSR |
 | `YW4_ASPECT=16:9` (`16:10`, `21:9`, `32:9`) | Aspect ratio at start ([decision 0033](decisions/0033-widescreen.md)): the cameras' aspect setting is changed every frame (hook on `f_97f510`), the screen-sized targets are made that much wider, the UI stays 16:9 in the middle. In the settings panel (F1, ASPECT RATIO) |
 | `YW4_LOG_CAMERA=<frame>` | With `YW4_GBUFFER=check` (or `native`): once at that frame, the render state's projection and the camera objects' floats (field of view, aspect, matrices) in the log |
-| `YW4_TAA_SHARPEN=0.5` | Testing: overrides SHARPENING with any amount for our sharpen pass (TAA, DLSS, off, FXAA, SMAA; 0 none, 1 = MAX) |
+| `YW4_TAA_SHARPEN=0.5` | Testing: overrides SHARPENING with any amount for our sharpen pass (TAA, DLSS, off, FXAA, SMAA; FSR's sharpness scale: 0 none, 0.7 = MAX, 1.0 rings) |
+| `YW4_SHARPEN_MAP=0.25,0.5,0.6,0.7` | Testing: SHARPENING's LOW, MEDIUM, HIGH, MAX amounts for every anti-aliasing but DLSS (`YW4_DLSS_SHARPEN_MAP`, default `0.6,0.75,0.8,0.85`) |
 | `YW4_TAA_SIGN=x,y` | Testing: overrides the signs TAA applies to the game's motion (default `1,-1` with the upper-left window origin) |
 | `YW4_TAA_LOG=1` | Every 300 frames: how many draws TAA shifted and how many after it (the UI) it left alone |
 | `YW4_SAMPLER_LOG=1` | Log each new sampler as the game set it (filters, wrap, LOD range and bias, anisotropy, compare) |

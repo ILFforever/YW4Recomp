@@ -148,3 +148,33 @@ blit of the 3D (counted in the anti-aliasing's own line). A 720p window was not 
 the game draws, and a smaller window only shows it scaled down after the sharpening, so it should look like the
 900-line row made smaller. Seen at 4x zoom: the filter works per colour channel (as
 CAS does), so hard UI edges can get a faint coloured edge; at normal size it doesn't show.
+
+## Follow-up 2026-11-16: DLSS's own steps, and FSR's method for our pass
+
+The player on #11 found FSR sharper after this record but DLSS "kinda the same". Measured at 1080p (school scene,
+upscaling off, same method; wall / boy / ground / house): DLSS on MAX (10.0 / 11.2 / 4.7 / 6.5) was about FSR on
+MEDIUM (10.3 / 10.1 / 5.7 / 7.0). Both add about the same share of detail per step; DLSS's picture simply starts
+15-30% softer than FSR's (OFF: 6.6 / 7.5 / 3.2 / 4.4 against 7.8 / 8.0 / 4.2 / 5.4), so matching steps by the share
+gained left DLSS a step behind everywhere.
+
+- **Our pass now uses RCAS's method** (`sharpen.glsl`: FSR's own sharpener, AMD FidelityFX, MIT): one weight for the
+  three colours, as large as keeps the result in 0..1, at most 0.1875, scaled by FSR's sharpness in stops. The clamped
+  push from above measured about the same at a given step, but pushed further it went blocky (tree trunks at 2.5x MAX)
+  and still stayed under FSR on soft ground; RCAS reaches FSR's look cleanly. Every mode now takes FSR's amounts:
+  **LOW 0.25 / MEDIUM 0.5 / HIGH 0.6 / MAX 0.7** (`YW4_SHARPEN_MAP`).
+- **DLSS gets its own steps: 0.6 / 0.75 / 0.8 / 0.85** (`YW4_DLSS_SHARPEN_MAP`), measured so each looks about as sharp
+  as FSR at the same step. 0.85 is still clean; 1.0 puts bright rims on edges.
+
+| 1080p | wall | boy | ground | house |
+|---|---|---|---|---|
+| DLSS OFF | 6.64 | 7.49 | 3.18 | 4.40 |
+| DLSS LOW (0.6) | 9.43 | 10.73 | 4.54 | 6.13 |
+| DLSS MEDIUM (0.75) | 10.93 | 12.47 | 5.28 | 7.06 |
+| DLSS HIGH (0.8) | 11.62 | 13.31 | 5.67 | 7.55 |
+| DLSS MAX (0.85) | 12.62 | 14.47 | 6.15 | 8.13 |
+| FSR LOW | 9.28 | 9.42 | 5.00 | 6.35 |
+| FSR MEDIUM | 10.26 | 10.21 | 5.69 | 7.05 |
+| FSR MAX | 11.92 | 11.43 | 6.63 | 8.15 |
+
+TAA stays on the common steps (MEDIUM 7.95 / 8.91 / 4.28 / 5.66): softer than FSR and DLSS, as TAA is; nobody asked.
+SHARPEN TEXT AND MENUS with RCAS: objective text +8% at MEDIUM over OFF (1080p), no rims seen at 3x zoom. Tests: 71 pass.
