@@ -18,6 +18,7 @@
 #include "gpu.h"
 #include "hud.h"
 #include "cheats.h"
+#include "discord.h"
 #include "settings.h"
 #include "theme.h"
 #include "shadow.h"
@@ -277,6 +278,13 @@ static const Setting player[] = {
      {"OFF", "ON"},
      {"THE SWITCH'S DEFAULT", "MORE DEPTH IN LEAVES AND UNDER EDGES"}, 2, gpu_contact,
      gpu_contact_toggle, "YW4_CONTACT", {"0", "1"}, contact_disabled},
+    {"ADVANCED", "DISCORD STATUS",
+     /* (decision 0077: Discord's local IPC, the Discord app on this PC; nothing goes anywhere else) */
+     "SHOWS ON YOUR DISCORD PROFILE THAT YOU ARE PLAYING YO-KAI WATCH 4, AND FOR HOW LONG. NEEDS THE DISCORD APP "
+     "OPEN ON THIS PC. OFF: NOTHING IS SENT.",
+     {"OFF", "ON"},
+     {"NOTHING SHOWN ON DISCORD", "SHOWN ON YOUR DISCORD PROFILE"}, 2,
+     discord_enabled, discord_toggle, "YW4_DISCORD", {"0", "1"}, discord_disabled},
     {"ADVANCED", "LEGACY MENUS",
      "THE OLD KEYS: F1 OPENS THE OLD SETTINGS PANEL AND ITS DEVELOPER OPTIONS, F2 THE OLD CONTROLS PAGE, F3 SHOWS OR "
      "HIDES THE PERFORMANCE HUD. OFF, F1 AND F2 OPEN THIS MENU'S SETTINGS AND CONTROLS PAGES (IT HAS ALL OF IT, THE "

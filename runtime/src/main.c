@@ -28,6 +28,7 @@
 #include <SDL3/SDL_filesystem.h>
 #include <SDL3/SDL_messagebox.h>
 
+#include "discord.h"
 #include "game_ini.h"
 #include "host.h"
 #include "kernel.h"
@@ -207,6 +208,7 @@ int main(int argc, char **argv) {
     }
     fprintf(stderr, "yw4: saves in %s%s\n", argv[3], default_save ? " (the default save folder)" : "");
     window_prestart();
+    discord_start();  /* Discord Rich Presence: its own thread, idle unless DISCORD STATUS is on (decision 0077) */
     if (yw4_load_modules(argv[1])) return 1;
     yw4_boot_mark("main and sdk loaded");
     if (romfs_open(argv[2])) return 1;
