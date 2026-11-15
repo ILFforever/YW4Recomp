@@ -703,8 +703,8 @@ let inst = null;  // the launcher's state of the install (Rust: ready.rs, %AppDa
 
 // What's new: written for each release (the launcher ships with the notes of the version it builds)
 const NEWS = {
-  version: '1.1.0',
-  items: ['Warnings when mods clash', 'Readable mod names', 'More mods found', 'The installer carries game 1.2.0'],
+  version: '1.2.0',
+  items: ['Cheats card: unlimited Crank-a-kai, on or off here', 'Linux: the AppImage builds the game', 'Linux: DLSS and FSR upscaling, FSR frame generation', 'Linux: the icon and banner show after a rebuild'],
 };
 
 function showNews(version, items) {
