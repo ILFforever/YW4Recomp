@@ -805,6 +805,7 @@ uint64_t tegra_total_size(const TexLayout *t) { return 0; }
 int scene_on_title(void) { return 0; }
 int mousemenu_talking(void) { return 0; }
 int mousemenu_map(void) { return 0; }
+int mousemenu_naviwoof(void) { return 0; }
 int mousemenu_sideways(void) { return 0; }
 int mousemenu_stopwatch(void) { return 0; }
 
@@ -927,6 +928,7 @@ uint64_t tegra_total_size(const TexLayout *t) { return 0; }
 int scene_on_title(void) { return 0; }
 int mousemenu_talking(void) { return 0; }
 int mousemenu_map(void) { return 0; }
+int mousemenu_naviwoof(void) { return 0; }
 int mousemenu_sideways(void) { return 0; }
 int mousemenu_stopwatch(void) { return 0; }
 
