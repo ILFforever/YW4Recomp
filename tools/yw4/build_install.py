@@ -218,11 +218,14 @@ class Previous:
 
 
 def ensure_install_icon(cfg: config.Config) -> None:
+    """The game's icon in the install's work/icon: the launcher's picture (icon.jpg) and, on Windows, the exe's
+    (yw4.ico; tools.yw4.icon makes no .ico elsewhere, so Linux is done with the JPEG alone)."""
     dst = cfg.work_dir / "icon"
-    if (dst / "yw4.ico").is_file():
+    done = "yw4.ico" if sys.platform == "win32" else "icon.jpg"
+    if (dst / done).is_file():
         return
     src = config.REPO_ROOT / "work" / "icon"
-    if (src / "yw4.ico").is_file():
+    if (src / done).is_file():
         dst.mkdir(parents=True, exist_ok=True)
         for name in ("icon.jpg", "yw4.ico", "icon.png"):
             if (src / name).is_file():

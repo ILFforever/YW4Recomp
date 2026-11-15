@@ -1,5 +1,5 @@
-"""The game's icon from the user's own NSP or XCI, as <work_dir>/icon/yw4.ico for the exe (decision 0048), and
-the original JPEG beside it as icon.jpg for the launcher's Ready screen.
+"""The game's icon from the user's own NSP or XCI, as <work_dir>/icon/icon.jpg for the launcher's Ready screen, and
+on Windows as yw4.ico beside it for the exe (decision 0048).
 
     python -m tools.yw4.icon
 
@@ -95,14 +95,20 @@ def jpeg_to_ico(jpeg: Path, ico: Path, tmp: Path) -> None:
 
 
 def make(cfg: config.Config, home: Path, ncas: list[Path]) -> Path:
-    """<work_dir>/icon/yw4.ico from these unpacked NCAs (preferred first); hactool's keys already in `home`."""
-    ico = cfg.work_dir / "icon" / "yw4.ico"
+    """<work_dir>/icon/icon.jpg from these unpacked NCAs (preferred first; hactool's keys already in `home`): the
+    launcher's Ready screen shows it, and its banner blurs it until there is a screenshot. On Windows also yw4.ico
+    beside it, for the exe. The JPEG comes first: the .ico needs Windows, and when its error came first a Linux
+    install had no picture at all (the launcher showed no icon and no banner)."""
+    out = cfg.work_dir / "icon"
     with tempfile.TemporaryDirectory() as t:
         tmp = Path(t)
         jpeg = icon_jpeg(cfg.hactool_exe, home, ncas, tmp)
-        jpeg_to_ico(jpeg, ico, tmp)
-        shutil.copyfile(jpeg, ico.with_name("icon.jpg"))  # the launcher's Ready screen shows it (the .ico is for Windows)
-    return ico
+        out.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(jpeg, out / "icon.jpg")
+        if sys.platform != "win32":
+            return out / "icon.jpg"
+        jpeg_to_ico(jpeg, out / "yw4.ico", tmp)
+    return out / "yw4.ico"
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -134,7 +140,7 @@ def main(argv: list[str] | None = None) -> int:
     except (config.ConfigError, IconError, extract.ExtractError, pfs0.Pfs0Error, xci.XciError) as e:
         print(f"icon: {e}", file=sys.stderr)
         return 1
-    print(f"wrote {ico}; the next python -m recomp.build puts it in yw4.exe")
+    print(f"wrote {ico}" + ("; the next python -m recomp.build puts it in yw4.exe" if ico.suffix == ".ico" else ""))
     return 0
 
 

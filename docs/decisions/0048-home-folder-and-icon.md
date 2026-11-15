@@ -48,3 +48,8 @@ the user's own NSP or XCI:
 - The game can be started from anywhere; relative paths in environment variables (`YW4_REPLAY=work/...`) are
   now relative to the home folder, which is where they pointed before for every existing use.
 - The icon stays in `work/` (gitignored) and in the built exe, which is never shared.
+- Linux (2026-11-15): the original JPEG is also the launcher's picture (`icon.jpg`: the Ready screen's icon, and its
+  banner until there is a screenshot). It was copied after the `.ico` was made, and the `.ico` needs Windows, so on
+  Linux the error came first and the launcher showed no icon and no banner (a Linux tester). `icon.make` now writes
+  `icon.jpg` first and makes the `.ico` on Windows only; `tools/yw4/build_install.py` counts a Linux install's icon as
+  done with the JPEG alone (`tests/test_icon.py`).
