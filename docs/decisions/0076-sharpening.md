@@ -144,6 +144,7 @@ The chosen table falls between DLSS and TAA at every step; FSR at MAX no longer 
 | 3840x2160 | 5.19 -> 5.20 (same) | +25% | +20% | 0.80 ms |
 
 The 3D measures the same with ON (not sharpened twice); the UI is crisper. The copy at the anti-aliasing point adds a
-blit of the 3D (counted in the anti-aliasing's own line). A 720p window shows the 900-line picture made smaller: the
-sharpening happens before that, so it looks like the 900 line. Seen at 4x zoom: the filter works per colour channel (as
+blit of the 3D (counted in the anti-aliasing's own line). A 720p window was not run: 900 lines is the smallest picture
+the game draws, and a smaller window only shows it scaled down after the sharpening, so it should look like the
+900-line row made smaller. Seen at 4x zoom: the filter works per colour channel (as
 CAS does), so hard UI edges can get a faint coloured edge; at normal size it doesn't show.
