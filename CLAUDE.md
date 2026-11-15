@@ -69,6 +69,17 @@ Goal: understand what we're dealing with before writing a recompiler.
   `python -m tools.dev.decisions --check` before committing docs (dead links, `decision NNNN` mentions of records
   that don't exist, code paths that are gone).
 
+## Releases
+- **A launcher release (`launcher-vX.Y.Z`) must have BOTH the Windows and the Linux downloads attached before it
+  is published:** `YW4-Recomp-Launcher-X.Y.Z-setup.exe` + `YW4-Recomp-Launcher-X.Y.Z-portable.zip` (Windows) and
+  `YW4-Recomp-Launcher-X.Y.Z-x86_64.AppImage` + its `.sha256` (Linux). 1.2.0 went out with the AppImage only
+  (2026-11-15): the README's download link (releases/latest) then had nothing for Windows, and 1.1.0 launchers
+  were offered an update with no installer. If one platform's files can't be built, publish nothing yet (or keep it a
+  draft) and tell the owner.
+- Check before and after publishing: `gh release view launcher-vX.Y.Z --json assets --jq '.assets[].name'`.
+- Both platforms' files are built from the same commit (the tag's): `python launcher/package.py launcher --ref
+  launcher-vX.Y.Z` on Windows, and the same on Linux/WSL for the AppImage (decision 0071).
+
 ## Disk space (C: filled up on 2026-11-07: 55 GB of test captures + 42 GB of Claude temp files)
 - Test captures (screenshots, frame dumps, A/B images, perf CSVs, logs) go in **one** folder per task under
   `work/` (gitignored), named `shots_<task>`. Do not scatter dozens of `shots_*` folders.
