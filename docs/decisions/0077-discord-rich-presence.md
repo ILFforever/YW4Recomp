@@ -8,7 +8,8 @@ code: runtime/src/discord.c, runtime/src/discord.h, runtime/src/discord_ipc.c, r
 -->
 
 Status: accepted (owner, 2026-11-15, through the relay session). Tested against a stand-in Discord on Windows and
-Linux; not yet against the real Discord app, which needs the owner's application ID.
+Linux, and on 2026-11-16 against the real Discord app on Windows with the owner's application ID: "discord:
+connected", the owner saw "Playing Yo-kai Watch 4" on their profile ("works"), clean exit after a ~3 h run.
 
 ## Context
 
@@ -22,9 +23,9 @@ area and the player's level too; the owner then cut it to the basics: the game's
   changes.
 - **Off unless turned on:** DISCORD STATUS (Settings, ADVANCED), OFF / ON, saved as `YW4_DISCORD=0/1`, default OFF.
   Turning it off clears the activity at once.
-- **The application ID** is `YW4_DISCORD_APP_ID` in `runtime/src/discord.h`, empty until the owner creates the
-  application; an environment variable of the same name overrides it. Empty: no thread at all, and the row is greyed
-  out ("NOT SET UP IN THIS BUILD").
+- **The application ID** is `YW4_DISCORD_APP_ID` in `runtime/src/discord.h`: the owner's application
+  `1571532450742665347` (created 2026-11-15; public, it goes in every build). An environment variable of the same
+  name overrides it. Empty: no thread at all, and the row is greyed out ("NOT SET UP IN THIS BUILD").
 - **No library.** Discord's local IPC is small: frames of an 8-byte header (op, length) and JSON. `discord_ipc.c`
   has the transport and the three messages (handshake, SET_ACTIVITY, clearing it) in about 250 lines. Windows: the
   named pipe `\\.\pipe\discord-ipc-0` to `-9`. Linux: the socket `discord-ipc-N` in `$XDG_RUNTIME_DIR`, `$TMPDIR`,
@@ -44,7 +45,8 @@ area and the player's level too; the owner then cut it to the basics: the game's
   autosave changed the header's second block), so they would show the last save, not the moment. Still open: which
   party slot is "the player", and area IDs to names (the player's RomFS text). A live value would need the game's
   memory found and hooked.
-- The real Discord app: waiting for the application ID (and its `icon` art).
+- No invite / cover image on the Discord application (owner skipped it, 2026-11-16).
+- Linux against the real Discord app: not run yet (stand-in only).
 
 ## Tests
 

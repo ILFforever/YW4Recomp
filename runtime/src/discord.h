@@ -7,7 +7,7 @@
 /* The Discord application's ID: its name is the game name the profile shows, its art the pictures. Empty: no
  * presence at all (the setting is greyed out). YW4_DISCORD_APP_ID overrides it (tests, or before it is filled in). */
 #ifndef YW4_DISCORD_APP_ID
-#define YW4_DISCORD_APP_ID ""
+#define YW4_DISCORD_APP_ID "1571532450742665347"
 #endif
 
 /* At start-up, after the settings are loaded: the presence thread (idle while the setting is off). */
