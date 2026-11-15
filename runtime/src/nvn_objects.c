@@ -559,7 +559,8 @@ static void register_texture(CPUState *c) {  /* (pool, id, texture, view or NULL
         while (i < POOLS && pools[i] && pools[i] != d) i++;
         if (i < POOLS) {
             pools[i] = d;
-            if (!(++regs[i] & (regs[i] - 1)))  /* powers of two */
+            long r = ++regs[i];  /* its own statement: read and written in one expression was undefined (GCC, #12) */
+            if (!(r & (r - 1)))  /* powers of two */
                 fprintf(stderr, "yw4: texpool: pool %p: %ld registrations\n", d, regs[i]);
         }
         char b[320];
