@@ -9,13 +9,96 @@
 //                 on Linux the ones on the PATH
 //   kill_tree     a build step and every process it started: taskkill /T, or the step's own process group
 //   python        the build's Python when the launcher runs from the repo: python / python3
+//   command       every program the launcher starts: inside the AppImage, without the AppImage's environment
 
-use std::ffi::OsStr;
+use std::ffi::{OsStr, OsString};
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
 /// The game's file name in its build folder (tools/yw4/build_install.py writes it under the same name).
 pub const GAME_EXE: &str = if cfg!(windows) { "yw4.exe" } else { "yw4" };
+
+/// A program to start: the build's Python, the game, curl, xdg-open... Use this, never `Command::new`.
+///
+/// The AppImage's AppRun (AppImageKit's, which Tauri bundles) sets up the environment for the launcher itself: PATH,
+/// LD_LIBRARY_PATH, XDG_DATA_DIRS, the GTK and GStreamer module paths into the AppImage, and PYTHONHOME / PYTHONPATH
+/// there too. A program the launcher starts inherits all of it. The system's Python then looked for its standard library
+/// inside the AppImage and stopped at once ("No module named 'encodings'", issue #13), and the compilers or the game
+/// could load the AppImage's libraries instead of the system's. So inside an AppImage (APPDIR set) every child gets the
+/// environment without what points into it (`appimage_env_fixes`). The launcher keeps its own: its web view needs it.
+pub fn command(program: impl AsRef<OsStr>) -> Command {
+    #[allow(unused_mut)] // changed only on Linux
+    let mut cmd = Command::new(program);
+    #[cfg(target_os = "linux")]
+    if let Some(appdir) = std::env::var_os("APPDIR").filter(|a| !a.is_empty()) {
+        for (k, v) in appimage_env_fixes(Path::new(&appdir), std::env::vars_os()) {
+            match v {
+                Some(v) => { cmd.env(k, v); }
+                None => { cmd.env_remove(k); }
+            }
+        }
+    }
+    cmd
+}
+
+/// What a child's environment changes to inside the AppImage mounted at `appdir`: each variable holding a place inside
+/// it loses those entries from its `:`-separated list, and is removed when nothing else is left (Some: the new value;
+/// None: removed). PYTHONDONTWRITEBYTECODE, which AppRun sets as well, is removed: it would keep the builder's Python
+/// from caching its compiled files. Everything else stays as the player's session has it.
+pub fn appimage_env_fixes(appdir: &Path, vars: impl Iterator<Item = (OsString, OsString)>)
+                          -> Vec<(OsString, Option<OsString>)> {
+    let root = appdir.to_string_lossy().trim_end_matches('/').to_string();
+    let inside = |e: &str| !root.is_empty() && (e == root || e.starts_with(&format!("{root}/")));
+    let mut out = Vec::new();
+    for (k, v) in vars {
+        if k == "PYTHONDONTWRITEBYTECODE" {
+            out.push((k, None));
+            continue;
+        }
+        let Some(s) = v.to_str() else { continue };
+        if !s.split(':').any(inside) { continue; }
+        let kept: Vec<&str> = s.split(':').filter(|e| !e.is_empty() && !inside(e)).collect();
+        out.push((k, if kept.is_empty() { None } else { Some(OsString::from(kept.join(":"))) }));
+    }
+    out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn fixes(vars: &[(&str, &str)]) -> Vec<(String, Option<String>)> {
+        let it = vars.iter().map(|(k, v)| (OsString::from(k), OsString::from(v)));
+        appimage_env_fixes(Path::new("/tmp/.mount_YW4-ReIJbDah"), it).into_iter()
+            .map(|(k, v)| (k.into_string().unwrap(), v.map(|v| v.into_string().unwrap()))).collect()
+    }
+
+    #[test]
+    fn appimage_environment_left_out() {
+        // as AppRun set them in issue #13, with the player's own values around them
+        let got = fixes(&[
+            ("PYTHONHOME", "/tmp/.mount_YW4-ReIJbDah/usr/"),
+            ("PYTHONPATH", "/tmp/.mount_YW4-ReIJbDah/usr/share/pyshared/:"),
+            ("PYTHONDONTWRITEBYTECODE", "1"),
+            ("PATH", "/tmp/.mount_YW4-ReIJbDah/usr/bin:/usr/local/bin:/usr/bin"),
+            ("LD_LIBRARY_PATH", "/tmp/.mount_YW4-ReIJbDah/usr/lib/:/tmp/.mount_YW4-ReIJbDah/usr/lib64/"),
+            ("XDG_DATA_DIRS", "/tmp/.mount_YW4-ReIJbDah/usr/share/:/usr/local/share:/usr/share"),
+            ("APPDIR", "/tmp/.mount_YW4-ReIJbDah"),
+            ("APPIMAGE", "/home/fang/YW4-Recomp-Launcher-1.1.0-x86_64.AppImage"),
+            ("HOME", "/home/fang"),
+            ("OTHER", "/tmp/.mount_YW4-ReIJbDahX/usr"),  // another mount, not inside this one
+        ]);
+        assert_eq!(got, vec![
+            ("PYTHONHOME".into(), None),
+            ("PYTHONPATH".into(), None),
+            ("PYTHONDONTWRITEBYTECODE".into(), None),
+            ("PATH".into(), Some("/usr/local/bin:/usr/bin".into())),
+            ("LD_LIBRARY_PATH".into(), None),
+            ("XDG_DATA_DIRS".into(), Some("/usr/local/share:/usr/share".into())),
+            ("APPDIR".into(), None),
+        ]);
+    }
+}
 
 /// No console window flashing up for a tool the launcher starts (Windows); nothing to do on Linux.
 pub fn hidden(cmd: &mut Command) -> &mut Command {
@@ -41,13 +124,13 @@ pub fn data_dir() -> PathBuf {
 /// Opens a link or a folder the way a double-click would.
 pub fn open(target: impl AsRef<OsStr>) -> Result<(), String> {
     let prog = if cfg!(windows) { "explorer" } else { "xdg-open" };
-    Command::new(prog).arg(target).spawn().map(|_| ()).map_err(|e| e.to_string())
+    command(prog).arg(target).spawn().map(|_| ()).map_err(|e| e.to_string())
 }
 
 /// The file manager on the folder holding `file`, with the file selected where the system can do that (Windows).
 pub fn reveal(file: &Path) -> Result<(), String> {
     #[cfg(windows)]
-    { Command::new("explorer").arg(format!("/select,{}", file.display())).spawn().map(|_| ()).map_err(|e| e.to_string()) }
+    { command("explorer").arg(format!("/select,{}", file.display())).spawn().map(|_| ()).map_err(|e| e.to_string()) }
     #[cfg(not(windows))]
     { open(file.parent().unwrap_or(file)) }
 }
@@ -79,20 +162,20 @@ pub fn own_group(cmd: &mut Command) -> &mut Command {
 /// Ends a process started with own_group and everything it started.
 pub fn kill_tree(pid: u32) {
     #[cfg(windows)]
-    { let _ = hidden(Command::new("taskkill").args(["/T", "/F", "/PID", &pid.to_string()])).status(); }
+    { let _ = hidden(command("taskkill").args(["/T", "/F", "/PID", &pid.to_string()])).status(); }
     #[cfg(not(windows))]
-    { let _ = Command::new("kill").args(["-KILL", "--", &format!("-{pid}")]).status(); }
+    { let _ = command("kill").args(["-KILL", "--", &format!("-{pid}")]).status(); }
 }
 
 /// Is any copy of the game running?
 pub fn game_running() -> bool {
     #[cfg(windows)]
     {
-        hidden(Command::new("tasklist").args(["/FI", "IMAGENAME eq yw4.exe", "/NH"])).output()
+        hidden(command("tasklist").args(["/FI", "IMAGENAME eq yw4.exe", "/NH"])).output()
             .map(|o| String::from_utf8_lossy(&o.stdout).to_lowercase().contains("yw4.exe")).unwrap_or(false)
     }
     #[cfg(not(windows))]
-    { Command::new("pgrep").args(["-x", GAME_EXE]).output().map(|o| o.status.success()).unwrap_or(false) }
+    { command("pgrep").args(["-x", GAME_EXE]).output().map(|o| o.status.success()).unwrap_or(false) }
 }
 
 /// The error an open-for-writing of a running program gives: Windows 5 / 32 (access denied, sharing violation),
@@ -105,10 +188,10 @@ pub fn busy_error(code: Option<i32>) -> bool {
 /// zipfile does it (the build needs Python 3 anyway), which also refuses absolute paths and "..".
 pub fn unzip(zip: &Path, dir: &Path) -> bool {
     #[cfg(windows)]
-    { hidden(Command::new(tool("tar")).arg("-xf").arg(zip).arg("-C").arg(dir)).status().map(|s| s.success()).unwrap_or(false) }
+    { hidden(command(tool("tar")).arg("-xf").arg(zip).arg("-C").arg(dir)).status().map(|s| s.success()).unwrap_or(false) }
     #[cfg(not(windows))]
     {
-        Command::new(python()).args(["-c", "import sys, zipfile; zipfile.ZipFile(sys.argv[1]).extractall(sys.argv[2])"])
+        command(python()).args(["-c", "import sys, zipfile; zipfile.ZipFile(sys.argv[1]).extractall(sys.argv[2])"])
             .arg(zip).arg(dir).status().map(|s| s.success()).unwrap_or(false)
     }
 }
@@ -129,7 +212,7 @@ pub fn free_bytes(p: &Path) -> Option<u64> {
     #[cfg(not(windows))]
     {
         // coreutils' df (every desktop distribution has it): bytes available to this user
-        let out = Command::new("df").args(["-B1", "--output=avail"]).arg(p).output().ok()?;
+        let out = command("df").args(["-B1", "--output=avail"]).arg(p).output().ok()?;
         String::from_utf8_lossy(&out.stdout).lines().nth(1)?.trim().parse().ok()
     }
 }
@@ -137,12 +220,12 @@ pub fn free_bytes(p: &Path) -> Option<u64> {
 /// The graphics cards' names, for the Options screen (which offers DLSS only with an RTX card).
 pub fn gpu_names() -> Vec<String> {
     #[cfg(windows)]
-    let out = hidden(Command::new("powershell").args(["-NoProfile", "-NonInteractive", "-Command",
+    let out = hidden(command("powershell").args(["-NoProfile", "-NonInteractive", "-Command",
         "Get-CimInstance Win32_VideoController | ForEach-Object { $_.Name }"])).output();
     // Linux: the Vulkan devices' names when vulkaninfo is there (the names the game's log shows), else lspci's
     // display controllers
     #[cfg(not(windows))]
-    let out = Command::new("sh").args(["-c",
+    let out = command("sh").args(["-c",
         "vulkaninfo --summary 2>/dev/null | sed -n 's/^[[:space:]]*deviceName[[:space:]]*= //p' | grep -v llvmpipe \
          || lspci 2>/dev/null | sed -n 's/^[^ ]* \\(VGA compatible controller\\|3D controller\\|Display controller\\): //p'"]).output();
     out.ok()
@@ -158,7 +241,7 @@ pub fn shortcut(desktop: bool, on: bool, target: &Path, icon: &Path) -> Result<(
         let place = if desktop { "[Environment]::GetFolderPath('Desktop')" } else { "[Environment]::GetFolderPath('Programs')" };
         if !on {
             let script = format!("Remove-Item -LiteralPath (Join-Path ({place}) 'Yo-kai Watch 4 Recomp.lnk') -ErrorAction SilentlyContinue");
-            let _ = hidden(Command::new("powershell").args(["-NoProfile", "-NonInteractive", "-Command", &script])).status();
+            let _ = hidden(command("powershell").args(["-NoProfile", "-NonInteractive", "-Command", &script])).status();
             return Ok(());
         }
         // ({place}): a .NET call given straight to a command is read as text, not run (Join-Path then fails and no
@@ -167,7 +250,7 @@ pub fn shortcut(desktop: bool, on: bool, target: &Path, icon: &Path) -> Result<(
             "$s=(New-Object -ComObject WScript.Shell).CreateShortcut((Join-Path ({place}) 'Yo-kai Watch 4 Recomp.lnk')); \
              $s.TargetPath=$env:YW4_LNK_TARGET; $s.WorkingDirectory=(Split-Path $env:YW4_LNK_TARGET); \
              $s.IconLocation=$env:YW4_LNK_ICON; $s.Save()");
-        let ok = hidden(Command::new("powershell").args(["-NoProfile", "-NonInteractive", "-Command", &script])
+        let ok = hidden(command("powershell").args(["-NoProfile", "-NonInteractive", "-Command", &script])
             .env("YW4_LNK_TARGET", target).env("YW4_LNK_ICON", icon)).status().map(|s| s.success()).unwrap_or(false);
         if ok { Ok(()) } else { Err("couldn't make a shortcut".into()) }
     }
@@ -176,7 +259,7 @@ pub fn shortcut(desktop: bool, on: bool, target: &Path, icon: &Path) -> Result<(
         let home = PathBuf::from(std::env::var("HOME").unwrap_or_default());
         let dir = if desktop {
             // the desktop folder's name follows the system's language: xdg-user-dir knows it
-            Command::new("xdg-user-dir").arg("DESKTOP").output().ok()
+            command("xdg-user-dir").arg("DESKTOP").output().ok()
                 .map(|o| PathBuf::from(String::from_utf8_lossy(&o.stdout).trim()))
                 .filter(|p| p.is_absolute())
                 .unwrap_or_else(|| home.join("Desktop"))

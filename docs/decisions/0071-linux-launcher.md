@@ -66,6 +66,29 @@ The launcher's "Find it" (an existing install) wrote `%APPDATA%/YW4 Recomp/save`
 "appdata" saves. The game expands no `%APPDATA%` (`runtime/src/game_ini.c`), so it read a folder literally named
 `%APPDATA%`. It now writes the real folder, on both systems.
 
+## Issue #13: the AppImage's environment reached the build (2026-11-15)
+
+A player on AOSC OS built the launcher. Two problems, one after the other:
+
+1. **Bundling:** `cargo tauri build` stopped with only "failed to run linuxdeploy". Their `cargo tauri` was 2.10.1,
+   older than the 2.12.4 we use (pinned in `package.json` for Windows; for Linux only a docstring said so). With 2.12.4
+   it bundled. `package.py` now checks `cargo tauri --version` against `package.json`'s pin before it starts, and stops
+   with the `cargo install tauri-cli --version 2.12.4 --locked` line instead.
+2. **Running:** in the AppImage, BUILD failed at 0%: the system's `python3` stopped with "No module named 'encodings'",
+   `PYTHONHOME` and `PYTHONPATH` pointing into the AppImage's mount. The binary run on its own worked. The AppImage's
+   AppRun (AppImageKit's, which Tauri bundles) sets those for the launcher, with PATH, LD_LIBRARY_PATH, XDG_DATA_DIRS
+   and the GTK / GStreamer / Qt module paths, and every program the launcher started inherited them: Python first, but
+   also the compiler, the game, curl and xdg-open (the player's browser), which could load the AppImage's libraries.
+
+   Fix: `platform::command`, used for every program the launcher starts (no `Command::new` left elsewhere). Inside an
+   AppImage (APPDIR set) it gives the child the launcher's environment with every entry inside the mount left out of
+   its variable's `:` list, the variable removed when nothing else is left, and AppRun's `PYTHONDONTWRITEBYTECODE`
+   removed. The launcher keeps its own (its web view needs it). Nothing the builder starts needed the AppImage's
+   libraries: hactool links only libc, and SDL3 is found next to the game through its run path. A Rust test feeds it
+   the variables from the player's log.
+
+   Never caught before: the AppImage was built in WSL but never started (Not done, below).
+
 ## Not done
 
 - Tried only in WSL with software rendering: no real GPU, desktop, file manager or controller.

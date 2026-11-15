@@ -237,11 +237,35 @@ def rust_host() -> str:
     return next((line.split(":", 1)[1].strip() for line in out.splitlines() if line.startswith("host:")), "")
 
 
+def version_tuple(text: str) -> tuple[int, ...]:
+    return tuple(int(p) for p in text.split("-")[0].split("."))
+
+
+def check_tauri_cli(launcher: Path) -> None:
+    """cargo's Tauri CLI at least the version package.json pins for Windows (the one the AppImage was made with). An
+    older one fails late with only "failed to run linuxdeploy": tauri-cli 2.10.1 did on a player's PC (issue #13)."""
+    want = json.loads((launcher / "package.json").read_text())["devDependencies"]["@tauri-apps/cli"].lstrip("^~=")
+    hint = f"install it with: cargo install tauri-cli --version {want} --locked"
+    try:
+        out = subprocess.run(["cargo", "tauri", "--version"], capture_output=True, text=True).stdout
+    except OSError:
+        raise SystemExit(f"cargo isn't on the PATH; {hint}")
+    have = out.split()[-1] if out.split() else ""
+    try:
+        old = version_tuple(have) < version_tuple(want)
+    except ValueError:
+        raise SystemExit(f"cargo's Tauri CLI is missing ({out.strip() or 'no `cargo tauri`'}); {hint}")
+    if old:
+        raise SystemExit(f"cargo's Tauri CLI is {have}, older than {want}: its AppImage tools fail to bundle; {hint}")
+
+
 def build_linux() -> None:
     """The AppImage (tauri.linux.conf.json), with builder/ and themes/ as its resources. Cargo builds in a folder of
     its own (YW4_LINUX_TARGET, default ~/.cache/yw4-launcher-target), never the repo's target/ that the Windows build
-    uses; the Tauri CLI is cargo's (`cargo install tauri-cli --version 2.12.4`): node_modules holds Windows' CLI."""
+    uses; the Tauri CLI is cargo's (`cargo install tauri-cli --version 2.12.4`, checked: check_tauri_cli):
+    node_modules holds Windows' CLI."""
     launcher = REPO / "launcher"
+    check_tauri_cli(launcher)
     version = (launcher / "VERSION").read_text().strip()
     target = Path(os.environ.get("YW4_LINUX_TARGET", Path.home() / ".cache" / "yw4-launcher-target"))
     overrides = OUT / "tauri.package.linux.json"

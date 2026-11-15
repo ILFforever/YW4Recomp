@@ -4,7 +4,6 @@
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-use std::process::Command;
 use crate::platform::{self, GAME_EXE};
 
 /// The launcher's own bookkeeping, in %AppData%\YW4 Recomp\launcher.json: which install it built and with what.
@@ -412,7 +411,7 @@ fn game_clashes(exe: &Path, version: &str) -> Option<Vec<ModOverlap>> {
     // an older yw4 takes the flag for a start: it writes a log before giving up, which would push the last real
     // log (the one a bug report sends) aside
     if crate::update::built_version(version)? <= (1, 1, 0) { return None; }
-    let mut child = hidden(Command::new(exe).arg("--mod-clashes")).current_dir(exe.parent()?)
+    let mut child = hidden(crate::platform::command(exe).arg("--mod-clashes")).current_dir(exe.parent()?)
         .stdout(std::process::Stdio::piped()).stderr(std::process::Stdio::null()).spawn().ok()?;
     let mut stdout = child.stdout.take()?;
     // read on another thread: a long answer would fill the pipe while this one waits for the exit
@@ -578,7 +577,7 @@ pub fn play(app: tauri::AppHandle, install: String, mods: Option<bool>, on_play:
     use tauri::{Emitter, Manager};
     crate::buildrun::ensure_dlc_extracted(&app, Path::new(&install));
     let e = exe(&install);
-    let mut cmd = Command::new(&e);
+    let mut cmd = crate::platform::command(&e);
     cmd.current_dir(e.parent().unwrap());
     // the game is a console program: its window shows the log live. Off unless Settings asks for it (the log file is written either way)
     #[cfg(windows)]
@@ -1165,7 +1164,7 @@ pub async fn uninstall(app: tauri::AppHandle, install: String, saves: String, ke
     if launcher {
         if let Some(u) = uninstaller() {
             // after we close: it removes this program's files and its entry in Windows' installed apps
-            hidden(Command::new(u).arg("/S")).spawn().map_err(|e| e.to_string())?;
+            hidden(crate::platform::command(u).arg("/S")).spawn().map_err(|e| e.to_string())?;
             app.exit(0);
         }
     }
@@ -1176,7 +1175,7 @@ pub async fn uninstall(app: tauri::AppHandle, install: String, saves: String, ke
 /// copied file) must never hang the screen; Windows' own error box for it is turned off in main.rs.
 fn game_version(exe: &Path) -> String {
     crate::quiet_errors();  // set again here: the window's start-up resets it (seen 2026-11-05)
-    let Ok(mut child) = hidden(Command::new(exe).arg("--version")).stdout(std::process::Stdio::piped())
+    let Ok(mut child) = hidden(crate::platform::command(exe).arg("--version")).stdout(std::process::Stdio::piped())
         .stderr(std::process::Stdio::null()).spawn() else { return String::new() };
     let started = std::time::Instant::now();
     loop {

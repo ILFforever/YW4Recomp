@@ -17,7 +17,6 @@
 use serde::Serialize;
 use sha2::{Digest, Sha256};
 use std::path::{Path, PathBuf};
-use std::process::Command;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 /// The build protocol this launcher speaks (tools/yw4/build_install.py PROTOCOL).
@@ -144,7 +143,7 @@ fn releases(fresh: bool) -> Option<serde_json::Value> {
             return Some(c["releases"].clone());
         }
     }
-    let out = hidden(Command::new(tool("curl")).args([
+    let out = hidden(crate::platform::command(tool("curl")).args([
         "-sSfL", "--max-time", "10", "-H", "Accept: application/vnd.github+json", "-H", "User-Agent: YW4-Recomp-Launcher",
         RELEASES,
     ])).output().ok()?;
@@ -240,7 +239,7 @@ pub async fn download_game_update(install: String, version: String, url: String,
         let dir = PathBuf::from(&install).join("builder").join("game");
         std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
         let (zip, tmp, dst) = (dir.join(format!("{version}.zip.part")), dir.join(format!("{version}.unpack")), dir.join(&version));
-        let ok = hidden(Command::new(tool("curl")).args(["-sSfL", "--max-time", "300", "-o"]).arg(&zip).arg(&url))
+        let ok = hidden(crate::platform::command(tool("curl")).args(["-sSfL", "--max-time", "300", "-o"]).arg(&zip).arg(&url))
             .status().map(|s| s.success()).unwrap_or(false);
         if !ok {
             let _ = std::fs::remove_file(&zip);
@@ -298,7 +297,7 @@ pub async fn download_launcher_update(app: tauri::AppHandle, version: String, ur
         std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
         let (part, exe) = (dir.join(format!("{name}.part")), dir.join(&name));
         let _ = std::fs::remove_file(&exe);
-        let ok = hidden(Command::new(tool("curl")).args(["-sSfL", "--max-time", "600", "-o"]).arg(&part).arg(&url))
+        let ok = hidden(crate::platform::command(tool("curl")).args(["-sSfL", "--max-time", "600", "-o"]).arg(&part).arg(&url))
             .status().map(|s| s.success()).unwrap_or(false);
         if !ok {
             let _ = std::fs::remove_file(&part);
@@ -323,7 +322,7 @@ pub async fn download_launcher_update(app: tauri::AppHandle, version: String, ur
 #[tauri::command]
 pub fn run_launcher_update(app: tauri::AppHandle) -> Result<(), String> {
     let exe = CHECKED_INSTALLER.lock().map_err(|e| e.to_string())?.take().ok_or("no checked installer")?;
-    Command::new(&exe).args(["/P", "/UPDATE", "/R"]).spawn().map_err(|e| format!("couldn't start the installer: {e}"))?;
+    crate::platform::command(&exe).args(["/P", "/UPDATE", "/R"]).spawn().map_err(|e| format!("couldn't start the installer: {e}"))?;
     std::thread::spawn(move || {
         std::thread::sleep(std::time::Duration::from_millis(300));  // the page's answer gets back first
         app.exit(0);

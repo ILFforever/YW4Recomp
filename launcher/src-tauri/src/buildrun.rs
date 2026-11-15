@@ -14,7 +14,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::io::{BufRead, BufReader};
 use std::path::{Path, PathBuf};
-use std::process::{Child, Command, Stdio};
+use std::process::{Child, Stdio};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use tauri::{AppHandle, Emitter, Manager};
@@ -135,7 +135,7 @@ fn code_protocol(b: &Builder) -> i64 {
             }
         }
     }
-    let mut cmd = Command::new(&b.python);
+    let mut cmd = crate::platform::command(&b.python);
     cmd.arg("-u").arg("-c").arg(BOOT).arg(&b.src).arg("tools.yw4.build_install").arg("--protocol")
         .current_dir(&b.src).stdout(Stdio::piped()).stderr(Stdio::null());
     platform::hidden(&mut cmd);
@@ -185,7 +185,7 @@ fn python(app: &AppHandle, run: &Running, b: &Builder, cfg: &Path, module: &str,
     if run.cancel.load(Ordering::SeqCst) { return Err("cancelled".into()); }
     // The game code's folder goes first on Python's path (tools/yw4/build_install.py BOOT does the same for each
     // step it starts): the bundled Python's ._pth file names no code folder, and a game update lives in its own.
-    let mut cmd = Command::new(&b.python);
+    let mut cmd = crate::platform::command(&b.python);
     cmd.arg("-u").arg("-c").arg(BOOT).arg(&b.src).arg(module).args(args).current_dir(&b.src)
         .env("YW4_CONFIG", cfg).env("YW4_PROGRESS", "1").env("PYTHONIOENCODING", "utf-8")
         .stdout(Stdio::piped()).stderr(Stdio::piped());
@@ -287,7 +287,7 @@ pub fn ensure_dlc_extracted(app: &AppHandle, inst: &Path) {
     let cfg = inst.join("config.toml");
     if !needed || !cfg.is_file() { return; }
     let b = builder(app, inst);
-    let mut cmd = Command::new(&b.python);
+    let mut cmd = crate::platform::command(&b.python);
     cmd.args(["-u", "-c", BOOT]).arg(&b.src).args(["tools.yw4.extract", "--dlc-only"]).current_dir(&b.src)
         .env("YW4_CONFIG", &cfg).env("PYTHONIOENCODING", "utf-8");
     if b.tools.is_some() { cmd.env("PYTHONPYCACHEPREFIX", inst.join("work").join("pycache")); }
