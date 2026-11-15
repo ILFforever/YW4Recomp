@@ -80,6 +80,18 @@ logs. Its theme is synced with the in-game overlay's, and game updates come thro
 
 ![Launcher themes: Jibanyan and Whisper](docs/screenshots/99-launcher-themes.jpg)
 
+### If you see graphical glitches
+
+If something looks wrong, like broken or flickering shadows, change the game's renderer setting:
+
+1. Open the overlay with **Escape**, then go to **Settings** and open **Advanced**.
+2. Open the **Developer options** page at the end of Advanced.
+3. Set **SHADOW PASS** from **CUSTOM** to **GAME**.
+
+This makes the game draw the shadows with its own renderer instead of ours. It **will lower performance**, so
+expect a lower frame rate. If the glitch is still there, try **G-BUFFER** the same way. Set the options back to
+CUSTOM if the game runs too slowly.
+
 ## Why not just use an emulator?
 
 Switch emulators already run *Yo-kai Watch 4++* at full speed on a good PC. This project aims further:
