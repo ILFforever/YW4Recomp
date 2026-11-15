@@ -25,12 +25,21 @@ fine; what costs most there is resolution and aspect ratio, which stay as the pl
   the Switch's values. Nothing else changes.
 - **High:** everything else. The defaults stay.
 
-**Once, in the game.** `settings_load` notes that a settings file is in use but doesn't exist yet. Right after
+**Once, in the game.** `settings_load` notes that a settings file is in use but doesn't exist yet, or has no
+`YW4_SHADOW_RES` line (2026-11-16, below). Right after
 the Vulkan device is made (`vk_init`), the window sorts the GPU and `settings_first_run` steps the four settings
 the way the panel would, then writes the file, so it never runs again and never overrides the player's choices.
 The game does it, not the launcher, because it knows the GPU it actually draws on, and a double-clicked
-`yw4.exe` gets it too. The launcher never makes `settings.ini`, only reads or copies it. A variable set in the
-environment is left alone. Test runs (`YW4_SETTINGS_FILE=none`) never trigger it.
+`yw4.exe` gets it too. A variable set in the environment is left alone.
+
+**"Not picked yet", not "no file" (2026-11-16, issue #14).** This first said "the launcher never makes
+`settings.ini`", but since 1.0.0 its "Full screen at start" switch writes `YW4_WINDOW` there, and since 1.2.0 its
+Cheats card writes the cheat lines, creating the file if needed. A player who flipped one before the first start
+had a one-line file, so the game skipped this and ran the high defaults on any GPU: on an Intel HD 520 (Linux,
+Mesa) the GPU was lost in the first cutscene. The game's own save writes every setting, so a file without
+`YW4_SHADOW_RES` was started by someone else and the graphics were never picked: that now counts as a first start
+too. The lines already there are kept (they are loaded first, and the save writes them back). The log says
+"(graphics not picked yet)" after the settings count. Test runs (`YW4_SETTINGS_FILE=none`) never trigger it.
 
 **A notice that fades.** A corner toast at the bottom left of the picture (the owner's pick of four mockups,
 2026-11-11: the first, one long line at the top, was hard to read): a tile with a gauge, **gold** for lighter
@@ -61,6 +70,7 @@ graphics level). It only points at the F2 card, which already shows every key, s
 
 - `YW4_FIRST_RUN_LEVEL=low|high` forces the level in tests (with `YW4_SETTINGS_FILE` pointing at a file that
   doesn't exist); screenshots include the notice.
-- Existing installs are untouched: they already have a settings file.
+- Existing installs are untouched when the game has saved its settings once (every line is written then). Those
+  with only the launcher's lines get the first start on their next start after the 2026-11-16 fix.
 - Not done: a "reset to recommended" row (the owner didn't ask for it); checking the levels on a real
   integrated GPU and an AMD card (the clean-PC test).

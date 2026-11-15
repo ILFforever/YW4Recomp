@@ -381,8 +381,12 @@ static void set_env(const char *name, const char *value) {
 #endif
 }
 
-/* A new install: a settings file is in use (not YW4_SETTINGS_FILE=none) but doesn't exist yet. settings_first_run
- * then picks the graphics for the GPU once and writes the file. */
+/* Graphics not picked yet: a settings file is in use (not YW4_SETTINGS_FILE=none) but doesn't exist, or exists
+ * without a YW4_SHADOW_RES line. The game's own save writes every setting, so only a file someone else started has
+ * none: the launcher writes YW4_WINDOW (Full screen at start) and the cheats into settings.ini, and a player who
+ * flipped one before the first start used to skip this and got the high defaults on any GPU (issue #14: an Intel
+ * HD 520, device lost in the first cutscene). settings_first_run then picks the graphics for the GPU once and writes
+ * the file, keeping the lines that were there. */
 static int first_run;
 
 void settings_load(void) {
@@ -393,11 +397,12 @@ void settings_load(void) {
         return;
     }
     char line[256];
-    int n = 0;
+    int n = 0, graphics = 0;
     while (fgets(line, sizeof line, f)) {
         char *eq = strchr(line, '=');
         if (line[0] == '#' || !eq) continue;
         *eq = 0;
+        if (!strcmp(line, "YW4_SHADOW_RES")) graphics = 1;
         char *value = eq + 1;
         value[strcspn(value, "\r\n")] = 0;
         for (int i = 0; i < NSETTINGS; i++)  /* only the panel's settings, and never over the environment */
@@ -408,7 +413,8 @@ void settings_load(void) {
             set_env(line, value), n++;
     }
     fclose(f);
-    fprintf(stderr, "yw4: settings: %d from %s\n", n, path);
+    first_run = !graphics;
+    fprintf(stderr, "yw4: settings: %d from %s%s\n", n, path, graphics ? "" : " (graphics not picked yet)");
 }
 
 void settings_save(void) {
