@@ -4,12 +4,13 @@
 #define YW4_GPU_INTERNAL_H
 
 #include "gpu.h"
+#include "c11_keywords.h"
 #include "nvn.h"
 #include "vk.h"
 
-_Noreturn void gpu_fatal(const char *what, VkResult r);
+YW4_NORETURN void gpu_fatal(const char *what, VkResult r);
 #define CHECK(x) do { VkResult r_ = (x); if (r_ != VK_SUCCESS) gpu_fatal(#x, r_); } while (0)
-_Noreturn void gpu_stop(const char *fmt, ...);  /* something the draw path can't do yet */
+YW4_NORETURN void gpu_stop(const char *fmt, ...);  /* something the draw path can't do yet */
 
 /* ---- gpu.c: where a frame's time on the GPU thread went, logged when it is long (hitches; YW4_STALL_MS) */
 enum { STALL_EXEC, STALL_LOCK, STALL_BEGIN, STALL_PIPE, STALL_IMAGE, STALL_UPLOAD, STALL_PRESENT, STALL_SHADER, STALL_WAIT,

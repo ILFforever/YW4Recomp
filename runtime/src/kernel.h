@@ -4,6 +4,7 @@
 
 #include <stdint.h>
 
+#include "c11_keywords.h"  /* before yw4rt.h: its _Noreturn in C++ */
 #include "yw4rt.h"
 
 #include <stdio.h>
@@ -87,7 +88,7 @@ void yw4_kernel_unlock(void);
 
 /* Stops the program after printing the current guest thread and its backtrace: for "not
  * implemented yet" stops reached from guest code (any guest thread, lock held or not). */
-_Noreturn void yw4_stop(void);
+YW4_NORETURN void yw4_stop(void);
 /* Up to n return addresses of ctx's guest call stack (frame-pointer chain); how many. */
 int yw4_call_stack(const CPUState *ctx, uint64_t *out, int n);
 /* YW4_WATCHW: report every write to [addr, addr + size) with the writer's call stack. */

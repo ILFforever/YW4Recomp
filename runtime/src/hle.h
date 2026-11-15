@@ -10,6 +10,7 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include "c11_keywords.h"  /* before yw4rt.h: its _Noreturn in C++ */
 #include "yw4rt.h"
 
 #define GPTR(v) ((void *)(uintptr_t)(v))
@@ -20,7 +21,7 @@
 
 /* Stops the program: an import was used in a way the runtime doesn't support yet, or the
  * game reported a fatal error. Prints the message and the guest address of the call. */
-_Noreturn void yw4_hle_stop(CPUState *ctx, const char *fmt, ...);
+YW4_NORETURN void yw4_hle_stop(CPUState *ctx, const char *fmt, ...);
 
 /* Native implementation by mangled name, or NULL (hle.c). */
 GuestFn yw4_hle_find(const char *name);

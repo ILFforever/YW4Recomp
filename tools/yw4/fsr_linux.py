@@ -131,12 +131,24 @@ def unpack(archive: Path, src: Path) -> None:
 
 
 def apply_patches(src: Path) -> None:
+    # git apply refuses a patch that doesn't fit, and works outside a repository too. But inside one (the default work
+    # folder is <clone>/work) it reads the patch's paths from the repository's top, finds them outside the folder it
+    # runs in, and skips them, saying nothing and exiting 0: the SDK then built unpatched and failed on its context
+    # size (issue #12). GIT_CEILING_DIRECTORIES stops it looking for a repository above the sources.
+    env = {**os.environ, "GIT_CEILING_DIRECTORIES": str(src.parent)}
     for patch in ("fidelityfx-sdk-v1.1.4-linux.patch", "fsr-3.1.5-backport.patch"):
         p = PORT / "patches" / patch
-        if shutil.which("git"):  # git apply works outside a repository too, and refuses a patch that doesn't fit
-            run(["git", "apply", "--whitespace=nowarn", str(p)], cwd=src)
+        if shutil.which("git"):
+            r = subprocess.run(["git", "apply", "--whitespace=nowarn", str(p)], cwd=src, env=env, capture_output=True,
+                               text=True)
+            if r.returncode:
+                raise RuntimeError(f"git apply {patch} failed:\n{(r.stdout + r.stderr)[-3000:]}")
         else:
             run(["patch", "-p1", "--forward", "-i", str(p)], cwd=src)
+    # however they were applied: a line the Linux patch adds must be there
+    types = src / "sdk" / "include" / "FidelityFX" / "host" / "ffx_types.h"
+    if "#ifndef FFX_SDK_DEFAULT_CONTEXT_SIZE" not in types.read_text(encoding="utf-8", errors="replace"):
+        raise RuntimeError(f"the Linux patches did not reach the SDK's sources ({types} is unchanged)")
     run([sys.executable, str(PORT / "patches" / "yw4_ffx_api_linux.py"), str(src / "ffx-api")])
 
 

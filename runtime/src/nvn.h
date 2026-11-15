@@ -18,6 +18,7 @@
 #include <stdint.h>
 
 #include "hle.h"
+#include "c11_keywords.h"
 #include "tegra.h"
 
 typedef struct {
@@ -41,7 +42,7 @@ extern const NvnImpl nvn_cmdbuf_impls[];
 #define SET_HOST(guest, p) (G(uint64_t, guest, 0) = (uint64_t)(uintptr_t)(p))
 
 /* Stops: something this NVN can't do yet. */
-_Noreturn void nvn_fatal(const CPUState *c, const char *fmt, ...);
+YW4_NORETURN void nvn_fatal(const CPUState *c, const char *fmt, ...);
 /* Calls a guest function (a game callback) on this thread; x0.. are already set. */
 void nvn_guest_call(CPUState *c, uint64_t fn);
 

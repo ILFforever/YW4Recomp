@@ -999,3 +999,39 @@ int main(void) {
                             "-o", str(exe), str(t / "drv_battle_scroll.c"), *sdl_libs], check=True, capture_output=True)
             got = subprocess.run([str(exe)], capture_output=True, text=True, check=True)
             self.assertEqual(got.returncode, 0)
+
+
+class CxxHeadersTest(unittest.TestCase):
+    """The runtime's headers compile as C++ (issue #12): gpu_dlssg.cpp includes some, and g++ stopped on C11's
+    `_Noreturn` there. Every header with a function that never returns or a thread-local, with each C++ compiler at
+    hand: g++ as it is, clang++ with C11 keywords made errors (it takes them as extensions otherwise)."""
+
+    HEADERS = ("host.h", "kernel.h", "hle.h", "nvn.h", "gpu_internal.h")
+
+    def compilers(self) -> list[tuple[str, list[str]]]:
+        cc = check.host_cc()
+        name = Path(cc).name
+        found = []
+        for c, cxx in (("clang", "clang++"), ("gcc", "g++")):
+            if name.startswith(c):
+                sibling = str(Path(cc).with_name(name.replace(c, cxx, 1))) if os.sep in cc or "/" in cc else name.replace(c, cxx, 1)
+                if shutil.which(sibling):
+                    found.append(sibling)
+        if shutil.which("g++") and "g++" not in found:
+            found.append("g++")
+        return [(c, ["-Werror=c11-extensions"] if "clang" in Path(c).name else []) for c in found]
+
+    def test_headers_as_cxx(self):
+        compilers = self.compilers()
+        if not compilers:
+            self.skipTest("no C++ compiler")
+        with tempfile.TemporaryDirectory() as t:
+            src = Path(t) / "headers.cpp"
+            src.write_text("".join(f'#include "{h}"\n' for h in self.HEADERS) + "int main() { return 0; }\n")
+            for cxx, flags in compilers:
+                with self.subTest(compiler=cxx):
+                    r = subprocess.run([cxx, "-std=c++17", "-fsyntax-only", *flags, f"-I{RUNTIME / 'src'}",
+                                        f"-I{RUNTIME / 'include'}",
+                                        f"-I{check.REPO / 'third_party' / 'vulkan' / 'include'}", str(src)],
+                                       capture_output=True, text=True)
+                    self.assertEqual(r.returncode, 0, r.stderr[-2000:])

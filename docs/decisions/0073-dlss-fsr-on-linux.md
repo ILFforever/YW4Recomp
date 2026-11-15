@@ -4,7 +4,7 @@
 state: accepted
 date: 2026-11-14
 replaces: none
-code: tools/yw4/fsr_linux.py, third_party/fsr3-linux, tools/yw4/deps.py, recomp/build.py, runtime/src/gpu_fsr.c, runtime/src/gpu_fg.c, runtime/src/gpu_dlss.c, runtime/src/settings.c, runtime/src/window.c, runtime/src/host.c, launcher/ui/app.js
+code: tools/yw4/fsr_linux.py, third_party/fsr3-linux, tools/yw4/deps.py, recomp/build.py, runtime/src/gpu_fsr.c, runtime/src/gpu_fg.c, runtime/src/gpu_dlss.c, runtime/src/settings.c, runtime/src/window.c, runtime/src/host.c, runtime/src/c11_keywords.h, launcher/ui/app.js
 -->
 
 Status: accepted, experimental on Linux. FSR upscaling checked in WSL on Lavapipe (software Vulkan) against AMD's own Windows library; FSR
@@ -89,6 +89,37 @@ Checked in WSL on Lavapipe (late-game save, frame 2600): a generated frame again
 difference 1 of 255, no pixel more than 64 apart, no holes or speckles; only soft edges differ. An earlier run had
 black holes on characters and white speckles; they were gone after fixes in the same session, and which change fixed
 them was not recorded. Not compared against Windows frame generation, no speed numbers.
+
+## Issue #12: FSR built unpatched inside a clone; C11 keywords in C++ (2026-11-15)
+
+A Linux player (GCC and Clang, AOSC) reported FSR failing to build with both compilers:
+`sizeof(FfxFsr3UpscalerContext) >= sizeof(FfxFsr3UpscalerContext_Private)`, 524288 >= 837848. 524288 bytes is AMD's
+default context size, `(1024 * 128)` uint32s, so our `-DFFX_SDK_DEFAULT_CONTEXT_SIZE=(1024 * 256)` never took effect:
+stock `ffx_types.h` defines it without `#ifndef`, and only xplane-fsr3's Linux patch makes it overridable (wchar_t is 4
+bytes on Linux, so the private contexts are larger).
+
+The patches had not been applied at all. `apply_patches` ran `git apply` in the unpacked sources. Outside a git
+repository that works like `patch`. Inside one, git reads the patch's paths from the repository's top, finds them outside
+the folder it runs in, and skips them, printing nothing and exiting 0. The default work folder is `<clone>/work`, inside
+the player's clone of this repository. Ours in WSL (`~/yw4linux/work`) is not, which is why it built here: reproduced in
+WSL with the work folder inside a fresh `git init`, the same error with the same numbers, with Clang 19 which had just
+built it fine outside one.
+
+Fix (`tools/yw4/fsr_linux.py`): `git apply` runs with `GIT_CEILING_DIRECTORIES` set to the folder above the sources,
+so it never looks for a repository there, and its errors are shown. After the patches, a line the Linux patch adds
+(`#ifndef FFX_SDK_DEFAULT_CONTEXT_SIZE` in `ffx_types.h`) must be in the sources, or the build stops with that reason:
+a skipped patch can't pass quietly again, whichever tool applied it. Checked in WSL with the work folder inside a
+repository: GCC 13 and Clang 19 both build the library.
+
+The same report: g++ stopped on `_Noreturn` in `host.h`, which `gpu_dlssg.cpp` (C++) includes. `runtime/src/c11_keywords.h`
+gives `YW4_NORETURN` (`[[noreturn]]` in C++, `_Noreturn` in C), used by every runtime header that had `_Noreturn` (host.h,
+kernel.h, hle.h, nvn.h, gpu_internal.h). In C++ only, it also defines `_Noreturn` and `_Thread_local` as the C++ words,
+for the headers that keep the C11 spelling: `runtime/include/yw4rt.h` (the generated code's header; a change there makes
+every player's build recompile all the generated code) and the thread-locals in nvn.h and gpu_internal.h, which g++
+stopped on next. A test compiles those five headers as C++ with each compiler at hand, clang++ with
+`-Werror=c11-extensions` (it otherwise takes C11 keywords as extensions): `tests/test_runtime.py`, CxxHeadersTest.
+`recomp.ci` compiles all 131 runtime files with Clang 19 and with GCC 13 except `ui.c` (`#embed`: GCC 15 or newer, as
+the setup page says).
 
 ## The launcher
 
