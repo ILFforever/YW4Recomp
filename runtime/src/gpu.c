@@ -87,8 +87,11 @@ typedef struct {
 static FrameTime frame_times[32];
 static uint64_t present_count;  /* frames presented */
 
+static void gpu_crash_report(VkResult r);
+
 void gpu_fatal(const char *what, VkResult r) {
     fprintf(stderr, "yw4: gpu: %s failed (VkResult %d)\n", what, (int)r);
+    gpu_crash_report(r);
     yw4_exit(3, __FILE__, __LINE__);
 }
 
@@ -288,6 +291,7 @@ static void submit(VkCommandBuffer cb) {
     host_unlock(&vk.queue_lock);
     if (r == VK_ERROR_DEVICE_LOST) {
         fprintf(stderr, "yw4: gpu: device lost in submission %" PRIu64 "\n", seq);
+        gpu_crash_report(r);
         yw4_exit(3, __FILE__, __LINE__);
     }
     if (r != VK_SUCCESS) gpu_fatal("vkQueueSubmit", r);
@@ -1303,8 +1307,17 @@ void gpu_picture_text(char *buf, size_t n) {
     int a = gpu_aa(), u = gpu_upscale(), s = gpu_sharpen(), f = gpu_fg();
     const char *note = a >= 4 && !u ? " (anti-aliasing only at full size: no speed-up)"
                        : !u && gpu_upscale_setting() ? " (the choice needs FSR or DLSS anti-aliasing)" : "";
-    snprintf(buf, n, "anti-aliasing %s, upscaling %s%s, the 3D at %d of %d lines, sharpening %s, frame generation %s",
-             aa[a], up[u], note, gpu_render_height(), gpu_res_height(), sharpen[s], fg[f]);
+    /* the shadows too (issues #8 and #14: the heaviest settings, and the shadow mask flickered on one AMD card);
+     * soft shadows as the panel names them (OFF, X1, X2, X4); contact shadows need our shadow mask (the panel
+     * greys the row out with the game's) */
+    static const char *const soft[4] = {"off", "x1", "x2", "x4"};
+    int mask = shadow_mask_native(), contact = gpu_contact() != 0;
+    snprintf(buf, n,
+             "anti-aliasing %s, upscaling %s%s, the 3D at %d of %d lines, sharpening %s, frame generation %s; "
+             "shadows %d, soft %s, contact %s, shadow pass %s, shadow mask %s",
+             aa[a], up[u], note, gpu_render_height(), gpu_res_height(), sharpen[s], fg[f], gpu_shadow_res(),
+             soft[gpu_pcss_level() & 3], !contact ? "off" : mask ? "on" : "on (unused: needs our shadow mask)",
+             shadow_pass_ours() ? "ours" : "the game's", mask ? "ours" : "the game's");
 }
 
 /* Logged at the first present and whenever it changes (gpu_sizes_settle); how often it changed after the first,
@@ -1313,8 +1326,8 @@ static int picture_changes;
 int gpu_picture_changes(void) { return __atomic_load_n(&picture_changes, __ATOMIC_RELAXED); }
 
 static void picture_log(void) {
-    static char last[256];
-    char now[256];
+    static char last[400];
+    char now[400];
     gpu_picture_text(now, sizeof now);
     if (!strcmp(now, last)) return;
     if (last[0]) __atomic_add_fetch(&picture_changes, 1, __ATOMIC_RELAXED);
@@ -2486,17 +2499,25 @@ void gpu_stall_add(int kind, int64_t ns) {
 
 /* ---- video memory (VK_EXT_memory_budget): this process's use of the device-local heaps and the budget the
  * driver gives it, sampled every present; every 600 frames a line with the peak since the last. */
-static void vram_sample(uint64_t frame) {
-    if (!vk.memory_budget) return;
+static uint64_t vram_run_peak;  /* the whole run's peak, for gpu_crash_report */
+
+static void vram_now(uint64_t *used, uint64_t *budget, uint64_t *size) {
     VkPhysicalDeviceMemoryBudgetPropertiesEXT b = {.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MEMORY_BUDGET_PROPERTIES_EXT};
     VkPhysicalDeviceMemoryProperties2 p = {.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_MEMORY_PROPERTIES_2, .pNext = &b};
     vkGetPhysicalDeviceMemoryProperties2(vk.gpu, &p);
-    uint64_t used = 0, budget = 0, size = 0;
+    *used = *budget = *size = 0;
     for (uint32_t i = 0; i < p.memoryProperties.memoryHeapCount; i++)
         if (p.memoryProperties.memoryHeaps[i].flags & VK_MEMORY_HEAP_DEVICE_LOCAL_BIT)
-            used += b.heapUsage[i], budget += b.heapBudget[i], size += p.memoryProperties.memoryHeaps[i].size;
+            *used += b.heapUsage[i], *budget += b.heapBudget[i], *size += p.memoryProperties.memoryHeaps[i].size;
+}
+
+static void vram_sample(uint64_t frame) {
+    if (!vk.memory_budget) return;
+    uint64_t used, budget, size;
+    vram_now(&used, &budget, &size);
     static uint64_t peak;
     if (used > peak) peak = used;
+    if (used > vram_run_peak) vram_run_peak = used;
     if (frame % 600) return;
     int nblocks = 0;
     VkDeviceSize in_blocks = 0;
@@ -2506,6 +2527,38 @@ static void vram_sample(uint64_t frame) {
             used >> 20, peak >> 20, budget >> 20, size >> 20, nblocks, IMAGE_BLOCK >> 20, (uint64_t)in_blocks >> 20,
             detile_ring ? DETILE_RING >> 20 : 0);
     peak = 0;
+}
+
+/* A GPU error that ends the game (gpu_fatal, a device lost at a submit): what a bug report needs next to it, in
+ * one place (issue #14, 2026-11-16: an Intel HD 520 lost the device in the first cutscene, and the settings it
+ * ran with had to be pieced together from the rest of the log). Only reads: no lock, nothing sent to the GPU. */
+static void gpu_crash_report(VkResult r) {
+    static int once;
+    if (__atomic_exchange_n(&once, 1, __ATOMIC_ACQ_REL)) return;
+    if (r == VK_ERROR_DEVICE_LOST)
+        fprintf(stderr, "yw4: gpu crash: the GPU stopped answering (device lost): its driver reset it. Often too much "
+                        "work in one frame for this GPU (lower the settings below), or a driver fault.\n");
+    char pic[400];
+    gpu_picture_text(pic, sizeof pic);
+    fprintf(stderr, "yw4: gpu crash: at frame %" PRIu64 "; %s\n", __atomic_load_n(&present_count, __ATOMIC_RELAXED), pic);
+    if (vk.memory_budget) {
+        uint64_t used, budget, size;
+        vram_now(&used, &budget, &size);
+        fprintf(stderr, "yw4: gpu crash: video memory %" PRIu64 " MiB used (peak %" PRIu64 " MiB this run), budget %" PRIu64
+                        " MiB of %" PRIu64 " MiB\n", used >> 20, vram_run_peak >> 20, budget >> 20, size >> 20);
+    }
+    if (ts_period_ns) {  /* the last frames' GPU time, newest first (they may be mid-update: a log figure) */
+        char line[200];
+        size_t n = 0;
+        uint64_t last = __atomic_load_n(&present_count, __ATOMIC_RELAXED);
+        for (uint64_t fr = last + 1, shown = 0; fr-- > 0 && fr + 32 > last && shown < 6;) {
+            FrameTime f = frame_times[fr % 32];
+            if (!f.used || f.frame != fr || n + 24 > sizeof line) continue;
+            n += (size_t)snprintf(line + n, sizeof line - n, "%s%" PRIu64 ": %.1f", shown++ ? ", " : "", fr,
+                                  (double)f.busy * ts_period_ns / 1e6);
+        }
+        if (n) fprintf(stderr, "yw4: gpu crash: GPU ms of the last frames (frame: ms): %s\n", line);
+    }
 }
 
 /* gpu_present, at its end: a line when the frame's command lists and present took over YW4_STALL_MS (default
@@ -2707,6 +2760,12 @@ void gpu_present(NvnTexture *t, uint64_t frame, const int crop[4]) {
     scan_writes();
     if (present_count % 300 == 0) evict_images(300, 0);
     gpu_sizes_settle(present_count);
+    {  /* YW4_TEST_GPU_CRASH_AT=<frame> (tests): ends the game there as a lost device would, to check the report */
+        static long long crash_at = -2;
+        if (crash_at == -2) crash_at = getenv("YW4_TEST_GPU_CRASH_AT") ? atoll(getenv("YW4_TEST_GPU_CRASH_AT")) : -1;
+        if (crash_at >= 0 && present_count >= (uint64_t)crash_at)
+            gpu_fatal("YW4_TEST_GPU_CRASH_AT (a test, not a real error)", VK_ERROR_DEVICE_LOST);
+    }
     size_change_check();
     if (quick_evict_at && present_count >= quick_evict_at) {
         quick_evict_at = 0;

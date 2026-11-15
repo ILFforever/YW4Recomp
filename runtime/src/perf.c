@@ -110,7 +110,7 @@ static void print_summary(FILE *f, size_t from, const char *what) {
     }
     for (size_t i = 0; i < m; i++) interval[i] = rows[from + i].interval, work[i] = rows[from + i].work;
     fprintf(f, "%s: %zu frames, %.1f frames/s average\n", what, m, 1000.0 * frames / sum);
-    char pic[256];  /* what the numbers were measured with (issue #12) */
+    char pic[400];  /* what the numbers were measured with (issue #12) */
     gpu_picture_text(pic, sizeof pic);
     int changes = gpu_picture_changes();
     fprintf(f, "  picture now: %s", pic);

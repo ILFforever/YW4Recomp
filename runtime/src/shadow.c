@@ -1115,6 +1115,17 @@ static void init_mode(void) {
                                                                 : "our pass draws the casters it mirrors");
 }
 
+/* Our shadow pass in use, or the one YW4_SHADOWS gives once the first shadows are drawn (the mode is set only
+ * then: before it, shadow_mode_name says ORIGINAL). For the log's picture line (gpu.c). */
+int shadow_pass_ours(void) {
+    int m = __atomic_load_n(&mode, __ATOMIC_ACQUIRE);
+    if (m < 0) {
+        const char *s = getenv("YW4_SHADOWS");
+        m = s && !strcmp(s, "game") ? MODE_GAME : s && !strcmp(s, "check") ? MODE_CHECK : MODE_NATIVE;
+    }
+    return m == MODE_NATIVE;
+}
+
 const char *shadow_mode_name(void) {
     int m = __atomic_load_n(&mode, __ATOMIC_ACQUIRE);
     return m == MODE_NATIVE ? "CUSTOM" : m == MODE_CHECK ? "CHECK" : "ORIGINAL";
