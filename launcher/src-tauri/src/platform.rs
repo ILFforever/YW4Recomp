@@ -121,16 +121,36 @@ pub fn data_dir() -> PathBuf {
     }
 }
 
-/// Opens a link or a folder the way a double-click would.
+/// Opens a link or a folder the way a double-click would. On Windows by ShellExecuteW, as the game's SDL_OpenURL does:
+/// explorer.exe with the target as its argument opened Documents instead when it couldn't take it, which the bug
+/// report's GitHub link (thousands of characters: the answers filled in) always did (owner, 2026-11-16).
 pub fn open(target: impl AsRef<OsStr>) -> Result<(), String> {
-    let prog = if cfg!(windows) { "explorer" } else { "xdg-open" };
-    command(prog).arg(target).spawn().map(|_| ()).map_err(|e| e.to_string())
+    #[cfg(windows)]
+    {
+        use std::os::windows::ffi::OsStrExt;
+        use windows_sys::Win32::UI::Shell::ShellExecuteW;
+        use windows_sys::Win32::UI::WindowsAndMessaging::SW_SHOWNORMAL;
+        let wide = |s: &OsStr| s.encode_wide().chain(Some(0)).collect::<Vec<u16>>();
+        let (verb, file) = (wide(OsStr::new("open")), wide(target.as_ref()));
+        let r = unsafe {
+            ShellExecuteW(std::ptr::null_mut(), verb.as_ptr(), file.as_ptr(), std::ptr::null(), std::ptr::null(), SW_SHOWNORMAL)
+        };
+        // above 32: done; else an error code (ShellExecuteW's return value)
+        if r as isize > 32 { Ok(()) } else { Err(format!("Windows couldn't open it (ShellExecute {})", r as isize)) }
+    }
+    #[cfg(not(windows))]
+    { command("xdg-open").arg(target).spawn().map(|_| ()).map_err(|e| e.to_string()) }
 }
 
 /// The file manager on the folder holding `file`, with the file selected where the system can do that (Windows).
 pub fn reveal(file: &Path) -> Result<(), String> {
     #[cfg(windows)]
-    { command("explorer").arg(format!("/select,{}", file.display())).spawn().map(|_| ()).map_err(|e| e.to_string()) }
+    {
+        // explorer takes /select,"<path>" with the quotes round the path only: Rust's quoting of the whole argument
+        // (the install's path had a space: "W:\YW4 Recomp") made it open Documents (owner, 2026-11-16)
+        use std::os::windows::process::CommandExt;
+        command("explorer").raw_arg(format!("/select,\"{}\"", file.display())).spawn().map(|_| ()).map_err(|e| e.to_string())
+    }
     #[cfg(not(windows))]
     { open(file.parent().unwrap_or(file)) }
 }
