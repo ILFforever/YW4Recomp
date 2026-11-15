@@ -38,6 +38,7 @@
 
 #include "events.h"
 #include "host.h"
+#include "gpu.h"
 #include "gpu_fg.h"
 #include "framerate.h"
 #include "hud.h"
@@ -109,6 +110,13 @@ static void print_summary(FILE *f, size_t from, const char *what) {
     }
     for (size_t i = 0; i < m; i++) interval[i] = rows[from + i].interval, work[i] = rows[from + i].work;
     fprintf(f, "%s: %zu frames, %.1f frames/s average\n", what, m, 1000.0 * frames / sum);
+    char pic[256];  /* what the numbers were measured with (issue #12) */
+    gpu_picture_text(pic, sizeof pic);
+    int changes = gpu_picture_changes();
+    fprintf(f, "  picture now: %s", pic);
+    if (changes)
+        fprintf(f, "  (changed %d time%s during the run: the numbers may mix settings)", changes, changes == 1 ? "" : "s");
+    fputc('\n', f);
     fprintf(f, "  interval ms: p50 %.1f  p95 %.1f  p99 %.1f  max %.1f   (slower than 34.5 ms: %zu = %.1f%%, than 50 ms: %zu)\n",
             percentile(interval, 0, m, 50), percentile(interval, 0, m, 95), percentile(interval, 0, m, 99),
             percentile(interval, 0, m, 100), over34, 100.0 * (double)over34 / frames, over50);

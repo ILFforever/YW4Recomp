@@ -1263,9 +1263,12 @@ int gpu_upscale(void) {  /* FSR or DLSS */
  * device-lost crash came right after such a run (Quality, Balanced, Performance, Off in a row with video memory
  * already high, 2026-11-09). gpu_present, every frame. */
 enum { SETTLE_FRAMES = 15 };
+static void picture_log(void);
+
 void gpu_sizes_settle(uint64_t frame) {
     static int last = -1;
     static uint64_t since;
+    picture_log();
     int choice = gpu_res_choice() << 8 | gpu_upscale_setting() << 4 | gpu_wide_choice();
     int used = gpu_res_height() << 8 | __atomic_load_n(&upscale_used, __ATOMIC_ACQUIRE) << 4 | gpu_wide();
     if (choice != last) last = choice, since = frame;
@@ -1287,6 +1290,36 @@ void gpu_upscale_cycle(void) {
 int gpu_render_height(void) {
     int h = gpu_res_height(), m = gpu_upscale();
     return m ? (int)((float)h / upscale_ratio[m] + 0.5f) : h;
+}
+
+/* The picture settings in one line for the log and the perf summary (issue #12, 2026-11-16: a player measured FSR
+ * slower than no anti-aliasing, and neither the screenshots nor the log said whether upscaling was on). FSR or
+ * DLSS with upscaling off is anti-aliasing at full size: it costs GPU time and saves none, said in so many words. */
+void gpu_picture_text(char *buf, size_t n) {
+    static const char *const aa[6] = {"off", "FXAA", "SMAA", "TAA", "FSR", "DLSS"};
+    static const char *const up[4] = {"off", "quality (1.5x)", "balanced (1.7x)", "performance (2x)"};
+    static const char *const sharpen[5] = {"off", "low", "medium", "high", "max"};
+    static const char *const fg[3] = {"off", "FSR", "DLSS"};
+    int a = gpu_aa(), u = gpu_upscale(), s = gpu_sharpen(), f = gpu_fg();
+    const char *note = a >= 4 && !u ? " (anti-aliasing only at full size: no speed-up)"
+                       : !u && gpu_upscale_setting() ? " (the choice needs FSR or DLSS anti-aliasing)" : "";
+    snprintf(buf, n, "anti-aliasing %s, upscaling %s%s, the 3D at %d of %d lines, sharpening %s, frame generation %s",
+             aa[a], up[u], note, gpu_render_height(), gpu_res_height(), sharpen[s], fg[f]);
+}
+
+/* Logged at the first present and whenever it changes (gpu_sizes_settle); how often it changed after the first,
+ * for the perf summary (its averages then mix settings). */
+static int picture_changes;
+int gpu_picture_changes(void) { return __atomic_load_n(&picture_changes, __ATOMIC_RELAXED); }
+
+static void picture_log(void) {
+    static char last[256];
+    char now[256];
+    gpu_picture_text(now, sizeof now);
+    if (!strcmp(now, last)) return;
+    if (last[0]) __atomic_add_fetch(&picture_changes, 1, __ATOMIC_RELAXED);
+    memcpy(last, now, sizeof last);
+    fprintf(stderr, "yw4: picture: %s\n", now);
 }
 
 static void more_remove(uint64_t addr) {

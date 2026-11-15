@@ -6,6 +6,7 @@
 #ifndef YW4_GPU_H
 #define YW4_GPU_H
 
+#include <stddef.h>
 #include <stdint.h>
 
 #include "nvn.h"
@@ -32,6 +33,10 @@ int gpu_upscale(void);          /* in effect: the choice when the anti-aliasing 
 int gpu_upscale_setting(void);  /* the choice (the panel shows it greyed out without FSR) */
 void gpu_upscale_cycle(void);
 int gpu_render_height(void);  /* the 3D images' height in the game's 900-line terms (= gpu_res_height() when off) */
+/* The picture settings in one line (anti-aliasing, upscaling, the 3D's size, sharpening, frame generation): logged
+ * as "yw4: picture:" at the first present and on every change, and in the perf summary; how often it changed. */
+void gpu_picture_text(char *buf, size_t n);
+int gpu_picture_changes(void);
 /* Texture filtering: 0 the game's, else blending between mip levels and anisotropic filtering with up
  * to this many taps (16 by default; YW4_ANISO at start), and the panel's cycle 0 -> 2 -> 4 -> 8 -> 16 -> 0. */
 int gpu_aniso(void);
