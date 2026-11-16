@@ -15,11 +15,45 @@
 #include "host.h"
 #include "shadow.h"
 
-static long passes_skipped, draws_skipped;
+/* What our pass left out, for the log (shadow.c's report every 600 frames, the run's summary, a GPU crash): passes
+ * (the whole layer's draws: its shadow map no longer bound, or not found again) and single draws, by why. Since the
+ * last report, and since the start. The first few of each kind are also logged when they happen, with the frame, so
+ * a player's "the shadows flickered at ..." can be matched to one (owner, 2026-11-16: enough in the log for a report). */
+static long passes_skipped, draws_skipped[SHADOW_SKIP_N];
+static long passes_skipped_total, draws_skipped_total[SHADOW_SKIP_N];
+const char *const shadow_skip_name[SHADOW_SKIP_N] = {"other", "vertices not in GPU memory",
+                                                     "indices not in GPU memory", "cut-out texture",
+                                                     "skin layout", "dither texture", "wind textures"};
 
-void gpu_shadow_counts(long *p, long *d) {
+void gpu_shadow_counts(long *p, long d[SHADOW_SKIP_N]) {
     *p = __atomic_exchange_n(&passes_skipped, 0, __ATOMIC_RELAXED);
-    *d = __atomic_exchange_n(&draws_skipped, 0, __ATOMIC_RELAXED);
+    for (int i = 0; i < SHADOW_SKIP_N; i++) d[i] = __atomic_exchange_n(&draws_skipped[i], 0, __ATOMIC_RELAXED);
+}
+
+void gpu_shadow_totals(long *p, long d[SHADOW_SKIP_N]) {
+    *p = __atomic_load_n(&passes_skipped_total, __ATOMIC_RELAXED);
+    for (int i = 0; i < SHADOW_SKIP_N; i++) d[i] = __atomic_load_n(&draws_skipped_total[i], __ATOMIC_RELAXED);
+}
+
+/* a pass left out: counted, and the first 5 logged */
+static void pass_skipped(const ShadowPass *p, const char *why) {
+    __atomic_add_fetch(&passes_skipped, 1, __ATOMIC_RELAXED);
+    long n = __atomic_add_fetch(&passes_skipped_total, 1, __ATOMIC_RELAXED);
+    if (n <= 5)
+        fprintf(stderr, "yw4: shadows: our pass for shadow map %#" PRIx64 " layer %u left out at GPU frame %" PRIu64
+                " (%u draws): %s%s\n", p->depth_addr, p->depth_layer, gpu_frames(), p->n, why,
+                n == 5 ? " (the last one logged; the count goes on in the shadows lines)" : "");
+}
+
+/* a draw left out: counted, and the first 3 of each reason logged */
+static void draw_skipped(const ShadowDraw *d, int why) {
+    __atomic_add_fetch(&draws_skipped[why], 1, __ATOMIC_RELAXED);
+    long n = __atomic_add_fetch(&draws_skipped_total[why], 1, __ATOMIC_RELAXED);
+    if (n <= 3)
+        fprintf(stderr, "yw4: shadows: one of our draws left out at GPU frame %" PRIu64 ": %s (vertices %#" PRIx64
+                " x %u, stride %u, indices %#" PRIx64 " x %u, texture %#" PRIx64 ")%s\n", gpu_frames(),
+                shadow_skip_name[why], d->vertices, d->vertex_count, d->stride, d->indices, d->index_count, d->texture,
+                n == 3 ? " (the last one logged for this reason)" : "");
 }
 
 static VkShaderModule module(const char *name) {
@@ -419,7 +453,7 @@ static void draw_pass(VkCommandBuffer cb, GpuState *s, const ShadowPass *p) {
     VkFormat color[8], depth;
     uint32_t w, h;
     if (!gpu_begin_targets(cb, s, color, &depth, &w, &h)) {
-        __atomic_add_fetch(&passes_skipped, 1, __ATOMIC_RELAXED);
+        pass_skipped(p, "its shadow map could not be bound");
         return;
     }
     VkPipeline bound = VK_NULL_HANDLE;
@@ -454,6 +488,7 @@ static void draw_pass(VkCommandBuffer cb, GpuState *s, const ShadowPass *p) {
         if (why) {
             skipped++;
             skip_why[why]++;
+            draw_skipped(d, why);
             continue;
         }
         if (d->texture && d->has_sampler) {  /* the sampler settings learned with the caster, not the ring slot's now */
@@ -470,6 +505,7 @@ static void draw_pass(VkCommandBuffer cb, GpuState *s, const ShadowPass *p) {
                                    : KIND_STATIC;
         if (kind_skinned(kind) && !pal.buf) {  /* can't happen: the gather made the ring */
             skipped++;
+            draw_skipped(d, 0);
             continue;
         }
         VkPipeline pipe = pipeline(depth, kind, uv, wind);
@@ -520,7 +556,6 @@ static void draw_pass(VkCommandBuffer cb, GpuState *s, const ShadowPass *p) {
         }
         gpu_query_after_draw(cb);
     }
-    if (skipped) __atomic_add_fetch(&draws_skipped, skipped, __ATOMIC_RELAXED);
     {
         static uint64_t from = 1, to;
         if (from == 1) {
@@ -586,7 +621,8 @@ void gpu_shadow_pass(void *vk_cb, void *gpu_state, const void *data, uint32_t si
     }
     if (!found) {
         free(game), free(ours);
-        __atomic_add_fetch(&passes_skipped, 1, __ATOMIC_RELAXED);
+        pass_skipped(p, game && ours ? "the game had moved to another target and its shadow map was not seen before"
+                                     : "out of memory");
         return;
     }
     int ncolor = s->ncolor;

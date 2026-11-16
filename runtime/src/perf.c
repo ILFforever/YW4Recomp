@@ -45,6 +45,8 @@
 #include "kernel.h"
 #include "nvn.h"
 
+void shadow_summary_text(char *buf, size_t n);  /* shadow.c (shadow.h needs the CPU state's type) */
+
 int gpu_frame_time(uint64_t frame, double *busy_ms, double *span_ms);  /* gpu.c */
 
 #define PERF_DELAY 6
@@ -117,6 +119,9 @@ static void print_summary(FILE *f, size_t from, const char *what) {
     if (changes)
         fprintf(f, "  (changed %d time%s during the run: the numbers may mix settings)", changes, changes == 1 ? "" : "s");
     fputc('\n', f);
+    char sh[600];  /* the shadow pass over the run: which, and what ours replaced and left out (shadow.c) */
+    shadow_summary_text(sh, sizeof sh);
+    fprintf(f, "  shadows: %s\n", sh);
     fprintf(f, "  interval ms: p50 %.1f  p95 %.1f  p99 %.1f  max %.1f   (slower than 34.5 ms: %zu = %.1f%%, than 50 ms: %zu)\n",
             percentile(interval, 0, m, 50), percentile(interval, 0, m, 95), percentile(interval, 0, m, 99),
             percentile(interval, 0, m, 100), over34, 100.0 * (double)over34 / frames, over50);

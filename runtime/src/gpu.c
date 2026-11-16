@@ -2540,6 +2540,9 @@ static void gpu_crash_report(VkResult r) {
     char pic[400];
     gpu_picture_text(pic, sizeof pic);
     fprintf(stderr, "yw4: gpu crash: at frame %" PRIu64 "; %s\n", __atomic_load_n(&present_count, __ATOMIC_RELAXED), pic);
+    char sh[600];
+    shadow_summary_text(sh, sizeof sh);
+    fprintf(stderr, "yw4: gpu crash: shadows: %s\n", sh);
     if (vk.memory_budget) {
         uint64_t used, budget, size;
         vram_now(&used, &budget, &size);

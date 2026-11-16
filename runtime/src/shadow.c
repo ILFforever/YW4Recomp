@@ -394,6 +394,8 @@ static long draws_since_toggle;  /* submeshes drawn by our pass since the last s
 static long compared, wrong_vb, wrong_ib, wrong_mvp;  /* the game's static and instanced draws vs ours */
 static long compared_inst, wrong_inst, pending_checked, pending_wrong;  /* of those, instanced; instance buffer or count different */
 static long copies_culled;  /* copies the game drew that our culling drops */
+/* since the start, for the run's summary (shadow_summary_text): added at each report */
+static long layers_total, replaced_total, game_drew_total, switches;
 /* the game's draws our pass can't repeat, by programs and why (reject: not mirrored, then which
  * test of shadow_check_draw / compare_draw turned it down) */
 enum { R_PROGRAM, R_CASTER, R_DESCRIBE, R_COPIES, R_VB, R_IB, R_MATRIX, R_LAYOUT, R_FADE, R_SKINNED, R_PALETTE, R_N };
@@ -456,12 +458,21 @@ static void report(void) {
                 __atomic_exchange_n(&compared_inst, 0, __ATOMIC_RELAXED), __atomic_exchange_n(&wrong_inst, 0, __ATOMIC_RELAXED),
                 __atomic_exchange_n(&copies_culled, 0, __ATOMIC_RELAXED));
     } else {
-        long ps, ds;
-        gpu_shadow_counts(&ps, &ds);
-        fprintf(stderr, "yw4: shadows: frame %" PRIu64 ": %ld shadow layers; %ld of the game's submesh draws replaced by "
-                "%ld of ours, %ld left to the game; skipped: %ld passes (other target bound), %ld draws (memory)\n", f, l,
-                __atomic_exchange_n(&draws_replaced, 0, __ATOMIC_RELAXED),
-                __atomic_exchange_n(&draws_native, 0, __ATOMIC_RELAXED), d, ps, ds);
+        long ps, ds[SHADOW_SKIP_N], dsum = 0;
+        gpu_shadow_counts(&ps, ds);
+        for (int i = 0; i < SHADOW_SKIP_N; i++) dsum += ds[i];
+        long r = __atomic_exchange_n(&draws_replaced, 0, __ATOMIC_RELAXED);
+        long nd = __atomic_exchange_n(&draws_native, 0, __ATOMIC_RELAXED);
+        __atomic_add_fetch(&layers_total, l, __ATOMIC_RELAXED);
+        __atomic_add_fetch(&replaced_total, r, __ATOMIC_RELAXED);
+        __atomic_add_fetch(&game_drew_total, d, __ATOMIC_RELAXED);
+        fprintf(stderr, "yw4: shadows: frame %" PRIu64 ": %s; %ld shadow layers; %ld of the game's submesh draws replaced "
+                "by %ld of ours, %ld left to the game; left out of ours: %ld passes, %ld draws", f,
+                mode == MODE_NATIVE ? "our pass" : "the game's pass", l, r, nd, d, ps, dsum);
+        int listed = 0;
+        for (int i = 0; i < SHADOW_SKIP_N; i++)  /* why, when any */
+            if (ds[i]) fprintf(stderr, "%s%s %ld", listed++ ? ", " : " (", shadow_skip_name[i], ds[i]);
+        fprintf(stderr, "%s\n", listed ? ")" : "");
     }
     for (int i = 0; i < OTHERS && others[i].vs; i++) {
         fprintf(stderr, "yw4: shadows:   the game's: vs %016" PRIx64 " fs %016" PRIx64 ":", others[i].vs, others[i].fs);
@@ -1111,8 +1122,11 @@ static void init_mode(void) {
     int unset = -1;
     if (!__atomic_compare_exchange_n(&mode, &unset, m, 0, __ATOMIC_ACQ_REL, __ATOMIC_ACQUIRE)) return;
     __atomic_store_n(&shadow_checking, m != MODE_GAME, __ATOMIC_RELEASE);
-    if (m != MODE_GAME) fprintf(stderr, "yw4: shadows: %s\n", m == MODE_CHECK ? "checking the gather"
-                                                                : "our pass draws the casters it mirrors");
+    /* which pass, and from what (a player's report says which they ran: owner, 2026-11-16) */
+    fprintf(stderr, "yw4: shadows: %s (SHADOW PASS %s; YW4_SHADOWS %s%s)\n",
+            m == MODE_CHECK ? "checking the gather" : m == MODE_GAME ? "the game draws every shadow caster itself"
+                                                                     : "our pass draws the casters it mirrors",
+            m == MODE_GAME ? "GAME" : "CUSTOM", s ? "=" : "not set, the default", s ? s : "");
 }
 
 /* Our shadow pass in use, or the one YW4_SHADOWS gives once the first shadows are drawn (the mode is set only
@@ -1137,9 +1151,32 @@ void shadow_toggle(void) {
     /* a layer already begun keeps what it hid and queued: its cascade-end hook finishes it */
     __atomic_store_n(&shadow_checking, m != MODE_GAME, __ATOMIC_RELEASE);
     __atomic_store_n(&mode, m, __ATOMIC_RELEASE);
-    fprintf(stderr, "yw4: shadows: %s (F9; %ld submeshes drawn by our pass since the last switch)\n",
-            m == MODE_NATIVE ? "ours" : "the game's",
+    __atomic_add_fetch(&switches, 1, __ATOMIC_RELAXED);
+    fprintf(stderr, "yw4: shadows: switched to %s at frame %" PRIu64 " (SHADOW PASS %s, the settings or F9; %ld submeshes "
+            "drawn by our pass since the last switch)\n", m == MODE_NATIVE ? "ours" : "the game's",
+            __atomic_load_n(&yw4_frames_presented, __ATOMIC_RELAXED), m == MODE_NATIVE ? "CUSTOM" : "GAME",
             __atomic_exchange_n(&draws_since_toggle, 0, __ATOMIC_RELAXED));
+}
+
+void shadow_summary_text(char *buf, size_t n) {
+    long ps, ds[SHADOW_SKIP_N], dsum = 0;
+    gpu_shadow_totals(&ps, ds);
+    for (int i = 0; i < SHADOW_SKIP_N; i++) dsum += ds[i];
+    /* the totals added at each report, and what came since the last one */
+    long layers = __atomic_load_n(&layers_total, __ATOMIC_RELAXED) + __atomic_load_n(&layers_seen, __ATOMIC_RELAXED);
+    long replaced = __atomic_load_n(&replaced_total, __ATOMIC_RELAXED) + __atomic_load_n(&draws_replaced, __ATOMIC_RELAXED);
+    long game = __atomic_load_n(&game_drew_total, __ATOMIC_RELAXED) + __atomic_load_n(&drawn_total, __ATOMIC_RELAXED);
+    int m = __atomic_load_n(&mode, __ATOMIC_ACQUIRE);
+    size_t o = (size_t)snprintf(buf, n, "%s now, switched %ld time%s; with ours: %ld shadow layers, %ld of the game's draws "
+                                "replaced, %ld drawn by the game; left out of ours: %ld passes, %ld draws",
+                                m < 0 ? "no shadows drawn yet" : m == MODE_GAME ? "the game's pass" : "our pass",
+                                __atomic_load_n(&switches, __ATOMIC_RELAXED),
+                                __atomic_load_n(&switches, __ATOMIC_RELAXED) == 1 ? "" : "s", layers, replaced, game, ps,
+                                dsum);
+    int listed = 0;
+    for (int i = 0; i < SHADOW_SKIP_N && o < n; i++)
+        if (ds[i]) o += (size_t)snprintf(buf + o, n - o, "%s%s %ld", listed++ ? ", " : " (", shadow_skip_name[i], ds[i]);
+    if (listed && o < n) snprintf(buf + o, n - o, ")");
 }
 
 /* ---- YW4_TRACE_LAYERS=<frame>: every layer the model renderer draws while presented frames

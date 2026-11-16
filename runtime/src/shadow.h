@@ -3,6 +3,7 @@
 #ifndef YW4_SHADOW_H
 #define YW4_SHADOW_H
 
+#include <stddef.h>
 #include <stdint.h>
 
 typedef struct {
@@ -65,7 +66,15 @@ void shadow_before_targets(const CPUState *ctx, uint64_t cmd, uint64_t depth_add
 void shadow_toggle(void);
 /* Our shadow pass in use, or the one YW4_SHADOWS will give once the first shadows are drawn (for the log). */
 int shadow_pass_ours(void);
-/* Passes skipped because another target was bound, and draws skipped (memory outside the pools). */
-void gpu_shadow_counts(long *passes_skipped, long *draws_skipped);
+/* What our pass left out (gpu_shadow.c): whole passes, and single draws by why (shadow_skip_name). counts: since the
+ * last call (shadow.c's report); totals: since the start. */
+enum { SHADOW_SKIP_N = 7 };
+extern const char *const shadow_skip_name[SHADOW_SKIP_N];
+void gpu_shadow_counts(long *passes_skipped, long draws_skipped[SHADOW_SKIP_N]);
+void gpu_shadow_totals(long *passes_skipped, long draws_skipped[SHADOW_SKIP_N]);
+/* The shadow pass in one line for the log (shadow.c): which pass, and since the start how many of the game's draws ours
+ * replaced, how many the game still drew, what ours left out, how often it was switched. For the run's summary
+ * (perf.c) and a GPU crash's report (gpu.c). */
+void shadow_summary_text(char *buf, size_t n);
 
 #endif
