@@ -1094,21 +1094,130 @@ typedef struct {
     uint64_t stack[WAITPROF_DEPTH];
     int depth;
     uint32_t imm;
+    uint64_t addr;   /* x0 at the call: the address (or mutex) waited on */
     uint64_t count;
     int64_t ns;
 } WaitSite;
 static WaitSite wait_sites[WAITPROF_SLOTS];
 static int waitprof = -1;
+static uint64_t waitprof_thread;  /* YW4_WAITPROF_THREAD=n: watch guest thread n instead of the main thread (0: main) */
 
-static void waitprof_add(uint32_t imm, const uint64_t *st, int k, int64_t ns) {
-    uint64_t h = imm;
+static void waitprof_add(uint32_t imm, uint64_t addr, const uint64_t *st, int k, int64_t ns) {
+    uint64_t h = imm ^ (addr * 0x9E3779B97F4A7C15ull);
     for (int i = 0; i < k; i++) h = (h ^ st[i]) * 0x100000001B3ull;
     for (uint64_t i = h % WAITPROF_SLOTS, n = 0; n < WAITPROF_SLOTS; i = (i + 1) % WAITPROF_SLOTS, n++) {
         WaitSite *w = &wait_sites[i];
-        if (w->count && (w->imm != imm || w->depth != k || memcmp(w->stack, st, (size_t)k * 8))) continue;
-        if (!w->count) memcpy(w->stack, st, (size_t)k * 8), w->depth = k, w->imm = imm;
+        if (w->count && (w->imm != imm || w->addr != addr || w->depth != k || memcmp(w->stack, st, (size_t)k * 8)))
+            continue;
+        if (!w->count) memcpy(w->stack, st, (size_t)k * 8), w->depth = k, w->imm = imm, w->addr = addr;
         w->count++, w->ns += ns;
         return;
+    }
+}
+
+/* The signal side (YW4_WAITPROF): SignalToAddress calls per signalling guest thread, address and stack.
+ * Written under klock (in the svc), read under klock by the report. */
+typedef struct {
+    uint64_t stack[WAITPROF_DEPTH];
+    int depth;
+    uint64_t tid, addr, count;
+} SignalSite;
+static SignalSite signal_sites[WAITPROF_SLOTS];
+
+static void signalprof_add(uint64_t tid, uint64_t addr, const uint64_t *st, int k) {
+    uint64_t h = (tid * 0x100000001B3ull) ^ (addr * 0x9E3779B97F4A7C15ull);
+    for (int i = 0; i < k; i++) h = (h ^ st[i]) * 0x100000001B3ull;
+    for (uint64_t i = h % WAITPROF_SLOTS, n = 0; n < WAITPROF_SLOTS; i = (i + 1) % WAITPROF_SLOTS, n++) {
+        SignalSite *s = &signal_sites[i];
+        if (s->count && (s->tid != tid || s->addr != addr || s->depth != k || memcmp(s->stack, st, (size_t)k * 8)))
+            continue;
+        if (!s->count) memcpy(s->stack, st, (size_t)k * 8), s->depth = k, s->tid = tid, s->addr = addr;
+        s->count++;
+        return;
+    }
+}
+
+/* YW4_HANDOFF_PROBE=<dispatch address>,<done address> (hex, with YW4_WAITPROF=1): times, per frame, the main thread's
+ * wait on the done address, its dispatch signal to the dispatch address, and the done signal (from the thread that
+ * finishes the job). The wait report prints the averages. Times in a ring under klock. */
+enum { PROBE_WAIT0, PROBE_WAIT1, PROBE_DISPATCH, PROBE_DONE };
+typedef struct { uint8_t kind; int64_t t; } ProbeEv;
+#define PROBE_N 4096
+static ProbeEv probe_ev[PROBE_N];
+static uint32_t probe_n;
+static uint64_t probe_dispatch, probe_done;
+static int probe_on = -1;
+
+static void probe_rec(int kind, int64_t t) {  /* klock held */
+    probe_ev[probe_n % PROBE_N] = (ProbeEv){(uint8_t)kind, t};
+    probe_n++;
+}
+
+/* YW4_MUTEX_HOLD=1 (with YW4_WAITPROF=1): how long each guest mutex is held, from a successful ArbitrateLock to the
+ * ArbitrateUnlock of the same mutex, per mutex and locking thread. Written under klock; reported with the wait report.
+ * It replaces the ArbitrateLock/Unlock wait tally, which these calls go around. LIMITATION: uncontended lock and unlock
+ * are done in guest code without a kernel call, so only contended locks are seen here; the hold times this prints are
+ * not usable (they pair a lock with a later unlock that may be far apart). The wait tally of ArbitrateLock is the
+ * measure that holds: each contended acquisition waits about 15-20 us (see the wait report). */
+static int mutex_hold_on = -1;
+typedef struct { uint64_t addr, tid, count; int64_t ns; } HoldSite;
+static HoldSite hold_sites[64];
+typedef struct { uint64_t addr, tid; int64_t since; } HoldOpen;
+static HoldOpen hold_open[32];
+
+static void hold_acquire(uint64_t addr, uint64_t tid, int64_t t) {  /* klock held */
+    for (int i = 0; i < 32; i++)
+        if (!hold_open[i].addr) { hold_open[i] = (HoldOpen){addr, tid, t}; return; }
+}
+
+static void hold_release(uint64_t addr, int64_t t) {  /* klock held */
+    for (int i = 0; i < 32; i++) {
+        if (hold_open[i].addr != addr) continue;
+        uint64_t tid = hold_open[i].tid;
+        int64_t dur = t - hold_open[i].since;
+        hold_open[i].addr = 0;
+        for (int j = 0; j < 64; j++) {
+            HoldSite *h = &hold_sites[j];
+            if (h->count && h->addr == addr && h->tid == tid) { h->count++, h->ns += dur; return; }
+            if (!h->count) { h->addr = addr, h->tid = tid, h->count = 1, h->ns = dur; return; }
+        }
+        return;
+    }
+}
+
+/* YW4_WAKE_PROBE=1 (with YW4_WAITPROF=1): for each contended guest mutex (an ArbitrateLock that had to wait), how
+ * long the waiter waited, and how long after the holder's ArbitrateUnlock it returned (the wake-up). Under klock. */
+/* YW4_LOCK_SPIN=<ns>: a contended ArbitrateLock spins up to this long watching the mutex word (outside klock) before it
+ * sleeps in the kernel; if the holder lets go in that time, the sleep and wake-up (a few us each) are skipped. 0: off. */
+static int64_t lock_spin_ns = -1;
+
+static int wake_on = -1;
+typedef struct { uint64_t mutex, t; } WakeUnlock;
+static WakeUnlock wake_unl[32];
+typedef struct { uint64_t mutex, tid, count; int64_t wake_ns, wait_ns; int depth; uint64_t stack[WAITPROF_DEPTH]; } WakeStat;
+static WakeStat wake_stats[64];
+
+static void wake_unlocked(uint64_t mutex, int64_t t) {  /* klock held */
+    for (int i = 0; i < 32; i++)
+        if (wake_unl[i].mutex == mutex || !wake_unl[i].mutex) { wake_unl[i].mutex = mutex, wake_unl[i].t = t; return; }
+    wake_unl[mutex % 32].mutex = mutex, wake_unl[mutex % 32].t = t;
+}
+
+static int wake_find(uint64_t mutex) {  /* klock held: index of the mutex's last unlock, or -1 */
+    for (int i = 0; i < 32; i++)
+        if (wake_unl[i].mutex == mutex) return i;
+    return -1;
+}
+
+static void wake_stat(uint64_t mutex, uint64_t tid, int64_t wake, int64_t wait, const uint64_t *st, int k) {  /* klock held */
+    for (int j = 0; j < 64; j++) {
+        WakeStat *s = &wake_stats[j];
+        if (s->count && s->mutex == mutex && s->tid == tid) { s->count++, s->wake_ns += wake, s->wait_ns += wait; return; }
+        if (!s->count) {
+            s->mutex = mutex, s->tid = tid, s->count = 1, s->wake_ns = wake, s->wait_ns = wait;
+            s->depth = k, memcpy(s->stack, st, (size_t)k * 8);  /* the first call's guest stack */
+            return;
+        }
     }
 }
 
@@ -1116,22 +1225,110 @@ void yw4_wait_report(FILE *f, int frames) {
     if (waitprof <= 0 || frames <= 0) return;
     static const char *const names[] = {[0x0B] = "SleepThread", [0x18] = "WaitSynchronization",
                                         [0x1A] = "ArbitrateLock", [0x1C] = "WaitProcessWideKey", [0x34] = "WaitForAddress"};
+    host_lock(&klock);  /* the watched thread writes the table under klock too */
     int64_t total = 0;
     for (int i = 0; i < WAITPROF_SLOTS; i++) total += wait_sites[i].ns;
-    fprintf(f, "  main thread waits, last %d frames: %.2f ms/frame\n", frames, (double)total / 1e6 / frames);
+    if (waitprof_thread)
+        fprintf(f, "  thread %" PRIu64 " waits, last %d frames: %.2f ms/frame\n", waitprof_thread, frames,
+                (double)total / 1e6 / frames);
+    else
+        fprintf(f, "  main thread waits, last %d frames: %.2f ms/frame\n", frames, (double)total / 1e6 / frames);
     for (int shown = 0; shown < 8; shown++) {
         WaitSite *best = NULL;
         for (int i = 0; i < WAITPROF_SLOTS; i++)
             if (wait_sites[i].count && (!best || wait_sites[i].ns > best->ns)) best = &wait_sites[i];
         if (!best || best->ns * 100 < total) break;  /* under 1% of the waiting */
         char where[48];
-        fprintf(f, "    %.2f ms/frame, %.1f calls/frame, %s:", (double)best->ns / 1e6 / frames,
-                (double)best->count / frames, names[best->imm]);
+        fprintf(f, "    %.2f ms/frame, %.1f calls/frame, %s at %#" PRIx64 ":", (double)best->ns / 1e6 / frames,
+                (double)best->count / frames, names[best->imm], best->addr);
         for (int i = 0; i < best->depth; i++) fprintf(f, " %s", yw4_describe(best->stack[i] - 4, where));
         fprintf(f, "\n");
         best->count = 0, best->ns = 0;  /* taken out of the search; cleared below */
     }
     memset(wait_sites, 0, sizeof wait_sites);
+    fprintf(f, "  SignalToAddress calls, last %d frames (signalling thread, address, call stack):\n", frames);
+    for (int shown = 0; shown < 8; shown++) {
+        SignalSite *best = NULL;
+        for (int i = 0; i < WAITPROF_SLOTS; i++)
+            if (signal_sites[i].count && (!best || signal_sites[i].count > best->count)) best = &signal_sites[i];
+        if (!best) break;
+        char where[48];
+        fprintf(f, "    %.2f calls/frame, thread %" PRIu64 ", address %#" PRIx64 ":", (double)best->count / frames,
+                best->tid, best->addr);
+        for (int i = 0; i < best->depth; i++) fprintf(f, " %s", yw4_describe(best->stack[i] - 4, where));
+        fprintf(f, "\n");
+        best->count = 0;  /* taken out of the search; cleared below */
+    }
+    memset(signal_sites, 0, sizeof signal_sites);
+    if (wake_on > 0) {
+        fprintf(f, "  contended mutex waits, last %d frames (mutex, waiting thread): per frame, average wait, average wake after unlock\n", frames);
+        for (int shown = 0; shown < 8; shown++) {
+            WakeStat *best = NULL;
+            for (int i = 0; i < 64; i++)
+                if (wake_stats[i].count && (!best || wake_stats[i].wait_ns > best->wait_ns)) best = &wake_stats[i];
+            if (!best) break;
+            fprintf(f, "    %.2f per frame, mutex %#" PRIx64 ", thread %" PRIu64 ": waited %.1f us, woke %.1f us after the unlock\n",
+                    (double)best->count / frames, best->mutex, best->tid, (double)best->wait_ns / best->count / 1e3,
+                    (double)best->wake_ns / best->count / 1e3);
+            char where[48];
+            fprintf(f, "      from:");
+            for (int i = 0; i < best->depth; i++) fprintf(f, " %s", yw4_describe(best->stack[i] - 4, where));
+            fprintf(f, "\n");
+            best->count = 0;
+        }
+        memset(wake_stats, 0, sizeof wake_stats);
+        memset(wake_unl, 0, sizeof wake_unl);
+    }
+    if (mutex_hold_on > 0) {
+        fprintf(f, "  mutex holds, last %d frames (mutex, locking thread: holds per frame, average hold):\n", frames);
+        for (int shown = 0; shown < 8; shown++) {
+            HoldSite *best = NULL;
+            for (int i = 0; i < 64; i++)
+                if (hold_sites[i].count && (!best || hold_sites[i].ns > best->ns)) best = &hold_sites[i];
+            if (!best) break;
+            fprintf(f, "    %.2f per frame, mutex %#" PRIx64 ", thread %" PRIu64 ": average %.3f ms, total %.2f ms a frame\n",
+                    (double)best->count / frames, best->addr, best->tid, (double)best->ns / best->count / 1e6,
+                    (double)best->ns / 1e6 / frames);
+            best->count = 0;
+        }
+        memset(hold_sites, 0, sizeof hold_sites);
+    }
+    if (probe_on > 0) {  /* the hand-off probe: averages over the events since the last report */
+        uint32_t n = probe_n < PROBE_N ? probe_n : PROBE_N, start = probe_n - n;
+        double wait = 0, work = 0, t20 = 0, tail = 0;
+        int nw = 0, nwork = 0, nt20 = 0, ntail = 0;
+        int64_t w0 = -1, w1 = -1, disp = -1;
+        int tail_done = 1, t20_done = 1, kinds[4] = {0, 0, 0, 0};
+        for (uint32_t i = 0; i < n; i++) {
+            ProbeEv e = probe_ev[(start + i) % PROBE_N];
+            kinds[e.kind]++;
+            switch (e.kind) {
+            case PROBE_WAIT0:  /* a main-thread wait starts; the dispatch-to-this-wait gap counts once per cycle */
+                if (disp >= 0 && !tail_done) tail += (double)(e.t - disp), ntail++, tail_done = 1;
+                w0 = e.t;
+                break;
+            case PROBE_WAIT1:
+                if (w0 >= 0) wait += (double)(e.t - w0), nw++;
+                w1 = e.t;
+                break;
+            case PROBE_DISPATCH:
+                if (w1 >= 0) work += (double)(e.t - w1), nwork++;
+                disp = e.t, w1 = -1, tail_done = 0, t20_done = 0;
+                break;
+            case PROBE_DONE:  /* the job's done signal, from the worker thread */
+                if (disp >= 0 && !t20_done) t20 += (double)(e.t - disp), nt20++, t20_done = 1;
+                break;
+            }
+        }
+        fprintf(f, "  hand-off probe events: wait start %d, wait end %d, dispatch %d, done %d\n",
+                kinds[PROBE_WAIT0], kinds[PROBE_WAIT1], kinds[PROBE_DISPATCH], kinds[PROBE_DONE]);
+        fprintf(f, "  hand-off probe, last %d frames: main waits %.2f ms (%d), main work before dispatch %.2f ms (%d),"
+                   " dispatch to done %.2f ms (%d), dispatch to next wait %.2f ms (%d)\n", frames,
+                nw ? wait / nw / 1e6 : 0.0, nw, nwork ? work / nwork / 1e6 : 0.0, nwork,
+                nt20 ? t20 / nt20 / 1e6 : 0.0, nt20, ntail ? tail / ntail / 1e6 : 0.0, ntail);
+        probe_n = 0;
+    }
+    host_unlock(&klock);
 }
 
 void yw4_svc(CPUState *ctx, uint32_t imm) {
@@ -1144,15 +1341,102 @@ void yw4_svc(CPUState *ctx, uint32_t imm) {
         const char *t = getenv("YW4_WAITPROF");
         waitprof = t && *t && *t != '0';
     }
-    if (waitprof && cur == &main_thread &&
+    if (lock_spin_ns < 0) {
+        const char *s = getenv("YW4_LOCK_SPIN");
+        lock_spin_ns = s ? atoll(s) : 0;
+    }
+    if (lock_spin_ns > 0 && imm == 0x1A) {
+        uint32_t *m = u32p(ctx->x[1]);
+        uint32_t seen = __atomic_load_n(m, __ATOMIC_ACQUIRE);
+        int64_t until = host_now_ns() + lock_spin_ns;
+        while (__atomic_load_n(m, __ATOMIC_ACQUIRE) == seen && host_now_ns() < until) { }
+    }
+    if (wake_on < 0) wake_on = getenv("YW4_WAKE_PROBE") && *getenv("YW4_WAKE_PROBE") != '0';
+    if (wake_on && (imm == 0x1A || imm == 0x1B)) {
+        host_lock(&klock);
+        if (imm == 0x1B) {
+            wake_unlocked(ctx->x[0], host_now_ns());
+            svc(ctx, imm);
+        } else {
+            uint64_t mutex = ctx->x[1], tid = cur ? cur->id : 0, st[WAITPROF_DEPTH];
+            int k = yw4_call_stack(ctx, st, WAITPROF_DEPTH);
+            int64_t t0 = host_now_ns();
+            svc(ctx, imm);
+            int64_t t1 = host_now_ns();
+            int i = ctx->x[0] == R_OK ? wake_find(mutex) : -1;
+            if (i >= 0) {
+                int64_t wake = t1 - wake_unl[i].t;
+                wake_unl[i].mutex = 0;  /* consumed: one wake per unlock */
+                if (t1 - t0 > 2000 && wake < 5000000) wake_stat(mutex, tid, wake, t1 - t0, st, k);
+            }
+        }
+        host_unlock(&klock);
+        return;
+    }
+    if (mutex_hold_on < 0) mutex_hold_on = getenv("YW4_MUTEX_HOLD") && *getenv("YW4_MUTEX_HOLD") != '0';
+    if (mutex_hold_on && (imm == 0x1A || imm == 0x1B)) {
+        host_lock(&klock);
+        uint64_t mutex = imm == 0x1A ? ctx->x[1] : ctx->x[0], tid = cur ? cur->id : 0;
+        svc(ctx, imm);
+        int64_t t = host_now_ns();
+        if (imm == 0x1A && ctx->x[0] == R_OK) hold_acquire(mutex, tid, t);
+        if (imm == 0x1B) hold_release(mutex, t);
+        host_unlock(&klock);
+        return;
+    }
+    if (probe_on < 0) {  /* once: YW4_HANDOFF_PROBE=<dispatch>,<done> */
+        const char *p = getenv("YW4_HANDOFF_PROBE");
+        char *e = NULL;
+        probe_dispatch = p ? strtoull(p, &e, 0) : 0;
+        probe_done = e && *e == ',' ? strtoull(e + 1, NULL, 0) : 0;
+        probe_on = probe_dispatch && probe_done;
+    }
+    if (probe_on && imm == 0x34 && cur == &main_thread && ctx->x[0] == probe_done) {
+        host_lock(&klock);
+        probe_rec(PROBE_WAIT0, host_now_ns());
+        svc(ctx, imm);
+        probe_rec(PROBE_WAIT1, host_now_ns());
+        host_unlock(&klock);
+        return;
+    }
+    if (probe_on && imm == 0x35 && ((ctx->x[0] == probe_dispatch && cur == &main_thread) || ctx->x[0] == probe_done)) {
+        int done = ctx->x[0] == probe_done;
+        host_lock(&klock);
+        svc(ctx, imm);
+        probe_rec(done ? PROBE_DONE : PROBE_DISPATCH, host_now_ns());
+        host_unlock(&klock);
+        return;
+    }
+    if (waitprof && !waitprof_thread) {  /* once: which thread the waits are watched on */
+        const char *w = getenv("YW4_WAITPROF_THREAD");
+        waitprof_thread = w ? strtoull(w, NULL, 10) : 0;
+    }
+    if (waitprof && (waitprof_thread ? cur->id == waitprof_thread : cur == &main_thread) &&
         (imm == 0x0B || imm == 0x18 || imm == 0x1A || imm == 0x1C || imm == 0x34)) {
         uint64_t st[WAITPROF_DEPTH];
         int k = yw4_call_stack(ctx, st, WAITPROF_DEPTH);
+        uint64_t addr = ctx->x[0];
+        if (imm == 0x1A) {  /* ArbitrateLock: x0 is the owner's handle; tally the owner's thread id (bit 40 marks it) */
+            host_lock(&klock);
+            KThread *ot = thread_get((uint32_t)ctx->x[0]);
+            host_unlock(&klock);
+            if (ot) addr = ((uint64_t)ot->id) | (1ull << 40);
+        }
         int64_t t0 = host_now_ns();
         host_lock(&klock);
         svc(ctx, imm);
+        waitprof_add(imm, addr, st, k, host_now_ns() - t0);
         host_unlock(&klock);
-        waitprof_add(imm, st, k, host_now_ns() - t0);
+        return;
+    }
+    if (waitprof && imm == 0x35) {  /* SignalToAddress: who signals the address the waits above are on */
+        uint64_t st[WAITPROF_DEPTH];
+        int k = yw4_call_stack(ctx, st, WAITPROF_DEPTH);
+        uint64_t addr = ctx->x[0], tid = cur ? cur->id : 0;
+        host_lock(&klock);
+        svc(ctx, imm);
+        signalprof_add(tid, addr, st, k);
+        host_unlock(&klock);
         return;
     }
     uint64_t in[4] = {ctx->x[0], ctx->x[1], ctx->x[2], ctx->x[3]};

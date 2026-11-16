@@ -41,6 +41,7 @@ static uint64_t seq_after[TICKETS];  /* the Vulkan submissions made when job t h
 static HostLock lock = HOST_LOCK_INIT;
 static HostCond work = HOST_COND_INIT, progress = HOST_COND_INIT;
 static int on = -1;
+static void *worker_host;  /* the worker's host thread, for its CPU time in the per-thread report */
 
 static int queue_on(void) {
     int o = __atomic_load_n(&on, __ATOMIC_ACQUIRE);
@@ -68,6 +69,7 @@ static void run(const Job *j) {
 static void worker(void *arg) {
     (void)arg;
     host_thread_set_priority(NULL, 39);  /* same priority as guest render workers */
+    __atomic_store_n(&worker_host, host_thread_self(), __ATOMIC_RELEASE);
     for (;;) {
         host_lock(&lock);
         while (done == queued) host_cond_wait(&work, &lock, -1);
@@ -158,6 +160,12 @@ int gpu_queue_wait(uint64_t fence, uint64_t timeout_ns) {
     uint64_t left = forever ? UINT64_MAX : deadline > host_now_ns() ? (uint64_t)(deadline - host_now_ns()) : 0;
     int r = gpu_wait(seq, left);
     return r == 2 ? 2 : waited || r;
+}
+
+/* The worker's CPU time so far (ns), 0 before it starts or with YW4_GPU_THREAD=0. */
+int64_t gpu_queue_worker_cpu_ns(void) {
+    void *h = __atomic_load_n(&worker_host, __ATOMIC_ACQUIRE);
+    return h ? host_thread_cpu_ns(h) : 0;
 }
 
 void gpu_queue_drain(void) {

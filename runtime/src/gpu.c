@@ -397,11 +397,25 @@ static NvnPool *pool_of(uint64_t addr) {
 
 static void scan_writes(void) {
     __atomic_add_fetch(&write_gen, 1, __ATOMIC_RELAXED);  /* gpu_note_written counts too, on game threads */
+    /* Every 600 frames, the scan's cost. Slow street 2026-11-17: ~1.1-1.2 ms a frame, ~1,900 pages written, 1,092 MiB
+     * walked; ~10% of the GPU worker. Splitting it over 3 helper threads did not shorten it (Windows seems to run
+     * GetWriteWatch calls on one process one at a time): no fps gain, removed. */
+    static int64_t ns;
+    static uint64_t pages, bytes, frames;
+    int64_t t0 = host_now_ns();
     for (int i = 0; i < npools; i++) {
         NvnPool *p = pools[i];
         GpuPool *g = p->gpu;
         if (p->flags & POOL_CPU_NO_ACCESS || g->untracked) continue;
-        if (host_written_pages(p->storage, p->size, mark_written, p) < 0) g->untracked = 1;
+        long n = host_written_pages(p->storage, p->size, mark_written, p);
+        if (n < 0) g->untracked = 1;
+        else pages += (uint64_t)n, bytes += p->size;
+    }
+    ns += host_now_ns() - t0;
+    if (++frames == 600) {
+        fprintf(stderr, "yw4: gpu: write scan: %.2f ms a frame, %.0f pages written a frame, %.0f MiB of pools scanned\n",
+                (double)ns / 1e6 / 600, (double)pages / 600, (double)bytes / 600 / 1048576);
+        ns = 0, pages = bytes = frames = 0;
     }
 }
 
@@ -586,6 +600,14 @@ static uint32_t geo_count;  /* ranges in the table */
 static int geo_half;        /* the half being filled */
 static uint64_t geo_retired[2];  /* the last submission that read each half before it was left */
 static int geo_on = -1, geo_full;
+enum { GEO_MEMO = 1024 };
+typedef struct {
+    uint64_t addr, size;
+    GeoCopy *c;
+    uint32_t epoch;  /* geo_epoch when remembered */
+} GeoMemo;
+static GeoMemo geo_memo[GEO_MEMO];
+static uint32_t geo_epoch = 1;
 
 int gpu_vram_geometry(void) {
     if (geo_on < 0) geo_on = !getenv("YW4_VRAM_GEOMETRY") || atoi(getenv("YW4_VRAM_GEOMETRY"));
@@ -600,15 +622,26 @@ static void geo_reset_if_full(void) {
     geo_half ^= 1;
     int waited = gpu_wait(geo_retired[geo_half], UINT64_MAX);
     memset(geo, 0, sizeof geo);
+    geo_epoch++;  /* the memo's pointers (geo_find) are into the emptied table */
     geo_used = 0, geo_full = 0, geo_count = 0;
     fprintf(stderr, "yw4: gpu: geometry arena emptied (now half %d%s)\n", geo_half, waited ? ", waited for the GPU" : "");
 }
 
 static GeoCopy *geo_find(uint64_t addr, uint64_t size, int add) {
-    uint32_t h = (uint32_t)((addr ^ size * 0x9E3779B97F4A7C15ull) * 0x9E3779B97F4A7C15ull >> 32) & (GEO_SLOTS - 1);
+    uint64_t mix = (addr ^ size * 0x9E3779B97F4A7C15ull) * 0x9E3779B97F4A7C15ull;
+    /* A small memo of ranges found lately in front of the 16 MB table: a draw asks for each of its ranges twice
+     * (needs_copy, then geometry_at) and the next frame asks for the same ones; the table's slot is a cache miss
+     * each time (2026-11-17). Entries are never removed one by one, only all at once (geo_reset_if_full: geo_epoch),
+     * so a remembered pointer stays right until then. */
+    GeoMemo *mo = &geo_memo[(uint32_t)(mix >> 54) & (GEO_MEMO - 1)];
+    if (mo->epoch == geo_epoch && mo->addr == addr && mo->size == size) return mo->c;
+    uint32_t h = (uint32_t)(mix >> 32) & (GEO_SLOTS - 1);
     for (uint32_t i = 0; i < 64; i++, h = (h + 1) & (GEO_SLOTS - 1)) {
         GeoCopy *c = &geo[h];
-        if (c->size && c->addr == addr && c->size == size) return c;
+        if (c->size && c->addr == addr && c->size == size) {
+            *mo = (GeoMemo){addr, size, c, geo_epoch};
+            return c;
+        }
         if (!c->size) {
             if (!add) return NULL;
             uint64_t at = (geo_used + 255) & ~255ull;
@@ -618,6 +651,7 @@ static GeoCopy *geo_find(uint64_t addr, uint64_t size, int add) {
             }
             geo_used = at + size;
             *c = (GeoCopy){.addr = addr, .size = size, .at = (uint64_t)geo_half * GEO_HALF + at};
+            *mo = (GeoMemo){addr, size, c, geo_epoch};
             if (++geo_count % 8192 == 0)
                 fprintf(stderr, "yw4: gpu: geometry table: %u ranges, %" PRIu64 " MiB\n", geo_count, geo_used >> 20);
             return c;
@@ -655,9 +689,17 @@ static int geo_stale(GeoCopy *c, const NvnPool *p) {
  * watch, gpu_watch.c). A quad is 160 bytes: reading it costs less than the copy it decides on. */
 enum { GEO_SMALL = 1024 };
 static uint64_t geo_print(uint64_t addr, uint64_t size) {
+    /* 8 bytes a step (it runs for every small range of every draw: byte steps were most of
+     * gpu_geometry_needs_copy's time, 2026-11-17); a mix after each word so a change anywhere shows */
     const uint8_t *m = (const uint8_t *)(uintptr_t)addr;
-    uint64_t h = 0xcbf29ce484222325ull;
-    for (uint64_t i = 0; i < size; i++) h = (h ^ m[i]) * 0x100000001b3ull;
+    uint64_t h = 0xcbf29ce484222325ull ^ size, i = 0;
+    for (; i + 8 <= size; i += 8) {
+        uint64_t v;
+        memcpy(&v, m + i, 8);
+        h = (h ^ v) * 0x100000001b3ull;
+        h ^= h >> 32;
+    }
+    for (; i < size; i++) h = (h ^ m[i]) * 0x100000001b3ull;
     return h | 1;  /* never 0: 0 is "no print" */
 }
 
@@ -1500,8 +1542,14 @@ static uint32_t base_height(const NvnTexture *t) {
     return battle && !gpu_is_presented(t->addr) ? 1080u : 900u;
 }
 
-static void image_scale(const NvnTexture *t, uint32_t *num, uint32_t *den) {
+/* screen: screen_sized(t), worked out once by key_of. */
+static void image_scale(const NvnTexture *t, int screen, uint32_t *num, uint32_t *den) {
     *num = *den = 0;
+    /* Only a screen-sized target or the shadow map's shape can be scaled: a plain texture (most of them) leaves
+     * here before the settings below are asked (they were ~4% of the GPU worker's time, 2026-11-17). Same result. */
+    int shadow_shape = t->layout.width == 1024 && t->layout.height == 1024 && t->layout.layers == 3 &&
+                       t->layout.levels <= 1 && t->pool_flags & POOL_CPU_NO_ACCESS;
+    if (!screen && !shadow_shape) return;
     int res = gpu_shadow_res(), h = gpu_render_height();
     if (gpu_upscale() && (gpu_is_presented(t->addr) || gpu_upscaled(t))) h = gpu_res_height();  /* output-sized */
     if (res != 1024 && t->layout.width == 1024 && t->layout.height == 1024 && t->layout.layers == 3 &&
@@ -1512,9 +1560,9 @@ static void image_scale(const NvnTexture *t, uint32_t *num, uint32_t *den) {
      * so a new set of images, and nine sets at 4K ran the GPU out of memory (2026-10-28) */
     else if (zoom_chain(t->layout.width, t->layout.height))
         return;
-    else if (screen_sized(t) && gpu_effects_full() && half_sized(t))
+    else if (screen && gpu_effects_full() && half_sized(t))
         *num = 2 * (uint32_t)h, *den = base_height(t);
-    else if (screen_sized(t) && (uint32_t)h != base_height(t))
+    else if (screen && (uint32_t)h != base_height(t))
         *num = (uint32_t)h, *den = base_height(t);
 }
 
@@ -1526,15 +1574,26 @@ static ImageKey key_of(const NvnTexture *t) {
     k.layers = t->layout.layers, k.levels = t->layout.levels;
     k.block_height_log2 = t->layout.block_height_log2, k.block_depth_log2 = t->layout.block_depth_log2;
     k.linear = (t->flags & FLAG_LINEAR) != 0;
-    image_scale(t, &k.scale_num, &k.scale_den);
-    if (gpu_wide() && screen_sized(t)) gpu_wide_factor(&k.wide_num, &k.wide_den);
+    int screen = screen_sized(t);
+    image_scale(t, screen, &k.scale_num, &k.scale_den);
+    if (screen && gpu_wide()) gpu_wide_factor(&k.wide_num, &k.wide_den);
     return k;
 }
 
+/* ImageKey is 64 bytes of whole 8-byte words (no padding): hashed and compared a word at a time, in line. The byte
+ * hash and the library memcmp were ~3% of the GPU worker (every texture lookup, 2026-11-17). */
+_Static_assert(sizeof(ImageKey) == 64, "ImageKey: 8 whole words");
+static int key_same(const ImageKey *a, const ImageKey *b) {
+    uint64_t x[8], y[8], d = 0;
+    memcpy(x, a, 64), memcpy(y, b, 64);
+    for (int i = 0; i < 8; i++) d |= x[i] ^ y[i];
+    return d == 0;
+}
+
 static uint32_t key_hash(const ImageKey *k) {
-    uint64_t h = 0xCBF29CE484222325ull;
-    const uint8_t *p = (const uint8_t *)k;
-    for (size_t i = 0; i < sizeof *k; i++) h = (h ^ p[i]) * 0x100000001B3ull;
+    uint64_t w[8], h = 0xCBF29CE484222325ull;
+    memcpy(w, k, 64);
+    for (int i = 0; i < 8; i++) h = (h ^ w[i]) * 0x100000001B3ull, h ^= h >> 29;
     return (uint32_t)(h ^ h >> 32) % IMAGE_BUCKETS;
 }
 
@@ -1546,9 +1605,9 @@ static uint32_t image_epoch = 1;
 GpuImage *image_find(const NvnTexture *t) {
     ImageKey k = key_of(t);
     GpuImage *m = t->found;
-    if (m && t->found_epoch == image_epoch && !memcmp(&m->key, &k, sizeof k)) return m;
+    if (m && t->found_epoch == image_epoch && key_same(&m->key, &k)) return m;
     for (GpuImage *g = images[key_hash(&k)]; g; g = g->next)
-        if (!memcmp(&g->key, &k, sizeof k)) {
+        if (key_same(&g->key, &k)) {
             ((NvnTexture *)t)->found = g, ((NvnTexture *)t)->found_epoch = image_epoch;
             return g;
         }
@@ -2135,7 +2194,12 @@ static float upscale_lod_bias(void) {
     if (!m || !gpu_sampler_scene) return 0.0f;
     static float extra = 1.0f;  /* 1.0: not read yet */
     if (extra > 0.5f) extra = getenv("YW4_FSR_MIP_BIAS") ? (float)atof(getenv("YW4_FSR_MIP_BIAS")) : -1.0f;
-    return log2f(upscale_ratio[m] > 0.0f ? 1.0f / upscale_ratio[m] : 1.0f) + extra;
+    /* worked out again only when the mode changes: log2f is a library call, and this runs for every texture of
+     * every draw (2026-11-17) */
+    static int last_m = -1;
+    static float last_bias;
+    if (m != last_m) last_bias = log2f(upscale_ratio[m] > 0.0f ? 1.0f / upscale_ratio[m] : 1.0f) + extra, last_m = m;
+    return last_bias;
 }
 
 VkSampler gpu_sampler(const NvnSamplerDesc *d) {
@@ -2149,9 +2213,22 @@ VkSampler gpu_sampler(const NvnSamplerDesc *d) {
     static int n;
     int af = gpu_aniso();
     float ub = upscale_lod_bias();
-    for (int i = 0; i < n; i++)
+    /* found through a hash index (was: every sampler made so far compared with the library memcmp, for every
+     * texture of every draw, 2026-11-17). NvnSamplerDesc is 16 whole 4-byte fields: hashed as words. */
+    _Static_assert(sizeof(NvnSamplerDesc) == 64, "NvnSamplerDesc: 16 whole words");
+    enum { SAMPLER_INDEX = 4096 };  /* a power of two, > 2 x MAX_SAMPLERS: probes stay short */
+    static int16_t index[SAMPLER_INDEX];  /* cache position + 1; 0: empty */
+    uint32_t w[16], ubits;
+    memcpy(w, d, 64), memcpy(&ubits, &ub, 4);
+    uint64_t h = 0xcbf29ce484222325ull ^ (uint64_t)(uint32_t)af ^ (uint64_t)ubits << 32;
+    for (int i = 0; i < 16; i++) h = (h ^ w[i]) * 0x100000001b3ull, h ^= h >> 29;
+    uint32_t at = (uint32_t)(h ^ h >> 32) & (SAMPLER_INDEX - 1);
+    for (; index[at]; at = (at + 1) & (SAMPLER_INDEX - 1)) {
+        int i = index[at] - 1;
         if (cache[i].aniso == af && cache[i].bias == ub && !memcmp(&cache[i].desc, d, sizeof *d)) return cache[i].s;
+    }
     if (n == MAX_SAMPLERS) gpu_stop("more than %d different samplers", MAX_SAMPLERS);
+    index[at] = (int16_t)(n + 1);  /* the empty slot the search ended on: the new sampler's (made below) */
     VkSamplerCreateInfo si = {.sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO};
     si.magFilter = d->mag_filter == 1 ? VK_FILTER_LINEAR : VK_FILTER_NEAREST;
     uint32_t mf = d->min_filter;

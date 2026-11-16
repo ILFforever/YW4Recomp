@@ -385,7 +385,7 @@ static int vk_init(void) {
     int core_bda = q12.bufferDeviceAddress;
     /* DLSS lists the old VK_EXT_buffer_device_address, but allocates with the core feature's flag (validation,
      * 2026-10-29): the core feature is kept where the GPU has it (Vulkan 1.2), the EXT only without it */
-    int bda_ext = 0, has_present_id = 0, has_derivatives = 0, has_conditional = 0;
+    int bda_ext = 0, has_present_id = 0, has_derivatives = 0, has_conditional = 0, has_push = 0;
     {
         uint32_t n = 0;
         vkEnumerateDeviceExtensionProperties(vk.gpu, NULL, &n, NULL);
@@ -397,6 +397,7 @@ static int vk_init(void) {
             if (!strcmp(e[i].extensionName, VK_KHR_PRESENT_ID_EXTENSION_NAME)) has_present_id = 1;
             if (!strcmp(e[i].extensionName, VK_KHR_COMPUTE_SHADER_DERIVATIVES_EXTENSION_NAME)) has_derivatives = 1;
             if (!strcmp(e[i].extensionName, VK_EXT_CONDITIONAL_RENDERING_EXTENSION_NAME)) has_conditional = 1;
+            if (!strcmp(e[i].extensionName, VK_KHR_PUSH_DESCRIPTOR_EXTENSION_NAME)) has_push = 1;
         }
         for (unsigned k = 0; k < ndlss && ndexts < 20; k++)
             for (uint32_t i = 0; i < n; i++)
@@ -420,6 +421,20 @@ static int vk_init(void) {
     fprintf(stderr, "yw4: window: host memory import: %s\n", vk.host_import ? "yes" : "no (no draw path)");
     if (vk.memory_budget && ndexts < 24) dexts[ndexts++] = VK_EXT_MEMORY_BUDGET_EXTENSION_NAME;  /* gpu_vram */
     else vk.memory_budget = 0;
+    /* push descriptors (gpu_draw.c, bind_stage_set): a draw's fragment bindings go into the command buffer, with no
+     * descriptor set allocated and written for each draw (that was ~18% of the GPU worker's time, 2026-11-17).
+     * YW4_PUSH_DESC=0: sets as before. */
+    if (has_push && ndexts < 24 && !(getenv("YW4_PUSH_DESC") && getenv("YW4_PUSH_DESC")[0] == '0')) {
+        VkPhysicalDevicePushDescriptorPropertiesKHR pp = {.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PUSH_DESCRIPTOR_PROPERTIES_KHR};
+        VkPhysicalDeviceProperties2 p2 = {.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2, .pNext = &pp};
+        vkGetPhysicalDeviceProperties2(vk.gpu, &p2);
+        if (pp.maxPushDescriptors) {
+            dexts[ndexts++] = VK_KHR_PUSH_DESCRIPTOR_EXTENSION_NAME;
+            vk.push_descriptor = 1, vk.max_push_descriptors = pp.maxPushDescriptors;
+        }
+    }
+    fprintf(stderr, "yw4: window: push descriptors: %s (up to %u)\n", vk.push_descriptor ? "yes" : "no",
+            vk.max_push_descriptors);
 
     /* Features: what the translated shaders (0020) and NVN's state use, where the GPU has it. */
     VkPhysicalDeviceVulkan13Features f13 = {.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_3_FEATURES};

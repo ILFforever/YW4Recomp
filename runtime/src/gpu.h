@@ -132,5 +132,6 @@ void gpu_queue_call(void (*fn)(void *), void *arg);
 uint64_t gpu_queue_fence(void);
 int gpu_queue_wait(uint64_t fence, uint64_t timeout_ns);
 void gpu_queue_drain(void);
+int64_t gpu_queue_worker_cpu_ns(void);  /* the GPU worker thread's CPU time so far, ns (0: none) */
 
 #endif

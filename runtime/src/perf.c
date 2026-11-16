@@ -1,7 +1,9 @@
-/* Performance log (YW4_PERF=0 turns it off, YW4_PERF_DIR sets the folder, default work/perf).
+/* Performance log (YW4_PERF=0 turns it off, YW4_PERF=1 adds the per-frame CSV, YW4_PERF_DIR sets the folder,
+ * default work/perf).
  *
- * One row per presented frame in perf_<time>.csv, and a summary in perf_<time>.txt (also on
- * stderr every 600 frames and at exit). The game paces itself on the display's vsync, so the
+ * A summary in perf_<time>.txt (also on stderr every 600 frames and at exit), events in perf_<time>.jsonl, and with
+ * YW4_PERF=1 one row per presented frame in perf_<time>.csv (the dev tools set it; players don't get it: 17-30 MB
+ * an hour of play). The game paces itself on the display's vsync, so the
  * frame interval mostly shows the cap (30 frames/s = 33.3 ms). What says how much headroom
  * there is is `work_ms`: the time from the end of the last present to the start of this one,
  * i.e. everything the game's thread did for the frame (game logic, recompiled code, command
@@ -46,6 +48,7 @@
 #include "nvn.h"
 
 void shadow_summary_text(char *buf, size_t n);  /* shadow.c (shadow.h needs the CPU state's type) */
+void yw4_prune_runs(const char *dir, const char *prefix, const char *current);  /* log.c */
 
 int gpu_frame_time(uint64_t frame, double *busy_ms, double *span_ms);  /* gpu.c */
 
@@ -70,11 +73,47 @@ static char summary_path[600];
 static int enabled = -1, exiting;
 static int64_t t0, last_exit, last_cpu;
 static uint64_t peak_rss;
-static Row *rows;
-static double *gpu_busy, *gpu_span;  /* per written row that had GPU times */
-static size_t nrows, cap, written, ngpu;
+/* The last RING frames' rows, and the GPU times of the last RING frames that had them: what the HUD (30 and 600
+ * frames back), the 600-frame reports and the CSV (PERF_DELAY back) read. Every frame of the run used to be kept
+ * for the whole run's summary: ~112 bytes a frame, 150-470 MB after three hours, never given back (owner,
+ * 2026-11-16). The whole run is now counted as it goes (the totals and histograms below): memory stays the same
+ * however long the game runs. Row i of the run is ROW(i), GPU sample j is GBUSY(j) / GSPAN(j). */
+enum { RING = 8192 };
+static Row ring_rows[RING];
+static double ring_busy[RING], ring_span[RING];
+#define ROW(i) ring_rows[(i) & (RING - 1)]
+#define GBUSY(j) ring_busy[(j) & (RING - 1)]
+#define GSPAN(j) ring_span[(j) & (RING - 1)]
+static size_t nrows, written, ngpu;  /* rows of the run so far, rows settled (GPU times asked), GPU samples */
 static uint64_t last_summary_frame;
 static double cpu_pct_sum;
+/* The whole run: totals, and histograms in 0.1 ms steps (the summary prints 0.1 ms) up to 2000 ms, longer frames
+ * in the last step (the maximum is kept exactly). */
+enum { HIST_STEPS = 20001 };  /* 0 .. 2000.0 ms */
+typedef struct { uint32_t n[HIST_STEPS]; double max; } Hist;
+static Hist h_interval, h_work, h_busy, h_span;
+static double run_sum, run_wsum, run_sumsq, run_sub, run_sync, run_other, run_bsum, run_ssum;
+static size_t run_over34, run_over50;
+
+static void hist_add(Hist *h, double v) {
+    long b = v > 0 ? (long)(v * 10.0 + 0.5) : 0;
+    h->n[b < HIST_STEPS ? b : HIST_STEPS - 1]++;
+    if (v > h->max) h->max = v;
+}
+/* Percentile p (0..100) of the m values counted, as percentile() picks it from the sorted values */
+static double hist_percentile(const Hist *h, size_t m, double p) {
+    if (!m) return 0;
+    if (p >= 100) return h->max;
+    size_t k = (size_t)((double)(m - 1) * p / 100.0 + 0.5), seen = 0;
+    for (int b = 0; b < HIST_STEPS; b++)
+        if ((seen += h->n[b]) > k) return b == HIST_STEPS - 1 ? h->max : b / 10.0;
+    return h->max;
+}
+static size_t hist_over(const Hist *h, double limit) {  /* how many were over limit (to the step) */
+    size_t c = 0;
+    for (int b = HIST_STEPS - 1; b >= 0 && b / 10.0 > limit; b--) c += h->n[b];
+    return c;
+}
 
 static int cmp_double(const void *a, const void *b) {
     double x = *(const double *)a, y = *(const double *)b;
@@ -94,23 +133,93 @@ static double percentile(const double *v, size_t from, size_t n, double p) {
     return r;
 }
 
-static void print_summary(FILE *f, size_t from, const char *what) {
-    size_t n = nrows;
-    if (n <= from) return;
-    double sum = 0, wsum = 0;
-    size_t over34 = 0, over50 = 0;
-    for (size_t i = from; i < n; i++) {
-        sum += rows[i].interval, wsum += rows[i].work;
-        over34 += rows[i].interval > 34.5, over50 += rows[i].interval > 50;
-    }
-    double frames = (double)(n - from);
-    size_t m = n - from;  /* only the stretch asked for: copying the whole run every report grew with play time */
+/* Slow frames in the text log (owner, 2026-11-16: without the CSV, a player's stutter must still reach us, and the log
+ * is what a bug report attaches). A frame is slow over 50 ms or 2.5 frames of the cap, whichever is longer; it is
+ * logged once settled, with its GPU time, at most one a second and SLOW_LINES a run; the summary counts them all.
+ * The GPU thread's own hitches have their "yw4: stall:" lines (gpu.c) with what they were spent on. */
+enum { SLOW_LINES = 300 };
+static size_t slow_total, slow_logged;
+static double slow_last_t = -10;
+
+static double slow_limit(void) {
+    int hz = framerate_hz();
+    double cap = hz > 0 ? 2500.0 / hz : 0;
+    return cap > 50 ? cap : 50;
+}
+
+static void note_slow(const Row *r, int has_gpu, double busy) {
+    if (r->interval <= slow_limit()) return;
+    slow_total++;
+    if (slow_logged >= SLOW_LINES || r->t - slow_last_t < 1.0) return;
+    slow_logged++, slow_last_t = r->t;
+    char gpu[32] = "-";
+    if (has_gpu) snprintf(gpu, sizeof gpu, "%.1f", busy);
+    fprintf(stderr, "yw4: slow frame %" PRIu64 " at %.1f s: %.1f ms (game work %.1f of it: translation %.1f, GPU waits "
+            "%.1f; present %.1f, wait for the display %.1f; GPU %s ms; %" PRIu64 " draws)%s\n", r->frame, r->t,
+            r->interval, r->work, r->submit, r->sync, r->present, r->wait, gpu, r->draws,
+            slow_logged == SLOW_LINES ? " (the last one logged: the summary counts the rest)" : "");
+}
+
+/* The numbers of a summary: the whole run (from the totals and histograms) or the last stretch (from the ring). */
+typedef struct {
+    size_t m, over34, over50, late, gm;
+    double sum, wsum, sumsq, sub, sync, other, ip[4], wp[4], bsum, ssum, bp[4], sp95;
+} Stats;
+static const double pct[4] = {50, 95, 99, 100};
+
+static void stats_whole(Stats *s, double late_limit) {
+    s->m = nrows, s->over34 = run_over34, s->over50 = run_over50, s->late = hist_over(&h_interval, late_limit);
+    s->sum = run_sum, s->wsum = run_wsum, s->sumsq = run_sumsq, s->sub = run_sub, s->sync = run_sync, s->other = run_other;
+    for (int i = 0; i < 4; i++)
+        s->ip[i] = hist_percentile(&h_interval, nrows, pct[i]), s->wp[i] = hist_percentile(&h_work, nrows, pct[i]),
+        s->bp[i] = hist_percentile(&h_busy, ngpu, pct[i]);
+    s->gm = ngpu, s->bsum = run_bsum, s->ssum = run_ssum, s->sp95 = hist_percentile(&h_span, ngpu, 95);
+}
+
+static int stats_last(Stats *s, size_t from, double late_limit) {
+    size_t m = nrows - from;  /* at most a few hundred: the 600-frame reports */
     double *interval = malloc(m * sizeof *interval), *work = malloc(m * sizeof *work);
     if (!interval || !work) {
         free(interval), free(work);
-        return;
+        return 0;
     }
-    for (size_t i = 0; i < m; i++) interval[i] = rows[from + i].interval, work[i] = rows[from + i].work;
+    memset(s, 0, sizeof *s);
+    s->m = m;
+    for (size_t i = 0; i < m; i++) {
+        const Row *r = &ROW(from + i);
+        interval[i] = r->interval, work[i] = r->work;
+        s->sum += r->interval, s->wsum += r->work, s->sumsq += r->interval * r->interval;
+        s->over34 += r->interval > 34.5, s->over50 += r->interval > 50, s->late += r->interval > late_limit;
+        s->sub += r->submit, s->sync += r->sync, s->other += r->submit_other;
+    }
+    for (int i = 0; i < 4; i++) s->ip[i] = percentile(interval, 0, m, pct[i]), s->wp[i] = percentile(work, 0, m, pct[i]);
+    free(interval), free(work);
+    size_t g0 = ngpu > m ? ngpu - m : 0;  /* the same stretch, roughly */
+    s->gm = ngpu - g0;
+    if (s->gm) {
+        double *b = malloc(s->gm * sizeof *b), *sp = malloc(s->gm * sizeof *sp);
+        if (b && sp) {
+            for (size_t j = 0; j < s->gm; j++) b[j] = GBUSY(g0 + j), sp[j] = GSPAN(g0 + j), s->bsum += b[j], s->ssum += sp[j];
+            for (int i = 0; i < 4; i++) s->bp[i] = percentile(b, 0, s->gm, pct[i]);
+            s->sp95 = percentile(sp, 0, s->gm, 95);
+        } else {
+            s->gm = 0;
+        }
+        free(b), free(sp);
+    }
+    return 1;
+}
+
+static void print_summary(FILE *f, size_t from, const char *what) {
+    size_t n = nrows;
+    if (n <= from) return;
+    int cap = framerate_hz();
+    double limit = cap > 0 ? 1500.0 / cap : 1e9;  /* "late": over one and a half of the cap's frame time */
+    Stats st;
+    if (from == 0) stats_whole(&st, limit);
+    else if (!stats_last(&st, from, limit)) return;
+    double frames = (double)st.m, sum = st.sum, wsum = st.wsum;
+    size_t m = st.m;
     fprintf(f, "%s: %zu frames, %.1f frames/s average\n", what, m, 1000.0 * frames / sum);
     char pic[400];  /* what the numbers were measured with (issue #12) */
     gpu_picture_text(pic, sizeof pic);
@@ -123,59 +232,53 @@ static void print_summary(FILE *f, size_t from, const char *what) {
     shadow_summary_text(sh, sizeof sh);
     fprintf(f, "  shadows: %s\n", sh);
     fprintf(f, "  interval ms: p50 %.1f  p95 %.1f  p99 %.1f  max %.1f   (slower than 34.5 ms: %zu = %.1f%%, than 50 ms: %zu)\n",
-            percentile(interval, 0, m, 50), percentile(interval, 0, m, 95), percentile(interval, 0, m, 99),
-            percentile(interval, 0, m, 100), over34, 100.0 * (double)over34 / frames, over50);
-    int cap = framerate_hz();
+            st.ip[0], st.ip[1], st.ip[2], st.ip[3], st.over34, 100.0 * (double)st.over34 / frames, st.over50);
     if (cap == 30 || cap == 60) {
         /* for comparing the two ways of holding 30 and 60 (YW4_PACE): frames that took over one and a half of the
          * cap's frame time (25 ms at 60, 50 ms at 30), and how much the frame times spread */
-        double limit = 1500.0 / cap, mean = sum / frames, var = 0;
-        size_t late = 0;
-        for (size_t i = 0; i < m; i++) late += interval[i] > limit, var += (interval[i] - mean) * (interval[i] - mean);
+        double mean = sum / frames, var = st.sumsq / frames - mean * mean;
         fprintf(f, "  pacing %s at %d frames/s: %zu frames over %.0f ms = %.2f%%, standard deviation %.2f ms\n",
-                framerate_pacing(cap) ? "refresh" : "tick", cap, late, limit, 100.0 * (double)late / frames, sqrt(var / frames));
+                framerate_pacing(cap) ? "refresh" : "tick", cap, st.late, limit, 100.0 * (double)st.late / frames,
+                sqrt(var > 0 ? var : 0));
     }
     fprintf(f, "  game work ms: avg %.1f  p50 %.1f  p95 %.1f  p99 %.1f  max %.1f   (budget at 30 frames/s: 33.3)\n", wsum / frames,
-            percentile(work, 0, m, 50), percentile(work, 0, m, 95), percentile(work, 0, m, 99),
-            percentile(work, 0, m, 100));
-    free(interval);
-    free(work);
-    size_t g0 = ngpu > (n - from) ? ngpu - (n - from) : 0;  /* the same stretch, roughly */
-    if (ngpu > g0) {
-        double bsum = 0, ssum = 0;
-        for (size_t i = g0; i < ngpu; i++) bsum += gpu_busy[i], ssum += gpu_span[i];
-        double cnt = (double)(ngpu - g0);
+            st.wp[0], st.wp[1], st.wp[2], st.wp[3]);
+    if (st.gm) {
+        double cnt = (double)st.gm;
         fprintf(f, "  GPU busy ms: avg %.1f  p50 %.1f  p95 %.1f  p99 %.1f  max %.1f   (span, with gaps: avg %.1f  p95 %.1f)\n",
-                bsum / cnt, percentile(gpu_busy, g0, ngpu, 50), percentile(gpu_busy, g0, ngpu, 95),
-                percentile(gpu_busy, g0, ngpu, 99), percentile(gpu_busy, g0, ngpu, 100), ssum / cnt,
-                percentile(gpu_span, g0, ngpu, 95));
+                st.bsum / cnt, st.bp[0], st.bp[1], st.bp[2], st.bp[3], st.ssum / cnt, st.sp95);
     } else {
         fprintf(f, "  GPU time: not available\n");
     }
-    double sub = 0, sync = 0, other = 0;
-    for (size_t i = from; i < n; i++) sub += rows[i].submit, sync += rows[i].sync, other += rows[i].submit_other;
     fprintf(f, "  of the game work: submit (host translation) avg %.1f, GPU waits avg %.1f, game code avg %.1f; submit on other threads avg %.1f\n",
-            sub / frames, sync / frames, (wsum - sub - sync) / frames, other / frames);
+            st.sub / frames, st.sync / frames, (wsum - st.sub - st.sync) / frames, st.other / frames);
+    if (from == 0)
+        fprintf(f, "  slow frames (over %.0f ms) in the whole run: %zu, %zu of them in the log (\"yw4: slow frame\")\n",
+                slow_limit(), slow_total, slow_logged);
     fprintf(f, "  process CPU: %.0f%% of one core on average, memory peak %.0f MB\n", cpu_pct_sum / (double)n,
             (double)peak_rss / 1048576.0);
 }
 
-/* Writes the rows up to (but not including) index `upto`, with their GPU times. */
+/* Settles the rows up to (but not including) index `upto`: their GPU times (which arrive PERF_DELAY frames late) into
+ * the ring and the run's histograms, a slow one into the log, and, with YW4_PERF=1, the CSV line. */
 static void write_rows(size_t upto) {
+    if (upto > written + RING) written = upto - RING;  /* can't happen (PERF_DELAY behind), but never read past the ring */
     for (; written < upto; written++) {
-        Row *r = &rows[written];
+        Row *r = &ROW(written);
         double busy, span;
         /* At exit the GPU lock may be held by the thread that is exiting (a stop inside a draw):
          * asking for GPU times then would deadlock, so the last rows go without them. */
         int has = exiting ? 0 : gpu_frame_time(r->frame, &busy, &span);
+        if (has) {
+            GBUSY(ngpu) = busy, GSPAN(ngpu) = span, ngpu++;
+            hist_add(&h_busy, busy), hist_add(&h_span, span), run_bsum += busy, run_ssum += span;
+        }
+        note_slow(r, has, has ? busy : 0);
+        if (!csv) continue;
         fprintf(csv, "%" PRIu64 ",%.3f,%.2f,%.2f,%.2f,%.2f,%" PRIu64 ",%.0f,%.0f,", r->frame, r->t, r->interval, r->work,
                 r->present, r->wait, r->draws, r->cpu, r->rss);
-        if (has) {
-            fprintf(csv, "%.2f,%.2f,", busy, span);
-            gpu_busy[ngpu] = busy, gpu_span[ngpu] = span, ngpu++;
-        } else {
-            fprintf(csv, ",,");
-        }
+        if (has) fprintf(csv, "%.2f,%.2f,", busy, span);
+        else fprintf(csv, ",,");
         fprintf(csv, "%.2f,%.2f,%.2f\n", r->submit, r->submit_other, r->sync);
     }
 }
@@ -246,14 +349,14 @@ static void report_unreached(uint64_t last) {
 }
 
 static void finish(void) {
-    if (!csv) return;
+    if (enabled <= 0 || exiting) return;
     exiting = 1;
     write_rows(nrows);
-    fclose(csv);
+    if (csv) fclose(csv);
     csv = NULL;
     write_summary(0, "whole run");
     print_summary(stderr, 0, "yw4: perf, whole run");
-    uint64_t last = nrows ? rows[nrows - 1].frame : 0;
+    uint64_t last = nrows ? ROW(nrows - 1).frame : 0;
     report_unreached(last);
     yw4_event("end", last, "\"frames\":%zu", nrows);
     if (events) fclose(events);
@@ -286,13 +389,21 @@ static void start(void) {
     strftime(when, sizeof when, "%Y%m%d_%H%M%S", &tmv);
     snprintf(csv_path, sizeof csv_path, "%s/perf_%s.csv", path, when);
     snprintf(summary_path, sizeof summary_path, "%s/perf_%s.txt", path, when);
-    csv = fopen(csv_path, "w");
-    if (!csv) return;
     char events_path[600];
     snprintf(events_path, sizeof events_path, "%s/perf_%s.jsonl", path, when);
     events = fopen(events_path, "w");
-    fprintf(csv, "frame,t_s,interval_ms,work_ms,present_ms,wait_ms,draws,cpu_pct,rss_mb,gpu_busy_ms,gpu_span_ms,submit_ms,submit_other_ms,sync_ms\n");
-    fprintf(stderr, "yw4: performance log %s\n", csv_path);
+    /* the per-frame CSV only when asked (YW4_PERF=1; the dev tools ask): 17-30 MB an hour of play, 90-180 MB for a
+     * three-hour session, and no bug report attaches it (owner, 2026-11-16). The summary and the events stay. */
+    if (on && *on == '1') {
+        csv = fopen(csv_path, "w");
+        if (csv) {
+            fprintf(csv, "frame,t_s,interval_ms,work_ms,present_ms,wait_ms,draws,cpu_pct,rss_mb,gpu_busy_ms,gpu_span_ms,"
+                         "submit_ms,submit_other_ms,sync_ms\n");
+            fprintf(stderr, "yw4: performance log %s\n", csv_path);
+        }
+    }
+    fprintf(stderr, "yw4: performance summary %s%s\n", summary_path, csv ? "" : " (per-frame CSV: YW4_PERF=1)");
+    yw4_prune_runs(path, "perf_", when);  /* the newest 5 runs' perf_* files kept, at most 1 GB (log.c) */
     uint64_t rss;
     t0 = host_now_ns();
     host_process_usage(&last_cpu, &rss);
@@ -315,14 +426,14 @@ void yw4_perf_hud(HudContent *c, int compact, unsigned parts) {
         size_t k = nrows < 30 ? nrows : 30, from = nrows - k;
         double interval = 0, work = 0, cpu = 0, draws = 0;
         for (size_t i = from; i < nrows; i++)
-            interval += rows[i].interval, work += rows[i].work, cpu += rows[i].cpu, draws += (double)rows[i].draws;
+            interval += ROW(i).interval, work += ROW(i).work, cpu += ROW(i).cpu, draws += (double)ROW(i).draws;
         interval /= (double)k, work /= (double)k, cpu /= (double)k, draws /= (double)k;
         /* 1% / 0.1% low: the frame rate of the 99th / 99.9th percentile frame time */
         static double recent[600];
         size_t m = nrows < 600 ? nrows : 600;
         double lo = 1e9, hi = 0;
         for (size_t i = 0; i < m; i++) {
-            recent[i] = rows[nrows - m + i].interval;
+            recent[i] = ROW(nrows - m + i).interval;
             if (recent[i] < lo) lo = recent[i];
             if (recent[i] > hi) hi = recent[i];
         }
@@ -332,7 +443,7 @@ void yw4_perf_hud(HudContent *c, int compact, unsigned parts) {
             if (!nc) nc = host_cpu_count();
             size_t gg = ngpu < 30 ? ngpu : 30;
             double b = 0;
-            for (size_t i = ngpu - gg; i < ngpu; i++) b += gpu_busy[i];
+            for (size_t i = ngpu - gg; i < ngpu; i++) b += GBUSY(i);
             float sh = gpu_fg_shown_per_frame();
             c->valid = 1;
             c->fps = interval > 0 ? (float)(1000.0 / interval) : 0;
@@ -340,7 +451,7 @@ void yw4_perf_hud(HudContent *c, int compact, unsigned parts) {
             c->frame_avg_ms = (float)interval, c->min_ms = (float)lo, c->max_ms = (float)hi;
             c->work_avg_ms = (float)work, c->gpu_ms = gg ? (float)(b / (double)gg) : -1.0f;
             c->ncpu = nc, c->cpu_pct = (float)(cpu / nc), c->cpu_cores = (float)(cpu / 100.0);
-            c->draws = (float)draws, c->ram_mb = (float)rows[nrows - 1].rss;
+            c->draws = (float)draws, c->ram_mb = (float)ROW(nrows - 1).rss;
             c->shown_fps = sh > 0.0f && interval > 0 ? (float)(1000.0 / interval * sh) : 0.0f;
             c->fg = gpu_fg() == 2 ? "DLSS" : "FSR";
         }
@@ -358,7 +469,7 @@ void yw4_perf_hud(HudContent *c, int compact, unsigned parts) {
         if (parts & HUD_PART_FPS) LINE("FRAME %4.1f  MIN %4.1f  MAX %5.1f MS", interval, lo, hi);
         size_t g = ngpu < 30 ? ngpu : 30;  /* GPU times arrive PERF_DELAY frames late */
         double busy = 0;
-        for (size_t i = ngpu - g; i < ngpu; i++) busy += gpu_busy[i];
+        for (size_t i = ngpu - g; i < ngpu; i++) busy += GBUSY(i);
         if (!(parts & HUD_PART_TIMES)) {
         } else if (g) {
             LINE("WORK %4.1f  GPU %4.1f MS", work, busy / (double)g);
@@ -370,12 +481,12 @@ void yw4_perf_hud(HudContent *c, int compact, unsigned parts) {
         if (!ncpu) ncpu = host_cpu_count();
         if (parts & HUD_PART_TIMES) {
             LINE("CPU %.0f%% (%.1f OF %d CORES)", cpu / ncpu, cpu / 100.0, ncpu);
-            LINE("DRAWS %.0f  RAM %.0f MB", draws, rows[nrows - 1].rss);
+            LINE("DRAWS %.0f  RAM %.0f MB", draws, ROW(nrows - 1).rss);
         }
         size_t p = nrows < HUD_POINTS ? nrows : HUD_POINTS;
         for (size_t i = 0; i < p; i++) {
-            c->frame_ms[i] = (float)rows[nrows - p + i].interval;
-            c->work_ms[i] = (float)rows[nrows - p + i].work;
+            c->frame_ms[i] = (float)ROW(nrows - p + i).interval;
+            c->work_ms[i] = (float)ROW(nrows - p + i).work;
         }
         c->npoints = parts & HUD_PART_GRAPH ? (int)p : 0;
     }
@@ -403,14 +514,9 @@ void yw4_perf_frame(uint64_t frame, int64_t enter, int64_t shown, int64_t exit_,
     uint64_t rss;
     host_process_usage(&cpu, &rss);
     double cpu_pct = exit_ > last_exit ? 100.0 * (double)(cpu - last_cpu) / (double)(exit_ - last_exit) : 0;
-    if (nrows == cap) {
-        cap = cap ? cap * 2 : 4096;
-        rows = realloc(rows, cap * sizeof *rows);
-        gpu_busy = realloc(gpu_busy, cap * sizeof *gpu_busy);
-        gpu_span = realloc(gpu_span, cap * sizeof *gpu_span);
-        if (!rows || !gpu_busy || !gpu_span) yw4_exit(3, __FILE__, __LINE__);
-    }
-    rows[nrows++] = (Row){.frame = frame, .draws = draws, .t = (double)(exit_ - t0) / 1e9,
+    Row *r = &ROW(nrows);
+    nrows++;
+    *r = (Row){.frame = frame, .draws = draws, .t = (double)(exit_ - t0) / 1e9,
                           .interval = (double)(exit_ - last_exit) / 1e6, .work = (double)(enter - last_exit) / 1e6,
                           .present = (double)(shown - enter) / 1e6, .wait = (double)(exit_ - shown) / 1e6,
                           .cpu = cpu_pct, .rss = (double)rss / 1048576.0,
@@ -420,13 +526,27 @@ void yw4_perf_frame(uint64_t frame, int64_t enter, int64_t shown, int64_t exit_,
     last_cpu = cpu, last_exit = exit_;
     if (rss > peak_rss) peak_rss = rss;
     cpu_pct_sum += cpu_pct;
+    /* the whole run, counted as it goes */
+    hist_add(&h_interval, r->interval), hist_add(&h_work, r->work);
+    run_sum += r->interval, run_wsum += r->work, run_sumsq += r->interval * r->interval;
+    run_sub += r->submit, run_sync += r->sync, run_other += r->submit_other;
+    run_over34 += r->interval > 34.5, run_over50 += r->interval > 50;
     if (nrows > PERF_DELAY) write_rows(nrows - PERF_DELAY);
-    if (nrows % 60 == 0) fflush(csv);
+    if (csv && nrows % 60 == 0) fflush(csv);
     if (frame - last_summary_frame >= 600) {
         print_summary(stderr, nrows > 600 ? nrows - 600 : 0, "yw4: perf, last 600 frames");
         static int64_t last_threads;  /* host time of the last per-thread report */
         if (last_threads) fprintf(stderr, "  threads, last 600 frames:\n");
         yw4_thread_cpu_report(stderr, last_threads ? exit_ - last_threads : 0);  /* 0: only takes the start values */
+        {   /* our GPU worker (gpu_queue.c) is a host thread, not a guest one: listed here so the CPU chain that
+             * feeds the GPU (guest render threads -> this worker -> GPU) shows whole */
+            static int64_t worker_last;
+            int64_t w = gpu_queue_worker_cpu_ns(), interval = exit_ - last_threads, frames = frame - last_summary_frame;
+            if (last_threads && w && interval > 0 && frames > 0)
+                fprintf(stderr, "    gpu worker (host): %3.0f%% of a core, %.2f ms/frame  [translates GPU work]\n",
+                        100.0 * (double)(w - worker_last) / (double)interval, (double)(w - worker_last) / 1e6 / (double)frames);
+            worker_last = w;
+        }
         yw4_wait_report(stderr, (int)(frame - last_summary_frame));
         last_threads = exit_;
         /* so a killed or crashed run leaves numbers (every frame is in the CSV too) */

@@ -403,6 +403,13 @@ static void set_env(const char *name, const char *value) {
  * the file, keeping the lines that were there. */
 static int first_run;
 
+/* Lines a player adds to settings.ini by hand when a bug report asks for them (no panel row): read like the panel's,
+ * and written back as they were, so the game's own saves don't drop them. YW4_PERF=1: the per-frame performance CSV
+ * (perf.c; owner, 2026-11-16: "we are asking them", so a line in the file is enough). */
+static const char *const by_hand[] = {"YW4_PERF"};
+enum { BY_HAND = sizeof by_hand / sizeof *by_hand };
+static char by_hand_value[BY_HAND][64];
+
 void settings_load(void) {
     const char *path = settings_file();
     FILE *f = *path ? fopen(path, "r") : NULL;
@@ -425,6 +432,20 @@ void settings_load(void) {
         if ((!strcmp(line, "YW4_THEME") || !strcmp(line, "YW4_WINDOW_SIZE") || !strcmp(line, "YW4_KEYBOARD")) &&
             !getenv(line))
             set_env(line, value), n++;
+        for (int i = 0; i < BY_HAND; i++)
+            if (!strcmp(line, by_hand[i])) {
+                snprintf(by_hand_value[i], sizeof by_hand_value[i], "%s", value);
+                const char *now = getenv(line);  /* set but empty counts as not set (set_env doesn't replace it) */
+                if (!now || !*now) {
+#ifdef _WIN32
+                    _putenv_s(line, value);
+#else
+                    setenv(line, value, 1);
+#endif
+                    n++;
+                }
+                fprintf(stderr, "yw4: settings: %s=%s (added by hand)\n", line, value);
+            }
     }
     fclose(f);
     first_run = !graphics;
@@ -457,6 +478,8 @@ void settings_save(void) {
     if (ww && wh) fprintf(f, "YW4_WINDOW_SIZE=%dx%d\n", ww, wh);
     const char *kb = getenv("YW4_KEYBOARD");  /* the name keyboard's last language (gamemenu.c) */
     if (kb && *kb) fprintf(f, "YW4_KEYBOARD=%s\n", kb);
+    for (int i = 0; i < BY_HAND; i++)  /* the lines added by hand, as they were */
+        if (by_hand_value[i][0]) fprintf(f, "%s=%s\n", by_hand[i], by_hand_value[i]);
     bindings_save(f);
     fclose(f);
 }
