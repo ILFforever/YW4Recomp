@@ -43,14 +43,21 @@ typedef struct {
     int percent;  /* a slider of 0..1 shown in percent: no AUTO, 0 is a value like any other (auto_note: what it does) */
     float (*parse)(const char *);  /* a slider's saved value as get() returns it (YW4_SET_AT); NULL: atof */
     /* a slider's names for the points along it, evenly spread from end to end (SHARPENING: OFF .. MAX at 0, 25, 50,
-     * 75, 100%): the overlay marks them on the track and names the nearest beside the value */
+     * 75, 100%): the overlay marks them on the track, and the nearest one's name is shown instead of a number */
     const char *marks[SETTINGS_MAX_OPTIONS];
 } Setting;
 
 /* A slider's value as shown and as saved. */
 static void slider_text(const Setting *s, char *shown, size_t n1, char *saved, size_t n2) {
     float v = s->get();
-    if (s->percent) {
+    if (s->percent && s->marks[0]) {  /* named points (SHARPENING): the nearest one's name is all that shows */
+        int n = 0;
+        while (n < SETTINGS_MAX_OPTIONS && s->marks[n]) n++;
+        float f = (v - s->lo) / (s->hi - s->lo);
+        int k = (int)(f * (float)(n - 1) + 0.5f);
+        if (shown) snprintf(shown, n1, "%s", s->marks[k < 0 ? 0 : k > n - 1 ? n - 1 : k]);
+        if (saved) snprintf(saved, n2, "%.2f", v);
+    } else if (s->percent) {
         if (shown) snprintf(shown, n1, "%d%%", (int)(v * 100 + 0.5f));
         if (saved) snprintf(saved, n2, "%.2f", v);
     } else if (v <= 0) {
@@ -216,9 +223,9 @@ static const Setting player[] = {
      /* (decision 0076: TAA's and DLSS's last pass, FSR's own sharpener, a pass of its own with the others; a slider
       * since issue #11, the five steps it replaced marked along it) */
      "MAKES THE WORLD CRISPER: SMOOTHING EDGES AND UPSCALING SOFTEN IT A LITTLE. WORKS WITH EVERY ANTI-ALIASING. "
-     "50% (MEDIUM) IS RECOMMENDED; ABOVE 75% FINE DETAIL CAN LOOK GRAINY. STEPS OF 5%. MENUS AND TEXT ARE NOT CHANGED.",
-     {NULL}, {NULL}, 0, NULL, NULL, "YW4_SHARPEN", {NULL}, NULL, gpu_sharpen_get, gpu_sharpen_set, 0.0f, 1.0f, 0.05f,
-     "OFF: AS THE ANTI-ALIASING LEAVES IT", 1, sharpen_parse, {"OFF", "LOW", "MEDIUM", "HIGH", "MAX"}},
+     "MEDIUM IS RECOMMENDED; AT HIGH AND MAX FINE DETAIL CAN LOOK GRAINY. MENUS AND TEXT ARE NOT CHANGED.",
+     {NULL}, {NULL}, 0, NULL, NULL, "YW4_SHARPEN", {NULL}, NULL, gpu_sharpen_get, gpu_sharpen_set, 0.0f, 1.0f, 0.25f,
+     "AS THE ANTI-ALIASING LEAVES IT", 1, sharpen_parse, {"OFF", "LOW", "MEDIUM", "HIGH", "MAX"}},
     {"ANTI-ALIASING AND UPSCALING", "SHARPEN TEXT AND MENUS",
      /* (decision 0076: at the present, only the pixels the game's UI changed; our overlay is never sharpened) */
      "SHARPENS THE GAME'S MENUS, TEXT AND HUD TOO, AS MUCH AS SHARPENING DOES THE WORLD. HELPS AT LOW RESOLUTIONS. "

@@ -51,9 +51,9 @@ void gpu_effects_cycle(void);
 int gpu_aa(void);
 void gpu_aa_cycle(void);
 void gpu_aa_step(int dir);
-/* SHARPENING (gpu_aa.c, decision 0076): a slider after any anti-aliasing, in percent, 0 (off) to 100 in steps of 5,
- * 50 the default (YW4_SHARPEN at start). get / set: the slider's 0..1. parse: a saved value, the slider's fraction
- * or a step of the five-option row before it (1..4: 25..100%). */
+/* SHARPENING (gpu_aa.c, decision 0076): a slider after any anti-aliasing, in percent, at its five levels 0 (off),
+ * 25, 50 (default), 75, 100 (YW4_SHARPEN at start). get / set: the slider's 0..1. parse: a saved value, the slider's
+ * fraction or a level of the five-option row before it (1..4: 25..100%). */
 int gpu_sharpen(void);
 float gpu_sharpen_get(void);
 void gpu_sharpen_set(float frac);

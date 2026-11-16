@@ -1413,36 +1413,21 @@ static float tag(const UiCanvas *c, float x, float y, const char *label, uint32_
     return w;
 }
 
-/* A slider row's named point at its position: the nearest one in sentence case ("Medium"), and 1 when the slider is
- * on it; 0 with no names. */
-static int slider_mark(const SettingRow *r, char *out, size_t n, int *exact) {
-    if (r->nmarks < 2) return 0;
-    float at = r->frac * (float)(r->nmarks - 1);
-    int k = (int)(at + 0.5f);
-    if (k < 0) k = 0;
-    if (k > r->nmarks - 1) k = r->nmarks - 1;
-    sentence_case(r->marks[k], out, n);
-    *exact = at - (float)k < 0.01f && (float)k - at < 0.01f;
-    return 1;
-}
-
-/* A slider row's value (SHARPENING, issue #11; the owner's pick of the mockup, style B, 2026-11-16) in the box x..x+w
- * of a row y..y+h: the track with its named points marked (lit up to the thumb), the thumb, the value, and the nearest
- * point's name, "~" before it between two. Left / Right step it as any row; the mouse clicks or drags on the track. */
+/* A slider row's value (SHARPENING, issue #11; the owner's pick of the mockup, style B, 2026-11-16, then "only the
+ * level", no number) in the box x..x+w of a row y..y+h: the track with its named points marked (lit up to the thumb),
+ * the thumb, and the value: the point's name ("Medium"), or the slider's own text with no names. The thumb stops at
+ * the points; Left / Right step it as any row; the mouse clicks or drags on the track. */
 static void row_slider(const UiCanvas *c, const SettingRow *r, int row, float x, float y, float w, float h, float fs,
                        int off) {
-    char name[40], shown[48];
-    int exact = 0, named = slider_mark(r, name, sizeof name, &exact);
-    float ns = fs - 3, nw = 0;
-    for (int k = 0; named && k < r->nmarks; k++) {  /* room for the widest name, so the track doesn't jump */
-        char t[40];
+    char t[40];
+    float vw = ui_text_w(UI_ROUNDED_700, fs, "100%"), gap = 14;
+    for (int k = 0; k < r->nmarks; k++) {  /* room for the widest name, so the track doesn't jump */
         sentence_case(r->marks[k], t, sizeof t);
-        snprintf(shown, sizeof shown, "~%s", t);
-        float tw = ui_text_w(UI_GOTHIC_700, ns, shown);
-        if (tw > nw) nw = tw;
+        float tw = ui_text_w(UI_ROUNDED_700, fs, t);
+        if (tw > vw) vw = tw;
     }
-    float vw = ui_text_w(UI_ROUNDED_700, fs, "100%"), gap = 10;
-    float tx = x + ROW_SLIDER_PAD, tw = w - ROW_SLIDER_PAD - gap - vw - (named ? gap + nw : 0) - 6, cy = y + h / 2;
+    int named = r->nmarks >= 2;
+    float tx = x + ROW_SLIDER_PAD, tw = w - ROW_SLIDER_PAD - gap - vw - 10, cy = y + h / 2;
     if (tw < 40) tw = 40;
     uint32_t ink = off ? MUTED : PLUM;
     float f = r->frac < 0 ? 0 : r->frac > 1 ? 1 : r->frac;
@@ -1455,12 +1440,8 @@ static void row_slider(const UiCanvas *c, const SettingRow *r, int row, float x,
     int hv = !off && hovered(HIT_ROW_SLIDER, row, 0);
     ui_box(c, tx + tw * f - 11, cy - 11, 22, 22, 11, hv ? NIGHT : ink, 2, WHITE);
     if (!off) hit_add(tx - ROW_SLIDER_PAD, y, tw + 2 * ROW_SLIDER_PAD, h, HIT_ROW_SLIDER, row, 0);
-    float vx = tx + tw + gap;
-    ui_text_in(c, UI_ROUNDED_700, fs, vx, y, vw, h, 2, r->value, off ? MUTED : NIGHT);
-    if (named) {
-        snprintf(shown, sizeof shown, "%s%s", exact ? "" : "~", name);
-        ui_text_in(c, UI_GOTHIC_700, ns, vx + vw + gap, y, nw, h, 0, shown, MUTED);
-    }
+    sentence_case(r->value, t, sizeof t);  /* the level's name, as the settings give it ("MEDIUM") */
+    ui_text_in(c, UI_ROUNDED_700, fs, tx + tw + gap, y, vw, h, 1, t, off ? MUTED : NIGHT);
 }
 
 /* The settings page (the design's isSettings section): the sections on the left (the chosen row's lit), its
@@ -3041,11 +3022,7 @@ static void draw_preview(const UiCanvas *c, const GameMenuInfo *in) {
     sentence_case(r->name, name, sizeof name);
     if (r->verbatim) snprintf(value, sizeof value, "%s", r->options[r->current] ? r->options[r->current] : "");
     else sentence_case(r->options[r->current] ? r->options[r->current] : "", value, sizeof value);
-    char mark[40];
-    int exact = 0;
-    if (r->slider && slider_mark(r, mark, sizeof mark, &exact) && exact)  /* "Sharpening: 50% (Medium)" */
-        snprintf(t, sizeof t, "%s: %s (%s)", name, value, mark);
-    else snprintf(t, sizeof t, "%s: %s", name, value);
+    snprintf(t, sizeof t, "%s: %s", name, value);
     ui_text(c, UI_ROUNDED_800, 15, dx + 20, dy + 14, 15 * 1.5f, t, SNOW);
     int tags = note_tags(r->notes[r->current] ? r->notes[r->current] : "", rest, sizeof rest);
     float ty = dy + 14 + 15 * 1.5f + 4;

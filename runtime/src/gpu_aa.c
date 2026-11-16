@@ -65,21 +65,27 @@ void gpu_aa_step(int dir) {
 
 void gpu_aa_cycle(void) { gpu_aa_step(1); }
 
-/* SHARPENING (decision 0076): a slider, 0..100% in steps of 5 (issue #11: a player asked for one), 50% the default.
- * The five steps it replaced sit at 0 / 25 / 50 / 75 / 100% (OFF, LOW, MEDIUM, HIGH, MAX); between them the amount
- * is blended (sharpen_amount). One choice for every anti-aliasing: TAA and DLSS get it in their last pass
- * (taa_output.frag), FSR as its own sharpener's amount (RCAS, so nothing is sharpened twice), OFF / FXAA / SMAA as a
- * pass of its own. Saved as YW4_SHARPEN, the slider's fraction ("0.50"); gpu_sharpen_parse reads that and the
- * files written before the slider (0..4, the steps). */
+/* SHARPENING (decision 0076): a slider (issue #11: a player asked for one) that stops at five levels, OFF / LOW /
+ * MEDIUM / HIGH / MAX at 0 / 25 / 50 / 75 / 100%, MEDIUM the default; it shows the level's name, no number (owner,
+ * 2026-11-16). Kept in percent: sharpen_amount blends between the levels, should finer steps come back. One choice
+ * for every anti-aliasing: TAA and DLSS get it in their last pass (taa_output.frag), FSR as its own sharpener's
+ * amount (RCAS, so nothing is sharpened twice), OFF / FXAA / SMAA as a pass of its own. Saved as YW4_SHARPEN, the
+ * slider's fraction ("0.50"); gpu_sharpen_parse reads that and the files written before the slider (0..4, the
+ * levels). */
 static int sharpen_pct = -1;
+enum { SHARPEN_STEP = 25 };  /* percent between two levels */
+
+static int sharpen_snap(int p) {
+    p = (p + SHARPEN_STEP / 2) / SHARPEN_STEP * SHARPEN_STEP;
+    return p < 0 ? 0 : p > 100 ? 100 : p;
+}
 
 int gpu_sharpen_parse(const char *e) {
     if (!e || !*e) return 50;
     int p;
     if (strchr(e, '.')) p = (int)(atof(e) * 100.0 + 0.5);  /* the slider's fraction */
     else if ((p = atoi(e)) >= 1 && p <= 4) p *= 25;          /* LOW, MEDIUM, HIGH, MAX before the slider */
-    p = (p + 2) / 5 * 5;                                      /* on the steps */
-    return p < 0 ? 0 : p > 100 ? 100 : p;
+    return sharpen_snap(p);
 }
 
 int gpu_sharpen(void) {
@@ -94,9 +100,7 @@ int gpu_sharpen(void) {
 float gpu_sharpen_get(void) { return (float)gpu_sharpen() / 100.0f; }
 
 void gpu_sharpen_set(float f) {
-    int p = (int)(f * 100.0f + 0.5f);
-    p = (p + 2) / 5 * 5;
-    p = p < 0 ? 0 : p > 100 ? 100 : p;
+    int p = sharpen_snap((int)(f * 100.0f + 0.5f));
     __atomic_store_n(&sharpen_pct, p, __ATOMIC_RELEASE);
     fprintf(stderr, "yw4: gpu: sharpening %d%%\n", p);
 }
@@ -126,8 +130,7 @@ static float sharpen_amount(int which) {
     }
     float env = which == SHARPEN_FSR ? fsr_env : taa_env;
     if (env >= 0.0f) return env;
-    /* the slider between the steps: a straight line from one step's amount to the next (0% is off). RCAS can't go
-     * gentler than a quarter of its full weight (amount 0), so 5% is already about two thirds of LOW. */
+    /* between two levels (none now: the slider stops only at them) a straight line from one's amount to the next */
     const float *map = which == SHARPEN_DLSS ? dlss_map : level_map;
     int p = gpu_sharpen();
     if (p <= 0) return 0.0f;
