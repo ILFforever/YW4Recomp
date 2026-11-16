@@ -183,6 +183,10 @@ footer a { color: var(--gold); }
 .dl a.linux code { background: #333336; color: #fff; }
 .dl a.linux .ico { object-fit: contain; filter: drop-shadow(0 0 1px #fffc) drop-shadow(0 0 3px #fff6); }  /* Tux's black body on the black card */
 @media (max-width: 760px) { .dl { grid-template-columns: minmax(0, 1fr); } }
+/* the older releases, a click away (the script at the end): the button under the last shown release */
+.older { justify-self: center; font: 800 .95rem/1 var(--display); padding: 13px 20px; border-radius: 10px; cursor: pointer;
+  border: 2px solid var(--line); background: var(--card); color: var(--ink); }
+.older:hover { border-color: var(--violet); }
 </style>
 <link rel="stylesheet" href="../site.css">
 <script>
@@ -264,7 +268,7 @@ try { const t = localStorage.getItem('yw4-theme'); if (t === 'dark' || t === 'li
           <a data-asset="-setup.exe" href="https://github.com/ILFforever/YW4Recomp/releases/download/launcher-v1.2.0/YW4-Recomp-Launcher-1.2.0-setup.exe"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path fill="#0078d4" d="M2 4.6 10 3.5v7.8H2zM11 3.4 22 2v9.3H11zM2 12.4h8v7.8l-8-1.1zM11 12.4h11V22l-11-1.5z"/></svg><span class="os">Windows</span><b>Installer</b>
             <span class="what">Installs the launcher, with Start menu and desktop shortcuts.</span>
             <span class="file">YW4-Recomp-Launcher-<span data-ver>1.2.0</span>-setup.exe</span></a>
-          <a data-asset="-portable.zip" href="https://github.com/ILFforever/YW4Recomp/releases/download/launcher-v1.2.0/YW4-Recomp-Launcher-1.2.0-portable.zip"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"><path d="M5 2.5h10l4 4v15H5z"/><path d="M15 2.5v4h4"/><path d="M10 2.5v2h2v2h-2v2h2v2h-2v2"/><rect x="9.2" y="13" width="3.6" height="4" rx=".8"/></svg><span class="os">Windows</span><b>Portable zip</b>
+          <a data-asset="-portable.zip" href="https://github.com/ILFforever/YW4Recomp/releases/download/launcher-v1.2.0/YW4-Recomp-Launcher-1.2.0-portable.zip"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path fill="#0078d4" d="M2 4.6 10 3.5v7.8H2zM11 3.4 22 2v9.3H11zM2 12.4h8v7.8l-8-1.1zM11 12.4h11V22l-11-1.5z"/></svg><span class="os">Windows</span><b>Portable zip</b>
             <span class="what">The same launcher with no installer: unpack it anywhere and run it.</span>
             <span class="file">YW4-Recomp-Launcher-<span data-ver>1.2.0</span>-portable.zip</span></a>
           <a class="linux" data-asset=".AppImage" href="https://github.com/ILFforever/YW4Recomp/releases/download/launcher-v1.2.0/YW4-Recomp-Launcher-1.2.0-x86_64.AppImage"><img class="ico tux" src="../img/tux.svg" alt="" width="24" height="28"><span class="os">Linux</span><b>AppImage</b>
@@ -564,6 +568,53 @@ fetch("https://api.github.com/repos/ILFforever/YW4Recomp/releases/latest")
     document.querySelectorAll("[data-ver]").forEach(s => { s.textContent = v; });
   })
   .catch(() => {});
+</script>
+<script>
+/* Releases: the newest SHOW_FIRST shown, SHOW_MORE more per click on "Show older releases" (or the list's "Older
+ * releases"); the Releases list shows the same ones. A link to an older release (#v1.2.0) opens up to it. Without
+ * this script every release shows. */
+(() => {
+  const SHOW_FIRST = 3, SHOW_MORE = 4;
+  const main = document.querySelector('main');
+  const rel = [...main.querySelectorAll(':scope > article')].filter(a => a.id !== 'download');
+  const list = document.querySelector('.pad ol');
+  const item = id => list.querySelector(`a[href="#${CSS.escape(id)}"]`)?.closest('li');
+  let shown = SHOW_FIRST;
+  const more = document.createElement('button');
+  more.type = 'button'; more.className = 'older';
+  main.append(more);
+  const older = document.createElement('li');
+  older.innerHTML = '<a href="#older"><span class="n">+</span>Older releases</a>';
+  list.append(older);
+  function render() {
+    rel.forEach((a, i) => { a.hidden = i >= shown; const li = item(a.id); if (li) li.hidden = i >= shown; });
+    const left = rel.length - shown;
+    more.hidden = older.hidden = left <= 0;
+    more.textContent = `Show older releases (${left})`;
+  }
+  function showMore() {
+    const first = shown;
+    shown = Math.min(rel.length, shown + SHOW_MORE);
+    render();
+    return rel[first];
+  }
+  more.addEventListener('click', showMore);
+  older.querySelector('a').addEventListener('click', e => {
+    e.preventDefault();
+    const a = showMore();
+    if (a) a.scrollIntoView();
+  });
+  function openTo(id) {
+    const i = rel.findIndex(a => a.id === id);
+    if (i < shown) return;
+    shown = i + 1;
+    render();
+    rel[i].scrollIntoView();
+  }
+  render();
+  if (location.hash) openTo(decodeURIComponent(location.hash.slice(1)));
+  addEventListener('hashchange', () => openTo(decodeURIComponent(location.hash.slice(1))));
+})();
 </script>
 <script>
 /* the theme switch: the other theme than the one showing, kept for next time */
