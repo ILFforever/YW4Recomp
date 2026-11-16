@@ -197,6 +197,7 @@ int main(int argc, char **argv) {
         if (getcwd(cwd, sizeof cwd)) fprintf(stderr, "yw4: home %s\n", cwd);
 #endif
     }
+    yw4_sysinfo_dump();  /* after the home folder is set: its disk is the one the game's files are on */
     if (from_ini) fprintf(stderr, "yw4: folders from game.ini\n");
     yw4_boot_mark("main() running, guest memory reserved, log open");
     settings_load();
