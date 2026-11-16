@@ -215,9 +215,9 @@ try { const t = localStorage.getItem('yw4-theme'); if (t === 'dark' || t === 'li
   <div class="hero-inner">
     <div>
       <span class="eyebrow">YW4 Recomp · fan PC port</span>
-      <div class="logo-row"><img src="../img/icon-192.png" alt="" width="64" height="64"><h1>What's new</h1></div>
+      <div class="logo-row"><h1>What's new</h1></div>
       <p>Get the launcher, then every change to the game and the launcher, newest first. Game updates come through the
-        launcher: you only ever download the launcher. <span class="oslogos"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path fill="#0078d4" d="M2 4.6 10 3.5v7.8H2zM11 3.4 22 2v9.3H11zM2 12.4h8v7.8l-8-1.1zM11 12.4h11V22l-11-1.5z"/></svg><img class="ico tux" src="../img/tux.svg" alt="" width="24" height="28"></span></p>
+        launcher: you only ever download the launcher.</p>
       <div class="links">
         <a class="btn" href="../">Home</a>
         <a class="btn ghost" href="#download">Download</a>
@@ -258,7 +258,7 @@ try { const t = localStorage.getItem('yw4-theme'); if (t === 'dark' || t === 'li
 
   <main>
     <article id="download">
-      <div class="bar"><span class="q" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M12 4v11M7 10.5l5 5 5-5M5 20h14"/></svg></span><h2>Download</h2><span class="cat">Launcher <span data-ver>1.2.0</span></span></div>
+      <div class="bar"><h2>Download</h2><span class="cat">Launcher <span data-ver>1.2.0</span></span></div>
       <div class="body">
         <div class="dl">
           <a data-asset="-setup.exe" href="https://github.com/ILFforever/YW4Recomp/releases/download/launcher-v1.2.0/YW4-Recomp-Launcher-1.2.0-setup.exe"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path fill="#0078d4" d="M2 4.6 10 3.5v7.8H2zM11 3.4 22 2v9.3H11zM2 12.4h8v7.8l-8-1.1zM11 12.4h11V22l-11-1.5z"/></svg><span class="os">Windows</span><b>Installer</b>
@@ -282,10 +282,10 @@ try { const t = localStorage.getItem('yw4-theme'); if (t === 'dark' || t === 'li
     </article>
 
     <article id="v1.4.0">
-      <div class="bar"><img class="kind" src="../img/icon-192.png" alt="" width="28" height="28"><h2>Game 1.4.0</h2><span class="cat">Game · 2026-11-16</span></div>
+      <div class="bar"><h2>Game 1.4.0</h2><span class="cat">Game · 2026-11-16</span></div>
       <div class="body prose notes">
 <p class="how">The launcher gets it for you: <b>Update</b> on the Play screen rebuilds the game in a few minutes, and the version before stays playable if anything goes wrong.</p>
-<h4><svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M12 2l2.2 6.6L21 11l-6.8 2.4L12 20l-2.2-6.6L3 11l6.8-2.4z"/></svg>What's new</h4>
+<h4>What's new</h4>
 <ul><li>
 <b>The shortcut wheel.</b> While exploring, hold your key for <b>L</b> (<b>1</b> by default) and all eight field shortcuts appear in a wheel. Point at one with the mouse and let go of the key to use it. Let go in the middle to cancel. So now you can toggle game shortcuts without having to let go of the mouse. You can turn the wheel off on the overlay's <b>Controls</b> page (Mouse, Shortcut wheel).
 </li><li>
@@ -295,13 +295,13 @@ try { const t = localStorage.getItem('yw4-theme'); if (t === 'dark' || t === 'li
 </li><li>
 <b>The mouse works in Naviwoof Guide.</b> The wheel moves along the row of pins, left click starts guiding, right click goes back.
 </li></ul>
-<h4><svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/></svg>Fixes</h4>
+<h4>Fixes</h4>
 <ul><li>
 <b>Lighter graphics on weak GPUs at first start (<a href="https://github.com/ILFforever/YW4Recomp/issues/14">#14</a>).</b> On first start the game picks lighter graphics for integrated or low-memory GPUs. This was skipped if you had changed "Full screen at start" or a cheat in the launcher before playing for the first time, so those PCs got the heaviest shadows and could crash in the first cutscene. It now runs in that case too.
 </li><li>
 <b>Better bug reports.</b> The game's log now lists your picture and shadow settings at start and on every change, and records more detail if the graphics card stops responding. Attach the log when you report a bug and we can find the cause faster.
 </li></ul>
-<h4><img class="ico tux" src="../img/tux.svg" alt="" width="24" height="28">On Linux (experimental)</h4>
+<h4>On Linux (experimental)</h4>
 <ul><li>
 <b>Building from source with GCC works (<a href="https://github.com/ILFforever/YW4Recomp/issues/12">#12</a>),</b> and FSR now builds correctly when the source is a git clone.
 </li></ul>
@@ -309,15 +309,15 @@ try { const t = localStorage.getItem('yw4-theme'); if (t === 'dark' || t === 'li
     </article>
 
     <article id="launcher-v1.2.0">
-      <div class="bar"><span class="q" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="2.5"/><path d="M3 8.5h18"/><path d="M10 11.5v5.5l4.5-2.75z" fill="currentColor"/></svg></span><h2>Launcher 1.2.0</h2><span class="cat">Launcher · 2026-11-15</span></div>
+      <div class="bar"><h2>Launcher 1.2.0</h2><span class="cat">Launcher · 2026-11-15</span></div>
       <div class="body prose notes">
 <p class="how">The launcher offers its own updates; with the portable zip, download the new zip and unpack it over your folder.</p>
 <p>A launcher update: a Cheats card, and Linux fixes. The game itself is updated separately (game 1.3.0): press <b>Update</b> on the Play screen to get it.</p>
-<h4><svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M12 2l2.2 6.6L21 11l-6.8 2.4L12 20l-2.2-6.6L3 11l6.8-2.4z"/></svg>What's new</h4>
+<h4>What's new</h4>
 <ul><li>
 <b>Cheats card.</b> Settings has a new <b>Cheats</b> card under Playing. Its switch shows or hides the game's Cheats page (in the overlay, Escape). <b>Manage</b> lists the cheats, for now <b>Unlimited Crank-a-kai</b>, and turns each one on or off. It's the same setting as the game's own Cheats page, so the last change wins. Close the game to change them here.
 </li></ul>
-<h4><img class="ico tux" src="../img/tux.svg" alt="" width="24" height="28">On Linux (experimental)</h4>
+<h4>On Linux (experimental)</h4>
 <ul><li>
 <b>The launcher runs on Linux</b> as an AppImage, attached to this release. It was checked in WSL only (no real Linux desktop yet); if it fails on your system, please <a href="https://github.com/ILFforever/YW4Recomp/issues">report a bug</a> with your log. You can still <a href="https://github.com/ILFforever/YW4Recomp#building-on-linux">build from source</a>.
 </li><li>
@@ -333,10 +333,10 @@ try { const t = localStorage.getItem('yw4-theme'); if (t === 'dark' || t === 'li
     </article>
 
     <article id="v1.3.0">
-      <div class="bar"><img class="kind" src="../img/icon-192.png" alt="" width="28" height="28"><h2>Game 1.3.0</h2><span class="cat">Game · 2026-11-15</span></div>
+      <div class="bar"><h2>Game 1.3.0</h2><span class="cat">Game · 2026-11-15</span></div>
       <div class="body prose notes">
 <p class="how">The launcher gets it for you: <b>Update</b> on the Play screen rebuilds the game in a few minutes, and the version before stays playable if anything goes wrong.</p>
-<h4><svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M12 2l2.2 6.6L21 11l-6.8 2.4L12 20l-2.2-6.6L3 11l6.8-2.4z"/></svg>What's new</h4>
+<h4>What's new</h4>
 <ul><li>
 <b>Cheats: unlimited Crank-a-kai.</b> The overlay (Escape) has a new <b>Cheats</b> page. Turn on <b>Unlimited Crank-a-kai</b> and the day's cranks never run out, so you can crank as long as you have coins. Each crank still costs a coin. If you turn it on with no cranks left, you get one back.
 </li><li>
@@ -357,7 +357,7 @@ try { const t = localStorage.getItem('yw4-theme'); if (t === 'dark' || t === 'li
 </li><li>
 <b>A cleaner cursor on the Yo-kai Pad.</b> On the Yo-kai Pad and its pages, the mouse now shows the touchpad's round grey cursor instead of the Windows arrow. It is also bigger, so it is easier to see in a small window.
 </li></ul>
-<h4><svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/></svg>Fixes</h4>
+<h4>Fixes</h4>
 <ul><li>
 <b>Blurred screens are no longer black with upscaling on (<a href="https://github.com/ILFforever/YW4Recomp/issues/10">#10</a>).</b> With FSR or DLSS upscaling, the blurred picture behind the pause menu, battle transitions, battle results and the capsule scene was black. It shows again.
 </li><li>
@@ -367,7 +367,7 @@ try { const t = localStorage.getItem('yw4-theme'); if (t === 'dark' || t === 'li
 </li><li>
 <b>Less work for your graphics card.</b> Objects hidden behind others are now skipped on the graphics card, as the game asks. The picture is the same. One more kind of graphics effect also runs now instead of being skipped (it has not been seen in play yet).
 </li></ul>
-<h4><img class="ico tux" src="../img/tux.svg" alt="" width="24" height="28">On Linux (experimental)</h4>
+<h4>On Linux (experimental)</h4>
 <ul><li>
 <b>FSR and DLSS upscaling, and FSR frame generation.</b> DLSS hasn't been tried on an NVIDIA card under Linux yet.
 </li><li>
@@ -377,10 +377,10 @@ try { const t = localStorage.getItem('yw4-theme'); if (t === 'dark' || t === 'li
     </article>
 
     <article id="v1.2.3">
-      <div class="bar"><img class="kind" src="../img/icon-192.png" alt="" width="28" height="28"><h2>Game 1.2.3</h2><span class="cat">Game · 2026-11-14</span></div>
+      <div class="bar"><h2>Game 1.2.3</h2><span class="cat">Game · 2026-11-14</span></div>
       <div class="body prose notes">
 <p class="how">The launcher gets it for you: <b>Update</b> on the Play screen rebuilds the game in a few minutes, and the version before stays playable if anything goes wrong.</p>
-<h4><svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M12 2l2.2 6.6L21 11l-6.8 2.4L12 20l-2.2-6.6L3 11l6.8-2.4z"/></svg>What's new</h4>
+<h4>What's new</h4>
 <ul><li>
 <b>Smoother first play after an update.</b> The game now keeps its shader cache when it's updated and rebuilds what changed in the background while it starts, instead of hitching the first time places and effects appear.
 </li><li>
@@ -392,10 +392,10 @@ try { const t = localStorage.getItem('yw4-theme'); if (t === 'dark' || t === 'li
     </article>
 
     <article id="v1.2.2">
-      <div class="bar"><img class="kind" src="../img/icon-192.png" alt="" width="28" height="28"><h2>Game 1.2.2</h2><span class="cat">Game · 2026-11-14</span></div>
+      <div class="bar"><h2>Game 1.2.2</h2><span class="cat">Game · 2026-11-14</span></div>
       <div class="body prose notes">
 <p class="how">The launcher gets it for you: <b>Update</b> on the Play screen rebuilds the game in a few minutes, and the version before stays playable if anything goes wrong.</p>
-<h4><svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M12 2l2.2 6.6L21 11l-6.8 2.4L12 20l-2.2-6.6L3 11l6.8-2.4z"/></svg>What's new</h4>
+<h4>What's new</h4>
 <ul><li>
 <b>Full jumps while running at high frame rates.</b> Above 60 frames/s a jump made while running was only a small hop. It now goes as high as on the Switch (<a href="https://github.com/ILFforever/YW4Recomp/issues/9">#9</a>).
 </li><li>
@@ -407,7 +407,7 @@ try { const t = localStorage.getItem('yw4-theme'); if (t === 'dark' || t === 'li
     </article>
 
     <article id="launcher-v1.1.0">
-      <div class="bar"><span class="q" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="2.5"/><path d="M3 8.5h18"/><path d="M10 11.5v5.5l4.5-2.75z" fill="currentColor"/></svg></span><h2>Launcher 1.1.0</h2><span class="cat">Launcher · 2026-11-13</span></div>
+      <div class="bar"><h2>Launcher 1.1.0</h2><span class="cat">Launcher · 2026-11-13</span></div>
       <div class="body prose notes">
 <p class="how">The launcher offers its own updates; with the portable zip, download the new zip and unpack it over your folder.</p>
 <h4>A launcher update for mods.</h4>
@@ -429,10 +429,10 @@ try { const t = localStorage.getItem('yw4-theme'); if (t === 'dark' || t === 'li
     </article>
 
     <article id="v1.2.0">
-      <div class="bar"><img class="kind" src="../img/icon-192.png" alt="" width="28" height="28"><h2>Game 1.2.0</h2><span class="cat">Game · 2026-11-13</span></div>
+      <div class="bar"><h2>Game 1.2.0</h2><span class="cat">Game · 2026-11-13</span></div>
       <div class="body prose notes">
 <p class="how">The launcher gets it for you: <b>Update</b> on the Play screen rebuilds the game in a few minutes, and the version before stays playable if anything goes wrong.</p>
-<h4><svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M12 2l2.2 6.6L21 11l-6.8 2.4L12 20l-2.2-6.6L3 11l6.8-2.4z"/></svg>What's new</h4>
+<h4>What's new</h4>
 <ul><li>
 <b>YKW Mod Merger™.</b> Mods that change the same part of the game, such as items or shops, now work together. Gameplay mods such as Free Tag Battles or Unshackled Equipment work next to the English translation and next to each other, instead of only one mod working at a time.
 </li><li>
@@ -444,10 +444,10 @@ try { const t = localStorage.getItem('yw4-theme'); if (t === 'dark' || t === 'li
     </article>
 
     <article id="v1.1.0">
-      <div class="bar"><img class="kind" src="../img/icon-192.png" alt="" width="28" height="28"><h2>Game 1.1.0</h2><span class="cat">Game · 2026-11-13</span></div>
+      <div class="bar"><h2>Game 1.1.0</h2><span class="cat">Game · 2026-11-13</span></div>
       <div class="body prose notes">
 <p class="how">The launcher gets it for you: <b>Update</b> on the Play screen rebuilds the game in a few minutes, and the version before stays playable if anything goes wrong.</p>
-<h4><svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M12 2l2.2 6.6L21 11l-6.8 2.4L12 20l-2.2-6.6L3 11l6.8-2.4z"/></svg>What's new</h4>
+<h4>What's new</h4>
 <ul><li>
 <b>Names typed in English look right.</b> Names you type with the English patch no longer come out spaced apart ("N a t e").
 </li><li>
@@ -461,10 +461,10 @@ try { const t = localStorage.getItem('yw4-theme'); if (t === 'dark' || t === 'li
     </article>
 
     <article id="v1.0.2">
-      <div class="bar"><img class="kind" src="../img/icon-192.png" alt="" width="28" height="28"><h2>Game 1.0.2</h2><span class="cat">Game · 2026-11-13</span></div>
+      <div class="bar"><h2>Game 1.0.2</h2><span class="cat">Game · 2026-11-13</span></div>
       <div class="body prose notes">
 <p class="how">The launcher gets it for you: <b>Update</b> on the Play screen rebuilds the game in a few minutes, and the version before stays playable if anything goes wrong.</p>
-<h4><svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M12 2l2.2 6.6L21 11l-6.8 2.4L12 20l-2.2-6.6L3 11l6.8-2.4z"/></svg>What's new</h4>
+<h4>What's new</h4>
 <ul><li>
 <b>Switch-style controllers.</b> Some Switch-style controllers show up on PC as an Xbox controller, so the button hints showed letters that don't match the ones printed on the controller. Turn on <b>Nintendo icons</b> on the overlay's Controls page, and the hints show the letters on your controller.
 </li><li>
@@ -476,7 +476,7 @@ try { const t = localStorage.getItem('yw4-theme'); if (t === 'dark' || t === 'li
     </article>
 
     <article id="launcher-v1.0.1">
-      <div class="bar"><span class="q" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="2.5"/><path d="M3 8.5h18"/><path d="M10 11.5v5.5l4.5-2.75z" fill="currentColor"/></svg></span><h2>Launcher 1.0.1</h2><span class="cat">Launcher · 2026-11-13</span></div>
+      <div class="bar"><h2>Launcher 1.0.1</h2><span class="cat">Launcher · 2026-11-13</span></div>
       <div class="body prose notes">
 <p class="how">The launcher offers its own updates; with the portable zip, download the new zip and unpack it over your folder.</p>
 <h4>A small update to the launcher.</h4>
@@ -492,10 +492,10 @@ try { const t = localStorage.getItem('yw4-theme'); if (t === 'dark' || t === 'li
     </article>
 
     <article id="v1.0.1">
-      <div class="bar"><img class="kind" src="../img/icon-192.png" alt="" width="28" height="28"><h2>Game 1.0.1</h2><span class="cat">Game · 2026-11-13</span></div>
+      <div class="bar"><h2>Game 1.0.1</h2><span class="cat">Game · 2026-11-13</span></div>
       <div class="body prose notes">
 <p class="how">The launcher gets it for you: <b>Update</b> on the Play screen rebuilds the game in a few minutes, and the version before stays playable if anything goes wrong.</p>
-<h4><svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M12 2l2.2 6.6L21 11l-6.8 2.4L12 20l-2.2-6.6L3 11l6.8-2.4z"/></svg>What's new</h4>
+<h4>What's new</h4>
 <ul><li>
 <b>Better first-start settings.</b> New installs now start at 60 frames a second instead of 30. PCs with a dedicated graphics card start on a high-quality set: 1440p, 120 frames a second, sharper shadows, and DLSS where the card has it. Integrated graphics still get the lighter set. If you already play, your settings stay as they are: change them in the overlay (Esc) any time.
 </li><li>
@@ -505,11 +505,11 @@ try { const t = localStorage.getItem('yw4-theme'); if (t === 'dark' || t === 'li
     </article>
 
     <article id="launcher-v1.0.0">
-      <div class="bar"><img class="kind" src="../img/icon-192.png" alt="" width="28" height="28"><h2>1.0.0: the first release</h2><span class="cat">Launcher + game · 2026-11-13</span></div>
+      <div class="bar"><h2>1.0.0: the first release</h2><span class="cat">Launcher + game · 2026-11-13</span></div>
       <div class="body prose notes">
 
 <p>After a long time in development, YW4 Recomp is at a stage I'm happy to share with the community. It took a lot to get here: lots of bugs squashed and a lot of things optimized. I hope everyone enjoys it, both returning players from the Switch and PS4 and new players starting their Yo-kai Watch 4 adventure.</p>
-<h4><svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M12 2l2.2 6.6L21 11l-6.8 2.4L12 20l-2.2-6.6L3 11l6.8-2.4z"/></svg>Features</h4>
+<h4>Features</h4>
 <ul><li>
 Lighter than an emulator
 </li><li>

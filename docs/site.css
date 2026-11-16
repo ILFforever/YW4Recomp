@@ -116,6 +116,17 @@ body.sub .cmp .knob::before, body.sub .cmp .knob::after { display: none; }
 body.sub .cmp .tag, body.sub .cmp .tag.r { background: #000a; color: #fff; }
 body.sub .chip[aria-pressed="true"], body.sub .side.b .chip[aria-pressed="true"] { background: var(--violet); border-color: var(--violet); color: var(--on-violet); }
 
+/* What's new: the download cards in the theme's colours (they had a fixed cream, unreadable in dark); Linux keeps its black */
+body.sub .dl a { background: var(--soft); border-color: var(--line); color: var(--ink); }
+body.sub .dl a:hover { background: var(--card); border-color: var(--violet); color: var(--ink); }
+body.sub .dl b { color: var(--ink); }
+body.sub .dl .os { color: var(--accent-ink); }
+body.sub .dl .ico { color: var(--ink); }
+body.sub .dl a.linux { background: #1d1d1f; border-color: #3a3a3d; color: #f2f2f2; }
+body.sub .dl a.linux:hover { background: #262629; border-color: #f5b800; color: #fff; }
+body.sub .dl a.linux b { color: #fff; }
+body.sub .dl a.linux .os { color: #f5b800; }
+
 /* the footer */
 body.sub footer { background: var(--soft); color: var(--ink-2); border-top: 1px solid var(--line); margin-top: 20px; }
 body.sub footer .in { max-width: 1120px; }
