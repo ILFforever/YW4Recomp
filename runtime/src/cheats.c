@@ -95,6 +95,85 @@ void cheat_crank_toggle(void) {
     }
 }
 
+/* Unlimited coins (YW4_CHEAT_COINS=1): spending a Crank-a-kai coin leaves the coin's count as it was.
+ *
+ * The game's "remove items" function (main+0x4f2e90: x0 an inventory handle, w1 how many) takes coins off. In the
+ * owner's play (2026-11-17, YW4_TRACE_ITEMREMOVE) a crank with a Crank-a-Coin, a One-Star Coin and an Old Coin each
+ * made one call (count 1); all three went the same way: at main+0x4f3038 the item's ID (the item_config's
+ * ITEM_CONSUME_INFO hash) is in w21 and the count to take off in w19, which the store at main+0x4f32c4 subtracts
+ * (count - w19, at least 0; a count left at 0 removes the item). The cheat makes w19 0 there for the ten coins, so
+ * the count stays and the crank still counts as paid. Not the script command the Crank-a-kai calls (0x195e1fd9,
+ * main+0x293760, "remove 1 of this item"): ~20 other scripts use it too (events, the battle item menu, the skill tree
+ * reset, equipment making), so the coins are told by item. Read at every call, so the Cheats page switches it live.
+ *
+ * YW4_TRACE_ITEMREMOVE=1 (a test tool): every call, its item ID and its result are logged. */
+static const uint32_t COINS[] = {
+    0x21102731, /* Crank-a-Coin */
+    0x2c0d27fb, /* One-Star Coin */
+    0x351616ba, /* Five-Star Coin */
+    0x1e3b4579, /* Special Coin */
+    0x07207438, /* Old Coin */
+    0x50b8b989, /* Y Coin */
+    0x517ad3be, /* Ark Coin */
+    0x80b868f7, /* Oni Coin */
+    0x99a359b6, /* Super Oni Coin */
+    0x49a388c8, /* Ultra Oni Coin */
+};
+static int coins_on = -1;  /* -1: not read yet; the Cheats page sets 0 or 1 while the game runs */
+static int item_trace = -1;
+
+int cheat_coins_get(void) {
+    int v = __atomic_load_n(&coins_on, __ATOMIC_RELAXED);
+    if (v < 0) {
+        v = env_on("YW4_CHEAT_COINS");
+        __atomic_store_n(&coins_on, v, __ATOMIC_RELAXED);
+    }
+    return v;
+}
+
+void cheat_coins_toggle(void) {
+    int v = !cheat_coins_get();
+    __atomic_store_n(&coins_on, v, __ATOMIC_RELAXED);
+    fprintf(stderr, "yw4: cheat: unlimited Crank-a-kai coins %s\n", v ? "on" : "off");
+}
+
+static int item_trace_on(void) {
+    if (item_trace < 0) item_trace = env_on("YW4_TRACE_ITEMREMOVE");
+    return item_trace;
+}
+
+static int is_coin(uint32_t id) {
+    for (size_t i = 0; i < sizeof COINS / sizeof *COINS; i++)
+        if (COINS[i] == id) return 1;
+    return 0;
+}
+
+/* The function's start (main+0x4f2e90): the trace only. */
+int yw4_hook_item_remove(CPUState *ctx) {
+    if (!item_trace_on()) return 0;
+    fprintf(stderr, "yw4: itemremove: handle %08" PRIx32 " (type %u slot %u) count %u from main+%#llx\n",
+            (uint32_t)ctx->x[0], (unsigned)((ctx->x[0] >> 12) & 0xf), (unsigned)(ctx->x[0] & 0xfff),
+            (unsigned)(uint32_t)ctx->x[1], (unsigned long long)(ctx->x[30] - yw4_image_base));
+    return 0;
+}
+
+/* After the item lookups (main+0x4f3038): w21 the item's ID, w19 the count to take off. */
+int yw4_hook_item_remove_id(CPUState *ctx) {
+    uint32_t id = (uint32_t)ctx->x[21];
+    int keep = cheats_allowed() && cheat_coins_get() && is_coin(id);
+    if (item_trace_on())
+        fprintf(stderr, "yw4: itemremove: id %08" PRIx32 " count %u%s\n", id, (unsigned)(uint32_t)ctx->x[19],
+                keep ? " -> 0 (unlimited coins)" : "");
+    if (keep) ctx->x[19] = 0;
+    return 0;
+}
+
+/* The end of every path (main+0x4f31a4): w21 the result; the trace only. */
+int yw4_hook_item_remove_end(CPUState *ctx) {
+    if (item_trace_on()) fprintf(stderr, "yw4: itemremove: result %u\n", (unsigned)(uint32_t)ctx->x[21]);
+    return 0;
+}
+
 int yw4_hook_save_byte(CPUState *ctx) {
     if (trace < 0) trace = env_on("YW4_TRACE_SAVEBYTE");
     int crank = cheats_allowed() && cheat_crank_get();

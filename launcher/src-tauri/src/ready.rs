@@ -1068,7 +1068,7 @@ pub fn set_game_full_screen(install: String, saves: String, full: bool) -> Resul
 /// Settings › Cheats › Manage: the cheats the game also switches in its own menu, read from and written to its
 /// settings.ini (the lines its Cheats page saves, decision 0074), so the launcher and the game never disagree: the
 /// last change wins. Only these lines may be written here.
-const GAME_CHEATS: [&str; 1] = ["YW4_CHEAT_CRANK"];
+const GAME_CHEATS: [&str; 2] = ["YW4_CHEAT_CRANK", "YW4_CHEAT_COINS"];
 
 #[derive(Serialize)]
 pub struct GameCheats { running: bool, on: Vec<String> }

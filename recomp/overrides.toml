@@ -358,6 +358,26 @@ why = "the \"save one byte by ID\" script command, just before its store (x9 the
 
 [[hook]]
 module = "main"
+offset = "0x4f2e90"
+native = "yw4_hook_item_remove"
+why = "the game's \"remove items\" (x0 inventory handle, w1 how many): YW4_TRACE_ITEMREMOVE logs every call (runtime/src/cheats.c)"
+
+[[hook]]
+module = "main"
+offset = "0x4f2e90"
+at = "0x4f3038"
+native = "yw4_hook_item_remove_id"
+why = "remove items, after the item lookups (w21 the item's ID, w19 how many to take off): unlimited coins (YW4_CHEAT_COINS) makes w19 0 for the Crank-a-kai coins (runtime/src/cheats.c)"
+
+[[hook]]
+module = "main"
+offset = "0x4f2e90"
+at = "0x4f31a4"
+native = "yw4_hook_item_remove_end"
+why = "remove items: the end of every path (w21 the result); YW4_TRACE_ITEMREMOVE (runtime/src/cheats.c)"
+
+[[hook]]
+module = "main"
 offset = "0x755ea0"
 native = "yw4_hook_field_guide"
 why = "the field HUD's shortcut cross being updated (x0 the HUD object): the shortcut wheel keeps the object to read which shortcuts are on, as the HUD's green disc shows (runtime/src/shortcutwheel.c, decision 0075)"

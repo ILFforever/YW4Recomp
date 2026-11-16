@@ -4,7 +4,7 @@
 state: accepted
 date: 2026-11-15
 replaces: none
-code: runtime/src/cheats.c, runtime/src/cheats.h, runtime/src/settings.c, runtime/src/gamemenu.c, recomp/overrides.toml, launcher/ui/app.js, launcher/src-tauri/src/ready.rs
+code: runtime/src/cheats.c, runtime/src/cheats.h, runtime/src/settings.c, runtime/src/gamemenu.c, recomp/overrides.toml, launcher/ui/app.js, launcher/ui/index.html, launcher/src-tauri/src/ready.rs
 -->
 
 Status: accepted. The crank cheat was checked in the owner's play (late-game save, 2026-11-15): the count stayed at
@@ -49,6 +49,27 @@ count elsewhere in the save. The hook reads the switch at every store, so it cha
 
 Turned on with no cranks left (0, or 255, -1 as a byte), the count is set to 1 so the next crank can happen; it then
 stays there (owner, 2026-11-15). The byte is found as the command finds it, through the ID table.
+
+## Unlimited coins
+
+Added 2026-11-17 for issue #17, where a player asked for coins that don't run out (`YW4_CHEAT_COINS`). Each crank
+spends one coin through the game's "remove items" function (`main+0x4f2e90`: an inventory handle and how many). A
+trace (`YW4_TRACE_ITEMREMOVE=1`) of the owner's play, cranking with a Crank-a-Coin, a One-Star Coin and an Old Coin,
+showed one call per crank (count 1), all on the same path. At `main+0x4f3038` the item's ID is in w21 and the count
+to take off is in w19. The store at `main+0x4f32c4` writes the count minus w19 (at least 0); a count left at 0
+removes the item.
+
+The cheat sets w19 to 0 there for the ten coins (the item config's `ITEM_CONSUME_INFO` entries in categories 107,
+Crank-a-kai coins, and 111, Oni coins: Crank-a-Coin, One-Star, Five-Star, Special, Old, Y, Ark, Oni, Super Oni,
+Ultra Oni). The count stays the same and the crank still counts as paid.
+
+Not the script command the Crank-a-kai calls (`0x195e1fd9`, `main+0x293760`, "remove 1 of this item"): about 20
+other scripts call it too (events, the battle item menu, the skill tree reset, equipment making), so the coins are
+picked out by item ID instead. Spending a coin any other way, such as selling it, also keeps it while the cheat is
+on.
+
+Tested in the owner's play, 2026-11-17: with the cheat on, two cranks (Crank-a-Coin, One-Star) took 0 coins; after
+it was turned off, the next crank took one. The switch is read at every call, so it changes while the game runs.
 
 ## Where the switch is
 

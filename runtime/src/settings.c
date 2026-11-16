@@ -350,11 +350,17 @@ static const Setting developer[] = {
  * with the launcher's "Cheats" off (YW4_CHEATS=0, cheats.h). Saved in the settings file like the rest. */
 static const Setting cheats[] = {
     {"CHEATS", "UNLIMITED CRANK-A-KAI",
-     "THE DAY'S CRANKS NEVER GO DOWN, SO YOU CAN CRANK AS LONG AS YOU HAVE COINS. EACH CRANK STILL COSTS A COIN. "
-     "IT TAKES EFFECT AT ONCE. OFF: THE GAME'S OWN DAILY LIMIT.",
+     "THE DAY'S CRANKS NEVER GO DOWN, SO YOU CAN CRANK AS LONG AS YOU HAVE COINS. EACH CRANK STILL COSTS A COIN "
+     "UNLESS UNLIMITED COINS IS ON. IT TAKES EFFECT AT ONCE. OFF: THE GAME'S OWN DAILY LIMIT.",
      {"OFF", "ON"},
-     {"THE GAME'S OWN DAILY LIMIT", "CRANKS NEVER RUN OUT, COINS STILL USED"}, 2, cheat_crank_get, cheat_crank_toggle,
+     {"THE GAME'S OWN DAILY LIMIT", "CRANKS NEVER RUN OUT"}, 2, cheat_crank_get, cheat_crank_toggle,
      "YW4_CHEAT_CRANK", {"0", "1"}},
+    {"CHEATS", "UNLIMITED COINS",
+     "CRANKING NEVER USES UP A COIN: EVERY CRANK-A-KAI COIN AND ONI COIN STAYS IN YOUR BAG. ONLY THE DAY'S CRANKS "
+     "LIMIT YOU (UNLESS UNLIMITED CRANK-A-KAI IS ON). IT TAKES EFFECT AT ONCE. OFF: EACH CRANK COSTS A COIN.",
+     {"OFF", "ON"},
+     {"EACH CRANK COSTS A COIN", "COINS NEVER RUN OUT"}, 2, cheat_coins_get, cheat_coins_toggle,
+     "YW4_CHEAT_COINS", {"0", "1"}},
 };
 enum { NPLAYER = sizeof player / sizeof *player, NDEVELOPER = sizeof developer / sizeof *developer,
        NCHEATS = sizeof cheats / sizeof *cheats, NSETTINGS = NPLAYER + NDEVELOPER + NCHEATS, LINK_ROW = NPLAYER };
