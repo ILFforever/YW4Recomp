@@ -56,6 +56,7 @@ line then says WARNING.
 | `YW4_WAITPROF=1` | With the performance summary every 600 frames: where the main thread blocked in the kernel (SleepThread, WaitSynchronization, ArbitrateLock, WaitProcessWideKeyAtomic, WaitForAddress), ms per frame and calls per frame per guest call stack |
 | `YW4_SHORT_SLEEP=0` | Sleeps under 0.2 ms use Windows' timer again (~0.5 ms at least). By default they yield and check the clock: the game's main thread polls its jobs with `nn::os::SleepThread(1 us)`, and each poll used to oversleep (busy late-game spot, DLSS P, unlimited: 61 -> 77 frames/s) |
 | `YW4_LOG=0` | Turn off the log file (on by default: everything printed on stderr is also saved in `work/logs/yw4_<time>.log`; `YW4_LOG_DIR` moves it) |
+| `YW4_LOG_KEEP=5` / `YW4_LOG_CAP_MB=1024` | At start, old runs' `yw4_*` logs and `perf_*` files are removed: the newest 5 runs of each are kept, at most 1 GB together; the current run always stays. `YW4_LOG_KEEP=0` keeps everything (`tools/dev/run.py` sets it for test runs) |
 | `YW4_AUDIO=0` | No sound (the game's audio still runs, timed at 48 kHz) |
 | `YW4_AUDIO_DUMP=<file>` | Also save the sound as played: raw PCM16, 48 kHz, the game's channel count (6 = 5.1) |
 | `YW4_HEADLESS=1` | No window, no Vulkan (nothing is drawn) |

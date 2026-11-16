@@ -52,6 +52,7 @@ def run(cfg: config.Config, save: Path | None, replay: Path | None, seconds: int
     env.setdefault("YW4_AUDIO", "0")
     env.setdefault("YW4_SETTINGS_FILE", "none")  # the owner's settings.ini stays out of test runs, and unchanged
     env.setdefault("YW4_MOUSE", "0")  # the game doesn't take the mouse: the owner can use the PC meanwhile
+    env.setdefault("YW4_LOG_KEEP", "0")  # test runs keep every log and perf file (players keep their last 5; --prune)
     for k, v in cfg.dlc_env().items():  # the owner's DLC folder ([input] dlc_dir); the game checks each file
         env.setdefault(k, v)
     if replay:

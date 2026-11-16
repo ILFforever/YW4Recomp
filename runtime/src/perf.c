@@ -46,6 +46,7 @@
 #include "nvn.h"
 
 void shadow_summary_text(char *buf, size_t n);  /* shadow.c (shadow.h needs the CPU state's type) */
+void yw4_prune_runs(const char *dir, const char *prefix, const char *current);  /* log.c */
 
 int gpu_frame_time(uint64_t frame, double *busy_ms, double *span_ms);  /* gpu.c */
 
@@ -293,6 +294,7 @@ static void start(void) {
     events = fopen(events_path, "w");
     fprintf(csv, "frame,t_s,interval_ms,work_ms,present_ms,wait_ms,draws,cpu_pct,rss_mb,gpu_busy_ms,gpu_span_ms,submit_ms,submit_other_ms,sync_ms\n");
     fprintf(stderr, "yw4: performance log %s\n", csv_path);
+    yw4_prune_runs(path, "perf_", when);  /* the newest 5 runs' perf_* files kept, at most 1 GB (log.c) */
     uint64_t rss;
     t0 = host_now_ns();
     host_process_usage(&last_cpu, &rss);
