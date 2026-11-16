@@ -59,6 +59,7 @@ typedef struct Shader {
     int nb;
     char inputs[32];  /* vertex inputs: 0 unused, 'f' float, 'u' integer */
     VkDescriptorSetLayout layout;
+    int push;             /* its layout is a push-descriptor one: bind_stage_set pushes, nothing allocated */
     VkShaderModule ours;  /* our readable program with the same interface, if we have one (0: none) */
     int pcf_float;  /* samples a shadow map: the float in cbuf 8 where its filter spread starts (2), else -1 */
     int screen_taps;  /* reads cbuf 8 row 32 (tap offsets in the screen-sized targets) */
@@ -370,7 +371,13 @@ static Shader *load_shader(uint64_t key, int stage) {
             }
         }
     }
+    /* Push descriptors (window.c) for the fragment and compute programs: a pipeline layout may hold only one
+     * push-descriptor set, and these are the only programs in their set index (the fragment set is the one with
+     * the textures). Vertex and geometry programs keep allocated sets. */
+    s->push = vk.push_descriptor && (stage == ST_FRAG || stage == ST_COMP) && s->nb &&
+              (uint32_t)s->nb <= vk.max_push_descriptors;
     VkDescriptorSetLayoutCreateInfo lci = {.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
+                                           .flags = s->push ? VK_DESCRIPTOR_SET_LAYOUT_CREATE_PUSH_DESCRIPTOR_BIT_KHR : 0,
                                            .bindingCount = (uint32_t)s->nb, .pBindings = lb};
     CHECK(vkCreateDescriptorSetLayout(vk.device, &lci, NULL, &s->layout));
     s->ours = replacement(key, stage);
@@ -1670,7 +1677,7 @@ static _Thread_local const TakeoverDraw *own_t;
 static int bind_stage_set(VkCommandBuffer cb, const GpuState *s, const Shader *sh, int ns, VkPipelineBindPoint bp,
                           VkPipelineLayout layout, uint32_t setno) {
     {
-        VkDescriptorSet set = gpu_alloc_set(sh->layout);
+        VkDescriptorSet set = sh->push ? VK_NULL_HANDLE : gpu_alloc_set(sh->layout);  /* pushed: no set */
         VkWriteDescriptorSet w[MAX_BINDINGS];
         VkDescriptorBufferInfo bi[MAX_BINDINGS];
         VkDescriptorImageInfo ii[MAX_BINDINGS];
@@ -1745,7 +1752,8 @@ static int bind_stage_set(VkCommandBuffer cb, const GpuState *s, const Shader *s
                 if (b->kind == 'd') d.min_filter = d.mag_filter = 0;  /* raw depth: nearest texel */
                 ii[i].imageView = e ? gpu_sample_view(cb, e->tex, &e->view, e->has_view, b->view)
                                     : gpu_dummy_view(cb, b->view);
-                if (e && ns == 1) {  /* widescreen: a fragment program reading a screen-sized image */
+                if (e && ns == 1 && gpu_wide()) {  /* widescreen: a fragment program reading a screen-sized image
+                                                   * (not widescreen: no image is wide, so no second lookup) */
                     const GpuImage *ti = image_find(e->tex);
                     if (ti && ti->wide_num != ti->wide_den) dyn_reads_screen = 1;
                 }
@@ -1774,8 +1782,12 @@ static int bind_stage_set(VkCommandBuffer cb, const GpuState *s, const Shader *s
                 return 0;
             }
         }
-        vkUpdateDescriptorSets(vk.device, (uint32_t)sh->nb, w, 0, NULL);
-        vkCmdBindDescriptorSets(cb, bp, layout, setno, 1, &set, 0, NULL);
+        if (sh->push) {
+            vkCmdPushDescriptorSetKHR(cb, bp, layout, setno, (uint32_t)sh->nb, w);
+        } else {
+            vkUpdateDescriptorSets(vk.device, (uint32_t)sh->nb, w, 0, NULL);
+            vkCmdBindDescriptorSets(cb, bp, layout, setno, 1, &set, 0, NULL);
+        }
     }
     return 1;
 }
@@ -2222,29 +2234,37 @@ void gpu_dynamic_state(VkCommandBuffer cb, const GpuState *s, VkFormat depth, ui
     d.bias[0] = s->polygon_offset[1], d.bias[1] = s->polygon_offset[2], d.bias[2] = s->polygon_offset[0];
     memcpy(d.blend, s->blend_color, sizeof d.blend);
     d.discard = s->rasterizer_discard != 0;
-    if (cb == dyn_cb && !memcmp(&d, &dyn_last, sizeof d)) return;  /* all of it set already */
+    int known = cb == dyn_cb;
+    if (known && !memcmp(&d, &dyn_last, sizeof d)) return;  /* all of it set already */
 
-    vkCmdSetViewport(cb, 0, 1, &d.viewport);
-    vkCmdSetScissor(cb, 0, 1, &d.scissor);
-    vkCmdSetCullMode(cb, d.cull);
-    vkCmdSetFrontFace(cb, d.front);
-    vkCmdSetDepthTestEnable(cb, d.depth_test);
-    vkCmdSetDepthWriteEnable(cb, d.depth_write);
-    vkCmdSetDepthCompareOp(cb, d.depth_op);
-    vkCmdSetDepthBoundsTestEnable(cb, VK_FALSE);
-    vkCmdSetStencilTestEnable(cb, d.stencil_test);
+    /* Only what changed (a new command buffer: all of it). With TAA the 3D draws' viewport is shifted and the
+     * others' is not, so alternating draws differed in the viewport alone and set all ~25 states each time
+     * (2026-11-17). d and dyn_last are zeroed with their padding, so each part compares as bytes. */
+#define DYN_CHANGED(f) (!known || memcmp(&d.f, &dyn_last.f, sizeof d.f))
+    if (DYN_CHANGED(viewport)) vkCmdSetViewport(cb, 0, 1, &d.viewport);
+    if (DYN_CHANGED(scissor)) vkCmdSetScissor(cb, 0, 1, &d.scissor);
+    if (DYN_CHANGED(cull)) vkCmdSetCullMode(cb, d.cull);
+    if (DYN_CHANGED(front)) vkCmdSetFrontFace(cb, d.front);
+    if (DYN_CHANGED(depth_test)) vkCmdSetDepthTestEnable(cb, d.depth_test);
+    if (DYN_CHANGED(depth_write)) vkCmdSetDepthWriteEnable(cb, d.depth_write);
+    if (DYN_CHANGED(depth_op)) vkCmdSetDepthCompareOp(cb, d.depth_op);
+    if (!known) vkCmdSetDepthBoundsTestEnable(cb, VK_FALSE);
+    if (DYN_CHANGED(stencil_test)) vkCmdSetStencilTestEnable(cb, d.stencil_test);
     for (int face = 0; face < 2; face++) {
         VkStencilFaceFlags f = face ? VK_STENCIL_FACE_BACK_BIT : VK_STENCIL_FACE_FRONT_BIT;
-        vkCmdSetStencilOp(cb, f, d.face[face].fail, d.face[face].pass, d.face[face].depth_fail, d.face[face].op);
-        vkCmdSetStencilReference(cb, f, d.face[face].ref);
-        vkCmdSetStencilWriteMask(cb, f, d.face[face].write_mask);
-        vkCmdSetStencilCompareMask(cb, f, d.face[face].compare_mask);
+        const __typeof__(d.face[0]) *n = &d.face[face], *o = &dyn_last.face[face];
+        if (!known || n->fail != o->fail || n->pass != o->pass || n->depth_fail != o->depth_fail || n->op != o->op)
+            vkCmdSetStencilOp(cb, f, n->fail, n->pass, n->depth_fail, n->op);
+        if (!known || n->ref != o->ref) vkCmdSetStencilReference(cb, f, n->ref);
+        if (!known || n->write_mask != o->write_mask) vkCmdSetStencilWriteMask(cb, f, n->write_mask);
+        if (!known || n->compare_mask != o->compare_mask) vkCmdSetStencilCompareMask(cb, f, n->compare_mask);
     }
-    vkCmdSetDepthBiasEnable(cb, d.bias_enable);
-    vkCmdSetDepthBias(cb, d.bias[0], d.bias[1], d.bias[2]);
-    vkCmdSetBlendConstants(cb, d.blend);
-    vkCmdSetRasterizerDiscardEnable(cb, d.discard);
-    vkCmdSetPrimitiveRestartEnable(cb, VK_FALSE);
+    if (DYN_CHANGED(bias_enable)) vkCmdSetDepthBiasEnable(cb, d.bias_enable);
+    if (DYN_CHANGED(bias)) vkCmdSetDepthBias(cb, d.bias[0], d.bias[1], d.bias[2]);
+    if (DYN_CHANGED(blend)) vkCmdSetBlendConstants(cb, d.blend);
+    if (DYN_CHANGED(discard)) vkCmdSetRasterizerDiscardEnable(cb, d.discard);
+    if (!known) vkCmdSetPrimitiveRestartEnable(cb, VK_FALSE);
+#undef DYN_CHANGED
     dyn_last = d, dyn_cb = cb;
 }
 

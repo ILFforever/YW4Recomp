@@ -538,6 +538,15 @@ void yw4_perf_frame(uint64_t frame, int64_t enter, int64_t shown, int64_t exit_,
         static int64_t last_threads;  /* host time of the last per-thread report */
         if (last_threads) fprintf(stderr, "  threads, last 600 frames:\n");
         yw4_thread_cpu_report(stderr, last_threads ? exit_ - last_threads : 0);  /* 0: only takes the start values */
+        {   /* our GPU worker (gpu_queue.c) is a host thread, not a guest one: listed here so the CPU chain that
+             * feeds the GPU (guest render threads -> this worker -> GPU) shows whole */
+            static int64_t worker_last;
+            int64_t w = gpu_queue_worker_cpu_ns(), interval = exit_ - last_threads, frames = frame - last_summary_frame;
+            if (last_threads && w && interval > 0 && frames > 0)
+                fprintf(stderr, "    gpu worker (host): %3.0f%% of a core, %.2f ms/frame  [translates GPU work]\n",
+                        100.0 * (double)(w - worker_last) / (double)interval, (double)(w - worker_last) / 1e6 / (double)frames);
+            worker_last = w;
+        }
         yw4_wait_report(stderr, (int)(frame - last_summary_frame));
         last_threads = exit_;
         /* so a killed or crashed run leaves numbers (every frame is in the CSV too) */

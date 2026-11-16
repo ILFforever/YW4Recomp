@@ -47,7 +47,7 @@
     X(vkCmdBeginQuery) X(vkCmdEndQuery) X(vkCmdCopyQueryPoolResults) X(vkCmdFillBuffer)                       \
     X(vkCmdBeginConditionalRenderingEXT) X(vkCmdEndConditionalRenderingEXT)                                   \
     X(vkCreatePipelineCache) X(vkGetPipelineCacheData) X(vkDestroyPipeline) X(vkDestroyPipelineLayout)        \
-    X(vkDestroyShaderModule) X(vkDestroyDescriptorSetLayout)
+    X(vkDestroyShaderModule) X(vkDestroyDescriptorSetLayout) X(vkCmdPushDescriptorSetKHR)
 
 #define VK_DECLARE_EXTERN(f) extern PFN_##f f;
 VK_GLOBAL_FNS(VK_DECLARE_EXTERN)
@@ -69,6 +69,8 @@ typedef struct {
     int occlusion_precise;         /* the occlusionQueryPrecise feature is enabled: sample counts, not just 0 or not */
     int conditional_rendering;     /* VK_EXT_conditional_rendering is enabled (gpu_query.c) */
     int sampler_anisotropy;        /* the samplerAnisotropy feature is enabled */
+    int push_descriptor;           /* VK_KHR_push_descriptor is enabled (gpu_draw.c; YW4_PUSH_DESC=0: not asked for) */
+    uint32_t max_push_descriptors; /* ... and how many descriptors one pushed set may have */
     /* what the device was created with, for AMD FSR's Linux build (gpu_fsr.c): it may use only what is enabled */
     const char *const *device_exts;
     uint32_t ndevice_exts;
