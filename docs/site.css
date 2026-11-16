@@ -41,6 +41,9 @@
   background: var(--card); color: var(--ink); cursor: pointer; text-decoration: none; padding: 0; }
 .site-top .iconbtn:hover { background: var(--soft); color: var(--ink); }
 .site-top .iconbtn svg { width: 19px; height: 19px; }
+/* switching the theme: the whole page cross-fades (the button's view transition), slowly */
+::view-transition-old(root), ::view-transition-new(root) { animation-duration: .7s; animation-timing-function: ease-in-out; }
+@media (prefers-reduced-motion: reduce) { ::view-transition-old(root), ::view-transition-new(root) { animation: none; } }
 /* the theme button shows the theme showing: a moon in light, a sun in dark (the system's, or the reader's choice) */
 #theme .sun { display: none; }
 :root[data-theme="dark"] #theme .sun { display: block; }
@@ -126,6 +129,28 @@ body.sub .dl a.linux { background: #1d1d1f; border-color: #3a3a3d; color: #f2f2f
 body.sub .dl a.linux:hover { background: #262629; border-color: #f5b800; color: #fff; }
 body.sub .dl a.linux b { color: #fff; }
 body.sub .dl a.linux .os { color: #f5b800; }
+
+/* Overlay: the default-keys keyboard. Its "deep violet" is a fill under white text and the ink on gold keys, so it
+ * stays dark in both themes; unused keys, the mouse and the description bar follow the theme. */
+body.sub .kv-board .unlit, body.sub .kv-board .mbody { fill: var(--card); stroke: var(--line); }
+body.sub .kv-board .mline { stroke: var(--line); }
+body.sub .kv-board .soft { fill: var(--soft); stroke: var(--line); }
+body.sub .kv-board .ink-unlit, body.sub .kv-board .muted { fill: var(--ink-2); }
+body.sub .kv-board .ink-port { fill: #2b1a52; }
+body.sub .kv-board .k.on .game, body.sub .kv-board .k.on .move { fill: #2b1a52; }
+body.sub .kv-seg { background: var(--soft); }
+body.sub .kv-seg button { color: var(--violet); }
+body.sub .kv-seg button:hover { background: var(--line); }
+body.sub .kv-seg button[aria-pressed="true"] { background: var(--violet); color: #fff; }
+body.sub .kv-bar { background: var(--bar); color: #fff; }
+body.sub .kv-bar .what { color: #fff; }
+body.sub .kv-bar .hint { color: #d9cfe9; }
+body.sub .kv-bar .cap { background: var(--accent); color: #fff; }
+
+/* the rest of the old "deep violet" used as a dark backdrop or as dark ink on a bright chip: dark in both themes */
+body.sub .bar .q { color: #2b1a52; }
+body.sub .zoom:fullscreen, body.sub figure:fullscreen { background: #000; }
+body.sub .slides .frames, body.sub .video iframe { background: #000; }
 
 /* the footer */
 body.sub footer { background: var(--soft); color: var(--ink-2); border-top: 1px solid var(--line); margin-top: 20px; }

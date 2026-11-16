@@ -433,10 +433,15 @@ footer img { width: 34px; height: 34px; border-radius: 9px; }
   const dark = () => root.dataset.theme ? root.dataset.theme === 'dark' : matchMedia('(prefers-color-scheme: dark)').matches;
   const label = () => btn.setAttribute('aria-label', dark() ? 'Light mode' : 'Dark mode');
   label();
-  btn.addEventListener('click', () => {
+  const flip = () => {
     root.dataset.theme = dark() ? 'light' : 'dark';
     try { localStorage.setItem('yw4-theme', root.dataset.theme); } catch (e) {}
     label();
+  };
+  /* a slow cross-fade between the themes (site.css sets its length), where the browser can do one */
+  btn.addEventListener('click', () => {
+    if (document.startViewTransition && !matchMedia('(prefers-reduced-motion: reduce)').matches) document.startViewTransition(flip);
+    else flip();
   });
 })();
 /* Auto-cycling (the hero's scenes, the Pad's tabs): the next one every CYCLE_MS, held while the mouse is over the
