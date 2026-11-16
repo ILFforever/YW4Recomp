@@ -23,6 +23,8 @@ typedef struct {
     int slider;            /* a slider instead of options: frac (0..1) its position, value its text */
     float frac;
     char value[16];
+    const char *marks[SETTINGS_MAX_OPTIONS];  /* a slider's named points, evenly spread from end to end (or none) */
+    int nmarks;
     int verbatim;  /* options[] are names to show as they are (the overlay's Theme row: "Jibanyan", "YW4 Recomp") */
 } SettingRow;
 
@@ -52,6 +54,8 @@ int settings_rows(SettingRow *rows, int max, int *selected);
  * `row` one option forward (dir 1) or back (-1), as Right / Left on it. */
 int settings_player_rows(SettingRow *rows, int max);
 void settings_change(int row, int dir);
+/* A slider row of that page set from a position along its track (0..1, the mouse), on its steps, saved. */
+void settings_slide(int row, float frac);
 /* The overlay's Cheats page: its rows (none when the launcher turned cheats off, cheats.h), and changing one. */
 int settings_cheat_rows(SettingRow *rows, int max);
 void settings_cheat_change(int row, int dir);

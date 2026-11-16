@@ -1302,7 +1302,6 @@ int gpu_render_height(void) {
 void gpu_picture_text(char *buf, size_t n) {
     static const char *const aa[6] = {"off", "FXAA", "SMAA", "TAA", "FSR", "DLSS"};
     static const char *const up[4] = {"off", "quality (1.5x)", "balanced (1.7x)", "performance (2x)"};
-    static const char *const sharpen[5] = {"off", "low", "medium", "high", "max"};
     static const char *const fg[3] = {"off", "FSR", "DLSS"};
     int a = gpu_aa(), u = gpu_upscale(), s = gpu_sharpen(), f = gpu_fg();
     const char *note = a >= 4 && !u ? " (anti-aliasing only at full size: no speed-up)"
@@ -1313,9 +1312,9 @@ void gpu_picture_text(char *buf, size_t n) {
     static const char *const soft[4] = {"off", "x1", "x2", "x4"};
     int mask = shadow_mask_native(), contact = gpu_contact() != 0;
     snprintf(buf, n,
-             "anti-aliasing %s, upscaling %s%s, the 3D at %d of %d lines, sharpening %s, frame generation %s; "
+             "anti-aliasing %s, upscaling %s%s, the 3D at %d of %d lines, sharpening %d%%, frame generation %s; "
              "shadows %d, soft %s, contact %s, shadow pass %s, shadow mask %s",
-             aa[a], up[u], note, gpu_render_height(), gpu_res_height(), sharpen[s], fg[f], gpu_shadow_res(),
+             aa[a], up[u], note, gpu_render_height(), gpu_res_height(), s, fg[f], gpu_shadow_res(),
              soft[gpu_pcss_level() & 3], !contact ? "off" : mask ? "on" : "on (unused: needs our shadow mask)",
              shadow_pass_ours() ? "ours" : "the game's", mask ? "ours" : "the game's");
 }

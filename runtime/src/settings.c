@@ -41,6 +41,10 @@ typedef struct {
     float lo, hi, step;
     const char *auto_note;
     int percent;  /* a slider of 0..1 shown in percent: no AUTO, 0 is a value like any other (auto_note: what it does) */
+    float (*parse)(const char *);  /* a slider's saved value as get() returns it (YW4_SET_AT); NULL: atof */
+    /* a slider's names for the points along it, evenly spread from end to end (SHARPENING: OFF .. MAX at 0, 25, 50,
+     * 75, 100%): the overlay marks them on the track and names the nearest beside the value */
+    const char *marks[SETTINGS_MAX_OPTIONS];
 } Setting;
 
 /* A slider's value as shown and as saved. */
@@ -127,6 +131,7 @@ static const char *fg_disabled(void) {
                                                         : "NEEDS ANTI-ALIASING SET TO TAA OR FSR");
 }
 static const char *sharpen_ui_disabled(void) { return gpu_sharpen() ? NULL : "NEEDS SHARPENING"; }
+static float sharpen_parse(const char *v) { return (float)gpu_sharpen_parse(v) / 100.0f; }
 static const char *upscale_disabled(void) {
     if (!gpu_fsr_built() && !gpu_dlss_built()) return NOT_BUILT;
     if (!gpu_fsr_built() && !gpu_dlss_available()) return "NEEDS AN NVIDIA RTX GPU FOR DLSS";
@@ -208,13 +213,12 @@ static const Setting player[] = {
       "2X SMALLER: FASTEST, SOFTER"}, 4,
      gpu_upscale_setting, gpu_upscale_cycle, "YW4_UPSCALE", {"0", "1", "2", "3"}, upscale_disabled},
     {"ANTI-ALIASING AND UPSCALING", "SHARPENING",
-     /* (decision 0076: TAA's and DLSS's last pass, FSR's own sharpener, a pass of its own with the others) */
+     /* (decision 0076: TAA's and DLSS's last pass, FSR's own sharpener, a pass of its own with the others; a slider
+      * since issue #11, the five steps it replaced marked along it) */
      "MAKES THE WORLD CRISPER: SMOOTHING EDGES AND UPSCALING SOFTEN IT A LITTLE. WORKS WITH EVERY ANTI-ALIASING. "
-     "TOO HIGH: GRAINY. MENUS AND TEXT ARE NOT CHANGED.",
-     {"OFF", "LOW", "MEDIUM", "HIGH", "MAX"},
-     {"AS THE ANTI-ALIASING LEAVES IT", "A LITTLE CRISPER", "CRISPER (RECOMMENDED)", "CRISPER STILL",
-      "THE MOST: FINE DETAIL CAN LOOK GRAINY"}, 5,
-     gpu_sharpen, gpu_sharpen_cycle, "YW4_SHARPEN", {"0", "1", "2", "3", "4"}},
+     "50% (MEDIUM) IS RECOMMENDED; ABOVE 75% FINE DETAIL CAN LOOK GRAINY. STEPS OF 5%. MENUS AND TEXT ARE NOT CHANGED.",
+     {NULL}, {NULL}, 0, NULL, NULL, "YW4_SHARPEN", {NULL}, NULL, gpu_sharpen_get, gpu_sharpen_set, 0.0f, 1.0f, 0.05f,
+     "OFF: AS THE ANTI-ALIASING LEAVES IT", 1, sharpen_parse, {"OFF", "LOW", "MEDIUM", "HIGH", "MAX"}},
     {"ANTI-ALIASING AND UPSCALING", "SHARPEN TEXT AND MENUS",
      /* (decision 0076: at the present, only the pixels the game's UI changed; our overlay is never sharpened) */
      "SHARPENS THE GAME'S MENUS, TEXT AND HUD TOO, AS MUCH AS SHARPENING DOES THE WORLD. HELPS AT LOW RESOLUTIONS. "
@@ -550,6 +554,7 @@ static int fill_rows(SettingRow *rows, int max, const Setting *list, int count) 
             rows[i].options[0] = rows[i].value;
             rows[i].notes[0] = v <= 0 ? list[i].auto_note : "";
             rows[i].current = 0;
+            for (int k = 0; k < SETTINGS_MAX_OPTIONS && list[i].marks[k]; k++) rows[i].marks[rows[i].nmarks++] = list[i].marks[k];
         } else {
             rows[i].current = list[i].current();
         }
@@ -642,7 +647,13 @@ void settings_hud_set(int opacity, float frac) {
 static int set_value(const char *env, const char *value, size_t vlen) {
     for (int i = 0; i < NSETTINGS; i++) {
         const Setting *s = setting(i);
-        if (!s->env || strcmp(s->env, env) || !s->noptions) continue;
+        if (!s->env || strcmp(s->env, env)) continue;
+        if (!s->noptions) {  /* a slider: the value as the settings file has it */
+            char v[32];
+            snprintf(v, sizeof v, "%.*s", (int)(vlen < sizeof v - 1 ? vlen : sizeof v - 1), value);
+            s->set(s->parse ? s->parse(v) : (float)atof(v));
+            return 0;
+        }
         for (int k = 0; k < s->noptions; k++) {
             const char *v = s->values[s->current()];
             if (v && strlen(v) == vlen && !strncmp(v, value, vlen)) break;
@@ -699,34 +710,63 @@ void settings_test_at(uint64_t frame) {
             for (int i = 0; i < NSETTINGS; i++) {
                 const Setting *s = setting(i);
                 if (!s->env || strlen(s->env) != (size_t)(eq - name) || strncmp(s->env, name, (size_t)(eq - name))) continue;
-                for (int k = 0; k < s->noptions && s->noptions; k++) {
-                    const char *v = s->values[s->current()];
-                    if (v && strlen(v) == vlen && !strncmp(v, eq + 1, vlen)) break;
-                    setting_step(s, 1);
+                const char *now;
+                char saved[16];
+                if (!s->noptions) {  /* a slider (SHARPENING): set straight to the value, as the file has it */
+                    set_value(s->env, eq + 1, vlen);
+                    slider_text(s, NULL, 0, saved, sizeof saved);
+                    now = saved;
+                } else {
+                    for (int k = 0; k < s->noptions; k++) {
+                        const char *v = s->values[s->current()];
+                        if (v && strlen(v) == vlen && !strncmp(v, eq + 1, vlen)) break;
+                        setting_step(s, 1);
+                    }
+                    now = s->values[s->current()];
                 }
-                fprintf(stderr, "yw4: settings: %s is %s at frame %llu (YW4_SET_AT)\n", s->env, s->values[s->current()], f);
-                yw4_event("set", f, "\"name\":\"%s\",\"value\":\"%s\"", s->env, s->values[s->current()]);
+                fprintf(stderr, "yw4: settings: %s is %s at frame %llu (YW4_SET_AT)\n", s->env, now, f);
+                yw4_event("set", f, "\"name\":\"%s\",\"value\":\"%s\"", s->env, now);
             }
         p = next ? next + 1 : NULL;
     }
 }
 
-void settings_change(int row, int dir) {
+/* The setting behind an overlay row (settings_player_rows' order, the theme row taken out); NULL for none. */
+static const Setting *player_row_setting(int row) {
     int at = theme_row();
-    if (row == at) {  /* Look > Theme */
-        theme_step(dir);
-        settings_save();
-        return;
-    }
+    if (row == at) return NULL;
     if (row > at) row--;
     const Setting *s = NULL;
     int seen = 0;
     for (int i = 0; i < NPLAYER && !s; i++)
         if (!hud_slider_row(&player[i]) && seen++ == row) s = &player[i];
     if (!s && row - seen >= 0 && row - seen < NDEVELOPER) s = &developer[row - seen];  /* Advanced's developer rows */
+    return s;
+}
+
+void settings_change(int row, int dir) {
+    if (row == theme_row()) {  /* Look > Theme */
+        theme_step(dir);
+        settings_save();
+        return;
+    }
+    const Setting *s = player_row_setting(row);
     if (!s) return;
     if (s->disabled && s->disabled()) return;  /* greyed out */
     setting_step(s, dir);
+    settings_save();
+}
+
+void settings_slide(int row, float frac) {
+    const Setting *s = player_row_setting(row);
+    if (!s || s->noptions || (s->disabled && s->disabled())) return;
+    if (frac < 0) frac = 0;
+    if (frac > 1) frac = 1;
+    float v = s->lo + frac * (s->hi - s->lo);
+    v = (float)(int)(v / s->step + 0.5f) * s->step;  /* on the steps */
+    float d = v - s->get();
+    if (d > -s->step * 0.5f && d < s->step * 0.5f) return;  /* a drag within one step: no save per mouse move */
+    s->set(v < s->lo ? s->lo : v > s->hi ? s->hi : v);
     settings_save();
 }
 

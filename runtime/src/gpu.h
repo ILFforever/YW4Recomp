@@ -51,10 +51,13 @@ void gpu_effects_cycle(void);
 int gpu_aa(void);
 void gpu_aa_cycle(void);
 void gpu_aa_step(int dir);
-/* SHARPENING (gpu_aa.c, decision 0076): 0 off, 1 low, 2 medium (default), 3 high, 4 max, after any anti-aliasing
- * (YW4_SHARPEN at start). */
+/* SHARPENING (gpu_aa.c, decision 0076): a slider after any anti-aliasing, in percent, 0 (off) to 100 in steps of 5,
+ * 50 the default (YW4_SHARPEN at start). get / set: the slider's 0..1. parse: a saved value, the slider's fraction
+ * or a step of the five-option row before it (1..4: 25..100%). */
 int gpu_sharpen(void);
-void gpu_sharpen_cycle(void);
+float gpu_sharpen_get(void);
+void gpu_sharpen_set(float frac);
+int gpu_sharpen_parse(const char *value);
 /* SHARPEN TEXT AND MENUS: 1 if the game's UI is sharpened too (YW4_SHARPEN_UI at start). */
 int gpu_sharpen_ui(void);
 void gpu_sharpen_ui_toggle(void);

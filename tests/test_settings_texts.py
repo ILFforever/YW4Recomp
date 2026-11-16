@@ -86,17 +86,20 @@ class SettingsTexts(unittest.TestCase):
                     self.assertFalse(missing, f"characters without a glyph: {sorted(missing)}")
 
     def test_sharpening_row(self):
-        """SHARPENING (decision 0076): five steps saved as 0..4, never greyed out (it works with every
-        anti-aliasing), and the runtime's default is MEDIUM."""
+        """SHARPENING (decision 0076, a slider since issue #11): 0..1 in steps of 0.05 shown in percent, never
+        greyed out (it works with every anti-aliasing), the five old steps named along it, the default 50%, and
+        settings files from before the slider (0..4) read as those steps."""
         src = (ROOT / "runtime/src/settings.c").read_text(encoding="utf-8")
         row = next(r for r in settings() if r["name"] == "SHARPENING")
-        self.assertEqual(row["options"], ["OFF", "LOW", "MEDIUM", "HIGH", "MAX"])
-        self.assertEqual(row["values"], ["0", "1", "2", "3", "4"])
+        self.assertEqual(row["count"], 0, "a slider has no options")
         entry = src[src.index('"SHARPENING",'):]
         entry = entry[:entry.index("}},") + 3]
-        self.assertTrue(entry.rstrip().endswith('"4"}},'), "no greyed-out reason after the values")
+        self.assertIn('"YW4_SHARPEN", {NULL}, NULL, gpu_sharpen_get, gpu_sharpen_set, 0.0f, 1.0f, 0.05f,', entry,
+                      "no greyed-out reason, 0..1 in steps of 5%")
+        self.assertRegex(entry, r'1, sharpen_parse, \{"OFF", "LOW", "MEDIUM", "HIGH", "MAX"\}\}')
         aa = (ROOT / "runtime/src/gpu_aa.c").read_text(encoding="utf-8")
-        self.assertRegex(aa, r'getenv\("YW4_SHARPEN"\);\s*l = e && \*e \? atoi\(e\) : 2;')
+        self.assertIn('if (!e || !*e) return 50;', aa)
+        self.assertIn("else if ((p = atoi(e)) >= 1 && p <= 4) p *= 25;", aa)
 
     def test_sharpen_text_row(self):
         """SHARPEN TEXT AND MENUS: right under SHARPENING, OFF / ON saved as 0 / 1, off unless YW4_SHARPEN_UI=1."""

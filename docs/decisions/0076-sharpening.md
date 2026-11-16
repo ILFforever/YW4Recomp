@@ -178,3 +178,21 @@ gained left DLSS a step behind everywhere.
 
 TAA stays on the common steps (MEDIUM 7.95 / 8.91 / 4.28 / 5.66): softer than FSR and DLSS, as TAA is; nobody asked.
 SHARPEN TEXT AND MENUS with RCAS: objective text +8% at MEDIUM over OFF (1080p), no rims seen at 3x zoom. Tests: 71 pass.
+
+## Follow-up 2026-11-16: a slider
+
+The same player asked for a slider. The owner, who had picked five steps over a slider for this record, agreed, and
+picked style B of a mockup (`work/mockups/sharpen_slider`): a track with the five old steps marked on it, the value in
+percent, and the nearest step's name beside it ("Medium", or "~High" between two).
+
+- **0..100% in steps of 5%**, default 50%. 0 / 25 / 50 / 75 / 100% are OFF / LOW / MEDIUM / HIGH / MAX, with exactly
+  the amounts above (DLSS on its own steps); between two steps the amount is blended in a straight line. RCAS can't
+  sharpen less than a quarter of its full weight, so 5% is already about two thirds of LOW: a small jump from OFF.
+- **Saved as `YW4_SHARPEN=0.50`** (the slider's fraction, as the HUD's sliders are saved). A file from before the
+  slider (`YW4_SHARPEN=0..4`) is read as its step: HIGH comes back as 75%. `YW4_SET_AT` takes either form.
+- **The overlay** draws the slider where a row's arrows and value are (settings page and the preview's bar); Left /
+  Right (and A / Enter) move it 5%, and a click or a drag on the track sets it there. The old F1 panel already drew
+  slider rows (its HUD sliders) and needs nothing new.
+- Checked in the game (school scene, DLSS, 1080p, a replay through the overlay): an old `3` started at 75%, `0.5` at
+  50%, each Left / Right one 5% step with the picture following; screenshots of the settings page and the preview bar.
+  The mouse was not driven by the test. 71 tests pass.

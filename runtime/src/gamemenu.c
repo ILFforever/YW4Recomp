@@ -888,7 +888,8 @@ enum { HIT_SIDE, HIT_SECTION, HIT_ROW, HIT_ROW_PREV, HIT_ROW_NEXT, HIT_BIND, HIT
        HIT_BUG_KIND, HIT_BUG_TEXT, HIT_BUG_OFTEN, HIT_BUG_NEXT, HIT_BUG_TICK, HIT_BUG_BTN, HIT_BUG_DONE,
        HIT_PROMPT_FIELD, HIT_PROMPT_OK, HIT_PROMPT_CANCEL, HIT_OSK_KEY, HIT_OSK_PAGE,
        HIT_KV_TAB, HIT_KV_MODE, HIT_KV_KEY, HIT_PV_PART,
-       HIT_MB_BACK, HIT_MB_SET, HIT_MB_ROW, HIT_MB_STEP, HIT_MB_OPT, HIT_MB_SCRIM, HIT_MB_POP };
+       HIT_MB_BACK, HIT_MB_SET, HIT_MB_ROW, HIT_MB_STEP, HIT_MB_OPT, HIT_MB_SCRIM, HIT_MB_POP, HIT_ROW_SLIDER };
+enum { ROW_SLIDER_PAD = 12 };  /* HIT_ROW_SLIDER: the track's hit box reaches this far past each end */
 #define HINT_CLOSE (-1)  /* a key hint's action: close the overlay */
 typedef struct {
     float x, y, w, h;
@@ -1001,6 +1002,10 @@ void gamemenu_mouse(float x, float y, int button) {
         }
         srow = h.a, focus = 1, in_rows = 1;
         if (click) settings_change(h.a, h.kind == HIT_ROW_PREV ? -1 : 1);
+        break;
+    case HIT_ROW_SLIDER:  /* a slider row's track (SHARPENING): a click or a drag sets it where the mouse is */
+        srow = h.a, focus = 1, in_rows = 1;
+        if (click || drag) settings_slide(h.a, (x - h.x - ROW_SLIDER_PAD) / (h.w - 2 * ROW_SLIDER_PAD)), changed();
         break;
     case HIT_BIND:
         focus = 1, bindings_select(h.a, h.b < 0 ? -1 : h.b);
@@ -1408,6 +1413,56 @@ static float tag(const UiCanvas *c, float x, float y, const char *label, uint32_
     return w;
 }
 
+/* A slider row's named point at its position: the nearest one in sentence case ("Medium"), and 1 when the slider is
+ * on it; 0 with no names. */
+static int slider_mark(const SettingRow *r, char *out, size_t n, int *exact) {
+    if (r->nmarks < 2) return 0;
+    float at = r->frac * (float)(r->nmarks - 1);
+    int k = (int)(at + 0.5f);
+    if (k < 0) k = 0;
+    if (k > r->nmarks - 1) k = r->nmarks - 1;
+    sentence_case(r->marks[k], out, n);
+    *exact = at - (float)k < 0.01f && (float)k - at < 0.01f;
+    return 1;
+}
+
+/* A slider row's value (SHARPENING, issue #11; the owner's pick of the mockup, style B, 2026-11-16) in the box x..x+w
+ * of a row y..y+h: the track with its named points marked (lit up to the thumb), the thumb, the value, and the nearest
+ * point's name, "~" before it between two. Left / Right step it as any row; the mouse clicks or drags on the track. */
+static void row_slider(const UiCanvas *c, const SettingRow *r, int row, float x, float y, float w, float h, float fs,
+                       int off) {
+    char name[40], shown[48];
+    int exact = 0, named = slider_mark(r, name, sizeof name, &exact);
+    float ns = fs - 3, nw = 0;
+    for (int k = 0; named && k < r->nmarks; k++) {  /* room for the widest name, so the track doesn't jump */
+        char t[40];
+        sentence_case(r->marks[k], t, sizeof t);
+        snprintf(shown, sizeof shown, "~%s", t);
+        float tw = ui_text_w(UI_GOTHIC_700, ns, shown);
+        if (tw > nw) nw = tw;
+    }
+    float vw = ui_text_w(UI_ROUNDED_700, fs, "100%"), gap = 10;
+    float tx = x + ROW_SLIDER_PAD, tw = w - ROW_SLIDER_PAD - gap - vw - (named ? gap + nw : 0) - 6, cy = y + h / 2;
+    if (tw < 40) tw = 40;
+    uint32_t ink = off ? MUTED : PLUM;
+    float f = r->frac < 0 ? 0 : r->frac > 1 ? 1 : r->frac;
+    ui_box(c, tx, cy - 3, tw, 6, 3, LINE, 0, 0);
+    if (f > 0) ui_box(c, tx, cy - 3, tw * f, 6, 3, ink, 0, 0);
+    for (int k = 0; named && k < r->nmarks; k++) {
+        float at = (float)k / (float)(r->nmarks - 1);
+        ui_box(c, tx + tw * at - 2, cy - 7, 4, 14, 2, f >= at - 0.001f ? ink : EDGE, 0, 0);
+    }
+    int hv = !off && hovered(HIT_ROW_SLIDER, row, 0);
+    ui_box(c, tx + tw * f - 11, cy - 11, 22, 22, 11, hv ? NIGHT : ink, 2, WHITE);
+    if (!off) hit_add(tx - ROW_SLIDER_PAD, y, tw + 2 * ROW_SLIDER_PAD, h, HIT_ROW_SLIDER, row, 0);
+    float vx = tx + tw + gap;
+    ui_text_in(c, UI_ROUNDED_700, fs, vx, y, vw, h, 2, r->value, off ? MUTED : NIGHT);
+    if (named) {
+        snprintf(shown, sizeof shown, "%s%s", exact ? "" : "~", name);
+        ui_text_in(c, UI_GOTHIC_700, ns, vx + vw + gap, y, nw, h, 0, shown, MUTED);
+    }
+}
+
 /* The settings page (the design's isSettings section): the sections on the left (the chosen row's lit), its
  * section's rows with the value, its note and arrows, the chosen row's description at the bottom. */
 static void draw_settings_page(const UiCanvas *c, const GameMenuInfo *in) {
@@ -1488,6 +1543,11 @@ static void draw_settings_page(const UiCanvas *c, const GameMenuInfo *in) {
         sentence_case(r->name, t, sizeof t);
         ui_text_in(c, UI_GOTHIC_500, 18, x + 20, y, 0, 72, 0, t, off ? MUTED : INK);
         float nx = x + w - 12 - 44, vx = nx - 10 - 300, px = vx - 10 - 44, by = y + 14;
+        if (r->slider) {  /* SHARPENING: a slider where the arrows and the value are on the other rows */
+            row_slider(c, r, i, px, y, nx + 44 - px, 72, 18, off);
+            y += 72 + 10;
+            continue;
+        }
         hit_add(px, by, 44, 44, HIT_ROW_PREV, i, 0), hit_add(nx, by, 44, 44, HIT_ROW_NEXT, i, 0);
         for (int k = 0; k < 2; k++) {  /* ‹ and ›; darker under the mouse */
             float bx = k ? nx : px;
@@ -2955,6 +3015,13 @@ static void draw_preview(const UiCanvas *c, const GameMenuInfo *in) {
         sentence_case(r->name, t, sizeof t);
         ui_text_in(c, UI_GOTHIC_500, 17, rx + 18, ry, 0, rh, 0, t, off ? MUTED : INK);
         float nx = rx + rw - 10 - 30, vx = nx - 6 - 170, px = vx - 6 - 30, by = ry + (rh - 30) / 2;
+        if (r->slider) {  /* SHARPENING: a slider in the arrows' and the value's place, reaching left into the row's
+                           * empty middle (the arrows' 242 alone left the track a stub) */
+            float sw = 400, sx = nx + 30 - sw, lx = rx + 18 + ui_text_w(UI_GOTHIC_500, 17, t) + 24;
+            if (sx < lx) sx = lx, sw = nx + 30 - sx;
+            row_slider(c, r, i, sx, ry, sw, rh, 17, off);
+            continue;
+        }
         for (int k = 0; k < 2; k++) {  /* ‹ and ›; a box under the mouse */
             float bx = k ? nx : px;
             int hv = !off && hovered(k ? HIT_ROW_NEXT : HIT_ROW_PREV, i, 0);
@@ -2974,7 +3041,11 @@ static void draw_preview(const UiCanvas *c, const GameMenuInfo *in) {
     sentence_case(r->name, name, sizeof name);
     if (r->verbatim) snprintf(value, sizeof value, "%s", r->options[r->current] ? r->options[r->current] : "");
     else sentence_case(r->options[r->current] ? r->options[r->current] : "", value, sizeof value);
-    snprintf(t, sizeof t, "%s: %s", name, value);
+    char mark[40];
+    int exact = 0;
+    if (r->slider && slider_mark(r, mark, sizeof mark, &exact) && exact)  /* "Sharpening: 50% (Medium)" */
+        snprintf(t, sizeof t, "%s: %s (%s)", name, value, mark);
+    else snprintf(t, sizeof t, "%s: %s", name, value);
     ui_text(c, UI_ROUNDED_800, 15, dx + 20, dy + 14, 15 * 1.5f, t, SNOW);
     int tags = note_tags(r->notes[r->current] ? r->notes[r->current] : "", rest, sizeof rest);
     float ty = dy + 14 + 15 * 1.5f + 4;

@@ -65,27 +65,40 @@ void gpu_aa_step(int dir) {
 
 void gpu_aa_cycle(void) { gpu_aa_step(1); }
 
-/* SHARPENING (decision 0076): 0 off, 1 low, 2 medium (the default), 3 high, 4 max; YW4_SHARPEN at start, the
- * settings panel cycles. One choice for every anti-aliasing: TAA and DLSS get it in their last pass (taa_output.frag),
- * FSR as its own sharpener's amount (RCAS, so nothing is sharpened twice), OFF / FXAA / SMAA as a pass of its own. */
-static int sharpen_level = -1;
+/* SHARPENING (decision 0076): a slider, 0..100% in steps of 5 (issue #11: a player asked for one), 50% the default.
+ * The five steps it replaced sit at 0 / 25 / 50 / 75 / 100% (OFF, LOW, MEDIUM, HIGH, MAX); between them the amount
+ * is blended (sharpen_amount). One choice for every anti-aliasing: TAA and DLSS get it in their last pass
+ * (taa_output.frag), FSR as its own sharpener's amount (RCAS, so nothing is sharpened twice), OFF / FXAA / SMAA as a
+ * pass of its own. Saved as YW4_SHARPEN, the slider's fraction ("0.50"); gpu_sharpen_parse reads that and the
+ * files written before the slider (0..4, the steps). */
+static int sharpen_pct = -1;
 
-int gpu_sharpen(void) {
-    int l = __atomic_load_n(&sharpen_level, __ATOMIC_ACQUIRE);
-    if (l < 0) {
-        const char *e = getenv("YW4_SHARPEN");
-        l = e && *e ? atoi(e) : 2;
-        if (l < 0 || l > 4) l = 2;
-        __atomic_store_n(&sharpen_level, l, __ATOMIC_RELEASE);
-    }
-    return l;
+int gpu_sharpen_parse(const char *e) {
+    if (!e || !*e) return 50;
+    int p;
+    if (strchr(e, '.')) p = (int)(atof(e) * 100.0 + 0.5);  /* the slider's fraction */
+    else if ((p = atoi(e)) >= 1 && p <= 4) p *= 25;          /* LOW, MEDIUM, HIGH, MAX before the slider */
+    p = (p + 2) / 5 * 5;                                      /* on the steps */
+    return p < 0 ? 0 : p > 100 ? 100 : p;
 }
 
-void gpu_sharpen_cycle(void) {
-    int l = (gpu_sharpen() + 1) % 5;
-    __atomic_store_n(&sharpen_level, l, __ATOMIC_RELEASE);
-    static const char *const name[5] = {"off", "low", "medium", "high", "max"};
-    fprintf(stderr, "yw4: gpu: sharpening %s\n", name[l]);
+int gpu_sharpen(void) {
+    int p = __atomic_load_n(&sharpen_pct, __ATOMIC_ACQUIRE);
+    if (p < 0) {
+        p = gpu_sharpen_parse(getenv("YW4_SHARPEN"));
+        __atomic_store_n(&sharpen_pct, p, __ATOMIC_RELEASE);
+    }
+    return p;
+}
+
+float gpu_sharpen_get(void) { return (float)gpu_sharpen() / 100.0f; }
+
+void gpu_sharpen_set(float f) {
+    int p = (int)(f * 100.0f + 0.5f);
+    p = (p + 2) / 5 * 5;
+    p = p < 0 ? 0 : p > 100 ? 100 : p;
+    __atomic_store_n(&sharpen_pct, p, __ATOMIC_RELEASE);
+    fprintf(stderr, "yw4: gpu: sharpening %d%%\n", p);
 }
 
 /* The amount, 0..1, as FSR's sharpness: FSR's own sharpener (RCAS) takes it, and our pass (sharpen.glsl) is the
@@ -113,7 +126,15 @@ static float sharpen_amount(int which) {
     }
     float env = which == SHARPEN_FSR ? fsr_env : taa_env;
     if (env >= 0.0f) return env;
-    return which == SHARPEN_DLSS ? dlss_map[gpu_sharpen()] : level_map[gpu_sharpen()];
+    /* the slider between the steps: a straight line from one step's amount to the next (0% is off). RCAS can't go
+     * gentler than a quarter of its full weight (amount 0), so 5% is already about two thirds of LOW. */
+    const float *map = which == SHARPEN_DLSS ? dlss_map : level_map;
+    int p = gpu_sharpen();
+    if (p <= 0) return 0.0f;
+    int i = p / 25;
+    if (i >= 4) return map[4];
+    float t = (float)(p - i * 25) / 25.0f;
+    return map[i] + (map[i + 1] - map[i]) * t;
 }
 
 /* SHARPEN TEXT AND MENUS (decision 0076): 0 only the 3D is sharpened (the default), 1 the game's UI too, at
