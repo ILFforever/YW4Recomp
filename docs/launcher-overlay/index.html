@@ -1,0 +1,192 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>The launcher and the overlay · YW4 Recomp</title>
+<link rel="icon" href="../favicon.ico" sizes="any">
+<link rel="icon" type="image/png" href="../img/icon-192.png">
+<link rel="apple-touch-icon" href="../img/icon-192.png">
+<meta name="description" content="Pictures of the YW4 Recomp launcher and its in-game overlay, with links to their full guides.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=M+PLUS+Rounded+1c:wght@500;700;800;900&family=Zen+Kaku+Gothic+New:wght@400;500;700&display=swap" rel="stylesheet">
+<script>
+/* the theme before the page draws: the reader's choice if kept, else the system's (no flash of the wrong one) */
+try { const t = localStorage.getItem('yw4-theme'); if (t === 'dark' || t === 'light') document.documentElement.dataset.theme = t; } catch (e) {}
+</script>
+<link rel="stylesheet" href="../site.css">
+<style>
+/* v3 mockup (2026-11-17): the launcher and the overlay, moved off the home page (the Yo-kai Pad shows them there).
+ * The home page's tokens, top bar, titles and footer, copied as they are. */
+:root {
+  --bg: #fffdf8; --pattern: url(../icons.svg); --card: #ffffff; --ink: #2b2140; --ink-2: #6b5d82; --line: #ece5f3;
+  --accent: #e8336d; --accent-ink: #b81f50; --violet: #4b2d7f; --violet-hover: #5d3b97; --on-violet: #fff;
+  --soft: #f6f1fb; --top: #fffffff2;
+  --display: "M PLUS Rounded 1c", "Hiragino Maru Gothic ProN", sans-serif;
+  --body: "Zen Kaku Gothic New", "Hiragino Sans", sans-serif;
+  color-scheme: light;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #15111d; --pattern: url(../icons-dark.svg); --card: #1f1929; --ink: #ece6f6; --ink-2: #a99cc0; --line: #2f2640;
+    --accent: #ff6b97; --accent-ink: #ff8fb0; --violet: #8e6ad8; --violet-hover: #a07fe6; --on-violet: #fff;
+    --soft: #241d31; --top: #15111df0; color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #15111d; --pattern: url(../icons-dark.svg); --card: #1f1929; --ink: #ece6f6; --ink-2: #a99cc0; --line: #2f2640;
+  --accent: #ff6b97; --accent-ink: #ff8fb0; --violet: #8e6ad8; --violet-hover: #a07fe6; --on-violet: #fff;
+  --soft: #241d31; --top: #15111df0; color-scheme: dark;
+}
+* { box-sizing: border-box; }
+html { scroll-behavior: smooth; }
+body { margin: 0; color: var(--ink); font: 400 1rem/1.7 var(--body); background: var(--bg) var(--pattern) 0 0 / 280px 280px;
+  overflow-x: hidden; }
+a { color: var(--accent-ink); }
+img { display: block; max-width: 100%; }
+.wrap { max-width: 1120px; margin: 0 auto; padding: 0 20px; }
+
+/* the top bar */
+.top { position: sticky; top: 0; z-index: 20; background: var(--top); backdrop-filter: blur(8px); border-bottom: 1px solid var(--line); }
+.top .wrap { display: flex; align-items: center; gap: 18px; height: 62px; }
+.brand { display: flex; align-items: center; gap: 10px; font: 900 1.05rem/1 var(--display); color: var(--ink); text-decoration: none; }
+.brand img { width: 34px; height: 34px; border-radius: 9px; }
+.nav { display: flex; gap: 2px; margin-left: auto; }
+.nav a { font: 700 .88rem/1 var(--display); color: var(--ink); text-decoration: none; padding: 9px 11px; border-radius: 8px; }
+.nav a:hover { background: var(--soft); }
+.iconbtn { width: 38px; height: 38px; display: grid; place-items: center; border: 1px solid var(--line); border-radius: 10px;
+  background: var(--card); color: var(--ink); cursor: pointer; text-decoration: none; }
+.iconbtn:hover { background: var(--soft); }
+.iconbtn svg { width: 19px; height: 19px; }
+.tools { display: flex; gap: 8px; }
+
+/* the header: the page's name, a line on what it shows, Home first and filled (as on every sub page) */
+.head .wrap { padding-top: 48px; padding-bottom: 6px; }
+.head h1 { font: 900 clamp(2.1rem, 1.7rem + 1.8vw, 3rem)/1.08 var(--display); margin: 0 0 12px; letter-spacing: -.01em; }
+.head p { margin: 0 0 20px; color: var(--ink-2); max-width: 62ch; }
+.dl { display: flex; flex-wrap: wrap; gap: 10px; margin: 0; }
+.btn { display: inline-flex; align-items: center; gap: 9px; font: 800 .95rem/1 var(--display); text-decoration: none;
+  border-radius: 10px; padding: 13px 18px; border: 2px solid var(--violet); }
+.btn.main { background: var(--violet); color: var(--on-violet); }
+.btn.main:hover { background: var(--violet-hover); border-color: var(--violet-hover); }
+.btn.alt { background: transparent; color: var(--ink); border-color: var(--line); }
+.btn.alt:hover { border-color: var(--violet); }
+
+/* section titles: one word in the accent, a short line under it */
+.sec { padding: 56px 0 0; }
+.title { margin: 0 0 22px; }
+.title h2 { margin: 0; font: 900 1.6rem/1.1 var(--display); color: var(--accent); letter-spacing: .03em; text-transform: uppercase; }
+.title p { margin: 4px 0 0; font: 700 .95rem/1.4 var(--display); color: var(--ink-2); }
+.title a { font-size: .9rem; }
+
+/* big pictures, two by two */
+.gallery { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 20px; }
+.gallery figure { margin: 0; }
+.gallery img { width: 100%; border-radius: 12px; border: 1px solid var(--line); }
+.gallery figcaption { font-size: .88rem; color: var(--ink-2); margin: 8px 2px 0; }
+.gallery figcaption b { color: var(--ink); font-family: var(--display); }
+
+footer { margin-top: 60px; border-top: 1px solid var(--line); background: var(--soft); font-size: .84rem; color: var(--ink-2); }
+footer .wrap { padding-top: 22px; padding-bottom: 28px; display: flex; gap: 16px; align-items: center; }
+footer img { width: 34px; height: 34px; border-radius: 9px; }
+
+@media (max-width: 900px) {
+  .nav { display: none; }
+  .tools { margin-left: auto; }
+  .gallery { grid-template-columns: minmax(0, 1fr); }
+}
+@media (prefers-reduced-motion: reduce) { html { scroll-behavior: auto; } }
+</style>
+</head>
+<body>
+
+<header class="site-top">
+  <div class="wrap">
+    <a class="brand" href="../"><img src="../img/icon-192.png" alt="" width="34" height="34">YW4 Recomp</a>
+    <nav class="nav" aria-label="Pages">
+      <a href="../changelog/">What's new</a>
+      <a href="../compare/">Comparisons</a>
+      <a href="../showcases/">Showcases</a>
+      <a href="../launcher/">Launcher</a>
+      <a href="../overlay/">Overlay</a>
+      <a href="../building/">Build it</a>
+    </nav>
+    <div class="tools">
+      <button class="iconbtn" id="theme" type="button" aria-label="Dark mode"><svg class="moon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M20 14.5A8 8 0 0 1 9.5 4a8 8 0 1 0 10.5 10.5z"/></svg><svg class="sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="4.2"/><path d="M12 2.5v2.2M12 19.3v2.2M2.5 12h2.2M19.3 12h2.2M5.3 5.3l1.6 1.6M17.1 17.1l1.6 1.6M5.3 18.7l1.6-1.6M17.1 6.9l1.6-1.6"/></svg></button>
+      <a class="iconbtn" href="https://github.com/ILFforever/YW4Recomp" aria-label="The project on GitHub"><svg viewBox="0 0 16 16" fill="currentColor"><path d="M8 0c4.42 0 8 3.58 8 8a8.013 8.013 0 0 1-5.45 7.59c-.4.08-.55-.17-.55-.38 0-.27.01-1.13.01-2.2 0-.75-.25-1.23-.54-1.48 1.78-.2 3.65-.88 3.65-3.95 0-.88-.31-1.59-.82-2.15.08-.2.36-1.02-.08-2.12 0 0-.67-.22-2.2.82-.64-.18-1.32-.27-2-.27-.68 0-1.36.09-2 .27-1.53-1.03-2.2-.82-2.2-.82-.44 1.1-.16 1.92-.08 2.12-.51.56-.82 1.28-.82 2.15 0 3.06 1.86 3.75 3.64 3.95-.23.2-.44.55-.51 1.07-.46.21-1.61.55-2.33-.66-.15-.24-.6-.83-1.23-.82-.67.01-.27.38.01.53.34.19.73.9.82 1.13.16.45.68 1.31 2.69.94 0 .67.01 1.3.01 1.49 0 .21-.15.45-.55.38A7.995 7.995 0 0 1 0 8c0-4.42 3.58-8 8-8Z"/></svg></a>
+      <a class="coffee" href="https://buymeacoffee.com/ilfforever" aria-label="Buy me a coffee"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M2.5 5.5h8.5v4.5a3.5 3.5 0 0 1-3.5 3.5h-1.5a3.5 3.5 0 0 1-3.5-3.5Z"/><path d="M11 6.5h1a2 2 0 0 1 0 4h-1"/><path d="M5 1.5c-.6.8.6 1.4 0 2.2M8 1.5c-.6.8.6 1.4 0 2.2"/></svg><span class="lbl">Buy me a coffee</span></a>
+    </div>
+  </div>
+</header>
+
+<section class="head">
+  <div class="wrap">
+    <h1>The launcher and the overlay</h1>
+    <p>Everything around the game, made for the PC: the launcher that builds and updates it, and the overlay that opens
+      over the game with every setting.</p>
+    <div class="dl">
+      <a class="btn main" href="../">Home</a>
+      <a class="btn alt" href="../launcher/">The launcher, step by step</a>
+      <a class="btn alt" href="../overlay/">The overlay in full</a>
+    </div>
+  </div>
+</section>
+
+<section class="sec" id="launcher">
+  <div class="wrap">
+    <div class="title"><h2>The launcher</h2><p>From your game files to Play <a href="../launcher/">More</a></p></div>
+    <div class="gallery">
+      <figure><img src="../screenshots/99-launcher-play.jpg" alt="The launcher's Play screen" loading="lazy">
+        <figcaption><b>Play.</b> What's new in your version, your screenshots, mods and DLC, and the button to update.</figcaption></figure>
+      <figure><img src="../screenshots/99-launcher.jpg" alt="Four launcher screens: First start, Your game files, Play and Settings" loading="lazy">
+        <figcaption><b>Setting up.</b> First start, your game files, Play and Settings: point it at your files and it checks them, builds the game once and keeps it up to date.</figcaption></figure>
+      <figure><img src="../screenshots/99-launcher-themes.jpg" alt="The launcher in several themes" loading="lazy">
+        <figcaption><b>Themes.</b> Jibanyan, Komasan, Shmoopie, Whisper and more, shared with the in-game overlay.</figcaption></figure>
+      <figure><img src="../screenshots/92-screenshots.jpg" alt="Four screenshots taken in the game with F12" loading="lazy">
+        <figcaption><b>Screenshots.</b> F12 in the game saves one at full resolution, like these four; the launcher's Screenshots tab shows them all.</figcaption></figure>
+    </div>
+  </div>
+</section>
+
+<section class="sec" id="overlay">
+  <div class="wrap">
+    <div class="title"><h2>The overlay</h2><p>Escape pauses the game and opens it, with full mouse and controller support <a href="../overlay/">More</a></p></div>
+    <div class="gallery">
+      <figure><img src="../screenshots/97-overlay-settings.jpg" alt="The overlay's Settings" loading="lazy">
+        <figcaption><b>Settings.</b> Every graphics setting by section, with what each choice does and what it costs.</figcaption></figure>
+      <figure><img src="../screenshots/97-overlay-preview.jpg" alt="Preview with the shadow settings" loading="lazy">
+        <figcaption><b>Preview.</b> Change a setting and watch it live while the game runs.</figcaption></figure>
+      <figure><img src="../screenshots/97-overlay.jpg" alt="The overlay's side panel" loading="lazy">
+        <figcaption><b>The side panel.</b> Settings, Controls, the HUD's options, Cheats and Report a bug.</figcaption></figure>
+      <figure><img src="../screenshots/98-overlay-themes.jpg" alt="The overlay in four themes" loading="lazy">
+        <figcaption><b>Themes.</b> The same Yo-kai themes as the launcher; pick one and both follow.</figcaption></figure>
+    </div>
+  </div>
+</section>
+
+<footer>
+  <div class="wrap">
+    <img src="../img/icon-192.png" alt="">
+    <span>A fan project. Not affiliated with or endorsed by LEVEL-5 or Nintendo; <i>Yo-kai Watch</i> belongs to its owners.
+      Screenshots are from the maintainer's own copy of the game, running in the recompiled port.
+      <a href="https://github.com/ILFforever/YW4Recomp">github.com/ILFforever/YW4Recomp</a></span>
+  </div>
+</footer>
+
+<script>
+/* the theme switch: the other theme than the one showing, kept for next time */
+(() => {
+  const btn = document.getElementById('theme'), root = document.documentElement;
+  const dark = () => root.dataset.theme ? root.dataset.theme === 'dark' : matchMedia('(prefers-color-scheme: dark)').matches;
+  const label = () => btn.setAttribute('aria-label', dark() ? 'Light mode' : 'Dark mode');
+  label();
+  btn.addEventListener('click', () => {
+    root.dataset.theme = dark() ? 'light' : 'dark';
+    try { localStorage.setItem('yw4-theme', root.dataset.theme); } catch (e) {}
+    label();
+  });
+})();
+</script>
+</body>
+</html>

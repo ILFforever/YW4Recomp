@@ -1,0 +1,126 @@
+/* YW4 Recomp's site, v3 (2026-11-17): the shared look. Light by default with a dark mode (the top bar's moon button,
+ * kept in localStorage 'yw4-theme', else the system's). The home page has its own sections in its page; the other
+ * pages (body.sub) keep their own layout, re-coloured here: this file is linked after their own styles. */
+
+/* ---- the v3 colours ---- */
+:root {
+  --bg: #fffdf8; --pattern: url(icons.svg); --card: #ffffff; --ink: #2b2140; --ink-2: #6b5d82; --line: #ece5f3;
+  --accent: #e8336d; --accent-ink: #b81f50; --violet: #4b2d7f; --violet-hover: #5d3b97; --on-violet: #fff;
+  --soft: #f6f1fb; --warn-bg: #fff4d6; --warn-ink: #7a5600; --top: #fffffff2; --bar: #4b2d7f; --shade: #2b214014;
+  --display: "M PLUS Rounded 1c", "Hiragino Maru Gothic ProN", sans-serif;
+  --body: "Zen Kaku Gothic New", "Hiragino Sans", sans-serif;
+  color-scheme: light;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #15111d; --pattern: url(icons-dark.svg); --card: #1f1929; --ink: #ece6f6; --ink-2: #a99cc0; --line: #2f2640;
+    --accent: #ff6b97; --accent-ink: #ff8fb0; --violet: #8e6ad8; --violet-hover: #a07fe6; --on-violet: #fff;
+    --soft: #241d31; --warn-bg: #2e2614; --warn-ink: #f3cf73; --top: #15111df0; --bar: #3f2a6b; --shade: #00000055;
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #15111d; --pattern: url(icons-dark.svg); --card: #1f1929; --ink: #ece6f6; --ink-2: #a99cc0; --line: #2f2640;
+  --accent: #ff6b97; --accent-ink: #ff8fb0; --violet: #8e6ad8; --violet-hover: #a07fe6; --on-violet: #fff;
+  --soft: #241d31; --warn-bg: #2e2614; --warn-ink: #f3cf73; --top: #15111df0; --bar: #3f2a6b; --shade: #00000055;
+  color-scheme: dark;
+}
+
+/* ---- the top bar, on every page ---- */
+.site-top { position: sticky; top: 0; z-index: 20; background: var(--top); backdrop-filter: blur(8px); border-bottom: 1px solid var(--line); }
+.site-top .wrap { max-width: 1120px; margin: 0 auto; padding: 0 20px; display: flex; align-items: center; gap: 18px; height: 62px; }
+.site-top .brand { display: flex; align-items: center; gap: 10px; font: 900 1.05rem/1 var(--display); color: var(--ink); text-decoration: none; }
+.site-top .brand:hover { color: var(--ink); }
+.site-top .brand img { width: 34px; height: 34px; border-radius: 9px; }
+.site-top .nav { display: flex; gap: 2px; margin-left: auto; }
+.site-top .nav a { font: 700 .88rem/1 var(--display); color: var(--ink); text-decoration: none; padding: 9px 11px; border-radius: 8px; }
+.site-top .nav a:hover { background: var(--soft); color: var(--ink); }
+.site-top .nav a[aria-current="page"] { background: var(--soft); color: var(--accent-ink); }
+.site-top .tools { display: flex; gap: 8px; align-items: center; }
+.site-top .iconbtn { width: 38px; height: 38px; display: grid; place-items: center; border: 1px solid var(--line); border-radius: 10px;
+  background: var(--card); color: var(--ink); cursor: pointer; text-decoration: none; padding: 0; }
+.site-top .iconbtn:hover { background: var(--soft); color: var(--ink); }
+.site-top .iconbtn svg { width: 19px; height: 19px; }
+/* the theme button shows the theme showing: a moon in light, a sun in dark (the system's, or the reader's choice) */
+#theme .sun { display: none; }
+:root[data-theme="dark"] #theme .sun { display: block; }
+:root[data-theme="dark"] #theme .moon { display: none; }
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) #theme .sun { display: block; }
+  :root:not([data-theme="light"]) #theme .moon { display: none; }
+}
+/* Buy Me a Coffee in its own yellow, its label hidden on narrow screens */
+.site-top .coffee { display: inline-flex; align-items: center; gap: 7px; height: 38px; padding: 0 12px; border-radius: 10px;
+  font: 800 .84rem/1 var(--display); color: #000; background: #ffdd00; border: 1px solid #e6c700; text-decoration: none; white-space: nowrap; }
+.site-top .coffee:hover { color: #000; background: #ffe633; }
+.site-top .coffee svg { width: 17px; height: 17px; fill: none; stroke: currentColor; stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; flex: none; }
+@media (max-width: 1100px) { .site-top .coffee .lbl { display: none; } .site-top .coffee { width: 38px; padding: 0; justify-content: center; } }
+@media (max-width: 900px) { .site-top .nav { display: none; } .site-top .tools { margin-left: auto; } }
+
+/* ---- the other pages: their own layout in the v3 colours ---- */
+body.sub {
+  /* their names for colours, pointed at v3's: the parts that only use these follow the theme on their own */
+  --lilac-0: var(--bg); --lilac-1: var(--soft); --lilac-2: var(--line); --lilac-3: var(--line);
+  --violet-soft: var(--accent-ink); --violet-deep: var(--ink); --cream: var(--soft);
+  background: var(--bg) var(--pattern) 0 0 / 280px 280px; color: var(--ink); font-family: var(--body);
+}
+body.sub a { color: var(--accent-ink); }
+body.sub a:hover { color: var(--accent); }
+body.sub :focus-visible { outline-color: var(--violet); }
+body.sub kbd { color: var(--ink); background: var(--card); border-color: var(--line); }
+
+/* the header: on the page's background, the name in the v3 type, Home first and filled */
+body.sub .hero { background: none; color: var(--ink); border-bottom: 0; overflow: visible; }
+body.sub .hero::before { display: none; }
+body.sub .hero-inner { max-width: 1120px; padding-top: 48px; padding-bottom: 28px; }
+body.sub .eyebrow { color: var(--accent); }
+body.sub .hero h1 { font-weight: 900; color: var(--ink); }
+body.sub .hero p { color: var(--ink-2); }
+body.sub .stats { border-color: var(--line); background: var(--card); }
+body.sub .stat { background: var(--card); }
+body.sub .stat + .stat { border-color: var(--line); }
+body.sub .stat b { color: var(--violet); }
+body.sub .stat span { color: var(--ink-2); }
+body.sub .btn { border-radius: 10px; border: 2px solid var(--violet); background: var(--violet); color: var(--on-violet);
+  font-weight: 800; padding: 13px 18px; }
+body.sub .btn:hover { background: var(--violet-hover); border-color: var(--violet-hover); color: var(--on-violet); }
+body.sub .btn.ghost { background: transparent; color: var(--ink); border-color: var(--line); }
+body.sub .btn.ghost:hover { background: transparent; color: var(--ink); border-color: var(--violet); }
+body.sub .shot { background: var(--card); border: 1px solid var(--line); box-shadow: 0 14px 34px var(--shade); }
+body.sub .shot figcaption { color: var(--ink-2); }
+
+/* the contents, the articles, their title bars */
+body.sub .shell { max-width: 1120px; padding-top: 24px; }
+body.sub .pad { background: var(--card); border-color: var(--line); top: 78px; }
+body.sub .pad h2, body.sub .bar { background: var(--bar); color: #fff; }
+body.sub .pad a { color: var(--ink); }
+body.sub .pad a:hover { background: var(--soft); color: var(--ink); }
+body.sub .pad a .n { color: var(--ink-2); }
+body.sub article { background: var(--card); border-color: var(--line); }
+body.sub .bar h2 { color: #fff; }
+body.sub .bar .cat { color: #ffd36b; }
+body.sub .prose li::marker { color: var(--accent); }
+body.sub .spec { background: var(--soft); }
+body.sub .spec dt, body.sub .spec dd { border-color: var(--line); }
+body.sub .spec dt { color: var(--ink-2); }
+body.sub .whole img { border-color: var(--line); }
+body.sub .whole figcaption { color: var(--ink-2); }
+body.sub .steps li::before, body.sub .steps > li::before { background: var(--violet); color: var(--on-violet); }
+
+/* the comparisons' sliders: the home page's handle (‹ › on white), labels on a dark glass in either theme */
+body.sub .cmp { background: #000; }
+body.sub .cmp .rule { background: #fff; }
+body.sub .cmp .knob { width: 40px; height: 40px; border: 0; box-shadow: 0 1px 4px #0005;
+  background: #fff url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%234b2d7f' stroke-width='2.6' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M9 7l-5 5 5 5M15 7l5 5-5 5'/%3E%3C/svg%3E") center / 62% no-repeat; }
+body.sub .cmp .knob::before, body.sub .cmp .knob::after { display: none; }
+body.sub .cmp .tag, body.sub .cmp .tag.r { background: #000a; color: #fff; }
+body.sub .chip[aria-pressed="true"], body.sub .side.b .chip[aria-pressed="true"] { background: var(--violet); border-color: var(--violet); color: var(--on-violet); }
+
+/* the footer */
+body.sub footer { background: var(--soft); color: var(--ink-2); border-top: 1px solid var(--line); margin-top: 20px; }
+body.sub footer .in { max-width: 1120px; }
+body.sub footer a { color: var(--accent-ink); }
+
+@media (max-width: 960px) {
+  body.sub .pad { top: 62px; }
+}

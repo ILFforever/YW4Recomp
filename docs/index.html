@@ -3,295 +3,635 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>YW4 Recomp</title>
+<title>YW4 Recomp · a fan PC port of Yo-kai Watch 4++</title>
 <link rel="icon" href="favicon.ico" sizes="any">
 <link rel="icon" type="image/png" href="img/icon-192.png">
 <link rel="apple-touch-icon" href="img/icon-192.png">
 <meta name="description" content="YW4 Recomp: a fan static recompilation of Yo-kai Watch 4++ for PC. 4K, ultrawide, better shadows, anti-aliasing, DLSS and FSR.">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=M+PLUS+Rounded+1c:wght@500;700;800&family=Zen+Kaku+Gothic+New:wght@400;500;700&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=M+PLUS+Rounded+1c:wght@500;700;800;900&family=Zen+Kaku+Gothic+New:wght@400;500;700&display=swap" rel="stylesheet">
+<script>
+/* the theme before the page draws: the reader's choice if kept, else the system's (no flash of the wrong one) */
+try { const t = localStorage.getItem('yw4-theme'); if (t === 'dark' || t === 'light') document.documentElement.dataset.theme = t; } catch (e) {}
+</script>
+<link rel="stylesheet" href="site.css">
 <style>
-/* Same look as compare/index.html: the game's menus (Yo-kai Pad lilac and violet, results-screen cream and gold). */
+/* v3 mockup, second pass (2026-11-17). A fan project's page: the project's name first, what it does shown (Switch
+ * against 4K), honest status, plain downloads. Light by default with a dark mode. No icon grids, no pill links,
+ * no character art, no tilts. */
 :root {
-  --lilac-0: oklch(97.5% 0.012 305); --lilac-1: oklch(94% 0.025 305); --lilac-2: oklch(89% 0.04 305); --lilac-3: oklch(80% 0.06 305);
-  --violet: oklch(36% 0.11 295); --violet-deep: oklch(27% 0.09 295); --violet-soft: oklch(50% 0.11 300);
-  --ink: oklch(25% 0.04 295); --ink-2: oklch(45% 0.04 295);
-  --gold: oklch(80% 0.12 85); --gold-deep: oklch(62% 0.12 75); --cream: oklch(96.5% 0.03 90);
-  --cyan: oklch(76% 0.11 215); --white: oklch(99.2% 0.004 305);
-  --r: 14px;
+  --bg: #fffdf8; --pattern: url(icons.svg); --card: #ffffff; --ink: #2b2140; --ink-2: #6b5d82; --line: #ece5f3;
+  --accent: #e8336d; --accent-ink: #b81f50; --violet: #4b2d7f; --violet-hover: #5d3b97; --on-violet: #fff;
+  --soft: #f6f1fb; --warn-bg: #fff4d6; --warn-ink: #7a5600; --top: #fffffff2;
   --display: "M PLUS Rounded 1c", "Hiragino Maru Gothic ProN", sans-serif;
   --body: "Zen Kaku Gothic New", "Hiragino Sans", sans-serif;
-  --ease: cubic-bezier(.22, 1, .36, 1);
+  color-scheme: light;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #15111d; --pattern: url(icons-dark.svg); --card: #1f1929; --ink: #ece6f6; --ink-2: #a99cc0; --line: #2f2640;
+    --accent: #ff6b97; --accent-ink: #ff8fb0; --violet: #8e6ad8; --violet-hover: #a07fe6; --on-violet: #fff;
+    --soft: #241d31; --warn-bg: #2e2614; --warn-ink: #f3cf73; --top: #15111df0; color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #15111d; --pattern: url(icons-dark.svg); --card: #1f1929; --ink: #ece6f6; --ink-2: #a99cc0; --line: #2f2640;
+  --accent: #ff6b97; --accent-ink: #ff8fb0; --violet: #8e6ad8; --violet-hover: #a07fe6; --on-violet: #fff;
+  --soft: #241d31; --warn-bg: #2e2614; --warn-ink: #f3cf73; --top: #15111df0; color-scheme: dark;
 }
 * { box-sizing: border-box; }
-body { margin: 0; overflow-x: hidden; color: var(--ink); font: 400 clamp(.98rem, .95rem + .15vw, 1.05rem)/1.7 var(--body);
-  font-variant-numeric: tabular-nums; background-color: var(--lilac-1);
-  background-image: conic-gradient(var(--lilac-0) 25%, transparent 0 50%, var(--lilac-0) 0 75%, transparent 0); background-size: 64px 64px; }
-a { color: var(--violet-soft); text-decoration-thickness: 1.5px; text-underline-offset: 3px; }
-a:hover { color: var(--violet); }
-:focus-visible { outline: 2px solid var(--gold-deep); outline-offset: 3px; }
+html { scroll-behavior: smooth; }
+body { margin: 0; color: var(--ink); font: 400 1rem/1.7 var(--body); background: var(--bg) var(--pattern) 0 0 / 280px 280px;
+  overflow-x: hidden; }
+a { color: var(--accent-ink); }
+img { display: block; max-width: 100%; }
+.wrap { max-width: 1120px; margin: 0 auto; padding: 0 20px; }
 
-.hero { color: var(--white); background-color: var(--violet-deep); position: relative; overflow: hidden; border-bottom: 3px solid var(--gold); }
-.hero::before { content: ""; position: absolute; inset: 0; opacity: .12; pointer-events: none;
-  background-image: radial-gradient(circle at 50% 100%, transparent 38%, var(--gold) 39% 42%, transparent 43% 55%, var(--gold) 56% 59%, transparent 60%);
-  background-size: 56px 28px; }
-.hero-inner { position: relative; max-width: 1180px; margin: 0 auto; padding: clamp(36px, 6vw, 72px) 20px clamp(36px, 5vw, 60px);
-  display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.2fr); gap: clamp(24px, 4vw, 56px); align-items: center; }
-.eyebrow { font: 700 .82rem/1 var(--display); letter-spacing: .16em; text-transform: uppercase; color: var(--gold); }
-h1 { font: 800 clamp(2.4rem, 1.6rem + 3.4vw, 4.2rem)/1.04 var(--display); margin: 12px 0 14px; letter-spacing: -.01em; }
-.hero p { margin: 0 0 22px; color: oklch(88% 0.03 300); max-width: 44ch; font-size: 1.08rem; }
-.chips { display: flex; flex-wrap: wrap; gap: 6px; margin: 0 0 24px; padding: 0; list-style: none; }
-.chips li { font: 700 .8rem/1 var(--display); padding: 7px 11px; border-radius: 999px; background: oklch(31% 0.1 295);
-  border: 1px solid oklch(50% 0.08 295); color: oklch(92% 0.02 300); }
-.links { display: flex; flex-wrap: wrap; gap: 10px; }
-.btn { font: 700 .95rem/1 var(--display); text-decoration: none; border-radius: 999px; padding: 12px 20px; border: 1.5px solid var(--gold);
-  color: var(--violet-deep); background: var(--gold); transition: background .2s var(--ease); }
-.btn:hover { color: var(--violet-deep); background: oklch(85% 0.12 85); }
-.btn.ghost { background: transparent; color: var(--gold); }
-.btn.ghost:hover { color: var(--gold); background: oklch(80% 0.12 85 / .12); }
-/* the GitHub button in GitHub's own look: black, the white mark (Octicons mark-github, MIT) */
-.btn.gh { display: inline-flex; align-items: center; gap: 8px; color: #fff; background: #000; border-color: #3d444d; }
-.btn.gh:hover { color: #fff; background: #1f2328; border-color: #656c76; }
-.btn.gh svg { width: 1.15em; height: 1.15em; fill: currentColor; flex: none; }
-/* the header's top bar: our icon and name (home), the GitHub button at the right */
-.sitebar { position: relative; max-width: 1180px; margin: 0 auto; padding: 16px 20px 0; display: flex; align-items: center;
-  justify-content: space-between; gap: 12px; }
-.brand { display: inline-flex; align-items: center; gap: 10px; color: var(--white); text-decoration: none;
-  font: 800 1.05rem/1 var(--display); }
-.brand:hover { color: var(--gold); }
-.brand img { width: 36px; height: 36px; display: block; }
-.sitebar .btn.gh { padding: 9px 14px; font-size: .88rem; }
-/* Buy Me a Coffee next to the GitHub button, in BMC's own yellow */
-.sitebtns { display: flex; align-items: center; gap: 8px; }
-.sitebtns .btn { white-space: nowrap; }
-.btn.coffee { display: inline-flex; align-items: center; gap: 8px; color: #000; background: #ffdd00; border-color: #e6c700; }
-.btn.coffee:hover { color: #000; background: #ffe633; border-color: #ffdd00; }
-.btn.coffee svg { width: 1.15em; height: 1.15em; fill: none; stroke: currentColor; stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; flex: none; }
-.sitebar .btn.coffee { padding: 9px 14px; font-size: .88rem; }
-@media (max-width: 560px) { .btn.coffee .lbl { display: none; } }
-.shot { background: var(--white); border-radius: var(--r); padding: 8px; box-shadow: 0 18px 40px oklch(15% 0.08 295 / .5); margin: 0; }
-.shot img { display: block; width: 100%; height: auto; border-radius: 8px; }
-.shot figcaption { color: var(--ink-2); font-size: .8rem; margin: 8px 6px 2px; }
-/* the header's slideshow: the pictures stacked in one 16:9 box, the current one faded in */
-.slides .frames { position: relative; aspect-ratio: 16 / 9; border-radius: 8px; overflow: hidden; background: var(--violet-deep); }
-.slides .frames img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; border-radius: 0;
-  opacity: 0; transition: opacity 1.2s var(--ease); }
-.slides .frames img.on { opacity: 1; }
-@media (prefers-reduced-motion: reduce) { .slides .frames img { transition: none; } }
+/* the top bar */
+.top { position: sticky; top: 0; z-index: 20; background: var(--top); backdrop-filter: blur(8px); border-bottom: 1px solid var(--line); }
+.top .wrap { display: flex; align-items: center; gap: 18px; height: 62px; }
+.brand { display: flex; align-items: center; gap: 10px; font: 900 1.05rem/1 var(--display); color: var(--ink); text-decoration: none; }
+.brand img { width: 34px; height: 34px; border-radius: 9px; }
+.nav { display: flex; gap: 2px; margin-left: auto; }
+.nav a { font: 700 .88rem/1 var(--display); color: var(--ink); text-decoration: none; padding: 9px 11px; border-radius: 8px; }
+.nav a:hover { background: var(--soft); }
+.iconbtn { width: 38px; height: 38px; display: grid; place-items: center; border: 1px solid var(--line); border-radius: 10px;
+  background: var(--card); color: var(--ink); cursor: pointer; text-decoration: none; }
+.iconbtn:hover { background: var(--soft); }
+.iconbtn svg { width: 19px; height: 19px; }
+.tools { display: flex; gap: 8px; }
 
-main { max-width: 1180px; margin: 0 auto; padding: 40px 20px 64px; display: grid; grid-template-columns: minmax(0, 1fr); gap: 28px; }
-.panel { background: var(--white); border-radius: var(--r); border: 1px solid var(--lilac-3); overflow: hidden; }
-.bar { display: flex; align-items: center; gap: 12px; padding: 12px 20px; background: var(--violet); color: var(--white); }
-.bar h2 { margin: 0; font: 800 clamp(1.25rem, 1.15rem + .5vw, 1.6rem)/1.2 var(--display); }
-.bar .q { flex: none; width: 28px; height: 28px; border-radius: 50%; background: var(--cyan); display: grid; place-items: center;
-  font: 800 .95rem/1 var(--display); color: var(--violet-deep); box-shadow: inset 0 0 0 2px var(--white); }
-.in { padding: 20px; }
-.in p { margin: 0 0 12px; max-width: 72ch; }
-.in p:last-child { margin-bottom: 0; }
+/* the header: the name, what it is, the downloads, the status; the Switch-against-4K slider */
+.hero .wrap { display: grid; grid-template-columns: minmax(0, .82fr) minmax(0, 1.18fr); gap: 44px; align-items: center;
+  padding-top: 52px; padding-bottom: 30px; }
+.hero h1 { font: 900 clamp(2.6rem, 2rem + 2.6vw, 3.8rem)/1.05 var(--display); margin: 0 0 12px; letter-spacing: -.01em; }
+.hero .what { font: 700 1.15rem/1.45 var(--display); margin: 0 0 12px; }
+.hero .what i { color: var(--accent-ink); font-style: normal; }
+.hero p { margin: 0 0 20px; color: var(--ink-2); max-width: 44ch; }
+.dl { display: flex; flex-wrap: wrap; gap: 10px; margin: 0 0 14px; }
+.btn { display: inline-flex; align-items: center; gap: 9px; font: 800 .95rem/1 var(--display); text-decoration: none;
+  border-radius: 10px; padding: 13px 18px; border: 2px solid var(--violet); }
+.btn.main { background: var(--violet); color: var(--on-violet); }
+.btn.main:hover { background: var(--violet-hover); border-color: var(--violet-hover); }
+.btn.alt { background: transparent; color: var(--ink); border-color: var(--line); }
+.btn.alt:hover { border-color: var(--violet); }
+.btn svg { width: 18px; height: 18px; flex: none; }
+/* Linux in Tux's colours: black, its yellow, a white penguin on a light badge */
+.btn.linux { background: #1d1d1f; color: #fff; border-color: #1d1d1f; }
+.btn.linux:hover { border-color: #f5b800; }
+.btn.linux small { color: #f5b800; opacity: 1; }
+.btn.linux img { width: 20px; height: 24px; object-fit: contain; filter: drop-shadow(0 0 1px #fffc) drop-shadow(0 0 3px #fff6); }
+.btn small { font-weight: 600; opacity: .75; }
+.status { font-size: .86rem; color: var(--ink-2); margin: 0; line-height: 1.55; }
+.status b { color: var(--warn-ink); background: var(--warn-bg); border-radius: 6px; padding: 1px 7px; font-family: var(--display); }
 
-.two { display: grid; grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr); gap: 28px; }
-.features { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 250px), 1fr)); gap: 0; margin: 0; padding: 0; list-style: none; }
-.features li { padding: 14px 20px; border-bottom: 1px solid var(--lilac-2); }
-.features b { display: block; font: 700 1rem/1.3 var(--display); color: var(--violet); }
-.features span { font-size: .9rem; color: var(--ink-2); }
-.facts { margin: 0; display: grid; grid-template-columns: auto minmax(0, 1fr); background: var(--cream); }
-.facts dt, .facts dd { margin: 0; padding: 10px 0; border-bottom: 1px solid oklch(88% 0.04 85); font-size: .92rem; }
-.facts dt { color: var(--ink-2); padding-left: 20px; padding-right: 16px; }
-.facts dd { font-weight: 700; padding-right: 20px; }
-.facts dt:last-of-type, .facts dd:last-of-type { border-bottom: 0; }
-.pics { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 420px), 1fr)); gap: 20px; padding: 20px; }
-.pics .shot { box-shadow: 0 8px 20px oklch(15% 0.08 295 / .18); }
-.go { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 240px), 1fr)); gap: 12px; padding: 20px; }
-.go a { display: block; text-decoration: none; color: var(--ink); background: var(--lilac-0); border: 1px solid var(--lilac-3);
-  border-radius: 12px; padding: 14px 16px; transition: border-color .2s var(--ease), background .2s var(--ease); }
-.go a:hover { border-color: var(--violet-soft); background: var(--white); }
-.go b { display: block; font: 700 1rem/1.3 var(--display); color: var(--violet); }
-.go span { font-size: .88rem; color: var(--ink-2); }
-kbd { display: inline-block; min-width: 1.7em; text-align: center; font: 700 .78rem/1 var(--display); color: var(--violet-deep);
-  background: var(--lilac-0); border: 1px solid var(--lilac-3); border-bottom-width: 2px; border-radius: 6px; padding: 4px 6px; margin: 1px 2px 1px 0; white-space: nowrap; }
-.note { background: var(--cream); padding: 12px 16px; border-radius: 10px; font-size: .95rem; }
+/* before / after: the Switch on the left of the line, YW4 Recomp on its right; drag it, or use the arrow keys */
+.ba { position: relative; border-radius: 16px; overflow: hidden; aspect-ratio: 16 / 9; background: #000; --pos: 50%;
+  border: 1px solid var(--line); }
+.ba img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
+.ba .before { clip-path: inset(0 calc(100% - var(--pos)) 0 0); }
+.ba .line { position: absolute; top: 0; bottom: 0; left: var(--pos); width: 3px; margin-left: -1.5px; background: #fff;
+  box-shadow: 0 0 0 1px #0003; pointer-events: none; }
+.ba .line::after { content: ""; position: absolute; top: 50%; left: 50%; width: 40px; height: 40px; margin: -20px 0 0 -20px;
+  border-radius: 50%; box-shadow: 0 1px 4px #0005;  /* the handle: ‹ › on white, the same on every slider of the site */
+  background: #fff url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%234b2d7f' stroke-width='2.6' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M9 7l-5 5 5 5M15 7l5 5-5 5'/%3E%3C/svg%3E") center / 62% no-repeat; }
+.ba input { position: absolute; inset: 0; width: 100%; height: 100%; margin: 0; opacity: 0; cursor: ew-resize; }
+.ba .lab { position: absolute; top: 12px; font: 800 .78rem/1 var(--display); color: #fff; background: #000a; border-radius: 6px;
+  padding: 6px 9px; pointer-events: none; }
+.ba .lab.l { left: 12px; } .ba .lab.r { right: 12px; }
+/* full screen: the button in the corner; the pictures whole (letterboxed) on black */
+.ba .fs { position: absolute; right: 12px; bottom: 12px; z-index: 2; width: 38px; height: 38px; display: grid; place-items: center;
+  border: 0; border-radius: 9px; background: #000a; color: #fff; cursor: pointer; }
+.ba .fs:hover { background: #000d; }
+.ba .fs svg { width: 20px; height: 20px; }
+.ba .fs .out, .ba:fullscreen .fs .in { display: none; }
+.ba:fullscreen .fs .out { display: block; }
+.ba:fullscreen { aspect-ratio: auto; border: 0; border-radius: 0; }
+.ba:fullscreen img { object-fit: contain; }
+.cap { font-size: .82rem; color: var(--ink-2); margin: 8px 2px 0; display: flex; justify-content: space-between; gap: 10px; flex-wrap: wrap; }
+.scenes { display: flex; gap: 6px; flex-wrap: wrap; }
+.scenes button { font: 700 .76rem/1 var(--display); color: var(--ink); background: var(--card); border: 1px solid var(--line);
+  border-radius: 6px; padding: 6px 9px; cursor: pointer; }
+.scenes button[aria-pressed="true"] { background: var(--violet); color: var(--on-violet); border-color: var(--violet); }
 
-footer { background: var(--violet-deep); color: oklch(84% 0.03 300); border-top: 3px solid var(--gold); }
-footer .in2 { max-width: 1180px; margin: 0 auto; padding: 24px 20px 32px; font-size: .85rem; display: grid; gap: 6px; }
-footer a { color: var(--gold); }
-@media (max-width: 900px) { .hero-inner, .two { grid-template-columns: minmax(0, 1fr); } }
+/* section titles: one word in the accent, a short line under it */
+.sec { padding: 56px 0 0; }
+.title { margin: 0 0 22px; }
+.title h2 { margin: 0; font: 900 1.6rem/1.1 var(--display); color: var(--accent); letter-spacing: .03em; text-transform: uppercase; }
+.title p { margin: 4px 0 0; font: 700 .95rem/1.4 var(--display); color: var(--ink-2); }
+.title a { font-size: .9rem; }
+
+/* before you start */
+.check { background: var(--soft); border-radius: 18px; padding: 22px 24px; display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 20px; }
+.check h3 { margin: 0 0 6px; font: 800 1rem/1.3 var(--display); }
+.check ul { margin: 0; padding-left: 18px; font-size: .9rem; }
+.check p { margin: 0; font-size: .9rem; }
+
+/* features: the Yo-kai Pad's menu, laid out as the game's, its colours sampled from the game's screen (55-ultrawide-yokai-pad.jpg) (yw::CMainMenu: a 4 x 3 grid, a description
+ * bar under it, a panel on the right, the hints along the bottom; one page of 12 here), drawn here: no art from the game. Every size is in
+ * the game's 960 x 540 screen units (--u), so it scales as one picture. */
+.ykpad { --u: calc(100cqw / 960); container-type: inline-size; position: relative; max-width: 1100px; margin: 0 auto;
+  aspect-ratio: 16 / 9; border-radius: 14px; overflow: hidden; background: #d7c5d5 url(pad-bg.svg) 0 0 / calc(480 * var(--u));
+  color: #5d4c6c; font-family: var(--display); }
+.ykpad > * { position: absolute; }
+.yk-logo { display: inline-block; width: calc(44 * var(--u)); height: calc(44 * var(--u)); border-radius: 50%; flex: none;
+  background: radial-gradient(circle, #fff 0 26%, transparent 27%),
+              conic-gradient(from 30deg, #f39cc0 0 120deg, #8fd0f0 0 240deg, #b9a3e6 0); border: calc(3 * var(--u)) solid #fff; }
+.yk-logo.small { width: calc(22 * var(--u)); height: calc(22 * var(--u)); border-width: calc(2 * var(--u)); }
+.yk-title { left: calc(-14 * var(--u)); top: calc(10 * var(--u)); width: calc(460 * var(--u)); height: calc(40 * var(--u));
+  background: #faf8fb; border-radius: 0 calc(22 * var(--u)) calc(22 * var(--u)) 0; display: flex; align-items: center;
+  gap: calc(10 * var(--u)); padding-left: calc(34 * var(--u)); font: 900 calc(23 * var(--u))/1 var(--display); color: #624160; }
+.yk-title .yk-logo { margin-top: calc(-6 * var(--u)); }
+/* the grid: white bevelled tiles, the label under each in heavy purple with a white edge */
+.yk-grid { left: calc(54 * var(--u)); top: calc(86 * var(--u)); width: calc(430 * var(--u)); height: calc(336 * var(--u));
+  display: grid; grid-template-columns: repeat(4, 1fr); grid-template-rows: repeat(3, 1fr); }
+.yk-tile { display: grid; justify-items: center; align-content: start; gap: calc(4 * var(--u)); background: none; border: 0; padding: 0;
+  cursor: pointer; font: inherit; color: inherit; position: relative; }
+.yk-tile:focus { outline: none; }
+.yk-ico { width: calc(68 * var(--u)); height: calc(60 * var(--u)); border-radius: calc(7 * var(--u));
+  background: linear-gradient(135deg, #fbf1f9 0%, #f3e2f0 45%, #efdcec 100%); border: calc(2 * var(--u)) solid #705e7f;
+  box-shadow: inset 0 0 0 calc(2 * var(--u)) #fff8, inset 0 calc(-4 * var(--u)) 0 #e6d0e4;
+  display: grid; place-items: center; }
+.yk-ico svg { width: 84%; height: 84%; display: block; }  /* the game's icons fill most of the tile */
+.yk-lab { font: 900 calc(14.5 * var(--u))/1.05 var(--display); color: #5d4c6c; paint-order: stroke fill;
+  -webkit-text-stroke: calc(4.5 * var(--u)) #fff; white-space: nowrap; margin-top: calc(6 * var(--u)); }
+.yk-bang { position: absolute; top: calc(-8 * var(--u)); left: calc(50% + 24 * var(--u)); width: calc(20 * var(--u)); height: calc(20 * var(--u));
+  border-radius: 50%; background: #e8202e; color: #fff; display: grid; place-items: center; font: 900 calc(13 * var(--u))/1 var(--display);
+  border: calc(2 * var(--u)) solid #fff; }
+.yk-tile[aria-selected="true"] .yk-ico { background: linear-gradient(135deg, #b6f5a8, #65e17c 55%, #4fd068);
+  border-color: #3d8f2c; box-shadow: inset 0 0 0 calc(2 * var(--u)) #fff9, 0 0 calc(12 * var(--u)) calc(2 * var(--u)) #b8f5a0; }
+/* the description bar under the grid */
+.yk-desc { left: calc(44 * var(--u)); top: calc(438 * var(--u)); width: calc(430 * var(--u)); height: calc(28 * var(--u));
+  background: #897692; border-radius: calc(14 * var(--u)); color: #fff; display: flex; align-items: center; gap: calc(10 * var(--u));
+  padding: 0 calc(8 * var(--u)); font: 700 calc(12.5 * var(--u))/1 var(--body); }
+.yk-desc #ykdesc { flex: 1; text-align: center; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  line-height: 1.5; }  /* room under the line: g, y and p were cut off at 1 */
+.yk-curl { width: calc(16 * var(--u)); height: calc(16 * var(--u)); border: calc(2.5 * var(--u)) solid #ffffffaa; border-radius: 50%;
+  border-right-color: transparent; }
+/* the right half: the chosen app, as the game's member panel */
+.yk-panel { left: calc(532 * var(--u)); top: calc(64 * var(--u)); width: calc(390 * var(--u)); height: calc(404 * var(--u));
+  background: #f0e0ebee; border: calc(3 * var(--u)) solid #faf8fb; border-radius: calc(16 * var(--u)); padding: calc(28 * var(--u)) calc(14 * var(--u)) calc(12 * var(--u));
+  display: flex; flex-direction: column; gap: calc(10 * var(--u)); box-shadow: 0 0 0 calc(2 * var(--u)) #c0acc7; }
+.yk-ptitle { position: absolute; left: 50%; top: calc(-11 * var(--u)); translate: -50% 0; display: flex; align-items: center;
+  gap: calc(10 * var(--u)); background: #6e5f7e; color: #fff; font: 900 calc(13 * var(--u))/1 var(--display);
+  padding: calc(6 * var(--u)) calc(22 * var(--u)); border-radius: calc(12 * var(--u)); white-space: nowrap; }
+.yk-ptitle i { width: calc(8 * var(--u)); height: calc(8 * var(--u)); border-radius: 50%; background: #fff; }
+.yk-view { position: relative; flex: 0 0 auto; aspect-ratio: 16 / 9.5; border-radius: calc(10 * var(--u)); overflow: hidden; background: #000;
+  border: calc(3 * var(--u)) solid #fff; }
+.yk-view > img { width: 100%; height: 100%; object-fit: cover; }
+.yk-view .ba { position: absolute; inset: 0; aspect-ratio: auto; border: 0; border-radius: 0; }
+.yk-view .ba .lab { font-size: calc(10 * var(--u)); top: calc(6 * var(--u)); padding: calc(4 * var(--u)) calc(6 * var(--u)); }
+.yk-view .ba .lab.l { left: calc(6 * var(--u)); } .yk-view .ba .lab.r { right: calc(6 * var(--u)); }
+.yk-view .ba .line::after { width: calc(26 * var(--u)); height: calc(26 * var(--u)); margin: calc(-13 * var(--u)) 0 0 calc(-13 * var(--u)); }
+/* the hints along the bottom */
+.yk-bar { left: 0; right: 0; bottom: 0; height: calc(46 * var(--u)); background: linear-gradient(#78468b, #503264); border-top: calc(3 * var(--u)) solid #c7b1c8;
+  display: flex; align-items: center; justify-content: space-between; padding: 0 calc(24 * var(--u)); color: #fff;
+  font: 800 calc(13 * var(--u))/1 var(--display); }
+.yk-today { display: flex; align-items: center; gap: calc(10 * var(--u)); background: #4a2a5e; border-radius: calc(14 * var(--u));
+  padding: calc(5 * var(--u)) calc(16 * var(--u)) calc(5 * var(--u)) calc(6 * var(--u)); }
+.yk-today b { margin-left: calc(14 * var(--u)); font-size: calc(15 * var(--u)); }
+.yk-hints { display: flex; gap: calc(22 * var(--u)); }
+.yk-hints span { display: flex; align-items: center; gap: calc(6 * var(--u)); }
+.yk-hints i { font-style: normal; min-width: calc(18 * var(--u)); height: calc(18 * var(--u)); border-radius: calc(9 * var(--u));
+  background: #faf8fb; color: #503264; display: grid; place-items: center; font: 900 calc(10 * var(--u))/1 var(--display); padding: 0 calc(3 * var(--u)); }
+/* the panel's tabs: an app's views, as the game's screens switch sections with L and R */
+.yk-tabs { display: flex; flex-wrap: wrap; gap: calc(5 * var(--u)); }
+.yk-tabs[hidden] { display: none; }
+.yk-tabs button { font: 800 calc(11 * var(--u))/1 var(--display); color: #5d4c6c; background: #faf8fb;
+  border: calc(2 * var(--u)) solid #c0acc7; border-radius: calc(10 * var(--u)); padding: calc(5 * var(--u)) calc(10 * var(--u));
+  cursor: pointer; }
+.yk-tabs button[aria-pressed="true"] { background: #65e17c; border-color: #3d8f2c; color: #1f4a14; }
+.yk-tabs button:hover { border-color: #705e7f; }
+.yk-cap { margin: 0; font: 700 calc(12 * var(--u))/1.4 var(--display); color: #5d4c6c; }
+/* the panel's Open: as A in the game, it goes to the app's full page */
+.yk-open { align-self: flex-end; margin-top: auto; display: inline-flex; align-items: center; gap: calc(8 * var(--u));
+  background: #6e5f7e; color: #fff; text-decoration: none; font: 900 calc(13 * var(--u))/1 var(--display);
+  padding: calc(7 * var(--u)) calc(16 * var(--u)) calc(7 * var(--u)) calc(8 * var(--u)); border-radius: calc(14 * var(--u)); }
+.yk-open i { font-style: normal; width: calc(18 * var(--u)); height: calc(18 * var(--u)); border-radius: 50%; background: #faf8fb;
+  color: #503264; display: grid; place-items: center; font-size: calc(10 * var(--u)); }
+.yk-open:hover { background: #3d8f2c; }
+/* What's new: the release's headlines as a list in the picture box, in the Pad's own colours */
+.yk-notes { position: absolute; inset: 0; background: #faf8fb; padding: calc(12 * var(--u)) calc(14 * var(--u));
+  display: flex; flex-direction: column; gap: calc(6 * var(--u)); overflow: hidden; }
+.yk-notes b { font: 900 calc(13 * var(--u))/1.2 var(--display); color: #624160; }
+.yk-notes ul { margin: 0; padding: 0; list-style: none; display: grid; gap: calc(5 * var(--u)); }
+.yk-notes li { position: relative; padding-left: calc(14 * var(--u)); font: 700 calc(11 * var(--u))/1.3 var(--body); color: #5d4c6c; }
+.yk-notes li::before { content: ""; position: absolute; left: 0; top: calc(4 * var(--u)); width: calc(7 * var(--u));
+  height: calc(7 * var(--u)); border-radius: 50%; background: #65e17c; box-shadow: 0 0 0 calc(1.5 * var(--u)) #3d8f2c; }
+.more { margin: 16px auto 0; max-width: 1100px; font-size: .9rem; color: var(--ink-2); text-align: center; }
+
+/* the launcher and the overlay: big pictures, two by two */
+.gallery { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 20px; }
+.gallery figure { margin: 0; }
+.gallery img { width: 100%; border-radius: 12px; border: 1px solid var(--line); }
+.gallery figcaption { font-size: .88rem; color: var(--ink-2); margin: 8px 2px 0; }
+.gallery figcaption b { color: var(--ink); font-family: var(--display); }
+
+/* how it works, the numbers */
+.about { display: grid; grid-template-columns: minmax(0, 1.3fr) minmax(0, 1fr); gap: 32px; }
+.about p { margin: 0 0 12px; }
+.facts { margin: 0; display: grid; grid-template-columns: auto minmax(0, 1fr); font-size: .9rem; background: var(--card);
+  border: 1px solid var(--line); border-radius: 14px; padding: 6px 16px; align-self: start; }
+.facts dt, .facts dd { margin: 0; padding: 8px 0; border-top: 1px solid var(--line); }
+.facts dt:first-of-type, .facts dt:first-of-type + dd { border-top: 0; }
+.facts dt { color: var(--ink-2); padding-right: 16px; }
+.facts dd { font-weight: 700; }
+
+/* more: a plain list of links, like a document's index */
+.links { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 0 30px; margin: 0; padding: 0; list-style: none; }
+.links li { border-top: 1px solid var(--line); padding: 12px 0; }
+.links a { font: 800 1rem/1.3 var(--display); text-decoration: none; color: var(--ink); }
+.links a:hover { color: var(--accent-ink); text-decoration: underline; }
+.links span { display: block; font-size: .85rem; color: var(--ink-2); }
+
+.video { position: relative; aspect-ratio: 16 / 9; border-radius: 14px; overflow: hidden; background: #000 center / cover; border: 1px solid var(--line); }
+.video iframe { position: absolute; inset: 0; width: 100%; height: 100%; border: 0; }
+/* the video loads only when played: until then, its picture and YouTube's play button (no player, no focus taken) */
+.video .play { position: absolute; inset: 0; width: 100%; height: 100%; border: 0; padding: 0; background: #0003; cursor: pointer;
+  display: grid; place-items: center; }
+.video .play:hover { background: #0001; }
+.video .play svg { width: 76px; height: 54px; filter: drop-shadow(0 2px 6px #0007); }
+.vcap { font-size: .88rem; color: var(--ink-2); margin: 8px 2px 0; }
+
+.ai { margin: 46px 0 0; font-size: .86rem; color: var(--ink-2); max-width: 80ch; }
+footer { margin-top: 60px; border-top: 1px solid var(--line); background: var(--soft); font-size: .84rem; color: var(--ink-2); }
+footer .wrap { padding-top: 22px; padding-bottom: 28px; display: flex; gap: 16px; align-items: center; }
+footer img { width: 34px; height: 34px; border-radius: 9px; }
+
+@media (max-width: 900px) {
+  .nav { display: none; }
+  .tools { margin-left: auto; }
+  .hero .wrap, .about, .check { grid-template-columns: minmax(0, 1fr); }
+  .gallery, .links { grid-template-columns: minmax(0, 1fr); }
+}
+@media (prefers-reduced-motion: reduce) { html { scroll-behavior: auto; } }
 </style>
 </head>
 <body>
 
-<header class="hero">
-  <nav class="sitebar" aria-label="Site">
-    <a class="brand" href="./"><img src="img/icon-192.png" alt="" width="36" height="36">YW4 Recomp</a>
-    <span class="sitebtns"><a class="btn gh" href="https://github.com/ILFforever/YW4Recomp"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 0c4.42 0 8 3.58 8 8a8.013 8.013 0 0 1-5.45 7.59c-.4.08-.55-.17-.55-.38 0-.27.01-1.13.01-2.2 0-.75-.25-1.23-.54-1.48 1.78-.2 3.65-.88 3.65-3.95 0-.88-.31-1.59-.82-2.15.08-.2.36-1.02-.08-2.12 0 0-.67-.22-2.2.82-.64-.18-1.32-.27-2-.27-.68 0-1.36.09-2 .27-1.53-1.03-2.2-.82-2.2-.82-.44 1.1-.16 1.92-.08 2.12-.51.56-.82 1.28-.82 2.15 0 3.06 1.86 3.75 3.64 3.95-.23.2-.44.55-.51 1.07-.46.21-1.61.55-2.33-.66-.15-.24-.6-.83-1.23-.82-.67.01-.27.38.01.53.34.19.73.9.82 1.13.16.45.68 1.31 2.69.94 0 .67.01 1.3.01 1.49 0 .21-.15.45-.55.38A7.995 7.995 0 0 1 0 8c0-4.42 3.58-8 8-8Z"/></svg>Project on GitHub</a><a class="btn coffee" href="https://buymeacoffee.com/ilfforever" aria-label="Buy me a coffee"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M2.5 5.5h8.5v4.5a3.5 3.5 0 0 1-3.5 3.5h-1.5a3.5 3.5 0 0 1-3.5-3.5Z"/><path d="M11 6.5h1a2 2 0 0 1 0 4h-1"/><path d="M5 1.5c-.6.8.6 1.4 0 2.2M8 1.5c-.6.8.6 1.4 0 2.2"/></svg><span class="lbl">Buy me a coffee</span></a></span>
-  </nav>
-  <div class="hero-inner">
-    <div>
-      <span class="eyebrow">Fan static recompilation · version 1.4.0</span>
-      <h1>YW4 Recomp</h1>
-      <p><i>Yo-kai Watch 4++</i> for the Nintendo Switch, translated into a native Windows and Linux program, with a renderer
-        that is gradually becoming its own.</p>
-      <ul class="chips">
-        <li>Up to 4K</li><li>21:9 and 32:9</li><li>Soft and contact shadows</li><li>TAA · SMAA</li>
-        <li>DLSS · FSR</li><li>Frame generation</li><li>60 to 144 fps</li>
-      </ul>
-      <div class="links">
-        <a class="btn" href="changelog/#download">Download</a>
-        <a class="btn ghost" href="compare/">See the comparisons</a>
-        <a class="btn ghost" href="showcases/">Showcases</a>
-        <a class="btn ghost" href="launcher/">The launcher</a>
-        <a class="btn ghost" href="overlay/">The overlay</a>
-        <a class="btn ghost" href="building/">Building from source</a>
-      </div>
+<header class="site-top">
+  <div class="wrap">
+    <a class="brand" href="./"><img src="img/icon-192.png" alt="" width="34" height="34">YW4 Recomp</a>
+    <nav class="nav" aria-label="Pages">
+      <a href="changelog/">What's new</a>
+      <a href="compare/">Comparisons</a>
+      <a href="showcases/">Showcases</a>
+      <a href="launcher/">Launcher</a>
+      <a href="overlay/">Overlay</a>
+      <a href="building/">Build it</a>
+    </nav>
+    <div class="tools">
+      <button class="iconbtn" id="theme" type="button" aria-label="Dark mode"><svg class="moon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M20 14.5A8 8 0 0 1 9.5 4a8 8 0 1 0 10.5 10.5z"/></svg><svg class="sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="4.2"/><path d="M12 2.5v2.2M12 19.3v2.2M2.5 12h2.2M19.3 12h2.2M5.3 5.3l1.6 1.6M17.1 17.1l1.6 1.6M5.3 18.7l1.6-1.6M17.1 6.9l1.6-1.6"/></svg></button>
+      <a class="iconbtn" href="https://github.com/ILFforever/YW4Recomp" aria-label="The project on GitHub"><svg viewBox="0 0 16 16" fill="currentColor"><path d="M8 0c4.42 0 8 3.58 8 8a8.013 8.013 0 0 1-5.45 7.59c-.4.08-.55-.17-.55-.38 0-.27.01-1.13.01-2.2 0-.75-.25-1.23-.54-1.48 1.78-.2 3.65-.88 3.65-3.95 0-.88-.31-1.59-.82-2.15.08-.2.36-1.02-.08-2.12 0 0-.67-.22-2.2.82-.64-.18-1.32-.27-2-.27-.68 0-1.36.09-2 .27-1.53-1.03-2.2-.82-2.2-.82-.44 1.1-.16 1.92-.08 2.12-.51.56-.82 1.28-.82 2.15 0 3.06 1.86 3.75 3.64 3.95-.23.2-.44.55-.51 1.07-.46.21-1.61.55-2.33-.66-.15-.24-.6-.83-1.23-.82-.67.01-.27.38.01.53.34.19.73.9.82 1.13.16.45.68 1.31 2.69.94 0 .67.01 1.3.01 1.49 0 .21-.15.45-.55.38A7.995 7.995 0 0 1 0 8c0-4.42 3.58-8 8-8Z"/></svg></a>
+      <a class="coffee" href="https://buymeacoffee.com/ilfforever" aria-label="Buy me a coffee"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M2.5 5.5h8.5v4.5a3.5 3.5 0 0 1-3.5 3.5h-1.5a3.5 3.5 0 0 1-3.5-3.5Z"/><path d="M11 6.5h1a2 2 0 0 1 0 4h-1"/><path d="M5 1.5c-.6.8.6 1.4 0 2.2M8 1.5c-.6.8.6 1.4 0 2.2"/></svg><span class="lbl">Buy me a coffee</span></a>
     </div>
-    <figure class="shot slides" aria-roledescription="slideshow" aria-label="Screenshots at 3840×2160">
-      <div class="frames">
-        <img src="compare/img/hero-forest-4k.jpg" class="on" alt="Mystic Grove, a bamboo forest by a river, at 3840×2160" data-cap="Mystic Grove · a bamboo forest by the river">
-        <img src="compare/img/hero-yokaiworld-4k.jpg" loading="lazy" alt="A Yo-kai World street under cherry blossoms, at 3840×2160" data-cap="Yo-kai World · a street under the cherry blossoms">
-        <img src="compare/img/hero-schoolfront-4k.jpg" loading="lazy" alt="The front of the school with its statue, at 3840×2160" data-cap="Uptown Springdale · in front of the school">
-        <img src="compare/img/hero-past-4k.jpg" loading="lazy" alt="A snowy shopping street in the past at evening, at 3840×2160" data-cap="Springdale in the past · a snowy evening street">
-        <img src="compare/img/hero-adams-4k.jpg" loading="lazy" alt="The street in front of the Adams house, at 3840×2160" data-cap="Uptown Springdale · in front of the Adams house">
-        <img src="compare/img/hero-school-4k.jpg" loading="lazy" alt="The schoolyard on a sunny day, at 3840×2160" data-cap="Uptown Springdale · the schoolyard">
-      </div>
-      <figcaption><span class="cap">Mystic Grove · a bamboo forest by the river</span> · 4K high</figcaption>
-    </figure>
   </div>
 </header>
 
-<main>
-  <section class="two">
-    <div class="panel">
-      <div class="bar"><span class="q">!</span><h2>What it is</h2></div>
-      <div class="in">
-        <p>A static recompiler in the style of <a href="https://github.com/N64Recomp/N64Recomp">N64Recomp</a>: the
-          game's ARM code is translated to C ahead of time and built into a Windows or Linux program, with the Switch's
-          system services and its graphics API reimplemented on the PC (Vulkan).</p>
-        <p>Unlike an emulator, which replays the game's GPU commands as they are, the port can replace the game's
-          renderer piece by piece. That is how it gets higher resolutions, wider screens, better shadows and DLSS and
-          FSR upscaling.</p>
-        <p class="note"><b>Bring your own game.</b> Nothing from the game is in the project. You need files from your
-          own copy with the last update, 2.2.0.</p>
+<section class="hero">
+  <div class="wrap">
+    <div>
+      <h1>YW4 Recomp</h1>
+      <p class="what">A fan-made PC port of <i>Yo-kai Watch 4++</i>, for Windows and Linux.</p>
+      <p>The Switch game's code, translated and rebuilt to run natively, with a renderer that is gradually becoming its own:
+        up to 4K, ultrawide, better shadows, DLSS and FSR. <b>You bring your own copy of the game.</b></p>
+      <div class="dl">
+        <a class="btn main" href="changelog/#download">
+          <svg viewBox="0 0 24 24" fill="currentColor"><path d="M2 4.6 10 3.5v7.8H2zM11 3.4 22 2v9.3H11zM2 12.4h8v7.8l-8-1.1zM11 12.4h11V22l-11-1.5z"/></svg>
+          Download for Windows</a>
+        <a class="btn linux" href="changelog/#download">
+          <img src="img/tux.svg" alt="" width="22" height="26">
+          Download for Linux <small>AppImage</small></a>
+      </div>
+      <p class="status"><b>Beta</b> Version 1.4.0. Playable, but nobody has finished the game on it yet.
+        <a href="https://github.com/ILFforever/YW4Recomp/blob/master/docs/known-issues.md">Known issues</a></p>
+    </div>
+    <div>
+      <div class="ba" id="ba">
+        <img class="after" src="compare/img/hero-forest-4k.jpg" alt="YW4 Recomp at 3840×2160">
+        <img class="before" src="compare/img/hero-forest-switch.jpg" alt="The Switch at 1600×900">
+        <span class="lab l">Switch · 1600×900</span><span class="lab r">YW4 Recomp · 4K</span>
+        <div class="line"></div>
+        <input type="range" min="0" max="100" value="50" aria-label="Move the line between the Switch and YW4 Recomp">
+        <button class="fs" type="button" aria-label="Full screen" hidden>
+          <svg class="in" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/></svg>
+          <svg class="out" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 4v5H4M15 4v5h5M9 20v-5H4M15 20v-5h5"/></svg>
+        </button>
+      </div>
+      <div class="cap">
+        <span>Drag the line: the Switch on the left, the PC port on the right.</span>
+        <span class="scenes" role="group" aria-label="Scene">
+          <button type="button" data-s="forest" aria-pressed="true">Bamboo forest</button>
+          <button type="button" data-s="yokaiworld" aria-pressed="false">Yo-kai World</button>
+          <button type="button" data-s="schoolfront" aria-pressed="false">School</button>
+          <button type="button" data-s="past" aria-pressed="false">Springdale, the past</button>
+        </span>
       </div>
     </div>
-    <div class="panel">
-      <div class="bar"><span class="q">!</span><h2>At a glance</h2></div>
+  </div>
+</section>
+
+<section class="sec">
+  <div class="wrap">
+    <div class="check">
+      <div><h3>You need</h3><p>Your own copy of <i>Yo-kai Watch 4++</i> with the 2.2.0 update (NSP, XCI or extracted folders,
+        and your keys). Nothing from the game comes with the project.</p></div>
+      <div><h3>Windows</h3><ul><li>64-bit (x86-64)</li><li>A graphics card with Vulkan 1.3</li><li>Installer or portable zip</li></ul></div>
+      <div><h3>Linux</h3><ul><li>x86-64, Mesa or NVIDIA driver</li><li>A graphics card with Vulkan 1.3</li><li>AppImage, or build from source</li></ul></div>
+    </div>
+  </div>
+</section>
+
+<section class="sec">
+  <div class="wrap">
+    <div class="title"><h2>Features</h2><p>What the PC version adds, as apps on the Yo-kai Pad. Point at one to see it, click to open it.
+      <a href="compare/">All the comparisons</a></p></div>
+    <div class="ykpad" id="ykpad">
+      <div class="yk-title"><span class="yk-logo" aria-hidden="true"></span>Yo-kai Pad</div>
+      <div class="yk-grid" id="ykgrid" role="listbox" aria-label="Features"></div>
+      <div class="yk-desc"><span class="yk-logo small" aria-hidden="true"></span><span id="ykdesc"></span><span class="yk-curl" aria-hidden="true"></span></div>
+      <div class="yk-panel">
+        <div class="yk-ptitle"><i></i><span id="ykptitle"></span><i></i></div>
+        <div class="yk-tabs" id="yktabs" role="group" aria-label="Views"></div>
+        <div class="yk-view" id="ykview"></div>
+        <p class="yk-cap" id="ykcap"></p>
+        <a class="yk-open" id="ykopen" href="#"><i>A</i>Open</a>
+      </div>
+      <div class="yk-bar"><span class="yk-today"><span class="yk-logo small" aria-hidden="true"></span>Today's build <b>1.4.0</b></span>
+        <span class="yk-hints"><span><i>✥</i>Move</span><span><i>A</i>Open</span></span></div>
+    </div>
+  </div>
+</section>
+
+<section class="sec">
+  <div class="wrap">
+    <div class="title"><h2>On a low-end laptop</h2><p>An ASUS Zenbook with integrated Radeon graphics, next to an emulator</p></div>
+    <div class="video" id="video" style="background-image:url(compare/img/hero-forest-4k.jpg)">
+      <button class="play" type="button" data-yt="HfCrAkMDOzs" aria-label="Play the video: YW4 Recomp against Eden on a low-end laptop">
+        <svg viewBox="0 0 68 48" aria-hidden="true"><path d="M66.5 7.7a8.5 8.5 0 0 0-6-6C55.3.3 34 .3 34 .3S12.7.3 7.4 1.7a8.5 8.5 0 0 0-6 6C0 13 0 24 0 24s0 11 1.4 16.3a8.5 8.5 0 0 0 6 6C12.7 47.7 34 47.7 34 47.7s21.3 0 26.6-1.4a8.5 8.5 0 0 0 6-6C68 35 68 24 68 24s0-11-1.5-16.3z" fill="#f00"/><path d="M27 34V14l18 10z" fill="#fff"/></svg>
+      </button>
+    </div>
+    <p class="vcap">About 35-40 frames/s with YW4 Recomp, 22-30 with the Eden emulator (Ryzen 5 7530U). <a href="showcases/">More showcases</a></p>
+  </div>
+</section>
+
+<section class="sec">
+  <div class="wrap">
+    <div class="title"><h2>How it works</h2><p>Not an emulator: the game itself, rebuilt for the PC</p></div>
+    <div class="about">
+      <div>
+        <p>A static recompiler in the style of <a href="https://github.com/N64Recomp/N64Recomp">N64Recomp</a>: the game's ARM code
+          is translated to C ahead of time and built into a Windows or Linux program, with the Switch's system services and
+          its graphics API reimplemented on the PC (Vulkan).</p>
+        <p>Unlike an emulator, which replays the game's GPU commands as they are, the port can replace the game's renderer
+          piece by piece. That is how it gets higher resolutions, wider screens, better shadows and DLSS and FSR upscaling.</p>
+      </div>
       <dl class="facts">
-        <dt>Version</dt><dd>1.4.0</dd>
+        <dt>Version</dt><dd>1.4.0 (beta)</dd>
         <dt>Platforms</dt><dd>Windows and Linux, x86-64</dd>
         <dt>Graphics</dt><dd>Vulkan</dd>
         <dt>Game version</dt><dd>Update 2.2.0</dd>
         <dt>CPU, busy street</dt><dd>111% of a core (emulator: 210%)</dd>
-        <dt>Memory</dt><dd>3.9 GB (emulator: ~7 GB, private + mapped)</dd>
+        <dt>Memory</dt><dd>3.9 GB (emulator: about 7 GB)</dd>
         <dt>Licence</dt><dd>MIT</dd>
       </dl>
     </div>
-  </section>
+  </div>
+</section>
 
-  <section class="panel">
-    <div class="bar"><span class="q">!</span><h2>What the PC version adds</h2></div>
-    <ul class="features">
-      <li><b>Resolution</b><span>1600×900 (the Switch's) up to 3840×2160</span></li>
-      <li><b>Aspect ratio</b><span>16:10, 21:9 and 32:9, the menus kept 16:9 in the middle</span></li>
-      <li><b>Shadows</b><span>Maps up to 4096, soft shadows (PCSS), contact shadows</span></li>
-      <li><b>Anti-aliasing</b><span>FXAA, SMAA and TAA, DLSS, FSR, with five levels of sharpening</span></li>
-      <li><b>Texture filtering</b><span>Anisotropic up to ×16</span></li>
-      <li><b>Frame rate</b><span>30, 60, 120, 144 or unlimited</span></li>
-      <li><b>Upscaling</b><span>NVIDIA DLSS (3.10.9.16) and AMD FSR (3.1)</span></li>
-      <li><b>Frame generation</b><span>NVIDIA DLSS (2.14.16) and AMD FSR (3.1 or 4)</span></li>
-      <li><b>Controls</b><span>Keyboard and mouse, Xbox, PlayStation and Joy-Cons, controls rebindable in settings</span></li>
-      <li><b>Mods</b><span>The English translation patch and other romfs mods (code patches in exefs don't work); mods that change the same file are merged</span></li>
-      <li><b>In-game overlay</b><span>Steam inspired control overlay: where you can find Graphical settings, Keybinds and more</span></li>
-      <li><b>Shortcut wheel</b><span>Hold 1 and point with the mouse to use any of the field's eight shortcuts</span></li>
-      <li><b>Cheats</b><span>Unlimited Crank-a-kai, switched on in the overlay while playing</span></li>
-      <li><b>Themes</b><span>Yo-kai inspired colours for the launcher and the overlay</span></li>
+<section class="sec">
+  <div class="wrap">
+    <div class="title"><h2>More</h2></div>
+    <ul class="links">
+      <li><a href="changelog/">What's new</a><span>Every release, and the downloads</span></li>
+      <li><a href="compare/">Comparisons</a><span>Before and after, setting by setting</span></li>
+      <li><a href="launcher-overlay/">The launcher and the overlay</a><span>Pictures of both, and their full guides</span></li>
+      <li><a href="showcases/">Showcases</a><span>Videos of the port running</span></li>
+      <li><a href="https://github.com/ILFforever/YW4Recomp/blob/master/docs/known-issues.md">Known issues</a><span>What is missing or wrong</span></li>
+      <li><a href="https://github.com/ILFforever/YW4Recomp/tree/master/docs/decisions">Decision records</a><span>Why each part works the way it does</span></li>
     </ul>
-  </section>
-
-  <section class="panel">
-    <div class="bar"><span class="q">!</span><h2>Showcases</h2></div>
-    <div class="in">
-      <iframe src="https://www.youtube-nocookie.com/embed/HfCrAkMDOzs" title="YW4 Recomp vs Eden comparison on Potato PC" loading="lazy" referrerpolicy="strict-origin-when-cross-origin"
-        style="display:block;width:100%;aspect-ratio:16/9;border:0;border-radius:10px"
-        allow="accelerometer; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share" allowfullscreen></iframe>
-      <p>On an ASUS Zenbook (Ryzen 5 7530U, integrated Radeon graphics): about 35-40 frames/s with YW4 Recomp, 22-30 with the Eden emulator. <a href="showcases/">More showcases</a></p>
-    </div>
-  </section>
-
-  <section class="panel">
-    <div class="bar"><span class="q">!</span><h2>The launcher and the overlay</h2></div>
-    <div class="pics">
-      <figure class="shot">
-        <img src="screenshots/99-launcher-play.jpg" loading="lazy" alt="The launcher's Play screen: the game's icon, Play, what's new in this version, screenshots, mods and DLC">
-        <figcaption>Native PC launcher: Build, play, update and manage your game, all in one place. <a href="launcher/">More on the launcher</a></figcaption>
-      </figure>
-      <figure class="shot">
-        <img src="screenshots/97-overlay-settings.jpg" loading="lazy" alt="The in-game overlay's Settings: the display section with window mode, resolution, aspect ratio and frame rate">
-        <figcaption>The in-game overlay: Steam inspired control overlay: where you can find Graphical settings, Keybinds and more, built with full mouse and controller support in mind. <a href="overlay/">More on the overlay</a></figcaption>
-      </figure>
-      <figure class="shot">
-        <img src="screenshots/97-overlay-preview.jpg" loading="lazy" alt="Preview: the game running in the schoolyard under a bar with the shadow settings and the frame rate">
-        <figcaption>Preview: adjust game settings and see changes live.</figcaption>
-      </figure>
-      <figure class="shot">
-        <img src="screenshots/76-controls-quick-look-controller.jpg" loading="lazy" alt="The controls quick look with a DualSense: each button of the controller joined to what it does while exploring">
-        <figcaption>Controls quick look: hold Back on a controller, or press F2, and a card shows what each button does.</figcaption>
-      </figure>
-      <figure class="shot">
-        <img src="screenshots/98-overlay-themes.jpg" loading="lazy" alt="The overlay in four themes: Jibanyan, Komasan, Shmoopie and Whisper">
-        <figcaption>Themes: Inspired by popular characters like Jibanyan, Komasan, Shmoopie, Whisper and more, applied across the Launcher and overlay.</figcaption>
-      </figure>
-    </div>
-  </section>
-
-
-  <section class="panel">
-    <div class="bar"><span class="q">!</span><h2>Read more</h2></div>
-    <div class="go">
-      <a href="changelog/"><b>What's new</b><span>Download the launcher, and what changed in every release</span></a>
-      <a href="compare/"><b>Comparisons</b><span>Before and after sliders for each improvement</span></a>
-      <a href="showcases/"><b>Showcases</b><span>Videos of the game running</span></a>
-      <a href="launcher/"><b>The launcher</b><span>From your game files to Play, step by step</span></a>
-      <a href="overlay/"><b>The in-game overlay</b><span>Settings, Preview, Controls, the default keys</span></a>
-      <a href="https://github.com/ILFforever/YW4Recomp#features"><b>Features</b><span>Every setting in detail, with measurements</span></a>
-      <a href="https://github.com/ILFforever/YW4Recomp/blob/master/docs/known-issues.md"><b>Known issues</b><span>What is missing or wrong</span></a>
-      <a href="https://github.com/ILFforever/YW4Recomp/blob/master/docs/progress.md"><b>Progress</b><span>How it got here, step by step</span></a>
-      <a href="https://github.com/ILFforever/YW4Recomp/tree/master/docs/decisions"><b>Decision records</b><span>Why each part works the way it does</span></a>
-    </div>
-  </section>
-
-  <section class="panel">
-    <div class="bar"><span class="q">!</span><h2>Built with AI</h2></div>
-    <div class="in">
-      <p>Claude (Anthropic's model, used through Claude Code) wrote most of this project: the recompiler, the runtime,
-        the reverse engineering notes and the docs. A person decides what to work on, plays and tests every build,
-        compares it against the real game and reviews the changes.</p>
-    </div>
-  </section>
-</main>
+    <p class="ai"><b>Built with AI.</b> Claude (Anthropic's model, through Claude Code) wrote most of this project: the recompiler,
+      the runtime, the reverse engineering notes and the docs. A person decides what to work on, plays and tests every build,
+      compares it against the real game and reviews the changes.</p>
+  </div>
+</section>
 
 <footer>
-  <div class="in2">
+  <div class="wrap">
+    <img src="img/icon-192.png" alt="">
     <span>A fan project. Not affiliated with or endorsed by LEVEL-5 or Nintendo; <i>Yo-kai Watch</i> belongs to its owners.
-      Screenshots are from the maintainer's own copy of the game, running in the recompiled port.</span>
-    <span><a href="https://github.com/ILFforever/YW4Recomp">github.com/ILFforever/YW4Recomp</a></span>
+      Screenshots are from the maintainer's own copy of the game, running in the recompiled port. Tux by Larry Ewing, made with The GIMP.
+      <a href="https://github.com/ILFforever/YW4Recomp">github.com/ILFforever/YW4Recomp</a></span>
   </div>
 </footer>
-<script>
-// The header's slideshow: the next picture every 5 s (once it has loaded), paused while the tab is hidden;
-// it stays on the first one when the reader asks for less motion.
-(() => {
-  const imgs = [...document.querySelectorAll('.slides .frames img')], cap = document.querySelector('.slides .cap');
-  if (imgs.length < 2 || matchMedia('(prefers-reduced-motion: reduce)').matches) return;
-  for (const img of imgs) img.loading = 'eager';  // fetch the rest now so each fade has its picture
-  let i = 0;
-  setInterval(() => {
-    if (document.hidden) return;
-    const n = (i + 1) % imgs.length;
-    if (!imgs[n].complete || !imgs[n].naturalWidth) return;
-    imgs[i].classList.remove('on'); imgs[n].classList.add('on'); cap.textContent = imgs[n].dataset.cap; i = n;
-  }, 5000);
-})();
 
+<script>
+/* the theme switch: the other theme than the one showing, kept for next time */
+(() => {
+  const btn = document.getElementById('theme'), root = document.documentElement;
+  const dark = () => root.dataset.theme ? root.dataset.theme === 'dark' : matchMedia('(prefers-color-scheme: dark)').matches;
+  const label = () => btn.setAttribute('aria-label', dark() ? 'Light mode' : 'Dark mode');
+  label();
+  btn.addEventListener('click', () => {
+    root.dataset.theme = dark() ? 'light' : 'dark';
+    try { localStorage.setItem('yw4-theme', root.dataset.theme); } catch (e) {}
+    label();
+  });
+})();
+/* Auto-cycling (the hero's scenes, the Pad's tabs): the next one every CYCLE_MS, held while the mouse is over the
+ * area or something in it has the keyboard focus, and never with reduced motion or a hidden tab. A pick by hand
+ * starts the wait again. */
+const CYCLE_MS = 5000;
+function autoCycle(area, next) {
+  if (matchMedia('(prefers-reduced-motion: reduce)').matches) return () => {};
+  let over = false, timer = 0;
+  area.addEventListener('pointerenter', e => { if (e.pointerType === 'mouse') over = true; });
+  area.addEventListener('pointerleave', () => { over = false; });
+  const restart = () => {
+    clearInterval(timer);
+    timer = setInterval(() => {
+      if (!over && !document.hidden && !area.contains(document.activeElement)) next();
+    }, CYCLE_MS);
+  };
+  restart();
+  return restart;
+}
+/* the video: YouTube's player put in on the first click, playing at once */
+(() => {
+  const b = document.querySelector('#video .play');
+  b.addEventListener('click', () => {
+    const f = document.createElement('iframe');
+    f.src = `https://www.youtube-nocookie.com/embed/${b.dataset.yt}?autoplay=1`;
+    f.title = 'YW4 Recomp against Eden on a low-end laptop';
+    f.allow = 'accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share';
+    f.allowFullscreen = true;
+    b.replaceWith(f);
+  });
+})();
+/* the before / after: the range input moves the line; the scene buttons swap the pair, and cycle on their own */
+(() => {
+  const ba = document.getElementById('ba'), range = ba.querySelector('input');
+  const scenes = [...document.querySelectorAll('.scenes button')];
+  const set = v => ba.style.setProperty('--pos', v + '%');
+  range.addEventListener('input', () => set(range.value));
+  let cur = 0;
+  function pick(i) {
+    const b = scenes[i], s = b.dataset.s;
+    cur = i;
+    ba.querySelector('.after').src = `compare/img/hero-${s}-4k.jpg`;
+    ba.querySelector('.before').src = `compare/img/hero-${s}-switch.jpg`;
+    for (const o of scenes) o.setAttribute('aria-pressed', o === b ? 'true' : 'false');
+  }
+  for (const s of document.querySelectorAll('.scenes button')) {  /* the next pictures, so a change shows at once */
+    new Image().src = `compare/img/hero-${s.dataset.s}-4k.jpg`;
+    new Image().src = `compare/img/hero-${s.dataset.s}-switch.jpg`;
+  }
+  const restart = autoCycle(ba.closest('.hero .wrap > div:last-child'), () => pick((cur + 1) % scenes.length));
+  for (const [i, b] of scenes.entries()) b.addEventListener('click', () => { pick(i); restart(); });
+  /* full screen: only where the browser can do it for an element (not iPhone Safari) */
+  const fs = ba.querySelector('.fs');
+  if (document.fullscreenEnabled) {
+    fs.hidden = false;
+    fs.addEventListener('click', () => {
+      if (document.fullscreenElement) document.exitFullscreen();
+      else ba.requestFullscreen().then(() => range.focus()).catch(() => {});
+    });
+    document.addEventListener('fullscreenchange', () =>
+      fs.setAttribute('aria-label', document.fullscreenElement === ba ? 'Leave full screen' : 'Full screen'));
+  }
+})();
+</script>
+<script>
+/* the Yo-kai Pad: one page of twelve apps. Pointing at a tile (or the arrow keys) chooses it, as in the game with the mouse:
+ * the bar under the grid says what it is, the panel on the right shows it (a Switch / PC pair as a slider). */
+(() => {
+  const C = 'compare/img/', S = 'screenshots/';
+  const apps = [
+    { name: "4K · Wide", go: "compare/#resolution", icon: "<svg viewBox=\"0 0 48 48\" aria-hidden=\"true\"><defs><clipPath id=\"yc0\"><path d=\"M0 0H48L0 48z\"/></clipPath><g id=\"ys0\"><rect x=\"4\" y=\"8\" width=\"40\" height=\"28\" rx=\"5\"/><rect x=\"12\" y=\"35\" width=\"5\" height=\"6\" rx=\"1.5\"/><rect x=\"31\" y=\"35\" width=\"5\" height=\"6\" rx=\"1.5\"/></g></defs><use href=\"#ys0\" fill=\"#6c78f2\"/><use href=\"#ys0\" fill=\"#4b55cf\" clip-path=\"url(#yc0)\"/><rect x=\"9\" y=\"13\" width=\"30\" height=\"18\" rx=\"2.5\" fill=\"#ffffff\" opacity=\".35\"/><path d=\"M34 14.5l1.4 3 3 1.4-3 1.4-1.4 3-1.4-3-3-1.4 3-1.4z\" fill=\"#ffffff\"/></svg>", d: "Up to 3840×2160, and 16:10, 21:9 or 32:9 screens", views: [
+        { tab: "4K close-up", sw: C + "res-switch-shop.png", pc: C + "res-4k-shop.png", cap: "A shop sign, the Switch’s 1600×900 against 4K: the lettering and the edges come out crisp." },
+        { tab: "4K whole frame", sw: C + "res-switch.jpg", pc: C + "res-4k.jpg", cap: "The whole street at 4K; the menus and text stay the same size as on the Switch." },
+        { tab: "21:9", img: S + "23-ultrawide-21-9.jpg", cap: "Exploring the town at 21:9: more of the street at both sides, nothing stretched." },
+        { tab: "Menus and battles", img: S + "84-ultrawide-menus-battles.jpg", cap: "The menus stay 16:9 in the middle so nothing is cut; battles fill the whole width." },
+        { tab: "Yo-kai Pad", img: C + "55-ultrawide-yokai-pad.jpg", cap: "The Yo-kai Pad at 21:9: the menu stays in the middle, the backdrop fills the sides." } ] },
+    { name: "Compare", go: "compare/", icon: "<svg viewBox=\"0 0 48 48\" aria-hidden=\"true\"><defs><clipPath id=\"yc1\"><path d=\"M0 0H48L0 48z\"/></clipPath><g id=\"ys1\"><rect x=\"3\" y=\"9\" width=\"42\" height=\"30\" rx=\"5\"/></g></defs><use href=\"#ys1\" fill=\"#43b8cb\"/><use href=\"#ys1\" fill=\"#23899b\" clip-path=\"url(#yc1)\"/><rect x=\"8\" y=\"14\" width=\"13\" height=\"20\" rx=\"2.5\" fill=\"#ffffff\" opacity=\".35\"/><path d=\"M24 5v38\" stroke=\"#ffffff\" stroke-width=\"3.4\" stroke-linecap=\"round\"/><circle cx=\"24\" cy=\"24\" r=\"6.5\" fill=\"#ffffff\"/><path d=\"M22.2 21.2l-2.6 2.8 2.6 2.8M25.8 21.2l2.6 2.8-2.6 2.8\" fill=\"none\" stroke=\"#23899b\" stroke-width=\"2.2\" stroke-linecap=\"round\" stroke-linejoin=\"round\"/></svg>", d: "The Switch against the PC port, scene by scene", views: [
+        { tab: "Bamboo forest", sw: C + "hero-forest-switch.jpg", pc: C + "hero-forest-4k.jpg", cap: "Mystic Grove: the Switch at 1600×900 against YW4 Recomp at 4K." },
+        { tab: "Yo-kai World", sw: C + "hero-yokaiworld-switch.jpg", pc: C + "hero-yokaiworld-4k.jpg", cap: "Yo-kai World: the Switch at 1600×900 against YW4 Recomp at 4K." },
+        { tab: "School gate", sw: C + "hero-schoolfront-switch.jpg", pc: C + "hero-schoolfront-4k.jpg", cap: "In front of the school: the Switch at 1600×900 against YW4 Recomp at 4K." },
+        { tab: "Schoolyard", sw: C + "hero-school-switch.jpg", pc: C + "hero-school-4k.jpg", cap: "The schoolyard: the Switch at 1600×900 against YW4 Recomp at 4K." },
+        { tab: "Nate’s house", sw: C + "hero-adams-switch.jpg", pc: C + "hero-adams-4k.jpg", cap: "Nate’s street: the Switch at 1600×900 against YW4 Recomp at 4K." },
+        { tab: "Springdale, the past", sw: C + "hero-past-switch.jpg", pc: C + "hero-past-4k.jpg", cap: "Springdale in the past: the Switch at 1600×900 against YW4 Recomp at 4K." } ] },
+    { name: "Shadows", go: "compare/#shadowmap", icon: "<svg viewBox=\"0 0 48 48\" aria-hidden=\"true\"><defs><clipPath id=\"yc2\"><path d=\"M0 0H48L0 48z\"/></clipPath><g id=\"ys2\"><path d=\"M4 23L20 8l16 15v20H4z\"/></g></defs><use href=\"#ys2\" fill=\"#bc6fdf\"/><use href=\"#ys2\" fill=\"#9853ca\" clip-path=\"url(#yc2)\"/><path d=\"M36 26l9 7v10h-9z\" fill=\"#5d3a7a\" opacity=\".45\"/><circle cx=\"40\" cy=\"9\" r=\"5\" fill=\"#f5a623\"/><rect x=\"16\" y=\"30\" width=\"8\" height=\"13\" rx=\"1.5\" fill=\"#fff\"/><rect x=\"9\" y=\"25\" width=\"6\" height=\"6\" rx=\"1\" fill=\"#fff\" opacity=\".85\"/></svg>", d: "Sharper, softer shadows, and contact shadows", views: [
+        { tab: "Shadow maps", sw: C + "20-shadows-stock.jpg", pc: C + "21-shadows-improved.jpg", cap: "The Switch's blocky shadows against ours: a bigger shadow map, sharper edges." },
+        { tab: "Soft shadows", sw: C + "16-pcss-off.jpg", pc: C + "18-pcss-x2.jpg", cap: "Soft shadows (PCSS) off against \u00d72: sharp where they touch, softer farther away." },
+        { tab: "Contact shadows", sw: C + "contact-awning-off.jpg", pc: C + "contact-awning-on.jpg", cap: "Contact shadows: the small shadows under an awning that the shadow map is too coarse for." } ] },
+    { name: "AA · Filter", go: "compare/#aa", icon: "<svg viewBox=\"0 0 48 48\" aria-hidden=\"true\"><defs><clipPath id=\"yc3\"><path d=\"M0 0H48L0 48z\"/></clipPath><g id=\"ys3\"><path d=\"M5 14l4-6 4 6v28H5zM20 14l4-6 4 6v28h-8zM35 14l4-6 4 6v28h-8z\"/><rect x=\"3\" y=\"18\" width=\"42\" height=\"5\" rx=\"1.5\"/><rect x=\"3\" y=\"31\" width=\"42\" height=\"5\" rx=\"1.5\"/></g></defs><use href=\"#ys3\" fill=\"#4cb35e\"/><use href=\"#ys3\" fill=\"#2c8a3c\" clip-path=\"url(#yc3)\"/></svg>", d: "Smooth edges, and sharp ground into the distance", views: [
+        { tab: "Anti-aliasing", sw: C + "33-aa-fence-off.png", pc: C + "35-aa-fence-taa.png", cap: "A fence without anti-aliasing against TAA: it stops shimmering as the camera moves. FXAA and SMAA too." },
+        { tab: "Filtering", sw: C + "40-filtering-crosswalk-off.png", pc: C + "44-filtering-crosswalk-x16.png", cap: "A crosswalk without filtering against ×16: the stripes stay sharp into the distance." } ] },
+    { name: "What’s new", go: "changelog/", icon: "<svg viewBox=\"0 0 48 48\" aria-hidden=\"true\"><defs><clipPath id=\"yc4\"><path d=\"M0 0H48L0 48z\"/></clipPath><g id=\"ys4\"><path d=\"M9 4h22l9 9v31H9z\"/></g></defs><use href=\"#ys4\" fill=\"#4aa3e8\"/><use href=\"#ys4\" fill=\"#2a7fc4\" clip-path=\"url(#yc4)\"/><path d=\"M31 4v9h9z\" fill=\"#ffffff\" opacity=\".55\"/><path d=\"M15 20h12M15 27h18M15 34h18\" stroke=\"#ffffff\" stroke-width=\"3.2\" stroke-linecap=\"round\"/><path d=\"M38 1.5l1.8 4.2 4.2 1.8-4.2 1.8-1.8 4.2-1.8-4.2-4.2-1.8 4.2-1.8z\" fill=\"#ffc531\" stroke=\"#ffffff\" stroke-width=\"1\"/></svg>", d: "Every release, and what each one added", views: [
+        { tab: "Game 1.4.0", title: "Game 1.4.0 · 2026-11-16", notes: ["The shortcut wheel: hold 1 and point at one of the eight field shortcuts", "Sharpening, from Off to Max, with every anti-aliasing mode", "Sharpen text and menus, for low resolutions", "The mouse works in Naviwoof Guide", "Fixed: lighter graphics on weak GPUs at first start (#14)"], cap: "Update from the launcher’s Play screen; the version before stays playable." },
+        { tab: "Launcher 1.2.0", title: "Launcher 1.2.0 · 2026-11-15", notes: ["A Cheats card in Settings, and Manage cheats", "The launcher runs on Linux, as an AppImage"], cap: "The launcher offers its own updates; the portable zip is unpacked over its folder." } ] },
+    { name: "Frame rate", go: "overlay/#hud", icon: "<svg viewBox=\"0 0 48 48\" aria-hidden=\"true\"><defs><clipPath id=\"yc5\"><path d=\"M0 0H48L0 48z\"/></clipPath><g id=\"ys5\"><circle cx=\"24\" cy=\"27\" r=\"18\"/><rect x=\"19\" y=\"3\" width=\"10\" height=\"6\" rx=\"2\"/><rect x=\"22\" y=\"7\" width=\"4\" height=\"4\"/><rect x=\"38\" y=\"9\" width=\"6\" height=\"5\" rx=\"1.5\" transform=\"rotate(45 41 11.5)\"/></g></defs><use href=\"#ys5\" fill=\"#fa932e\"/><use href=\"#ys5\" fill=\"#d2791d\" clip-path=\"url(#yc5)\"/><circle cx=\"24\" cy=\"27\" r=\"12.5\" fill=\"#ffffff\"/><path d=\"M24 27l6-7\" stroke=\"#8a4a10\" stroke-width=\"3.4\" stroke-linecap=\"round\"/><circle cx=\"24\" cy=\"27\" r=\"2.6\" fill=\"#8a4a10\"/><path d=\"M24 17v2.5M34 27h-2.5M14 27h2.5M24 37v-2.5\" stroke=\"#d2791d\" stroke-width=\"2.2\" stroke-linecap=\"round\"/></svg>", d: "30, 60, 120, 144 or unlimited", views: [
+        { tab: "Performance HUD", img: S + "11-hud-in-town.jpg", cap: "The detailed performance HUD at 4K: frames per second, frame time, CPU and GPU." } ] },
+    { name: "DLSS \u00b7 FSR", go: "compare/#upscaling", icon: "<svg viewBox=\"0 0 48 48\" aria-hidden=\"true\"><defs><clipPath id=\"yc6\"><path d=\"M0 0H48L0 48z\"/></clipPath><g id=\"ys6\"><circle cx=\"20\" cy=\"20\" r=\"16\"/><rect x=\"29\" y=\"27\" width=\"9\" height=\"20\" rx=\"4\" transform=\"rotate(-45 33.5 37)\"/></g></defs><use href=\"#ys6\" fill=\"#ec5d6f\"/><use href=\"#ys6\" fill=\"#c33a4c\" clip-path=\"url(#yc6)\"/><circle cx=\"20\" cy=\"20\" r=\"10.5\" fill=\"#ffffff\" opacity=\".9\"/><path d=\"M20 14v12M14 20h12\" stroke=\"#c33a4c\" stroke-width=\"3.6\" stroke-linecap=\"round\"/></svg>", d: "Upscaling and frame generation", views: [
+        { tab: "Upscaling", img: S + "63-fsr-dlss-quality-vs-native.jpg", cap: "Native, FSR quality and DLSS quality side by side: the world drawn smaller, rebuilt at full size." },
+        { tab: "Fine detail", img: S + "65-dlss-vs-fsr-fence.jpg", cap: "A perforated fence: DLSS keeps fine patterns clean where FSR gets grainy." },
+        { tab: "Frame generation", img: S + "71-fg-fsr-schoolyard.jpg", cap: "FSR frame generation in the schoolyard: about twice as many frames on screen." } ] },
+    { name: "Controls", go: "overlay/#controls", icon: "<svg viewBox=\"0 0 48 48\" aria-hidden=\"true\"><defs><clipPath id=\"yc7\"><path d=\"M0 0H48L0 48z\"/></clipPath><g id=\"ys7\"><path d=\"M14 12h20a11 11 0 0 1 11 11l-1.6 10a5.5 5.5 0 0 1-9.8 2.2L30.5 30h-13l-3.1 5.2A5.5 5.5 0 0 1 4.6 33L3 23a11 11 0 0 1 11-11z\"/></g></defs><use href=\"#ys7\" fill=\"#8c6ee6\"/><use href=\"#ys7\" fill=\"#6b4bc2\" clip-path=\"url(#yc7)\"/><path d=\"M14 18v10M9 23h10\" stroke=\"#ffffff\" stroke-width=\"3.6\" stroke-linecap=\"round\"/><circle cx=\"33.5\" cy=\"19.5\" r=\"2.8\" fill=\"#ffffff\"/><circle cx=\"38.5\" cy=\"24\" r=\"2.8\" fill=\"#ffffff\"/><circle cx=\"28.5\" cy=\"24\" r=\"2.8\" fill=\"#ffffff\"/><circle cx=\"33.5\" cy=\"28.5\" r=\"2.8\" fill=\"#ffffff\"/></svg>", d: "Keyboard, mouse and any controller", views: [
+        { tab: "Keyboard", img: S + "76-controls-quick-look-keyboard.jpg", cap: "The quick look (F2): every bound key on the keyboard, named by what it does." },
+        { tab: "Controller", img: S + "76-controls-quick-look-controller.jpg", cap: "The quick look with a DualSense (hold Back): each button joined to what it does." },
+        { tab: "Rebinding", img: S + "75-controls-dualsense.jpg", cap: "Rebinding: two keys and one controller input for every Switch button, named as on your pad." },
+        { tab: "Mouse buttons", img: S + "75-controls-mouse-buttons.jpg", cap: "The mouse buttons and wheel, set apart for exploring and for battles." },
+        { tab: "Button hints", img: S + "89-button-icons.png", cap: "The game's hints show your own keys, or your controller's buttons: Xbox, PlayStation or Nintendo." } ] },
+    { name: "Overlay", go: "overlay/", icon: "<svg viewBox=\"0 0 48 48\" aria-hidden=\"true\"><defs><clipPath id=\"yc8\"><path d=\"M0 0H48L0 48z\"/></clipPath><g id=\"ys8\"><circle cx=\"24\" cy=\"24\" r=\"14\"/><rect x=\"20.5\" y=\"5.0\" width=\"7\" height=\"7\" rx=\"1.5\" transform=\"rotate(0.0 24.0 8.5)\"/><rect x=\"31.5\" y=\"9.5\" width=\"7\" height=\"7\" rx=\"1.5\" transform=\"rotate(45.0 35.0 13.0)\"/><rect x=\"36.0\" y=\"20.5\" width=\"7\" height=\"7\" rx=\"1.5\" transform=\"rotate(90.0 39.5 24.0)\"/><rect x=\"31.5\" y=\"31.5\" width=\"7\" height=\"7\" rx=\"1.5\" transform=\"rotate(135.0 35.0 35.0)\"/><rect x=\"20.5\" y=\"36.0\" width=\"7\" height=\"7\" rx=\"1.5\" transform=\"rotate(180.0 24.0 39.5)\"/><rect x=\"9.5\" y=\"31.5\" width=\"7\" height=\"7\" rx=\"1.5\" transform=\"rotate(225.0 13.0 35.0)\"/><rect x=\"5.0\" y=\"20.5\" width=\"7\" height=\"7\" rx=\"1.5\" transform=\"rotate(270.0 8.5 24.0)\"/><rect x=\"9.5\" y=\"9.5\" width=\"7\" height=\"7\" rx=\"1.5\" transform=\"rotate(315.0 13.0 13.0)\"/></g></defs><use href=\"#ys8\" fill=\"#6c7ba0\"/><use href=\"#ys8\" fill=\"#4b5876\" clip-path=\"url(#yc8)\"/><circle cx=\"24\" cy=\"24\" r=\"6\" fill=\"#ffffff\"/></svg>", d: "A PC menu over the game", views: [
+        { tab: "Settings", img: S + "97-overlay-settings.jpg", cap: "Every graphics setting by section, with what each choice does and what it costs." },
+        { tab: "Preview", img: S + "97-overlay-preview.jpg", cap: "Preview: the game runs under a bar of settings, so each change shows live." },
+        { tab: "Overview", img: S + "97-overlay.jpg", cap: "The side panel: Settings, Controls, the HUD's options, Cheats and Report a bug." },
+        { tab: "Themes", img: S + "98-overlay-themes.jpg", cap: "Yo-kai themes such as Jibanyan, Komasan, Shmoopie and Whisper, shared with the launcher." } ] },
+    { name: "Launcher", go: "launcher/", icon: "<svg viewBox=\"0 0 48 48\" aria-hidden=\"true\"><defs><clipPath id=\"yc9\"><path d=\"M0 0H48L0 48z\"/></clipPath><g id=\"ys9\"><path d=\"M14 25l-7 9v7l9-5zM34 25l7 9v7l-9-5z\"/><path d=\"M24 3c9 7 12 18 10 30H14C12 21 15 10 24 3z\"/></g></defs><use href=\"#ys9\" fill=\"#ec625d\"/><use href=\"#ys9\" fill=\"#c63f3a\" clip-path=\"url(#yc9)\"/><circle cx=\"24\" cy=\"17\" r=\"5\" fill=\"#ffffff\"/><path d=\"M18 34h12l-6 11z\" fill=\"#ffc531\"/></svg>", d: "Build, play and update in one place", views: [
+        { tab: "Play", img: S + "99-launcher-play.jpg", cap: "The Play screen: what's new in your version, your screenshots, mods and DLC." },
+        { tab: "Home", img: S + "99-launcher.jpg", cap: "The first screen: point it at your game files and it does the rest." },
+        { tab: "Themes", img: S + "99-launcher-themes.jpg", cap: "The launcher in the same Yo-kai themes as the in-game overlay." } ] },
+    { name: "Mods", go: "launcher/#play", icon: "<svg viewBox=\"0 0 48 48\" aria-hidden=\"true\"><defs><clipPath id=\"yc10\"><path d=\"M0 0H48L0 48z\"/></clipPath><g id=\"ys10\"><path d=\"M8 12h10v-1a6 6 0 0 1 12 0v1h10v10h-1a6 6 0 0 0 0 12h1v10H8V34h1a6 6 0 0 0 0-12H8z\"/></g></defs><use href=\"#ys10\" fill=\"#f2c42a\"/><use href=\"#ys10\" fill=\"#cf9d06\" clip-path=\"url(#yc10)\"/></svg>", d: "The English patch and other Switch mods", views: [
+        { tab: "English patch", img: S + "90-english-patch.jpg", cap: "The fan English translation patch, laid over your game files without touching your dump." },
+        { tab: "Mod merger", img: S + "91-mod-merger.jpg", cap: "Mods that change the same file are merged, and the launcher names only the real clashes." } ] },
+    { name: "Extras", go: "overlay/#shortcut-wheel", icon: "<svg viewBox=\"0 0 48 48\" aria-hidden=\"true\"><defs><clipPath id=\"yc11\"><path d=\"M0 0H48L0 48z\"/></clipPath><g id=\"ys11\"><rect x=\"7\" y=\"21\" width=\"34\" height=\"22\" rx=\"2.5\"/><rect x=\"5\" y=\"14\" width=\"38\" height=\"9\" rx=\"2.5\"/></g></defs><use href=\"#ys11\" fill=\"#ec6fae\"/><use href=\"#ys11\" fill=\"#c4458a\" clip-path=\"url(#yc11)\"/><rect x=\"21\" y=\"14\" width=\"6\" height=\"29\" fill=\"#ffffff\"/><path d=\"M24 14c-4-9-14-8-11-2 2 3 7 3 11 2zM24 14c4-9 14-8 11-2-2 3-7 3-11 2z\" fill=\"#ffffff\"/></svg>", d: "The shortcut wheel, cheats and screenshots", views: [
+        { tab: "Screenshots", img: S + "92-screenshots.jpg", cap: "F12 saves a screenshot at full resolution; the launcher shows them all." } ] },
+  ];
+  const pad = document.getElementById('ykpad'), grid = document.getElementById('ykgrid'),
+    ykview = document.getElementById('ykview'), tabs = document.getElementById('yktabs');
+  let sel = 0, tapped = -1, lastPointer = 'mouse', curTab = 0;  /* tapped: the tile a touch already previewed */
+  function view(a, k) {
+    const v = a.views[k];
+    curTab = k;
+    for (const [j, c] of [...tabs.children].entries()) c.setAttribute('aria-pressed', j === k ? 'true' : 'false');
+    document.getElementById('ykcap').textContent = v.cap;
+    if (v.sw) {
+      ykview.innerHTML = `<div class="ba"><img class="after" alt="YW4 Recomp" src="${v.pc}"><img class="before" alt="The Switch" src="${v.sw}">
+        <span class="lab l">Switch</span><span class="lab r">YW4 Recomp</span><div class="line"></div>
+        <input type="range" min="0" max="100" value="50" aria-label="Move the line between the Switch and YW4 Recomp"></div>`;
+      const ba = ykview.firstElementChild, r = ba.querySelector('input');
+      r.addEventListener('input', () => ba.style.setProperty('--pos', r.value + '%'));
+    } else if (v.notes) {
+      const esc = t => t.replace(/[&<>]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' })[c]);
+      ykview.innerHTML = `<div class="yk-notes"><b>${esc(v.title)}</b><ul>${v.notes.map(n => `<li>${esc(n)}</li>`).join('')}</ul></div>`;
+    } else ykview.innerHTML = `<img alt="${v.tab}" src="${v.img}">`;
+  }
+  function show(i) {
+    const a = apps[i]; if (!a) return;
+    sel = i;
+    for (const [k, t] of [...grid.children].entries()) t.setAttribute('aria-selected', k === i ? 'true' : 'false');
+    document.getElementById('ykdesc').textContent = a.d;
+    document.getElementById('ykptitle').textContent = a.name;
+    document.getElementById('ykopen').href = a.go;
+    tabs.innerHTML = '';
+    tabs.hidden = a.views.length < 2;
+    for (const [k, v] of a.views.entries()) {
+      const c = document.createElement('button');
+      c.type = 'button'; c.textContent = v.tab;
+      c.addEventListener('click', () => { view(a, k); restartTabs(); });
+      tabs.appendChild(c);
+    }
+    view(a, 0);
+  }
+  for (const [i, a] of apps.entries()) {
+    const b = document.createElement('button');
+    b.title = 'Open: ' + a.name;
+    b.type = 'button'; b.className = 'yk-tile'; b.setAttribute('role', 'option');
+    const ic = document.createElement('span'); ic.className = 'yk-ico';
+    ic.innerHTML = a.icon;  /* one icon style, as the game's tiles: no words or pictures on them */
+    const lab = document.createElement('span'); lab.className = 'yk-lab'; lab.textContent = a.name;
+    b.append(ic, lab);
+    if (a.bang) { const g = document.createElement('span'); g.className = 'yk-bang'; g.textContent = '!'; b.appendChild(g); }
+    /* the mouse: pointing previews, a click opens. The keyboard: moving previews, Enter opens. A touch screen has no
+     * pointing, so as in the game with a pad: the first tap previews, a second tap on the same tile opens. */
+    b.addEventListener('pointerdown', e => { lastPointer = e.pointerType; });
+    b.addEventListener('pointerenter', e => { if (e.pointerType === 'mouse') show(i); });
+    b.addEventListener('focus', () => { if (lastPointer === 'mouse') show(i); });
+    b.addEventListener('click', e => {
+      const touch = e.detail !== 0 && lastPointer !== 'mouse';
+      if (!touch || (sel === i && tapped === i)) location.href = apps[i].go;
+      else { show(i); tapped = i; }
+    });
+    grid.appendChild(b);
+  }
+  grid.addEventListener('keydown', e => {
+    lastPointer = 'mouse';  /* keys again: moving previews */
+    const n = apps.length, col = sel % 4;
+    let to = null;
+    if (e.key === 'ArrowRight') to = col === 3 || sel + 1 >= n ? null : sel + 1;
+    if (e.key === 'ArrowLeft') to = col === 0 ? null : sel - 1;
+    if (e.key === 'ArrowDown') to = sel + 4 < n ? sel + 4 : null;
+    if (e.key === 'ArrowUp') to = sel - 4 >= 0 ? sel - 4 : null;
+    if (to !== null) { grid.children[to].focus(); e.preventDefault(); }
+  });
+  /* the chosen app's tabs cycle on their own while the mouse is off the Pad */
+  const restartTabs = autoCycle(pad, () => {
+    const a = apps[sel];
+    if (a.views.length > 1) view(a, (curTab + 1) % a.views.length);
+  });
+  show(0);
+})();
 </script>
 </body>
 </html>
