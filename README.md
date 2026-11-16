@@ -35,8 +35,10 @@
 >   ([decision 0059](docs/decisions/0059-amd-depth-format-fallback.md)): a Ryzen 5 7530U laptop's integrated graphics
 >   runs it at about 35-40 frames/s at native resolution, where the Eden emulator gets 22-30
 > - Linux - x86-64, Vulkan: works. Tester [ouni666](https://github.com/ouni666) plays it on AOSC OS (KDE Plasma, Wayland) with an AMD RX 6600 XT at
->   about 110-120 frames/s, the GPU at full load, with sound and controls working. Built from source for now (the launcher is Windows only). FSR,
->   DLSS, frame generation and Reflex are Windows only for now
+>   about 110-120 frames/s, the GPU at full load, with sound and controls working. The launcher runs on Linux too, as
+>   an AppImage ([decision 0071](docs/decisions/0071-linux-launcher.md)). FSR and DLSS upscaling and FSR frame
+>   generation are built for Linux ([decision 0073](docs/decisions/0073-dlss-fsr-on-linux.md)), not yet tried on a real
+>   Linux GPU; DLSS frame generation and Reflex are Windows only
 
 > [!NOTE]
 > **Bring your own game.** Nothing from the game is in this repository. You need files from your own copy of
@@ -60,13 +62,13 @@ More: [what is known to be missing or wrong](docs/known-issues.md) · [how it go
 
 ## How to play
 
-**[Download the launcher](https://github.com/ILFforever/YW4Recomp/releases/latest)** (Windows): the installer, or
-the portable zip, which is the same app with no installer.
+**[Download the launcher](https://github.com/ILFforever/YW4Recomp/releases/latest)**: on Windows the installer, or
+the portable zip, which is the same app with no installer; on Linux the AppImage.
 
 It takes your game files (NSP, XCI or extracted folders), checks them, builds the game on your PC once (about 10 to
 15 minutes) and starts it. After that it opens on **Play**, with what's new, your screenshots, mods, DLC, saves and
 logs. Its theme is synced with the in-game overlay's, and game updates come through it. Every step and screen is on
-[the launcher's page](https://ilfforever.github.io/YW4Recomp/launcher/). On Linux, or to work on the code,
+[the launcher's page](https://ilfforever.github.io/YW4Recomp/launcher/). To work on the code,
 [build from source](#building-from-source).
 
 <details>
@@ -429,8 +431,7 @@ back. The mouse also works in the Yo-kai Pad and its pages: hover, click, and th
 progress, [decision 0057](docs/decisions/0057-mouse-menu-lists.md)). By default the left button attacks and the right
 button aims in battles, and the wheel selects characters; each is set on the Mouse buttons page.
 
-**Where the mouse works** (the code on GitHub, 2026-11-15; the title screen, conversations, shops, the map, the
-battle's Stopwatching menu and the overlay's wheel are newer than the last release):
+**Where the mouse works:**
 
 | Where | Point and click | Wheel | Right button |
 |---|---|---|---|
@@ -440,6 +441,7 @@ battle's Stopwatching menu and the overlay's wheel are newer than the last relea
 | Title screen and the save list | Left chooses what is selected (A); no hover | Moves the selection | Back (B) |
 | Conversations, their choices, and what opens from them (shops, the Crank-a-kai) | Left confirms or moves the text on (A); no hover | Moves between choices; on a Yes / No box, Yes (up) and No (down) | Cancel / back (B) |
 | The map | Moving the mouse pans the map (as the left stick); left is A | Zooms in and out | Closes it (B) |
+| Naviwoof Guide's row of pins | Left starts guiding (A) | Steps left and right along the pins | Back (B) |
 | The overlay (Escape) | Yes: hover, click, drag the sliders | Moves the selection | Back (Escape) |
 | The battle's Stopwatching menu (Pin, Items, Switch Members) and its pages | Left confirms (A); back in the fight it attacks again | Moves the selection (the battle's wheel) | Back (B); back in the fight it aims again |
 
@@ -462,6 +464,19 @@ A button with nothing bound to it shows **N/A** in the same style (a keycap, an 
 button) instead of a key you can't press; bind one on the Controls page and its key shows.
 
 ![N/A in the game's hint bar for Switch ally with no key bound, and the N/A icon in each style: Keyboard, Xbox, PlayStation and Switch](docs/screenshots/89-button-icons-na.png)
+
+</details>
+
+<details>
+<summary><b>Shortcut wheel</b>: hold the L key (1), point with the mouse, let go to use one of the eight shortcuts</summary>
+
+The field HUD's shortcut cross has eight shortcuts: four on the D-pad and four more with L held. With a mouse and
+keyboard, hold the key bound to L (**1** by default) while exploring: a wheel opens over the game with all eight.
+Move the mouse towards one and let go of the key to use it; let go in the middle to do nothing. The four D-pad
+shortcuts sit where the D-pad points, the hold-L four on the diagonals. Shortcuts the game can't use there show
+greyed out, and one that is on (the bike) shows green. Pressing an arrow key while holding the key still works the
+old way. **Mouse shortcut wheel** on the overlay's Controls page turns it off
+([decision 0075](docs/decisions/0075-shortcut-wheel.md)).
 
 </details>
 
@@ -530,8 +545,10 @@ way its own pause does (the whole world stops), without its pause screen. From t
   cutscene), and the list to change them: choose one, then press the new key or button.
 - **Overlay**: the performance HUD off, compact (the frame rate only) or detailed, which corner it sits in, its size and opacity, and
   what the detailed one shows.
+- **Cheats**: see Cheats below.
 - **Report a bug**: describe the problem, then save a zip with a screenshot and the log, or send it to GitHub (it
-  opens the form). **Exit game** (it asks first). F12 takes screenshots, in the overlay or not.
+  opens the form). **Return to title** and **Exit game** (each asks first). F12 takes screenshots, in the overlay or
+  not.
 
 W/S or the arrow keys choose, A/D or ←/→ change a setting, Enter selects, Q/E jump between sections (LB/RB or
 LT/RT on a controller). Holding a direction keeps moving. Escape, Backspace or B goes back one step; from the side
@@ -544,6 +561,22 @@ the launcher: the game opens in the launcher's theme, and a theme picked in the 
 closes (a theme file added to the launcher's themes folder shows up in both).
 
 ![Overlay themes: Jibanyan, Komasan, Shmoopie and Whisper](docs/screenshots/98-overlay-themes.jpg)
+
+</details>
+
+<details>
+<summary><b>Cheats</b>: unlimited Crank-a-kai and unlimited coins, switched on in the overlay while playing</summary>
+
+The overlay has a **Cheats** page, between Overlay and Report a bug, with two cheats:
+
+- **Unlimited Crank-a-kai**: your cranks for the day never go down.
+- **Unlimited coins**: cranking never uses up a coin, for every Crank-a-kai coin and Oni coin. Everything else
+  that uses up items works as before.
+
+Each switches on or off while you play and is saved like any setting.
+
+In the launcher, Settings › **Cheats** hides the page and turns every cheat off, and **Manage** switches the cheats
+from there (while the game isn't running) ([decision 0074](docs/decisions/0074-cheats.md)).
 
 </details>
 
@@ -577,6 +610,7 @@ the panel's WINDOW MODE row). **F12** takes a screenshot. The other function key
 | **Anti-aliasing and upscaling** | |
 | Anti-aliasing | Off (default), FXAA, SMAA, TAA, FSR or DLSS, applied to the 3D scene before the UI is drawn, so text stays sharp. TAA, FSR and DLSS also steady thin things that shimmer: fences, nets, leaves |
 | Upscaling | Off (default), quality, balanced or performance: the world drawn smaller and rebuilt at full size by FSR or DLSS. Needs anti-aliasing set to FSR or DLSS |
+| Sharpening | Off, low, medium (default), high or max: the 3D scene sharpened after any anti-aliasing (FSR uses its own sharpening), textures more than edges so edges don't ring ([decision 0076](docs/decisions/0076-sharpening.md)) |
 | **Frame generation and latency** | |
 | Frame generation | Off (default), FSR (any GPU) or DLSS (NVIDIA RTX 40 and newer): a frame made between each two of the game's, about twice as many on screen. Needs anti-aliasing set to TAA, FSR or DLSS |
 | Reflex | NVIDIA GPUs: off (default), on or on + boost: less input delay, most where the GPU limits the frame rate. On while frame generation is DLSS |
@@ -617,29 +651,30 @@ On Ordinary Street with the performance HUD on (F3). The frame takes about 19 ms
 ## Goals
 
 <details>
-<summary><b>Planned</b> (2)</summary>
+<summary><b>Planned</b> (1)</summary>
 
 | Goal | What it will be |
 |---|---|
-| **Built-in cheats** | Cheats switched on from the panel while playing, such as unlimited Crank-a-kai, with no separate cheat tool |
-| **Launcher for Linux** | The same launcher on Linux, so the game no longer has to be built from source there |
+| **More cheats** | More switches on the overlay's Cheats page, next to unlimited Crank-a-kai and unlimited coins |
 
 </details>
 
 <details>
-<summary><b>Ongoing</b> (4)</summary>
+<summary><b>Ongoing</b> (6)</summary>
 
 | Goal | Where it stands |
 |---|---|
+| **Performance (CPU)** | Less work per frame on the CPU, so busy places hold their frame rate on slower PCs: the renderer's GPU commands are being made cheaper to build (in testing) |
+| **Diary save slots** | Five Diary slots instead of one, and under them one Autosave row with your newest autosave: pick a slot when you start a new game, page through them in the Diary, delete one with X. Each slot keeps its own autosave, so playing another slot never loses one (in testing; the Diary's look comes next) |
 | **Our own renderer** | Ours: shadows, surfaces, bloom, distance blur, lighting, sky, tone mapping. **Left:** choosing what to draw, two screen passes, the UI and menus |
 | **Steadier shadows** | Shadows still shimmer a little as the camera moves; steadier cascades next |
 | **Better anti-aliasing** | FXAA, SMAA and TAA (steady thin edges: fences, nets, leaves) on the 3D scene before the UI is drawn, so text stays crisp; per-object motion for TAA next (a first version is in, off by default) |
-| **Mouse control for the Yo-kai Pad** | Pointing, clicking and wheel scrolling work on the Yo-kai Pad and the pages opened from it, such as the item and quest lists, Ukiukipedia and Members ([decision 0057](docs/decisions/0057-mouse-menu-lists.md)). On 2026-11-08 some pages still had open issues (Watch skills, Soulmate, Trophies, Treasure photos, Switch moves) |
+| **Mouse in the game's menus** | Pointing, clicking and wheel scrolling work on the Yo-kai Pad and the pages opened from it, such as the item and quest lists, Ukiukipedia and Members ([decision 0057](docs/decisions/0057-mouse-menu-lists.md)). Clicks and the wheel also work on the title screen, in conversations and shops, on the map, in the battle's Stopwatching menu and on Naviwoof Guide (see [Keyboard, mouse and controllers](#features)). Some Pad pages still had open issues on 2026-11-08 (Watch skills, Soulmate, Trophies, Treasure photos, Switch moves) |
 
 </details>
 
 <details>
-<summary><b>Finished</b> (13)</summary>
+<summary><b>Finished</b> (15)</summary>
 
 | Goal | Where it stands |
 |---|---|
@@ -655,7 +690,9 @@ On Ordinary Street with the performance HUD on (F3). The frame takes about 19 ms
 | **Mod support** | Mods in the Switch's layout are laid over your game files at start, as on a modded Switch, without touching your dump: the English translation patch runs (see [Features](#features), [decision 0043](docs/decisions/0043-mods-layeredfs.md)). The YKW Mod Merger™ makes mods that change the same file work together ([0067](docs/decisions/0067-mods-merge-cpk-list.md), [0068](docs/decisions/0068-mods-merge-data-files.md)) |
 | **In-game overlay** | Escape or a controller button pauses the game and opens a side panel: settings, controls, the performance HUD's options, screenshots and exit, drawn like its design ([decision 0053](docs/decisions/0053-in-game-overlay.md)); Preview shows graphics changes live, and themes match the launcher's ([decision 0055](docs/decisions/0055-overlay-themes.md)) |
 | **Launcher** | A Windows app that takes your game files, checks them, builds the game and starts it, with mods, DLC, saves and screenshots in one place. Installer and portable zip ([decision 0052](docs/decisions/0052-launcher-packaging.md)), tested on a second PC. Released with 1.0.0 (2026-11-13): [download](https://github.com/ILFforever/YW4Recomp/releases/latest) |
-| **Linux** | Tester [ouni666](https://github.com/ouni666) plays it on AOSC OS with an AMD RX 6600 XT at about 110-120 frames/s, sound and controls included (2026-11-13). Built from source (the launcher is Windows only); DLSS and FSR upscaling are built on Linux too, frame generation and Reflex are Windows only |
+| **Linux** | Tester [ouni666](https://github.com/ouni666) plays it on AOSC OS with an AMD RX 6600 XT at about 110-120 frames/s, sound and controls included (2026-11-13). DLSS and FSR upscaling and FSR frame generation are built on Linux too ([decision 0073](docs/decisions/0073-dlss-fsr-on-linux.md)); DLSS frame generation and Reflex are Windows only |
+| **Launcher for Linux** | The same launcher as an AppImage, from launcher 1.2.0 (2026-11-15), so the game no longer has to be built by hand on Linux ([decision 0071](docs/decisions/0071-linux-launcher.md)). Players use it on their Linux desktops |
+| **Built-in cheats** | A Cheats page in the overlay, switched while playing: unlimited Crank-a-kai and unlimited coins so far, with a switch in the launcher ([decision 0074](docs/decisions/0074-cheats.md)) |
 
 </details>
 
@@ -713,7 +750,8 @@ Set `[tools] cc = "clang"` in `config.local.toml`, then build as in steps 1-5. A
 `./work/build/yw4` alone: the build writes your game and DLC folders into `work/build/game.ini`. Saves go to
 `~/.local/share/YW4Recomp/save`. Ubuntu 24.04 has no SDL3 package: see
 [docs/setup.md](docs/setup.md#requirements). AMD FSR and NVIDIA DLSS upscaling are built on Linux too (FSR from
-AMD's own source, during the build: about a minute); frame generation and Reflex are Windows only for now.
+AMD's own source, during the build: about a minute), and so is FSR frame generation; DLSS frame generation and
+Reflex are Windows only. Or skip all this: the launcher's Linux AppImage does these steps for you.
 
 ## Project layout
 
