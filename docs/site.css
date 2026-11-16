@@ -26,6 +26,9 @@
   color-scheme: dark;
 }
 
+/* a jump to a section (the pages' Contents) stops below the sticky top bar, so the section's heading shows */
+html { scroll-padding-top: 78px; }
+
 /* ---- the top bar, on every page ---- */
 .site-top { position: sticky; top: 0; z-index: 20; background: var(--top); backdrop-filter: blur(8px); border-bottom: 1px solid var(--line); }
 .site-top .wrap { max-width: 1120px; margin: 0 auto; padding: 0 20px; display: flex; align-items: center; gap: 18px; height: 62px; }
