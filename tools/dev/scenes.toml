@@ -71,3 +71,38 @@ about = "A forest cutscene"
 [groups]
 busy-all = ["busy", "lag", "lag2", "lag3", "lag4", "lategame", "yokaiworld", "walk"]
 all = ["busy", "lag", "lag2", "lag3", "lag4", "lategame", "yokaiworld", "walk", "school", "forest"]
+cam = ["lag_cam", "busy_cam", "lategame_cam"]
+
+# Camera turn to the right after the load: the game streams in map data it has not drawn yet (replay: camera_right.txt,
+# the load_save input and the right stick held from tick 3400 to 6000).
+[lag_cam]
+save = "save_base_lag"
+replay = "camera_right.txt"
+seconds = 115
+about = "Slow evening street, camera turning right (streams new map data)"
+
+[busy_cam]
+save = "save_base_busy"
+replay = "camera_right.txt"
+seconds = 115
+about = "Busy spot, camera turning right (streams new map data)"
+
+[lategame_cam]
+save = "save_base_lategame"
+replay = "camera_right.txt"
+seconds = 115
+about = "Late-game bamboo forest, camera turning right (streams new map data)"
+
+
+# The owner's snow bridge save (a manual save made on the late-game copy, 2026-11-16).
+[snowbridge]
+save = "save_snowbridge"
+replay = "load_save.txt"
+seconds = 115
+about = "Snow bridge (owner's save, heavy)"
+
+[snowbridge_cam]
+save = "save_snowbridge"
+replay = "camera_right.txt"
+seconds = 115
+about = "Snow bridge, camera turning right (streams new map data)"
