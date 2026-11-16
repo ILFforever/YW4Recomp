@@ -1,0 +1,549 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>YW4 Recomp · What's new</title>
+<link rel="icon" href="../favicon.ico" sizes="any">
+<link rel="icon" type="image/png" href="../img/icon-192.png">
+<link rel="apple-touch-icon" href="../img/icon-192.png">
+<meta name="description" content="Download the YW4 Recomp launcher for Windows or Linux, and what changed in every game and launcher release.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=M+PLUS+Rounded+1c:wght@500;700;800&family=Zen+Kaku+Gothic+New:wght@400;500;700&display=swap" rel="stylesheet">
+<style>
+/* The same look as the comparisons page (../compare/): the game's menus, Yo-kai Pad lilac and violet, gold. */
+:root {
+  --lilac-0: oklch(97.5% 0.012 305); --lilac-1: oklch(94% 0.025 305); --lilac-2: oklch(89% 0.04 305);
+  --lilac-3: oklch(80% 0.06 305);
+  --violet: oklch(36% 0.11 295); --violet-deep: oklch(27% 0.09 295); --violet-soft: oklch(50% 0.11 300);
+  --ink: oklch(25% 0.04 295); --ink-2: oklch(45% 0.04 295);
+  --gold: oklch(80% 0.12 85); --gold-deep: oklch(62% 0.12 75); --cream: oklch(96.5% 0.03 90);
+  --cyan: oklch(76% 0.11 215); --white: oklch(99.2% 0.004 305);
+  --r: 14px;
+  --display: "M PLUS Rounded 1c", "Hiragino Maru Gothic ProN", sans-serif;
+  --body: "Zen Kaku Gothic New", "Hiragino Sans", sans-serif;
+  --step--1: clamp(.8rem, .78rem + .1vw, .88rem);
+  --step-0: clamp(.98rem, .95rem + .15vw, 1.05rem);
+  --step-1: clamp(1.15rem, 1.08rem + .35vw, 1.35rem);
+  --step-2: clamp(1.3rem, 1.18rem + .6vw, 1.7rem);
+  --step-3: clamp(2rem, 1.5rem + 2.4vw, 3.3rem);
+}
+* { box-sizing: border-box; }
+html { scroll-behavior: smooth; scroll-padding-top: 16px; }
+body {
+  margin: 0; overflow-x: hidden; color: var(--ink); font: 400 var(--step-0)/1.7 var(--body);
+  font-variant-numeric: tabular-nums; background-color: var(--lilac-1);
+  background-image: conic-gradient(var(--lilac-0) 25%, transparent 0 50%, var(--lilac-0) 0 75%, transparent 0);
+  background-size: 64px 64px;
+}
+a { color: var(--violet-soft); text-decoration-thickness: 1.5px; text-underline-offset: 3px; }
+a:hover { color: var(--violet); }
+:focus-visible { outline: 2px solid var(--gold-deep); outline-offset: 3px; }
+kbd { font: 700 .82em/1 var(--display); color: var(--violet-deep); background: var(--white); border: 1px solid var(--lilac-3);
+  border-bottom-width: 2px; border-radius: 5px; padding: 2px 6px; white-space: nowrap; }
+
+.hero { color: var(--white); background-color: var(--violet-deep); position: relative; overflow: hidden; border-bottom: 3px solid var(--gold); }
+.hero::before {
+  content: ""; position: absolute; inset: 0; opacity: .12; pointer-events: none;
+  background-image: radial-gradient(circle at 50% 100%, transparent 38%, var(--gold) 39% 42%, transparent 43% 55%, var(--gold) 56% 59%, transparent 60%);
+  background-size: 56px 28px;
+}
+.hero-inner {
+  position: relative; max-width: 1280px; margin: 0 auto; padding: clamp(28px, 5vw, 56px) 20px clamp(28px, 4vw, 44px);
+  display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.35fr); gap: clamp(24px, 4vw, 56px); align-items: center;
+}
+.eyebrow { font: 700 var(--step--1)/1 var(--display); letter-spacing: .16em; text-transform: uppercase; color: var(--gold); }
+.hero h1 { font: 800 var(--step-3)/1.08 var(--display); margin: 12px 0 14px; letter-spacing: -.01em; }
+.hero p { margin: 0 0 22px; color: oklch(88% 0.03 300); max-width: 46ch; }
+.stats { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); border: 1px solid oklch(50% 0.08 295); border-radius: 12px; overflow: hidden; margin: 0 0 22px; }
+.stat { padding: 12px 14px; background: oklch(31% 0.1 295); }
+.stat + .stat { border-left: 1px solid oklch(50% 0.08 295); }
+.stat b { display: block; font: 800 var(--step-1)/1.1 var(--display); color: var(--gold); }
+.stat span { font-size: .78rem; color: oklch(82% 0.03 300); line-height: 1.35; display: block; margin-top: 4px; }
+.links { display: flex; flex-wrap: wrap; gap: 10px; }
+.btn { font: 700 .92rem/1 var(--display); text-decoration: none; border-radius: 999px; padding: 11px 18px; border: 1.5px solid var(--gold);
+  background: var(--gold); color: var(--violet-deep); }
+.btn:hover { color: var(--violet-deep); background: oklch(85% 0.12 85); }
+.btn.ghost { background: transparent; color: var(--gold); }
+.btn.ghost:hover { color: var(--gold); background: oklch(80% 0.12 85 / .12); }
+/* the GitHub button in GitHub's own look: black, the white mark (Octicons mark-github, MIT) */
+.btn.gh { display: inline-flex; align-items: center; gap: 8px; color: #fff; background: #000; border-color: #3d444d; }
+.btn.gh:hover { color: #fff; background: #1f2328; border-color: #656c76; }
+.btn.gh svg { width: 1.15em; height: 1.15em; fill: currentColor; flex: none; }
+/* the header's top bar: our icon and name (home), the GitHub button at the right */
+.sitebar { position: relative; max-width: 1280px; margin: 0 auto; padding: 16px 20px 0; display: flex; align-items: center;
+  justify-content: space-between; gap: 12px; }
+.brand { display: inline-flex; align-items: center; gap: 10px; color: var(--white); text-decoration: none;
+  font: 800 1.05rem/1 var(--display); }
+.brand:hover { color: var(--gold); }
+.brand img { width: 36px; height: 36px; display: block; }
+.sitebar .btn.gh { padding: 9px 14px; font-size: .88rem; }
+/* Buy Me a Coffee next to the GitHub button, in BMC's own yellow */
+.sitebtns { display: flex; align-items: center; gap: 8px; }
+.sitebtns .btn { white-space: nowrap; }
+.btn.coffee { display: inline-flex; align-items: center; gap: 8px; color: #000; background: #ffdd00; border-color: #e6c700; }
+.btn.coffee:hover { color: #000; background: #ffe633; border-color: #ffdd00; }
+.btn.coffee svg { width: 1.15em; height: 1.15em; fill: none; stroke: currentColor; stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; flex: none; }
+.sitebar .btn.coffee { padding: 9px 14px; font-size: .88rem; }
+@media (max-width: 560px) { .btn.coffee .lbl { display: none; } }
+.shot { background: var(--gold); border-radius: var(--r); padding: 8px; box-shadow: 0 18px 40px oklch(15% 0.08 295 / .5); margin: 0; }
+.shot img { display: block; width: 100%; height: auto; border-radius: 8px; }
+.shot figcaption { color: var(--violet-deep); font-size: .8rem; margin: 8px 6px 2px; }
+
+.shell { max-width: 1280px; margin: 0 auto; padding: 40px 20px 72px; display: grid; grid-template-columns: 236px minmax(0, 1fr); gap: 40px; align-items: start; }
+.shell > * { min-width: 0; }
+.pad { position: sticky; top: 16px; background: var(--white); border-radius: var(--r); overflow: hidden; border: 1px solid var(--lilac-3); }
+.pad h2 { margin: 0; padding: 11px 16px; background: var(--violet); color: var(--white); font: 700 .78rem/1 var(--display); letter-spacing: .14em; text-transform: uppercase; }
+.pad ol { list-style: none; margin: 0; padding: 8px; display: grid; gap: 2px; }
+.pad a { display: flex; gap: 10px; align-items: baseline; text-decoration: none; color: var(--ink); font: 500 .92rem/1.3 var(--body); padding: 7px 10px; border-radius: 8px; }
+.pad a .n { font: 700 .75rem/1 var(--display); color: var(--ink-2); min-width: 1.3em; }
+.pad a:hover { background: var(--lilac-1); }
+
+main { display: grid; gap: 28px; }
+article { background: var(--white); border-radius: var(--r); border: 1px solid var(--lilac-3); overflow: hidden; }
+.bar { display: flex; align-items: center; gap: 12px; padding: 12px 20px; background: var(--violet); color: var(--white); }
+.bar h2 { margin: 0; font: 800 var(--step-2)/1.2 var(--display); flex: 1; }
+.bar .cat { font: 700 .7rem/1 var(--display); letter-spacing: .14em; text-transform: uppercase; color: var(--gold); }
+.bar .q { flex: none; width: 28px; height: 28px; border-radius: 50%; background: var(--cyan); display: grid; place-items: center;
+  font: 800 .9rem/1 var(--display); color: var(--violet-deep); }
+.body { padding: 20px 20px 22px; }
+.top { display: grid; grid-template-columns: minmax(0, 1.5fr) minmax(220px, 1fr); gap: 24px; margin: 0 0 16px; }
+.prose p { margin: 0 0 10px; max-width: 66ch; }
+.prose ul, .prose ol { margin: 8px 0 10px; padding-left: 1.2em; }
+.prose li { margin: 0 0 6px; }
+.prose li::marker { color: var(--gold-deep); }
+.spec { background: var(--cream); border-radius: 10px; padding: 4px 14px; font-size: var(--step--1); align-self: start; }
+.spec dl { margin: 0; display: grid; grid-template-columns: auto minmax(0, 1fr); }
+.spec dt, .spec dd { padding: 7px 0; border-bottom: 1px solid oklch(88% 0.04 85); margin: 0; }
+.spec dt { color: var(--ink-2); padding-right: 14px; }
+.spec dd { font-weight: 700; }
+.spec dt:last-of-type, .spec dd:last-of-type { border-bottom: 0; }
+.whole { margin: 0; }
+.whole + .whole { margin-top: 14px; }
+.whole img { display: block; width: 100%; height: auto; border-radius: 10px; border: 1px solid var(--lilac-2); }
+.whole figcaption { margin: 6px 2px 0; font-size: var(--step--1); color: var(--ink-2); }
+.pair { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 320px), 1fr)); gap: 14px; }
+.steps { counter-reset: s; list-style: none; padding: 0 !important; }
+.steps li { counter-increment: s; display: grid; grid-template-columns: 30px minmax(0, 1fr); gap: 10px; align-items: start; }
+.steps li::before { content: counter(s); width: 26px; height: 26px; border-radius: 50%; background: var(--gold); color: var(--violet-deep);
+  font: 800 .85rem/26px var(--display); text-align: center; margin-top: 2px; }
+
+footer { background: var(--violet-deep); color: oklch(84% 0.03 300); border-top: 3px solid var(--gold); }
+footer .in { max-width: 1280px; margin: 0 auto; padding: 24px 20px 32px; font-size: var(--step--1); display: grid; gap: 6px; }
+footer a { color: var(--gold); }
+
+@media (max-width: 960px) {
+  .hero-inner { grid-template-columns: minmax(0, 1fr); }
+  .shell { grid-template-columns: minmax(0, 1fr); gap: 20px; padding-top: 0; }
+  .pad { top: 0; z-index: 5; border-radius: 0 0 12px 12px; margin: 0 -20px; border-top: 0; }
+  .pad h2 { display: none; }
+  .pad ol { display: flex; overflow-x: auto; scrollbar-width: none; padding: 6px; }
+  .pad a { white-space: nowrap; }
+  .top { grid-template-columns: minmax(0, 1fr); }
+}
+@media (max-width: 560px) { .stats { grid-template-columns: minmax(0, 1fr); } .stat + .stat { border-left: 0; border-top: 1px solid oklch(50% 0.08 295); } .bar .cat { display: none; } }
+@media (prefers-reduced-motion: reduce) { html { scroll-behavior: auto; } }
+
+/* the changelog: the download cards, then one card per release */
+.dl { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; margin: 4px 0 14px; }
+.dl a { display: grid; gap: 4px; text-decoration: none; color: var(--ink); background: var(--cream); border: 1.5px solid oklch(88% 0.04 85);
+  border-radius: 12px; padding: 14px 16px; }
+.dl a:hover { border-color: var(--gold-deep); background: oklch(94% 0.05 88); color: var(--ink); }
+.dl b { font: 800 var(--step-1)/1.2 var(--display); color: var(--violet-deep); }
+.dl .os { font: 700 .72rem/1 var(--display); letter-spacing: .14em; text-transform: uppercase; color: var(--gold-deep); }
+.dl .what { font-size: var(--step--1); color: var(--ink-2); line-height: 1.45; }
+.dl .file { font: 500 .78rem/1.3 var(--body); color: var(--violet-soft); overflow-wrap: anywhere; }
+.notes h4 { font: 800 var(--step-0)/1.3 var(--display); color: var(--violet); margin: 16px 0 6px; }
+.notes h4:first-child { margin-top: 0; }
+.notes ul ul { margin: 4px 0 4px; }
+.notes code { font-size: .9em; background: var(--lilac-1); border-radius: 4px; padding: 1px 5px; }
+.notes .how { color: var(--ink-2); font-size: var(--step--1); }
+.pad a .n { min-width: 3em; }
+.dl a { grid-template-columns: 44px minmax(0, 1fr); column-gap: 12px; align-items: start; }
+.dl a > :not(.ico) { grid-column: 2; }
+.dl .ico { grid-row: 1 / span 4; width: 44px; height: 44px; color: var(--violet-deep); }
+.bar .kind { flex: none; width: 28px; height: 28px; border-radius: 8px; display: block; }
+.bar .q svg { width: 17px; height: 17px; }
+.notes h4 { display: flex; align-items: center; gap: 8px; }
+.notes h4 svg, .notes h4 img { width: 18px; height: 18px; flex: none; color: var(--gold-deep); object-fit: contain; }
+.logo-row { display: flex; align-items: center; gap: 14px; margin: 0 0 4px; }
+.logo-row img { width: 64px; height: 64px; border-radius: 16px; box-shadow: 0 6px 18px oklch(15% 0.08 295 / .45); }
+.logo-row h1 { margin: 0; }
+.hero .stats { margin-top: 18px; }
+.oslogos { display: inline-flex; gap: 8px; vertical-align: middle; margin-left: 4px; }
+.oslogos .ico { width: 20px; height: 20px; background: var(--white); border-radius: 5px; padding: 2px; object-fit: contain; }
+/* the Linux card in Tux's colours: black, white, its yellow */
+.dl a.linux { background: #1d1d1f; border-color: #3a3a3d; color: #f2f2f2; }
+.dl a.linux:hover { background: #262629; border-color: #f5b800; color: #fff; }
+.dl a.linux b { color: #fff; }
+.dl a.linux .os { color: #f5b800; }
+.dl a.linux .what { color: #c9c9cc; }
+.dl a.linux .file { color: #f5c84a; }
+.dl a.linux code { background: #333336; color: #fff; }
+.dl a.linux .ico { object-fit: contain; filter: drop-shadow(0 0 1px #fffc) drop-shadow(0 0 3px #fff6); }  /* Tux's black body on the black card */
+@media (max-width: 760px) { .dl { grid-template-columns: minmax(0, 1fr); } }
+</style>
+</head>
+<body>
+
+<header class="hero">
+  <nav class="sitebar" aria-label="Site">
+    <a class="brand" href="../"><img src="../img/icon-192.png" alt="" width="36" height="36">YW4 Recomp</a>
+    <span class="sitebtns"><a class="btn gh" href="https://github.com/ILFforever/YW4Recomp"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 0c4.42 0 8 3.58 8 8a8.013 8.013 0 0 1-5.45 7.59c-.4.08-.55-.17-.55-.38 0-.27.01-1.13.01-2.2 0-.75-.25-1.23-.54-1.48 1.78-.2 3.65-.88 3.65-3.95 0-.88-.31-1.59-.82-2.15.08-.2.36-1.02-.08-2.12 0 0-.67-.22-2.2.82-.64-.18-1.32-.27-2-.27-.68 0-1.36.09-2 .27-1.53-1.03-2.2-.82-2.2-.82-.44 1.1-.16 1.92-.08 2.12-.51.56-.82 1.28-.82 2.15 0 3.06 1.86 3.75 3.64 3.95-.23.2-.44.55-.51 1.07-.46.21-1.61.55-2.33-.66-.15-.24-.6-.83-1.23-.82-.67.01-.27.38.01.53.34.19.73.9.82 1.13.16.45.68 1.31 2.69.94 0 .67.01 1.3.01 1.49 0 .21-.15.45-.55.38A7.995 7.995 0 0 1 0 8c0-4.42 3.58-8 8-8Z"/></svg>Project on GitHub</a><a class="btn coffee" href="https://buymeacoffee.com/ilfforever" aria-label="Buy me a coffee"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M2.5 5.5h8.5v4.5a3.5 3.5 0 0 1-3.5 3.5h-1.5a3.5 3.5 0 0 1-3.5-3.5Z"/><path d="M11 6.5h1a2 2 0 0 1 0 4h-1"/><path d="M5 1.5c-.6.8.6 1.4 0 2.2M8 1.5c-.6.8.6 1.4 0 2.2"/></svg><span class="lbl">Buy me a coffee</span></a></span>
+  </nav>
+  <div class="hero-inner">
+    <div>
+      <span class="eyebrow">YW4 Recomp · fan PC port</span>
+      <div class="logo-row"><img src="../img/icon-192.png" alt="" width="64" height="64"><h1>What's new</h1></div>
+      <p>Get the launcher, then every change to the game and the launcher, newest first. Game updates come through the
+        launcher: you only ever download the launcher. <span class="oslogos"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path fill="#0078d4" d="M2 4.6 10 3.5v7.8H2zM11 3.4 22 2v9.3H11zM2 12.4h8v7.8l-8-1.1zM11 12.4h11V22l-11-1.5z"/></svg><img class="ico tux" src="../img/tux.svg" alt="" width="24" height="28"></span></p>
+      <div class="links">
+        <a class="btn" href="#download">Download</a>
+        <a class="btn ghost" href="../">Home</a>
+        <a class="btn ghost" href="../launcher/">The launcher</a>
+      </div>
+      <div class="stats">
+        <div class="stat"><b>9</b><span>game releases</span></div>
+        <div class="stat"><b>Launcher 1.2.0</b><span>the newest launcher</span></div>
+        <div class="stat"><b>2026-11-16</b><span>the last release</span></div>
+      </div>
+    </div>
+    <figure class="shot">
+      <img src="../launcher/img/play.jpg" alt="The launcher's Play screen: the game's icon and Play, what's new, screenshots, mods and DLC">
+      <figcaption>The launcher's Play screen: what's new in your version shows here too</figcaption>
+    </figure>
+  </div>
+</header>
+
+<div class="shell">
+  <nav class="pad" aria-label="Releases">
+    <h2>Releases</h2>
+    <ol>
+      <li><a href="#download"><span class="n">↓</span>Download</a></li>
+      <li><a href="#v1.4.0"><span class="n">11/16</span>Game 1.4.0</a></li>
+      <li><a href="#launcher-v1.2.0"><span class="n">11/15</span>Launcher 1.2.0</a></li>
+      <li><a href="#v1.3.0"><span class="n">11/15</span>Game 1.3.0</a></li>
+      <li><a href="#v1.2.3"><span class="n">11/14</span>Game 1.2.3</a></li>
+      <li><a href="#v1.2.2"><span class="n">11/14</span>Game 1.2.2</a></li>
+      <li><a href="#launcher-v1.1.0"><span class="n">11/13</span>Launcher 1.1.0</a></li>
+      <li><a href="#v1.2.0"><span class="n">11/13</span>Game 1.2.0</a></li>
+      <li><a href="#v1.1.0"><span class="n">11/13</span>Game 1.1.0</a></li>
+      <li><a href="#v1.0.2"><span class="n">11/13</span>Game 1.0.2</a></li>
+      <li><a href="#launcher-v1.0.1"><span class="n">11/13</span>Launcher 1.0.1</a></li>
+      <li><a href="#v1.0.1"><span class="n">11/13</span>Game 1.0.1</a></li>
+      <li><a href="#launcher-v1.0.0"><span class="n">11/13</span>1.0.0: the first release</a></li>
+    </ol>
+  </nav>
+
+  <main>
+    <article id="download">
+      <div class="bar"><span class="q" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M12 4v11M7 10.5l5 5 5-5M5 20h14"/></svg></span><h2>Download</h2><span class="cat">Launcher <span data-ver>1.2.0</span></span></div>
+      <div class="body">
+        <div class="dl">
+          <a data-asset="-setup.exe" href="https://github.com/ILFforever/YW4Recomp/releases/download/launcher-v1.2.0/YW4-Recomp-Launcher-1.2.0-setup.exe"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path fill="#0078d4" d="M2 4.6 10 3.5v7.8H2zM11 3.4 22 2v9.3H11zM2 12.4h8v7.8l-8-1.1zM11 12.4h11V22l-11-1.5z"/></svg><span class="os">Windows</span><b>Installer</b>
+            <span class="what">Installs the launcher, with Start menu and desktop shortcuts.</span>
+            <span class="file">YW4-Recomp-Launcher-<span data-ver>1.2.0</span>-setup.exe</span></a>
+          <a data-asset="-portable.zip" href="https://github.com/ILFforever/YW4Recomp/releases/download/launcher-v1.2.0/YW4-Recomp-Launcher-1.2.0-portable.zip"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round"><path d="M5 2.5h10l4 4v15H5z"/><path d="M15 2.5v4h4"/><path d="M10 2.5v2h2v2h-2v2h2v2h-2v2"/><rect x="9.2" y="13" width="3.6" height="4" rx=".8"/></svg><span class="os">Windows</span><b>Portable zip</b>
+            <span class="what">The same launcher with no installer: unpack it anywhere and run it.</span>
+            <span class="file">YW4-Recomp-Launcher-<span data-ver>1.2.0</span>-portable.zip</span></a>
+          <a class="linux" data-asset=".AppImage" href="https://github.com/ILFforever/YW4Recomp/releases/download/launcher-v1.2.0/YW4-Recomp-Launcher-1.2.0-x86_64.AppImage"><img class="ico tux" src="../img/tux.svg" alt="" width="24" height="28"><span class="os">Linux</span><b>AppImage</b>
+            <span class="what">Make it executable (<code>chmod +x</code>) and run it.</span>
+            <span class="file">YW4-Recomp-Launcher-<span data-ver>1.2.0</span>-x86_64.AppImage</span></a>
+        </div>
+        <div class="prose">
+          <p><b>Bring your own game:</b> nothing from the game comes with it. You need your own copy of
+            <i>Yo-kai Watch 4++</i> with the 2.2.0 update. The launcher checks your files, builds the game on your PC once
+            (about 10 to 15 minutes) and starts it. Step by step: <a href="../launcher/">the launcher's page</a>.</p>
+          <p>Every file and its checksum: <a href="https://github.com/ILFforever/YW4Recomp/releases">all releases on
+            GitHub</a>. The "Game update" releases there are for the launcher; don't download those.</p>
+        </div>
+      </div>
+    </article>
+
+    <article id="v1.4.0">
+      <div class="bar"><img class="kind" src="../img/icon-192.png" alt="" width="28" height="28"><h2>Game 1.4.0</h2><span class="cat">Game · 2026-11-16</span></div>
+      <div class="body prose notes">
+<p class="how">The launcher gets it for you: <b>Update</b> on the Play screen rebuilds the game in a few minutes, and the version before stays playable if anything goes wrong.</p>
+<h4><svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M12 2l2.2 6.6L21 11l-6.8 2.4L12 20l-2.2-6.6L3 11l6.8-2.4z"/></svg>What's new</h4>
+<ul><li>
+<b>The shortcut wheel.</b> While exploring, hold your key for <b>L</b> (<b>1</b> by default) and all eight field shortcuts appear in a wheel. Point at one with the mouse and let go of the key to use it. Let go in the middle to cancel. So now you can toggle game shortcuts without having to let go of the mouse. You can turn the wheel off on the overlay's <b>Controls</b> page (Mouse, Shortcut wheel).
+</li><li>
+<b>Image Sharpening.</b> A new <b>Sharpening</b> setting under <b>Anti-aliasing and upscaling</b> makes the world crisper. It's a slider with five levels: Off, Low, <b>Medium</b> (the default), High and Max. It works with every anti-aliasing mode. DLSS gets a stronger sharpen at each level, so it looks as crisp as FSR at the same level.
+</li><li>
+<b>Sharpen text and menus.</b> Right under Sharpening, an option to sharpen the game's menus, text and HUD too. Off by default; it helps most at low resolutions.
+</li><li>
+<b>The mouse works in Naviwoof Guide.</b> The wheel moves along the row of pins, left click starts guiding, right click goes back.
+</li></ul>
+<h4><svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/></svg>Fixes</h4>
+<ul><li>
+<b>Lighter graphics on weak GPUs at first start (<a href="https://github.com/ILFforever/YW4Recomp/issues/14">#14</a>).</b> On first start the game picks lighter graphics for integrated or low-memory GPUs. This was skipped if you had changed "Full screen at start" or a cheat in the launcher before playing for the first time, so those PCs got the heaviest shadows and could crash in the first cutscene. It now runs in that case too.
+</li><li>
+<b>Better bug reports.</b> The game's log now lists your picture and shadow settings at start and on every change, and records more detail if the graphics card stops responding. Attach the log when you report a bug and we can find the cause faster.
+</li></ul>
+<h4><img class="ico tux" src="../img/tux.svg" alt="" width="24" height="28">On Linux (experimental)</h4>
+<ul><li>
+<b>Building from source with GCC works (<a href="https://github.com/ILFforever/YW4Recomp/issues/12">#12</a>),</b> and FSR now builds correctly when the source is a git clone.
+</li></ul>
+      </div>
+    </article>
+
+    <article id="launcher-v1.2.0">
+      <div class="bar"><span class="q" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="2.5"/><path d="M3 8.5h18"/><path d="M10 11.5v5.5l4.5-2.75z" fill="currentColor"/></svg></span><h2>Launcher 1.2.0</h2><span class="cat">Launcher · 2026-11-15</span></div>
+      <div class="body prose notes">
+<p class="how">The launcher offers its own updates; with the portable zip, download the new zip and unpack it over your folder.</p>
+<p>A launcher update: a Cheats card, and Linux fixes. The game itself is updated separately (game 1.3.0): press <b>Update</b> on the Play screen to get it.</p>
+<h4><svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M12 2l2.2 6.6L21 11l-6.8 2.4L12 20l-2.2-6.6L3 11l6.8-2.4z"/></svg>What's new</h4>
+<ul><li>
+<b>Cheats card.</b> Settings has a new <b>Cheats</b> card under Playing. Its switch shows or hides the game's Cheats page (in the overlay, Escape). <b>Manage</b> lists the cheats, for now <b>Unlimited Crank-a-kai</b>, and turns each one on or off. It's the same setting as the game's own Cheats page, so the last change wins. Close the game to change them here.
+</li></ul>
+<h4><img class="ico tux" src="../img/tux.svg" alt="" width="24" height="28">On Linux (experimental)</h4>
+<ul><li>
+<b>The launcher runs on Linux</b> as an AppImage, attached to this release. It was checked in WSL only (no real Linux desktop yet); if it fails on your system, please <a href="https://github.com/ILFforever/YW4Recomp/issues">report a bug</a> with your log. You can still <a href="https://github.com/ILFforever/YW4Recomp#building-on-linux">build from source</a>.
+</li><li>
+<b>Upscaling and frame generation.</b> The launcher offers AMD FSR (upscaling and frame generation) and NVIDIA DLSS (upscaling only), as on Windows. Tried only on software rendering so far; we'd love reports from real Linux graphics cards.
+</li><li>
+<b>Build works from the AppImage (<a href="https://github.com/ILFforever/YW4Recomp/issues/13">#13</a>).</b> Build stopped at 0% with "No module named 'encodings'": the AppImage's own settings reached the programs it started. They now start with your normal settings.
+</li><li>
+<b>The icon and banner show (<a href="https://github.com/ILFforever/YW4Recomp/issues/13">#13</a>).</b> The game's icon, and the banner made from it, were missing on Linux. They appear after a rebuild.
+</li><li>
+<b>FSR builds inside your copy of the project (<a href="https://github.com/ILFforever/YW4Recomp/issues/12">#12</a>).</b> When the build folder was inside your project folder, AMD FSR failed to build and the game was built without it. It builds now, with GCC or Clang.
+</li></ul>
+      </div>
+    </article>
+
+    <article id="v1.3.0">
+      <div class="bar"><img class="kind" src="../img/icon-192.png" alt="" width="28" height="28"><h2>Game 1.3.0</h2><span class="cat">Game · 2026-11-15</span></div>
+      <div class="body prose notes">
+<p class="how">The launcher gets it for you: <b>Update</b> on the Play screen rebuilds the game in a few minutes, and the version before stays playable if anything goes wrong.</p>
+<h4><svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M12 2l2.2 6.6L21 11l-6.8 2.4L12 20l-2.2-6.6L3 11l6.8-2.4z"/></svg>What's new</h4>
+<ul><li>
+<b>Cheats: unlimited Crank-a-kai.</b> The overlay (Escape) has a new <b>Cheats</b> page. Turn on <b>Unlimited Crank-a-kai</b> and the day's cranks never run out, so you can crank as long as you have coins. Each crank still costs a coin. If you turn it on with no cranks left, you get one back.
+</li><li>
+<b>The mouse works in more places.</b>
+<ul><li>
+<b>Title screen and save list:</b> the wheel moves the selection, left click chooses, right click goes back.
+</li><li>
+<b>Conversations and shops</b> (and the Crank-a-kai): the wheel moves between choices, left click confirms, right click cancels.
+</li><li>
+<b>The map:</b> move the mouse to pan the map, use the wheel to zoom, right click to close it.
+</li><li>
+<b>The battle's Stopwatching menu</b> (and the Start Battle / Stopwatching choice): left click confirms, right click goes back.
+</li><li>
+<b>The overlay:</b> the wheel now moves the selection, like Up and Down.
+</li></ul>
+</li><li>
+<b>"N/A" for buttons with nothing bound.</b> If you removed the key or pad button for an action, its hint now shows <b>N/A</b> instead of a Switch button name that nothing presses. It matches your hint style: keyboard, Xbox, PlayStation or Switch.
+</li><li>
+<b>A cleaner cursor on the Yo-kai Pad.</b> On the Yo-kai Pad and its pages, the mouse now shows the touchpad's round grey cursor instead of the Windows arrow. It is also bigger, so it is easier to see in a small window.
+</li></ul>
+<h4><svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/></svg>Fixes</h4>
+<ul><li>
+<b>Blurred screens are no longer black with upscaling on (<a href="https://github.com/ILFforever/YW4Recomp/issues/10">#10</a>).</b> With FSR or DLSS upscaling, the blurred picture behind the pause menu, battle transitions, battle results and the capsule scene was black. It shows again.
+</li><li>
+<b>Stopwatching menu keys and hints.</b> With the default keys, <b>Switch ally</b> had no key. In that menu, the left stick press key (<b>Tab</b> by default) now switches ally too, and the hints show the keys that work: Tab for Switch ally, <b>F</b> for Switch enemy.
+</li><li>
+<b>A rare thread timing bug.</b> One way the game's threads wait for each other could fail in a rare timing window. It showed up in our tests, not in play, and is fixed.
+</li><li>
+<b>Less work for your graphics card.</b> Objects hidden behind others are now skipped on the graphics card, as the game asks. The picture is the same. One more kind of graphics effect also runs now instead of being skipped (it has not been seen in play yet).
+</li></ul>
+<h4><img class="ico tux" src="../img/tux.svg" alt="" width="24" height="28">On Linux (experimental)</h4>
+<ul><li>
+<b>FSR and DLSS upscaling, and FSR frame generation.</b> DLSS hasn't been tried on an NVIDIA card under Linux yet.
+</li><li>
+<b>Clearer messages when adding DLC (<a href="https://github.com/ILFforever/YW4Recomp/issues/3">#3</a>).</b>
+</li></ul>
+      </div>
+    </article>
+
+    <article id="v1.2.3">
+      <div class="bar"><img class="kind" src="../img/icon-192.png" alt="" width="28" height="28"><h2>Game 1.2.3</h2><span class="cat">Game · 2026-11-14</span></div>
+      <div class="body prose notes">
+<p class="how">The launcher gets it for you: <b>Update</b> on the Play screen rebuilds the game in a few minutes, and the version before stays playable if anything goes wrong.</p>
+<h4><svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M12 2l2.2 6.6L21 11l-6.8 2.4L12 20l-2.2-6.6L3 11l6.8-2.4z"/></svg>What's new</h4>
+<ul><li>
+<b>Smoother first play after an update.</b> The game now keeps its shader cache when it's updated and rebuilds what changed in the background while it starts, instead of hitching the first time places and effects appear.
+</li><li>
+<b>Native FSR and DLSS are easier to find.</b> The first Upscaling choice now says <b>Off (native)</b>: set Anti-aliasing to FSR or DLSS and Upscaling to Off (native) to smooth edges at full resolution.
+</li><li>
+<b>Better graphics compatibility.</b> The game now follows the Vulkan rules more closely: its shaders stay within what every desktop graphics card supports, and NVIDIA DLSS and Reflex get everything they ask for. Nothing should look different; it may help on graphics cards and drivers that are less forgiving.
+</li></ul>
+      </div>
+    </article>
+
+    <article id="v1.2.2">
+      <div class="bar"><img class="kind" src="../img/icon-192.png" alt="" width="28" height="28"><h2>Game 1.2.2</h2><span class="cat">Game · 2026-11-14</span></div>
+      <div class="body prose notes">
+<p class="how">The launcher gets it for you: <b>Update</b> on the Play screen rebuilds the game in a few minutes, and the version before stays playable if anything goes wrong.</p>
+<h4><svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M12 2l2.2 6.6L21 11l-6.8 2.4L12 20l-2.2-6.6L3 11l6.8-2.4z"/></svg>What's new</h4>
+<ul><li>
+<b>Full jumps while running at high frame rates.</b> Above 60 frames/s a jump made while running was only a small hop. It now goes as high as on the Switch (<a href="https://github.com/ILFforever/YW4Recomp/issues/9">#9</a>).
+</li><li>
+<b>Shadows on AMD graphics cards.</b> A fix for shadows flickering on and off on AMD cards on Windows (<a href="https://github.com/ILFforever/YW4Recomp/issues/8">#8</a>). If you set <b>Shadow mask</b> to the game's to work around it, set it back and let us know if the flicker is gone.
+</li><li>
+<b>FSR on AMD graphics cards.</b> FSR anti-aliasing and FSR frame generation now get the scene's depth in a form that is valid on AMD cards.
+</li></ul>
+      </div>
+    </article>
+
+    <article id="launcher-v1.1.0">
+      <div class="bar"><span class="q" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="2.5"/><path d="M3 8.5h18"/><path d="M10 11.5v5.5l4.5-2.75z" fill="currentColor"/></svg></span><h2>Launcher 1.1.0</h2><span class="cat">Launcher · 2026-11-13</span></div>
+      <div class="body prose notes">
+<p class="how">The launcher offers its own updates; with the portable zip, download the new zip and unpack it over your folder.</p>
+<h4>A launcher update for mods.</h4>
+<ul><li>
+<b>Clash warnings.</b> The Mods tab tells you when two mods can't work together, before you play. Mods that clash are shown in groups: the one the game uses is marked <b>Used</b>, and you switch off the ones you don't want right there.
+</li><li>
+<b>Readable mod names.</b> Mods show as "Crank-a-kai Overhaul" instead of their folder name.
+</li><li>
+<b>More mods found.</b> Mods without a <code>romfs</code> folder, or inside an extra folder of their own, show up in the list.
+</li><li>
+<b>Buy me a coffee.</b> If you enjoy YW4 Recomp, there's a small Support card in Settings.
+</li><li>
+<b>Portable zip fixes.</b> Update now points you to the new portable zip instead of running the installer, and the zip includes the themes.
+</li><li>
+<b>The installer carries game 1.2.0</b> with the YKW Mod Merger™, so a new install starts from the current game.
+</li></ul>
+<p><b>Using the portable zip from 1.0.1?</b> Don't press Update for this one: it runs the installer. Download YW4-Recomp-Launcher-1.1.0-portable.zip below and unpack it over your folder.</p>
+      </div>
+    </article>
+
+    <article id="v1.2.0">
+      <div class="bar"><img class="kind" src="../img/icon-192.png" alt="" width="28" height="28"><h2>Game 1.2.0</h2><span class="cat">Game · 2026-11-13</span></div>
+      <div class="body prose notes">
+<p class="how">The launcher gets it for you: <b>Update</b> on the Play screen rebuilds the game in a few minutes, and the version before stays playable if anything goes wrong.</p>
+<h4><svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M12 2l2.2 6.6L21 11l-6.8 2.4L12 20l-2.2-6.6L3 11l6.8-2.4z"/></svg>What's new</h4>
+<ul><li>
+<b>YKW Mod Merger™.</b> Mods that change the same part of the game, such as items or shops, now work together. Gameplay mods such as Free Tag Battles or Unshackled Equipment work next to the English translation and next to each other, instead of only one mod working at a time.
+</li><li>
+<b>More mods load.</b> Mods that come without a <code>romfs</code> folder, or inside an extra folder of their own, are found now.
+</li><li>
+<b>Clash warnings.</b> The game now detects when mods clash and warns you through the launcher.
+</li></ul>
+      </div>
+    </article>
+
+    <article id="v1.1.0">
+      <div class="bar"><img class="kind" src="../img/icon-192.png" alt="" width="28" height="28"><h2>Game 1.1.0</h2><span class="cat">Game · 2026-11-13</span></div>
+      <div class="body prose notes">
+<p class="how">The launcher gets it for you: <b>Update</b> on the Play screen rebuilds the game in a few minutes, and the version before stays playable if anything goes wrong.</p>
+<h4><svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M12 2l2.2 6.6L21 11l-6.8 2.4L12 20l-2.2-6.6L3 11l6.8-2.4z"/></svg>What's new</h4>
+<ul><li>
+<b>Names typed in English look right.</b> Names you type with the English patch no longer come out spaced apart ("N a t e").
+</li><li>
+<b>PS touchpad support.</b> Use a DualSense or DualShock 4 touchpad to move a cursor in the game's menus and the overlay, and click to choose.
+</li><li>
+<b>More controller icons.</b> The middle buttons show the icons printed on your controller: CREATE, SHARE or SELECT on PlayStation pads, and the Back and Start icons on Xbox 360 pads.
+</li><li>
+<b>Mouse hints in battles.</b> With mouse and keyboard, battle hints show the mouse button first.
+</li></ul>
+      </div>
+    </article>
+
+    <article id="v1.0.2">
+      <div class="bar"><img class="kind" src="../img/icon-192.png" alt="" width="28" height="28"><h2>Game 1.0.2</h2><span class="cat">Game · 2026-11-13</span></div>
+      <div class="body prose notes">
+<p class="how">The launcher gets it for you: <b>Update</b> on the Play screen rebuilds the game in a few minutes, and the version before stays playable if anything goes wrong.</p>
+<h4><svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M12 2l2.2 6.6L21 11l-6.8 2.4L12 20l-2.2-6.6L3 11l6.8-2.4z"/></svg>What's new</h4>
+<ul><li>
+<b>Switch-style controllers.</b> Some Switch-style controllers show up on PC as an Xbox controller, so the button hints showed letters that don't match the ones printed on the controller. Turn on <b>Nintendo icons</b> on the overlay's Controls page, and the hints show the letters on your controller.
+</li><li>
+<b>Open the overlay with the shoulder buttons.</b> Hold L, R, ZL and ZR together (LB, RB, LT and RT on an Xbox controller). This helps on controllers where Minus + Plus also opens the Xbox Game Bar or Steam.
+</li><li>
+<b>Faster builds.</b> Building the game is about 20% faster.
+</li></ul>
+      </div>
+    </article>
+
+    <article id="launcher-v1.0.1">
+      <div class="bar"><span class="q" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="2.5"/><path d="M3 8.5h18"/><path d="M10 11.5v5.5l4.5-2.75z" fill="currentColor"/></svg></span><h2>Launcher 1.0.1</h2><span class="cat">Launcher · 2026-11-13</span></div>
+      <div class="body prose notes">
+<p class="how">The launcher offers its own updates; with the portable zip, download the new zip and unpack it over your folder.</p>
+<h4>A small update to the launcher.</h4>
+<ul><li>
+<b>New installs build the newest game straight away.</b> Before the first build, the launcher now downloads any game update that came out after it. New players used to build the old version first, then get the update and build again.
+</li><li>
+<b>"What's new" shows the game update you have.</b> After a game update, the Play screen lists that update's changes instead of the launcher's own.
+</li><li>
+<b>The installer carries game 1.0.1</b>, so a new install starts from the current game.
+</li></ul>
+<p><b>Using the portable zip?</b> Its Update button runs the installer, which installs a second launcher instead of updating yours. Download the newest portable zip from the releases page and unpack it over your folder instead. Fixed in launcher 1.1.0.</p>
+      </div>
+    </article>
+
+    <article id="v1.0.1">
+      <div class="bar"><img class="kind" src="../img/icon-192.png" alt="" width="28" height="28"><h2>Game 1.0.1</h2><span class="cat">Game · 2026-11-13</span></div>
+      <div class="body prose notes">
+<p class="how">The launcher gets it for you: <b>Update</b> on the Play screen rebuilds the game in a few minutes, and the version before stays playable if anything goes wrong.</p>
+<h4><svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M12 2l2.2 6.6L21 11l-6.8 2.4L12 20l-2.2-6.6L3 11l6.8-2.4z"/></svg>What's new</h4>
+<ul><li>
+<b>Better first-start settings.</b> New installs now start at 60 frames a second instead of 30. PCs with a dedicated graphics card start on a high-quality set: 1440p, 120 frames a second, sharper shadows, and DLSS where the card has it. Integrated graphics still get the lighter set. If you already play, your settings stay as they are: change them in the overlay (Esc) any time.
+</li><li>
+<b>Much faster on Linux.</b> The game was sending almost every texture to the graphics card again on every frame, and kept 3D models in system memory. Both are fixed, so towns no longer drop to 20-something frames a second.
+</li></ul>
+      </div>
+    </article>
+
+    <article id="launcher-v1.0.0">
+      <div class="bar"><img class="kind" src="../img/icon-192.png" alt="" width="28" height="28"><h2>1.0.0: the first release</h2><span class="cat">Launcher + game · 2026-11-13</span></div>
+      <div class="body prose notes">
+
+<p>After a long time in development, YW4 Recomp is at a stage I'm happy to share with the community. It took a lot to get here: lots of bugs squashed and a lot of things optimized. I hope everyone enjoys it, both returning players from the Switch and PS4 and new players starting their Yo-kai Watch 4 adventure.</p>
+<h4><svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M12 2l2.2 6.6L21 11l-6.8 2.4L12 20l-2.2-6.6L3 11l6.8-2.4z"/></svg>Features</h4>
+<ul><li>
+Lighter than an emulator
+</li><li>
+Higher frame rate caps
+</li><li>
+Higher Resolutions
+</li><li>
+Ultrawide and other aspect ratios
+</li><li>
+Improved shadow maps and rendering
+</li><li>
+Contact Shadows for objects
+</li><li>
+DLSS and FSR upscaling and frame generation
+</li><li>
+Full Mouse, Keyboard and controller support
+</li><li>
+Custom keybinds and on screen hints
+</li><li>
+Custom Launcher and New in game overlay
+</li><li>
+Mods support such as the <a href="https://gamebanana.com/mods/480884">English patch</a> by Light8227
+</li></ul>
+      </div>
+    </article>
+  </main>
+</div>
+
+<footer>
+  <div class="in">
+    <span>A fan project. Screenshots are from the maintainer's own copy of the game, running in the recompiled port;
+      the file paths shown are examples. Not affiliated with or endorsed by LEVEL-5 or Nintendo; <i>Yo-kai Watch</i>
+      belongs to its owners.</span>
+    <span>Tux, the Linux penguin, by Larry Ewing (lewing@isc.tamu.edu), made with The GIMP.</span>
+    <span>NVIDIA DLSS is NVIDIA's; AMD FSR is AMD's. How each part works: the
+      <a href="https://github.com/ILFforever/YW4Recomp#features">README</a> and
+      <a href="https://github.com/ILFforever/YW4Recomp/tree/master/docs/decisions">docs/decisions</a>.</span>
+  </div>
+</footer>
+
+<script>
+/* The download cards point at the newest launcher release when GitHub answers; the links above are the fallback. */
+fetch("https://api.github.com/repos/ILFforever/YW4Recomp/releases/latest")
+  .then(r => r.ok ? r.json() : Promise.reject(r.status))
+  .then(rel => {
+    if (!rel.tag_name || !rel.tag_name.startsWith("launcher-v")) return;
+    const v = rel.tag_name.slice("launcher-v".length);
+    document.querySelectorAll("[data-asset]").forEach(a => {
+      const f = (rel.assets || []).find(x => x.name.endsWith(a.dataset.asset));
+      if (f) a.href = f.browser_download_url;
+    });
+    document.querySelectorAll("[data-ver]").forEach(s => { s.textContent = v; });
+  })
+  .catch(() => {});
+</script>
+</body>
+</html>

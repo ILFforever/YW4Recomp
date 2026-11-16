@@ -7,7 +7,8 @@ replaces: none
 code: launcher/src-tauri/src/platform.rs, launcher/src-tauri/tauri.linux.conf.json, launcher/package.py, launcher/ui/app.js, tools/yw4/system.py, tools/yw4/build_install.py, recomp/build.py
 -->
 
-Status: accepted. Built and checked in WSL (Ubuntu 24.04, software rendering); not yet on a real Linux desktop.
+Status: accepted. Built and checked in WSL (Ubuntu 24.04, software rendering); since then players use the AppImage on
+their own Linux desktops (owner, 2026-11-17).
 
 ## Context
 

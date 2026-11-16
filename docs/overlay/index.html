@@ -238,8 +238,10 @@ footer a { color: var(--gold); }
       <li><a href="#mouse"><span class="n">5</span>Mouse buttons</a></li>
       <li><a href="#quick-look"><span class="n">6</span>Quick look</a></li>
       <li><a href="#hud"><span class="n">7</span>Performance HUD</a></li>
-      <li><a href="#themes"><span class="n">8</span>Themes</a></li>
-      <li><a href="#default-keys"><span class="n">9</span>Default keys</a></li>
+      <li><a href="#shortcut-wheel"><span class="n">8</span>Shortcut wheel</a></li>
+      <li><a href="#themes"><span class="n">9</span>Themes</a></li>
+      <li><a href="#cheats"><span class="n">10</span>Cheats</a></li>
+      <li><a href="#default-keys"><span class="n">11</span>Default keys</a></li>
     </ol>
   </nav>
 
@@ -252,7 +254,7 @@ footer a { color: var(--gold); }
             <p>Press <kbd>Esc</kbd>, or on a controller the touchpad (PlayStation), Share (Xbox Series), Capture
               (Switch Pro) or Back and Start together. The game pauses behind it.</p>
             <p>The side panel: <b>Resume</b>, <b>Settings</b>, <b>Controls</b>, <b>Overlay</b> (the performance HUD),
-              <b>Report a bug</b>, <b>Return to title</b> and <b>Exit game</b>. <kbd>F1</kbd> opens Settings straight away.</p>
+              <b>Cheats</b>, <b>Report a bug</b>, <b>Return to title</b> and <b>Exit game</b>. <kbd>F1</kbd> opens Settings straight away.</p>
             <p>Keyboard, mouse and controller all work everywhere in it, and the key hints along the bottom follow
               whichever you used last.</p>
           </div>
@@ -273,7 +275,8 @@ footer a { color: var(--gold); }
           <div class="prose">
             <p>Every graphics setting, in seven sections: Display, Anti-aliasing and upscaling, Frame generation and
               latency, Detail, Shadows, Look and Advanced. Each option shows what it does and what it costs in the box
-              below, and the Switch's own choice is marked.</p>
+              below, and the Switch's own choice is marked. <b>Sharpening</b> (off, low, medium, high, max) works with
+              every anti-aliasing choice.</p>
           </div>
           <div class="spec"><dl>
             <dt>Sections</dt><dd>7</dd>
@@ -322,7 +325,7 @@ footer a { color: var(--gold); }
           <div class="spec"><dl>
             <dt>Per Switch button</dt><dd>Two keys and one controller input</dd>
             <dt>Sets</dt><dd>Exploring and battles</dd>
-            <dt>Also</dt><dd>Mouse sensitivity, vibration</dd>
+            <dt>Also</dt><dd>Mouse sensitivity, vibration, the shortcut wheel on or off</dd>
           </dl></div>
         </div>
         <figure class="whole">
@@ -403,6 +406,24 @@ footer a { color: var(--gold); }
       </div>
     </article>
 
+    <article id="shortcut-wheel">
+      <div class="bar"><span class="q">!</span><h2>Shortcut wheel</h2><span class="cat">Controls</span></div>
+      <div class="body">
+        <div class="top">
+          <div class="prose">
+            <p>All eight of the field's shortcuts with the mouse: hold the key bound to L (<kbd>1</kbd>) while
+              exploring, point towards one, let go of the key. Let go in the middle to do nothing. The D-pad's four sit
+              where the D-pad points, the hold-L four on the diagonals; the ones that can't be used there are greyed out.</p>
+          </div>
+          <div class="spec"><dl>
+            <dt>Opens with</dt><dd>Hold <kbd>1</kbd> while exploring</dd>
+            <dt>Turn off</dt><dd>Controls › Mouse shortcut wheel</dd>
+            <dt>Record</dt><dd><a href="https://github.com/ILFforever/YW4Recomp/blob/master/docs/decisions/0075-shortcut-wheel.md">decision 0075</a></dd>
+          </dl></div>
+        </div>
+      </div>
+    </article>
+
     <article id="themes">
       <div class="bar"><span class="q">!</span><h2>Themes</h2><span class="cat">Look</span></div>
       <div class="body">
@@ -421,6 +442,24 @@ footer a { color: var(--gold); }
           <img src="../screenshots/98-overlay-themes.jpg" loading="lazy" alt="The overlay in four themes: Jibanyan, Komasan, Shmoopie and Whisper">
           <figcaption>Jibanyan, Komasan, Shmoopie and Whisper</figcaption>
         </figure>
+      </div>
+    </article>
+
+    <article id="cheats">
+      <div class="bar"><span class="q">!</span><h2>Cheats</h2><span class="cat">Extras</span></div>
+      <div class="body">
+        <div class="top">
+          <div class="prose">
+            <p><b>Unlimited Crank-a-kai</b>: your cranks for the day never go down, so you can keep cranking as long as
+              you have coins. It switches on or off while you play and is saved with your settings. The launcher's
+              Settings can hide this page (every cheat off) or switch the cheats from there.</p>
+          </div>
+          <div class="spec"><dl>
+            <dt>Cheats</dt><dd>Unlimited Crank-a-kai</dd>
+            <dt>Where</dt><dd>The side panel, or the launcher's Settings</dd>
+            <dt>Record</dt><dd><a href="https://github.com/ILFforever/YW4Recomp/blob/master/docs/decisions/0074-cheats.md">decision 0074</a></dd>
+          </dl></div>
+        </div>
       </div>
     </article>
 

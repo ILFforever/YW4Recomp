@@ -157,7 +157,7 @@ footer a { color: var(--gold); }
     <div>
       <span class="eyebrow">YW4 Recomp · fan PC port</span>
       <h1>The launcher</h1>
-      <p>A Windows app for the PC version of <i>Yo-kai Watch 4++</i>. Point it at your own game files: it checks them,
+      <p>A Windows and Linux app for the PC version of <i>Yo-kai Watch 4++</i>. Point it at your own game files: it checks them,
         builds YW4Recomp on your PC once and starts it, with mods, DLC, saves and screenshots all in one place.</p>
       <div class="stats">
         <div class="stat"><b>5 steps</b><span>game files, check, options, build, play</span></div>
@@ -207,7 +207,7 @@ footer a { color: var(--gold); }
               The launcher checks your files before beginning the build process.</p>
           </div>
           <div class="spec"><dl>
-            <dt>Needs</dt><dd>Windows, x86-64</dd>
+            <dt>Needs</dt><dd>Windows (installer or portable zip) or Linux (AppImage), x86-64</dd>
             <dt>Graphics</dt><dd>Vulkan 1.3; NVIDIA RTX cards also get DLSS</dd>
             <dt>Your game</dt><dd>Yo-kai Watch 4++ with the 2.2.0 update</dd>
           </dl></div>
@@ -254,7 +254,7 @@ footer a { color: var(--gold); }
               <li><b>Options</b>: where the build goes, whether saves and settings stay in the game's folder or in AppData, shortcuts, and your option to download AMD FSR or
                 NVIDIA DLSS. It names your graphics card; DLSS is greyed out without an NVIDIA RTX card. The
                 graphics settings themselves (resolution, shadows...) are in the game.</li>
-              <li><b>Build</b>: the game's code is being translated and compiled into a Windows program on your PC, about
+              <li><b>Build</b>: the game's code is being translated and compiled into a Windows or Linux program on your PC, about
                 10 to 15 minutes, once. You can follow along using the progress bar on screen.</li>
             </ul>
           </div>
@@ -288,7 +288,8 @@ footer a { color: var(--gold); }
             <p>Once the game is built, the launcher opens on <b>Play</b>. With options:</p>
             <ul>
               <li><b>Overview</b>: what's new in this version, and your latest screenshots (<kbd>F12</kbd> in the game).</li>
-              <li><b>Screenshots</b>, <b>Mods</b> (the English patch and other romfs mods; code patches in exefs don't work) and <b>DLC</b> tabs.</li>
+              <li><b>Screenshots</b>, <b>Mods</b> (the English patch and other romfs mods; code patches in exefs don't work) and <b>DLC</b> tabs.
+                Mods that change the same file are merged, and the Mods tab names the ones that really clash.</li>
               <li>Last played, play time, and shortcuts to the saves and the logs.</li>
               <li><b>Free up space</b>: you can remove the build files the game doesn't need to run.</li>
             </ul>
@@ -314,10 +315,14 @@ footer a { color: var(--gold); }
             <ul>
               <li><b>Playing</b>: the theme; what the launcher does when the game starts (hide and come back when it
                 closes, minimise, stay open, or close); start in full screen; mods on or off.</li>
+              <li><b>Cheats</b>: show or hide the game's Cheats page (off also turns every cheat off), and <b>Manage</b> to
+                switch the cheats from here while the game isn't running.</li>
               <li><b>Where things are kept</b>: the game folder, and the saves and settings in it or in AppData.</li>
               <li><b>Shortcuts</b>: desktop and Start menu.</li>
               <li><b>Disk space</b>, <b>downloads</b> (changing them rebuilds the game) and <b>updates</b>.</li>
               <li><b>Rebuild</b> and <b>Uninstall</b> (it shows what is kept and how big it is).</li>
+              <li><b>Support</b>: Buy me a coffee, if you'd like to. <b>Help</b> has <b>Report a bug</b> under
+                Troubleshooting.</li>
             </ul>
           </div>
           <div class="spec"><dl>
