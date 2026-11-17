@@ -139,8 +139,14 @@ def write_temp_keys(keys_dir: Path, rights_ids: set[str], home: Path,
                     found[rid] = key.strip()
     missing = rights_ids - found.keys()
     if missing:
-        raise ExtractError("Your title.keys is missing this game's key. Use the title.keys from the console the game "
-                           f"was dumped from.\n(no key for rights ID(s): {', '.join(sorted(missing))})")
+        # a rights ID starts with its title's ID: say whose key is missing (the base game's, the update's, an add-on's)
+        ids = {r[:16].lower() for r in missing}
+        whose = ("the 2.2.0 update's key" if ids == {"010086c00af7c800"} else
+                 "the base game's key" if ids == {"010086c00af7c000"} else "the game's keys")
+        raise ExtractError(f"Your title.keys doesn't have {whose}, and the file has no ticket with it. Use a title.keys "
+                           "that includes it (from a console with the game and its 2.2.0 update installed), or a dump "
+                           "that keeps its ticket. prod.keys is not the problem here.\n"
+                           f"(no key for rights ID(s): {', '.join(sorted(missing))})")
     (switch / "title.keys").write_text("".join(f"{r} = {k}\n" for r, k in found.items()))
 
 
