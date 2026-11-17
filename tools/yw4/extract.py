@@ -77,20 +77,26 @@ def unpack_ncas(path: Path, out_dir: Path, tag: str) -> tuple[list[Path], set[st
     return ncas, rights_ids
 
 
-def ticket_title_key(data: bytes) -> tuple[str, str] | None:
-    """(rights ID, encrypted title key) from a common ticket (.tik) inside an NSP, else None. hactool's
+def ticket_title_key(data: bytes) -> tuple[str, str] | str:
+    """(rights ID, encrypted title key) from a common ticket (.tik) inside an NSP, else why it can't be used. hactool's
     title.keys holds the key as the ticket carries it (it decrypts it with titlekek_<gen> from prod.keys)."""
     if len(data) < 4:
-        return None
+        return "too short"
     sig = int.from_bytes(data[:4], "little")
     sizes = {0x10000: (0x200, 0x3C), 0x10001: (0x100, 0x3C), 0x10002: (0x3C, 0x40),
              0x10003: (0x200, 0x3C), 0x10004: (0x100, 0x3C), 0x10005: (0x3C, 0x40)}
     if sig not in sizes:
-        return None
+        return f"unknown type {sig:#x}"
     body = 4 + sizes[sig][0] + sizes[sig][1]
-    if len(data) < body + 0x170 or data[body + 0x141] != 0:  # 0: common (the key as is); 1: personalised
-        return None
+    if len(data) < body + 0x170:
+        return "too short"
+    if data[body + 0x141] != 0:  # 0: common (the key as is); 1: personalised (encrypted to one console)
+        return "personalised" if data[body + 0x141] == 1 else f"unknown key type {data[body + 0x141]}"
     return data[body + 0x160:body + 0x170].hex(), data[body + 0x40:body + 0x50].hex()
+
+
+# Why each NSP ticket wasn't used, by rights ID (its file name): the missing-key error says it, the log lists it
+TICKETS_SKIPPED: dict[str, str] = {}
 
 
 def ticket_keys_of(path: Path) -> dict[str, str]:
@@ -103,11 +109,18 @@ def ticket_keys_of(path: Path) -> dict[str, str]:
         if xci.is_xci(f):
             return keys
         for e in pfs0.read_entries(f):
-            if e.name.endswith(".tik") and e.size <= 0x1000:
+            if not e.name.endswith(".tik"):
+                continue
+            if e.size > 0x1000:
+                got = "too long"
+            else:
                 f.seek(e.offset)
                 got = ticket_title_key(f.read(e.size))
-                if got:
-                    keys[got[0]] = got[1]
+            if isinstance(got, tuple):
+                keys[got[0]] = got[1]
+            else:
+                TICKETS_SKIPPED[e.name[:-4].lower()] = got
+                print(f"ticket {e.name} in {path.name}: {got}, not used (its key must come from title.keys)")
     return keys
 
 
@@ -143,10 +156,16 @@ def write_temp_keys(keys_dir: Path, rights_ids: set[str], home: Path,
         ids = {r[:16].lower() for r in missing}
         whose = ("the 2.2.0 update's key" if ids == {"010086c00af7c800"} else
                  "the base game's key" if ids == {"010086c00af7c000"} else "the game's keys")
-        raise ExtractError(f"Your title.keys doesn't have {whose}, and the file has no ticket with it. Use a title.keys "
-                           "that includes it (from a console with the game and its 2.2.0 update installed), or a dump "
-                           "that keeps its ticket. prod.keys is not the problem here.\n"
-                           f"(no key for rights ID(s): {', '.join(sorted(missing))})")
+        # why the file's own ticket didn't give it: a personalised one (to one console) is the usual case
+        why = {TICKETS_SKIPPED.get(r, "") for r in missing}
+        ticket = ("the file's own ticket can't be used: it is personalized to the console it came from"
+                  if why == {"personalised"} else
+                  "the file's own ticket is of a kind the build can't read (please report it with the log)"
+                  if any(w.startswith("unknown") for w in why) else "the file's own ticket can't be used")
+        raise ExtractError(f"Your title.keys doesn't have {whose}, and {ticket}. Use a title.keys that includes it "
+                           "(from a console with the game and its 2.2.0 update installed). prod.keys is not the problem "
+                           f"here.\n(no key for rights ID(s): {', '.join(sorted(missing))}; tickets: "
+                           f"{', '.join(sorted(w or '?' for w in why))})")
     (switch / "title.keys").write_text("".join(f"{r} = {k}\n" for r, k in found.items()))
 
 
@@ -239,7 +258,7 @@ def extract_dlc(cfg: config.Config) -> int:
                         if e.name.endswith(".tik") and e.size <= 0x1000:
                             f.seek(e.offset)
                             got = ticket_title_key(f.read(e.size))
-                            if got:
+                            if isinstance(got, tuple):  # else why it can't be used (a str)
                                 tkeys[got[0]] = got[1]
                     for e in entries:
                         if (not e.name.endswith(".nca") or e.name.endswith(".cnmt.nca") or e.size <= 0xC00
