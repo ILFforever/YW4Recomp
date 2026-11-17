@@ -1598,30 +1598,48 @@ static void slot_choice_text(char *out, size_t n, int s) {
              secs / 60 % 60);
 }
 
+/* The replay (YW4_REPLAY) while it still gives the input, else NULL: once it hands over to the player (a replay
+ * that only loads a save) New Game shows its slot list again (owner, 2026-11-17: the list stopped opening in a
+ * session started from a save copy, after its replay had finished). */
+extern int yw4_replay_done;  /* svc_hid.c */
+static const char *replay_playing(void) {
+    const char *r = getenv("YW4_REPLAY");
+    return r && *r && !__atomic_load_n(&yw4_replay_done, __ATOMIC_ACQUIRE) ? r : NULL;
+}
+
 /* New Game on the title (owner, 2026-11-17: "choose on beginning which save slot to write to"): the overlay's
  * list popup (gamemenu_choice_begin) over the game's waiting picture, as the name entry does (swkbd.c); the game's
  * thread waits here. An occupied slot asks again before it is used. Replays and YW4_NEWGAME_SLOT=<1..10> answer at
  * once (a replay's clock counts frames, which stop while the game waits): the given slot, else the first empty one,
  * else slot 1. */
-static int choose_new_game_slot(void) {
+static int choose_new_game_slot(int can_go_back) {
     host_lock(&slot_lock);
     int first_empty = find_first_empty_slot_locked();
     host_unlock(&slot_lock);
-    const char *given = getenv("YW4_NEWGAME_SLOT"), *replay = getenv("YW4_REPLAY");
+    const char *given = getenv("YW4_NEWGAME_SLOT"), *replay = replay_playing();
     if (given && atoi(given) >= 1 && atoi(given) <= DIARY_SLOT_COUNT) return atoi(given) - 1;
-    if ((replay && *replay) || window_repaint(1) != 0) return first_empty >= 0 ? first_empty : 0;
+    if ((replay && *replay) || window_repaint(1) != 0) {
+        fprintf(stderr, "yw4: diary: New Game slot list not shown (%s), first empty slot taken\n",
+                replay && *replay ? "replay" : "no picture to show it over");
+        return first_empty >= 0 ? first_empty : 0;
+    }
+    fprintf(stderr, "yw4: diary: New Game slot list shown\n");
     char lines[DIARY_SLOT_COUNT][96];
-    const char *rows[DIARY_SLOT_COUNT];
-    int sel = first_empty >= 0 ? first_empty : 0;
+    const char *rows[DIARY_SLOT_COUNT + 1];
+    int n = DIARY_SLOT_COUNT + (can_go_back ? 1 : 0), sel = first_empty >= 0 ? first_empty : 0;
     for (;;) {
         for (int s = 0; s < DIARY_SLOT_COUNT; s++) slot_choice_text(lines[s], sizeof lines[s], s), rows[s] = lines[s];
-        gamemenu_choice_begin("New game: choose a Diary slot",
-                              "Your new game saves in this slot. Each slot has its own save and Autosave.", rows,
-                              DIARY_SLOT_COUNT, sel);
+        if (can_go_back) rows[DIARY_SLOT_COUNT] = "Back to the title";
+        gamemenu_choice_begin("New Game: choose a Diary slot",
+                              "Your new game is saved in this slot when you save it in the Diary.", rows, n, sel);
         int s;
         while ((s = gamemenu_choice_take()) < 0) {
             window_repaint(0);
             host_sleep_ns(16 * 1000000LL);
+        }
+        if (s >= DIARY_SLOT_COUNT) {  /* back to the title, as the game's own warning's No */
+            window_repaint(0);
+            return -1;
         }
         sel = s;
         host_lock(&slot_lock);
@@ -1630,7 +1648,7 @@ static int choose_new_game_slot(void) {
         if (!used) break;
         char title[64], body[200];
         snprintf(title, sizeof title, "Overwrite Diary %d" DIARY_OF "?", s + 1);
-        snprintf(body, sizeof body, "%s. It is replaced when your new game first saves; until then it stays.",
+        snprintf(body, sizeof body, "%s. It is only replaced when you save your new game over it in the Diary.",
                  lines[s]);
         const char *const yes_no[2] = {"No, choose another slot", "Yes, overwrite it"};
         gamemenu_choice_begin(title, body, yes_no, 2, 0);
@@ -1643,6 +1661,147 @@ static int choose_new_game_slot(void) {
     }
     window_repaint(0);  /* the popup gone before the game goes on */
     return sel;
+}
+
+/* The new game's slot: active from now on, its old save (if any) kept on disk until the new game first saves (New
+ * Game writes nothing, research Round 4), so quitting before that keeps it. Its summary is forgotten now: the first
+ * save must not carry the old game's other row into HEADERSAVE. */
+static void new_game_take_slot(int slot) {
+    host_lock(&slot_lock);
+    new_game_slot_set = 1;
+    int overwrite = slot_any_data_locked(slot);
+    if (overwrite) memset(slot_cache[slot], 0, sizeof slot_cache[slot]);
+    fresh_slot = overwrite ? slot : -1;
+    diary_slot = slot;
+    set_active_slot(slot);
+    host_unlock(&slot_lock);
+    fprintf(stderr, "yw4: diary: New Game in slot %d" DIARY_OF " (%s)\n", slot + 1,
+            overwrite ? "replaces its save at the first save" : "empty");
+}
+
+/* The title's New Game (owner, 2026-11-17: the slot list right after New Game, and no "erase the current saved data?"
+ * warning: with five slots nothing is erased). The title script (title_main) asks that with OpenCheckWindow(text
+ * 0x3f4180e1): funcLuaCommand 0xade8af16 opens the box (f_299910: its argument 3 the text), then 0x024a58f2 (f_29c060)
+ * is polled until it gives the answer (-1 while open; 1 Yes, 0 No), and Yes starts the new game. For that text the
+ * slot list shows instead of the box, and the poll answers from it: a slot (Yes) or Back to the title (No). */
+static int newgame_answer = -1;
+
+static double guest_number(CPUState *ctx, uint64_t L, uint32_t idx) {
+    GuestFn fn = yw4_lookup(yw4_image_base + 0xd235c0ull);  /* the game's lua_tonumberx(L, idx, NULL) */
+    if (!fn) return 0;
+    CPUState saved = *ctx;
+    ctx->sp = saved.sp - 0x40;
+    ctx->x[0] = L, ctx->x[1] = idx, ctx->x[2] = 0, ctx->x[30] = saved.x[30];
+    fn(ctx);
+    double d;
+    uint64_t bits = ctx->v[0].d[0];
+    memcpy(&d, &bits, sizeof d);
+    *ctx = saved;
+    return d;
+}
+
+/* The slot list's state while the title waits on it (the game goes on behind it, as behind its own box): 0 none,
+ * 1 the list up, 2 its "Overwrite Diary n/5?" up (ng_slot the slot asked about). */
+static int ng_state, ng_slot;
+
+static void ng_row(GameMenuDiaryRow *r, int s) {
+    memset(r, 0, sizeof *r);
+    host_lock(&slot_lock);
+    const DiarySlotRow *d = slot_cache[s][0].valid ? &slot_cache[s][0]
+                            : newest_auto_slot_locked() == s && slot_cache[s][1].valid ? &slot_cache[s][1]
+                                                                                         : NULL;
+    if (d) {
+        char name[37];
+        memcpy(name, d->raw + 0x60, 36);
+        name[36] = 0;
+        snprintf(r->name, sizeof r->name, "%s", name[0] ? name : "Diary");
+        const uint8_t *t = d->raw + 0x90;  /* year (u16), month, day, hour, minute */
+        snprintf(r->date, sizeof r->date, "%02u/%02u/%04u  %u:%02u", t[2], t[3], read_le16(t), t[4], t[5]);
+        uint32_t secs = read_le32(d->raw + 0x98);
+        snprintf(r->play, sizeof r->play, "%03u:%02u:%02u", secs / 3600, secs / 60 % 60, secs % 60);
+    }
+    host_unlock(&slot_lock);
+}
+
+static void ng_open_list(int sel) {
+    GameMenuDiaryRow rows[DIARY_SLOT_COUNT];
+    for (int s = 0; s < DIARY_SLOT_COUNT; s++) ng_row(&rows[s], s);
+    gamemenu_diary_begin("New Game: choose a slot for your new game", rows, DIARY_SLOT_COUNT, sel, "Back to the title");
+    gamemenu_live_popup();  /* over the running title */
+    ng_state = 1;
+}
+
+int yw4_hook_check_window_open(CPUState *ctx) {
+    if (!diary_slots_enabled() || !scene_on_title() || !ctx->x[0]) return 0;
+    uint64_t args = ctx->x[0], L;
+    uint32_t base;
+    memcpy(&L, (const void *)(uintptr_t)args, sizeof L);
+    memcpy(&base, (const void *)(uintptr_t)(args + 0xc), sizeof base);
+    if ((uint32_t)ctx->x[1] < 3 || guest_number(ctx, L, base + 3) != (double)0x3f4180e1u) return 0;
+    host_lock(&slot_lock);
+    if (user_save_dir[0]) scan_all_slots_locked();
+    int first_empty = find_first_empty_slot_locked();
+    host_unlock(&slot_lock);
+    const char *given = getenv("YW4_NEWGAME_SLOT"), *replay = replay_playing();
+    const char *show = getenv("YW4_NEWGAME_LIST");  /* tests: the list even in a replay (to see it; nothing answers) */
+    if ((given && atoi(given) >= 1 && atoi(given) <= DIARY_SLOT_COUNT) || (replay && *replay && !(show && *show == '1'))) {
+        /* tests answer at once (a replay's clock counts frames; the list would wait for a person) */
+        new_game_take_slot(given && atoi(given) >= 1 && atoi(given) <= DIARY_SLOT_COUNT ? atoi(given) - 1
+                           : first_empty >= 0                                          ? first_empty
+                                                                                       : 0);
+        __atomic_store_n(&newgame_answer, 1, __ATOMIC_RELEASE);
+    } else {
+        ng_open_list(first_empty >= 0 ? first_empty : 0);
+        fprintf(stderr, "yw4: diary: New Game slot list shown\n");
+    }
+    ctx->x[0] = 0;  /* no results, as the box's open */
+    return 1;
+}
+
+int yw4_hook_check_window_result(CPUState *ctx) {
+    if (!ctx->x[0]) return 0;
+    int a = -1;
+    if (ng_state == 1) {
+        int t = gamemenu_choice_take();
+        if (t >= DIARY_SLOT_COUNT) {  /* back to the title, as the game's box's No */
+            ng_state = 0, a = 0, gamemenu_diary_end();
+            fprintf(stderr, "yw4: diary: New Game: back to the title\n");
+        } else if (t >= 0) {
+            host_lock(&slot_lock);
+            int used = slot_any_data_locked(t);
+            host_unlock(&slot_lock);
+            if (!used) {
+                new_game_take_slot(t);
+                ng_state = 0, a = 1, gamemenu_diary_end();
+            } else {
+                GameMenuDiaryRow r;
+                ng_row(&r, t);
+                char title[64], body[200];
+                snprintf(title, sizeof title, "Overwrite Diary %d" DIARY_OF "?", t + 1);
+                snprintf(body, sizeof body,
+                         "%s's diary is only replaced when you save your new game over it in the Diary.", r.name);
+                gamemenu_diary_confirm(title, body, "No, choose another slot", "Yes, overwrite it");
+                gamemenu_live_popup();
+                ng_slot = t, ng_state = 2;
+            }
+        }
+    } else if (ng_state == 2) {
+        int y = gamemenu_choice_take();
+        if (y == 1) {
+            new_game_take_slot(ng_slot);
+            ng_state = 0, a = 1, gamemenu_diary_end();
+        } else if (y == 0) {
+            ng_open_list(ng_slot);
+        }
+    } else {
+        a = __atomic_exchange_n(&newgame_answer, -1, __ATOMIC_ACQ_REL);
+        if (a < 0) return 0;  /* not ours: the game's own box */
+    }
+    uint64_t L;
+    memcpy(&L, (const void *)(uintptr_t)ctx->x[0], sizeof L);
+    guest_call3(ctx, 0xd23e30, L, (uint64_t)(int64_t)a, 0);  /* -1 while open, else the answer, as f_29c060 does */
+    ctx->x[0] = 1;
+    return 1;
 }
 
 /* The title opened (pause.c, SceneTitle: at the start and at each Return to Title): the next game is a new one until
@@ -1678,20 +1837,7 @@ void savefs_new_game_naming(const char *token, int girl) {
     if (!done && user_save_dir[0]) scan_all_slots_locked();
     host_unlock(&slot_lock);
     if (done) return;
-    int slot = choose_new_game_slot();
-    host_lock(&slot_lock);
-    new_game_slot_set = 1;
-    int overwrite = slot_any_data_locked(slot);
-    /* The old save's files stay until the new game first saves (New Game writes nothing, research Round 4), so
-     * quitting before that keeps it. Its summary is forgotten now: the first save must not carry the old game's
-     * other row (an Autosave from the old game beside the new game's manual save) into HEADERSAVE. */
-    if (overwrite) memset(slot_cache[slot], 0, sizeof slot_cache[slot]);
-    fresh_slot = overwrite ? slot : -1;
-    diary_slot = slot;
-    set_active_slot(slot);
-    host_unlock(&slot_lock);
-    fprintf(stderr, "yw4: diary: New Game in slot %d" DIARY_OF " (%s)\n", slot + 1,
-            overwrite ? "replaces its save at the first save" : "empty");
+    new_game_take_slot(choose_new_game_slot(0) /* at the name: no way back */);
 }
 
 /* 1 while the Diary (title > Continue, or Save in the game) is on screen: its update runs every frame while it

@@ -71,11 +71,32 @@ int gamemenu_prompting(void);
  * gamemenu_choice_take: -1 while it is open, then the row picked (once). While it shows, gamemenu_open() is 1. */
 void gamemenu_choice_begin(const char *title, const char *body, const char *const *rows, int n, int sel);
 int gamemenu_choice_take(void);
+/* The same list in the Diary's look (New Game on the title, savefs.c): a slot per row as the game's Diary rows, the
+ * chosen one's page on the right, and a last row `back` ("Back to the title"). Taken with gamemenu_choice_take: the
+ * slot's row, or n for `back`. */
+typedef struct {
+    char name[40];  /* the recorder, "" for an empty slot */
+    char date[32];  /* "11/17/2026  7:35", "" for an empty slot */
+    char play[24];  /* "036:40:09" */
+} GameMenuDiaryRow;
+void gamemenu_diary_begin(const char *title, const GameMenuDiaryRow *rows, int n, int sel, const char *back);
+/* A yes / no question over that Diary (its page stays, dimmed): rows 0 `no` and 1 `yes`, taken with
+ * gamemenu_choice_take; Back answers no. */
+void gamemenu_diary_confirm(const char *title, const char *body, const char *no, const char *yes);
+/* An answered Diary list or question stays on screen (no flicker before the next one): this closes it, when the
+ * game goes on (a slot taken, or back to the title). */
+void gamemenu_diary_end(void);
 /* The focused text field's box in design units (x, y, w, h) and the caret's x, for the system's IME
  * (SDL_SetTextInputArea); 0 when no field is focused. */
 int gamemenu_text_rect(float r[4], float *caret_x);
 
 int gamemenu_open(void);       /* the overlay is open (its panel shows, or a page it opened) */
+/* The popup just begun shows over the running game, see-through (the New Game slot list: the title goes on behind
+ * it), not over a kept picture; until it closes. */
+void gamemenu_live_popup(void);
+int gamemenu_live(void);
+/* the live popup's area in the design's units (x, y, w, h): only that part is blended over the game */
+void gamemenu_live_rect(float r[4]);
 int gamemenu_selected(void);   /* GM_* */
 int gamemenu_confirming(void); /* a popup shows: Exit game's or Return to title's */
 void gamemenu_toggle(void);    /* the overlay button: open, or close and resume */

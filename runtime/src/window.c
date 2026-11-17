@@ -1753,7 +1753,8 @@ static void menu_draw(VkImage dst, uint32_t index, int32_t x0, int32_t y0, uint3
     /* the shortcut wheel (shortcutwheel.h): drawn as the quick look is, see-through and blended, but no blur */
     int wheel = swheel_visible() && !gamemenu_open() && !peek;
     if ((!gamemenu_open() && !peek && !wheel) || settings_open()) return;
-    int pv = gamemenu_previewing() || peek || wheel;  /* Preview: only its bar, over the live picture (no kept picture needed) */
+    int live = gamemenu_live();  /* a popup over the running game (the New Game slot list): see-through, blended */
+    int pv = gamemenu_previewing() || peek || wheel || live;  /* Preview: only its bar, over the live picture (no kept picture needed) */
     /* the preview's bar hidden: its "Show bar" chip has rounded corners; copied as a rectangle they showed the bar's
      * older drawing (a white strip, square corners: owner, 2026-11-16), so it is blended like the quick look */
     int chip = !peek && !wheel && gamemenu_preview_bar_hidden();
@@ -1772,13 +1773,13 @@ static void menu_draw(VkImage dst, uint32_t index, int32_t x0, int32_t y0, uint3
     }
     uint64_t now = SDL_GetTicks();
     uint32_t look = gamemenu_look(now);
-    if (pv) look ^= 0x80000000u | (uint32_t)(now / 500) << 20;  /* the bar's frame rate, twice a second */
+    if (pv && !live) look ^= 0x80000000u | (uint32_t)(now / 500) << 20;  /* the bar's frame rate, twice a second */
     if (wheel) look = 0x40000000u ^ swheel_look();               /* the wheel: only when the pick changes */
     int redrawn = !ov.uploaded || look != ov.look;
     if (redrawn) {  /* draw it again: on the CPU, then one copy into the upload buffer */
         if (!ov.px && !(ov.px = malloc((size_t)bw * bh * 4))) return;
         if (!pv) memcpy(ov.px, ov.bg, (size_t)bw * bh * 4);  /* the bar is opaque: drawn over anything */
-        if (peek || wheel || chip) memset(ov.px, 0, (size_t)bw * bh * 4);  /* see-through around the card, wheel, chip */
+        if (peek || wheel || chip || live) memset(ov.px, 0, (size_t)bw * bh * 4);  /* see-through around the card, wheel, chip */
         float fs, fx, fy;
         overlay_fit((float)bw, (float)bh, &fs, &fx, &fy);
         UiCanvas c = {ov.px, (int)bw, (int)bh, fs, fx, fy};
@@ -1813,6 +1814,7 @@ static void menu_draw(VkImage dst, uint32_t index, int32_t x0, int32_t y0, uint3
         float r[4], s, fx, fy;
         overlay_fit((float)bw, (float)bh, &s, &fx, &fy);
         if (wheel) swheel_rect(r);
+        else if (live) gamemenu_live_rect(r);  /* the popup alone: blending the whole window each redraw cost frames */
         else gamemenu_preview_rect(r);
         rx = (int32_t)(fx + r[0] * s), ry = (int32_t)(fy + r[1] * s), rw = (int32_t)(r[2] * s + 0.5f),
         rh = (int32_t)(r[3] * s + 0.5f);
@@ -1822,7 +1824,7 @@ static void menu_draw(VkImage dst, uint32_t index, int32_t x0, int32_t y0, uint3
         if (ry + rh > (int32_t)bh) rh = (int32_t)bh - ry;
         if (rw <= 0 || rh <= 0) return;
         /* the quick look: blended, so its rounded corners show the (blurred) picture; the blit below if that fails */
-        if ((peek || chip) && !pk_draw(dst, index, ov.px, bw, rx, ry, rw, rh, x0, y0, redrawn)) return;
+        if ((peek || chip || live) && !pk_draw(dst, index, ov.px, bw, rx, ry, rw, rh, x0, y0, redrawn)) return;
         if (wheel) {  /* blended or not at all: a plain copy would show a black square round the disc */
             pk_draw(dst, index, ov.px, bw, rx, ry, rw, rh, x0, y0, redrawn);
             return;
@@ -2655,6 +2657,11 @@ static void update_input(void) {
     int is_open = settings_open() || gamemenu_open();  /* the panel or the in-game overlay */
     if (is_open) {
         withheld = 1;
+        /* a mouse button held when it closes is not the game's: the camera takes the mouse back at once and a
+         * held left button would be A (the click on the New Game list's "Back to the title" pressed the title's
+         * New Game and the list reopened: owner, 2026-11-17); left out until let go, as a click that takes the
+         * mouse back is (mouse_held_off: cleared at the top when no button is held) */
+        mouse_held_off = 1;
         if (window && SDL_GetWindowRelativeMouseMode(window))
             SDL_SetWindowRelativeMouseMode(window, false);
     } else if (was_open) {
@@ -3691,7 +3698,22 @@ void window_run(void (*guest)(void *), void *arg) {
                               {SDLK_ESCAPE, GM_BACK, "M_BACK"},  {SDLK_DELETE, GM_CLEAR, "M_CLEAR"},
                               {SDLK_Q, GM_PREV, "M_PREV"},       {SDLK_E, GM_NEXT, "M_NEXT"},
                               {SDLK_P, GM_ALT, "M_ALT"},         {SDLK_H, GM_ALT, "M_ALT"}};  /* Preview; its bar */
-                    for (size_t i = 0; i < sizeof mk / sizeof *mk; i++)
+                    /* a popup over the running game (the New Game slot list) is part of the game's screen: the
+                     * keys bound to the game's A, B and up / down work on it too, whatever they are (owner,
+                     * 2026-11-17: "E or whatever the user has it set as"), before the overlay's own keys */
+                    int bound = 0;
+                    if (gamemenu_live()) {
+                        uint32_t m = bindings_key_inputs(0, (int)e.key.scancode);
+                        for (int i = 0; i < 32 && m && !bound; i++) {
+                            if (!(m & (1u << i))) continue;
+                            const char *id = bindings_input_id(i);
+                            int act = !strcmp(id, "A") ? GM_ACCEPT : !strcmp(id, "B") ? GM_BACK
+                                    : !strcmp(id, "DPAD_UP") || !strcmp(id, "LS_UP") ? GM_UP
+                                    : !strcmp(id, "DPAD_DOWN") || !strcmp(id, "LS_DOWN") ? GM_DOWN : -1;
+                            if (act >= 0) gamemenu_action(act), yw4_hid_note_key(id), bound = 1;
+                        }
+                    }
+                    for (size_t i = 0; i < sizeof mk / sizeof *mk && !bound; i++)
                         if (k == mk[i].key) gamemenu_action(mk[i].action), yw4_hid_note_key(mk[i].name);
                 }
                 break;  /* not the settings panel's keys below: the overlay's Enter mustn't reach a page it opens */

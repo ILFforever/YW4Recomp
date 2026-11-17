@@ -469,6 +469,18 @@ why = "the Lua call 'load Diary row N' has made its load kind (w22: row 1 -> 2 A
 
 [[hook]]
 module = "main"
+offset = "0x299910"
+native = "yw4_hook_check_window_open"
+why = "the Lua command that opens a Yes/No check window (OpenCheckWindow): on the title, for 'erase the current saved data?' (text 0x3f4180e1) the Diary slot list shows instead (runtime/src/savefs.c)"
+
+[[hook]]
+module = "main"
+offset = "0x29c060"
+native = "yw4_hook_check_window_result"
+why = "the Lua command polled for a check window's answer: after the slot list, 1 (a slot: New Game goes on) or 0 (back to the title) (runtime/src/savefs.c)"
+
+[[hook]]
+module = "main"
 offset = "0x9e9340"
 native = "yw4_hook_menu_row_focus"
 why = "a menu copy's focus look, done by the Diary row code for row 0: skipped during a Diary paint pass (runtime/src/savefs.c)"

@@ -60,6 +60,19 @@ static int prompt_min, prompt_cancel;  /* letters the game needs at least; Cance
 enum { PICK_MAX = 12 };
 static char pick_rows[PICK_MAX][96];
 static int pick_n, pick_sel, pick_answer = -1;
+/* the Diary look of the list (gamemenu_diary_begin): its rows' details; diary_n slots, then the back row */
+static GameMenuDiaryRow diary_rows[PICK_MAX];
+static int diary_n;
+/* the Diary's own title (the list's, kept while its question shows), its slots, the slot chosen when the question
+ * was asked, and 1 while the question shows over it (gamemenu_diary_confirm) */
+static char dy_title[256];
+static int dy_slots, dy_list_sel, dy_confirm;
+/* 1 once the Diary's list or question is answered: it stays on screen, taking no input, until the next one begins
+ * or gamemenu_diary_end. The game asks for the next one a frame or more after the answer: closed in between, the
+ * game showed for a frame on the way into and out of the question (owner, 2026-11-17: "flickers once when in and
+ * once when out"). */
+static int dy_hold;
+static char diary_back[64];
 static void changed(void);
 
 int gamemenu_prompting(void) { return __atomic_load_n(&prompting, __ATOMIC_ACQUIRE); }
@@ -295,18 +308,41 @@ void gamemenu_message_begin(const char *title, const char *body) {
     fprintf(stderr, "yw4: overlay: message \"%s\"\n", prompt_title);
 }
 
-void gamemenu_choice_begin(const char *title, const char *body, const char *const *rows, int n, int sel) {
+/* A list's setup. The present thread draws while the game's thread sets a list up (no lock): its contents are
+ * written first and which look it has last, and between two of the Diary's screens the look never passes through
+ * the plain list's, which showed for a frame when answers came quickly (owner, 2026-11-17: "spamming ... can still
+ * cause the overwrite to blink"). dslots: the Diary's list with that many slots; conf: the Diary's question, over
+ * the list with list_sel chosen. */
+static void choice_setup(const char *title, const char *body, const char *const *rows, int n, int sel, int dslots,
+                         int conf, int list_sel) {
     if (n > PICK_MAX) n = PICK_MAX;
     if (n < 1) return;
     snprintf(prompt_title, sizeof prompt_title, "%s", title);
     snprintf(prompt_body, sizeof prompt_body, "%s", body ? body : "");
     for (int i = 0; i < n; i++) snprintf(pick_rows[i], sizeof pick_rows[i], "%s", rows[i]);
-    pick_sel = sel >= 0 && sel < n ? sel : 0;
     prompt_fallback[0] = 0;
     textin_clear(&prompt_text);
     textin_focus(NULL);
     __atomic_store_n(&pick_answer, -1, __ATOMIC_RELEASE);
-    __atomic_store_n(&pick_n, n, __ATOMIC_RELEASE);
+    sel = sel >= 0 && sel < n ? sel : 0;
+    if (conf) {  /* the page under it shows list_sel from now on: then the question's own state */
+        dy_list_sel = list_sel;
+        __atomic_store_n(&dy_confirm, 1, __ATOMIC_RELEASE);
+        pick_sel = sel;
+        __atomic_store_n(&pick_n, n, __ATOMIC_RELEASE);
+        __atomic_store_n(&diary_n, 0, __ATOMIC_RELEASE);
+    } else if (dslots) {  /* the list's state, then its look */
+        pick_sel = sel;
+        __atomic_store_n(&pick_n, n, __ATOMIC_RELEASE);
+        __atomic_store_n(&diary_n, dslots, __ATOMIC_RELEASE);
+        __atomic_store_n(&dy_confirm, 0, __ATOMIC_RELEASE);
+    } else {
+        __atomic_store_n(&diary_n, 0, __ATOMIC_RELEASE);
+        __atomic_store_n(&dy_confirm, 0, __ATOMIC_RELEASE);
+        pick_sel = sel;
+        __atomic_store_n(&pick_n, n, __ATOMIC_RELEASE);
+    }
+    dy_hold = 0;
     __atomic_store_n(&prompt_finished, 0, __ATOMIC_RELEASE);
     __atomic_store_n(&prompting, 1, __ATOMIC_RELEASE);
     __atomic_store_n(&open_, 1, __ATOMIC_RELEASE);
@@ -314,10 +350,49 @@ void gamemenu_choice_begin(const char *title, const char *body, const char *cons
     fprintf(stderr, "yw4: overlay: list \"%s\" (%d rows)\n", prompt_title, n);
 }
 
+void gamemenu_choice_begin(const char *title, const char *body, const char *const *rows, int n, int sel) {
+    choice_setup(title, body, rows, n, sel, 0, 0, 0);
+}
+
+void gamemenu_diary_begin(const char *title, const GameMenuDiaryRow *rows, int n, int sel, const char *back) {
+    if (n > PICK_MAX - 1) n = PICK_MAX - 1;
+    if (n < 1) return;
+    const char *names[PICK_MAX];
+    for (int i = 0; i < n; i++) diary_rows[i] = rows[i], names[i] = rows[i].name[0] ? rows[i].name : "Empty Diary";
+    snprintf(diary_back, sizeof diary_back, "%s", back ? back : "Back");
+    names[n] = diary_back;
+    dy_slots = n;
+    snprintf(dy_title, sizeof dy_title, "%s", title);
+    choice_setup(title, NULL, names, n + 1, sel, n, 0, 0);
+}
+
+void gamemenu_diary_confirm(const char *title, const char *body, const char *no, const char *yes) {
+    const char *rows[2] = {no, yes};
+    choice_setup(title, body, rows, 2, 0, 0, 1, pick_sel /* the slot just chosen: the list's answer */);
+}
+
 static void prompt_close(int how);
+void gamemenu_diary_end(void) {
+    if (!dy_hold) return;
+    dy_hold = 0;
+    __atomic_store_n(&pick_n, 0, __ATOMIC_RELEASE);
+    diary_n = 0, dy_confirm = 0;
+    prompt_body[0] = 0;
+    prompt_close(1);
+}
+
 static void pick_finish(void) {  /* A, Enter or a click: the chosen row is the answer */
     int a = pick_sel;
+    if (diary_n || dy_confirm) {  /* the Diary's: kept on screen until the next one or gamemenu_diary_end */
+        if (dy_hold) return;
+        dy_hold = 1;
+        changed();
+        __atomic_store_n(&pick_answer, a, __ATOMIC_RELEASE);
+        fprintf(stderr, "yw4: overlay: list row %d chosen\n", a);
+        return;
+    }
     __atomic_store_n(&pick_n, 0, __ATOMIC_RELEASE);
+    diary_n = 0, dy_confirm = 0;
     prompt_body[0] = 0;
     prompt_close(1);
     __atomic_store_n(&pick_answer, a, __ATOMIC_RELEASE);
@@ -330,7 +405,14 @@ static void pick_move(int d) {
 
 int gamemenu_choice_take(void) { return __atomic_exchange_n(&pick_answer, -1, __ATOMIC_ACQ_REL); }
 
+static int live_popup;  /* gamemenu_live_popup: the popup over the running game */
+static float live_rect[4];  /* the live popup's area in design units, its shadow included (gamemenu_live_rect) */
+void gamemenu_live_rect(float r[4]) { memcpy(r, live_rect, sizeof live_rect); }
+void gamemenu_live_popup(void) { __atomic_store_n(&live_popup, 1, __ATOMIC_RELEASE), changed(); }
+int gamemenu_live(void) { return gamemenu_open() && __atomic_load_n(&live_popup, __ATOMIC_ACQUIRE); }
+
 static void prompt_close(int how) {
+    __atomic_store_n(&live_popup, 0, __ATOMIC_RELEASE);
     if (osk_switched && !strcmp(prompt_label, "Name")) {  /* the next name's keyboard opens on this language */
 #ifdef _WIN32
         _putenv_s("YW4_KEYBOARD", osk_lang_ids[osk_page]);
@@ -365,7 +447,13 @@ static void prompt_finish(void) {
 }
 
 void gamemenu_prompt_cancel(void) {
-    if (__atomic_load_n(&pick_n, __ATOMIC_ACQUIRE)) return;  /* a list has no Cancel: one row must be chosen */
+    if (__atomic_load_n(&pick_n, __ATOMIC_ACQUIRE)) {
+        if (dy_hold) return;
+        /* a list has no Cancel, one row must be chosen; the Diary's has its back row: Back chooses it */
+        if (diary_n) pick_sel = diary_n, pick_finish();
+        else if (dy_confirm) pick_sel = 0, pick_finish();  /* the Diary's question: Back is its No */
+        return;
+    }
     if (gamemenu_prompting() && (prompt_cancel || prompt_body[0])) prompt_close(prompt_body[0] ? 1 : 2);
 }
 
@@ -861,9 +949,11 @@ void gamemenu_action(int a) {
     if (!gamemenu_open() || settings_open()) return;
     changed();
     if (gamemenu_prompting() && __atomic_load_n(&pick_n, __ATOMIC_ACQUIRE)) {  /* a list: up / down, A picks */
+        if (dy_hold) return;  /* answered: waiting for the game */
         if (a == GM_UP || a == GM_LEFT) pick_move(-1);
         else if (a == GM_DOWN || a == GM_RIGHT) pick_move(1);
         else if (a == GM_ACCEPT) pick_finish();
+        else if (a == GM_BACK || a == GM_LEAVE) gamemenu_prompt_cancel();  /* the Diary's list: its back row */
         return;
     }
     if (gamemenu_prompting()) {  /* the name popup: A / Enter is OK (typing has ended), the rest nothing */
@@ -989,6 +1079,7 @@ void gamemenu_mouse(float x, float y, int button) {
     Hit h;
     int found = hit_find(x, y, &h);
     if (gamemenu_prompting() && __atomic_load_n(&pick_n, __ATOMIC_ACQUIRE)) {  /* a list: hovering chooses, a click picks */
+        if (dy_hold) return;  /* answered: waiting for the game */
         if (found && h.kind == HIT_PICK_ROW && (button == 0 || button == 1)) {
             if (pick_sel != h.a) pick_sel = h.a, changed();
             if (button == 1) pick_finish();
@@ -3118,16 +3209,310 @@ static void draw_preview(const UiCanvas *c, const GameMenuInfo *in) {
     }
 }
 
+/* The New Game slot list in the Diary's look (gamemenu_diary_begin; owner, 2026-11-17: "make it actually match the
+ * game's", the reference the game's own Diary, title > Continue, work/screenshots/frame_032363.bmp). The whole
+ * screen, as the game's: a lilac page with a white header band ("Diary" and its icon), the slots as the Diary's rows
+ * (purple plates fading out to the right, a square at their left, the name in white over a thin line, the date in
+ * navy under it; the chosen one green with a pale edge and a dot beside it), and the chosen slot's page on the right
+ * as the Diary's notebook (cream, a maroon cover showing at its left and bottom, rows of diamonds along its top and
+ * bottom, the spiral's rings at the right, the labels in coloured pills with a line out to a dot). The keys along a
+ * dark bar at the bottom, on the right. The game's portrait and party have no counterpart here: the slot's number
+ * sits where the portrait is, and a note where the party is. Laid out from the 1920 x 1080 capture at 900 / 1080. */
+enum { DY_BG = 0xCBB9DF, DY_BG_LIGHT = 0xDACCE9, DY_BAND = 0xB79FD3, DY_STRIP = 0xE4D9EF, DY_HEAD = 0x5E3E8E,
+       DY_SUB = 0x6B5A85, DY_BAR = 0x4D3566, DY_BAR_LINE = 0xA88FC6, DY_PLATE = 0x9682C3, DY_SQUARE = 0x7A66A6,
+       DY_CHOSEN = 0x5CCF55, DY_CHOSEN_HI = 0x9BE57F, DY_CHOSEN_EDGE = 0xD9F7CB, DY_SQUARE_ON = 0x3E9E3A,
+       DY_INK = 0x4A3570, DY_INK_ON = 0x2F7A2A, DY_NAVY = 0x26245E, DY_NAVY_ON = 0x173E17, DY_RULE = 0xDCD2EC,
+       DY_RULE_ON = 0xE6FAD9, DY_COVER = 0x7A2F3B, DY_PAPER = 0xFFF8F5, DY_PAPER_EDGE = 0xE9D7DB,
+       DY_DIAMOND = 0xC6B3DF, DY_RING = 0xF7F3FA, DY_RING_SHADE = 0x6F5C84, DY_HOLE = 0x9C8AAE, DY_TITLE = 0x7B2D6F,
+       DY_UNDER = 0x7B5AA6, DY_NOTE_CARD = 0xF5EDF7 };
+#define DY_BAR_H 79.0f
+#define DY_ARROW "<path d=\"M10 6L4 12l6 6M4 12h16\"/>"
+#define DY_PENCIL "<path d=\"M4 20l1.2-4.8L15.5 4.9l3.6 3.6L8.8 18.8zM13.5 6.9l3.6 3.6\"/>"
+
+/* The Diary drawn as a popup: the game's full-screen layout (1600 x 900 design units, laid out from the capture)
+ * scaled down into a rounded panel in the middle, over the running game (owner, 2026-11-17: "dont need to be full
+ * screen but the snippet needs to look like the real thing"). dy_canvas is the canvas with the layout's units. */
+#define DY_K 0.9f
+static UiCanvas dy_canvas(const UiCanvas *c, float W, float *offx, float *offy) {
+    *offx = (W - 1600 * DY_K) / 2, *offy = (900 - 900 * DY_K) / 2;
+    UiCanvas d = {c->px, c->w, c->h, c->s * DY_K, c->ox + *offx * c->s, c->oy + *offy * c->s};
+    return d;
+}
+
+/* The page's parts that stay the same while it shows (on the layout's canvas): the background and its pattern, the
+ * header band and its words, the bar at the bottom, the notebook with its cover, diamonds and spiral. */
+static void diary_page_static(const UiCanvas *c) {
+    float nx = 621, bt = 900 - DY_BAR_H;
+    ui_box(c, 0, 0, 1600, 900, 24, DY_BG, 0, 0);
+    /* the header: a band along the top with a lighter strip, the white band round at its right end */
+    ui_box(c, 0, 0, 1600, 60, 24, DY_BAND, 0, 0);
+    ui_rect(c, 0, 30, 1600, 57, DY_BAND, 1);
+    ui_box(c, 300, 6, 1276, 22, 11, DY_STRIP, 0, 0);
+    ui_box(c, 0, 0, 790, 79, 24, 0xFFFFFF, 0, 0);
+    ui_rect(c, 0, 40, 60, 39, 0xFFFFFF, 1);
+    ui_shape(c, "<path fill=\"#000\" d=\"M12 1L23 11V23H1V11Z\"/>", 52, 18, 52, 52, 24, 0x7FCB6E);  /* the icon: a green tag */
+    ui_shape(c, "<path fill=\"#000\" d=\"M7 13H17V16H7Z\"/>", 52, 18, 52, 52, 24, 0xFFFFFF);
+    float tw = ui_text(c, UI_ROUNDED_800, 40, 114, 24, 40 * 1.2f, "Diary", DY_HEAD);
+    ui_text(c, UI_GOTHIC_700, 20, 114 + tw + 24, 40, 20 * 1.3f, dy_title, DY_SUB);
+    /* the pattern: lighter checks right of the rows (the rows fade out into the plain colour), inside the panel */
+    for (int j = 0; 87 + (float)j * 96 < bt - 4; j++)
+        for (int i = 0; (float)i * 96 < 1600; i++)
+            if ((i + j) % 2 && (float)i * 96 >= 620) {
+                float y = 87 + (float)j * 96, h = y + 96 > bt - 4 ? bt - 4 - y : 96;
+                float w = (float)i * 96 + 96 > 1600 ? 1600 - (float)i * 96 : 96;
+                ui_rect(c, (float)i * 96, y, w, h, DY_BG_LIGHT, 0.5f);
+            }
+    /* the bar along the bottom, its corners round as the panel's */
+    ui_rect(c, 0, bt - 4, 1600, 4, DY_BAR_LINE, 1);
+    ui_rect(c, 0, bt, 1600, 40, DY_BAR, 1);
+    ui_box(c, 0, bt, 1600, DY_BAR_H, 24, DY_BAR, 0, 0);
+    /* the notebook: its cover under the page, out at the left and bottom; the diamonds; the spiral */
+    ui_box(c, nx - 8, 129, 880, 630, 12, DY_COVER, 0, 0);
+    ui_box(c, nx, 121, 878, 628, 8, DY_PAPER, 2, DY_PAPER_EDGE);
+    for (float dx = nx + 18; dx < nx + 830; dx += 16)
+        for (int k = 0; k < 2; k++) {
+            float dy = k ? 727 : 129;
+            ui_shape(c, "<path fill=\"#000\" d=\"M5 0L10 5L5 10L0 5Z\"/>", dx, dy, 10, 10, 10, DY_DIAMOND);
+            ui_shape(c, "<path fill=\"#000\" d=\"M5 2.4L7.6 5L5 7.6L2.4 5Z\"/>", dx, dy, 10, 10, 10, DY_PAPER);
+        }
+    for (float ry = 150; ry < 700; ry += 47) {  /* a hole in the page, the ring through it and over the edge */
+        ui_box(c, nx + 836, ry + 9, 9, 9, 4.5f, DY_HOLE, 0, 0);
+        static const char ring[] = "<path stroke=\"#000\" stroke-width=\"4.5\" d=\"M6 5.5C17 1 27 6 27 15S17 29 6 24.5\"/>";
+        ui_shape(c, ring, nx + 838, ry - 1, 32, 32, 32, DY_RING_SHADE);
+        ui_shape(c, ring, nx + 836, ry - 3, 32, 32, 32, DY_RING);
+    }
+}
+
+/* Those parts and the panel's shadow over the running game, drawn once and kept, then copied in. Drawing them took
+ * about 230 ms at 4K, and the present thread draws the overlay while the game waits on its present: each move in the
+ * list froze the game for a quarter of a second (owner, 2026-11-17; the log's "stall: window present 230 ms" at each
+ * key). Only over the running game: there window.c clears the canvas first, so the kept pixels are what drawing them
+ * again would give (over the paused picture they would carry that picture). The rows and the chosen slot's details
+ * are drawn on top each time. Only the present thread draws, so no lock. */
+static struct {
+    uint8_t *px;
+    int x, y, w, h;  /* the part of the canvas kept (live_rect, in image pixels) */
+    int cw, ch;      /* the canvas it was drawn on */
+    float s, ox, oy;
+    char title[sizeof dy_title];
+} dp_keep;
+
+static void diary_page_kept(const UiCanvas *c, const UiCanvas *d, float offx, float offy) {
+    int x0 = (int)(c->ox + live_rect[0] * c->s), y0 = (int)(c->oy + live_rect[1] * c->s);
+    int x1 = (int)(c->ox + (live_rect[0] + live_rect[2]) * c->s) + 1, y1 = (int)(c->oy + (live_rect[1] + live_rect[3]) * c->s) + 1;
+    if (x0 < 0) x0 = 0;
+    if (y0 < 0) y0 = 0;
+    if (x1 > c->w) x1 = c->w;
+    if (y1 > c->h) y1 = c->h;
+    if (x1 <= x0 || y1 <= y0) return;
+    int w = x1 - x0, h = y1 - y0;
+    if (dp_keep.px && dp_keep.cw == c->w && dp_keep.ch == c->h && dp_keep.s == c->s && dp_keep.ox == c->ox &&
+        dp_keep.oy == c->oy && dp_keep.x == x0 && dp_keep.y == y0 && dp_keep.w == w && dp_keep.h == h &&
+        !strcmp(dp_keep.title, dy_title)) {
+        for (int j = 0; j < h; j++)
+            memcpy(c->px + ((size_t)(y0 + j) * (size_t)c->w + (size_t)x0) * 4, dp_keep.px + (size_t)j * (size_t)w * 4,
+                   (size_t)w * 4);
+        return;
+    }
+    ui_shadow(c, offx, offy + 14, 1600 * DY_K, 900 * DY_K, 24 * DY_K, 40, 0x241040, 0.45f);
+    diary_page_static(d);  /* drawn on the canvas, then kept from it */
+    uint8_t *k = realloc(dp_keep.px, (size_t)w * (size_t)h * 4);
+    if (!k) return;  /* not kept: drawn again next time */
+    for (int j = 0; j < h; j++)
+        memcpy(k + (size_t)j * (size_t)w * 4, c->px + ((size_t)(y0 + j) * (size_t)c->w + (size_t)x0) * 4, (size_t)w * 4);
+    dp_keep.px = k, dp_keep.x = x0, dp_keep.y = y0, dp_keep.w = w, dp_keep.h = h;
+    dp_keep.cw = c->w, dp_keep.ch = c->h, dp_keep.s = c->s, dp_keep.ox = c->ox, dp_keep.oy = c->oy;
+    snprintf(dp_keep.title, sizeof dp_keep.title, "%s", dy_title);
+}
+
+/* A row's plate: purple (the chosen one green, lighter to the right, with a pale edge), fading into the page at its
+ * right end as the game's rows do */
+static void diary_plate(const UiCanvas *c, float x, float y, float w, float h, int on) {
+    if (on) ui_box(c, x - 3, y - 3, w + 6, h + 6, 15, DY_CHOSEN_EDGE, 0, 0);
+    ui_box_alpha(c, x, y, w, h, 12, on ? DY_CHOSEN : DY_PLATE, on ? 1.0f : 0.85f);
+    if (on)
+        for (int k = 1; k <= 12; k++) ui_rect(c, x + w * 0.35f + (float)(k - 1) * w * 0.04f, y, w * 0.04f, h, DY_CHOSEN_HI, 0.04f * (float)k);
+    for (int k = 1; k <= 16; k++) ui_rect(c, x + w - 160 + (float)(k - 1) * 10, y - 4, 10, h + 8, DY_BG, (float)k / 16);
+    ui_rect(c, x + w, y - 4, 8, h + 8, DY_BG, 1);  /* the edge's last pixels past the plate */
+}
+
+/* A label in a coloured pill with the game's swirls at its ends, a line out from it to a dot */
+static void diary_pill(const UiCanvas *c, float x, float y, float w, float line_to, const char *label, uint32_t fill,
+                       uint32_t ink, uint32_t line) {
+    if (line_to > x + w) {
+        ui_rect(c, x + w - 4, y + 26, line_to - (x + w) + 4, 1.5f, line, 1);
+        ui_box(c, line_to - 4, y + 22.5f, 8, 8, 4, line, 0, 0);
+    }
+    ui_box(c, x, y, w, 28, 14, fill, 0, 0);
+    ui_box_alpha(c, x + 6, y + 9, 10, 10, 5, ink, 0.18f);
+    ui_box_alpha(c, x + w - 16, y + 9, 10, 10, 5, ink, 0.18f);
+    ui_text_in(c, UI_ROUNDED_700, 19, x, y, w, 28, 1, label, ink);
+}
+
+/* a key hint's width (hint(), below the same sizes): to set the bar's hints at its right end */
+static float hint_w(const char *key, const char *label) {
+    float kw = -1;
+    for (size_t i = 0; i < sizeof hint_icons / sizeof *hint_icons; i++)
+        if (!strcmp(hint_icons[i].name, key)) kw = 30 + (hint_icons[i].icon[1] ? 24 : 0);
+    if (kw < 0) {
+        kw = ui_text_w(UI_GOTHIC_700, 14, key) + 16;
+        if (kw < 30) kw = 30;
+    }
+    return kw + 10 + ui_text_w(UI_GOTHIC_400, 16, label);
+}
+
+static void draw_diary_pick(const UiCanvas *real, const GameMenuInfo *in, float W, float H, float T, float E,
+                            float by) {
+    (void)by, (void)H;
+    int conf = dy_confirm, slots = conf ? dy_slots : diary_n, live = gamemenu_live();
+    int n = conf ? slots + 1 : __atomic_load_n(&pick_n, __ATOMIC_ACQUIRE);
+    int sel = conf ? dy_list_sel : pick_sel;  /* the page's chosen row (under the question: the slot asked about) */
+    float offx, offy;
+    UiCanvas dc = dy_canvas(real, W, &offx, &offy);
+    const UiCanvas *c = &dc;  /* below, the layout's units */
+    live_rect[0] = offx - 30, live_rect[1] = offy - 30, live_rect[2] = 1600 * DY_K + 60, live_rect[3] = 900 * DY_K + 70;
+    if (live) {
+        diary_page_kept(real, c, offx, offy);
+    } else {  /* over the paused picture: dimmed, as the other popups */
+        ui_rect(real, 0, T - 1, W, 900 + 2 * E + 2, POP_BACKDROP, 0.30f);
+        ui_shadow(real, offx, offy + 14, 1600 * DY_K, 900 * DY_K, 24 * DY_K, 40, 0x241040, 0.45f);
+        diary_page_static(c);
+    }
+    float X = 0, nx = 621;
+    /* the rows: the slots, then (apart, where the game's Autosave row is) the way back */
+    float lx = X + 79, lw = 520;
+    for (int i = 0; i < n && i <= slots; i++) {
+        int back = i == slots, on = i == sel;
+        const GameMenuDiaryRow *r = back ? NULL : &diary_rows[i];
+        float h = back ? 58 : 67, y = back ? 605 : 175 + (float)i * 83, sq = h - 16;
+        diary_plate(c, lx, y, lw, h, on);
+        if (on) ui_box(c, lx - 16, y + h / 2 - 9, 18, 18, 9, 0x7BD86A, 2, 0xFFFFFF);  /* the game's green pointer */
+        /* the square at the left: the slot's number (the game's sprite), an empty slot's pencil, the back arrow */
+        ui_box(c, lx + 9, y + 8, sq, sq, 8, on ? DY_SQUARE_ON : DY_SQUARE, 0, 0);
+        if (back || !r->name[0]) {
+            float is = sq * 0.6f;
+            ui_icon(c, back ? DY_ARROW : DY_PENCIL, lx + 9 + (sq - is) / 2, y + 8 + (sq - is) / 2, is, 2.6f, 0xFFFFFF);
+        } else {
+            char num[4];
+            snprintf(num, sizeof num, "%d", i + 1);
+            ui_text_in(c, UI_ROUNDED_800, 28, lx + 9, y + 8, sq, sq, 1, num, 0xFFFFFF);
+        }
+        float tx = lx + 9 + sq + 16, tw = lx + 380 - tx;
+        const char *name = back ? diary_back : r->name[0] ? r->name : "Empty Diary";
+        if (back) {  /* one line, in the middle */
+            ui_text_in(c, UI_ROUNDED_800, 25, tx + 1.5f, y + 1.5f, tw, h, 0, name, on ? DY_INK_ON : DY_INK);
+            ui_text_in(c, UI_ROUNDED_800, 25, tx, y, tw, h, 0, name, 0xFFFFFF);
+        } else {  /* the name over a thin line out to a dot, the date under it at the right */
+            ui_rect(c, tx - 4, y + 39, lx + lw - 150 - tx, 1.5f, on ? DY_RULE_ON : DY_RULE, 0.9f);
+            ui_text(c, UI_ROUNDED_800, 26, tx + 1.5f, y + 5 + 1.5f, 26 * 1.25f, name, on ? DY_INK_ON : DY_INK);
+            ui_text(c, UI_ROUNDED_800, 26, tx, y + 5, 26 * 1.25f, name, 0xFFFFFF);
+            if (r->date[0]) ui_text_in(c, UI_GOTHIC_700, 22, tx, y + 39, tw, 28, 2, r->date, on ? DY_NAVY_ON : DY_NAVY);
+        }
+        if (!conf) hit_add(offx + lx * DY_K, offy + y * DY_K, lw * DY_K, h * DY_K, HIT_PICK_ROW, i, 0);  /* the mouse: the screen's units */
+    }
+    /* the chosen slot's page */
+    int sel_back = sel >= slots;
+    const GameMenuDiaryRow *r = sel_back ? NULL : &diary_rows[sel];
+    ui_box(c, nx + 66, 140, 78, 92, 4, 0xFFFFFF, 2, 0xC9BAD9);  /* where the game's portrait is */
+    ui_box(c, nx + 71, 145, 68, 82, 2, sel_back ? 0xEDE6F3 : 0xE3EEF8, 0, 0);
+    if (sel_back) {
+        ui_icon(c, DY_ARROW, nx + 85, 166, 40, 3.2f, DY_HEAD);
+    } else {
+        char num[4];
+        snprintf(num, sizeof num, "%d", sel + 1);
+        ui_text_in(c, UI_ROUNDED_800, 48, nx + 71, 145, 68, 82, 1, num, DY_HEAD);
+    }
+    if (!sel_back) diary_pill(c, nx + 150, 150, 150, 0, "Recorder", 0xE8CBEA, 0x7A4A9A, 0);
+    ui_text_in(c, UI_ROUNDED_800, 38, nx + 300, 136, 520, 52, 1,
+               sel_back ? diary_back : r->name[0] ? r->name : "Empty Diary", DY_TITLE);
+    ui_rect(c, nx + 150, 219, 670, 2.5f, DY_UNDER, 1);
+    ui_box(c, nx + 816, 215.5f, 9, 9, 4.5f, DY_UNDER, 0, 0);
+    const char *note;
+    float note_y = 254;
+    if (!sel_back) {
+        char slot[24];
+        snprintf(slot, sizeof slot, "%d of %d", sel + 1, slots);
+        const struct {
+            const char *label, *value;
+            uint32_t fill, ink, line;
+        } line[4] = {
+            {"Diary Date", r->date[0] ? r->date : "-", 0xEBCFEC, 0x7A4A9A, 0xCDB3DA},
+            {"Slot", slot, 0xE7EEB3, 0x6B7A2A, 0xD3DC98},
+            {"Playtime", r->play[0] ? r->play : "-", 0xF4D4E4, 0x8A3F6A, 0xE6BBD0},
+            {"Status", r->name[0] ? "Saved" : "Empty", 0xD0DEE8, 0x3F6680, 0xB5C9D8},
+        };
+        for (int k = 0; k < 4; k++) {
+            float ly = 254 + (float)k * 47;
+            diary_pill(c, nx + 46, ly, 233, nx + 822, line[k].label, line[k].fill, line[k].ink, line[k].line);
+            ui_text_in(c, UI_GOTHIC_700, 27, nx + 300, ly - 15, 500, 36, 1, line[k].value, DY_NAVY);
+        }
+        note = r->name[0] ? "Your new game takes this slot. This diary is only replaced when you save over it in the Diary."
+                          : "Your new game starts in this empty slot.";
+        note_y = 254 + 4 * 47 + 20;
+    } else {
+        note = "No new game: back to the title screen. Your diaries stay as they are.";
+    }
+    ui_box(c, nx + 46, note_y, 778, 96, 14, DY_NOTE_CARD, 0, 0);  /* where the game's party is */
+    ui_text_wrap(c, UI_GOTHIC_500, 21, 0, nx + 72, note_y + 18, 726, 21 * 1.5f, 0, note, DY_SUB);
+    if (conf) {  /* the question over the page (owner, 2026-11-17: not the generic popup): a page of the notebook,
+                  * its two answers as the Diary's rows side by side */
+        ui_box_alpha(c, 0, 0, 1600, 900, 24, 0x2A1A40, 0.38f);
+        float dw = 820, dh = 330, dx = (1600 - dw) / 2, dyy = (900 - DY_BAR_H - dh) / 2;
+        ui_shadow(c, dx, dyy + 12, dw, dh, 12, 36, 0x241040, 0.5f);
+        ui_box(c, dx - 8, dyy + 8, dw, dh, 12, DY_COVER, 0, 0);
+        ui_box(c, dx, dyy, dw, dh, 10, DY_PAPER, 2, DY_PAPER_EDGE);
+        for (float ddx = dx + 18; ddx < dx + dw - 24; ddx += 16)
+            for (int k = 0; k < 2; k++) {
+                float ddy = k ? dyy + dh - 18 : dyy + 8;
+                ui_shape(c, "<path fill=\"#000\" d=\"M5 0L10 5L5 10L0 5Z\"/>", ddx, ddy, 10, 10, 10, DY_DIAMOND);
+                ui_shape(c, "<path fill=\"#000\" d=\"M5 2.4L7.6 5L5 7.6L2.4 5Z\"/>", ddx, ddy, 10, 10, 10, DY_PAPER);
+            }
+        ui_text_in(c, UI_ROUNDED_800, 34, dx + 30, dyy + 30, dw - 60, 50, 1, prompt_title, DY_TITLE);
+        ui_rect(c, dx + 60, dyy + 88, dw - 120, 2.5f, DY_UNDER, 1);
+        ui_box(c, dx + dw - 64, dyy + 84.5f, 9, 9, 4.5f, DY_UNDER, 0, 0);
+        ui_text_wrap(c, UI_GOTHIC_500, 21, 0, dx + 60, dyy + 106, dw - 120, 21 * 1.5f, 1, prompt_body, DY_SUB);
+        float bw = 340, bh = 62, gap = 40, bx = dx + (dw - 2 * bw - gap) / 2, byy = dyy + dh - 46 - bh;
+        for (int k = 0; k < 2; k++) {
+            int on = k == pick_sel;
+            float x = bx + (float)k * (bw + gap);
+            if (on) ui_box(c, x - 3, byy - 3, bw + 6, bh + 6, 15, DY_CHOSEN_EDGE, 0, 0);
+            ui_box(c, x, byy, bw, bh, 12, on ? DY_CHOSEN : DY_PLATE, 0, 0);
+            if (on) ui_box(c, x - 16, byy + bh / 2 - 9, 18, 18, 9, 0x7BD86A, 2, 0xFFFFFF);  /* the green pointer */
+            ui_text_in(c, UI_ROUNDED_800, 23, x + 1.5f, byy + 1.5f, bw, bh, 1, pick_rows[k], on ? DY_INK_ON : DY_INK);
+            ui_text_in(c, UI_ROUNDED_800, 23, x, byy, bw, bh, 1, pick_rows[k], 0xFFFFFF);
+            hit_add(offx + x * DY_K, offy + byy * DY_K, bw * DY_K, bh * DY_K, HIT_PICK_ROW, k, 0);
+        }
+    }
+    /* the keys, at the bar's right end as the game's (the keys bound to the game's A and B work here: window.c) */
+    const char *choose = "W S", *ok = "Enter", *back = "Esc";
+    if (in->pad) {
+        choose = "D-pad", ok = in->pad == 2 ? "Cross" : "A", back = in->pad == 2 ? "Circle" : "B";
+    } else {
+        for (int i = 0; i < 32; i++) {
+            const char *id = bindings_input_id(i), *key = bindings_input_key(0, i, 0);
+            if (key && key[0] && !strcmp(id, "A")) ok = key;
+            if (key && key[0] && !strcmp(id, "B")) back = key;
+        }
+    }
+    float hy = 900 - DY_BAR_H + (DY_BAR_H - 56) / 2;
+    float hx = X + 1600 - 48 - hint_w(choose, "Choose") - 36 - hint_w(ok, "Select") - 36 - hint_w(back, "Back");
+    hx += hint(c, hx, hy, choose, "Choose") + 36;
+    hx += hint(c, hx, hy, ok, "Select") + 36;
+    hint(c, hx, hy, back, "Back");
+}
+
 /* The list popup (gamemenu_choice_begin): the name popup's frame (board N1), the question under the title, the rows
  * as buttons, the chosen one gold (as the on-screen keyboard's key); OK picks it. No Cancel: one row is the answer. */
 static void draw_pick(const UiCanvas *c, const GameMenuInfo *in, float W, float H, float T, float E, float by) {
-    ui_rect(c, 0, T - 1, W, H + 2 * E + 2, POP_BACKDROP, 0.45f);
+    int live = gamemenu_live();
+    if (!live) ui_rect(c, 0, T - 1, W, H + 2 * E + 2, POP_BACKDROP, 0.45f);
     int n = __atomic_load_n(&pick_n, __ATOMIC_ACQUIRE);
     float pw = 720, bar = 18 + 22 * 1.3f + 16, blh = 17 * 1.5f, rh = 44, rg = 4;
     float msg_h = prompt_body[0] ? ui_text_wrap(NULL, UI_GOTHIC_500, 17, 0, 0, 0, pw - 56, blh, 0, prompt_body, 0) : 0;
     float body = 22 + (msg_h > 0 ? msg_h + 14 : 0) + (float)n * (rh + rg) - rg + 18;
     float tray = 16 + 52 + 16, ph = bar + 3 + body + tray;
     float px = (W - pw) / 2, py = (H - 56 - ph) / 2;
+    live_rect[0] = px - 40, live_rect[1] = py - 30, live_rect[2] = pw + 80, live_rect[3] = ph + 90;
     ui_shadow(c, px, py + 14, pw, ph, 16, 40, POP_SHADOW, 0.45f);
     ui_box_alpha(c, px - 1, py - 1, pw + 2, ph + 2, 17, POP_BORDER, 0.5f);
     ui_box(c, px, py, pw, ph, 16, POP_WHITE, 0, 0);
@@ -3154,6 +3539,7 @@ static void draw_pick(const UiCanvas *c, const GameMenuInfo *in, float W, float 
     ui_box(c, okx, oky, okw, 52, 12, GOLD, 0, 0);
     ui_text_in(c, UI_ROUNDED_800, 18, okx, oky, okw, 52, 1, "OK", ON_GOLD);
     hit_add(okx, oky, okw, 52, HIT_PROMPT_OK, 0, 0);
+    if (live) return;  /* over the running game: the popup alone */
     ui_rect(c, 0, by, W, 56 + 1, NIGHT, 1);  /* the key hints, the whole width */
     float hx = 48;
     if (in->pad) {
@@ -3225,7 +3611,8 @@ void gamemenu_draw(const UiCanvas *c, const GameMenuInfo *in) {
         changed();
     }
     if (gamemenu_prompting() && __atomic_load_n(&pick_n, __ATOMIC_ACQUIRE)) {  /* a list (the New Game slots) */
-        draw_pick(c, in, W, H, T, E, by);
+        if (diary_n || dy_confirm) draw_diary_pick(c, in, W, H, T, E, by);
+        else draw_pick(c, in, W, H, T, E, by);
         __atomic_store_n(&hit_front, hk, __ATOMIC_RELEASE);
         return;
     }
