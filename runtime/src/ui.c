@@ -226,9 +226,25 @@ static void box_a(const UiCanvas *c, float x, float y, float w, float h, float r
     if (iy0 < 0) iy0 = 0;
     if (ix1 > c->w) ix1 = c->w;
     if (iy1 > c->h) iy1 = c->h;
-    for (int j = iy0; j < iy1; j++)
+    /* the solid inside: where the fill alone shows, fully (the box, or with a border the box inside it), away from
+     * the rounded corners, at least half a pixel in from every edge. There the distance is the plain box's and
+     * covers the pixel: no distance needed (two square roots a pixel with a border). The same pixels as before. */
+    int inner = B <= 0 || (x1 - x0 > 2 * B && y1 - y0 > 2 * B);
+    float sx0 = B > 0 ? x0 + B : x0, sy0 = B > 0 ? y0 + B : y0, sx1 = B > 0 ? x1 - B : x1, sy1 = B > 0 ? y1 - B : y1;
+    float sR = B > 0 ? iR : R;
+    for (int j = iy0; j < iy1; j++) {
+        float py = (float)j + 0.5f, lo = 1, hi = 0;
+        if (inner && py - sy0 >= 0.5f && sy1 - py >= 0.5f) {
+            int straight = py >= sy0 + sR && py <= sy1 - sR;
+            lo = straight || sR < 0.5f ? sx0 + 0.5f : sx0 + sR;
+            hi = straight || sR < 0.5f ? sx1 - 0.5f : sx1 - sR;
+        }
         for (int i = ix0; i < ix1; i++) {
-            float px = (float)i + 0.5f, py = (float)j + 0.5f;
+            float px = (float)i + 0.5f;
+            if (px >= lo && px <= hi) {
+                blend(c, i, j, fill, fa);
+                continue;
+            }
             float co = cover(box_dist(px, py, x0, y0, x1, y1, R));
             if (co <= 0) continue;
             if (B <= 0) {
@@ -240,6 +256,7 @@ static void box_a(const UiCanvas *c, float x, float y, float w, float h, float r
             if (ci < 1.0f) blend(c, i, j, border, co * (1.0f - ci) * ba);
             if (ci > 0.0f) blend(c, i, j, fill, co * ci * fa);
         }
+    }
 }
 
 void ui_box(const UiCanvas *c, float x, float y, float w, float h, float r, uint32_t fill, float bw, uint32_t border) {
@@ -257,6 +274,50 @@ void ui_box_alpha(const UiCanvas *c, float x, float y, float w, float h, float r
 
 void ui_shadow(const UiCanvas *c, float x, float y, float w, float h, float r, float blur, uint32_t rgb, float a) {
     enum { STEPS = 12 };  /* layers from the widest to the box itself: a soft edge like CSS box-shadow */
+    /* The layers are the box grown by e with its corners' radius grown by e too, so a pixel's distance to layer i
+     * is its distance to the box minus e_i: one distance a pixel (one square root) gives all twelve, and their
+     * "over"s of one colour are one blend with the combined alpha. Inside the box's straight parts every layer
+     * covers the pixel: a constant, no distance at all. As twelve box_a calls this was most of a popup's redraw
+     * (12 passes over the whole box, each pixel's distance with a square root: 230 ms for the 4K Diary page,
+     * owner 2026-11-17). Where the radius would be clamped (a box smaller than its corners) the grown boxes are
+     * not offsets of it: the layers are drawn one by one there, as before. */
+    float s = c->s, bx0 = c->ox + x * s, by0 = c->oy + y * s, bx1 = bx0 + w * s, by1 = by0 + h * s, R = r * s;
+    float la = a / STEPS * 1.6f;
+    if (la > 1.0f) la = 1.0f;
+    if (blur > 0 && la > 0 && w > 0 && h > 0 && R <= (bx1 - bx0 < by1 - by0 ? bx1 - bx0 : by1 - by0) * 0.5f) {
+        float E[STEPS], emax = blur * 0.5f * s;
+        for (int i = 0; i < STEPS; i++) E[i] = emax * (float)(i + 1) / STEPS;
+        float full = 1.0f;  /* what is left of the picture under all twelve */
+        for (int i = 0; i < STEPS; i++) full *= 1.0f - la;
+        int ix0 = (int)floorf(bx0 - emax), iy0 = (int)floorf(by0 - emax), ix1 = (int)ceilf(bx1 + emax),
+            iy1 = (int)ceilf(by1 + emax);
+        if (ix0 < 0) ix0 = 0;
+        if (iy0 < 0) iy0 = 0;
+        if (ix1 > c->w) ix1 = c->w;
+        if (iy1 > c->h) iy1 = c->h;
+        for (int j = iy0; j < iy1; j++) {
+            float py = (float)j + 0.5f;
+            /* the row's part inside the box away from its corners: distance <= 0 there, inside every layer
+             * (the smallest grows the box by E[0]: covered when distance - E[0] <= -0.5) */
+            float lo = 1, hi = 0;
+            if (E[0] >= 0.5f && py >= by0 && py <= by1) {
+                if (py >= by0 + R && py <= by1 - R) lo = bx0, hi = bx1;
+                else lo = bx0 + R, hi = bx1 - R;
+            }
+            for (int i = ix0; i < ix1; i++) {
+                float px = (float)i + 0.5f;
+                if (px >= lo && px <= hi) {
+                    blend(c, i, j, rgb, 1.0f - full);
+                    continue;
+                }
+                float d = box_dist(px, py, bx0, by0, bx1, by1, R), keep = 1.0f;
+                if (d - E[STEPS - 1] >= 0.5f) continue;  /* outside the widest */
+                for (int k = 0; k < STEPS; k++) keep *= 1.0f - la * cover(d - E[k]);
+                blend(c, i, j, rgb, 1.0f - keep);
+            }
+        }
+        return;
+    }
     for (int i = STEPS; i >= 1; i--) {
         float e = blur * 0.5f * (float)i / STEPS;
         box_a(c, x - e, y - e, w + 2 * e, h + 2 * e, r + e, rgb, a / STEPS * 1.6f, 0, 0, 1);
