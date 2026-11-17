@@ -1872,12 +1872,15 @@ static const char *kv_action(int mode, const char *id) {
         {"A", "Interact / confirm"}, {"B", "Jump / back, hold to run"}, {"X", "Yo-kai Pad"}, {"Y", "Map"},
         {"L", "Hold: more shortcuts"}, {"R", "Minimap size"}, {"ZL", "Watch scan"}, {"ZR", "Yo-kai Beam"},
         {"PLUS", "Pause"}, {"LS_PRESS", "Close hints"}, {"RS_PRESS", "Scan"},
-        {"DPAD_UP", "Shortcut"}, {"DPAD_RIGHT", "Shortcut"}, {"DPAD_DOWN", "Shortcut"}, {"DPAD_LEFT", "Shortcut"}};
+        {"DPAD_UP", "Shortcut"}, {"DPAD_RIGHT", "Shortcut"}, {"DPAD_DOWN", "Shortcut"}, {"DPAD_LEFT", "Shortcut"},
+        {"RUN", "Run (by Running mode)"}};
     static const char *const battle[][2] = {
         {"A", "Confirm"}, {"B", "Roll / dodge"}, {"X", "Character skill"}, {"Y", "Attack"},
         {"R", "Skill wheel / Encourage / Soul Steal"}, {"ZL", "Aim"}, {"ZR", "Yo-kai Drain"}, {"PLUS", "Stop watching"},
-        {"MINUS", "Auto battle"}, {"LS_PRESS", "Target enemy"}, {"DPAD_UP", "Switch character"},
-        {"DPAD_DOWN", "Switch character"}, {"DPAD_LEFT", "Target ally"}, {"DPAD_RIGHT", "Target ally"}};
+        {"MINUS", "Auto battle"}, {"LS_PRESS", "Cycle allies"}, {"RS_PRESS", "Lock on / off"},
+        {"DPAD_UP", "Switch character"},
+        {"DPAD_DOWN", "Switch character"}, {"DPAD_LEFT", "Cycle targets (allies and enemies)"},
+        {"DPAD_RIGHT", "Cycle targets (allies and enemies)"}};  /* both ways, friend and foe (owner, 2026-11-18) */
     static const char *const cutscene[][2] = {{"A", "Next line"}, {"B", "Next line"}, {"R", "Fast forward"},
                                               {"PLUS", "Pause"}};  /* B too (owner, 2026-11-13) */
     if (!strncmp(id, "LS_", 3) && strcmp(id, "LS_PRESS")) return mode == 2 ? NULL : "Move";
@@ -2708,7 +2711,9 @@ static void draw_controls_page(const UiCanvas *c, const GameMenuInfo *in) {
     if (in->pad_name) snprintf(t, sizeof t, "%s connected", in->pad_name);
     else snprintf(t, sizeof t, "No controller connected");
     ui_text_in(c, UI_GOTHIC_400, 16, 488, 76 + 12, 1024 - vw - 24, 34 * 1.25f - 12, 2, t, MUTED);
-    float hh = ui_text_wrap(NULL, UI_GOTHIC_500, 15, 0, 0, 0, 1024, 15 * 1.45f, 0, help, 0);
+    /* the help: a fixed height (3 lines for what the row is, then its controls on a line of their own), so the table
+     * keeps its size and the controls their place from row to row (owner, 2026-11-18) */
+    const float hlh = 15 * 1.45f, hh = 4 * hlh + 4;
     float x = 488, w = 1024, cw[3] = {379, 379, 266}, hdr = 16 * 1.45f + 28, rh = 17 * 1.45f + 24;
     int visible = (int)((bottom - hh - 22 - top - hdr - 4) / rh);
     if (visible < 1) visible = 1;
@@ -2745,7 +2750,7 @@ static void draw_controls_page(const UiCanvas *c, const GameMenuInfo *in) {
         else if (!strcmp(r->group, "KEYS FOR")) snprintf(u, sizeof u, "KEYS FOR");
         else snprintf(u, sizeof u, "%s %s", r->group, r->name);
         sentence_case(u, t, sizeof t);
-        ui_text_in(c, UI_GOTHIC_400, 17, x + 22, y, 0, rh, 0, t, INK);
+        ui_text_in(c, UI_GOTHIC_400, 17, x + 22, y, 0, rh, 0, t, r->disabled ? MUTED : INK);  /* greyed: does nothing */
         if (!r->group) continue;
         if (r->value && !strcmp(r->group, "MOUSE") && !strcmp(r->name, "BUTTONS")) {
             /* the way into the Mouse buttons page: what each part does in the set shown, as chips, and a › */
@@ -2835,13 +2840,36 @@ static void draw_controls_page(const UiCanvas *c, const GameMenuInfo *in) {
             if (on && col == k && bindings_capturing()) cell = "PRESS...";
             float tw = cell_text(NULL, kx, y, rh, cell, 0);
             hit_add(kx - 10, y, tw + 20, rh, HIT_BIND, i, k);
-            if (on && col == k) ui_box(c, kx - 10, y + 8, tw + 20, rh - 16, 8, GOLD, 0, 0);
-            cell_text(c, kx, y, rh, cell, r->conflict[k] ? WINE : !strcmp(r->cells[k], "-") ? MUTED : INK);
+            if (on && col == k && !r->disabled) ui_box(c, kx - 10, y + 8, tw + 20, rh - 16, 8, GOLD, 0, 0);
+            cell_text(c, kx, y, rh, cell,
+                      r->disabled ? MUTED : r->conflict[k] ? WINE : !strcmp(r->cells[k], "-") ? MUTED : INK);
         }
     }
-    char hprose[512];
-    prose_case(help, hprose, sizeof hprose);
-    ui_text_wrap(c, UI_GOTHIC_500, 15, 0, x, top + th + 22, w, 15 * 1.45f, 0, hprose, MUTED);
+    /* "WHAT IT IS|HOW TO CHANGE IT" (bindings.h BIND_HELP_SPLIT); a game input's first part is empty: its actions,
+     * from the F2 sheet's names (kv_action), the set this page shows first */
+    char *split = strchr(help, BIND_HELP_SPLIT), what[400], how[400];
+    if (split) *split = 0;
+    prose_case(help, what, sizeof what);
+    prose_case(split ? split + 1 : "", how, sizeof how);
+    const BindRow *sel = row >= 0 && row < n ? &rows[row] : NULL;
+    if (!*what && sel && sel->id) {
+        int first = bindings_set_shown() ? 1 : 0;
+        const char *f = kv_action(0, sel->id), *b = kv_action(1, sel->id), *s = kv_action(2, sel->id);
+        size_t o = 0;
+        if (f && b && !strcmp(f, b)) {
+            o += (size_t)snprintf(what + o, sizeof what - o, "Exploring and battles: %s.", f);
+        } else {
+            const char *label[2] = {"Exploring", "Battles"}, *act[2] = {f, b};
+            for (int k = 0; k < 2; k++) {
+                int m = k ? !first : first;
+                if (act[m] && o < sizeof what)
+                    o += (size_t)snprintf(what + o, sizeof what - o, "%s%s: %s.", o ? " " : "", label[m], act[m]);
+            }
+        }
+        if (s && o < sizeof what) snprintf(what + o, sizeof what - o, "%sCutscenes: %s.", o ? " " : "", s);
+    }
+    ui_text_wrap(c, UI_GOTHIC_500, 15, 0, x, top + th + 22, w, hlh, 0, what, MUTED);
+    ui_text_wrap(c, UI_GOTHIC_500, 15, 0, x, top + th + 22 + 3 * hlh + 4, w, hlh, 0, how, MUTED);
 }
 
 /* A choice chip (the design's chipStyle): the chosen one filled; ringed in gold where the focus is. */

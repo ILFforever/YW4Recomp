@@ -1267,9 +1267,11 @@ static void panel_draw(VkImage dst, int32_t x0, int32_t y0, uint32_t bw, uint32_
     if (!settings_open() || overlay_resources(&panel)) return;
     int w, h;
     if (settings_page()) {
-        static BindRow rows[32];
-        char help[256];
-        int row, col, n = bindings_rows(rows, 32, &row, &col, help, sizeof help);
+        static BindRow rows[48];
+        char help[512];
+        int row, col, n = bindings_rows(rows, 48, &row, &col, help, sizeof help);
+        for (char *p = help; *p; p++)  /* one paragraph here: the overlay's two parts joined */
+            if (*p == BIND_HELP_SPLIT) *p = ' ';
         controls_render(panel.ptr, (int)panel.w, (int)panel.h, rows, n, row, col, bindings_capturing(), help, &w, &h);
     } else {
         SettingRow rows[48];

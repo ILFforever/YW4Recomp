@@ -276,6 +276,12 @@ why = "a character action's per-frame motion update: above 30 frames/s a motion'
 
 [[hook]]
 module = "main"
+offset = "0x1fe950"
+native = "yw4_hook_player_run"
+why = "the field's player controller, once a frame: the RUNNING modes (toggle, always) keep its carry-on-running timer (ctrl+0x58) above zero, so the game runs by its own path and B stays the game's (issue #18; runtime/src/run.c)"
+
+[[hook]]
+module = "main"
 offset = "0x897d90"
 native = "yw4_hook_battle_blur"
 why = "the battles' blur, a render job with its own rounds: BATTLE BLUR fast hands it a job with a quarter of the rounds (runtime/src/dof.c)"

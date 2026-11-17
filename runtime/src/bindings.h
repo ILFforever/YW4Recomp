@@ -32,13 +32,22 @@ typedef struct {
     char cells[BIND_COLS][BIND_NAME];  /* the two keys, then the gamepad input; "-" for none */
     int conflict[BIND_COLS];           /* the cell's key or input also presses another Switch input */
     int value;                         /* a setting, not an input: its value in cells[0], LEFT/RIGHT change it */
+    const char *id;                    /* an input's settings-file name ("B", "RUN"); NULL for the others */
+    int disabled;                      /* greyed out: does nothing now (Run in the DEFAULT running mode) */
 } BindRow;
+/* bindings_rows' help: "WHAT IT IS|HOW TO CHANGE IT", the second part on a line of its own under the first so it
+ * stays in one place from row to row. An input row's first part is empty unless it is one of ours: the overlay
+ * puts the input's actions there (the F2 sheet's names, gamemenu.c kv_action). */
+#define BIND_HELP_SPLIT '|'
 
 /* The Switch buttons (bits as in svc_hid) and sticks (left x, left y, right x, right y; up and right
  * positive) for keyboard state, mouse buttons/wheel, and gamepad. */
 struct SDL_Gamepad;
 void bindings_read(const bool *keyboard, uint32_t mouse_buttons, int wheel_up, int wheel_down,
                    struct SDL_Gamepad *gamepad, uint64_t *buttons, int32_t sticks[4]);
+
+/* Our Run input (not a Switch button) is held, as of the last bindings_read (run.c). */
+int bindings_run_held(void);
 
 /* The connected controller is a Nintendo one (its A is on the right, B at the bottom; others the other way). */
 int bindings_pad_nintendo(void);

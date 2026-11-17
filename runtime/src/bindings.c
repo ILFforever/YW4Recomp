@@ -13,6 +13,7 @@
 #include "gaiji_create.h"
 #include "mousemenu.h"
 #include "pause.h"
+#include "run.h"
 #include "savefs.h"
 #include "settings.h"
 #include "shortcutwheel.h"
@@ -25,11 +26,13 @@
  * name (PAD_FACE + 0..3: A, B, X, Y as printed on the connected controller: confirm on a PlayStation pad is
  * cross, on a Nintendo one the right button). */
 enum { PAD_NONE = -1, PAD_AXIS = 100, PAD_FACE = 200 };
+/* An input of ours that the game never sees (Run / Walk, run.c): read here, not sent as a Switch button */
+enum { INPUT_OURS = -2 };
 #define AXIS(a, positive) (PAD_AXIS + (a) * 2 + (positive))
 
 typedef struct {
     const char *group, *name, *id;  /* id: the name in the settings file */
-    int bit;                        /* the Switch button; -1 for a stick direction */
+    int bit;                        /* the Switch button; -1 for a stick direction; INPUT_OURS for one of ours */
     int stick, sign;                /* the stick direction: 0 left x, 1 left y, 2 right x, 3 right y; +1/-1 */
     int keys[BIND_KEYS];            /* the starting binding: SDL_Scancode or MOUSE_BIND_* */
     int pad;
@@ -47,7 +50,8 @@ static const Input inputs[] = {
     {"BUTTONS", "ZR", "ZR", 9, 0, 0, {SDL_SCANCODE_F}, AXIS(SDL_GAMEPAD_AXIS_RIGHT_TRIGGER, 1)},
     {"BUTTONS", "PLUS", "PLUS", 10, 0, 0, {SDL_SCANCODE_P, SDL_SCANCODE_ESCAPE}, SDL_GAMEPAD_BUTTON_START},
     {"BUTTONS", "MINUS", "MINUS", 11, 0, 0, {SDL_SCANCODE_X}, SDL_GAMEPAD_BUTTON_BACK},
-    {"BUTTONS", "LEFT STICK PRESS", "LS_PRESS", 4, 0, 0, {SDL_SCANCODE_LSHIFT}, SDL_GAMEPAD_BUTTON_LEFT_STICK},
+    /* Left Ctrl, not Left Shift, since Run took Shift (owner, 2026-11-18); older files move over in migrate_hints */
+    {"BUTTONS", "LEFT STICK PRESS", "LS_PRESS", 4, 0, 0, {SDL_SCANCODE_LCTRL}, SDL_GAMEPAD_BUTTON_LEFT_STICK},
     {"BUTTONS", "RIGHT STICK PRESS", "RS_PRESS", 5, 0, 0, {0, SDL_SCANCODE_R}, SDL_GAMEPAD_BUTTON_RIGHT_STICK},
     {"D-PAD", "UP", "DPAD_UP", 13, 0, 0, {SDL_SCANCODE_UP}, SDL_GAMEPAD_BUTTON_DPAD_UP},
     {"D-PAD", "DOWN", "DPAD_DOWN", 15, 0, 0, {SDL_SCANCODE_DOWN}, SDL_GAMEPAD_BUTTON_DPAD_DOWN},
@@ -62,6 +66,10 @@ static const Input inputs[] = {
     {"RIGHT STICK", "DOWN", "RS_DOWN", -1, 3, -1, {SDL_SCANCODE_K}, AXIS(SDL_GAMEPAD_AXIS_RIGHTY, 1)},
     {"RIGHT STICK", "LEFT", "RS_LEFT", -1, 2, -1, {SDL_SCANCODE_J}, AXIS(SDL_GAMEPAD_AXIS_RIGHTX, 0)},
     {"RIGHT STICK", "RIGHT", "RS_RIGHT", -1, 2, 1, {SDL_SCANCODE_L}, AXIS(SDL_GAMEPAD_AXIS_RIGHTX, 1)},
+    /* ours, the last (issue #18), shown on the Controls page up with the settings, under NINTENDO ICONS (RUN_INPUT_ROW):
+     * what it does follows the RUNNING mode (run.c). Left Shift; on a pad the left stick press, shared with Close
+     * hints, every button having a job already (owner, 2026-11-18) */
+    {"BUTTONS", "RUN", "RUN", INPUT_OURS, 0, 0, {SDL_SCANCODE_LSHIFT}, SDL_GAMEPAD_BUTTON_LEFT_STICK},
 };
 /* The controls page's rows: the mouse's two sensitivities, its buttons (a page of their own in the overlay), the
  * shortcut wheel's On / Off (shortcutwheel.h), the vibration toggle, which set is shown, the inputs, the reset
@@ -72,9 +80,19 @@ enum { NINPUTS = sizeof inputs / sizeof *inputs, NMOUSE = 2,
        WHEEL_ROW = MOUSE_ROW + 1,
        RUMBLE_ROW = WHEEL_ROW + 1,
        LAYOUT_ROW = RUMBLE_ROW + 1,
-       SET_ROW = LAYOUT_ROW + 1,
+       /* Run / Walk (the last input, ours) and RUNNING up here with the other settings, under NINTENDO ICONS
+        * (owner, 2026-11-17); the Switch's inputs follow KEYS FOR */
+       RUN_INPUT = NINPUTS - 1, OURS = 1,
+       RUN_ROW = LAYOUT_ROW + 1,  /* RUNNING, then the Run key under it (owner, 2026-11-18) */
+       RUN_INPUT_ROW = RUN_ROW + 1,
+       SET_ROW = RUN_INPUT_ROW + 1,
        FIRST_INPUT = SET_ROW + 1,
-       RESET_ROW = FIRST_INPUT + NINPUTS, NROWS };
+       RESET_ROW = FIRST_INPUT + NINPUTS - OURS, NROWS };
+/* The input a row binds, or -1 for a setting or the reset row. */
+static int row_input(int r) {
+    if (r == RUN_INPUT_ROW) return RUN_INPUT;
+    return r >= FIRST_INPUT && r < RESET_ROW ? r - FIRST_INPUT : -1;
+}
 
 /* Two sets of keys: one while exploring, one in battles (battle.c says which), so a key can do one thing on the
  * field and another in a battle. The battle set starts as a copy of the exploring one, with mouse wheel up and
@@ -109,6 +127,7 @@ static const int battle_keys[NINPUTS][BIND_KEYS] = {
     {SDL_SCANCODE_LEFT},  {SDL_SCANCODE_RIGHT}, /* DPAD_LEFT, DPAD_RIGHT */
     {SDL_SCANCODE_W}, {SDL_SCANCODE_S}, {SDL_SCANCODE_A}, {SDL_SCANCODE_D},  /* LS */
     {SDL_SCANCODE_I}, {SDL_SCANCODE_K}, {SDL_SCANCODE_J}, {SDL_SCANCODE_L},  /* RS */
+    {0},                                                                     /* RUN: the field's only */
 };
 
 /* The mouse's own bindings (owner, 2026-11-13: the Mouse buttons page): in each set, the Switch input each part of
@@ -179,9 +198,28 @@ static void reset(void) {
 static void ready(void) {
     if (!bound_ready) reset();
 }
+/* A settings file from before Run (2026-11-18) has the left stick press (Close hints) on Left Shift, now Run's: the
+ * exploring set's Left Shift on it moves to Left Ctrl, where Left Ctrl is bound to nothing else, so Shift runs and
+ * hints still close. Files with a RUN line keep what the player chose. */
+static int file_keys, file_run, hints_migrated;
+static void migrate_hints(void) {
+    if (hints_migrated || !file_keys || file_run) return;
+    hints_migrated = 1;
+    int ls = input_by_id("LS_PRESS");
+    for (int i = 0; i < NINPUTS; i++)
+        for (int k = 0; k < BIND_KEYS; k++)
+            if (i != ls && sets[SET_FIELD][i].keys[k] == SDL_SCANCODE_LCTRL) return;  /* taken: the player's call */
+    for (int k = 0; k < BIND_KEYS && ls >= 0; k++)
+        if (sets[SET_FIELD][ls].keys[k] == SDL_SCANCODE_LSHIFT) {
+            sets[SET_FIELD][ls].keys[k] = SDL_SCANCODE_LCTRL;
+            fprintf(stderr, "yw4: controls: Close hints moved from Left Shift to Left Ctrl (Left Shift is now Run)\n");
+        }
+}
+
 /* After the settings file: a battle set it didn't have gets the battle set's starting keys. */
 static void sets_ready(void) {
     ready();
+    migrate_hints();
     if (!battle_set_known) {
         battle_starting_set();
         battle_set_known = 1;
@@ -451,6 +489,10 @@ static int32_t pad_amount(SDL_Gamepad *g, int pad) {
     return v < 0 ? 0 : v > 32767 ? 32767 : v;
 }
 
+/* Our inputs (Run (hold), Run / Walk), as of the window's last poll (run.c reads them on the game's thread). */
+static int run_held;
+int bindings_run_held(void) { return __atomic_load_n(&run_held, __ATOMIC_ACQUIRE); }
+
 void bindings_read(const bool *keyboard, uint32_t mouse_buttons, int wheel_up, int wheel_down,
                    struct SDL_Gamepad *gamepad, uint64_t *buttons, int32_t sticks[4]) {
     sets_ready();
@@ -555,6 +597,12 @@ void bindings_read(const bool *keyboard, uint32_t mouse_buttons, int wheel_up, i
             if (mouse[p] == i && held[p]) key = 1;
         any_key |= key;
         int32_t amount = pad_amount(gamepad, use[i].pad);
+        if (inputs[i].bit == INPUT_OURS) {  /* Run (hold), Run / Walk: kept for run.c, never sent to the game */
+            int pressed = amount > (use[i].pad >= PAD_AXIS ? 16000 : 0);
+            any_pad |= pressed;
+            __atomic_store_n(&run_held, key || pressed, __ATOMIC_RELEASE);
+            continue;
+        }
         if (inputs[i].bit >= 0) {
             /* a stick or trigger counts as a button pushed past half way */
             int pressed = amount > (use[i].pad >= PAD_AXIS ? 16000 : 0);
@@ -1229,6 +1277,9 @@ void bindings_action(int action) {
             nintendo_layout = !nintendo_layout, settings_save();
         } else if (row == WHEEL_ROW) {
             swheel_set_enabled(!swheel_enabled()), settings_save();
+        } else if (row == RUN_ROW) {  /* the ends stop, as the sensitivities */
+            int m = run_mode() + (action == SETTINGS_RIGHT ? 1 : -1);
+            if (m >= 0 && m < RUN_MODES) run_mode_set(m), settings_save();
         } else if (row == MOUSE_ROW) {  /* the Mouse buttons row opens its page (gamemenu.c): nothing here */
         } else if (!pad_only) {  /* a pad stays on its own column */
             col = action == SETTINGS_LEFT ? (col > 0 ? col - 1 : 0) : (col < BIND_COLS - 1 ? col + 1 : BIND_COLS - 1);
@@ -1248,12 +1299,15 @@ void bindings_action(int action) {
             nintendo_layout = !nintendo_layout, settings_save();
         } else if (row == WHEEL_ROW) {
             swheel_set_enabled(!swheel_enabled()), settings_save();
+        } else if (row == RUN_ROW) {
+            run_mode_set((run_mode() + 1) % RUN_MODES), settings_save();
         } else if (row == RESET_ROW) {
             /* the exploring set back to the starting keys; the battle set to a copy of the exploring set */
             if (edit_set == SET_BATTLE) copy_exploring_to_battle();
             else reset_set(SET_FIELD);
             settings_save();
         } else if (row == MOUSE_ROW) {  /* opens its page (gamemenu.c) */
+        } else if (row == RUN_INPUT_ROW && run_mode() == RUN_DEFAULT) {  /* greyed out: it does nothing */
         } else {
             capturing = 1, capture_since = SDL_GetTicks();
         }
@@ -1267,9 +1321,10 @@ void bindings_action(int action) {
         }
         if (row == LAYOUT_ROW) nintendo_layout = 0, settings_save();
         if (row == WHEEL_ROW) swheel_set_enabled(1), settings_save();  /* back to its start: on */
-        if (row < FIRST_INPUT || row == RESET_ROW) break;
-        if (col < BIND_KEYS) bound[row - FIRST_INPUT].keys[col] = 0;
-        else bound[row - FIRST_INPUT].pad = PAD_NONE;
+        if (row == RUN_ROW) run_mode_set(RUN_DEFAULT), settings_save();  /* back to the game's */
+        if (row_input(row) < 0 || (row == RUN_INPUT_ROW && run_mode() == RUN_DEFAULT)) break;
+        if (col < BIND_KEYS) bound[row_input(row)].keys[col] = 0;
+        else bound[row_input(row)].pad = PAD_NONE;
         settings_save();
         break;
     }
@@ -1280,8 +1335,8 @@ int bindings_capture_key(int scancode) {
     capturing = 0;
     if (col < BIND_KEYS) {  /* a key for a key column; the other key of the row cleared if it is the same */
         for (int k = 0; k < BIND_KEYS; k++)
-            if (bound[row - FIRST_INPUT].keys[k] == scancode) bound[row - FIRST_INPUT].keys[k] = 0;
-        bound[row - FIRST_INPUT].keys[col] = scancode;
+            if (bound[row_input(row)].keys[k] == scancode) bound[row_input(row)].keys[k] = 0;
+        bound[row_input(row)].keys[col] = scancode;
         using_pad = 0;
         settings_save();
     }  /* a key while waiting for a gamepad input cancels */
@@ -1293,7 +1348,7 @@ int bindings_capture_key(int scancode) {
 static int capture_mouse_part(int part) {
     if (!bindings_capturing() || col >= BIND_KEYS || part < 0) return 0;
     capturing = 0;
-    mouse_map[edit_set][part] = row - FIRST_INPUT;
+    mouse_map[edit_set][part] = row_input(row);
     using_pad = 0;
     settings_save();
     return 1;
@@ -1328,26 +1383,27 @@ int bindings_set_shown(void) { return edit_set; }
 int bindings_capture_button(int button) {
     if (!bindings_capturing()) return 0;
     capturing = 0;
-    if (col == BIND_KEYS) bound[row - FIRST_INPUT].pad = button, using_pad = 1, settings_save();
+    if (col == BIND_KEYS) bound[row_input(row)].pad = button, using_pad = 1, settings_save();
     return 1;
 }
 
 int bindings_capture_axis(int axis, int value) {
     if (!bindings_capturing() || col != BIND_KEYS || (value < 24000 && value > -24000)) return 0;
     capturing = 0;
-    bound[row - FIRST_INPUT].pad = AXIS(axis, value > 0);
+    bound[row_input(row)].pad = AXIS(axis, value > 0);
     using_pad = 1;
     settings_save();
     return 1;
 }
 
-/* The other Switch input that a key or gamepad input also presses, or -1. */
+/* The other Switch input that a key or gamepad input also presses, or -1. On a pad, Run sharing a button with one of
+ * the game's is meant (no button is free; owner, 2026-11-18): not marked. */
 static int also_used(int self, int key, int pad) {
     for (int i = 0; i < NINPUTS; i++) {
         if (i == self) continue;
         for (int k = 0; k < BIND_KEYS; k++)
             if (key && bound[i].keys[k] == key) return i;
-        if (pad != PAD_NONE && resolve(bound[i].pad) == resolve(pad)) return i;
+        if (pad != PAD_NONE && resolve(bound[i].pad) == resolve(pad) && self != RUN_INPUT && i != RUN_INPUT) return i;
     }
     return -1;
 }
@@ -1359,6 +1415,18 @@ static void input_title(int i, char *s, size_t n) {
 void bindings_input_title(int i, char *s, size_t n) {
     if (i >= 0 && i < NINPUTS) input_title(i, s, n);
     else if (n) *s = 0;
+}
+
+/* An input's row: its two keys and its gamepad input, each marked when another input has it too. */
+static void input_row(BindRow *r, int i) {
+    memset(r, 0, sizeof *r);
+    r->group = inputs[i].group, r->name = inputs[i].name, r->id = inputs[i].id;
+    for (int k = 0; k < BIND_KEYS; k++) {
+        snprintf(r->cells[k], BIND_NAME, "%s", key_name(bound[i].keys[k]));
+        r->conflict[k] = also_used(i, bound[i].keys[k], PAD_NONE) >= 0;
+    }
+    snprintf(r->cells[BIND_KEYS], BIND_NAME, "%s", pad_label(bound[i].pad));
+    r->conflict[BIND_KEYS] = also_used(i, 0, bound[i].pad) >= 0;
 }
 
 int bindings_rows(BindRow *rows, int max, int *sel_row, int *sel_col, char *help, int help_size) {
@@ -1395,22 +1463,23 @@ int bindings_rows(BindRow *rows, int max, int *sel_row, int *sel_col, char *help
         r->group = "CONTROLLER", r->name = "NINTENDO ICONS", r->value = 1;
         snprintf(r->cells[0], BIND_NAME, "%s", nintendo_layout ? "ON" : "OFF");
     }
+    if (n < max) {  /* RUNNING (RUN_ROW), a setting in both sets, then the Run key under it (RUN_INPUT_ROW) */
+        BindRow *r = &rows[n++];
+        memset(r, 0, sizeof *r);
+        r->group = "RUNNING", r->name = "MODE", r->value = 1;
+        snprintf(r->cells[0], BIND_NAME, "%s", run_mode_name(run_mode()));
+    }
+    if (n < max) {
+        input_row(&rows[n], RUN_INPUT);
+        rows[n++].disabled = run_mode() == RUN_DEFAULT;  /* greyed out where it does nothing (owner, 2026-11-18) */
+    }
     if (n < max) {
         BindRow *r = &rows[n++];
         memset(r, 0, sizeof *r);
         r->group = "KEYS FOR", r->name = "SET", r->value = 1;
         snprintf(r->cells[0], BIND_NAME, "%s", edit_set ? "BATTLES" : "EXPLORING");
     }
-    for (int i = 0; i < NINPUTS && n < max; i++, n++) {
-        BindRow *r = &rows[n];
-        r->group = inputs[i].group, r->name = inputs[i].name;
-        for (int k = 0; k < BIND_KEYS; k++) {
-            snprintf(r->cells[k], BIND_NAME, "%s", key_name(bound[i].keys[k]));
-            r->conflict[k] = also_used(i, bound[i].keys[k], PAD_NONE) >= 0;
-        }
-        snprintf(r->cells[BIND_KEYS], BIND_NAME, "%s", pad_label(bound[i].pad));
-        r->conflict[BIND_KEYS] = also_used(i, 0, bound[i].pad) >= 0;
-    }
+    for (int i = 0; i < RUN_INPUT && n < max; i++) input_row(&rows[n++], i);  /* the Switch's inputs */
     if (n < max) {
         BindRow *r = &rows[n++];
         memset(r, 0, sizeof *r);
@@ -1418,74 +1487,94 @@ int bindings_rows(BindRow *rows, int max, int *sel_row, int *sel_col, char *help
     }
     *sel_row = row, *sel_col = col;
     char title[48], other[48];
+    /* each: "WHAT IT IS|HOW TO CHANGE IT" (BIND_HELP_SPLIT): the overlay keeps the second part on its own line, in
+     * the same place for every row (owner, 2026-11-18) */
     if (row >= SENS_ROW && row < SENS_ROW + NMOUSE) {
         int a = row - SENS_ROW;
         snprintf(help, (size_t)help_size,
-                 "HOW FAST THE CAMERA TURNS %s WITH THE MOUSE: %sX (1.0X TO START), IN BOTH SETS. LEFT/RIGHT: CHANGE. "
-                 "DELETE OR X: BACK TO 1.0X. A CLICK IN THE WINDOW GIVES THE MOUSE TO THE GAME, ALT TAKES IT BACK.",
+                 "HOW FAST THE CAMERA TURNS %s WITH THE MOUSE: %sX (1.0X TO START), IN BOTH SETS. A CLICK IN THE "
+                 "WINDOW GIVES THE MOUSE TO THE GAME, ALT TAKES IT BACK.|LEFT/RIGHT: CHANGE. DELETE OR X: BACK TO 1.0X.",
                  a ? "UP AND DOWN" : "LEFT AND RIGHT", sens_values[sens_index(a)]);
         return n;
     }
     if (row == MOUSE_ROW) {
         snprintf(help, (size_t)help_size,
                  "WHAT THE LEFT AND RIGHT BUTTONS, THE WHEEL PRESS AND TURNING THE WHEEL DO, FOR EXPLORING AND FOR "
-                 "BATTLES. ENTER OR CLICK: OPEN.");
+                 "BATTLES.|ENTER OR CLICK: OPEN.");
         return n;
     }
     if (row == WHEEL_ROW) {
         snprintf(help, (size_t)help_size,
                  "WHILE EXPLORING, HOLD THE L KEY (1 TO START) AND POINT THE MOUSE AT A SHORTCUT, THEN LET GO TO USE IT. "
-                 "LET GO IN THE MIDDLE TO USE NOTHING. L AND THE ARROW KEYS STILL WORK. NOW %s. LEFT/RIGHT OR "
+                 "LET GO IN THE MIDDLE TO USE NOTHING. L AND THE ARROW KEYS STILL WORK. NOW %s.|LEFT/RIGHT OR "
                  "ENTER/A: TOGGLE.",
                  swheel_enabled() ? "ON" : "OFF");
         return n;
     }
     if (row == RUMBLE_ROW) {
         snprintf(help, (size_t)help_size,
-                 "WHETHER CONTROLLER VIBRATION AND HAPTICS ARE ENABLED: %s. LEFT/RIGHT OR ENTER/A: TOGGLE. "
-                 "WHEN TURNED ON, THE CONTROLLER RUMBLES FOR A SECOND AS A TEST.",
+                 "WHETHER CONTROLLER VIBRATION AND HAPTICS ARE ENABLED: %s. WHEN TURNED ON, THE CONTROLLER RUMBLES FOR "
+                 "A SECOND AS A TEST.|LEFT/RIGHT OR ENTER/A: TOGGLE.",
                  window_rumble_enabled() ? "ON" : "OFF");
         return n;
     }
     if (row == LAYOUT_ROW) {
         snprintf(help, (size_t)help_size,
                  "FOR NINTENDO-STYLE CONTROLLERS THAT THE GAME SEES AS AN XBOX CONTROLLER: %s. WHEN ON, THE BUTTON "
-                 "ICONS SHOW THE LETTERS PRINTED ON YOUR CONTROLLER. THE BUTTONS KEEP THEIR PLACES. "
-                 "LEFT/RIGHT OR ENTER/A: TOGGLE.",
+                 "ICONS SHOW THE LETTERS PRINTED ON YOUR CONTROLLER. THE BUTTONS KEEP THEIR PLACES.|LEFT/RIGHT OR "
+                 "ENTER/A: TOGGLE.",
                  nintendo_layout ? "ON" : "OFF");
         return n;
     }
     if (row == SET_ROW) {
         snprintf(help, (size_t)help_size,
                  "WHICH KEYS THIS PAGE SHOWS AND CHANGES: THE ONES FOR EXPLORING OR THE ONES FOR BATTLES. THE GAME "
-                 "USES EACH SET BY ITSELF, SO A KEY CAN DO ONE THING ON THE FIELD AND ANOTHER IN A BATTLE. "
-                 "LEFT/RIGHT: SWITCH.%s",
+                 "USES EACH SET BY ITSELF, SO A KEY CAN DO ONE THING ON THE FIELD AND ANOTHER IN A BATTLE.%s|"
+                 "LEFT/RIGHT: SWITCH.",
                  battle_active() ? " A BATTLE IS ON NOW." : "");
         return n;
     }
-    if (row == RESET_ROW) {
-        snprintf(help, (size_t)help_size, edit_set ? "MAKES THE BATTLE KEYS THE SAME AS THE EXPLORING KEYS. ENTER OR A: COPY."
-                                                   : "PUTS EVERY KEY AND GAMEPAD BUTTON BACK TO HOW IT STARTED. ENTER OR A: RESET.");
+    if (row == RUN_ROW) {
+        static const char *const what[RUN_MODES] = {
+            "THE GAME'S: HOLD B TO RUN, TAP B TO JUMP. THE RUN KEY DOES NOTHING.",
+            "YOU ALWAYS RUN. HOLD RUN TO WALK. B STILL JUMPS.",
+            "RUN TURNS RUNNING ON AND OFF. IT TURNS OFF WHEN A BATTLE STARTS. B STILL JUMPS.",
+            "HOLD RUN TO RUN. B STILL JUMPS, AND STILL RUNS WHEN HELD."};
+        snprintf(help, (size_t)help_size, "%s|LEFT/RIGHT: CHANGE. DELETE OR X: BACK TO DEFAULT.", what[run_mode()]);
         return n;
     }
-    int in = row - FIRST_INPUT;
+    if (row == RESET_ROW) {
+        snprintf(help, (size_t)help_size, edit_set ? "MAKES THE BATTLE KEYS THE SAME AS THE EXPLORING KEYS.|ENTER OR A: COPY."
+                                                   : "PUTS EVERY KEY AND GAMEPAD BUTTON BACK TO HOW IT STARTED.|ENTER OR A: "
+                                                     "RESET.");
+        return n;
+    }
+    int in = row_input(row);
     input_title(in, title, sizeof title);
     int key = col < BIND_KEYS ? bound[in].keys[col] : 0, pad = col == BIND_KEYS ? bound[in].pad : PAD_NONE;
     int o = also_used(in, key, pad);
     if (o >= 0) input_title(o, other, sizeof other);
+    /* the first part: ours say what they do here; the game's are left empty for the overlay (its action names) */
+    char what[160] = "";
+    if (in == RUN_INPUT) {  /* by the RUNNING mode below it */
+        static const char *const by_mode[RUN_MODES] = {
+            "OFF IN THE DEFAULT RUNNING MODE, WHERE B HOLDS TO RUN. PICK ANOTHER MODE ABOVE TO USE IT.", "HOLD TO WALK.",
+            "PRESS TO START OR STOP RUNNING.", "HOLD TO RUN."};
+        snprintf(what, sizeof what, "%s (RUNNING MODE: %s.)", by_mode[run_mode()], run_mode_name(run_mode()));
+    }
     if (bindings_capturing())
         snprintf(help, (size_t)help_size,
-                 col < BIND_KEYS ? "PRESS THE KEY OR CLICK MOUSE FOR %s NOW. A GAMEPAD BUTTON CANCELS."
-                                 : "PRESS THE GAMEPAD BUTTON, OR PUSH THE STICK OR TRIGGER, FOR %s NOW. A KEY CANCELS.",
-                 title);
+                 col < BIND_KEYS ? "%s|PRESS THE KEY OR CLICK MOUSE FOR %s NOW. A GAMEPAD BUTTON CANCELS."
+                                 : "%s|PRESS THE GAMEPAD BUTTON, OR PUSH THE STICK OR TRIGGER, FOR %s NOW. A KEY CANCELS.",
+                 what, title);
     else if (o >= 0)
-        snprintf(help, (size_t)help_size, "%s ALSO PRESSES %s. BOTH WORK, BUT THE GAME SEES THEM TOGETHER.",
+        snprintf(help, (size_t)help_size, "%s|%s ALSO PRESSES %s. BOTH WORK, BUT THE GAME SEES THEM TOGETHER.", what,
                  col < BIND_KEYS ? key_name(key) : pad_label(pad), other);
+    else if (in == RUN_INPUT && run_mode() == RUN_DEFAULT)  /* greyed out: nothing to change here */
+        snprintf(help, (size_t)help_size, "%s|UP: RUNNING MODE.", what);
     else
-        snprintf(help, (size_t)help_size,
-                 "%s: TWO KEYS AND ONE GAMEPAD INPUT. ENTER OR A: CHANGE. DELETE OR X: CLEAR. GAMEPAD BUTTONS ARE "
-                 "NAMED AS ON YOUR CONTROLLER.",
-                 title);
+        snprintf(help, (size_t)help_size, "%s|ENTER OR A: CHANGE. DELETE OR X: CLEAR.%s", what,
+                 col == BIND_KEYS ? " BUTTONS ARE NAMED AS ON YOUR CONTROLLER." : "");
     return n;
 }
 
@@ -1509,6 +1598,10 @@ int bindings_load_line(const char *name, const char *value) {
     if (!strcmp(name, "YW4_SHORTCUT_WHEEL")) {  /* the environment wins, as for the others */
         const char *v = getenv(name) ? getenv(name) : value;
         swheel_set_enabled(!strcmp(v, "1") || !strcmp(v, "ON") || !strcmp(v, "on"));
+        return 1;
+    }
+    if (!strcmp(name, "YW4_RUN_MODE")) {  /* run.c reads the environment itself, so it wins */
+        if (!getenv(name)) run_mode_set(atoi(value));
         return 1;
     }
     if (!strcmp(name, "YW4_NINTENDO_LAYOUT")) {
@@ -1537,6 +1630,7 @@ int bindings_load_line(const char *name, const char *value) {
         for (int k = 0; k < BIND_KEYS; k++) {
             snprintf(want, sizeof want, "KEY%d_%s", k + 1, inputs[i].id);
             if (!strcmp(name, want)) {
+                if (set == SET_FIELD) file_keys = 1, file_run |= i == RUN_INPUT;  /* migrate_hints */
                 int code = key_from_name(value), part = mouse_part(code);
                 /* a mouse button in a key slot (files before the Mouse buttons page, 2026-11-13): it becomes the
                  * mouse's own binding and the slot is freed; the side buttons are dropped */
@@ -1578,4 +1672,5 @@ void bindings_save(FILE *f) {
     fprintf(f, "YW4_RUMBLE=%d\n", window_rumble_enabled());
     fprintf(f, "YW4_SHORTCUT_WHEEL=%d\n", swheel_enabled());
     fprintf(f, "YW4_NINTENDO_LAYOUT=%d\n", nintendo_layout);
+    fprintf(f, "YW4_RUN_MODE=%s\n", run_mode_save(run_mode()));
 }
