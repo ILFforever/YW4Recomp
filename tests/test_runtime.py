@@ -813,6 +813,13 @@ int mousemenu_naviwoof(void) { return 0; }
 int mousemenu_sideways(void) { return 0; }
 int mousemenu_stopwatch(void) { return 0; }
 int savefs_diary_open(void) { return 0; }
+/* the running modes (run.c, issue #18): the Controls page's Run row; the game's own way here */
+#include "run.h"
+static int run_state = RUN_DEFAULT;
+int run_mode(void) { return run_state; }
+void run_mode_set(int mode) { run_state = mode; }
+const char *run_mode_name(int mode) { (void)mode; return "DEFAULT"; }
+const char *run_mode_save(int mode) { (void)mode; return "default"; }
 
 #include "bindings.c"
 
@@ -829,7 +836,10 @@ int main(void) {
     if (strcmp(rows[4].name, "VIBRATION") != 0) return 3;
     if (strcmp(rows[4].cells[0], "ON") != 0) return 4;
     if (strcmp(rows[5].name, "NINTENDO ICONS") != 0) return 21;
-    if (strcmp(rows[6].group, "KEYS FOR") != 0) return 20;
+    /* then RUNNING's mode and the Run key under it, greyed out at the game's own way (issue #18) */
+    if (strcmp(rows[6].group, "RUNNING") != 0 || strcmp(rows[6].name, "MODE") != 0) return 27;
+    if (!rows[7].disabled) return 28;
+    if (strcmp(rows[8].group, "KEYS FOR") != 0) return 20;
 
     /* the shortcut wheel's row (decision 0075): Enter turns it off and on, saved as YW4_SHORTCUT_WHEEL */
     bindings_select(3, 0);
@@ -937,6 +947,13 @@ int mousemenu_naviwoof(void) { return 0; }
 int mousemenu_sideways(void) { return 0; }
 int mousemenu_stopwatch(void) { return 0; }
 int savefs_diary_open(void) { return 0; }
+/* the running modes (run.c, issue #18): the Controls page's Run row; the game's own way here */
+#include "run.h"
+static int run_state = RUN_DEFAULT;
+int run_mode(void) { return run_state; }
+void run_mode_set(int mode) { run_state = mode; }
+const char *run_mode_name(int mode) { (void)mode; return "DEFAULT"; }
+const char *run_mode_save(int mode) { (void)mode; return "default"; }
 
 #include "bindings.c"
 
