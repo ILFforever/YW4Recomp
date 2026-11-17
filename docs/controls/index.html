@@ -1,0 +1,374 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>YW4 Recomp · Controls</title>
+<link rel="icon" href="../favicon.ico" sizes="any">
+<link rel="icon" type="image/png" href="../img/icon-192.png">
+<link rel="apple-touch-icon" href="../img/icon-192.png">
+<meta name="description" content="Keyboard, mouse and controllers in YW4 Recomp, the fan PC port of Yo-kai Watch 4++: rebinding, the controls quick look, the mouse camera, button icons and the shortcut wheel.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=M+PLUS+Rounded+1c:wght@500;700;800;900&family=Zen+Kaku+Gothic+New:wght@400;500;700&display=swap" rel="stylesheet">
+<style>
+/* The same look as the comparisons page (../compare/): the game's menus, Yo-kai Pad lilac and violet, gold. */
+:root {
+  --lilac-0: oklch(97.5% 0.012 305); --lilac-1: oklch(94% 0.025 305); --lilac-2: oklch(89% 0.04 305);
+  --lilac-3: oklch(80% 0.06 305);
+  --violet: oklch(36% 0.11 295); --violet-deep: oklch(27% 0.09 295); --violet-soft: oklch(50% 0.11 300);
+  --ink: oklch(25% 0.04 295); --ink-2: oklch(45% 0.04 295);
+  --gold: oklch(80% 0.12 85); --gold-deep: oklch(62% 0.12 75); --cream: oklch(96.5% 0.03 90);
+  --cyan: oklch(76% 0.11 215); --white: oklch(99.2% 0.004 305);
+  --r: 14px;
+  --display: "M PLUS Rounded 1c", "Hiragino Maru Gothic ProN", sans-serif;
+  --body: "Zen Kaku Gothic New", "Hiragino Sans", sans-serif;
+  --step--1: clamp(.8rem, .78rem + .1vw, .88rem);
+  --step-0: clamp(.98rem, .95rem + .15vw, 1.05rem);
+  --step-1: clamp(1.15rem, 1.08rem + .35vw, 1.35rem);
+  --step-2: clamp(1.3rem, 1.18rem + .6vw, 1.7rem);
+  --step-3: clamp(2rem, 1.5rem + 2.4vw, 3.3rem);
+}
+* { box-sizing: border-box; }
+html { scroll-behavior: smooth; scroll-padding-top: 16px; }
+body {
+  margin: 0; overflow-x: hidden; color: var(--ink); font: 400 var(--step-0)/1.7 var(--body);
+  font-variant-numeric: tabular-nums; background-color: var(--lilac-1);
+  background-image: conic-gradient(var(--lilac-0) 25%, transparent 0 50%, var(--lilac-0) 0 75%, transparent 0);
+  background-size: 64px 64px;
+}
+a { color: var(--violet-soft); text-decoration-thickness: 1.5px; text-underline-offset: 3px; }
+a:hover { color: var(--violet); }
+:focus-visible { outline: 2px solid var(--gold-deep); outline-offset: 3px; }
+kbd { font: 700 .82em/1 var(--display); color: var(--violet-deep); background: var(--white); border: 1px solid var(--lilac-3);
+  border-bottom-width: 2px; border-radius: 5px; padding: 2px 6px; white-space: nowrap; }
+
+.hero { color: var(--white); background-color: var(--violet-deep); position: relative; overflow: hidden; border-bottom: 3px solid var(--gold); }
+.hero::before {
+  content: ""; position: absolute; inset: 0; opacity: .12; pointer-events: none;
+  background-image: radial-gradient(circle at 50% 100%, transparent 38%, var(--gold) 39% 42%, transparent 43% 55%, var(--gold) 56% 59%, transparent 60%);
+  background-size: 56px 28px;
+}
+.hero-inner {
+  position: relative; max-width: 1280px; margin: 0 auto; padding: clamp(28px, 5vw, 56px) 20px clamp(28px, 4vw, 44px);
+  display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.35fr); gap: clamp(24px, 4vw, 56px); align-items: center;
+}
+.eyebrow { font: 700 var(--step--1)/1 var(--display); letter-spacing: .16em; text-transform: uppercase; color: var(--gold); }
+.hero h1 { font: 800 var(--step-3)/1.08 var(--display); margin: 12px 0 14px; letter-spacing: -.01em; }
+.hero p { margin: 0 0 22px; color: oklch(88% 0.03 300); max-width: 46ch; }
+.stats { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); border: 1px solid oklch(50% 0.08 295); border-radius: 12px; overflow: hidden; margin: 0 0 22px; }
+.stat { padding: 12px 14px; background: oklch(31% 0.1 295); }
+.stat + .stat { border-left: 1px solid oklch(50% 0.08 295); }
+.stat b { display: block; font: 800 var(--step-1)/1.1 var(--display); color: var(--gold); }
+.stat span { font-size: .78rem; color: oklch(82% 0.03 300); line-height: 1.35; display: block; margin-top: 4px; }
+.links { display: flex; flex-wrap: wrap; gap: 10px; }
+.btn { font: 700 .92rem/1 var(--display); text-decoration: none; border-radius: 999px; padding: 11px 18px; border: 1.5px solid var(--gold);
+  background: var(--gold); color: var(--violet-deep); }
+.btn:hover { color: var(--violet-deep); background: oklch(85% 0.12 85); }
+.btn.ghost { background: transparent; color: var(--gold); }
+.btn.ghost:hover { color: var(--gold); background: oklch(80% 0.12 85 / .12); }
+/* the GitHub button in GitHub's own look: black, the white mark (Octicons mark-github, MIT) */
+.btn.gh { display: inline-flex; align-items: center; gap: 8px; color: #fff; background: #000; border-color: #3d444d; }
+.btn.gh:hover { color: #fff; background: #1f2328; border-color: #656c76; }
+.btn.gh svg { width: 1.15em; height: 1.15em; fill: currentColor; flex: none; }
+/* the header's top bar: our icon and name (home), the GitHub button at the right */
+.sitebar { position: relative; max-width: 1280px; margin: 0 auto; padding: 16px 20px 0; display: flex; align-items: center;
+  justify-content: space-between; gap: 12px; }
+.brand { display: inline-flex; align-items: center; gap: 10px; color: var(--white); text-decoration: none;
+  font: 800 1.05rem/1 var(--display); }
+.brand:hover { color: var(--gold); }
+.brand img { width: 36px; height: 36px; display: block; }
+.sitebar .btn.gh { padding: 9px 14px; font-size: .88rem; }
+/* Buy Me a Coffee next to the GitHub button, in BMC's own yellow */
+.sitebtns { display: flex; align-items: center; gap: 8px; }
+.sitebtns .btn { white-space: nowrap; }
+.btn.coffee { display: inline-flex; align-items: center; gap: 8px; color: #000; background: #ffdd00; border-color: #e6c700; }
+.btn.coffee:hover { color: #000; background: #ffe633; border-color: #ffdd00; }
+.btn.coffee svg { width: 1.15em; height: 1.15em; fill: none; stroke: currentColor; stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; flex: none; }
+.sitebar .btn.coffee { padding: 9px 14px; font-size: .88rem; }
+@media (max-width: 560px) { .btn.coffee .lbl { display: none; } }
+.shot { background: var(--gold); border-radius: var(--r); padding: 8px; box-shadow: 0 18px 40px oklch(15% 0.08 295 / .5); margin: 0; }
+.shot img { display: block; width: 100%; height: auto; border-radius: 8px; }
+.shot figcaption { color: var(--violet-deep); font-size: .8rem; margin: 8px 6px 2px; }
+
+.shell { max-width: 1280px; margin: 0 auto; padding: 40px 20px 72px; display: grid; grid-template-columns: 236px minmax(0, 1fr); gap: 40px; align-items: start; }
+.shell > * { min-width: 0; }
+.pad { position: sticky; top: 16px; background: var(--white); border-radius: var(--r); overflow: hidden; border: 1px solid var(--lilac-3); }
+.pad h2 { margin: 0; padding: 11px 16px; background: var(--violet); color: var(--white); font: 700 .78rem/1 var(--display); letter-spacing: .14em; text-transform: uppercase; }
+.pad ol { list-style: none; margin: 0; padding: 8px; display: grid; gap: 2px; }
+.pad a { display: flex; gap: 10px; align-items: baseline; text-decoration: none; color: var(--ink); font: 500 .92rem/1.3 var(--body); padding: 7px 10px; border-radius: 8px; }
+.pad a .n { font: 700 .75rem/1 var(--display); color: var(--ink-2); min-width: 1.3em; }
+.pad a:hover { background: var(--lilac-1); }
+
+main { display: grid; gap: 28px; }
+article { background: var(--white); border-radius: var(--r); border: 1px solid var(--lilac-3); overflow: hidden; }
+.bar { display: flex; align-items: center; gap: 12px; padding: 12px 20px; background: var(--violet); color: var(--white); }
+.bar h2 { margin: 0; font: 800 var(--step-2)/1.2 var(--display); flex: 1; }
+.bar .cat { font: 700 .7rem/1 var(--display); letter-spacing: .14em; text-transform: uppercase; color: var(--gold); }
+.bar .q { flex: none; width: 28px; height: 28px; border-radius: 50%; background: var(--cyan); display: grid; place-items: center;
+  font: 800 .9rem/1 var(--display); color: var(--violet-deep); }
+.body { padding: 20px 20px 22px; }
+.top { display: grid; grid-template-columns: minmax(0, 1.5fr) minmax(220px, 1fr); gap: 24px; margin: 0 0 16px; }
+.prose p { margin: 0 0 10px; max-width: 66ch; }
+.prose ul, .prose ol { margin: 8px 0 10px; padding-left: 1.2em; }
+.prose li { margin: 0 0 6px; }
+.prose li::marker { color: var(--gold-deep); }
+.spec { background: var(--cream); border-radius: 10px; padding: 4px 14px; font-size: var(--step--1); align-self: start; }
+.spec dl { margin: 0; display: grid; grid-template-columns: auto minmax(0, 1fr); }
+.spec dt, .spec dd { padding: 7px 0; border-bottom: 1px solid oklch(88% 0.04 85); margin: 0; }
+.spec dt { color: var(--ink-2); padding-right: 14px; }
+.spec dd { font-weight: 700; }
+.spec dt:last-of-type, .spec dd:last-of-type { border-bottom: 0; }
+.whole { margin: 0; }
+.whole + .whole { margin-top: 14px; }
+.whole img { display: block; width: 100%; height: auto; border-radius: 10px; border: 1px solid var(--lilac-2); }
+.whole figcaption { margin: 6px 2px 0; font-size: var(--step--1); color: var(--ink-2); }
+.pair { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 320px), 1fr)); gap: 14px; }
+.steps { counter-reset: s; list-style: none; padding: 0 !important; }
+.steps li { counter-increment: s; display: grid; grid-template-columns: 30px minmax(0, 1fr); gap: 10px; align-items: start; }
+.steps li::before { content: counter(s); width: 26px; height: 26px; border-radius: 50%; background: var(--gold); color: var(--violet-deep);
+  font: 800 .85rem/26px var(--display); text-align: center; margin-top: 2px; }
+
+footer { background: var(--violet-deep); color: oklch(84% 0.03 300); border-top: 3px solid var(--gold); }
+footer .in { max-width: 1280px; margin: 0 auto; padding: 24px 20px 32px; font-size: var(--step--1); display: grid; gap: 6px; }
+footer a { color: var(--gold); }
+
+@media (max-width: 960px) {
+  .hero-inner { grid-template-columns: minmax(0, 1fr); }
+  .shell { grid-template-columns: minmax(0, 1fr); gap: 20px; padding-top: 0; }
+  .pad { top: 0; z-index: 5; border-radius: 0 0 12px 12px; margin: 0 -20px; border-top: 0; }
+  .pad h2 { display: none; }
+  .pad ol { display: flex; overflow-x: auto; scrollbar-width: none; padding: 6px; }
+  .pad a { white-space: nowrap; }
+  .top { grid-template-columns: minmax(0, 1fr); }
+}
+@media (max-width: 560px) { .stats { grid-template-columns: minmax(0, 1fr); } .stat + .stat { border-left: 0; border-top: 1px solid oklch(50% 0.08 295); } .bar .cat { display: none; } }
+@media (prefers-reduced-motion: reduce) { html { scroll-behavior: auto; } }
+/* a table in a card (where the mouse works, mods compared) */
+.tbl { overflow-x: auto; margin: 14px 0 4px; }
+.tbl table { border-collapse: collapse; width: 100%; font-size: var(--step--1); }
+.tbl th, .tbl td { text-align: left; vertical-align: top; padding: 8px 10px; border-bottom: 1px solid var(--lilac-2); }
+.tbl th { font: 700 .78rem/1.3 var(--display); color: var(--violet); background: var(--lilac-0); }
+.note { font-size: var(--step--1); color: var(--ink-2); margin: 8px 0 0; }
+</style>
+<link rel="stylesheet" href="../site.css">
+<script>
+/* the theme before the page draws: the reader's choice if kept, else the system's (no flash of the wrong one) */
+try { const t = localStorage.getItem('yw4-theme'); if (t === 'dark' || t === 'light') document.documentElement.dataset.theme = t; } catch (e) {}
+</script>
+</head>
+<body class="sub">
+
+<header class="site-top">
+  <div class="wrap">
+    <a class="brand" href="../"><img src="../img/icon-192.png" alt="" width="34" height="34">YW4 Recomp</a>
+    <nav class="nav" aria-label="Pages">
+      <a href="../changelog/">What's new</a>
+      <a href="../compare/">Comparisons</a>
+      <a href="../showcases/">Showcases</a>
+      <a href="../launcher/">Launcher</a>
+      <a href="../overlay/">Overlay</a>
+      <a href="../building/">Build it</a>
+    </nav>
+    <div class="tools">
+      <button class="iconbtn" id="theme" type="button" aria-label="Dark mode"><svg class="moon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M20 14.5A8 8 0 0 1 9.5 4a8 8 0 1 0 10.5 10.5z"/></svg><svg class="sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="4.2"/><path d="M12 2.5v2.2M12 19.3v2.2M2.5 12h2.2M19.3 12h2.2M5.3 5.3l1.6 1.6M17.1 17.1l1.6 1.6M5.3 18.7l1.6-1.6M17.1 6.9l1.6-1.6"/></svg></button>
+      <a class="iconbtn" href="https://github.com/ILFforever/YW4Recomp" aria-label="The project on GitHub"><svg viewBox="0 0 16 16" fill="currentColor"><path d="M8 0c4.42 0 8 3.58 8 8a8.013 8.013 0 0 1-5.45 7.59c-.4.08-.55-.17-.55-.38 0-.27.01-1.13.01-2.2 0-.75-.25-1.23-.54-1.48 1.78-.2 3.65-.88 3.65-3.95 0-.88-.31-1.59-.82-2.15.08-.2.36-1.02-.08-2.12 0 0-.67-.22-2.2.82-.64-.18-1.32-.27-2-.27-.68 0-1.36.09-2 .27-1.53-1.03-2.2-.82-2.2-.82-.44 1.1-.16 1.92-.08 2.12-.51.56-.82 1.28-.82 2.15 0 3.06 1.86 3.75 3.64 3.95-.23.2-.44.55-.51 1.07-.46.21-1.61.55-2.33-.66-.15-.24-.6-.83-1.23-.82-.67.01-.27.38.01.53.34.19.73.9.82 1.13.16.45.68 1.31 2.69.94 0 .67.01 1.3.01 1.49 0 .21-.15.45-.55.38A7.995 7.995 0 0 1 0 8c0-4.42 3.58-8 8-8Z"/></svg></a>
+      <a class="coffee" href="https://buymeacoffee.com/ilfforever" aria-label="Buy me a coffee"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M2.5 5.5h8.5v4.5a3.5 3.5 0 0 1-3.5 3.5h-1.5a3.5 3.5 0 0 1-3.5-3.5Z"/><path d="M11 6.5h1a2 2 0 0 1 0 4h-1"/><path d="M5 1.5c-.6.8.6 1.4 0 2.2M8 1.5c-.6.8.6 1.4 0 2.2"/></svg><span class="lbl">Buy me a coffee</span></a>
+    </div>
+  </div>
+</header>
+
+<section class="hero">
+  <div class="hero-inner">
+    <div>
+      <span class="eyebrow">YW4 Recomp · fan PC port</span>
+      <h1>Controls</h1>
+      <p>Play <i>Yo-kai Watch 4++</i> with a keyboard and mouse or any controller: every button rebound, the mouse turning the camera, and the game's hints showing the keys you actually press.</p>
+      <div class="links">
+        <a class="btn" href="../">Home</a>
+        <a class="btn ghost" href="../overlay/">The overlay</a>
+        <a class="btn ghost" href="../mods/">Mods</a>
+      </div>
+    </div>
+    <figure class="shot">
+      <img src="../screenshots/76-controls-quick-look-controller.jpg" alt="The controls quick look with a DualSense: each button joined to what it does">
+      <figcaption>The quick look with a DualSense (hold Back, or F2)</figcaption>
+    </figure>
+  </div>
+</section>
+
+<div class="shell">
+  <nav class="pad" aria-label="Controls">
+    <h2>Contents</h2>
+    <ol>
+      <li><a href="#quick-look"><span class="n">1</span>Controls quick look</a></li>
+      <li><a href="#rebinding"><span class="n">2</span>Rebinding</a></li>
+      <li><a href="#controllers"><span class="n">3</span>Controllers</a></li>
+      <li><a href="#mouse"><span class="n">4</span>Mouse</a></li>
+      <li><a href="#button-icons"><span class="n">5</span>Button icons</a></li>
+      <li><a href="#shortcut-wheel"><span class="n">6</span>Shortcut wheel</a></li>
+    </ol>
+  </nav>
+
+  <main>
+    <article id="quick-look">
+      <div class="bar"><span class="q">1</span><h2>Controls quick look</h2><span class="cat">Controls</span></div>
+      <div class="body">
+        <div class="top">
+          <div class="prose">
+            <p>Hold <b>Back</b> on a controller, or press <kbd>F2</kbd>: a card over the game shows what every button does, with your bindings and your controller's own button names. It has one layout for exploring and one for battles; with a keyboard it shows the keys instead.</p>
+          </div>
+          <div class="spec"><dl>
+            <dt>Opens with</dt><dd>Hold Back, or <kbd>F2</kbd></dd>
+            <dt>Layouts</dt><dd>Exploring, battles</dd>
+            <dt>Shows</dt><dd>Your bindings, your pad's names</dd>
+          </dl></div>
+        </div>
+        <figure class="whole">
+          <img src="../screenshots/76-controls-quick-look-keyboard.jpg" loading="lazy" alt="The quick look on the keyboard: every bound key coloured and named">
+          <figcaption>On the keyboard: every bound key, named by what it does</figcaption>
+        </figure>
+      </div>
+    </article>
+
+    <article id="rebinding">
+      <div class="bar"><span class="q">2</span><h2>Rebinding</h2><span class="cat">Controls</span></div>
+      <div class="body">
+        <div class="top">
+          <div class="prose">
+            <p>The overlay's <b>Controls</b> page lists every Switch button with two keys and one controller input of your choice, named as printed on your pad. Battles have their own keys. Everything is saved.</p>
+          </div>
+          <div class="spec"><dl>
+            <dt>Where</dt><dd>Overlay › Controls</dd>
+            <dt>Per button</dt><dd>Two keys, one controller input</dd>
+            <dt>Sets</dt><dd>Exploring, battles</dd>
+          </dl></div>
+        </div>
+        <figure class="whole">
+          <img src="../screenshots/75-controls-dualsense.jpg" loading="lazy" alt="The Controls page with a DualSense: each Switch button with its keys and its PlayStation symbol">
+          <figcaption>With a DualSense: each Switch button, its keys and its PlayStation symbol</figcaption>
+        </figure>
+      </div>
+    </article>
+
+    <article id="controllers">
+      <div class="bar"><span class="q">3</span><h2>Controllers</h2><span class="cat">Controls</span></div>
+      <div class="body">
+        <div class="top">
+          <div class="prose">
+            <p>Xbox, PlayStation and Nintendo controllers work, named as printed: A B X Y and LB / RT on Xbox, × ○ □ △ and L1-R3 on PlayStation, ZL / ZR on Nintendo. The game's confirm is your controller's own: × on a DualSense, A on Xbox. <b>Vibration</b> goes through the controller's motors, on by default.</p>
+          </div>
+          <div class="spec"><dl>
+            <dt>Tested</dt><dd>DualSense (PS5), battles included</dd>
+            <dt>Vibration</dt><dd>On; Controls › Controller vibration</dd>
+            <dt>Record</dt><dd><a href="https://github.com/ILFforever/YW4Recomp/blob/master/docs/decisions/0058-controller-rumble.md">decision 0058</a></dd>
+          </dl></div>
+        </div>
+      </div>
+    </article>
+
+    <article id="mouse">
+      <div class="bar"><span class="q">4</span><h2>Mouse</h2><span class="cat">Controls</span></div>
+      <div class="body">
+        <div class="top">
+          <div class="prose">
+            <p>The game's code still has a mouse camera the Switch version never feeds; we feed it, so the mouse turns the camera. A click in the window gives the mouse to the game, Alt gives it back. In battles the left button attacks and the right one aims; the menus take hover, clicks and the wheel.</p>
+          </div>
+          <div class="spec"><dl>
+            <dt>Camera</dt><dd>Mouse look, with its own speed</dd>
+            <dt>Buttons</dt><dd>Overlay › Controls › Mouse buttons</dd>
+            <dt>Record</dt><dd><a href="https://github.com/ILFforever/YW4Recomp/blob/master/docs/decisions/0057-mouse-menu-lists.md">decision 0057</a></dd>
+          </dl></div>
+        </div>
+        <figure class="whole">
+          <img src="../screenshots/75-controls-mouse-buttons.jpg" loading="lazy" alt="The Mouse buttons page for battles: Attack on the left button, Aim on the right, the wheel switching character">
+          <figcaption>Mouse buttons for battles: what each button and the wheel do</figcaption>
+        </figure>
+        <div class="tbl"><table>
+          <tr><th>Where</th><th>Point and click</th><th>Wheel</th><th>Right button</th></tr>
+          <tr><td>Exploring ✎</td><td>The mouse turns the camera; left is Interact (A)</td><td>Minimap size (R)</td><td>Watch scan (ZL)</td></tr>
+          <tr><td>Battles ✎</td><td>Left attacks (Y)</td><td>Picks the character</td><td>Aims (ZL)</td></tr>
+          <tr><td>Yo-kai Pad and its pages</td><td>Hover moves the cursor, a click chooses</td><td>Scrolls lists; on the Pad's grid, changes page</td><td>Back (B)</td></tr>
+          <tr><td>Title screen and the Diary</td><td>Left chooses what is selected (A)</td><td>Moves the selection; on the Save screen, changes slot</td><td>Back (B)</td></tr>
+          <tr><td>Conversations, shops, the Crank-a-kai</td><td>Left confirms or moves the text on (A)</td><td>Moves between choices; Yes / No on a box</td><td>Cancel / back (B)</td></tr>
+          <tr><td>The map</td><td>Moving the mouse pans the map; left is A</td><td>Zooms in and out</td><td>Closes it (B)</td></tr>
+          <tr><td>Naviwoof Guide's pins</td><td>Left starts guiding (A)</td><td>Steps along the pins</td><td>Back (B)</td></tr>
+          <tr><td>The overlay (Escape)</td><td>Hover, click, drag the sliders</td><td>Moves the selection</td><td>Back (Escape)</td></tr>
+          <tr><td>The battle's Stopwatching menu</td><td>Left confirms (A)</td><td>Moves the selection</td><td>Back (B)</td></tr>
+        </table></div>
+        <p class="note">✎ The defaults: left, right, the wheel and its press can each be set to any button on the overlay's
+          Mouse buttons page, for exploring and for battles. The other rows are the menus' own.</p>
+      </div>
+    </article>
+
+    <article id="button-icons">
+      <div class="bar"><span class="q">5</span><h2>Button icons</h2><span class="cat">Controls</span></div>
+      <div class="body">
+        <div class="top">
+          <div class="prose">
+            <p>The HUD and the game's text show the keys or buttons you actually use, following what you last pressed. The game's files hold keyboard, Xbox and PlayStation icons the Switch version never shows; we show them. A button with nothing bound shows <b>N/A</b> instead of a key you can't press.</p>
+          </div>
+          <div class="spec"><dl>
+            <dt>Styles</dt><dd>Keyboard, Xbox, PlayStation, Switch</dd>
+            <dt>Follows</dt><dd>The last key or button pressed</dd>
+          </dl></div>
+        </div>
+        <figure class="whole">
+          <img src="../screenshots/89-button-icons.png" loading="lazy" alt="The shortcut wheel and the minimap's search button with Switch, keyboard, Xbox and PlayStation icons">
+          <figcaption>The same hints with Switch, keyboard, Xbox and PlayStation icons</figcaption>
+        </figure>
+        <figure class="whole">
+          <img src="../screenshots/89-button-icons-na.png" loading="lazy" alt="N/A in the game's hint bar for a button with no key, in each style">
+          <figcaption>N/A for a button with nothing bound, in each style</figcaption>
+        </figure>
+      </div>
+    </article>
+
+    <article id="shortcut-wheel">
+      <div class="bar"><span class="q">6</span><h2>Shortcut wheel</h2><span class="cat">Controls</span></div>
+      <div class="body">
+        <div class="top">
+          <div class="prose">
+            <p>All eight of the field's shortcuts with the mouse: hold the key bound to L (<kbd>1</kbd>) while exploring, point towards one, let go of the key. Let go in the middle to do nothing. The D-pad's four sit where the D-pad points, the hold-L four on the diagonals; ones that can't be used there are greyed out.</p>
+          </div>
+          <div class="spec"><dl>
+            <dt>Opens with</dt><dd>Hold <kbd>1</kbd> while exploring</dd>
+            <dt>Turn off</dt><dd>Controls › Mouse shortcut wheel</dd>
+            <dt>Record</dt><dd><a href="https://github.com/ILFforever/YW4Recomp/blob/master/docs/decisions/0075-shortcut-wheel.md">decision 0075</a></dd>
+          </dl></div>
+        </div>
+      </div>
+    </article>
+
+  </main>
+</div>
+
+<footer>
+  <div class="in">
+    <span>A fan project. Videos are of the maintainer's own copy of the game. Not affiliated with or endorsed by
+      LEVEL-5 or Nintendo; <i>Yo-kai Watch</i> belongs to its owners.</span>
+    <span><a href="https://github.com/ILFforever/YW4Recomp">github.com/ILFforever/YW4Recomp</a></span>
+  </div>
+</footer>
+
+<script>
+/* the theme switch: the other theme than the one showing, kept for next time */
+(() => {
+  const btn = document.getElementById('theme'), root = document.documentElement;
+  const dark = () => root.dataset.theme ? root.dataset.theme === 'dark' : matchMedia('(prefers-color-scheme: dark)').matches;
+  const label = () => btn.setAttribute('aria-label', dark() ? 'Light mode' : 'Dark mode');
+  label();
+  const flip = () => {
+    root.dataset.theme = dark() ? 'light' : 'dark';
+    try { localStorage.setItem('yw4-theme', root.dataset.theme); } catch (e) {}
+    label();
+  };
+  /* a slow cross-fade between the themes (site.css sets its length), where the browser can do one */
+  btn.addEventListener('click', () => {
+    if (document.startViewTransition && !matchMedia('(prefers-reduced-motion: reduce)').matches) document.startViewTransition(flip);
+    else flip();
+  });
+})();
+</script>
+</body>
+</html>
