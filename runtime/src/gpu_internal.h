@@ -244,6 +244,7 @@ int gpu_taa_jitter(uint32_t w, uint32_t h, float *jx, float *jy);  /* not for th
 int gpu_taa_clip_jitter(float *cx, float *cy);  /* the same shift in clip space, for passes rebuilding positions */
 int gpu_scene_recent(void);  /* a 3D object drawn in the last 30 GPU frames (FSR frame generation steps aside without) */
 void gpu_note_model_draw(void);  /* gpu_draw.c: a 3D object's draw, this frame */
+void gpu_note_movie_draw(void);  /* gpu_draw.c: the movie program's draw, this frame (gpu_movie_screen, gpu.h) */
 void gpu_taa_note_targets(const GpuState *s);
 /* One of the textures presented lately (the window's images; gpu.c). */
 int gpu_is_presented(uint64_t addr);

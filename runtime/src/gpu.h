@@ -37,6 +37,8 @@ int gpu_render_height(void);  /* the 3D images' height in the game's 900-line te
  * as "yw4: picture:" at the first present and on every change, and in the perf summary; how often it changed. */
 void gpu_picture_text(char *buf, size_t n);
 int gpu_picture_changes(void);
+/* A full-screen video is on screen (the movie program drew lately, no 3D object): framerate.c holds 30 frames/s. */
+int gpu_movie_screen(void);
 /* Texture filtering: 0 the game's, else blending between mip levels and anisotropic filtering with up
  * to this many taps (16 by default; YW4_ANISO at start), and the panel's cycle 0 -> 2 -> 4 -> 8 -> 16 -> 0. */
 int gpu_aniso(void);

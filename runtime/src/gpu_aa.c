@@ -478,6 +478,20 @@ int gpu_scene_recent(void) {
     uint64_t f = __atomic_load_n(&scene_frame, __ATOMIC_RELAXED);
     return f && gpu_frames() - f < 30;
 }
+
+/* A full-screen video (CRI Sofdec: the title menu's background, the opening movie) is on screen: the movie program
+ * drew in the last 10 GPU frames and no 3D object in the last 30. framerate_wait then holds 30 frames/s, the
+ * videos' own rate: at 60 on a 165 Hz display (2.75 refreshes a frame, no variable refresh) each picture stayed
+ * 5 or 6 refreshes in an uneven order and the video stuttered; at 30 it alternates 5, 6, 5, 6 (PresentMon,
+ * owner's laptop, 2026-11-18). */
+static uint64_t movie_frame;  /* the GPU frame of the movie program's last draw (gpu_draw.c) */
+
+void gpu_note_movie_draw(void) { __atomic_store_n(&movie_frame, gpu_frames(), __ATOMIC_RELAXED); }
+
+int gpu_movie_screen(void) {
+    uint64_t f = __atomic_load_n(&movie_frame, __ATOMIC_RELAXED);
+    return f && gpu_frames() - f < 10 && !gpu_scene_recent();
+}
 static uint32_t scene_ow;          /* ... and the output's width (upscaling: larger) */
 /* The game's motion target is used for other things later in the frame, so it is copied into our own image
  * as soon as the G-buffer pass ends (gpu_taa_targets_end). */

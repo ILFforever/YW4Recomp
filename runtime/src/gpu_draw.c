@@ -2437,6 +2437,7 @@ static void draw(VkCommandBuffer cb, GpuState *s, const CmdRec *r) {
 
     /* YW4_MOVIE_LOG=1 (testing video pacing): when the movie program's luma texture shows a new picture (a
      * fingerprint of its memory changes), the GPU frame, the host time and how many frames the last one stayed */
+    if (g->sh[ST_FRAG] && g->sh[ST_FRAG]->key == 0x2e2b3b7ac92f7848ull) gpu_note_movie_draw();  /* framerate.c: 30 */
     if (g->sh[ST_FRAG] && g->sh[ST_FRAG]->key == 0x2e2b3b7ac92f7848ull && getenv("YW4_MOVIE_LOG")) {
         NvnTexEntry *e = tex_entry(s, s->tex[nvn_stage[ST_FRAG]][0]);
         if (e && e->tex->addr) {

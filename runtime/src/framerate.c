@@ -35,6 +35,7 @@
 #include <string.h>
 
 #include "framerate.h"
+#include "gpu.h"
 #include "host.h"
 #include "kernel.h"
 #include "window.h"
@@ -89,6 +90,21 @@ void framerate_wait(void) {
     if (game_paces) return;     /* the game's limiter and interval did it */
     int hz = framerate_hz();
     yw4_vsync_start();
+    /* A full-screen video (gpu_movie_screen: the title menu's background, the opening movie) is held at 30, its own
+     * rate, whatever the cap. A 30 frames/s video at 60 shows each picture for 2 frames; when 60 doesn't divide the
+     * display's refresh (165 Hz: 2.75 refreshes a frame) and there is no variable refresh, those frames stay 2 or
+     * 3 refreshes in an uneven order, so the pictures stayed 30 or 36 ms at random and the video stuttered (the
+     * game itself gave every picture exactly 2 frames, YW4_MOVIE_LOG). At 30 they alternate 30, 36, 30, 36 ms,
+     * which looks smooth (PresentMon, owner's 165 Hz laptop, 2026-11-18). YW4_MOVIE_30=0 turns it off. */
+    static int movie_30 = -1, said_movie;
+    if (movie_30 < 0) movie_30 = !(getenv("YW4_MOVIE_30") && !strcmp(getenv("YW4_MOVIE_30"), "0"));
+    int movie = movie_30 && hz != 30 && gpu_movie_screen();
+    if (movie != said_movie) {
+        said_movie = movie;
+        fprintf(stderr, "yw4: frame rate: %s\n", movie ? "a video is playing: 30 frames/s, its own rate, until it ends"
+                                                       : "the video ended: back to the panel's frame rate");
+    }
+    if (movie) hz = 30;
     /* Refresh (the default at 30, framerate_pacing; from Quandiy's fork, where it was the default at both): a
      * deadline on this thread, its period a whole number of the display's refreshes (4 x 8.33 ms on a 120 Hz screen
      * at 30, so every frame shows for the same refreshes and the phase doesn't drift). A late frame starts the
