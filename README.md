@@ -111,19 +111,23 @@ characters' shadows keep their shape, and the tree shade on the pavement is soft
 
 ![Stock (the game's): Stock shadows: blurry character shadows, hard tree shade; Improved (ours): Improved shadows: defined character shadows, soft tree shade](docs/screenshots/82-shadows-stock-vs-improved.jpg)
 
-It is also lighter to run. The same busy street on the same laptop ([docs/baseline.md](docs/baseline.md),
-2026-10-22), both at the game's own settings (1600×900, 30 frames/s, every improvement of this project off), so
-the two do the same work:
+It is also lighter to run. Both side by side on the same PC with the same late-game save
+([docs/baseline.md](docs/baseline.md), 2026-11-17), at the game's own settings (1600×900 3D, 30 frames/s, shadow
+map 1024, no anti-aliasing or upscaling), so the two do the same work. 30 seconds standing still in each of two
+places:
 
 | | Emulator (Eden) | This project |
 |---|---|---|
-| CPU | 210% of one core | 111% |
-| Memory | ~7 GB | 3.9 GB |
-| GPU | 30% | 33% |
+| CPU, bamboo forest | 126% of one core | 58% |
+| CPU, a busier area | 204% of one core | 96% |
+| GPU, bamboo forest | 15.4% | 13.6% |
+| GPU, a busier area | 14.9% | 15.1% |
+| Memory in use (working set) | 6.8 GB | 3.2 GB |
+| Video memory | 1.3 GB | 1.7 GB |
 
-Memory: Eden's is private + mapped (the emulated console's RAM is mapped memory, which Task Manager's Memory
-column leaves out: it shows about 1.3 GB for Eden and 2.8 GB for this project). Ours is everything the game has
-committed.
+Less than half the CPU and memory, about the same GPU. The extra video memory is deliberate: the game's geometry
+is kept there ([decision 0028](docs/decisions/0028-geometry-in-video-memory.md)), which is a large part of why
+the GPU side is fast. At these settings this project's GPU works about 6-7 ms of each 33 ms frame.
 
 On an ASUS Zenbook (Ryzen 5 7530U, integrated Radeon graphics): about 35-40 frames/s here, 22-30 in Eden (more on the site's [Showcases](https://ilfforever.github.io/YW4Recomp/showcases/) page).
 
@@ -131,6 +135,13 @@ On an ASUS Zenbook (Ryzen 5 7530U, integrated Radeon graphics): about 35-40 fram
 <summary>YW4 Recomp vs Eden on the Zenbook (video)</summary>
 
 [![YW4 Recomp vs Eden comparison on Potato PC (video on YouTube)](https://i.ytimg.com/vi/HfCrAkMDOzs/maxresdefault.jpg)](https://youtu.be/HfCrAkMDOzs)
+
+</details>
+
+<details>
+<summary>Gameplay at 4K (video)</summary>
+
+[![YW4 Recomp gameplay at 4K (video on YouTube)](https://i.ytimg.com/vi/udBcr0H6iHQ/maxresdefault.jpg)](https://youtu.be/udBcr0H6iHQ)
 
 </details>
 

@@ -114,6 +114,38 @@ Notes:
 - The owner's slow evening and night towns (`work/testsaves/save_base_lag`..`lag4`), 20-26 fps before 0028, now run
   at 29.9 fps with 12 ms of GPU time and ~13 ms of game work a frame.
 
+## Recompiled build vs Eden, late-game save, two places, 2026-11-17
+
+Game 1.5.0 plus commit 6c20dc7 (after decision 0079, the GPU worker's CPU work). Both loaded the same save
+(`work/testsaves/save_base_lategame`, copied into Eden's save folder), side by side, standing still. Ours at the
+game's own settings: `YW4_RES=900` (1600×900 3D, as the Switch docked and Eden at 1x), window 1920×1080, 30
+frames/s, shadow map 1024, PCSS, contact shadows, anti-aliasing, upscaling, frame generation and sharpening off,
+the game's distance blur. Eden: Vulkan, balanced accuracy, docked, 1x, bicubic, no AA. Sampled with
+`work/devtools/sample_vs_eden.ps1`: each process once a second for 30 s (CPU time, GPU 3D-engine counters by process
+id); memory read once after the second place.
+
+| Measure | Eden | Recompiled build |
+|---|---|---|
+| Bamboo forest (111 draws): CPU, % of one core | 126% (peak 136%) | 58% (peak 65%) |
+| Bamboo forest: GPU, 3D engine, this process only | 15.4% (peak 15.8%) | 13.6% (peak 14.1%); 5.6 ms of GPU time a frame |
+| Busier place (~350 draws): CPU | 204% (peak 221%) | 96% (peak 115%) |
+| Busier place: GPU | 14.9% (peak 16.0%) | 15.1% (peak 19.2%); 7.2 ms a frame (p95 10.1, max 24.2) |
+| Frame rate (ours from its log) | not recorded | 30.0, every 600-frame summary; worst frame 33.6 ms |
+| Memory in use (working set) | 6.81 GB | 3.22 GB |
+| Memory, private / committed | 7.19 GB | 5.75 GB |
+| Video memory, dedicated, this process | 1.34 GB | 1.71 GB |
+
+Notes:
+- CPU: 46-47% of Eden's in both places. GPU: about equal (a little under Eden in the forest, level in the busier
+  place, with higher peaks there).
+- A first forest sample, partly taken while the loading replay still ran its frame clock (slow motion), gave the
+  same picture: CPU 57% vs 128%, GPU 11.6% vs 12.1%.
+- Memory is now like for like: Eden's working set includes the emulated console's mapped RAM (6.8 GB), unlike the
+  Task Manager column used on 2026-10-22 and 10-26. Ours reserves the game's heap up front (committed 5.75 GB) but
+  uses 3.2 GB. More video memory than Eden: the 1 GB geometry arena (decision 0028) and the 256 MB de-tiling ring.
+- Eden's frame rate was not recorded by the script (its status bar is the source); if it fell below 30 in either
+  place, its CPU share above is understated.
+
 ## Recompiled build, frame pacing at the owner's settings, 2026-11-12
 
 Not against Eden: a check for spikes before the 1.0.0 release, on the same machine. Settings: 3840×2160, DLSS as
