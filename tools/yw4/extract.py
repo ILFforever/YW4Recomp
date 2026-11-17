@@ -48,6 +48,10 @@ class ExtractError(Exception):
     pass
 
 
+# Shown above the technical reason when a game file itself can't be read (ingest.py uses it too)
+DAMAGED = "This game file looks damaged, or isn't a Switch NSP or XCI. Try dumping it again."
+
+
 def unpack_ncas(path: Path, out_dir: Path, tag: str) -> tuple[list[Path], set[str]]:
     """Copy every content NCA out of an NSP or XCI. Returns NCA paths and the rights IDs of its tickets
     (a game card's NCAs have none: they need no title key)."""
@@ -135,7 +139,8 @@ def write_temp_keys(keys_dir: Path, rights_ids: set[str], home: Path,
                     found[rid] = key.strip()
     missing = rights_ids - found.keys()
     if missing:
-        raise ExtractError(f"title.keys has no key for rights ID(s): {', '.join(sorted(missing))}")
+        raise ExtractError("Your title.keys is missing this game's key. Use the title.keys from the console the game "
+                           f"was dumped from.\n(no key for rights ID(s): {', '.join(sorted(missing))})")
     (switch / "title.keys").write_text("".join(f"{r} = {k}\n" for r, k in found.items()))
 
 
@@ -173,7 +178,9 @@ def run_hactool(hactool: Path, home: Path, args: list[str], watch: tuple[str, li
             log.seek(0)
             out = log.read()
     if code != 0 or re.search(r"(?m)^(Error|\[WARN\] Unable)", out):
-        raise ExtractError(f"hactool failed ({code}):\n{out.strip()[-2000:]}")
+        raise ExtractError("The game files couldn't be unpacked or decrypted. Usually the keys are old or don't match "
+                           "the game: use a prod.keys and title.keys from the same console, on a recent firmware. "
+                           f"The file may also be damaged.\n(hactool failed ({code}):\n{out.strip()[-2000:]})")
     return out
 
 
@@ -186,8 +193,12 @@ def find_programs(hactool: Path, home: Path, ncas: list[Path], app_id: int) -> t
         if not re.search(r"Content Type:\s+Program", info) or not m or int(m.group(1), 16) != app_id:
             continue
         kind = "update" if re.search(r"Partition Type:\s+Patch RomFS", info) else "base"
-        if kind in found:
-            raise ExtractError(f"two {kind} Program NCAs: {found[kind].name}, {n.name}")
+        if kind in found:  # the plain reason first (the launcher shows it); the NCAs after
+            raise ExtractError(
+                ("The file chosen as the base game is an update. Choose the base game ([v0]) there, and the 2.2.0 "
+                 "update in the update box." if kind == "update" else
+                 "Both files are the base game. Choose the 2.2.0 update in the update box.") +
+                f"\n(two {kind} Program NCAs: {found[kind].name}, {n.name})")
         found[kind] = n
     return found.get("base"), found.get("update")
 
@@ -280,13 +291,18 @@ def main(argv: list[str] | None = None) -> int:
         if args.dlc_only:
             extract_dlc(cfg)
             return 0
-        for name in ("base_nsp", "hactool_exe"):
-            if getattr(cfg, name) is None or not getattr(cfg, name).is_file():
-                raise config.ConfigError(f"{name} is not set or not a file")
+        if cfg.base_nsp is None or not cfg.base_nsp.is_file():
+            raise config.ConfigError("The base game file can't be found. It may have moved: choose it again.\n"
+                                     "(base_nsp is not set or not a file)")
+        if cfg.hactool_exe is None or not cfg.hactool_exe.is_file():
+            raise config.ConfigError("hactool, the tool that unpacks the game, is missing. Reinstall the launcher, or "
+                                     "set [tools] hactool_exe.\n(hactool_exe is not set or not a file)")
         if cfg.update_nsp is not None and not cfg.update_nsp.is_file():
-            raise config.ConfigError("update_nsp is set but not a file")
+            raise config.ConfigError("The update file can't be found. It may have moved: choose it again.\n"
+                                     "(update_nsp is set but not a file)")
         if cfg.keys_dir is None or not (cfg.keys_dir / "prod.keys").is_file():
-            raise config.ConfigError("keys_dir is not set or has no prod.keys")
+            raise config.ConfigError("No prod.keys in the keys folder. Choose the folder that holds your prod.keys.\n"
+                                     "(keys_dir is not set or has no prod.keys)")
     except config.ConfigError as e:
         print(f"config error: {e}", file=sys.stderr)
         return 1
@@ -314,10 +330,12 @@ def main(argv: list[str] | None = None) -> int:
             write_temp_keys(cfg.keys_dir, rids, home, tkeys)
             base_prog, upd_prog = find_programs(cfg.hactool_exe, home, ncas, app_id)
             if base_prog is None:
-                raise ExtractError(f"no base game ({app_id:016X}) in base_nsp" +
-                                   (" or update_nsp" if cfg.update_nsp else ""))
+                raise ExtractError(f"That base game file isn't Yo-kai Watch 4++. Choose the base game of {app_id:016X}."
+                                   f"\n(no base game ({app_id:016X}) in base_nsp" +
+                                   (" or update_nsp)" if cfg.update_nsp else ")"))
             if upd_prog is None:
-                raise ExtractError("no update for this game: set update_nsp to the 2.2.0 update")
+                raise ExtractError("The 2.2.0 update is missing. Choose it in the update box.\n"
+                                   "(no update for this game: set update_nsp to the 2.2.0 update)")
             print(f"base program NCA:   {base_prog.name}\nupdate program NCA: {upd_prog.name}")
             print("extracting ExeFS + RomFS with update applied (takes a few minutes) ...")
             # hactool says nothing while it works: its output folders are measured against this build's size
@@ -339,14 +357,18 @@ def main(argv: list[str] | None = None) -> int:
                 print(f"icon: none ({e})")
             progress.report("icon", 1, 1)
             extract_dlc(cfg)
-    except (ExtractError, pfs0.Pfs0Error, xci.XciError) as e:
+    except (pfs0.Pfs0Error, xci.XciError) as e:  # the file itself: damaged, or not a Switch package
+        print(f"extract failed: {DAMAGED}\n({e})", file=sys.stderr)
+        return 1
+    except ExtractError as e:
         print(f"extract failed: {e}", file=sys.stderr)
         return 1
 
     if not args.keep_nca:
         shutil.rmtree(nca_dir)
     if not (cfg.exefs_dir / "main").is_file():
-        print("extract finished but exefs_dir has no 'main'", file=sys.stderr)
+        print("The game files unpacked, but the game's program is missing: the dump may be incomplete. Try dumping it "
+              "again.\n(extract finished but exefs_dir has no 'main')", file=sys.stderr)
         return 1
     print("done. Next: python -m tools.yw4.ingest")
     return 0

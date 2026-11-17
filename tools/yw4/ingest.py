@@ -80,7 +80,8 @@ def main(argv: list[str] | None = None) -> int:
     try:
         main_header, main_image = process_module(cfg.exefs_dir / "main")
     except nso.NsoError as e:
-        print(f"main: {e}", file=sys.stderr)
+        from .extract import DAMAGED
+        print(f"{DAMAGED}\n(main: {e})", file=sys.stderr)
         return 1
     got_hash = hashlib.sha256(main_image).hexdigest()
     got_id = nso.build_id_hex(main_header.build_id)
@@ -103,7 +104,9 @@ def main(argv: list[str] | None = None) -> int:
               file=sys.stderr)
         return 1
     if got_hash != want_hash:
-        print("Wrong game build: main does not match target.toml.\n"
+        print("This is a different version of the game. Only the final 4++ update, 2.2.0, works: choose that update "
+              "in the update box.\n"
+              "Wrong game build: main does not match target.toml.\n"
               f"  expected image_sha256 {want_hash} (build_id {target.get('build_id', '?')})\n"
               f"  got      image_sha256 {got_hash} (build_id {got_id})\n"
               "This project supports exactly one version: the final 4++ update.",
@@ -124,7 +127,8 @@ def main(argv: list[str] | None = None) -> int:
             try:
                 header, image = process_module(path)
             except nso.NsoError as e:
-                print(f"{name}: {e}", file=sys.stderr)
+                from .extract import DAMAGED
+                print(f"{DAMAGED}\n({name}: {e})", file=sys.stderr)
                 return 1
         (out_dir / f"{name}.bin").write_bytes(image)
         info = describe(name, header, image)

@@ -79,11 +79,19 @@ BOOT = ("import runpy, sys; sys.path.insert(0, sys.argv[1]); m = sys.argv[2]; sy
         "runpy.run_module(m, run_name='__main__', alter_sys=True)")
 
 
+# The steps that only work on what earlier steps made (code, shaders, the exe): when one of them fails, the player's
+# files passed already, so it is a problem on our side; the player's own steps (extract, ingest) say what to fix.
+OURS = {"recomp.translate", "tools.yw4.shaders", "recomp.shader", "recomp.build"}
+
+
 def run(module: str, *args: str) -> None:
     """One build step's tool, in its own process (as before), its output straight to the launcher."""
     say(f"> python -m {module} {' '.join(args)}".rstrip())
     r = subprocess.run([sys.executable, "-u", "-c", BOOT, str(config.REPO_ROOT), module, *args], cwd=config.REPO_ROOT)
     if r.returncode:
+        if module in OURS:
+            raise RuntimeError(f"{module} failed. Your game files were fine: this is most likely a problem in YW4 Recomp. "
+                               "If the disk isn't full, please send the log (Help, Report a bug).")
         raise RuntimeError(f"{module} failed")
 
 
@@ -129,7 +137,7 @@ def game_files(cfg: config.Config, args: argparse.Namespace) -> None:
     exefs, romfs = cfg.exefs_dir, cfg.romfs_dir
     if args.fresh_files:
         if args.mode == "folders" and any(Path(p).resolve() in (exefs.resolve(), romfs.resolve()) for p in (args.exefs, args.romfs)):
-            raise RuntimeError("those are this install's own game files: choose your original folders")
+            raise RuntimeError("Those are this install's own copy of the game files: choose your own dump's folders.")
         for d in (exefs, romfs):  # set aside, not deleted: dropped only once the new ones are in place
             if d.is_dir():
                 shutil.rmtree(old_files(d), ignore_errors=True)

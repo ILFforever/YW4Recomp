@@ -66,8 +66,8 @@ def fetch_pinned(urls: list[str], dst: Path, sha256: str, step: str = "download"
             return
         errors.append(f"{url}: SHA-256 {digest.hexdigest()}, expected {sha256}")
         dst.unlink()
-    raise RuntimeError(f"{dst.name}: no source had the tested file. Check for a newer launcher version.\n  "
-                       + "\n  ".join(errors))
+    raise RuntimeError("A download failed. Check the internet connection and build again; if it keeps failing, update "
+                       f"the launcher.\n({dst.name}: no source had the tested file:\n  " + "\n  ".join(errors) + ")")
 
 
 SDL_VERSION = "3.4.18"
