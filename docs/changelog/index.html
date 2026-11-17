@@ -245,6 +245,7 @@ try { const t = localStorage.getItem('yw4-theme'); if (t === 'dark' || t === 'li
     <h2>Releases</h2>
     <ol>
       <li><a href="#download"><span class="n">↓</span>Download</a></li>
+      <li><a href="#v1.5.0"><span class="n">11/17</span>Game 1.5.0</a></li>
       <li><a href="#v1.4.0"><span class="n">11/16</span>Game 1.4.0</a></li>
       <li><a href="#launcher-v1.2.0"><span class="n">11/15</span>Launcher 1.2.0</a></li>
       <li><a href="#v1.3.0"><span class="n">11/15</span>Game 1.3.0</a></li>
@@ -282,6 +283,41 @@ try { const t = localStorage.getItem('yw4-theme'); if (t === 'dark' || t === 'li
           <p>Every file and its checksum: <a href="https://github.com/ILFforever/YW4Recomp/releases">all releases on
             GitHub</a>. The "Game update" releases there are for the launcher; don't download those.</p>
         </div>
+      </div>
+    </article>
+
+    <article id="v1.5.0">
+      <div class="bar"><h2>Game 1.5.0</h2><span class="cat">Game · 2026-11-17</span></div>
+      <div class="body prose notes">
+<p class="how">The launcher gets it for you: <b>Update</b> on the Play screen rebuilds the game in a few minutes, and the version before stays playable if anything goes wrong.</p>
+<h4>What's new</h4>
+<ul><li>
+<b>Five save slots in the Diary.</b> On the Switch the game has room for just one save, plus an autosave. Now <b>Continue</b> on the title shows five save slots and the Autosave under them, in the game's own Diary rows. Your existing save is slot 1. When you save in the game, Left and Right choose the slot.
+</li><li>
+<b>New Game asks where your game goes.</b> Right after New Game, choose a slot in a list that looks like the Diary. A slot with a save asks before it's used, and that save is only replaced when you save your new game over it. <b>Back to the title</b> leaves without starting one.
+</li><li>
+<b>Delete a slot.</b> On Continue, press X twice: the X key on a keyboard, Square on a PlayStation controller.
+</li><li>
+<b>Unlimited coins cheat (<a href="https://github.com/ILFforever/YW4Recomp/issues/17">#17</a>).</b> Cranking the Crank-a-kai never uses up a coin. Turn it on in the overlay's <b>Cheats</b> page or the launcher's <b>Manage cheats</b>.
+</li><li>
+<b>The mouse works in more menus:</b> Slimey Marks, Soulmates, Yo-kai Trophies and the treasure photos.
+</li></ul>
+<h4>Performance</h4>
+<ul><li>
+<b>Busy places run faster.</b> Where the CPU limits the frame rate, the graphics work takes less of it: about 9% more frames per second on our busiest test street.
+</li><li>
+<b>No more stutter in the overlay's popups.</b> Moving through a popup could freeze the game for a moment at 4K.
+</li></ul>
+<h4>Fixes</h4>
+<ul><li>
+<b>A crash after saving in some late-game areas.</b> Going back to the map after a Diary save could load more textures at once than the game could handle, and it stopped.
+</li><li>
+<b>Long sessions no longer use more and more memory.</b> The performance log kept every frame, a few hundred MB after three hours.
+</li><li>
+<b>Logs don't pile up.</b> The game keeps the newest 5 runs' logs (at most 1 GB) and only writes the large per-frame file when asked.
+</li><li>
+<b>Better bug reports (<a href="https://github.com/ILFforever/YW4Recomp/issues/14">#14</a>).</b> Every log now starts with your system: OS, CPU, memory and free disk space.
+</li></ul>
       </div>
     </article>
 
