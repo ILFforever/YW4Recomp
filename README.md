@@ -601,7 +601,8 @@ as five rows like the game's own, with the **Autosave** (your latest play) under
 
   ![New Game: the slot list in the Diary's look, slot 1 (Summer) chosen with its page on the right, slot 2 (Dean), three empty slots and Back to the title](docs/screenshots/100-diary-new-game.jpg)
 
-- **X** twice deletes a slot's save.
+- **X** twice deletes a slot's save, on the title's Continue (its hint shows Delete): the X key on a keyboard,
+  Square on a PlayStation controller.
 
 Your existing save is slot 1. Your game files aren't changed: the extra rows are made in memory each time the game
 starts ([decision 0078](docs/decisions/0078-diary-save-slots.md)).

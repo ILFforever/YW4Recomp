@@ -2586,6 +2586,11 @@ static int wheel_key_held(const bool *keys) {
         if (keys[sc] && (bindings_key_inputs(0, sc) >> l & 1)) return 1;
     return 0;
 }
+int window_key_x_held(void) {
+    const bool *k = SDL_GetKeyboardState(NULL);
+    return k && window && (SDL_GetWindowFlags(window) & SDL_WINDOW_INPUT_FOCUS) && k[SDL_SCANCODE_X];
+}
+
 static void update_input(void) {
     uint64_t b;
     int32_t s[4];

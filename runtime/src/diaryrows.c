@@ -338,7 +338,16 @@ static const char HINT_EN[] = "<CMD_ENTER|5>[CY2]Save[C]   <CMD_BACK>Back";
  * one's key, and the pair (a group) would keep the Switch icon (bindings.c gaiji_swap) */
 static const char HINT_NEW[] = "[$gaiji_key_lt_s000][$gaiji_key_rt_s000]Change Slot   <CMD_ENTER|5>[CY2]Save[C]   <CMD_BACK>Back";
 
-uint8_t *diaryrows_save_hint(const uint8_t *b, size_t n, size_t *out_n) {
+/* ---- the title's Continue (the diary_load script, its only user of text 0xbdaf66c1): "Select / Back" gets X's
+ * Delete before it (owner, 2026-11-17), the X button's icon (gaiji_bt01: the north button, Switch X; on a keyboard
+ * the runtime shows its key, bindings.c gaiji_swap). X deletes there only (savefs.c). */
+#define LOAD_HINT_ID 0xbdaf66c1u
+static const char LOAD_HINT_EN[] = "<CMD_ENTER>Select   <CMD_BACK>Back";
+static const char LOAD_HINT_NEW[] = "[$gaiji_bt01_s000]Delete   <CMD_ENTER>Select   <CMD_BACK>Back";
+
+/* One text line (TEXT_INFO id, its English text) given new text, put at the end of the string table; NULL when the
+ * line isn't there as expected (another language: left as it is). */
+static uint8_t *hint_replace(const uint8_t *b, size_t n, size_t *out_n, uint32_t id, const char *en, const char *text) {
     static Ent e[4096];
     int ne = entries(b, n, e, 4096);
     if (ne <= 0) return NULL;
@@ -346,14 +355,14 @@ uint8_t *diaryrows_save_hint(const uint8_t *b, size_t n, size_t *out_n) {
     if ((uint64_t)st + sl > n) return NULL;
     uint32_t ti = crc32_str("TEXT_INFO");
     for (int i = 0; i < ne; i++) {
-        if (e[i].crc != ti || e[i].k < 3 || get32(b + e[i].vals) != SAVE_HINT_ID) continue;
+        if (e[i].crc != ti || e[i].k < 3 || get32(b + e[i].vals) != id) continue;
         uint32_t so = get32(b + e[i].vals + 8);
-        if (so >= sl || !memchr(b + st + so, 0, sl - so) || strcmp((const char *)b + st + so, HINT_EN)) return NULL;
-        size_t names = al(st + (size_t)sl, 16), add = sizeof HINT_NEW;
+        if (so >= sl || !memchr(b + st + so, 0, sl - so) || strcmp((const char *)b + st + so, en)) return NULL;
+        size_t names = al(st + (size_t)sl, 16), add = strlen(text) + 1;
         if (names > n) return NULL;
         Buf o = {0};
         put(&o, b, st + (size_t)sl);
-        put(&o, HINT_NEW, add);
+        put(&o, text, add);
         while (o.n % 16) put(&o, "\xff", 1);
         put(&o, b + names, n - names);
         if (o.bad) {
@@ -367,4 +376,18 @@ uint8_t *diaryrows_save_hint(const uint8_t *b, size_t n, size_t *out_n) {
         return o.b;
     }
     return NULL;
+}
+
+/* The in-game Save's hint and the title's Continue hint, each where it is the English line; NULL when neither is. */
+uint8_t *diaryrows_save_hint(const uint8_t *b, size_t n, size_t *out_n) {
+    size_t n1 = 0, n2 = 0;
+    uint8_t *one = hint_replace(b, n, &n1, SAVE_HINT_ID, HINT_EN, HINT_NEW);
+    uint8_t *two = hint_replace(one ? one : b, one ? n1 : n, &n2, LOAD_HINT_ID, LOAD_HINT_EN, LOAD_HINT_NEW);
+    if (two) {
+        free(one);
+        *out_n = n2;
+        return two;
+    }
+    if (one) *out_n = n1;
+    return one;
 }

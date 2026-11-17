@@ -81,6 +81,8 @@ static void set_active_slot(int val) {
 }
 static int diary_slot;             /* slot (0..9) currently shown in the Diary menu */
 static int diary_opened_once;
+/* the armed row's label: no button named, it is X, Tab, the X key or Square by device (owner, 2026-11-17) */
+#define DELETE_LABEL "Press again to delete"
 static int delete_confirm_slot = -1;
 static int delete_confirm_frames;
 static int delete_blocked;         /* X on the slot being played (in the game): "In use" shows instead of DELETE? */
@@ -166,7 +168,7 @@ static void strip_slot_prefix_inplace(uint8_t name_field[36]) {
         memset(name_field + rem + 1, 0, (size_t)(36 - (rem + 1)));
     }
     if (!strcmp((const char *)name_field, "Empty Diary") ||
-        !strcmp((const char *)name_field, "DELETE? (Press X)") ||
+        !strcmp((const char *)name_field, "DELETE? (Press X)") || !strcmp((const char *)name_field, DELETE_LABEL) ||
         !strcmp((const char *)name_field, "In use: can't delete")) {
         memset(name_field, 0, 36);
     }
@@ -294,7 +296,7 @@ static void utf8_copy_bounded(char *dst, size_t cap, const char *src, size_t max
 static int rows_on;
 static void format_slot_label(char dst[36], int slot, int delete_mode, const uint8_t raw_name[36], uint8_t valid) {
     if (rows_on) {  /* stacked rows: the five rows show which slot it is, no "<n>/5" (owner, 2026-11-17) */
-        const char *t = delete_mode == 2 ? "In use: can't delete" : delete_mode ? "DELETE? (Press X)"
+        const char *t = delete_mode == 2 ? "In use: can't delete" : delete_mode ? DELETE_LABEL
                         : !valid                  ? "Empty Diary"
                                                   : NULL;
         if (t) {
@@ -308,7 +310,7 @@ static void format_slot_label(char dst[36], int slot, int delete_mode, const uin
         return;
     }
     if (delete_mode) {
-        snprintf(dst, 36, delete_mode == 2 ? "%d" DIARY_OF " In use: can't delete" : "%d" DIARY_OF " DELETE? (Press X)",
+        snprintf(dst, 36, delete_mode == 2 ? "%d" DIARY_OF " In use: can't delete" : "%d" DIARY_OF " " DELETE_LABEL,
                  slot + 1);
         return;
     }
@@ -846,6 +848,7 @@ uint32_t savefs_open(uint64_t program_id, const uint8_t uid[16], int create, Ser
 /* ---- 10-slot Diary, In-Game Save selector, Non-destructive New Game & Delete UX */
 
 #define HID_BTN_X            (1ull << 2)
+#define HID_BTN_MINUS        (1ull << 11)
 #define HID_BTN_L            (1ull << 6)
 #define HID_BTN_R            (1ull << 7)
 #define HID_BTN_DPAD_LEFT    (1ull << 12)
@@ -1347,10 +1350,18 @@ int yw4_hook_diary_focus(CPUState *ctx) {
     int v = v16;
     if (v < 0 || v >= DIARY_ROWS) return 0;
     host_lock(&slot_lock);
+    int was = focus_auto ? DIARY_SLOT_COUNT : diary_slot;
     if (v < DIARY_SLOT_COUNT) diary_slot = v;
     focus_auto = v == DIARY_SLOT_COUNT;
     rows_set_active_locked(v);
-    delete_confirm_slot = -1, delete_confirm_frames = 0, delete_blocked = 0;
+    /* moving off an armed row cancels its delete, and its label goes back to the name: the rows painted again
+     * at the next update (owner, 2026-11-17: it kept "Press again to delete" after scrolling away). Only a real
+     * move: painting the rows calls this back on the same row, which cancelled every armed delete (the label
+     * blinked back to the name and the second press armed it again instead of deleting) */
+    if (v != was) {
+        if (delete_confirm_slot >= 0) paint_pending = 1;
+        delete_confirm_slot = -1, delete_confirm_frames = 0, delete_blocked = 0;
+    }
     host_unlock(&slot_lock);
     diary_repopulate(ctx, menu);
     uint8_t flip_from = v == DIARY_SLOT_COUNT ? 0 : 1;
@@ -1461,6 +1472,14 @@ int yw4_hook_diary_update(CPUState *ctx) {
     uint64_t cur = hid_current_buttons();
     uint64_t edge = cur & ~prev_buttons;
     prev_buttons = cur;
+    /* the keyboard's X key deletes too on the title's Continue, where the hint shows it (owner, 2026-11-17: "use X
+     * like actual X on a keyboard"); it is bound to the game's Minus, which does nothing there, so that press is
+     * left out (it would cancel the armed delete) */
+    static int xkey_was;
+    int xkey = scene_on_title() && window_key_x_held();
+    if (xkey && !xkey_was) edge |= HID_BTN_X;
+    if (xkey) cur &= ~HID_BTN_MINUS, edge &= ~HID_BTN_MINUS;
+    xkey_was = xkey;
 
     if (paint_pending) {
         paint_pending = 0;
@@ -1529,20 +1548,13 @@ int yw4_hook_diary_update(CPUState *ctx) {
         host_unlock(&slot_lock);
         fprintf(stderr, "yw4: diary: selected slot %d" DIARY_OF " (%s)\n", ns + 1, valid_any ? "occupied" : "empty");
         need_refresh = 1;
-    } else if ((edge & HID_BTN_X) && !(rows_on && focus_auto)) {
+    } else if ((edge & HID_BTN_X) && scene_on_title() && !(rows_on && focus_auto)) {
+        /* X deletes on the title's Continue only, where its hint says so (owner, 2026-11-17): not from the
+         * in-game Save (where the slot being played couldn't go anyway: its next autosave would write it back) */
         host_lock(&slot_lock);
         int ds = diary_slot;
         int valid_any = slot_any_data_locked(ds);
-        /* in the game, the slot being played can't go: its next autosave would only write it back */
-        int playing = !scene_on_title() && __atomic_load_n(&active_slot, __ATOMIC_ACQUIRE) == ds;
-        if (valid_any && playing) {
-            delete_confirm_slot = ds;
-            delete_blocked = 1;
-            delete_confirm_frames = 120;
-            host_unlock(&slot_lock);
-            fprintf(stderr, "yw4: diary: slot %d" DIARY_OF " is being played; not deleted\n", ds + 1);
-            need_refresh = 1;
-        } else if (valid_any) {
+        if (valid_any) {
             delete_blocked = 0;
             if (delete_confirm_slot == ds) {
                 delete_slot_files_locked(ds);

@@ -41,6 +41,7 @@ void window_pause_toggle(void);
 int window_pause_to_title(void);
 /* Whether it can: 1 yes, 0 not yet (the game is still pausing), -1 not here (no pause screen: greyed out) */
 int window_pause_title_state(void);
+int window_key_x_held(void);  /* the keyboard's X key is down (savefs.c: the Diary's delete) */
 int window_paused(void);  /* the overlay's pause is on: the player's input is held back */
 uint64_t window_pause_buttons(void);  /* the buttons it presses for the player now (live input and replays) */
 

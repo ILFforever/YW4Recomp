@@ -71,9 +71,12 @@ back.
    save; once per new game. An occupied slot asks "Overwrite Diary n/5?" (No by default). Its old files stay until
    the new game's first save: until then the slot reads as empty (`fresh_slot`). Replays and
    `YW4_NEWGAME_SLOT=<1..5>` answer at once.
-8. **Delete:** X on an occupied slot arms it for 5 s ("DELETE? (Press X)"), X again deletes its save. Any other button
-   or a slot change cancels; nothing on the Autosave row. In the game, the slot being played can't be deleted ("In
-   use: can't delete"): its next save would only write it back.
+8. **Delete:** on the title's Continue, X on an occupied slot arms it for 5 s ("Press again to delete": no button
+   named, it differs by device), X again deletes its save. Any other button or a slot change cancels; nothing on the
+   Autosave row. Its hint shows it: "Delete" with the X button's icon before Select / Back (text `0xbdaf66c1`, the
+   `diary_load` script's only, changed in memory where it is the English line). On a keyboard the icon is the X key,
+   which deletes there too (it is the game's Minus, left out on that screen); Tab, the X button's key, still does. Not from the in-game Save (2026-11-17): it had refused only the slot being played ("In use: can't delete"),
+   and the hint there has no room for it.
 9. **Boot:** if slot 1 is empty but another slot has a save, the first used slot is made active.
 
 ## Why not other ways
@@ -116,7 +119,7 @@ back.
   start, over its save. Now the picker before the boy's name, with an overwrite question.
 - Folders `SLOT01..SLOT09` (one less than the slot shown) renamed `SLOT02..SLOT10`, then five slots `SLOT02..SLOT05`.
 - On-demand file and folder creation was on for every path; now only in a slot's own folder.
-- Deleting the slot being played in the game is refused.
+- Deleting from the in-game Save is off (2026-11-17; before, only the slot being played was refused).
 - `hid_current_buttons` declared in `kernel.h` beside `yw4_hid_update`, not in `savefs.h`.
 - The title's Diary: one paged card became five stacked rows; the per-slot Autosave became one shared file; the
   "card shows the other row" problem of the paged card went with it.

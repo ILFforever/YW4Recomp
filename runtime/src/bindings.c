@@ -865,6 +865,12 @@ static uint32_t gaiji_swap(uint32_t crc, int *sheet) {
     sets_ready();
     const Bound *use = sets[battle_active() ? SET_BATTLE : SET_FIELD];  /* the keys in use now */
     if (!using_pad) {
+        /* the title's Continue: its hint's X Delete shows the X key, which deletes there (savefs.c; the X key is
+         * the game's Minus elsewhere, so the X button's own key would be another; owner, 2026-11-17) */
+        static int in_x = -2;
+        if (in_x == -2) in_x = input_by_id("X");
+        if (row == in_x && savefs_diary_open() && scene_on_title())
+            return *sheet = SHEET_KEY, gaiji_crc(key_gaiji(SDL_SCANCODE_X));
         /* the row's first key that has an icon, else its mouse part (the keyboard first: owner, 2026-11-13); in
          * battles the mouse first (owner, 2026-11-13: you attack and aim with the mouse there, so the hint shows
          * the mouse button, not U or O). Groups (a stick, the whole D-pad) keep the Switch icon: the keyboard sheet
