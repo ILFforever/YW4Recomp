@@ -45,18 +45,28 @@ static VkSemaphore timeline;
 static uint64_t submitted;  /* number of the last submission */
 
 /* Command buffers in a ring; each slot also owns what its submission needs until it has
- * run: descriptor pools and staging buffers. */
-enum { RING = 16, MAX_DESC_POOLS = 16, MAX_STAGING = 256 };
+ * run: descriptor pools and staging memory. */
+enum { RING = 16, MAX_DESC_POOLS = 16 };
+/* Staging memory: uploads are packed into blocks of STAGING_BLOCK bytes (a bigger upload gets a block of its own),
+ * as many blocks as a submission needs. Each upload used to be a buffer and an allocation of its own, at most 256 a
+ * submission: a late-game area reloading after a Diary save made more and the game stopped ("more than 256 uploads
+ * in one submission", owner 2026-11-17). Each upload starts at a multiple of STAGING_ALIGN: a buffer-to-image
+ * copy's offset must be a multiple of 4 and of the texel block's size (1, 2, 3, 4, 6, 8, 12 or 16 bytes). */
+#define STAGING_BLOCK ((VkDeviceSize)4 << 20)  /* small: up to RING submissions keep theirs until the slot comes round */
+#define STAGING_ALIGN ((VkDeviceSize)768)
+typedef struct {
+    VkBuffer buf;
+    VkDeviceMemory mem;
+    uint8_t *ptr;
+    VkDeviceSize size, used;
+} StagingBlock;
 typedef struct {
     VkCommandBuffer cb;
     uint64_t seq;  /* the submission that last used it */
     VkDescriptorPool desc[MAX_DESC_POOLS];
     int ndesc;
-    struct {
-        VkBuffer buf;
-        VkDeviceMemory mem;
-    } staging[MAX_STAGING];
-    int nstaging;
+    StagingBlock *blocks;  /* the submission's staging memory (grown as needed, freed when the slot comes round) */
+    int nblocks, blocks_cap;
     /* YW4_DETILE_CHECK=1: the GPU's de-tiled bytes and the CPU's for the same levels, compared when the slot
      * comes round again (the GPU done) */
     struct {
@@ -256,11 +266,11 @@ static VkCommandBuffer begin(void) {
             fprintf(stderr, "yw4: detile check: %ld textures, %ld differ%s\n", checked, wrong, bad ? " (this one)" : "");
     }
     s->nchecks = 0;
-    for (int i = 0; i < s->nstaging; i++) {
-        vkDestroyBuffer(vk.device, s->staging[i].buf, NULL);
-        vkFreeMemory(vk.device, s->staging[i].mem, NULL);
+    for (int i = 0; i < s->nblocks; i++) {
+        vkDestroyBuffer(vk.device, s->blocks[i].buf, NULL);
+        vkFreeMemory(vk.device, s->blocks[i].mem, NULL);
     }
-    s->nstaging = 0;
+    s->nblocks = 0;
     CHECK(vkResetCommandBuffer(s->cb, 0));
     VkCommandBufferBeginInfo bi = {.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,
                                    .flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT};
@@ -331,26 +341,41 @@ VkDescriptorSet gpu_alloc_set(VkDescriptorSetLayout layout) {
     return set;
 }
 
-/* A host-visible buffer of `size` bytes, alive until the current submission has run. */
-static void *staging(VkDeviceSize size, VkBuffer *buf) {
-    if (cur->nstaging == MAX_STAGING) gpu_stop("more than %d uploads in one submission", MAX_STAGING);
-    VkBufferCreateInfo bci = {.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO, .size = size,
-                              .usage = VK_BUFFER_USAGE_TRANSFER_SRC_BIT};
-    CHECK(vkCreateBuffer(vk.device, &bci, NULL, buf));
-    VkMemoryRequirements mr;
-    vkGetBufferMemoryRequirements(vk.device, *buf, &mr);
-    VkMemoryAllocateInfo mai = {
-        .sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO, .allocationSize = mr.size,
-        .memoryTypeIndex = vk_memory_type(mr.memoryTypeBits,
-                                          VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT)};
-    VkDeviceMemory mem;
-    CHECK(vkAllocateMemory(vk.device, &mai, NULL, &mem));
-    CHECK(vkBindBufferMemory(vk.device, *buf, mem, 0));
-    void *p;
-    CHECK(vkMapMemory(vk.device, mem, 0, VK_WHOLE_SIZE, 0, &p));
-    cur->staging[cur->nstaging].buf = *buf, cur->staging[cur->nstaging].mem = mem;
-    cur->nstaging++;
-    return p;
+/* `size` bytes of host-visible memory, alive until the current submission has run: the buffer it is in and where in
+ * it it starts (*base) for the copy commands, and the bytes to write. */
+static void *staging(VkDeviceSize size, VkBuffer *buf, VkDeviceSize *base) {
+    StagingBlock *k = cur->nblocks ? &cur->blocks[cur->nblocks - 1] : NULL;
+    VkDeviceSize at = k ? (k->used + STAGING_ALIGN - 1) / STAGING_ALIGN * STAGING_ALIGN : 0;
+    if (!k || at + size > k->size) {  /* a new block */
+        if (cur->nblocks == cur->blocks_cap) {
+            int cap = cur->blocks_cap ? cur->blocks_cap * 2 : 8;
+            StagingBlock *grown = realloc(cur->blocks, (size_t)cap * sizeof *grown);
+            if (!grown) gpu_stop("out of host memory for %d staging blocks", cap);
+            cur->blocks = grown, cur->blocks_cap = cap;
+        }
+        k = &cur->blocks[cur->nblocks];
+        memset(k, 0, sizeof *k);
+        k->size = size > STAGING_BLOCK ? size : STAGING_BLOCK;
+        VkBufferCreateInfo bci = {.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO, .size = k->size,
+                                  .usage = VK_BUFFER_USAGE_TRANSFER_SRC_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT};
+        CHECK(vkCreateBuffer(vk.device, &bci, NULL, &k->buf));
+        VkMemoryRequirements mr;
+        vkGetBufferMemoryRequirements(vk.device, k->buf, &mr);
+        VkMemoryAllocateInfo mai = {
+            .sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO, .allocationSize = mr.size,
+            .memoryTypeIndex = vk_memory_type(mr.memoryTypeBits,
+                                              VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT)};
+        CHECK(vkAllocateMemory(vk.device, &mai, NULL, &k->mem));
+        CHECK(vkBindBufferMemory(vk.device, k->buf, k->mem, 0));
+        void *p;
+        CHECK(vkMapMemory(vk.device, k->mem, 0, VK_WHOLE_SIZE, 0, &p));
+        k->ptr = p;
+        cur->nblocks++;
+        at = 0;
+    }
+    k->used = at + size;
+    *buf = k->buf, *base = at;
+    return k->ptr + at;
 }
 
 /* ================================================================== memory pools */
@@ -1059,10 +1084,11 @@ static uint32_t detile(VkCommandBuffer cb, NvnTexture *t, GpuImage *g) {
     /* YW4_DETILE_CHECK=1: the GPU's bytes copied out, and the CPU's for the same levels, for begin() to compare */
     static int check = -1;
     if (check < 0) check = getenv("YW4_DETILE_CHECK") && atoi(getenv("YW4_DETILE_CHECK"));
-    if (check && cur->nchecks < 64 && cur->nstaging + 2 <= MAX_STAGING) {
+    if (check && cur->nchecks < 64) {
         VkBuffer gb, cbuf;
-        uint8_t *gpu = staging(size, &gb), *cpu = staging(size, &cbuf);
-        VkBufferCopy bc = {at, 0, size};
+        VkDeviceSize gbase, cbase;
+        uint8_t *gpu = staging(size, &gb, &gbase), *cpu = staging(size, &cbuf, &cbase);
+        VkBufferCopy bc = {at, gbase, size};
         vkCmdCopyBuffer(cb, detile_ring, gb, 1, &bc);
         full_barrier(cb);
         VkDeviceSize o = 0;
@@ -1140,7 +1166,8 @@ static void upload_texels(VkCommandBuffer cb, NvnTexture *t, GpuImage *g) {
     }
     if (!total) return;
     VkBuffer buf;
-    uint8_t *dst = staging(total, &buf);
+    VkDeviceSize base;
+    uint8_t *dst = staging(total, &buf, &base);
     VkBufferImageCopy copies[16];
     uint32_t ncopies = 0;
     VkDeviceSize off = 0;
@@ -1152,7 +1179,7 @@ static void upload_texels(VkCommandBuffer cb, NvnTexture *t, GpuImage *g) {
             tegra_read_region(L, (const uint8_t *)(uintptr_t)t->addr, l, k, 0, 0, 0, lv.w, lv.h, lv.d,
                               dst + off + k * layer_bytes);
         copies[ncopies++] = (VkBufferImageCopy){
-            .bufferOffset = off, .imageSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, l, 0, g->layers},
+            .bufferOffset = base + off, .imageSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, l, 0, g->layers},
             .imageExtent = {lv.w, lv.h, lv.d}};
         off += layer_bytes * g->layers;
     }
