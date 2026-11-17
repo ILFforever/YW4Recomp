@@ -154,6 +154,11 @@ float bias_of(float slope_distance, float n_dot_l) {
 // the inverse of rows 20-23, which carry this frame's AA shift (cb8_scaled_copy), so the march lines up with the
 // shifted depth. Returns how much is in shadow: a hit near the start 1, one toward the end of the ray less.
 // `jitter` (0..1) moves the steps along the ray (contact_smoothed spreads it over each 2x2 block of pixels).
+// No early exit (issue #19, #8): every pixel runs all the steps, "off the screen" and "the first hit" kept in flags,
+// so the four pixels of a 2x2 block are together again at contact_smoothed's swaps. With break / return they left
+// the loop at different steps, and Vulkan only promises they meet again with maximal reconvergence: NVIDIA's driver
+// did, AMD's (likely) didn't, and a swap read a neighbour's value never written (black bars on AMD). The result is
+// the same as before: the first hit's 1 - t², 0 with none or once the ray has left the screen.
 float contact_shadow(vec3 pos, vec3 n, vec3 l, float jitter) {
     mat4 proj = inverse(transpose(mat4(view.d[20], view.d[21], view.d[22], view.d[23])));
     int steps = int(yw4_pcss.contact.x);
@@ -161,37 +166,43 @@ float contact_shadow(vec3 pos, vec3 n, vec3 l, float jitter) {
     float dist = -pos.z;
     // off the surface a little, more with distance (the depth is coarser there), so it doesn't shadow itself
     vec3 start = pos + n * (dist * 0.002);
+    bool done = false;  // the ray left the screen (was a break), or hit (was a return)
+    float result = 0.0;
+    ivec2 size = textureSize(half_depth, 0);
     for (int i = 0; i < steps; i++) {
         float t = (float(i) + jitter) / float(steps);
         vec3 p = start + l * (len * t);
         vec4 c = proj * vec4(p, 1.0);
-        if (c.w <= 0.0) break;
-        vec2 ndc = c.xy / c.w;
+        bool ahead = c.w > 0.0;
+        vec2 ndc = c.xy / (ahead ? c.w : 1.0);
         vec2 suv = vec2(ndc.x * 0.5 + 0.5, 0.5 - ndc.y * 0.5);
-        if (any(lessThan(suv, vec2(0.0))) || any(greaterThan(suv, vec2(1.0)))) break;
+        bool on_screen = ahead && !any(lessThan(suv, vec2(0.0))) && !any(greaterThan(suv, vec2(1.0)));
+        done = done || !on_screen;
         // the texel itself, not a blend: at an outline (a pole against the ground) a filtered read is a depth
-        // between the two that nothing has, and it looked like a blocker beside thin things
-        ivec2 texel = min(ivec2(suv * vec2(textureSize(half_depth, 0))), textureSize(half_depth, 0) - 1);
+        // between the two that nothing has, and it looked like a blocker beside thin things (clamped: off the
+        // screen it is read and not used)
+        vec2 cuv = clamp(suv, vec2(0.0), vec2(1.0));
+        ivec2 texel = min(ivec2(cuv * vec2(size)), size - 1);
         vec4 sc = vec4(ndc, texelFetch(half_depth, texel, 0).x, 1.0);
         float scene_z = dot(view.d[22], sc) / dot(view.d[23], sc);
         float gap = scene_z - p.z;  // > 0: the picture there is nearer the camera than the ray
         // (hits right beside the pixel count: skipping them, for the hairline beside posts, also dropped the thin
         // line under a wall's cap or an eave once it was only a texel or two tall, so it faded with distance)
-        if (gap > dist * 0.001) {
-            // How squarely the blocker faces the camera there: seen edge-on (a post's outline, |n.v| near 0) its
-            // depth says nothing about how thick it is behind, and rays passing behind a post's side drew a line
-            // on the ground beside it, so those don't count. A face seen at a slant (a wall's cap looking along
-            // the wall) still counts, with the thickness widened by the slant: its depth there spreads over more
-            // of the view, and at 0.07 the line under the cap faded out as the view turned.
-            // (Asking whether the ray comes out in front again can't tell a post from a wall's thin cap: the ray
-            // under a cap comes out over its top, and the cap's line went too.)
-            vec3 hn = normalize(fma(textureLod(gbuffer_normal, suv, 0.0).xyz, vec3(2.0), vec3(-1.0)));
-            vec3 hp = vec3(dot(view.d[20], sc), dot(view.d[21], sc), dot(view.d[22], sc)) / dot(view.d[23], sc);
-            float facing = abs(dot(hn, normalize(hp)));
-            if (facing > 0.15 && gap < thick / max(facing, 0.25)) return 1.0 - t * t;
-        }
+        // How squarely the blocker faces the camera there: seen edge-on (a post's outline, |n.v| near 0) its
+        // depth says nothing about how thick it is behind, and rays passing behind a post's side drew a line
+        // on the ground beside it, so those don't count. A face seen at a slant (a wall's cap looking along
+        // the wall) still counts, with the thickness widened by the slant: its depth there spreads over more
+        // of the view, and at 0.07 the line under the cap faded out as the view turned.
+        // (Asking whether the ray comes out in front again can't tell a post from a wall's thin cap: the ray
+        // under a cap comes out over its top, and the cap's line went too.)
+        vec3 hn = normalize(fma(textureLod(gbuffer_normal, cuv, 0.0).xyz, vec3(2.0), vec3(-1.0)));
+        vec3 hp = vec3(dot(view.d[20], sc), dot(view.d[21], sc), dot(view.d[22], sc)) / dot(view.d[23], sc);
+        float facing = abs(dot(hn, normalize(hp)));
+        bool hit = gap > dist * 0.001 && facing > 0.15 && gap < thick / max(facing, 0.25);
+        result = (!done && hit) ? 1.0 - t * t : result;
+        done = done || hit;
     }
-    return 0.0;
+    return result;
 }
 
 // Contact shadows smoothed: the four pixels of a 2x2 block march with the steps a quarter step apart, then
@@ -206,7 +217,8 @@ float contact_smoothed(vec3 pos, vec3 n) {
     float jitter = (float(q.x + 2u * q.y) + 0.5) * 0.25;
     vec3 l = normalize(sun.d[0].xyz);
     float used = -pos.z <= sun.d[9].y && dot(n, l) > 1e-4 ? 1.0 : 0.0;
-    float c = used > 0.0 ? contact_shadow(pos, n, l, jitter) : 0.0;
+    // every pixel marches (no branch before the swaps, as in contact_shadow); those that don't use it get 0
+    float c = contact_shadow(pos, n, l, jitter) * used;
     float z = pos.z, near = -z * 0.02;
     vec3 cs = vec3(subgroupQuadSwapHorizontal(c), subgroupQuadSwapVertical(c), subgroupQuadSwapDiagonal(c));
     vec3 zs = vec3(subgroupQuadSwapHorizontal(z), subgroupQuadSwapVertical(z), subgroupQuadSwapDiagonal(z));
