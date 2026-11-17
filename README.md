@@ -585,8 +585,8 @@ from there (while the game isn't running) ([decision 0074](docs/decisions/0074-c
 
 ![The Diary on the title screen: two saves (Summer, and Dean marked Latest!), three empty slots and the Autosave row, with Dean's diary page on the right](docs/screenshots/100-diary-save-slots.jpg)
 
-The game keeps one save and one autosave. Here the Diary has **five save slots**, shown as five rows like the game's
-own, with the **Autosave** (your latest play) under them:
+On the Switch, the game has room for just one save, plus an autosave. Here the Diary has **five save slots**, shown
+as five rows like the game's own, with the **Autosave** (your latest play) under them:
 
 - **Continue** on the title: Up and Down (or the mouse wheel) move through the rows, the page on the right shows the
   one picked, and the newest is chosen when the Diary opens. An empty slot has nothing to load.
