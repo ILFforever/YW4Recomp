@@ -54,19 +54,26 @@ static int npending;
 static uint64_t known[KNOWN];  /* first addresses of the pairs we wrote: what a condition may name */
 static int cond_open;
 
-/* YW4_OCCLUSION=0: the counts stay real, but the game's conditional draws are all made */
-static int cull_on(void) {
-    static int on = -1;
-    if (on < 0) {
+/* YW4_OCCLUSION=0: the counts stay real, but the game's conditional draws are all made.
+ * YW4_OCCLUSION=off: no queries at all, as before 2026-11-14: each SAMPLES_PASSED report writes 0 by hand and
+ * every conditional draw is made. No query, result copy or conditional rendering reaches the GPU (issue #14: a
+ * GPU hang on Intel HD 520 / Mesa, to tell whether this code is the cause). */
+static int occ_mode = -1;  /* 2 on, 1 counts only (=0), 0 off */
+static int occlusion_mode(void) {
+    if (occ_mode < 0) {
         const char *e = getenv("YW4_OCCLUSION");
-        on = !(e && *e == '0');
-        fprintf(stderr, "yw4: gpu: occlusion queries: %s counts, conditional draws %s\n",
-                vk.occlusion_precise ? "exact" : "zero-or-not",
-                !vk.conditional_rendering ? "always drawn (no VK_EXT_conditional_rendering)"
-                : on ? "skipped on the GPU when hidden" : "always drawn (YW4_OCCLUSION=0)");
+        occ_mode = !e ? 2 : !strcmp(e, "off") ? 0 : *e == '0' ? 1 : 2;
+        if (!occ_mode)
+            fprintf(stderr, "yw4: gpu: occlusion queries: off (YW4_OCCLUSION=off), conditional draws always drawn\n");
+        else
+            fprintf(stderr, "yw4: gpu: occlusion queries: %s counts, conditional draws %s\n",
+                    vk.occlusion_precise ? "exact" : "zero-or-not",
+                    !vk.conditional_rendering ? "always drawn (no VK_EXT_conditional_rendering)"
+                    : occ_mode == 2 ? "skipped on the GPU when hidden" : "always drawn (YW4_OCCLUSION=0)");
     }
-    return on && vk.conditional_rendering;
+    return occ_mode;
 }
+static int cull_on(void) { return occlusion_mode() == 2 && vk.conditional_rendering; }
 
 /* ---- YW4_COUNTER_LOG=<from>-<to>: in those GPU frames, one line per pair and per condition, and a
  * summary per frame. A count shown is what the game's memory holds at that moment: the GPU writes it
@@ -170,6 +177,10 @@ static void pair_abandon(VkCommandBuffer cb) {
 }
 
 void gpu_query_report(VkCommandBuffer cb, GpuState *s, uint64_t addr) {
+    if (!occlusion_mode()) {  /* off: no pair is ever made, so no condition is ever "known" */
+        *(uint64_t *)(uintptr_t)addr = 0;
+        return;
+    }
     if (pair.state && addr == pair.begin + 16) {  /* the pair's second report */
         int kind = RESULT_COUNT;
         if (pair.state == PAIR_COUNTING) vkCmdEndQuery(cb, pool, pair.query);
