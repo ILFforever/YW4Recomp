@@ -66,6 +66,11 @@ int gamemenu_prompt_take(char *out, size_t n);
 /* The same popup with a message instead of a field, and OK (a pad's A or B, Enter, Escape); taken the same way. */
 void gamemenu_message_begin(const char *title, const char *body);
 int gamemenu_prompting(void);
+/* The same popup with a list to choose from (the New Game slot picker, savefs.c): the question, then up to 12 rows,
+ * `sel` chosen first. Up / Down, the wheel or hovering choose; A, Enter, OK or a click picks. No Cancel.
+ * gamemenu_choice_take: -1 while it is open, then the row picked (once). While it shows, gamemenu_open() is 1. */
+void gamemenu_choice_begin(const char *title, const char *body, const char *const *rows, int n, int sel);
+int gamemenu_choice_take(void);
 /* The focused text field's box in design units (x, y, w, h) and the caret's x, for the system's IME
  * (SDL_SetTextInputArea); 0 when no field is focused. */
 int gamemenu_text_rect(float r[4], float *caret_x);

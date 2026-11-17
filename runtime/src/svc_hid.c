@@ -22,9 +22,14 @@
 #include "gamemenu.h"
 #include "gbuffer.h"
 #include "ipc_simple.h"
+#include "kernel.h"
+#include "savefs.h"
 #include "settings.h"
 #include "textin.h"
 #include "window.h"
+
+static uint64_t latest_buttons;
+uint64_t hid_current_buttons(void) { return __atomic_load_n(&latest_buttons, __ATOMIC_ACQUIRE); }
 
 #define HID_SHARED_MEMORY_SIZE 0x40000
 
@@ -323,6 +328,8 @@ void yw4_hid_update(uint64_t tick) {
         if (sticks[i] < -16384) buttons |= 1ull << dir[i][0];
         if (sticks[i] > 16384) buttons |= 1ull << dir[i][1];
     }
+    __atomic_store_n(&latest_buttons, buttons, __ATOMIC_RELEASE);
+    buttons = savefs_filter_buttons(buttons);  /* the Diary: no A on an empty save row (savefs.c) */
     uint8_t *lifo = npad(0) + NPAD_FULL_KEY_LIFO;
     uint64_t *head = (uint64_t *)lifo;  /* unused, entries, tail, count */
     static uint64_t sampling;

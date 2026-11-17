@@ -320,7 +320,8 @@ class RomfsTest(unittest.TestCase):
             exe = t / "romfs.exe"
             # host.c: romfs.c's own lock around file reads and yw4_exit (every exit names its source line)
             subprocess.run([check.host_cc(), "-std=c11", "-O1", "-Wall", *POSIX, f"-I{RUNTIME / 'src'}", "-o", str(exe),
-                            str(t / "drv.c"), str(RUNTIME / "src" / "romfs.c"), str(RUNTIME / "src" / "modmerge.c"), str(RUNTIME / "src" / "host.c"),
+                            str(t / "drv.c"), str(RUNTIME / "src" / "romfs.c"), str(RUNTIME / "src" / "modmerge.c"),
+                            str(RUNTIME / "src" / "diaryrows.c"), str(RUNTIME / "src" / "host.c"),
                             "-pthread", *(["-lwinmm"] if sys.platform == "win32" else [])],
                            check=True, capture_output=True)
             subprocess.run([str(exe), str(root), str(t / "image.bin")], capture_output=True, check=True)
@@ -376,7 +377,8 @@ class RomfsTest(unittest.TestCase):
             (t / "drv.c").write_text(ROMFS_DRIVER)
             exe = t / "romfs.exe"
             subprocess.run([check.host_cc(), "-std=c11", "-O1", "-Wall", *POSIX, f"-I{RUNTIME / 'src'}", "-o", str(exe),
-                            str(t / "drv.c"), str(RUNTIME / "src" / "romfs.c"), str(RUNTIME / "src" / "modmerge.c"), str(RUNTIME / "src" / "host.c"),
+                            str(t / "drv.c"), str(RUNTIME / "src" / "romfs.c"), str(RUNTIME / "src" / "modmerge.c"),
+                            str(RUNTIME / "src" / "diaryrows.c"), str(RUNTIME / "src" / "host.c"),
                             "-pthread", *(["-lwinmm"] if sys.platform == "win32" else [])],
                            check=True, capture_output=True)
             r = subprocess.run([str(exe), str(t / "romfs"), str(t / "image.bin")], capture_output=True, text=True,
@@ -429,7 +431,7 @@ class RomfsTest(unittest.TestCase):
                 (t / path).write_bytes(data)
             (t / "drv.c").write_text(ROMFS_DRIVER)
             (t / "clash.c").write_text(drv_clash)
-            srcs = [str(RUNTIME / "src" / n) for n in ("romfs.c", "modmerge.c", "host.c")]
+            srcs = [str(RUNTIME / "src" / n) for n in ("romfs.c", "modmerge.c", "diaryrows.c", "host.c")]
             libs = ["-pthread", *(["-lwinmm"] if sys.platform == "win32" else [])]
             for drv, exe in (("drv.c", "romfs.exe"), ("clash.c", "clash.exe")):
                 subprocess.run([check.host_cc(), "-std=c11", "-O1", "-Wall", *POSIX, f"-I{RUNTIME / 'src'}", "-o",
@@ -517,6 +519,8 @@ GuestFn yw4_resolve(uint64_t target) {
     if (target == 0x12345678) return mock_callback;
     return NULL;
 }
+/* the Diary's New Game slot picker (savefs.c): not tested here */
+void savefs_new_game_naming(const char *token, int girl) { (void)token; (void)girl; }
 
 #include "swkbd.c"
 
@@ -808,6 +812,7 @@ int mousemenu_map(void) { return 0; }
 int mousemenu_naviwoof(void) { return 0; }
 int mousemenu_sideways(void) { return 0; }
 int mousemenu_stopwatch(void) { return 0; }
+int savefs_diary_open(void) { return 0; }
 
 #include "bindings.c"
 
@@ -931,6 +936,7 @@ int mousemenu_map(void) { return 0; }
 int mousemenu_naviwoof(void) { return 0; }
 int mousemenu_sideways(void) { return 0; }
 int mousemenu_stopwatch(void) { return 0; }
+int savefs_diary_open(void) { return 0; }
 
 #include "bindings.c"
 

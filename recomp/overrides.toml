@@ -387,3 +387,95 @@ module = "main"
 offset = "0x756520"
 native = "yw4_hook_field_guide_button"
 why = "the field HUD's shortcut cross setting one button's state (x1 the button 0xc-0x12, w2 / w3 its flags): the shortcut wheel keeps them to show which shortcut is on (runtime/src/shortcutwheel.c, decision 0075)"
+
+[[hook]]
+module = "main"
+offset = "0x8a7dc0"
+native = "yw4_hook_save_load"
+why = "save load job starter (x0 req: +0 u8 kind, +2 u16 slot): switches active slot to selected Diary slot; YW4_SAVE_SLOT_TEST=1 redirects manual slot 0 to slot 1 when YW4_DIARY_SLOTS=0 (runtime/src/savefs.c)"
+
+[[hook]]
+module = "main"
+offset = "0x8a7b10"
+native = "yw4_hook_save_write"
+why = "save write job starter (x0 req: +0 u8 kind, +4 u16 slot): commits active slot when manually saving from Diary; YW4_SAVE_SLOT_TEST=1 redirects manual slot 0 to slot 1 when YW4_DIARY_SLOTS=0 (runtime/src/savefs.c)"
+
+[[hook]]
+module = "main"
+offset = "0x761aa0"
+native = "yw4_hook_diary_populate"
+why = "the Diary menu's row populator (CMenuSaveLoad::SetupHeaderInfo): fills headersave_obj from active Diary slot (0..9) with [n/10] label (runtime/src/savefs.c)"
+
+[[hook]]
+module = "main"
+offset = "0x75e9b0"
+native = "yw4_hook_diary_open"
+why = "the Diary menu's open/init (CMenuSaveLoad::OnOpen): scans save slots 0..9 and prepares the selected Diary slot (runtime/src/savefs.c)"
+
+[[hook]]
+module = "main"
+offset = "0x75e810"
+native = "yw4_hook_diary_update"
+why = "the Diary menu's per-frame update (CMenuSaveLoad::Step): handles 10-slot Left/Right/L/R scrolling and 2-step X delete confirmation (runtime/src/savefs.c)"
+
+[[hook]]
+module = "main"
+offset = "0x75ee60"
+native = "yw4_hook_diary_setup"
+why = "the Diary's per-copy layer setup (menu, &layer hash, copy): its row data has 2 rows, so copies 2.. of diary_load_slot (stacked rows) are skipped; savefs.c paints them (runtime/src/savefs.c)"
+
+[[hook]]
+module = "main"
+offset = "0x75fb40"
+native = "yw4_hook_diary_focus"
+why = "the Diary rows' Up/Down handler: flips its selection between 2 rows; with stacked rows the focused copy picks the slot or the Autosave (runtime/src/savefs.c)"
+
+[[hook]]
+module = "main"
+offset = "0x9f3e90"
+native = "yw4_hook_menu_layer"
+why = "menu layer copy lookup (menu, layer hash, copy): during a Diary paint pass the save-row layer's row j goes to the copy being painted (runtime/src/savefs.c)"
+
+[[hook]]
+module = "main"
+offset = "0x70c920"
+native = "yw4_hook_menu_attach"
+why = "a menu's attach line moved to one copy of a layer (turned off on copies 0..n-1): the Diary's cursor with n = 6 when its rows are stacked (runtime/src/savefs.c)"
+
+[[hook]]
+module = "main"
+offset = "0x9f2a00"
+native = "yw4_hook_menu_focus_up"
+why = "a menu's focus one up (menu, &layer hash, wrap): wraps from the top only with wrap set; the Diary's stacked rows wrap to the Autosave (runtime/src/savefs.c)"
+
+[[hook]]
+module = "main"
+offset = "0x75f6b0"
+native = "yw4_hook_diary_first_focus"
+why = "the Diary rows' first focus, on the game's Latest! row of two (menu+0x748): with the stacked rows the newest of six (runtime/src/savefs.c)"
+
+[[hook]]
+module = "main"
+offset = "0x2672d0"
+native = "yw4_hook_diary_has_save"
+why = "the Lua call 'has this Diary row a save?' (the summary's valid flag for row 0 or 1): with the stacked rows, the focused row's answer (runtime/src/savefs.c)"
+
+[[hook]]
+module = "main"
+offset = "0x266fc0"
+at = "0x267030"
+native = "yw4_hook_diary_load_kind"
+why = "the Lua call 'load Diary row N' has made its load kind (w22: row 1 -> 2 Autosave, else the row): with the stacked rows 0 or 2 from the focused row (runtime/src/savefs.c)"
+
+[[hook]]
+module = "main"
+offset = "0x9e9340"
+native = "yw4_hook_menu_row_focus"
+why = "a menu copy's focus look, done by the Diary row code for row 0: skipped during a Diary paint pass (runtime/src/savefs.c)"
+
+[[hook]]
+module = "main"
+offset = "0x9f4020"
+native = "yw4_hook_menu_row_focus"
+why = "a menu's focus set, done by the Diary row code for row 0: skipped during a Diary paint pass (runtime/src/savefs.c)"
+

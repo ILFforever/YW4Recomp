@@ -21,6 +21,7 @@
 
 #include "kernel.h"
 #include "pause.h"
+#include "savefs.h"
 #include "yw4rt.h"
 
 #define ENTER_CALL_RET 0x8665d8u  /* MenuState's Enter, just after its f_880750 call (main-relative) */
@@ -53,7 +54,7 @@ int yw4_hook_scene_open(CPUState *ctx) {
         char n[12] = {0};
         for (int i = 0; i < 11; i++)
             if (!(n[i] = (char)ld8(ctx->x[1] + i))) break;
-        if (!strcmp(n, "SceneTitle")) __atomic_store_n(&on_title, 1, __ATOMIC_RELAXED);
+        if (!strcmp(n, "SceneTitle")) __atomic_store_n(&on_title, 1, __ATOMIC_RELAXED), savefs_title_opened();
         else if (!strcmp(n, "SceneRpg")) __atomic_store_n(&on_title, 0, __ATOMIC_RELAXED);
     }
     if (log) {  /* which scene, with what, from where: how the pause was found */

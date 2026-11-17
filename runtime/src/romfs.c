@@ -18,6 +18,7 @@
 #include <string.h>
 #include <sys/stat.h>
 #include "host.h"
+#include "diaryrows.h"
 #include "modmerge.h"
 
 #define EMPTY 0xFFFFFFFFu
@@ -822,6 +823,168 @@ static void build(RomfsImage *m, Dir *root, const char *dir) {
             (double)m->data_size / (1 << 30), dir);
 }
 
+/* ---- the Diary's stacked rows (diaryrows.h): three of the game's files changed in memory, after the mods (a mod's
+ * copy of one is the one changed), and freed from their archives in the list, as a mod frees its files. All three or
+ * none: a file that isn't what the change expects (a mod changed it, or it is already changed) leaves the game's two
+ * rows, and the Diary pages (savefs.c). */
+
+/* The file at path in the tree, made (with its folders) if it isn't there: for a file the game has only in an archive. */
+static File *tree_file(Dir *root, const char *path) {
+    Dir *d = root;
+    for (;;) {
+        const char *slash = strchr(path, '/');
+        size_t n = slash ? (size_t)(slash - path) : strlen(path);
+        char *name = malloc(n + 1);
+        if (!name) yw4_exit(3, __FILE__, __LINE__);
+        memcpy(name, path, n), name[n] = 0;
+        if (!slash) {
+            for (int i = 0; i < d->nfiles; i++)
+                if (!strcmp(d->files[i]->name, name)) return free(name), d->files[i];
+            File *f = calloc(1, sizeof *f);
+            File **nf = realloc(d->files, sizeof *d->files * (size_t)(d->nfiles + 1));
+            if (!f || !nf) yw4_exit(3, __FILE__, __LINE__);
+            f->name = name, f->path = dup_str("(made in memory: the Diary's stacked rows)"), f->parent = d;
+            d->files = nf, d->files[d->nfiles++] = f;
+            qsort(d->files, (size_t)d->nfiles, sizeof *d->files, by_file_name);
+            return f;
+        }
+        Dir *next = NULL;
+        for (int i = 0; i < d->ndirs && !next; i++)
+            if (!strcmp(d->dirs[i]->name, name)) next = d->dirs[i];
+        if (next) {
+            free(name);
+        } else {
+            next = calloc(1, sizeof *next);
+            Dir **nd = realloc(d->dirs, sizeof *d->dirs * (size_t)(d->ndirs + 1));
+            if (!next || !nd) yw4_exit(3, __FILE__, __LINE__);
+            next->name = name, next->parent = d;
+            d->dirs = nd, d->dirs[d->ndirs++] = next;
+            qsort(d->dirs, (size_t)d->ndirs, sizeof *d->dirs, by_dir_name);
+        }
+        d = next, path = slash + 1;
+    }
+}
+
+typedef uint8_t *(*Change)(const uint8_t *, size_t, size_t *);
+
+/* The copy of path the game would read now: a mod's or a merged one in the tree, else the game's from its archive. */
+static uint8_t *current_copy(Dir *root, const char *path, size_t *n) {
+    File *f = find_file(root, path);
+    *n = 0;
+    if (f && f->mem) {
+        uint8_t *b = malloc(f->size ? (size_t)f->size : 1);
+        if (b) memcpy(b, f->mem, (size_t)f->size), *n = (size_t)f->size;
+        return b;
+    }
+    if (f) return read_all(f->path, n);
+    File none = {0};
+    return game_copy(root, &none, path, n);
+}
+
+/* Changes n files in memory, all or none (change[i] returns NULL: not the copy expected), and frees them in the
+ * archive list (archive an empty string, as mods free theirs, with the new sizes). Returns 1 when done; quiet says
+ * nothing when a file is not the one expected (a choice among copies, e.g. languages). */
+static int memory_patch(Dir *root, const char *what, const char *const *paths, const Change *change, int n, int quiet) {
+    File *list = find_file(root, "data/cpk_list.cfg.bin");
+    if (!list || n > 8) return 0;
+    if (!game_list_path) game_list_path = dup_str(list->game_path ? list->game_path : list->path);  /* no mods */
+    uint8_t *out[8] = {0};
+    size_t on[8] = {0};
+    int ok = 1;
+    for (int i = 0; i < n && ok; i++) {
+        size_t bn = 0;
+        uint8_t *b = current_copy(root, paths[i], &bn);
+        out[i] = b ? change[i](b, bn, &on[i]) : NULL;
+        if (!out[i]) {
+            if (!quiet)
+                fprintf(stderr, "yw4: %s: %s %s, not changed\n", what, paths[i],
+                        b ? "is not the one expected (a mod's, or already changed)" : "not found");
+            ok = 0;
+        }
+        free(b);
+    }
+    size_t ln = list->mem ? (size_t)list->size : 0;
+    uint8_t *lb = NULL;
+    if (ok) {
+        lb = list->mem ? list->mem : read_all(list->path, &ln);
+        ok = lb != NULL;
+    }
+    CpkEntry *e = NULL;
+    int ne = ok ? cpk_entries(lb, ln, &e) : -1;
+    uint32_t empty = EMPTY;
+    for (int k = 0; k < ne && empty == EMPTY; k++)
+        if (e[k].loose && get32(lb + e[k].archive) != EMPTY) empty = get32(lb + e[k].archive);
+    if (ne > 0 && empty == EMPTY) {
+        uint32_t so = get32(lb + 4), sl = get32(lb + 8);
+        if (sl && (uint64_t)so + sl <= ln && lb[so + sl - 1] == 0) empty = sl - 1;
+    }
+    int named[8] = {0}, freed = 0, all = 1;
+    for (int k = 0; k < ne && empty != EMPTY; k++)
+        for (int i = 0; i < n; i++)
+            if (!strcmp(e[k].path, paths[i]) && e[k].archive + 8 <= ln) {
+                uint32_t sz = (uint32_t)on[i];
+                memcpy(lb + e[k].archive, &empty, 4);
+                memcpy(lb + e[k].archive + 4, &sz, 4);
+                named[i] = 1, freed++;
+            }
+    free(e);
+    for (int i = 0; i < n; i++) all &= named[i];
+    if (!ok || !all) {
+        if (ok) fprintf(stderr, "yw4: %s: the archive list doesn't name the files, not changed\n", what);
+        if (lb && lb != list->mem) free(lb);
+        for (int i = 0; i < n; i++) free(out[i]);
+        return 0;
+    }
+    if (lb != list->mem) list->mem = lb, list->size = ln;
+    for (int i = 0; i < n; i++) {
+        File *f = tree_file(root, paths[i]);
+        if (f->mem) free(f->mem);
+        f->mem = out[i], f->size = on[i];
+    }
+    return freed;
+}
+
+static void diary_rows(Dir *root) {
+    if (!diaryrows_enabled()) return;
+    static const char *const paths[3] = {DIARYROWS_MODEL, DIARYROWS_LOCATOR, DIARYROWS_SETTING};
+    static const Change change[3] = {diaryrows_model, diaryrows_locator, diaryrows_setting};
+    int freed = memory_patch(root, "diary rows", paths, change, 3, 0);
+    if (freed) fprintf(stderr, "yw4: diary rows: on (%d row copies; %d list entries freed)\n", DIARY_ROW_COPIES, freed);
+    else fprintf(stderr, "yw4: diary rows: off, the Diary keeps its two rows\n");
+}
+
+/* The in-game Save's hint names its slot paging (Left / Right): its line in each language's system text that has the
+ * English one (the translation patch's), every language folder the archive list names. */
+static void diary_save_hint(Dir *root) {
+    if (!diaryrows_slots_enabled()) return;
+    File *list = find_file(root, "data/cpk_list.cfg.bin");
+    if (!list) return;
+    size_t ln = list->mem ? (size_t)list->size : 0;
+    uint8_t *lb = list->mem ? list->mem : read_all(list->path, &ln);
+    CpkEntry *e = NULL;
+    int ne = lb ? cpk_entries(lb, ln, &e) : -1, done = 0;
+    char paths[16][128];
+    int np = 0;
+    for (int k = 0; k < ne && np < 16; k++) {
+        const char *p = e[k].path;
+        size_t pl = strlen(p);
+        if (strncmp(p, "data/common/text/", 17) || pl < 20 || strcmp(p + pl - 20, "/system_text.cfg.bin") ||
+            pl >= sizeof paths[0])
+            continue;
+        int dup = 0;
+        for (int i = 0; i < np && !dup; i++) dup = !strcmp(paths[i], p);
+        if (!dup) snprintf(paths[np++], sizeof paths[0], "%s", p);
+    }
+    free(e);
+    if (lb != list->mem) free(lb);
+    for (int i = 0; i < np; i++) {
+        const char *one[1] = {paths[i]};
+        static const Change ch[1] = {diaryrows_save_hint};
+        if (memory_patch(root, "diary save hint", one, ch, 1, 1)) done++;
+    }
+    fprintf(stderr, "yw4: diary save hint: %d of %d system texts\n", done, np);
+}
+
 int romfs_open(const char *dir) {
     Dir *root = scan(dir, "", NULL, 0);
     if (!root) {
@@ -829,6 +992,8 @@ int romfs_open(const char *dir) {
         return -1;
     }
     apply_mods(root);
+    diary_rows(root);
+    diary_save_hint(root);
     build(&game, root, dir);
     game_root = root;
     return 0;

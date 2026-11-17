@@ -55,6 +55,11 @@ static char prompt_title[256], prompt_fallback[64], prompt_answer[TEXTIN_MAX];
 static char prompt_body[512];  /* a message instead of a field ("" for a field) */
 static const char *prompt_label = "Name";
 static int prompt_min, prompt_cancel;  /* letters the game needs at least; Cancel offered */
+/* the list popup (gamemenu_choice_begin): the New Game slot picker (savefs.c); prompting is 1 while it shows, the
+ * title and prompt_body are its question; pick_n 0: not a list */
+enum { PICK_MAX = 12 };
+static char pick_rows[PICK_MAX][96];
+static int pick_n, pick_sel, pick_answer = -1;
 static void changed(void);
 
 int gamemenu_prompting(void) { return __atomic_load_n(&prompting, __ATOMIC_ACQUIRE); }
@@ -290,6 +295,41 @@ void gamemenu_message_begin(const char *title, const char *body) {
     fprintf(stderr, "yw4: overlay: message \"%s\"\n", prompt_title);
 }
 
+void gamemenu_choice_begin(const char *title, const char *body, const char *const *rows, int n, int sel) {
+    if (n > PICK_MAX) n = PICK_MAX;
+    if (n < 1) return;
+    snprintf(prompt_title, sizeof prompt_title, "%s", title);
+    snprintf(prompt_body, sizeof prompt_body, "%s", body ? body : "");
+    for (int i = 0; i < n; i++) snprintf(pick_rows[i], sizeof pick_rows[i], "%s", rows[i]);
+    pick_sel = sel >= 0 && sel < n ? sel : 0;
+    prompt_fallback[0] = 0;
+    textin_clear(&prompt_text);
+    textin_focus(NULL);
+    __atomic_store_n(&pick_answer, -1, __ATOMIC_RELEASE);
+    __atomic_store_n(&pick_n, n, __ATOMIC_RELEASE);
+    __atomic_store_n(&prompt_finished, 0, __ATOMIC_RELEASE);
+    __atomic_store_n(&prompting, 1, __ATOMIC_RELEASE);
+    __atomic_store_n(&open_, 1, __ATOMIC_RELEASE);
+    changed();
+    fprintf(stderr, "yw4: overlay: list \"%s\" (%d rows)\n", prompt_title, n);
+}
+
+static void prompt_close(int how);
+static void pick_finish(void) {  /* A, Enter or a click: the chosen row is the answer */
+    int a = pick_sel;
+    __atomic_store_n(&pick_n, 0, __ATOMIC_RELEASE);
+    prompt_body[0] = 0;
+    prompt_close(1);
+    __atomic_store_n(&pick_answer, a, __ATOMIC_RELEASE);
+    fprintf(stderr, "yw4: overlay: list row %d chosen\n", a);
+}
+static void pick_move(int d) {
+    int n = __atomic_load_n(&pick_n, __ATOMIC_ACQUIRE);
+    if (n) pick_sel = (pick_sel + d + n) % n, changed();  /* round, as the Diary's slots */
+}
+
+int gamemenu_choice_take(void) { return __atomic_exchange_n(&pick_answer, -1, __ATOMIC_ACQ_REL); }
+
 static void prompt_close(int how) {
     if (osk_switched && !strcmp(prompt_label, "Name")) {  /* the next name's keyboard opens on this language */
 #ifdef _WIN32
@@ -310,6 +350,10 @@ static void prompt_close(int how) {
 
 static void prompt_finish(void) {
     if (!gamemenu_prompting()) return;
+    if (__atomic_load_n(&pick_n, __ATOMIC_ACQUIRE)) {
+        pick_finish();
+        return;
+    }
     if (!prompt_enough()) {  /* too short for the game (a password needs a letter): keep typing */
         textin_focus(&prompt_text);
         changed();
@@ -321,12 +365,13 @@ static void prompt_finish(void) {
 }
 
 void gamemenu_prompt_cancel(void) {
+    if (__atomic_load_n(&pick_n, __ATOMIC_ACQUIRE)) return;  /* a list has no Cancel: one row must be chosen */
     if (gamemenu_prompting() && (prompt_cancel || prompt_body[0])) prompt_close(prompt_body[0] ? 1 : 2);
 }
 
 int gamemenu_prompt_take(char *out, size_t n) {
     /* Enter or Tab end the typing (window.c): that is OK here, as is the pad's A or the OK button */
-    if (gamemenu_prompting() && !prompt_body[0] && !textin_has(&prompt_text)) prompt_finish();
+    if (gamemenu_prompting() && !pick_n && !prompt_body[0] && !textin_has(&prompt_text)) prompt_finish();
     int how = __atomic_exchange_n(&prompt_finished, 0, __ATOMIC_ACQ_REL);
     if (how == 1) snprintf(out, n, "%s", prompt_answer);
     return how;
@@ -815,6 +860,12 @@ static void bug_page_action(int a) {
 void gamemenu_action(int a) {
     if (!gamemenu_open() || settings_open()) return;
     changed();
+    if (gamemenu_prompting() && __atomic_load_n(&pick_n, __ATOMIC_ACQUIRE)) {  /* a list: up / down, A picks */
+        if (a == GM_UP || a == GM_LEFT) pick_move(-1);
+        else if (a == GM_DOWN || a == GM_RIGHT) pick_move(1);
+        else if (a == GM_ACCEPT) pick_finish();
+        return;
+    }
     if (gamemenu_prompting()) {  /* the name popup: A / Enter is OK (typing has ended), the rest nothing */
         if (osk_shown && !prompt_body[0]) {  /* the on-screen keyboard (a controller) */
             char t[8];
@@ -888,7 +939,7 @@ enum { HIT_SIDE, HIT_SECTION, HIT_ROW, HIT_ROW_PREV, HIT_ROW_NEXT, HIT_BIND, HIT
        HIT_BUG_KIND, HIT_BUG_TEXT, HIT_BUG_OFTEN, HIT_BUG_NEXT, HIT_BUG_TICK, HIT_BUG_BTN, HIT_BUG_DONE,
        HIT_PROMPT_FIELD, HIT_PROMPT_OK, HIT_PROMPT_CANCEL, HIT_OSK_KEY, HIT_OSK_PAGE,
        HIT_KV_TAB, HIT_KV_MODE, HIT_KV_KEY, HIT_PV_PART,
-       HIT_MB_BACK, HIT_MB_SET, HIT_MB_ROW, HIT_MB_STEP, HIT_MB_OPT, HIT_MB_SCRIM, HIT_MB_POP, HIT_ROW_SLIDER };
+       HIT_MB_BACK, HIT_MB_SET, HIT_MB_ROW, HIT_MB_STEP, HIT_MB_OPT, HIT_MB_SCRIM, HIT_MB_POP, HIT_ROW_SLIDER, HIT_PICK_ROW };
 enum { ROW_SLIDER_PAD = 12 };  /* HIT_ROW_SLIDER: the track's hit box reaches this far past each end */
 #define HINT_CLOSE (-1)  /* a key hint's action: close the overlay */
 typedef struct {
@@ -937,6 +988,15 @@ void gamemenu_mouse(float x, float y, int button) {
     if (!gamemenu_open() || settings_open() || bindings_capturing()) return;
     Hit h;
     int found = hit_find(x, y, &h);
+    if (gamemenu_prompting() && __atomic_load_n(&pick_n, __ATOMIC_ACQUIRE)) {  /* a list: hovering chooses, a click picks */
+        if (found && h.kind == HIT_PICK_ROW && (button == 0 || button == 1)) {
+            if (pick_sel != h.a) pick_sel = h.a, changed();
+            if (button == 1) pick_finish();
+        } else if (button == 1 && found && h.kind == HIT_PROMPT_OK) {
+            pick_finish();
+        }
+        return;
+    }
     if (gamemenu_prompting()) {  /* the name popup: its field takes the typing again, OK finishes */
         if (found && h.kind == HIT_PROMPT_FIELD) {
             char text[TEXTIN_MAX]; int cur;
@@ -1123,6 +1183,10 @@ void gamemenu_mouse(float x, float y, int button) {
 }
 
 void gamemenu_wheel(int dy) {
+    if (gamemenu_prompting() && __atomic_load_n(&pick_n, __ATOMIC_ACQUIRE)) {  /* a list popup: a row a notch */
+        pick_move(dy > 0 ? -1 : 1);
+        return;
+    }
     /* the wheel moves the selection, one row a notch, as Up / Down do (owner, 2026-11-15: like the game's own menus,
      * mousemenu.c; before, 2026-11-06, it only scrolled the long lists). A list longer than its space scrolls to keep
      * the chosen row in view, as with the keys. Not in a popup, while a key is being bound or text is being typed, or
@@ -3054,6 +3118,53 @@ static void draw_preview(const UiCanvas *c, const GameMenuInfo *in) {
     }
 }
 
+/* The list popup (gamemenu_choice_begin): the name popup's frame (board N1), the question under the title, the rows
+ * as buttons, the chosen one gold (as the on-screen keyboard's key); OK picks it. No Cancel: one row is the answer. */
+static void draw_pick(const UiCanvas *c, const GameMenuInfo *in, float W, float H, float T, float E, float by) {
+    ui_rect(c, 0, T - 1, W, H + 2 * E + 2, POP_BACKDROP, 0.45f);
+    int n = __atomic_load_n(&pick_n, __ATOMIC_ACQUIRE);
+    float pw = 720, bar = 18 + 22 * 1.3f + 16, blh = 17 * 1.5f, rh = 44, rg = 4;
+    float msg_h = prompt_body[0] ? ui_text_wrap(NULL, UI_GOTHIC_500, 17, 0, 0, 0, pw - 56, blh, 0, prompt_body, 0) : 0;
+    float body = 22 + (msg_h > 0 ? msg_h + 14 : 0) + (float)n * (rh + rg) - rg + 18;
+    float tray = 16 + 52 + 16, ph = bar + 3 + body + tray;
+    float px = (W - pw) / 2, py = (H - 56 - ph) / 2;
+    ui_shadow(c, px, py + 14, pw, ph, 16, 40, POP_SHADOW, 0.45f);
+    ui_box_alpha(c, px - 1, py - 1, pw + 2, ph + 2, 17, POP_BORDER, 0.5f);
+    ui_box(c, px, py, pw, ph, 16, POP_WHITE, 0, 0);
+    ui_box(c, px, py, pw, bar + 16, 16, POP_DEEP, 0, 0);
+    ui_rect(c, px, py + bar, pw, 3, POP_GOLD, 1);
+    float ty = py + ph - tray;
+    ui_box(c, px, ty - 16, pw, tray + 16, 16, POP_LILAC, 0, 0);
+    ui_rect(c, px, py + bar + 3, pw, ty - (py + bar + 3), POP_WHITE, 1);
+    ui_rect(c, px, ty, pw, 1, POP_LINE, 1);
+    ui_text(c, UI_ROUNDED_800, 22, px + 28, py + 18, 22 * 1.3f, prompt_title, POP_WHITE);
+    float bx = px + 28, bw = pw - 56, y = py + bar + 3 + 22;
+    if (msg_h > 0) {
+        ui_text_wrap(c, UI_GOTHIC_500, 17, 0, bx, y, bw, blh, 0, prompt_body, POP_INK);
+        y += msg_h + 14;
+    }
+    for (int i = 0; i < n; i++, y += rh + rg) {
+        int on = i == pick_sel;
+        ui_box(c, bx, y, bw, rh, 12, on ? GOLD : WHITE, on ? 0 : 2, LINE);
+        ui_text_in(c, UI_ROUNDED_800, 18, bx + 18, y, bw - 36, rh, 0, pick_rows[i], on ? ON_GOLD : PLUM);
+        hit_add(bx, y, bw, rh, HIT_PICK_ROW, i, 0);
+    }
+    float okw = ui_text_w(UI_ROUNDED_800, 18, "OK") + 2 * 32, okx = px + pw - 16 - okw, oky = ty + 16;
+    ui_box(c, okx - 4, oky - 4, okw + 8, 60, 15, RING, 0, 0);
+    ui_box(c, okx, oky, okw, 52, 12, GOLD, 0, 0);
+    ui_text_in(c, UI_ROUNDED_800, 18, okx, oky, okw, 52, 1, "OK", ON_GOLD);
+    hit_add(okx, oky, okw, 52, HIT_PROMPT_OK, 0, 0);
+    ui_rect(c, 0, by, W, 56 + 1, NIGHT, 1);  /* the key hints, the whole width */
+    float hx = 48;
+    if (in->pad) {
+        hx += hint(c, hx, by, "D-pad", "Choose") + 28;
+        hint(c, hx, by, in->pad == 2 ? "Cross" : "A", "OK");
+    } else {
+        hx += hint(c, hx, by, "W S", "Choose") + 28;
+        hint(c, hx, by, "Enter", "OK");
+    }
+}
+
 void gamemenu_draw(const UiCanvas *c, const GameMenuInfo *in) {
     TH = theme_colors();
     draw_text_has = 0;
@@ -3112,6 +3223,11 @@ void gamemenu_draw(const UiCanvas *c, const GameMenuInfo *in) {
             toast("Couldn't save the report");
         }
         changed();
+    }
+    if (gamemenu_prompting() && __atomic_load_n(&pick_n, __ATOMIC_ACQUIRE)) {  /* a list (the New Game slots) */
+        draw_pick(c, in, W, H, T, E, by);
+        __atomic_store_n(&hit_front, hk, __ATOMIC_RELEASE);
+        return;
     }
     if (gamemenu_prompting()) {  /* name entry (board N1): only the popup, over the game's waiting picture */
         ui_rect(c, 0, T - 1, W, H + 2 * E + 2, POP_BACKDROP, 0.45f);

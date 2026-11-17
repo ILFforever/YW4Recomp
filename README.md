@@ -581,6 +581,29 @@ from there (while the game isn't running) ([decision 0074](docs/decisions/0074-c
 </details>
 
 <details>
+<summary><b>Diary save slots</b>: five save slots stacked in the Diary, and one Autosave under them</summary>
+
+![The Diary on the title screen: two saves (Summer, and Katie marked Latest!), three empty slots and the Autosave row, with Katie's diary page on the right](docs/screenshots/100-diary-save-slots.jpg)
+
+The game keeps one save and one autosave. Here the Diary has **five save slots**, shown as five rows like the game's
+own, with the **Autosave** (your latest play) under them:
+
+- **Continue** on the title: Up and Down (or the mouse wheel) move through the rows, the page on the right shows the
+  one picked, and the newest is chosen when the Diary opens. An empty slot has nothing to load.
+- **Save** in the game: Left and Right (or the mouse wheel) choose the slot to save to; the hint at the bottom says so.
+  It opens on the slot you're playing.
+
+  ![Save in the game: slot 2 of 5 (Katie) on the diary page, and the hint at the bottom: Change Slot, Save, Back](docs/screenshots/100-diary-save-in-game.jpg)
+
+- **New Game** asks which slot your new game goes in, and asks again before it replaces a save.
+- **X** twice deletes a slot's save.
+
+Your existing save is slot 1. Your game files aren't changed: the extra rows are made in memory each time the game
+starts ([decision 0078](docs/decisions/0078-diary-save-slots.md)).
+
+</details>
+
+<details>
 <summary><b>Settings</b>: every option in game, F1 for settings, F2 for controls, F3 for the performance HUD</summary>
 
 **F1** opens the overlay's **Settings** page: every option with all its choices, and what each one does (arrow keys or
@@ -660,12 +683,11 @@ On Ordinary Street with the performance HUD on (F3). The frame takes about 19 ms
 </details>
 
 <details>
-<summary><b>Ongoing</b> (6)</summary>
+<summary><b>Ongoing</b> (5)</summary>
 
 | Goal | Where it stands |
 |---|---|
 | **Performance (CPU)** | Less work per frame on the CPU, so busy places hold their frame rate on slower PCs: the renderer's GPU commands are being made cheaper to build (in testing) |
-| **Diary save slots** | Five Diary slots instead of one, and under them one Autosave row with your newest autosave: pick a slot when you start a new game, page through them in the Diary, delete one with X. Each slot keeps its own autosave, so playing another slot never loses one (in testing; the Diary's look comes next) |
 | **Our own renderer** | Ours: shadows, surfaces, bloom, distance blur, lighting, sky, tone mapping. **Left:** choosing what to draw, two screen passes, the UI and menus |
 | **Steadier shadows** | Shadows still shimmer a little as the camera moves; steadier cascades next |
 | **Better anti-aliasing** | FXAA, SMAA and TAA (steady thin edges: fences, nets, leaves) on the 3D scene before the UI is drawn, so text stays crisp; per-object motion for TAA next (a first version is in, off by default) |
@@ -674,7 +696,7 @@ On Ordinary Street with the performance HUD on (F3). The frame takes about 19 ms
 </details>
 
 <details>
-<summary><b>Finished</b> (15)</summary>
+<summary><b>Finished</b> (16)</summary>
 
 | Goal | Where it stands |
 |---|---|
@@ -693,6 +715,7 @@ On Ordinary Street with the performance HUD on (F3). The frame takes about 19 ms
 | **Linux** | Tester [ouni666](https://github.com/ouni666) plays it on AOSC OS with an AMD RX 6600 XT at about 110-120 frames/s, sound and controls included (2026-11-13). DLSS and FSR upscaling and FSR frame generation are built on Linux too ([decision 0073](docs/decisions/0073-dlss-fsr-on-linux.md)); DLSS frame generation and Reflex are Windows only |
 | **Launcher for Linux** | The same launcher as an AppImage, from launcher 1.2.0 (2026-11-15), so the game no longer has to be built by hand on Linux ([decision 0071](docs/decisions/0071-linux-launcher.md)). Players use it on their Linux desktops |
 | **Built-in cheats** | A Cheats page in the overlay, switched while playing: unlimited Crank-a-kai and unlimited coins so far, with a switch in the launcher ([decision 0074](docs/decisions/0074-cheats.md)) |
+| **Diary save slots** | Five save slots stacked in the Diary like the game's own rows, with one Autosave under them; pick a slot for a new game, Left / Right on the in-game Save screen, X to delete ([decision 0078](docs/decisions/0078-diary-save-slots.md)) |
 
 </details>
 

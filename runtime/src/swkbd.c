@@ -14,6 +14,7 @@
 #include "gamemenu.h"
 #include "host.h"
 #include "romfs.h"
+#include "savefs.h"
 #include "textin.h"
 #include "window.h"
 #include "yw4load.h"
@@ -272,6 +273,9 @@ void yw4_swkbd_ShowKeyboard(CPUState *c) {
      * Replays answer at once: there "Nate" (or "Katie") when the game gave nothing. */
     const char *fallback = initial[0] ? initial : girl ? DEFAULT_GIRL : DEFAULT_NAME;
     int min = *(const int32_t *)(a + 0x3b0), main_name = token[0] == '<';
+    /* a name the game gave a default for (a download code has none): on the title, the boy's starts a new game, whose
+     * Diary slot is picked first (savefs.c, decision 0078) */
+    if (token[0]) savefs_new_game_naming(token, girl);
     /* The player types it (board N1): the overlay's popup over the game's last frame, which this thread shows again
      * while it waits (the game waits here too, as on the Switch). Not in replays (their clock counts frames, which
      * stop here) or with YW4_PLAYER_NAME: those answer at once. */

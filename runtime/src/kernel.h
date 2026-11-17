@@ -78,6 +78,8 @@ KTransferMemory *yw4_transfer_memory_get(uint32_t handle);  /* NULL if not one *
 void yw4_vsync_start(void);
 /* Controller input into hid's shared memory (svc_hid.c); the vsync thread calls it. */
 void yw4_hid_update(uint64_t tick);
+/* The buttons yw4_hid_update last gave the game (Switch bits: A 0, B 1, X 2... as the npad state); any thread. */
+uint64_t hid_current_buttons(void);
 uint64_t yw4_vsync_count(void);
 void yw4_wait_vsync(uint64_t n);  /* until vsync number n has happened */
 
