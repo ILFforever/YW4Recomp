@@ -74,8 +74,14 @@ static const Screen screens[] = {
     {"settings",         0x14c60f8u, 0x857cd4feu, 0xc3a04661u, 1, 7, 433.5f, 191.5f,   0.0f, 58.65f, 365.0f,  27.5f, SCR_HOVER | SCR_CLICK | SCR_WHEEL},
     /* Help 8-row scrolling list (yw::CMenuHelp) */
     {"help",             0x14c00f8u, 0x0142cd83u, 0x9ee9efdfu, 1, 8, 449.5f, 191.5f,   0.0f, 58.65f, 352.0f,  27.5f, SCR_HOVER | SCR_CLICK | SCR_WHEEL},
-    /* Yo-kai Trophies 8-row scrolling list (yw::CMenuTrophyObj) */
-    {"trophies",         0x14c9658u, 0xb3f13b48u, 0xffb21636u, 1, 8, 284.5f, 191.5f,   0.0f, 58.65f, 218.0f,  27.5f, SCR_HOVER | SCR_WHEEL},
+    /* Yo-kai Trophies 8-row scrolling list (yw::CMenuTrophyObj; Pad page 2 "Trophies") */
+    {"trophies",         0x14c9658u, 0xb3f13b48u, 0xffb21636u, 1, 8, 284.5f, 191.5f,   0.0f, 58.65f, 218.0f,  27.5f, SCR_HOVER | SCR_CLICK | SCR_WHEEL},
+    /* Slimey Marks 8-row list (yw::CMenuSlimeyMark-style list, vt main+0x14c2348; Pad page 1 "Slimey Mark"). Rows measured
+     * on a screenshot 2026-11-16: first row centre y 162, step 58.3, one column about 664 wide (x 64 .. 728). */
+    {"slimey_marks",     0x14c2348u, 0x795f8b82u, 0xff59842fu, 1, 8, 396.0f, 162.0f,   0.0f, 58.3f, 332.0f,  28.0f, SCR_HOVER | SCR_CLICK | SCR_WHEEL},
+    /* Pad page 1 "Soulmates": the 2 x 2 tile menu (Matching, Training, Custom Equip., Soul List; vt main+0x14c0838).
+     * Tile centres measured 2026-11-16: (440, 216), (840, 216), (440, 448), (840, 448); tiles about 328 x 200. */
+    {"soulmates_tiles",  0x14c0838u, 0x500ef853u, 0,           2, 2, 440.0f, 216.0f, 400.0f, 232.0f, 164.0f, 100.0f, SCR_HOVER | SCR_CLICK},
     /* Ukiukipedia 4-row category list (yw::CMenuDictionaryTop) */
     {"ukiukipedia",      0x14befd8u, 0x4c41ffe9u, 0,           1, 4, 273.0f, 181.0f,   0.0f,  70.0f, 268.0f,  33.0f, SCR_HOVER | SCR_CLICK | SCR_WHEEL},
     /* Ukiukipedia 8-row inner entry list (yw::CMenuDictionaryTop) */
@@ -86,16 +92,26 @@ static const Screen screens[] = {
     {"members_watcher",  0x14c1948u, 0x180cb413u, 0,           1, 1, 288.0f, 160.0f,   0.0f,   0.0f, 215.0f,  60.0f, SCR_HOVER | SCR_CLICK},
     /* Organize Members - Main Members 3 x 2 Yo-kai card grid (yw::CMemberMenu) */
     {"members_grid",     0x14c1948u, 0x634fbf8du, 0,           3, 2, 145.5f, 356.0f, 142.5f, 184.0f,  67.5f,  68.0f, SCR_HOVER | SCR_CLICK},
-    /* Treasure photos 4-row scrolling list (yw::CMenuTreasure) */
-    {"treasure",         0x14c9488u, 0x14cc3aa3u, 0xafdaecc2u, 1, 4, 285.0f, 185.0f,   0.0f, 126.5f, 220.0f,  60.0f, SCR_HOVER | SCR_CLICK | SCR_WHEEL},
+    /* Treasure photos: a grid of 5 columns x 3 rows of photo cards (yw::CMenuTreasure; measured 2026-11-16 from a
+     * screenshot: column centres 176, 405, 634, 863, 1092; row centres 180, 308, 436). No wheel: the wheel would page
+     * the grid L/R (cols > 1). */
+    {"treasure",         0x14c9488u, 0x14cc3aa3u, 0,           5, 3, 176.0f, 180.0f, 229.0f, 128.0f, 108.0f,  60.0f, SCR_HOVER | SCR_CLICK},
     /* Soulmate 8-row scrolling list (yw::CMenuKonkatsuList) */
     {"soulmate",         0x14c0498u, 0x933f4e58u, 0x596edf43u, 1, 8, 288.5f, 191.5f,   0.0f, 58.65f, 222.0f,  27.5f, SCR_HOVER | SCR_CLICK | SCR_WHEEL},
-    /* Watch skills 6-column character select (yw::CMenuGeneralWindow) */
-    {"watch_skills",     0x14bfa78u, 0x1405a5f7u, 0,           6, 1, 169.0f, 354.0f, 188.4f,   0.0f,  87.0f, 150.0f, SCR_HOVER | SCR_CLICK},
+    /* Watch Skills 6-character row (its own class, vt main+0x14c6b78, focus hash 0x5b8ae332; the old row had the
+     * News notice's class and hash). Characters measured 2026-11-16 at x about 144, 264, 384, 504, 640, 744, y 200 .. 640. */
+    {"watch_skills",     0x14c6b78u, 0x5b8ae332u, 0,           6, 1, 144.0f, 420.0f, 120.0f,   0.0f,  60.0f, 220.0f, SCR_HOVER | SCR_CLICK},
     /* Organize Members "What will you do?" 6-row action popup (yw::CMenuSubWindow) */
     {"members_action",   0x14c7b78u, 0xb2869aecu, 0,           1, 6, 519.6f, 268.0f,   0.0f,  48.0f, 103.6f,  20.0f, SCR_HOVER | SCR_CLICK},
 };
 enum { NSCREENS = sizeof screens / sizeof *screens };
+
+/* Watch Skills (vt main+0x14c6b78): LEFT and RIGHT move the character highlight, but the game does not report that move
+ * through OnChangeFocus (control 0x5b8ae332 keeps focus index 0; replay runs Q and R on 2026-11-16: screenshots show the
+ * highlight move Cole -> Summer -> Hammy -> ...). So the mouse keeps its own count: 0 when the screen opens from the Pad,
+ * +1 for each RIGHT and -1 for each LEFT the mouse sends. Presses by the player's keys are not counted. */
+#define WATCH_SKILLS_VTABLE 0x14c6b78u
+static int wsk_index;         /* the character highlighted on Watch Skills, by the mouse's count */
 
 /* Written by the hooks (the game's threads), read by the window's thread. */
 static int pad_open;          /* the Pad (or a page it opened) is on screen */
@@ -330,6 +346,13 @@ int yw4_hook_menu_focus(CPUState *ctx) {
         __atomic_store_n(&active_idx, idx, __ATOMIC_RELEASE);
         if (menu != prev_menu || idx != prev_idx) {
             if (menu != prev_menu) __atomic_store_n(&layers_open, 0, __ATOMIC_RELEASE);
+            if (menu != prev_menu && vt == WATCH_SKILLS_VTABLE) __atomic_store_n(&wsk_index, 0, __ATOMIC_RELEASE);
+            __atomic_store_n(&page, PAGE_NONE, __ATOMIC_RELEASE);
+            __atomic_store_n(&wheel_steps, 0, __ATOMIC_RELEASE);
+        } else if (hash == screens[idx].hash && __atomic_load_n(&page, __ATOMIC_ACQUIRE) == PAGE_OPEN) {
+            /* the screen's own control took the focus again while a page opened over it: that page is closed (Watch
+             * Skills: a character's skill tree closed with its layer count not back at the start, so the screen stayed
+             * "covered" and ignored the mouse; 2026-11-16) */
             __atomic_store_n(&page, PAGE_NONE, __ATOMIC_RELEASE);
             __atomic_store_n(&wheel_steps, 0, __ATOMIC_RELEASE);
         }
@@ -449,6 +472,7 @@ int mousemenu_wheel(int dir) {
 
 /* The currently focused visible slot (0 .. cols*rows - 1) on screen s, or -1. */
 static int screen_focus(const Screen *s, uint64_t ctrl, uint64_t lv) {
+    if (s->vtable == WATCH_SKILLS_VTABLE) return __atomic_load_n(&wsk_index, __ATOMIC_ACQUIRE);
     if (s->lv_hash) {
         if (!lv) return -1;
         int32_t top = (int32_t)ld32(lv + 0x114) + (int32_t)ld32(lv + 0xb0);
@@ -677,8 +701,13 @@ uint64_t mousemenu_update(float mx, float my, int w, int h, uint32_t mouse_butto
         int cols = s->cols;
         int dr = target / cols - focus / cols, dc = target % cols - focus % cols;
         if (dr) press = dr > 0 ? BTN_DOWN : BTN_UP;
-        else if (dc) press = dc > 0 ? BTN_RIGHT : BTN_LEFT;
-        else if (click_target >= 0) {
+        else if (dc) {
+            press = dc > 0 ? BTN_RIGHT : BTN_LEFT;
+            if (s->vtable == WATCH_SKILLS_VTABLE) {  /* the press moves the highlight: count it (see wsk_index) */
+                int n = __atomic_load_n(&wsk_index, __ATOMIC_ACQUIRE) + (dc > 0 ? 1 : -1);
+                __atomic_store_n(&wsk_index, n < 0 ? 0 : n > 5 ? 5 : n, __ATOMIC_RELEASE);
+            }
+        } else if (click_target >= 0) {
             if (s->vtable == 0x14c60f8u) {
                 float uw = (float)w, uh = (float)h;
                 if (uw * 9.0f > uh * 16.0f) uw = uh * 16.0f / 9.0f;

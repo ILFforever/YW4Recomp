@@ -101,3 +101,17 @@ The rest of the Yo-kai Pad pages are assumed working; remaining issues to fix:
 - **Slimey marks (Trophies)**: page not working.
 - **Treasure photos**: only Y axis working.
 - **Organize Members → Switch moves**: not working.
+
+### Open issues: test results (2026-11-16)
+Full screen map with the vtables, hashes and screenshots: [docs/mouse-menu-map.md](../mouse-menu-map.md).
+- **Watch skills**: partly. The first character (Cole) opens her skill tree by click. The game moves the character
+  highlight with LEFT and RIGHT but does not report it through OnChangeFocus, so the mouse keeps its own count
+  (`wsk_index` in mousemenu.c). Built; not yet proven by a scripted-mouse run (see map).
+- **Soulmate**: partly. The 2 x 2 tile menu (Pad page 1) is now in `screens[]`, so Soul List opens by click.
+- **Slimey marks (Trophies)**: partly. The Slimey Mark list (its own class, not the Yo-kai Trophies class) is in
+  `screens[]`. Its row click is sent, not yet shown to open a sub-page. Yo-kai Trophies (page 2) gained SCR_CLICK.
+- **Treasure photos**: fixed. It is a 5 x 3 grid, not a 1 x 4 list; hover and click work.
+- **Organize Members -> Switch moves**: partly. Switch Moves opens by click; its moves and equipment page is not in
+  `screens[]`.
+- Found on the way: "isn't available right now" message boxes (Diary, Lambert Mail, Ark Swap) take all clicks until A
+  is pressed, and a right click does not close them.
