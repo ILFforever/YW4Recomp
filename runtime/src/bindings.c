@@ -1560,7 +1560,8 @@ int bindings_rows(BindRow *rows, int max, int *sel_row, int *sel_col, char *help
         static const char *const by_mode[RUN_MODES] = {
             "OFF IN THE DEFAULT RUNNING MODE, WHERE B HOLDS TO RUN. PICK ANOTHER MODE ABOVE TO USE IT.", "HOLD TO WALK.",
             "PRESS TO START OR STOP RUNNING.", "HOLD TO RUN."};
-        snprintf(what, sizeof what, "%s (RUNNING MODE: %s.)", by_mode[run_mode()], run_mode_name(run_mode()));
+        if (run_mode() == RUN_DEFAULT) snprintf(what, sizeof what, "%s", by_mode[RUN_DEFAULT]);  /* names it already */
+        else snprintf(what, sizeof what, "%s (RUNNING MODE: %s.)", by_mode[run_mode()], run_mode_name(run_mode()));
     }
     if (bindings_capturing())
         snprintf(help, (size_t)help_size,
@@ -1570,11 +1571,11 @@ int bindings_rows(BindRow *rows, int max, int *sel_row, int *sel_col, char *help
     else if (o >= 0)
         snprintf(help, (size_t)help_size, "%s|%s ALSO PRESSES %s. BOTH WORK, BUT THE GAME SEES THEM TOGETHER.", what,
                  col < BIND_KEYS ? key_name(key) : pad_label(pad), other);
-    else if (in == RUN_INPUT && run_mode() == RUN_DEFAULT)  /* greyed out: nothing to change here */
-        snprintf(help, (size_t)help_size, "%s|UP: RUNNING MODE.", what);
     else
         snprintf(help, (size_t)help_size, "%s|ENTER OR A: CHANGE. DELETE OR X: CLEAR.%s", what,
-                 col == BIND_KEYS ? " BUTTONS ARE NAMED AS ON YOUR CONTROLLER." : "");
+                 in == RUN_INPUT && run_mode() == RUN_DEFAULT ? " DISABLED WHILE RUNNING MODE IS DEFAULT."
+                 : col == BIND_KEYS                          ? " BUTTONS ARE NAMED AS ON YOUR CONTROLLER."
+                                                             : "");
     return n;
 }
 
