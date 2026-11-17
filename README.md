@@ -583,7 +583,7 @@ from there (while the game isn't running) ([decision 0074](docs/decisions/0074-c
 <details>
 <summary><b>Diary save slots</b>: five save slots stacked in the Diary, and one Autosave under them</summary>
 
-![The Diary on the title screen: two saves (Summer, and Katie marked Latest!), three empty slots and the Autosave row, with Katie's diary page on the right](docs/screenshots/100-diary-save-slots.jpg)
+![The Diary on the title screen: two saves (Summer, and Dean marked Latest!), three empty slots and the Autosave row, with Dean's diary page on the right](docs/screenshots/100-diary-save-slots.jpg)
 
 The game keeps one save and one autosave. Here the Diary has **five save slots**, shown as five rows like the game's
 own, with the **Autosave** (your latest play) under them:
@@ -595,7 +595,12 @@ own, with the **Autosave** (your latest play) under them:
 
   ![Save in the game: slot 2 of 5 (Katie) on the diary page, and the hint at the bottom: Change Slot, Save, Back](docs/screenshots/100-diary-save-in-game.jpg)
 
-- **New Game** asks which slot your new game goes in, and asks again before it replaces a save.
+- **New Game** asks which slot your new game goes in, in the Diary's look, and asks again before it replaces a save.
+  **Back to the title** (or Back) leaves without starting one. A save is only replaced when you save your new game
+  over it in the Diary.
+
+  ![New Game: the slot list in the Diary's look, slot 1 (Summer) chosen with its page on the right, slot 2 (Dean), three empty slots and Back to the title](docs/screenshots/100-diary-new-game.jpg)
+
 - **X** twice deletes a slot's save.
 
 Your existing save is slot 1. Your game files aren't changed: the extra rows are made in memory each time the game
