@@ -11,6 +11,7 @@
 #include "gamemenu.h"
 #include "battle.h"
 #include "bindings.h"
+#include "mousemenu.h"
 #include "bugreport.h"
 #include "cheats.h"
 #include "savefs.h"
@@ -480,11 +481,26 @@ static int peek_;
  * mouse) holds until the card hides (owner, 2026-11-13) */
 static int peek_mode = -1;
 int gamemenu_peeking(void) { return __atomic_load_n(&peek_, __ATOMIC_ACQUIRE) && !gamemenu_open(); }
+/* In a battle the card also pauses the fight (owner, 2026-11-18): opening it presses Plus, which opens the
+ * Stopwatch (the battle's pause; it may show), unless the Stopwatch is open already; closing it closes the Stopwatch
+ * again if this card opened it and it is still open. Exploring, the card stays a quick look over the running game. */
+enum { PEEK_PLUS = 1 << 10, PEEK_CLOSE = 1 << 1 };  /* svc_hid bits: Plus; B closes the Stopwatch */
+static int peek_paused;  /* this card opened the Stopwatch */
 void gamemenu_peek_toggle(void) {
     int on = !__atomic_load_n(&peek_, __ATOMIC_ACQUIRE);
     if (on) __atomic_store_n(&peek_mode, -1, __ATOMIC_RELEASE);  /* each time it opens: the game's mode */
     __atomic_store_n(&peek_, on, __ATOMIC_RELEASE);
     __atomic_add_fetch(&changes, 1, __ATOMIC_ACQ_REL);
+    if (on && battle_active() && !mousemenu_stopwatch()) {
+        window_press_for_player(PEEK_PLUS), peek_paused = 1;
+        fprintf(stderr, "yw4: overlay: F2 card in a battle: Plus (the Stopwatch)\n");
+    } else if (!on && peek_paused) {
+        peek_paused = 0;
+        if (battle_active() && mousemenu_stopwatch()) {
+            window_press_for_player(PEEK_CLOSE);
+            fprintf(stderr, "yw4: overlay: F2 card closed: B (the Stopwatch closed)\n");
+        }
+    }
 }
 static int peek_shown_mode(void) {
     int m = __atomic_load_n(&peek_mode, __ATOMIC_ACQUIRE);

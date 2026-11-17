@@ -1343,6 +1343,9 @@ static void pause_press_button(uint64_t button) {
     pause_press_reads = window_input_reads() + 2;
     __atomic_store_n(&pause_press, button, __ATOMIC_RELEASE);
 }
+/* A Switch button pressed for the player, until the game has read the input twice (the F2 card in a battle opens and
+ * closes the Stopwatch with it; gamemenu.c). */
+void window_press_for_player(uint64_t button) { pause_press_button(button); }
 
 static void pause_live(const char *why) {
     __atomic_store_n(&pause_press, 0, __ATOMIC_RELEASE);

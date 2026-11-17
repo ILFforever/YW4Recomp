@@ -43,6 +43,7 @@ int window_pause_to_title(void);
 int window_pause_title_state(void);
 int window_key_x_held(void);  /* the keyboard's X key is down (savefs.c: the Diary's delete) */
 int window_paused(void);  /* the overlay's pause is on: the player's input is held back */
+void window_press_for_player(uint64_t button);  /* a Switch button (svc_hid bits), until the game has read it twice */
 uint64_t window_pause_buttons(void);  /* the buttons it presses for the player now (live input and replays) */
 
 /* The refresh rate of the display the window is on, in Hz (0 not known yet, or no window). Any thread. */
