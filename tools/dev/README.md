@@ -15,6 +15,7 @@ and keys are in [docs/debugging.md](../../docs/debugging.md). Nothing here conta
 | `python -m tools.dev.pipebench` | Builds `pipebench.c` and times **cold** Vulkan pipeline builds of translated shaders |
 | `python -m tools.dev.spv_salt` | Makes a compiled shader new to the driver's cache, to test a cold start in the real game |
 | `python -m tools.dev.decisions` | Writes the decisions' index ([docs/decisions/README.md](../../docs/decisions/README.md)) from each record's header; `--check` also finds dead links, `decision NNNN` mentions of records that don't exist and code paths that are gone |
+| `python -m tools.dev.code_map` | Writes the site's code map data ([docs/advanced/](../../docs/advanced/)): every runtime module and function and who calls whom. Run it after runtime changes; `--check` exits 1 when it is out of date |
 | `python -m tools.yw4.mainview` | Groups a traced frame into passes with the engine functions that draw them ([frame.md](../../docs/frame.md)) |
 
 ## A test run, start to finish

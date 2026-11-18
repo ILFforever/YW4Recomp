@@ -36,7 +36,7 @@ html { scroll-padding-top: 78px; }
 .site-top .brand:hover { color: var(--ink); }
 .site-top .brand img { width: 34px; height: 34px; border-radius: 9px; }
 .site-top .nav { display: flex; gap: 2px; margin-left: auto; }
-.site-top .nav a { font: 700 .88rem/1 var(--display); color: var(--ink); text-decoration: none; padding: 9px 11px; border-radius: 8px; }
+.site-top .nav a { font: 700 .88rem/1 var(--display); color: var(--ink); text-decoration: none; padding: 9px 11px; border-radius: 8px; white-space: nowrap; }
 .site-top .nav a:hover { background: var(--soft); color: var(--ink); }
 .site-top .nav a[aria-current="page"] { background: var(--soft); color: var(--accent-ink); }
 .site-top .tools { display: flex; gap: 8px; align-items: center; }
@@ -61,7 +61,8 @@ html { scroll-padding-top: 78px; }
 .site-top .coffee:hover { color: #000; background: #ffe633; }
 .site-top .coffee svg { width: 17px; height: 17px; fill: none; stroke: currentColor; stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; flex: none; }
 @media (max-width: 1100px) { .site-top .coffee .lbl { display: none; } .site-top .coffee { width: 38px; padding: 0; justify-content: center; } }
-@media (max-width: 900px) { .site-top .nav { display: none; } .site-top .tools { margin-left: auto; } }
+/* seven pages since Advanced (2026-11-18): the row needs about 1000px, so it hides below that rather than wrapping */
+@media (max-width: 1000px) { .site-top .nav { display: none; } .site-top .tools { margin-left: auto; } }
 
 /* ---- the other pages: their own layout in the v3 colours ---- */
 body.sub {

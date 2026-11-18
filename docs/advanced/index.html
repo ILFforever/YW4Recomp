@@ -1,0 +1,983 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>YW4 Recomp · Advanced</title>
+<link rel="icon" href="../favicon.ico" sizes="any">
+<link rel="icon" type="image/png" href="../img/icon-192.png">
+<link rel="apple-touch-icon" href="../img/icon-192.png">
+<meta name="description" content="How the PC version of Yo-kai Watch 4++ is put together: an interactive map of the runtime's modules and functions, and where to read more.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=M+PLUS+Rounded+1c:wght@500;700;800;900&family=Zen+Kaku+Gothic+New:wght@400;500;700&display=swap" rel="stylesheet">
+<style>
+/* Advanced: the site's v3 look (site.css) with one wide figure, the code map. Map colours: the eight area colours
+ * below (a validated categorical order, stepped separately for dark); everything else uses site.css's tokens. */
+:root {
+  --s1: #2a78d6; --s2: #eb6834; --s3: #1baf7a; --s4: #eda100; --s5: #e87ba4; --s6: #008300; --s7: #6250d6; --s8: #e34948;
+  --mono: ui-monospace, "Cascadia Mono", "JetBrains Mono", Consolas, monospace;
+  --r: 14px;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) { --s1: #3987e5; --s2: #d95926; --s3: #199e70; --s4: #c98500; --s5: #d55181; --s6: #0ca30c; --s7: #9085e9; --s8: #e66767; }
+}
+:root[data-theme="dark"] { --s1: #3987e5; --s2: #d95926; --s3: #199e70; --s4: #c98500; --s5: #d55181; --s6: #0ca30c; --s7: #9085e9; --s8: #e66767; }
+
+* { box-sizing: border-box; }
+[hidden] { display: none !important; }
+html { scroll-behavior: smooth; }
+body { margin: 0; overflow-x: hidden; font: 400 1rem/1.7 var(--body); font-variant-numeric: tabular-nums; }
+code { font: 500 .86em/1.4 var(--mono); background: var(--soft); border-radius: 5px; padding: 1px 5px; overflow-wrap: anywhere; }
+.page { max-width: 1120px; margin: 0 auto; padding: 0 20px; }
+
+/* ---- the header */
+.adv-hero { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: clamp(24px, 4vw, 56px); align-items: center;
+  padding: 48px 0 32px; }
+.eyebrow { font: 700 .8rem/1 var(--display); letter-spacing: .16em; text-transform: uppercase; color: var(--accent); }
+.adv-hero h1 { font: 900 clamp(2.2rem, 1.6rem + 2.4vw, 3.3rem)/1.08 var(--display); margin: 12px 0 14px; letter-spacing: -.01em; }
+.adv-hero p { margin: 0 0 22px; color: var(--ink-2); max-width: 48ch; }
+.adv-stats { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); border: 1px solid var(--line); border-radius: 12px;
+  overflow: hidden; margin: 0 0 22px; background: var(--card); }
+.adv-stats div { padding: 12px 14px; }
+.adv-stats div + div { border-left: 1px solid var(--line); }
+.adv-stats b { display: block; font: 800 1.3rem/1.1 var(--display); color: var(--violet); }
+.adv-stats span { font-size: .8rem; color: var(--ink-2); line-height: 1.35; display: block; margin-top: 4px; }
+.adv-links { display: flex; flex-wrap: wrap; gap: 10px; }
+.adv-btn { font: 800 .92rem/1 var(--display); text-decoration: none; border-radius: 10px; padding: 13px 18px;
+  border: 2px solid var(--violet); background: var(--violet); color: var(--on-violet) !important; }
+.adv-btn:hover { background: var(--violet-hover); border-color: var(--violet-hover); }
+.adv-btn.ghost { background: transparent; color: var(--ink) !important; border-color: var(--line); }
+.adv-btn.ghost:hover { border-color: var(--violet); background: transparent; }
+
+/* the areas card: lines of code per area, to one scale */
+.areas { background: var(--card); border: 1px solid var(--line); border-radius: var(--r); padding: 18px 20px 16px; box-shadow: 0 14px 34px var(--shade); }
+.areas h2 { margin: 0 0 2px; font: 800 1.05rem/1.3 var(--display); }
+.areas .sub { margin: 0 0 12px; font-size: .84rem; color: var(--ink-2); }
+.areas ol { list-style: none; margin: 0; padding: 0; display: grid; gap: 7px; }
+.areas li { display: grid; grid-template-columns: minmax(0, 11.5em) minmax(0, 1fr) 4.2em; gap: 10px; align-items: center; font-size: .86rem; }
+.areas .nm { display: flex; align-items: center; gap: 8px; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.areas .dot { width: 10px; height: 10px; border-radius: 50%; flex: none; }
+.areas .track { height: 10px; border-radius: 0 4px 4px 0; background: var(--soft); overflow: hidden; }
+.areas .fill { height: 100%; border-radius: 0 4px 4px 0; }
+.areas .v { text-align: right; color: var(--ink-2); font-size: .8rem; }
+.areas .src { margin: 10px 0 0; font-size: .76rem; color: var(--ink-2); }
+
+/* ---- sections */
+.sec-title { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 16px; margin: 0 0 14px; }
+.sec-title h2 { margin: 0; font: 900 clamp(1.4rem, 1.2rem + .8vw, 1.9rem)/1.2 var(--display); }
+.sec-title p { margin: 0; color: var(--ink-2); }
+
+/* ---- the code map: wider than the text, like a figure */
+.mapwrap { max-width: 1360px; margin: 8px auto 0; padding: 0 20px; scroll-margin-top: 70px; }
+article.cm { background: var(--card); border: 1px solid var(--line); border-radius: var(--r); overflow: hidden; }
+.cm .bar { display: flex; align-items: center; gap: 12px; padding: 12px 20px; background: var(--bar); color: #fff; flex-wrap: wrap; }
+.cm .bar h2 { margin: 0; font: 800 1.3rem/1.2 var(--display); color: #fff; }
+.cm .bar .cat { font: 700 .7rem/1 var(--display); letter-spacing: .14em; text-transform: uppercase; color: #ffd36b; margin-left: auto; }
+.cm .bar .crumb { font: 500 .95rem/1.2 var(--mono); color: #e7dcf7; }
+.cm-body { padding: 14px 16px 16px; display: grid; gap: 12px; }
+.cm-lede { margin: 0; color: var(--ink-2); font-size: .95rem; max-width: 90ch; }
+
+.cm-toolbar { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; min-height: 36px; }
+.cm-chips, .cm-crumbs { display: flex; flex-wrap: wrap; gap: 6px; flex: 1 1 520px; min-width: 0; align-items: center; }
+.cm-chip { display: inline-flex; align-items: center; gap: 6px; padding: 4px 11px 4px 9px; border-radius: 999px; border: 1px solid var(--line);
+  background: var(--card); color: var(--ink); font: 500 .82rem/1.4 var(--body); cursor: pointer; }
+.cm-chip .dot { width: 10px; height: 10px; border-radius: 50%; flex: none; }
+.cm-chip .n { color: var(--ink-2); }
+.cm-chip[aria-pressed="false"] { color: var(--ink-2); background: transparent; border-style: dashed; }
+.cm-chip[aria-pressed="false"] .dot { background: transparent !important; box-shadow: inset 0 0 0 1.5px var(--ink-2); }
+.cm-chip:hover { border-color: var(--violet); }
+.cm-tools { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.cm-tools input[type="search"] { font: 500 .85rem/1.2 var(--mono); padding: 8px 11px; width: 250px; max-width: 100%;
+  border: 1px solid var(--line); border-radius: 10px; background: var(--card); color: var(--ink); }
+.cm-btn { font: 700 .84rem/1 var(--display); padding: 9px 13px; border-radius: 10px; border: 1px solid var(--line); background: var(--card);
+  color: var(--ink); cursor: pointer; }
+.cm-btn:hover { border-color: var(--violet); }
+.cm-btn.primary { background: var(--violet); border-color: var(--violet); color: var(--on-violet); }
+.cm-btn.primary:hover { background: var(--violet-hover); }
+.cm-check { display: inline-flex; gap: 6px; align-items: center; font-size: .84rem; color: var(--ink-2); cursor: pointer; }
+.cm-check input { accent-color: var(--violet); }
+
+.cm-main { display: grid; grid-template-columns: minmax(0, 1fr) 360px; gap: 14px; align-items: start; }
+.cm-stage { position: relative; background: var(--bg); border: 1px solid var(--line); border-radius: 12px; overflow: hidden;
+  height: min(calc(100vh - 170px), 800px); min-height: 480px; }
+#graph { width: 100%; height: 100%; display: block; cursor: grab; touch-action: none; }
+#graph:active { cursor: grabbing; }
+.cm-hint { position: absolute; left: 10px; bottom: 10px; font-size: .74rem; color: var(--ink-2); pointer-events: none; background: var(--card);
+  border: 1px solid var(--line); padding: 2px 8px; border-radius: 6px; }
+.cm-zoom { position: absolute; right: 10px; top: 10px; display: grid; gap: 4px; }
+.cm-zoom button { width: 32px; height: 32px; border-radius: 8px; border: 1px solid var(--line); background: var(--card); color: var(--ink);
+  font: 800 1.05rem/1 var(--display); cursor: pointer; display: grid; place-items: center; padding: 0; }
+.cm-zoom button:hover { border-color: var(--violet); }
+
+#graph .link { stroke: var(--ink-2); stroke-opacity: .2; fill: none; }
+#graph .link.inc { stroke-dasharray: 3 3; }
+#graph .link.dim { stroke-opacity: .04; }
+#graph .link.hl { stroke: var(--ink); stroke-opacity: .8; }
+#graph .link.hl.in { stroke: var(--accent-ink); stroke-opacity: .7; }
+#graph .fileview .link { stroke-opacity: .28; }
+#graph .fileview .link.dim { stroke-opacity: .05; }
+#graph .fileview .link.hl { stroke-opacity: .85; }
+#graph .node circle { fill: var(--c); stroke: var(--bg); stroke-width: 1.5; cursor: pointer; }
+#graph .node.priv circle { fill: var(--bg); stroke: var(--c); stroke-width: 2; }
+#graph .node.tables circle { stroke-dasharray: 2 2; }
+#graph .node.sel circle { stroke: var(--ink); stroke-width: 3; }
+#graph .node.dim { opacity: .15; }
+#graph .node text { font: 500 11px var(--mono); fill: var(--ink); pointer-events: none; paint-order: stroke; stroke: var(--bg);
+  stroke-width: 3px; stroke-linejoin: round; display: none; }
+#graph .node.big text, #graph.zoomed .node text, #graph .node.nb text, #graph .node.sel text, #graph .node.hover text, #graph .node.ext text { display: block; }
+#graph .node.dim text { display: none; }
+#graph .node.ext.dim text { display: block; }
+#graph .node.ext text { fill: var(--ink-2); pointer-events: auto; cursor: pointer; }
+#graph .node.sel text { font-weight: 700; font-size: 12.5px; fill: var(--ink); }
+#graph .hdr { cursor: pointer; }
+#graph .hdr text { font: 700 12px var(--mono); fill: var(--ink); }
+#graph .hdr .open { fill: var(--ink-2); font-family: var(--body); font-weight: 500; }
+#graph .hdr:hover text { text-decoration: underline; }
+#graph .hdr.dim { opacity: .3; }
+#graph .colhead { font: 800 12px var(--display); fill: var(--ink-2); letter-spacing: .08em; text-transform: uppercase; }
+#graph .colrule { stroke: var(--line); }
+#graph .cluster { font: 800 13px var(--display); fill: var(--ink-2); text-anchor: middle; letter-spacing: .06em; text-transform: uppercase;
+  pointer-events: none; paint-order: stroke; stroke: var(--bg); stroke-width: 4px; }
+#graph .cluster.dim { opacity: .25; }
+
+.cm-tip { position: absolute; pointer-events: none; background: var(--ink); color: var(--card); padding: 6px 10px; border-radius: 8px;
+  font-size: .78rem; line-height: 1.45; max-width: 300px; z-index: 2; }
+.cm-tip b { font: 600 .95em var(--mono); }
+
+aside.cm-panel { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 16px; display: grid; gap: 14px;
+  max-height: min(calc(100vh - 170px), 800px); min-height: 480px; overflow: auto; align-content: start; font-size: .9rem; line-height: 1.55; }
+.cm-panel h2 { margin: 0; font: 600 1.15rem/1.3 var(--mono); overflow-wrap: anywhere; }
+.cm-panel h3 { margin: 0 0 6px; font: 800 .72rem/1.2 var(--display); text-transform: uppercase; letter-spacing: .1em; color: var(--ink-2); }
+.cm-panel p { margin: 0; color: var(--ink-2); }
+.cm-area { display: inline-flex; align-items: center; gap: 6px; font-size: .8rem; color: var(--ink-2); }
+.cm-area .dot { width: 10px; height: 10px; border-radius: 50%; }
+.cm-facts { display: flex; flex-wrap: wrap; gap: 2px 16px; font-size: .84rem; color: var(--ink-2); }
+.cm-facts b { color: var(--ink); font-weight: 700; }
+.cm-files { display: grid; gap: 2px; font: 500 .8rem/1.5 var(--mono); overflow-wrap: anywhere; }
+.cm-legend { display: grid; gap: 4px; font-size: .82rem; color: var(--ink-2); }
+.cm-legend span { display: inline-flex; align-items: center; gap: 8px; }
+.cm-legend i { width: 11px; height: 11px; border-radius: 50%; display: inline-block; flex: none; }
+ul.cm-rel { list-style: none; margin: 0; padding: 0; display: grid; gap: 1px; }
+ul.cm-rel button { width: 100%; text-align: left; display: grid; grid-template-columns: 10px minmax(0, 1fr) auto; gap: 1px 8px; align-items: baseline;
+  background: none; border: 0; border-radius: 8px; padding: 5px 7px; font: inherit; color: var(--ink); cursor: pointer; }
+ul.cm-rel button:hover { background: var(--soft); }
+ul.cm-rel .dot { width: 8px; height: 8px; border-radius: 50%; align-self: center; }
+ul.cm-rel .dot.priv { background: transparent !important; box-shadow: inset 0 0 0 1.5px var(--c); }
+ul.cm-rel .nm { font: 500 .84rem/1.4 var(--mono); overflow-wrap: anywhere; }
+ul.cm-rel .nm small { color: var(--ink-2); font-size: .72rem; }
+ul.cm-rel .ct { font-size: .76rem; color: var(--ink-2); }
+ul.cm-rel .fns { grid-column: 2 / 4; font: 400 .72rem/1.45 var(--mono); color: var(--ink-2); overflow-wrap: anywhere; }
+ul.cm-rel .about { display: grid; grid-template-columns: 10px minmax(0, 1fr); gap: 1px 8px; padding: 5px 7px; }
+ul.cm-rel .about .dot { margin-top: 8px; }
+ul.cm-rel .about span span { color: var(--ink-2); font-size: .82rem; }
+.cm-empty { color: var(--ink-2); font-size: .84rem; }
+.cm-btnrow { display: flex; flex-wrap: wrap; gap: 8px; }
+details.cm-more summary { cursor: pointer; font-size: .86rem; color: var(--ink-2); }
+details.cm-more ul { margin-top: 6px; }
+
+details.cm-table { border-top: 1px solid var(--line); padding-top: 4px; }
+details.cm-table > summary { cursor: pointer; font: 700 .9rem/1.4 var(--display); padding: 6px 2px; }
+.cm-scroll { overflow-x: auto; }
+.cm-scroll table { width: 100%; border-collapse: collapse; font-size: .84rem; }
+.cm-scroll th, .cm-scroll td { text-align: left; padding: 6px 10px; border-bottom: 1px solid var(--line); white-space: nowrap; }
+.cm-scroll td.blurb { white-space: normal; min-width: 320px; color: var(--ink-2); }
+.cm-scroll th { font: 800 .7rem/1.2 var(--display); text-transform: uppercase; letter-spacing: .08em; color: var(--ink-2); }
+.cm-scroll th button { all: unset; cursor: pointer; }
+.cm-scroll th button:focus-visible { outline: 2px solid var(--violet); }
+.cm-scroll .num { text-align: right; }
+.cm-scroll .mono { font-family: var(--mono); }
+.cm-scroll tbody tr { cursor: pointer; }
+.cm-scroll tbody tr:hover { background: var(--soft); }
+.cm-note { margin: 0; font-size: .82rem; color: var(--ink-2); max-width: 100ch; }
+
+/* ---- more for developers */
+.more { padding: 44px 0 56px; }
+.cards { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
+.cards a { display: grid; gap: 4px; height: 100%; padding: 16px 18px; background: var(--card); border: 1px solid var(--line); border-radius: 12px;
+  text-decoration: none; color: var(--ink) !important; }
+.cards a:hover { border-color: var(--violet); }
+.cards b { font: 800 1rem/1.3 var(--display); }
+.cards span { font-size: .86rem; color: var(--ink-2); line-height: 1.5; }
+.cards .where { font: 500 .74rem/1.4 var(--mono); color: var(--accent-ink); }
+
+footer .in { max-width: 1120px; margin: 0 auto; padding: 24px 20px 32px; font-size: .86rem; display: grid; gap: 6px; }
+
+@media (max-width: 960px) {
+  .adv-hero { grid-template-columns: minmax(0, 1fr); padding-top: 32px; }
+  .cm-main { grid-template-columns: minmax(0, 1fr); }
+  .cm-stage { height: 64vh; min-height: 400px; }
+  aside.cm-panel { max-height: none; min-height: 0; }
+  .cards { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+@media (max-width: 560px) {
+  .adv-stats { grid-template-columns: minmax(0, 1fr); }
+  .adv-stats div + div { border-left: 0; border-top: 1px solid var(--line); }
+  .cards { grid-template-columns: minmax(0, 1fr); }
+  .areas li { grid-template-columns: minmax(0, 9.5em) minmax(0, 1fr) 3.8em; }
+  .cm-body { padding: 12px 10px; }
+}
+@media (prefers-reduced-motion: reduce) { html { scroll-behavior: auto; } }
+</style>
+<link rel="stylesheet" href="../site.css">
+<script>
+/* the theme before the page draws: the reader's choice if kept, else the system's (no flash of the wrong one) */
+try { const t = localStorage.getItem('yw4-theme'); if (t === 'dark' || t === 'light') document.documentElement.dataset.theme = t; } catch (e) {}
+</script>
+</head>
+<body class="sub">
+
+<header class="site-top">
+  <div class="wrap">
+    <a class="brand" href="../"><img src="../img/icon-192.png" alt="" width="34" height="34">YW4 Recomp</a>
+    <nav class="nav" aria-label="Pages">
+      <a href="../changelog/">What's new</a>
+      <a href="../compare/">Comparisons</a>
+      <a href="../showcases/">Showcases</a>
+      <a href="../launcher/">Launcher</a>
+      <a href="../overlay/">Overlay</a>
+      <a href="../building/">Build it</a>
+      <a href="../advanced/" aria-current="page">Advanced</a>
+    </nav>
+    <div class="tools">
+      <button class="iconbtn" id="theme" type="button" aria-label="Dark mode"><svg class="moon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M20 14.5A8 8 0 0 1 9.5 4a8 8 0 1 0 10.5 10.5z"/></svg><svg class="sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="4.2"/><path d="M12 2.5v2.2M12 19.3v2.2M2.5 12h2.2M19.3 12h2.2M5.3 5.3l1.6 1.6M17.1 17.1l1.6 1.6M5.3 18.7l1.6-1.6M17.1 6.9l1.6-1.6"/></svg></button>
+      <a class="iconbtn" href="https://github.com/ILFforever/YW4Recomp" aria-label="The project on GitHub"><svg viewBox="0 0 16 16" fill="currentColor"><path d="M8 0c4.42 0 8 3.58 8 8a8.013 8.013 0 0 1-5.45 7.59c-.4.08-.55-.17-.55-.38 0-.27.01-1.13.01-2.2 0-.75-.25-1.23-.54-1.48 1.78-.2 3.65-.88 3.65-3.95 0-.88-.31-1.59-.82-2.15.08-.2.36-1.02-.08-2.12 0 0-.67-.22-2.2.82-.64-.18-1.32-.27-2-.27-.68 0-1.36.09-2 .27-1.53-1.03-2.2-.82-2.2-.82-.44 1.1-.16 1.92-.08 2.12-.51.56-.82 1.28-.82 2.15 0 3.06 1.86 3.75 3.64 3.95-.23.2-.44.55-.51 1.07-.46.21-1.61.55-2.33-.66-.15-.24-.6-.83-1.23-.82-.67.01-.27.38.01.53.34.19.73.9.82 1.13.16.45.68 1.31 2.69.94 0 .67.01 1.3.01 1.49 0 .21-.15.45-.55.38A7.995 7.995 0 0 1 0 8c0-4.42 3.58-8 8-8Z"/></svg></a>
+      <a class="coffee" href="https://buymeacoffee.com/ilfforever" aria-label="Buy me a coffee"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M2.5 5.5h8.5v4.5a3.5 3.5 0 0 1-3.5 3.5h-1.5a3.5 3.5 0 0 1-3.5-3.5Z"/><path d="M11 6.5h1a2 2 0 0 1 0 4h-1"/><path d="M5 1.5c-.6.8.6 1.4 0 2.2M8 1.5c-.6.8.6 1.4 0 2.2"/></svg><span class="lbl">Buy me a coffee</span></a>
+    </div>
+  </div>
+</header>
+
+<div class="page">
+  <section class="adv-hero">
+    <div>
+      <span class="eyebrow">YW4 Recomp · for developers</span>
+      <h1>Advanced</h1>
+      <p>How the port is put together: a map of the runtime's code that you can click through, and where to read more.
+        For anyone reading or changing the code. You don't need any of this to play.</p>
+      <div class="adv-stats">
+        <div><b id="stModules">102</b><span>modules in runtime/</span></div>
+        <div><b id="stFuncs">2,040</b><span>functions, with who calls whom</span></div>
+        <div><b id="stLines">45,903</b><span>lines of C</span></div>
+      </div>
+      <div class="adv-links">
+        <a class="adv-btn" href="#map">Open the code map</a>
+        <a class="adv-btn ghost" href="#more">More for developers</a>
+      </div>
+    </div>
+    <div class="areas">
+      <h2>The runtime in eight areas</h2>
+      <p class="sub">Lines of code in each, from the map's data</p>
+      <ol id="areaBars"></ol>
+      <p class="src" id="areaSrc"></p>
+    </div>
+  </section>
+</div>
+
+<section class="mapwrap" id="map">
+  <article class="cm">
+    <div class="bar"><h2>Code map</h2><span class="crumb" id="barCrumb">runtime/</span><span class="cat" id="barCat">All modules</span></div>
+    <div class="cm-body">
+      <p class="cm-lede" id="lede"></p>
+      <div class="cm-toolbar">
+        <div class="cm-chips" id="chips" role="group" aria-label="Show or hide areas"></div>
+        <nav class="cm-crumbs" id="crumbs" hidden aria-label="Where you are in the map">
+          <button class="cm-btn" type="button" id="back">← All modules</button>
+        </nav>
+        <div class="cm-tools">
+          <input type="search" id="search" placeholder="Find a module or function…" list="findlist" aria-label="Find a module or function" autocomplete="off">
+          <datalist id="findlist"></datalist>
+          <label class="cm-check" id="incLabel"><input type="checkbox" id="showInc" checked> #include-only links</label>
+          <button class="cm-btn" id="reset" type="button">Reset view</button>
+        </div>
+      </div>
+
+      <div class="cm-main">
+        <div class="cm-stage" id="stage">
+          <svg id="graph" role="img" aria-label="Map of the YW4 Recomp runtime"></svg>
+          <div class="cm-zoom"><button type="button" id="zin" aria-label="Zoom in">+</button><button type="button" id="zout" aria-label="Zoom out">−</button></div>
+          <div class="cm-tip" id="tip" hidden></div>
+          <div class="cm-hint" id="hint"></div>
+        </div>
+        <aside class="cm-panel" id="panel" aria-live="polite"></aside>
+      </div>
+
+      <details class="cm-table" id="tableDetails">
+        <summary id="tableTitle">All modules as a table</summary>
+        <div class="cm-scroll">
+          <table>
+            <thead id="thead"></thead>
+            <tbody id="tbody"></tbody>
+          </table>
+        </div>
+      </details>
+
+      <p class="cm-note"><b>How it was made.</b> <code>python -m tools.dev.code_map</code> reads every <code>.c</code>, <code>.cpp</code>
+        and <code>.h</code> file in <code>runtime/src</code> and <code>runtime/include</code>. A file and its header count as one module
+        (<code>gpu.c</code> + <code>gpu.h</code> = <code>gpu</code>). Between modules, a line means one includes the other's header or names
+        a function defined there. Between functions, a line means one names the other in its body: a call, or passing it as a function pointer.
+        Calls through pointers at run time and calls inside macros are not seen. Not shown: the recompiled game code (made on your own
+        computer at build time), shaders, the launcher and the Python tools. <span id="commit"></span></p>
+    </div>
+  </article>
+</section>
+
+<div class="page more" id="more">
+  <div class="sec-title"><h2>More for developers</h2><p>The written side: how things work and why</p></div>
+  <ul class="cards">
+    <li><a href="../building/"><span class="where">Build it</span><b>Building from source</b><span>Build the game yourself on Windows or Linux, from your own game files.</span></a></li>
+    <li><a href="https://github.com/ILFforever/YW4Recomp/tree/master/docs/decisions"><span class="where">docs/decisions</span><b>Decision records</b><span>Why each part works the way it does, one record per choice, with its code files.</span></a></li>
+    <li><a href="https://github.com/ILFforever/YW4Recomp/blob/master/docs/frame.md"><span class="where">docs/frame.md</span><b>How a frame is built</b><span>The engine's passes, layers, draw items and materials, and which passes are ours.</span></a></li>
+    <li><a href="https://github.com/ILFforever/YW4Recomp/blob/master/docs/debugging.md"><span class="where">docs/debugging.md</span><b>Debugging options</b><span>Every environment variable and key the runtime reads.</span></a></li>
+    <li><a href="https://github.com/ILFforever/YW4Recomp/blob/master/tools/dev/README.md"><span class="where">tools/dev</span><b>Test tools</b><span>Repeatable test runs from a save, A/B comparisons in one run, shader build timing.</span></a></li>
+    <li><a href="https://github.com/ILFforever/YW4Recomp/blob/master/docs/known-issues.md"><span class="where">docs/known-issues.md</span><b>Known issues</b><span>What is missing or wrong right now.</span></a></li>
+  </ul>
+</div>
+
+<footer>
+  <div class="in">
+    <span>A fan project. Not affiliated with or endorsed by LEVEL-5 or Nintendo; <i>Yo-kai Watch</i> belongs to its
+      owners. The map shows only the project's own code; nothing from the game is in it.</span>
+    <span>The code map uses <a href="https://d3js.org">D3</a> (ISC licence, <a href="../vendor/d3/LICENSE">its notice</a>).</span>
+  </div>
+</footer>
+
+<script src="../vendor/d3/d3.min.js"></script>
+<script src="code-map.js"></script>
+<script>
+/* the theme switch: the other theme than the one showing, kept for next time */
+(() => {
+  const btn = document.getElementById('theme'), root = document.documentElement;
+  const dark = () => root.dataset.theme ? root.dataset.theme === 'dark' : matchMedia('(prefers-color-scheme: dark)').matches;
+  const label = () => btn.setAttribute('aria-label', dark() ? 'Light mode' : 'Dark mode');
+  label();
+  const flip = () => {
+    root.dataset.theme = dark() ? 'light' : 'dark';
+    try { localStorage.setItem('yw4-theme', root.dataset.theme); } catch (e) {}
+    label();
+  };
+  /* a slow cross-fade between the themes (site.css sets its length), where the browser can do one */
+  btn.addEventListener('click', () => {
+    if (document.startViewTransition && !matchMedia('(prefers-reduced-motion: reduce)').matches) document.startViewTransition(flip);
+    else flip();
+  });
+})();
+</script>
+<script>
+/* The code map. Two views on one SVG: all modules (a force layout, clustered by area) and the functions inside one
+ * module (callers from other files on the left, this module in the middle, what it calls on the right). The state
+ * lives in the address: #mod picks a module, #mod/ opens it, #mod/fn picks a function inside it. */
+(() => {
+const DATA = window.CODE_MAP;
+const REPO = "https://github.com/ILFforever/YW4Recomp/blob/";
+const GROUPS = {
+  vulkan:  { label: "Vulkan & window",       slot: 1, about: "Turns the game's NVN commands into Vulkan draws; owns the window and presents frames." },
+  overlay: { label: "Overlay & controls",    slot: 2, about: "The in-game overlay, settings, controls, cheats and bug reports." },
+  system:  { label: "Switch system",         slot: 3, about: "The kernel, native stand-ins for the sdk (HLE) and Switch services: files, saves, input, audio." },
+  passes:  { label: "Render passes",         slot: 4, about: "Our own versions of the game's passes: G-buffer, shadows, bloom, blur, anti-aliasing, widescreen." },
+  core:    { label: "Start-up & CPU",        slot: 5, about: "Loads the recompiled game and starts it; CPU helpers, threads, logs." },
+  nvn:     { label: "NVN graphics API",      slot: 6, about: "The Switch's graphics API, rebuilt natively, plus Tegra texture layouts." },
+  upscale: { label: "Upscaling & frame gen", slot: 7, about: "FSR and DLSS upscaling and frame generation." },
+  debug:   { label: "Debug & performance",   slot: 8, about: "Performance logs, profilers and trace tools for development." },
+};
+const GROUP_ORDER = Object.keys(GROUPS).sort((a, b) => GROUPS[a].slot - GROUPS[b].slot);
+const RING = ["core", "overlay", "debug", "upscale", "passes", "nvn", "system"];
+const colorOf = g => `var(--s${GROUPS[g].slot})`;
+const esc = s => String(s).replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+const fmt = n => n.toLocaleString("en-US");
+const plural = (n, w) => `${fmt(n)} ${w}${n === 1 ? "" : "s"}`;
+const reduceMotion = matchMedia("(prefers-reduced-motion: reduce)").matches;
+const T = sel => reduceMotion ? sel : sel.transition().duration(450);
+const $ = id => document.getElementById(id);
+if (!DATA || !window.d3) { $("lede").textContent = "The code map could not load its data or its library."; return; }
+
+// ---------- data
+const nodes = DATA.nodes.map(n => ({ ...n, out: [], in: [] }));
+const byId = new Map(nodes.map(n => [n.id, n]));
+const links = DATA.links.map(l => ({ ...l, s: l.source, t: l.target }));
+links.forEach(l => { byId.get(l.s).out.push(l); byId.get(l.t).in.push(l); });
+nodes.forEach(n => {
+  n.outN = n.out.length; n.inN = n.in.length;
+  n.r = 4 + Math.sqrt(n.loc) * 0.27;
+  n.out.sort((a, b) => b.fnCount - a.fnCount || a.t.localeCompare(b.t));
+  n.in.sort((a, b) => b.fnCount - a.fnCount || a.s.localeCompare(b.s));
+});
+const F = new Map(DATA.funcs.map(f => [f.k, { ...f, callers: [] }]));
+F.forEach(f => f.c.forEach(k => F.get(k).callers.push(f.k)));
+F.forEach(f => { f.group = byId.get(f.m).group; f.tables = f.n === "(tables)"; });
+const funcsByMod = d3.group([...F.values()], f => f.m);
+nodes.forEach(n => { n.fnTotal = (funcsByMod.get(n.id) || []).filter(f => !f.tables).length; });
+const realFuncs = [...F.values()].filter(f => !f.tables);
+const fileUrl = f => `${REPO}${DATA.commit}/${f}`;
+const fnUrl = f => `${REPO}${DATA.commit}/${f.f}#L${f.l}`;
+
+// ---------- header numbers and the areas card
+const totalLoc = d3.sum(nodes, n => n.loc);
+$("stModules").textContent = fmt(nodes.length);
+$("stFuncs").textContent = fmt(realFuncs.length);
+$("stLines").textContent = fmt(totalLoc);
+const areaLoc = GROUP_ORDER.map(g => ({ g, loc: d3.sum(nodes.filter(n => n.group === g), n => n.loc), n: nodes.filter(n => n.group === g).length }))
+  .sort((a, b) => b.loc - a.loc);
+const maxLoc = d3.max(areaLoc, a => a.loc);
+$("areaBars").innerHTML = areaLoc.map(a => `<li><span class="nm"><span class="dot" style="background:${colorOf(a.g)}"></span>${esc(GROUPS[a.g].label)}</span>
+  <span class="track" title="${fmt(a.loc)} lines in ${a.n} modules"><span class="fill" style="display:block;width:${(a.loc / maxLoc * 100).toFixed(1)}%;background:${colorOf(a.g)}"></span></span>
+  <span class="v">${fmt(a.loc)}</span></li>`).join("");
+$("areaSrc").textContent = `Non-blank lines, commit ${DATA.commit.slice(0, 7)} (${DATA.date}). Areas are grouped by hand.`;
+$("commit").innerHTML = `Made from commit <a href="${REPO.replace("/blob/", "/tree/")}${DATA.commit}">${DATA.commit.slice(0, 7)}</a> (${esc(DATA.date)}); function links open that commit on GitHub.`;
+
+const lede = $("lede"), hint = $("hint");
+const LEDE_OVERVIEW = "Every module in runtime/, clustered by area. A line means one file uses another. Click a dot to see what it uses and what uses it; double-click it, or press Open functions, to look inside.";
+const HINT_OVERVIEW = "Drag to pan · Ctrl + scroll or the buttons to zoom · double-click a dot to look inside";
+
+// ---------- area chips
+const hidden = new Set();
+const chips = $("chips");
+GROUP_ORDER.forEach(g => {
+  const b = document.createElement("button");
+  b.type = "button"; b.className = "cm-chip"; b.setAttribute("aria-pressed", "true"); b.title = GROUPS[g].about; b.dataset.g = g;
+  b.innerHTML = `<span class="dot" style="background:${colorOf(g)}"></span>${esc(GROUPS[g].label)} <span class="n">${nodes.filter(n => n.group === g).length}</span>`;
+  b.addEventListener("click", () => { if (hidden.has(g)) hidden.delete(g); else hidden.add(g); syncChips(); applyVisibility(); });
+  chips.appendChild(b);
+});
+function syncChips() { [...chips.children].forEach(c => c.setAttribute("aria-pressed", String(!hidden.has(c.dataset.g)))); }
+$("findlist").innerHTML =
+  nodes.map(n => n.id).sort().map(id => `<option value="${esc(id)}">`).join("") +
+  realFuncs.map(f => `${f.n} (${f.m})`).sort().map(v => `<option value="${esc(v)}">`).join("");
+
+// ---------- svg + zoom (the wheel zooms only with Ctrl, so the page still scrolls over the map)
+const stage = $("stage");
+const W = 1000, H = Math.max(620, Math.min(1500, Math.round(1000 * stage.clientHeight / Math.max(1, stage.clientWidth))));
+const svg = d3.select("#graph").attr("viewBox", `0 0 ${W} ${H}`);
+svg.append("defs").html(`
+  <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,1 L9,5 L0,9 z" style="fill:var(--ink)"></path></marker>
+  <marker id="arrow-in" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,1 L9,5 L0,9 z" style="fill:var(--accent-ink)"></path></marker>`);
+const ovRoot = svg.append("g");
+const fileRoot = svg.append("g").attr("class", "fileview").style("display", "none");
+let view = "overview", baseK = 1, ovBaseK = 1, ovT = null;
+const zoom = d3.zoom().scaleExtent([0.12, 6])
+  .filter(e => e.type === "wheel" ? (e.ctrlKey || e.metaKey) : (!e.ctrlKey || e.type === "wheel") && !e.button)
+  .on("zoom", e => {
+    (view === "overview" ? ovRoot : fileRoot).attr("transform", e.transform);
+    svg.classed("zoomed", e.transform.k >= baseK * 1.7);
+  });
+svg.call(zoom).on("dblclick.zoom", null);
+svg.on("click", () => { if (view === "overview") select(null); else selectFn(null); });
+$("zin").addEventListener("click", () => T(svg).call(zoom.scaleBy, 1.4));
+$("zout").addEventListener("click", () => T(svg).call(zoom.scaleBy, 1 / 1.4));
+
+const tip = $("tip");
+function showTip(html) { tip.innerHTML = html; tip.hidden = false; }
+function moveTip(e) {
+  const b = stage.getBoundingClientRect();
+  let x = e.clientX - b.left + 14, y = e.clientY - b.top + 14;
+  if (x + tip.offsetWidth + 8 > b.width) x = e.clientX - b.left - 14 - tip.offsetWidth;
+  if (y + tip.offsetHeight + 8 > b.height) y = e.clientY - b.top - 14 - tip.offsetHeight;
+  tip.style.left = x + "px"; tip.style.top = y + "px";
+}
+function hideTip() { tip.hidden = true; }
+
+// ---------- the address: #mod, #mod/, #mod/fn
+let ignoreHash = null;
+function setHash(h) {
+  const v = h ? "#" + h : "";
+  if (location.hash === v) return;
+  if (h) { ignoreHash = v; location.hash = h; }
+  else { try { history.pushState(null, "", location.pathname + location.search); } catch (e) {} }
+}
+function route(scroll) {
+  const h = decodeURIComponent(location.hash.slice(1));
+  if (!h) { if (view === "file") closeFile(true); select(null, false, true); return; }
+  const slash = h.indexOf("/"), m = slash < 0 ? h : h.slice(0, slash), fn = slash < 0 ? "" : h.slice(slash + 1);
+  if (!byId.has(m)) return;
+  if (scroll) $("map").scrollIntoView({ block: "start" });
+  if (slash < 0) { if (view === "file") closeFile(true); select(m, true, true); return; }
+  const key = fn ? (F.has(`${m}:${fn}`) ? `${m}:${fn}` : (F.has(fn) ? fn : null)) : null;
+  if (view !== "file" || fileMod !== m) openFile(m, key, true); else selectFn(key, true, true);
+}
+window.addEventListener("hashchange", () => { if (location.hash === ignoreHash) { ignoreHash = null; return; } ignoreHash = null; route(false); });
+window.addEventListener("popstate", () => { if (!location.hash) route(false); });
+
+// ======================================================================
+// All modules
+// ======================================================================
+const anchors = { vulkan: { x: W / 2, y: H / 2 } };
+RING.forEach((g, i) => {
+  const a = -Math.PI / 2 + i * 2 * Math.PI / RING.length;
+  anchors[g] = { x: W / 2 + Math.cos(a) * W * 0.36, y: H / 2 + Math.sin(a) * H * 0.37 };
+});
+const rand = d3.randomLcg(7);
+nodes.forEach(n => { const a = anchors[n.group]; n.x = a.x + (rand() - 0.5) * 80; n.y = a.y + (rand() - 0.5) * 80; });
+const sim = d3.forceSimulation(nodes)
+  .randomSource(d3.randomLcg(11))
+  .force("link", d3.forceLink(links).id(d => d.id).distance(60).strength(l => byId.get(l.s).group === byId.get(l.t).group ? 0.06 : 0.008))
+  .force("charge", d3.forceManyBody().strength(-70).distanceMax(220))
+  .force("collide", d3.forceCollide(d => d.r + 3))
+  .force("x", d3.forceX(d => anchors[d.group].x).strength(0.13))
+  .force("y", d3.forceY(d => anchors[d.group].y).strength(0.13))
+  .stop();
+sim.tick(420);
+
+const linkSel = ovRoot.append("g").selectAll("line").data(links).join("line")
+  .attr("class", l => "link" + (l.fnCount === 0 ? " inc" : ""))
+  .attr("stroke-width", l => l.fnCount === 0 ? 0.8 : 0.7 + Math.log2(l.fnCount + 1) * 0.55);
+const clusterSel = ovRoot.append("g").selectAll("text").data(GROUP_ORDER).join("text").attr("class", "cluster").text(g => GROUPS[g].label);
+const nodeSel = ovRoot.append("g").selectAll("g").data(nodes).join("g")
+  .attr("class", n => "node" + (n.loc >= 450 ? " big" : "")).style("--c", n => colorOf(n.group))
+  .attr("tabindex", 0).attr("role", "button").attr("aria-label", n => `${n.id}, ${GROUPS[n.group].label}, ${n.loc} lines`);
+nodeSel.append("circle").attr("r", n => n.r);
+nodeSel.append("text").attr("dy", n => -n.r - 4).attr("text-anchor", "middle").text(n => n.id);
+
+function drawOverview() {
+  linkSel.each(function (l) {
+    const s = l.source, t = l.target, dx = t.x - s.x, dy = t.y - s.y, d = Math.hypot(dx, dy) || 1;
+    this.setAttribute("x1", s.x + dx / d * s.r); this.setAttribute("y1", s.y + dy / d * s.r);
+    this.setAttribute("x2", t.x - dx / d * (t.r + 2)); this.setAttribute("y2", t.y - dy / d * (t.r + 2));
+  });
+  nodeSel.attr("transform", n => `translate(${n.x},${n.y})`);
+  clusterSel.each(function (g) {
+    const ms = nodes.filter(n => n.group === g);
+    this.setAttribute("x", d3.mean(ms, n => n.x)); this.setAttribute("y", d3.min(ms, n => n.y - n.r) - 22);
+  });
+}
+drawOverview();
+sim.on("tick", drawOverview);
+
+function fitOverview(animate) {
+  const xs = d3.extent(nodes, n => n.x), ys = d3.extent(nodes, n => n.y);
+  const pad = 50, k = Math.min(W / (xs[1] - xs[0] + pad * 2), H / (ys[1] - ys[0] + pad * 2 + 30), 1.4);
+  ovBaseK = baseK = k;
+  const t = d3.zoomIdentity.translate(W / 2, H / 2 + 10).scale(k).translate(-(xs[0] + xs[1]) / 2, -(ys[0] + ys[1]) / 2);
+  (animate ? T(svg) : svg).call(zoom.transform, t);
+}
+fitOverview(false);
+
+nodeSel.call(d3.drag()
+  .on("start", (e, n) => { if (!e.active) sim.alphaTarget(0.2).restart(); n.fx = n.x; n.fy = n.y; })
+  .on("drag", (e, n) => { n.fx = e.x; n.fy = e.y; })
+  .on("end", (e, n) => { if (!e.active) sim.alphaTarget(0); n.fx = null; n.fy = null; }));
+nodeSel.on("mouseenter", function (e, n) {
+  d3.select(this).classed("hover", true);
+  showTip(`<b>${esc(n.id)}</b> · ${esc(GROUPS[n.group].label)}<br>${fmt(n.loc)} lines · ${plural(n.fnTotal, "function")}<br>uses ${n.outN} modules · used by ${n.inN}`);
+}).on("mousemove", moveTip).on("mouseleave", function () { d3.select(this).classed("hover", false); hideTip(); })
+  .on("click", (e, n) => { e.stopPropagation(); select(n.id, false); })
+  .on("dblclick", (e, n) => { e.stopPropagation(); hideTip(); openFile(n.id, null); })
+  .on("keydown", (e, n) => {
+    if (e.key === "Enter" && selected === n.id) { e.preventDefault(); openFile(n.id, null); }
+    else if (e.key === "Enter" || e.key === " ") { e.preventDefault(); select(n.id, false); }
+  });
+
+let selected = null;
+const showInc = $("showInc");
+showInc.addEventListener("change", applyVisibility);
+function applyVisibility() {
+  nodeSel.style("display", n => hidden.has(n.group) ? "none" : null);
+  clusterSel.style("display", g => hidden.has(g) ? "none" : null);
+  linkSel.style("display", l => hidden.has(l.source.group) || hidden.has(l.target.group) || (!showInc.checked && l.fnCount === 0) ? "none" : null);
+  if (selected && hidden.has(byId.get(selected).group)) select(null);
+}
+
+function select(id, center, fromRoute) {
+  selected = id;
+  if (!id) {
+    nodeSel.classed("sel", false).classed("dim", false).classed("nb", false);
+    linkSel.classed("hl", false).classed("in", false).classed("dim", false).attr("marker-end", null);
+    clusterSel.classed("dim", false);
+    renderOverviewPanel();
+    if (!fromRoute) setHash("");
+    renderTable();
+    return;
+  }
+  const n = byId.get(id);
+  if (hidden.has(n.group)) { hidden.delete(n.group); syncChips(); applyVisibility(); }
+  const nb = new Set([id, ...n.out.map(l => l.t), ...n.in.map(l => l.s)]);
+  nodeSel.classed("sel", d => d.id === id).classed("nb", d => d.id !== id && nb.has(d.id)).classed("dim", d => !nb.has(d.id));
+  linkSel.classed("hl", l => l.s === id || l.t === id).classed("in", l => l.t === id && l.s !== id)
+    .classed("dim", l => l.s !== id && l.t !== id)
+    .attr("marker-end", l => l.s === id ? "url(#arrow)" : l.t === id ? "url(#arrow-in)" : null);
+  linkSel.filter(l => l.s === id || l.t === id).raise();
+  clusterSel.classed("dim", true);
+  renderModulePanel(n);
+  if (!fromRoute) setHash(id);
+  if (center) {
+    const k = Math.max(d3.zoomTransform(svg.node()).k, ovBaseK * 1.3);
+    T(svg).call(zoom.transform, d3.zoomIdentity.translate(W / 2, H / 2).scale(k).translate(-n.x, -n.y));
+  }
+}
+
+const panel = $("panel");
+function modRow(otherId, l) {
+  const o = byId.get(otherId);
+  const ct = l.fnCount ? plural(l.fnCount, "function") : "#include only";
+  const shown = l.fns.slice(0, 6), more = l.fnCount - shown.length;
+  const fns = shown.length ? `<span class="fns">${shown.map(esc).join(", ")}${more > 0 ? ` +${more} more` : ""}</span>` : "";
+  return `<li><button type="button" data-go="${esc(otherId)}"><span class="dot" style="background:${colorOf(o.group)}"></span><span class="nm">${esc(otherId)}</span><span class="ct">${ct}</span>${fns}</button></li>`;
+}
+function renderModulePanel(n) {
+  panel.innerHTML = `
+    <div style="display:grid;gap:6px">
+      <span class="cm-area"><span class="dot" style="background:${colorOf(n.group)}"></span>${esc(GROUPS[n.group].label)}</span>
+      <h2>${esc(n.id)}</h2>
+      <div class="cm-files">${n.files.map(f => `<a href="${fileUrl(f)}">${esc(f)}</a>`).join("")}</div>
+    </div>
+    <div class="cm-facts"><span><b>${fmt(n.loc)}</b> lines</span><span><b>${n.fnTotal}</b> functions</span><span>uses <b>${n.outN}</b></span><span>used by <b>${n.inN}</b></span></div>
+    ${n.fnTotal ? `<div class="cm-btnrow"><button class="cm-btn primary" type="button" data-open="${esc(n.id)}">Open functions (${n.fnTotal}) →</button></div>` : ""}
+    ${n.blurb ? `<p>${esc(n.blurb)}</p>` : ""}
+    <div><h3>Uses (${n.outN})</h3>${n.out.length ? `<ul class="cm-rel">${n.out.map(l => modRow(l.t, l)).join("")}</ul>` : `<p class="cm-empty">Uses nothing else in the runtime.</p>`}</div>
+    <div><h3>Used by (${n.inN})</h3>${n.in.length ? `<ul class="cm-rel">${n.in.map(l => modRow(l.s, l)).join("")}</ul>` : `<p class="cm-empty">Nothing else in the runtime uses it.</p>`}</div>
+    <div class="cm-btnrow"><button class="cm-btn" type="button" data-clear>Clear selection</button></div>`;
+  panel.scrollTop = 0;
+}
+function renderOverviewPanel() {
+  const hubs = [...nodes].sort((a, b) => b.inN - a.inN).slice(0, 8);
+  const biggest = [...nodes].sort((a, b) => b.loc - a.loc).slice(0, 6);
+  const row = (n, ct) => `<li><button type="button" data-go="${esc(n.id)}"><span class="dot" style="background:${colorOf(n.group)}"></span><span class="nm">${esc(n.id)}</span><span class="ct">${ct}</span></button></li>`;
+  panel.innerHTML = `
+    <div style="display:grid;gap:6px"><h3 style="margin:0">Nothing picked yet</h3>
+    <p>Click a dot, or a module below. Lines into a dot mean other files use it; dashed lines are header includes with no function calls.</p></div>
+    <div><h3>Most used</h3><ul class="cm-rel">${hubs.map(n => row(n, `used by ${n.inN}`)).join("")}</ul></div>
+    <div><h3>Biggest</h3><ul class="cm-rel">${biggest.map(n => row(n, `${fmt(n.loc)} lines`)).join("")}</ul></div>
+    <div><h3>Areas</h3><ul class="cm-rel">${GROUP_ORDER.map(k =>
+      `<li class="about"><span class="dot" style="width:8px;height:8px;border-radius:50%;background:${colorOf(k)}"></span><span><b>${esc(GROUPS[k].label)}</b><br><span>${esc(GROUPS[k].about)}</span></span></li>`).join("")}</ul></div>`;
+}
+
+// ======================================================================
+// Inside one module
+// ======================================================================
+const ROW = 17, COLTOP = 78, LX = 230, RX = 830, CX = 530, CX0 = 290, CX1 = 770, VIEW_W = 1090;
+let fileMod = null, fileSel = null, fileInfo = null, fNodeSel = null, fLinkSel = null, hdrSel = null, fileSim = null;
+
+function columnRows(keys) {
+  const groups = d3.groups([...keys].map(k => F.get(k)), f => f.m)
+    .sort((a, b) => GROUPS[byId.get(a[0]).group].slot - GROUPS[byId.get(b[0]).group].slot || a[0].localeCompare(b[0]));
+  const rows = []; let y = COLTOP;
+  groups.forEach(([m, fs]) => {
+    rows.push({ type: "hdr", m, y }); y += ROW + 2;
+    fs.sort((a, b) => a.n.localeCompare(b.n)).forEach(f => { rows.push({ type: "fn", key: f.k, f, y }); y += ROW; });
+    y += 10;
+  });
+  return { rows, h: y };
+}
+const fnR = f => f.tables ? 5 : Math.min(18, 3.2 + Math.sqrt(f.len) * 0.9);
+
+function setChrome(fileView, id) {
+  chips.hidden = fileView; $("crumbs").hidden = !fileView; $("incLabel").hidden = fileView;
+  $("barCrumb").textContent = fileView ? `runtime/ › ${id}` : "runtime/";
+  $("barCat").textContent = fileView ? "Functions" : "All modules";
+}
+
+function openFile(id, fnKey, fromRoute) {
+  const mod = byId.get(id);
+  if (!mod) return;
+  if (view === "overview") ovT = d3.zoomTransform(svg.node());
+  view = "file"; fileMod = id; fileSel = null; selected = id;
+  hideTip();
+  if (fileSim) fileSim.stop();
+  ovRoot.style("display", "none");
+  fileRoot.style("display", null).selectAll("*").remove();
+  setChrome(true, id);
+  lede.textContent = `The functions inside ${id}. Middle: this module, top of the file at the top. Left: functions in other files that call into it. Right: functions in other files it calls. Click a function to see its calls; click a module name on the side to go there.`;
+  hint.textContent = "Drag to pan · Ctrl + scroll or the buttons to zoom";
+
+  const inner = (funcsByMod.get(id) || []).slice().sort((a, b) => (a.tables - b.tables) || a.l - b.l);
+  const innerSet = new Set(inner.map(f => f.k));
+  const extIn = new Set(), extOut = new Set();
+  inner.forEach(f => {
+    f.c.forEach(k => { if (!innerSet.has(k)) extOut.add(k); });
+    f.callers.forEach(k => { if (!innerSet.has(k)) extIn.add(k); });
+  });
+  const left = columnRows(extIn), right = columnRows(extOut);
+  const n = inner.length, Hc = Math.max(420, n * 11);
+  const Hf = Math.max(COLTOP + Hc + 20, left.h, right.h) + 20;
+
+  const mid = inner.map((f, i) => {
+    const hasIn = f.callers.some(k => !innerSet.has(k)), hasOut = f.c.some(k => !innerSet.has(k));
+    const tx = CX + (hasIn && !hasOut ? -120 : !hasIn && hasOut ? 120 : 0);
+    const y0 = COLTOP + 10 + (i + 0.5) / Math.max(1, n) * Hc;
+    return { side: "mid", key: f.k, f, r: fnR(f), x: CX + (d3.randomLcg(i + 3)() - 0.5) * (CX1 - CX0 - 40), y: y0, tx, ty: y0 };
+  });
+  const midBy = new Map(mid.map(d => [d.key, d]));
+  const inBy = new Map(), outBy = new Map(), ext = [];
+  left.rows.filter(r => r.type === "fn").forEach(r => { const d = { side: "in", key: r.key, f: r.f, r: 4, x: LX, y: r.y }; inBy.set(r.key, d); ext.push(d); });
+  right.rows.filter(r => r.type === "fn").forEach(r => { const d = { side: "out", key: r.key, f: r.f, r: 4, x: RX, y: r.y }; outBy.set(r.key, d); ext.push(d); });
+
+  const edges = [], innerLinks = [];
+  inner.forEach(f => f.c.forEach(k => {
+    if (innerSet.has(k)) { const e = { kind: "int", a: midBy.get(f.k), b: midBy.get(k) }; edges.push(e); innerLinks.push({ source: e.a, target: e.b }); }
+    else edges.push({ kind: "out", a: midBy.get(f.k), b: outBy.get(k) });
+  }));
+  extIn.forEach(k => F.get(k).c.forEach(c => { if (innerSet.has(c)) edges.push({ kind: "in", a: inBy.get(k), b: midBy.get(c) }); }));
+
+  fileSim = d3.forceSimulation(mid)
+    .randomSource(d3.randomLcg(5))
+    .force("link", d3.forceLink(innerLinks).distance(34).strength(0.25))
+    .force("charge", d3.forceManyBody().strength(-60).distanceMax(180))
+    .force("collide", d3.forceCollide(d => d.r + 5))
+    .force("x", d3.forceX(d => d.tx).strength(0.015))
+    .force("y", d3.forceY(d => d.ty).strength(0.09))
+    .stop();
+  const clamp = () => mid.forEach(d => {
+    d.x = Math.max(CX0 + d.r, Math.min(CX1 - d.r, d.x));
+    d.y = Math.max(COLTOP + d.r, Math.min(Hf - 20 - d.r, d.y));
+  });
+  for (let i = 0; i < 320; i++) { fileSim.tick(); clamp(); }
+
+  const heads = fileRoot.append("g");
+  heads.append("text").attr("class", "colhead").attr("x", LX + 4).attr("y", COLTOP - 36).attr("text-anchor", "end").text(`Called from other files (${extIn.size})`);
+  heads.append("text").attr("class", "colhead").attr("x", CX).attr("y", COLTOP - 36).attr("text-anchor", "middle").text(`Inside ${id} (${plural(inner.filter(f => !f.tables).length, "function")})`);
+  heads.append("text").attr("class", "colhead").attr("x", RX - 4).attr("y", COLTOP - 36).text(`Calls into other files (${extOut.size})`);
+  heads.append("line").attr("class", "colrule").attr("x1", CX0 - 20).attr("x2", CX0 - 20).attr("y1", COLTOP - 24).attr("y2", Hf);
+  heads.append("line").attr("class", "colrule").attr("x1", CX1 + 20).attr("x2", CX1 + 20).attr("y1", COLTOP - 24).attr("y2", Hf);
+  if (!extIn.size) heads.append("text").attr("class", "colhead").attr("x", LX + 4).attr("y", COLTOP + 4).attr("text-anchor", "end").style("text-transform", "none").text("Nothing outside calls in");
+  if (!extOut.size) heads.append("text").attr("class", "colhead").attr("x", RX - 4).attr("y", COLTOP + 4).style("text-transform", "none").text("Calls nothing outside");
+
+  const edgePath = e => {
+    if (e.kind === "int") {
+      const dx = e.b.x - e.a.x, dy = e.b.y - e.a.y, d = Math.hypot(dx, dy) || 1;
+      return `M${e.a.x + dx / d * e.a.r},${e.a.y + dy / d * e.a.r}L${e.b.x - dx / d * (e.b.r + 2)},${e.b.y - dy / d * (e.b.r + 2)}`;
+    }
+    const x0 = e.kind === "in" ? LX + 5 : e.a.x + e.a.r, y0 = e.a.y;
+    const x1 = e.kind === "in" ? e.b.x - e.b.r - 2 : RX - 6, y1 = e.b.y;
+    const mx = (x1 - x0) * 0.5;
+    return `M${x0},${y0}C${x0 + mx},${y0} ${x1 - mx},${y1} ${x1},${y1}`;
+  };
+  fLinkSel = fileRoot.append("g").selectAll("path").data(edges).join("path")
+    .attr("class", "link").attr("stroke-width", e => e.kind === "int" ? 1 : 0.8);
+
+  hdrSel = fileRoot.append("g").selectAll("g")
+    .data([...left.rows.filter(r => r.type === "hdr").map(r => ({ ...r, side: "in" })), ...right.rows.filter(r => r.type === "hdr").map(r => ({ ...r, side: "out" }))])
+    .join("g").attr("class", "hdr").attr("tabindex", 0).attr("role", "link")
+    .attr("transform", r => `translate(${r.side === "in" ? LX + 4 : RX - 4},${r.y})`);
+  hdrSel.append("circle").attr("r", 4.5).attr("cx", r => r.side === "in" ? 0 : 4).style("fill", r => colorOf(byId.get(r.m).group));
+  hdrSel.append("text").attr("x", r => r.side === "in" ? -10 : 14).attr("dy", 4).attr("text-anchor", r => r.side === "in" ? "end" : "start")
+    .html(r => r.side === "in" ? `<tspan class="open">open ‹ </tspan>${esc(r.m)}` : `${esc(r.m)}<tspan class="open"> › open</tspan>`);
+  hdrSel.on("click", (e, r) => { e.stopPropagation(); openFile(r.m, null); })
+    .on("keydown", (e, r) => { if (e.key === "Enter") openFile(r.m, null); });
+
+  fNodeSel = fileRoot.append("g").selectAll("g").data([...ext, ...mid]).join("g")
+    .attr("class", d => "node" + (d.side !== "mid" ? " ext" : "") + (d.f.s ? " priv" : "") + (d.f.tables ? " tables" : "") + (d.side === "mid" && (d.f.len >= 30 || d.f.tables) ? " big" : ""))
+    .style("--c", d => colorOf(d.f.group))
+    .attr("tabindex", d => d.side === "mid" ? 0 : -1).attr("role", "button")
+    .attr("aria-label", d => `${d.f.n}, ${d.f.m}, ${d.f.len} lines`);
+  fNodeSel.append("circle").attr("r", d => d.r);
+  fNodeSel.append("text")
+    .attr("x", d => d.side === "in" ? -9 : d.side === "out" ? 9 : 0)
+    .attr("dy", d => d.side === "mid" ? -d.r - 4 : 4)
+    .attr("text-anchor", d => d.side === "in" ? "end" : d.side === "out" ? "start" : "middle")
+    .text(d => d.f.n);
+
+  function drawFile() { fLinkSel.attr("d", edgePath); fNodeSel.attr("transform", d => `translate(${d.x},${d.y})`); }
+  drawFile();
+  fileSim.on("tick", () => { clamp(); drawFile(); });
+  fNodeSel.filter(d => d.side === "mid").call(d3.drag()
+    .on("start", (e, d) => { if (!e.active) fileSim.alphaTarget(0.15).restart(); d.fx = d.x; d.fy = d.y; })
+    .on("drag", (e, d) => { d.fx = e.x; d.fy = e.y; })
+    .on("end", (e, d) => { if (!e.active) fileSim.alphaTarget(0); d.fx = null; d.fy = null; }));
+  fNodeSel.on("mouseenter", function (e, d) {
+    d3.select(this).classed("hover", true);
+    const f = d.f;
+    showTip(`<b>${esc(f.n)}</b>${f.m !== id ? ` · ${esc(f.m)}` : ""}<br>${f.tables ? "names used in tables" : `${plural(f.len, "line")} · ${f.s ? "private" : "public"}`}<br>calls ${f.c.length} · called by ${f.callers.length}`);
+  }).on("mousemove", moveTip).on("mouseleave", function () { d3.select(this).classed("hover", false); hideTip(); })
+    .on("click", (e, d) => { e.stopPropagation(); selectFn(d.key, false); })
+    .on("dblclick", (e, d) => { e.stopPropagation(); if (d.f.m !== id) openFile(d.f.m, d.key); })
+    .on("keydown", (e, d) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); selectFn(d.key, false); } });
+
+  fileInfo = { id, mod, inner, extIn, extOut, midBy };
+  const kW = Math.min(1.25, W / VIEW_W), kH = H / (Hf + 40);
+  const k = Math.max(Math.min(kW, kH), kW * 0.92);
+  baseK = k;
+  fileInfo.fits = kH >= kW * 0.92;
+  svg.call(zoom.transform, d3.zoomIdentity.translate(W / 2 - CX * k, 16).scale(k));
+
+  renderTable();
+  if (fnKey && F.has(fnKey)) selectFn(fnKey, !fileInfo.fits, fromRoute);
+  else { renderFilePanel(); if (!fromRoute) setHash(id + "/"); }
+}
+
+function closeFile(fromRoute) {
+  if (fileSim) fileSim.stop();
+  view = "overview"; fileSel = null;
+  fileRoot.style("display", "none").selectAll("*").remove();
+  ovRoot.style("display", null);
+  setChrome(false);
+  lede.textContent = LEDE_OVERVIEW; hint.textContent = HINT_OVERVIEW;
+  baseK = ovBaseK;
+  svg.call(zoom.transform, ovT || d3.zoomIdentity);
+  const m = fileMod; fileMod = null;
+  if (!fromRoute) select(m, false);
+  renderTable();
+}
+
+function selectFn(key, center, fromRoute) {
+  if (view !== "file") return;
+  fileSel = key;
+  if (!key) {
+    fNodeSel.classed("sel", false).classed("dim", false).classed("nb", false);
+    fLinkSel.classed("hl", false).classed("in", false).classed("dim", false).attr("marker-end", null);
+    hdrSel.classed("dim", false);
+    renderFilePanel();
+    if (!fromRoute) setHash(fileMod + "/");
+    return;
+  }
+  const f = F.get(key);
+  const rel = new Set([key, ...f.c, ...f.callers]);
+  fNodeSel.classed("sel", d => d.key === key).classed("nb", d => d.key !== key && rel.has(d.key)).classed("dim", d => !rel.has(d.key));
+  const touches = e => e.a.key === key || e.b.key === key;
+  fLinkSel.classed("hl", touches).classed("in", e => e.b.key === key).classed("dim", e => !touches(e))
+    .attr("marker-end", e => touches(e) ? (e.b.key === key ? "url(#arrow-in)" : "url(#arrow)") : null);
+  fLinkSel.filter(touches).raise();
+  hdrSel.classed("dim", r => !(funcsByMod.get(r.m) || []).some(g => rel.has(g.k)));
+  renderFnPanel(f);
+  if (!fromRoute) setHash(`${fileMod}/${f.n}`);
+  if (center) {
+    const d = fileInfo.midBy.get(key) || fNodeSel.data().find(x => x.key === key);
+    if (d) {
+      const k = Math.max(d3.zoomTransform(svg.node()).k, baseK * 1.25);
+      T(svg).call(zoom.transform, d3.zoomIdentity.translate(W / 2, H / 2).scale(k).translate(-d.x, -d.y));
+    }
+  }
+}
+
+function fnRow(g, ct, here) {
+  return `<li><button type="button" data-fn="${esc(g.k)}"><span class="dot${g.s ? " priv" : ""}" style="--c:${colorOf(g.group)};background:${colorOf(g.group)}"></span><span class="nm">${esc(g.n)}${g.m !== here ? ` <small>${esc(g.m)}</small>` : ""}</span><span class="ct">${ct}</span></button></li>`;
+}
+const lenText = g => g.tables ? "table" : plural(g.len, "line");
+function renderFilePanel() {
+  const { id, mod, inner, extIn, extOut } = fileInfo;
+  const real = inner.filter(f => !f.tables), pub = real.filter(f => !f.s).length;
+  const longest = [...real].sort((a, b) => b.len - a.len).slice(0, 8);
+  const extCallers = f => f.callers.filter(k => F.get(k).m !== id).length;
+  const entries = real.filter(f => extCallers(f) > 0).sort((a, b) => extCallers(b) - extCallers(a));
+  const hubs = real.filter(f => f.callers.length).sort((a, b) => b.callers.length - a.callers.length).slice(0, 6);
+  panel.innerHTML = `
+    <div style="display:grid;gap:6px">
+      <span class="cm-area"><span class="dot" style="background:${colorOf(mod.group)}"></span>${esc(GROUPS[mod.group].label)}</span>
+      <h2>${esc(id)}</h2>
+      <div class="cm-files">${mod.files.map(f => `<a href="${fileUrl(f)}">${esc(f)}</a>`).join("")}</div>
+    </div>
+    <div class="cm-facts"><span><b>${real.length}</b> functions</span><span><b>${pub}</b> public</span><span><b>${real.length - pub}</b> private</span><span><b>${fmt(mod.loc)}</b> lines</span></div>
+    ${mod.blurb ? `<p>${esc(mod.blurb)}</p>` : ""}
+    <div class="cm-legend">
+      <span><i style="background:${colorOf(mod.group)}"></i>Filled dot: public, other files can call it</span>
+      <span><i style="box-shadow:inset 0 0 0 2px ${colorOf(mod.group)}"></i>Ring: private (<code>static</code>), only this file</span>
+      <span><i style="background:var(--ink-2);transform:scale(.6)"></i>Bigger dot: longer function</span>
+    </div>
+    <div><h3>Ways in from other files (${entries.length})</h3>${entries.length ? `<ul class="cm-rel">${entries.slice(0, 8).map(f => fnRow(f, `${extCallers(f)} outside callers`, id)).join("")}</ul>` : `<p class="cm-empty">Nothing outside this module calls its functions by name.</p>`}</div>
+    <div><h3>Longest</h3><ul class="cm-rel">${longest.map(f => fnRow(f, lenText(f), id)).join("")}</ul></div>
+    ${hubs.length ? `<div><h3>Most called</h3><ul class="cm-rel">${hubs.map(f => fnRow(f, `called by ${f.callers.length}`, id)).join("")}</ul></div>` : ""}
+    <details class="cm-more"><summary>Outline, in file order (${inner.length})</summary><ul class="cm-rel">${inner.map(f => fnRow(f, f.tables ? "table" : `line ${f.l}`, id)).join("")}</ul></details>
+    <div class="cm-facts"><span>called from <b>${extIn.size}</b> outside functions</span><span>calls <b>${extOut.size}</b> outside functions</span></div>`;
+  panel.scrollTop = 0;
+}
+function renderFnPanel(f) {
+  const here = fileMod;
+  const order = (a, b) => (a.m !== here) - (b.m !== here) || a.m.localeCompare(b.m) || a.n.localeCompare(b.n);
+  const calls = f.c.map(k => F.get(k)).sort(order), callers = f.callers.map(k => F.get(k)).sort(order);
+  panel.innerHTML = `
+    <div style="display:grid;gap:6px">
+      <span class="cm-area"><span class="dot" style="background:${colorOf(f.group)}"></span>${esc(f.m)} · ${esc(GROUPS[f.group].label)}</span>
+      <h2>${esc(f.n)}</h2>
+      <div class="cm-files"><a href="${fnUrl(f)}" title="Open on GitHub">${esc(f.f)}:${f.l}</a></div>
+    </div>
+    <div class="cm-facts">${f.tables ? "<span>Function names used outside any function</span>" : `<span><b>${fmt(f.len)}</b> lines</span><span><b>${f.s ? "private" : "public"}</b></span>`}<span>calls <b>${f.c.length}</b></span><span>called by <b>${f.callers.length}</b></span></div>
+    ${f.d ? `<p>${esc(f.d)}</p>` : `<p class="cm-empty">No comment above this function.</p>`}
+    <div class="cm-btnrow">
+      ${f.m !== here ? `<button class="cm-btn primary" type="button" data-openfn="${esc(f.k)}">Open ${esc(f.m)} →</button>` : ""}
+      <button class="cm-btn" type="button" data-clearfn>Back to ${esc(here)}</button>
+    </div>
+    <div><h3>Calls (${calls.length})</h3>${calls.length ? `<ul class="cm-rel">${calls.map(g => fnRow(g, lenText(g), here)).join("")}</ul>` : `<p class="cm-empty">Calls no other runtime function.</p>`}</div>
+    <div><h3>Called by (${callers.length})</h3>${callers.length ? `<ul class="cm-rel">${callers.map(g => fnRow(g, lenText(g), here)).join("")}</ul>` : `<p class="cm-empty">${f.s ? "Nothing calls it by name." : "Nothing in the runtime calls it by name. The recompiled game, a hook table or a callback may still reach it."}</p>`}</div>`;
+  panel.scrollTop = 0;
+}
+
+panel.addEventListener("click", e => {
+  const t = e.target.closest("[data-go],[data-open],[data-clear],[data-fn],[data-openfn],[data-clearfn]");
+  if (!t) return;
+  if (t.dataset.go) select(t.dataset.go, true);
+  else if (t.dataset.open) openFile(t.dataset.open, null);
+  else if (t.hasAttribute("data-clear")) select(null);
+  else if (t.dataset.fn) {
+    const g = F.get(t.dataset.fn);
+    if (view === "file" && fNodeSel.data().some(d => d.key === g.k)) selectFn(g.k, true); else openFile(g.m, g.k);
+  }
+  else if (t.dataset.openfn) { const g = F.get(t.dataset.openfn); openFile(g.m, g.k); }
+  else if (t.hasAttribute("data-clearfn")) selectFn(null);
+});
+$("back").addEventListener("click", () => closeFile(false));
+
+// ---------- search, reset
+const search = $("search");
+function runSearch() {
+  const q = search.value.trim();
+  if (!q) return;
+  const m = q.match(/^(\S+) \((\w+)\)$/);
+  if (m) {
+    const g = F.get(`${m[2]}:${m[1]}`) || (F.get(m[1]) && F.get(m[1]).m === m[2] ? F.get(m[1]) : null);
+    if (g) { openFile(g.m, g.k); return; }
+  }
+  const ql = q.toLowerCase();
+  if (byId.has(ql)) { if (view === "file") openFile(ql, null); else select(ql, true); return; }
+  if (F.has(q) && !F.get(q).tables) { openFile(F.get(q).m, q); return; }
+  const mod = nodes.find(n => n.id.startsWith(ql));
+  if (mod) { if (view === "file") openFile(mod.id, null); else select(mod.id, true); return; }
+  const fn = realFuncs.find(f => f.n.toLowerCase().startsWith(ql)) || realFuncs.find(f => f.n.toLowerCase().includes(ql));
+  if (fn) openFile(fn.m, fn.k);
+}
+search.addEventListener("change", runSearch);
+search.addEventListener("keydown", e => { if (e.key === "Enter") runSearch(); });
+$("reset").addEventListener("click", () => {
+  search.value = "";
+  if (view === "file") { T(svg).call(zoom.transform, d3.zoomIdentity.translate(W / 2 - CX * baseK, 16).scale(baseK)); selectFn(null); return; }
+  hidden.clear(); syncChips(); showInc.checked = true; applyVisibility(); select(null); fitOverview(true);
+});
+
+// ---------- the table: modules, or the functions of the open module
+const thead = $("thead"), tbody = $("tbody"), tableTitle = $("tableTitle");
+const sortState = { overview: { k: "loc", dir: -1 }, file: { k: "l", dir: 1 } };
+const COLS = {
+  overview: [["id", "Module"], ["group", "Area"], ["loc", "Lines", 1], ["fnTotal", "Functions", 1], ["outN", "Uses", 1], ["inN", "Used by", 1], [null, "What it is"]],
+  file: [["n", "Function"], ["l", "Line", 1], ["len", "Lines", 1], ["s", "Kind"], ["cN", "Calls", 1], ["byN", "Called by", 1], [null, "Comment above it"]],
+};
+function renderTable() {
+  const v = view, st = sortState[v];
+  tableTitle.textContent = v === "overview" ? "All modules as a table" : `All functions in ${fileMod} as a table`;
+  thead.innerHTML = "<tr>" + COLS[v].map(([k, label, num]) => `<th${num ? ' class="num"' : ""}>${k ? `<button type="button" data-k="${k}">${label}${st.k === k ? (st.dir > 0 ? " ↑" : " ↓") : ""}</button>` : label}</th>`).join("") + "</tr>";
+  const cmp = val => (a, b) => { const x = val(a, st.k), y = val(b, st.k); return (x < y ? -1 : x > y ? 1 : 0) * st.dir; };
+  if (v === "overview") {
+    const rows = [...nodes].sort(cmp((n, k) => k === "group" ? GROUPS[n.group].label : n[k]));
+    tbody.innerHTML = rows.map(n => `<tr data-go="${esc(n.id)}" tabindex="0">
+      <td class="mono">${esc(n.id)}</td>
+      <td><span class="cm-area"><span class="dot" style="background:${colorOf(n.group)}"></span>${esc(GROUPS[n.group].label)}</span></td>
+      <td class="num">${fmt(n.loc)}</td><td class="num">${n.fnTotal}</td><td class="num">${n.outN}</td><td class="num">${n.inN}</td>
+      <td class="blurb">${esc(n.blurb)}</td></tr>`).join("");
+  } else {
+    const rows = [...fileInfo.inner].sort(cmp((f, k) => k === "cN" ? f.c.length : k === "byN" ? f.callers.length : f[k]));
+    tbody.innerHTML = rows.map(f => `<tr data-fnrow="${esc(f.k)}" tabindex="0">
+      <td class="mono">${esc(f.n)}</td><td class="num">${f.l}</td><td class="num">${f.len}</td><td>${f.tables ? "table" : f.s ? "private" : "public"}</td>
+      <td class="num">${f.c.length}</td><td class="num">${f.callers.length}</td><td class="blurb">${esc(f.d)}</td></tr>`).join("");
+  }
+}
+thead.addEventListener("click", e => {
+  const b = e.target.closest("button[data-k]");
+  if (!b) return;
+  const st = sortState[view], k = b.dataset.k;
+  if (st.k === k) st.dir = -st.dir; else { st.k = k; st.dir = ["id", "group", "n", "l", "s"].includes(k) ? 1 : -1; }
+  renderTable();
+});
+function goRow(e) {
+  if (e.type === "keydown" && e.key !== "Enter") return;
+  const tr = e.target.closest("tr[data-go],tr[data-fnrow]");
+  if (!tr) return;
+  if (tr.dataset.go) select(tr.dataset.go, true); else selectFn(tr.dataset.fnrow, true);
+  stage.scrollIntoView({ behavior: reduceMotion ? "auto" : "smooth", block: "center" });
+}
+tbody.addEventListener("click", goRow);
+tbody.addEventListener("keydown", goRow);
+
+// ---------- start
+lede.textContent = LEDE_OVERVIEW; hint.textContent = HINT_OVERVIEW;
+renderOverviewPanel();
+renderTable();
+if (location.hash) route(true);
+})();
+</script>
+</body>
+</html>
