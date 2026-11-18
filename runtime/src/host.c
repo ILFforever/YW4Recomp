@@ -221,7 +221,18 @@ void host_respawn(int argc, char **argv) {
     STARTUPINFOA si = {sizeof si};
     PROCESS_INFORMATION pi = {0};
     char *cmd = _strdup(GetCommandLineA());
-    if (cmd && CreateProcessA(NULL, cmd, NULL, NULL, TRUE, 0, NULL, NULL, &si, &pi)) {
+    /* The copy goes in a job that is killed when this process's handle to it closes, so stopping this process (a
+     * test run's time limit, a launcher closing it) stops the copy too. Without it the copy ran on: a timed bench run
+     * that respawned (2026-11-18) left a game open, and every later run refused to start. */
+    HANDLE job = CreateJobObjectA(NULL, NULL);
+    if (job) {
+        JOBOBJECT_EXTENDED_LIMIT_INFORMATION lim = {0};
+        lim.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
+        SetInformationJobObject(job, JobObjectExtendedLimitInformation, &lim, sizeof lim);
+    }
+    if (cmd && CreateProcessA(NULL, cmd, NULL, NULL, TRUE, CREATE_SUSPENDED, NULL, NULL, &si, &pi)) {
+        if (job) AssignProcessToJobObject(job, pi.hProcess);  /* before it runs: nothing it starts escapes */
+        ResumeThread(pi.hThread);
         WaitForSingleObject(pi.hProcess, INFINITE);
         DWORD code = 0;
         GetExitCodeProcess(pi.hProcess, &code);

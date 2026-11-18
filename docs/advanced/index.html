@@ -63,6 +63,30 @@ code { font: 500 .86em/1.4 var(--mono); background: var(--soft); border-radius: 
 .areas .v { text-align: right; color: var(--ink-2); font-size: .8rem; }
 .areas .src { margin: 10px 0 0; font-size: .76rem; color: var(--ink-2); }
 
+/* ---- performance snapshot (bench.js, python -m tools.dev.bench) */
+.perf { padding-top: 36px; }
+.perf-card { background: var(--card); border: 1px solid var(--line); border-radius: var(--r); padding: 18px 20px; display: grid; gap: 16px; }
+.perf-meta { margin: 0; font-size: .84rem; color: var(--ink-2); line-height: 1.5; }
+.perf-grid { display: grid; grid-template-columns: minmax(0, 3fr) minmax(0, 2fr); gap: 24px; }
+.perf h3 { margin: 0 0 4px; font: 800 1.02rem/1.3 var(--display); }
+.perf .sub { margin: 0 0 10px; font-size: .82rem; color: var(--ink-2); }
+.perf select { font: 500 .88rem/1.3 var(--body); color: var(--ink); background: var(--card); border: 1px solid var(--line); border-radius: 8px; padding: 6px 10px; max-width: 100%; }
+.perf ol { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
+.perf li { display: grid; grid-template-columns: minmax(0, 12em) minmax(0, 1fr) 4.6em; gap: 10px; align-items: center; font-size: .85rem; }
+.perf .nm { min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.perf .track { height: 10px; border-radius: 0 4px 4px 0; background: var(--soft); overflow: hidden; }
+.perf .fill { height: 100%; border-radius: 0 4px 4px 0; }
+.perf .v { text-align: right; color: var(--ink-2); font-size: .8rem; font-variant-numeric: tabular-nums; }
+.perf-key { display: flex; flex-wrap: wrap; gap: 14px; margin: 10px 0 0; padding: 0; list-style: none; font-size: .8rem; color: var(--ink-2); }
+.perf-key li { display: flex; align-items: center; gap: 6px; grid-template-columns: none; }
+.perf-key .dot { width: 10px; height: 10px; border-radius: 50%; }
+.perf table { width: 100%; border-collapse: collapse; font-size: .84rem; }
+.perf th, .perf td { padding: 6px 8px 6px 0; border-bottom: 1px solid var(--line); text-align: left; }
+.perf th { color: var(--ink-2); font-weight: 600; }
+.perf td.n, .perf th.n { text-align: right; font-variant-numeric: tabular-nums; }
+.perf .scroll { overflow-x: auto; }
+@media (max-width: 860px) { .perf-grid { grid-template-columns: minmax(0, 1fr); } .perf li { grid-template-columns: minmax(0, 9em) minmax(0, 1fr) 4.2em; } }
+
 /* ---- sections */
 .sec-title { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 16px; margin: 0 0 14px; }
 .sec-title h2 { margin: 0; font: 900 clamp(1.4rem, 1.2rem + .8vw, 1.9rem)/1.2 var(--display); }
@@ -261,6 +285,7 @@ try { const t = localStorage.getItem('yw4-theme'); if (t === 'dark' || t === 'li
       </div>
       <div class="adv-links">
         <a class="adv-btn" href="#map">Open the code map</a>
+        <a class="adv-btn ghost" href="#perf">Frame time</a>
         <a class="adv-btn ghost" href="#more">More for developers</a>
       </div>
     </div>
@@ -321,6 +346,39 @@ try { const t = localStorage.getItem('yw4-theme'); if (t === 'dark' || t === 'li
   </article>
 </section>
 
+<div class="page perf" id="perf">
+  <div class="sec-title"><h2>Where the frame time goes</h2><p>A snapshot from one PC: GPU time per pass, at high settings</p></div>
+  <div class="perf-card">
+    <p class="perf-meta" id="perfMeta">The snapshot hasn't been made yet: <code>python -m tools.dev.bench</code>.</p>
+    <div class="perf-grid">
+      <div>
+        <h3>GPU time per pass</h3>
+        <p class="sub">Milliseconds per frame. <label for="perfScene">Scene:</label> <select id="perfScene"></select></p>
+        <ol id="perfPasses"></ol>
+        <ul class="perf-key" aria-label="Whose code each pass is">
+          <li><span class="dot" style="background:var(--s3)"></span>Ours</li>
+          <li><span class="dot" style="background:var(--s4)"></span>The game's</li>
+          <li><span class="dot" style="background:var(--s7)"></span>NVIDIA DLSS</li>
+        </ul>
+      </div>
+      <div>
+        <h3>The shadow mask, in four forms</h3>
+        <p class="sub">Our shadow pass with soft and contact shadows on and off, timed in the same run (bamboo forest). Together they
+          cost about 2 ms; how that splits between the two changes from one run to the next.</p>
+        <ol id="perfMask"></ol>
+      </div>
+    </div>
+    <div>
+      <h3>Frame rate per scene</h3>
+      <p class="sub">At the settings above, and uncapped at the game's own 1600×900 with no anti-aliasing (there the CPU sets the limit)</p>
+      <div class="scroll"><table>
+        <thead><tr><th>Scene</th><th class="n">Frames/s</th><th class="n">GPU ms per frame</th><th class="n">Frames/s uncapped, 1600×900</th></tr></thead>
+        <tbody id="perfScenes"></tbody>
+      </table></div>
+    </div>
+  </div>
+</div>
+
 <div class="page more" id="more">
   <div class="sec-title"><h2>More for developers</h2><p>The written side: how things work and why</p></div>
   <ul class="cards">
@@ -343,6 +401,38 @@ try { const t = localStorage.getItem('yw4-theme'); if (t === 'dark' || t === 'li
 
 <script src="../vendor/d3/d3.min.js"></script>
 <script src="code-map.js"></script>
+<script src="bench.js"></script>
+<script>
+/* the frame-time snapshot (bench.js, written by python -m tools.dev.bench) */
+(() => {
+  const B = window.BENCH;
+  if (!B || !B.scenes || !B.scenes.length) return;
+  const el = (id) => document.getElementById(id);
+  const esc = (s) => String(s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]);
+  const color = (who) => who === "ours" ? "var(--s3)" : who === "game's" ? "var(--s4)" : who === "NVIDIA DLSS" ? "var(--s7)" : "var(--line)";
+  const fmt = (v, d = 1) => v == null ? "—" : Number(v).toFixed(d);
+  const date = new Date(B.date + "T00:00:00Z").toLocaleDateString(undefined, { year: "numeric", month: "long", day: "numeric", timeZone: "UTC" });
+  el("perfMeta").innerHTML = `Measured ${esc(date)} with game ${esc(B.version)} on ${esc(B.gpu || "one PC")}. Settings: ${esc(B.settings)}. `
+    + `Another graphics card or other settings give other numbers: this shows where the time goes, not how fast it runs for you. `
+    + `Made with <code>python -m tools.dev.bench</code>.`;
+  const bars = (ol, rows) => {
+    const max = Math.max(...rows.map((r) => r.ms), 0.001);
+    ol.innerHTML = rows.map((r) => `<li><span class="nm" title="${esc(r.name)}">${esc(r.name)}</span>`
+      + `<span class="track"><span class="fill" style="display:block;width:${(100 * r.ms / max).toFixed(1)}%;background:${color(r.who)}"></span></span>`
+      + `<span class="v">${fmt(r.ms, 2)} ms</span></li>`).join("");
+  };
+  const sel = el("perfScene");
+  sel.innerHTML = B.scenes.map((s, i) => `<option value="${i}">${esc(s.name)}</option>`).join("");
+  const show = () => bars(el("perfPasses"), B.scenes[+sel.value].passes);
+  sel.addEventListener("change", show);
+  show();
+  const MASK = [["as set", "Soft and contact shadows"], ["no contact shadows", "Soft shadows only"], ["no soft shadows", "Contact shadows only"], ["neither", "Neither"]];
+  const m = B.shadow_mask || {};
+  bars(el("perfMask"), MASK.filter(([k]) => m[k] != null).map(([k, label]) => ({ name: label, who: "ours", ms: m[k] })));
+  el("perfScenes").innerHTML = B.scenes.map((s) => `<tr><td>${esc(s.name)}</td><td class="n">${fmt(s.fps)}</td>`
+    + `<td class="n">${fmt(s.gpu_ms)}</td><td class="n">${fmt(s.fps_uncapped, 0)}</td></tr>`).join("");
+})();
+</script>
 <script>
 /* the theme switch: the other theme than the one showing, kept for next time */
 (() => {

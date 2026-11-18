@@ -15,6 +15,7 @@ and keys are in [docs/debugging.md](../../docs/debugging.md). Nothing here conta
 | `python -m tools.dev.pipebench` | Builds `pipebench.c` and times **cold** Vulkan pipeline builds of translated shaders |
 | `python -m tools.dev.spv_salt` | Makes a compiled shader new to the driver's cache, to test a cold start in the real game |
 | `python -m tools.dev.decisions` | Writes the decisions' index ([docs/decisions/README.md](../../docs/decisions/README.md)) from each record's header; `--check` also finds dead links, `decision NNNN` mentions of records that don't exist and code paths that are gone |
+| `python -m tools.dev.bench` | Where the frame time goes, for every scene of the `bench` group (~2 h, nothing else open): GPU time per pass at the owner's settings and CPU time per thread uncapped at 1600×900, in `work/bench/` (JSON and CSV); writes the site's snapshot `docs/advanced/bench.js`. `--parse` rewrites the results from the last runs; scene names run only those |
 | `python -m tools.dev.code_map` | Writes the site's code map data ([docs/advanced/](../../docs/advanced/)): every runtime module and function and who calls whom. Run it after runtime changes; `--check` exits 1 when it is out of date |
 | `python -m tools.yw4.mainview` | Groups a traced frame into passes with the engine functions that draw them ([frame.md](../../docs/frame.md)) |
 
