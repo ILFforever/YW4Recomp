@@ -495,7 +495,10 @@ void yw4_perf_hud(HudContent *c, int compact, unsigned parts) {
 
 /* Called by nvnQueuePresentTexture: enter = on entry, shown = after the host's part of the
  * present, exit = after the wait for the flip. */
+uint64_t yw4_world_frames;  /* presents in a row with the 3D world drawn (over 100 draws): replays wait on it */
+
 void yw4_perf_frame(uint64_t frame, int64_t enter, int64_t shown, int64_t exit_, uint64_t draws) {
+    __atomic_store_n(&yw4_world_frames, draws > 100 ? yw4_world_frames + 1 : 0, __ATOMIC_RELAXED);
     if (enabled < 0) start();
     /* YW4_EXIT_AT=<frame> (tests): the run ends cleanly once that frame has been presented, so a test lasts as long
      * as its last scheduled frame needs and not a guessed number of seconds */

@@ -93,7 +93,11 @@ static uint64_t scripted(uint64_t tick) {
  *     k <tick> <F9|F10|F11|F12|F6|F1|UP|DOWN|LEFT|RIGHT>  (the last four: the settings panel's keys)
  * A replay feeds the same states back at the same ticks (instead of the keyboard and gamepad)
  * and presses the same capture keys, so a route a person played can be run again by a script.
- * The game's loading times vary a little from run to run, so long routes can drift. */
+ * The game's loading times vary a little from run to run, so long routes can drift.
+ *     w <tick>   (written by hand) at that tick the replay waits for the 3D world: it presses A every 40 frames
+ *                until the world has drawn for 60 frames in a row, then goes on, its later ticks moved by the wait.
+ *                Loading a save runs on real time, so at an uncapped frame rate a fixed press can come too early
+ *                and the run sits on "Finished loading diary save data!" (2026-11-18). */
 #include <time.h>
 #ifdef _WIN32
 #include <direct.h>
@@ -169,6 +173,9 @@ typedef struct {
 static RecState *replay_states;
 static RecKey *replay_keys;
 static size_t n_states, n_keys, next_key;
+static uint64_t *replay_waits;  /* "w" lines */
+static size_t n_waits;
+extern uint64_t yw4_world_frames;  /* perf.c */
 static int replay_loaded;
 int yw4_replay_done;  /* the replay has handed over to the player (its last line): kernel.c's frame clock stops */
 
@@ -195,6 +202,9 @@ static void replay_load(void) {
             snprintf(replay_keys[n_keys].name, sizeof replay_keys[n_keys].name, "%s", name);
             replay_keys[n_keys].text = NULL;
             n_keys++;
+        } else if (sscanf(line, "w %llu", &tick) == 1) {
+            replay_waits = realloc(replay_waits, (n_waits + 1) * sizeof *replay_waits);
+            replay_waits[n_waits++] = tick;
         } else if (sscanf(line, "t %llu %n", &tick, &at) == 1 && at > 0) {  /* typed text, to the end of the line */
             line[strcspn(line, "\r\n")] = 0;
             replay_keys = realloc(replay_keys, (n_keys + 1) * sizeof *replay_keys);
@@ -220,7 +230,25 @@ static int replay_state(uint64_t tick, uint64_t *buttons, int32_t sticks[4]) {
      * 120 frames/s let one live read through, then the replay's last state held the input). */
     static int handed_over;
     if (handed_over) return 0;
-    if (next_key == n_keys && (!n_states || tick > replay_states[n_states - 1].tick)) {
+    /* a "w" line: hold the replay's ticks there, pressing A, until the world is up (at most 10 minutes of frames) */
+    static uint64_t shift, wait_from;
+    static size_t next_wait;
+    if (next_wait < n_waits && tick - shift >= replay_waits[next_wait]) {
+        if (!wait_from) wait_from = tick;
+        if (__atomic_load_n(&yw4_world_frames, __ATOMIC_RELAXED) < 60 && tick - wait_from < 36000) {
+            shift = tick - replay_waits[next_wait];
+            /* A, but not once the world draws (it would talk to whoever stands there) */
+            *buttons = !__atomic_load_n(&yw4_world_frames, __ATOMIC_RELAXED) && (tick - wait_from) % 40 >= 20 &&
+                       (tick - wait_from) % 40 < 26;
+            memset(sticks, 0, 4 * sizeof(int32_t));
+            return 1;
+        }
+        fprintf(stderr, "yw4: replay: waited %llu frames at tick %llu for the world\n",
+                (unsigned long long)(tick - wait_from), (unsigned long long)replay_waits[next_wait]);
+        next_wait++, wait_from = 0;
+    }
+    tick -= shift;
+    if (next_wait == n_waits && next_key == n_keys && (!n_states || tick > replay_states[n_states - 1].tick)) {
         if (!handed_over) {
             handed_over = 1;
             __atomic_store_n(&yw4_replay_done, 1, __ATOMIC_RELEASE);

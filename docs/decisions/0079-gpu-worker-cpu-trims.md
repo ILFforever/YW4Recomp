@@ -49,6 +49,19 @@ Streamline's draws, and its semaphore) and screenshots at the same replay frames
 - **Flush rules instead of the page scan** (`YW4_UNTRACKED=1`): slower; the per-draw checks cost more than the scan.
 - **The page scan split over helper threads**: the scan (~1.1 ms a frame, 1,092 MiB walked for ~1,900 written pages)
   took as long on 4 threads: GetWriteWatch calls don't overlap. A log line now reports its cost every 600 frames.
+- **Scanning only the pages something reads** (2026-11-18): only textures we uploaded and geometry we copied read
+  the write generations, so the scan was limited to those pages ("live" pages, tracking reset when a page joins, runs
+  closer than 16 pages scanned as one call). Short runs: 0.26-0.64 ms a frame against 0.94-1.30. Dropped:
+  - The saving fades: pages never leave the set, and after 9 minutes of play it held 600 MiB and cost 0.90 ms
+    (whole pools: 0.97). Making pages leave again is more code for a background thread's fraction of a millisecond.
+  - A content audit (a texture or copy the pages call unchanged, compared with its upload) over 8 scenes, live
+    against whole pools: textures were all caught by the next scan, but geometry copies left stale for more than
+    3 frames were 108 against 40, cause not found.
+  - Windows itself was fine: GetWriteWatch and ResetWriteWatch on part of a region behave as documented (a standalone
+    test). An early "missed write" was the test's own snapshot taken before the reset; resetting must come before
+    anything reads the storage.
+  - The whole-pool scan also leaves 40 geometry copies stale for more than 3 frames (ranges of 100 bytes to 5 KB)
+    in those 8 scenes: not looked into yet.
 
 ## Consequences
 
