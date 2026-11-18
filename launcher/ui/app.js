@@ -1194,6 +1194,35 @@ document.querySelectorAll('[data-open]').forEach((b) => b.addEventListener('clic
   invoke('open_folder', { install: inst.install, which: b.dataset.open, saves: inst.saves })));
 
 
+// Settings' "Open straight into the game" (owner, 2026-11-18): the window starts hidden (main.rs); the Ready screen
+// is made behind it and the game starts, and the window shows when the game closes (play's "hide", where the update
+// popup then offers what was found). An update found within 3 s goes to the game's corner card (YW4_UPDATE_NOTICE),
+// so an offline PC isn't kept waiting. Anything in the way (no build, the DLC's keys): the window, as usual.
+async function straightToGame() {
+  const win = T && T.window ? T.window.getCurrentWindow() : null;
+  try {
+    await showReady();
+    const info = await invoke('install_info', { install: inst.install });
+    if (!info.version || !$('dlc-keys-box').hidden) throw new Error('not ready to play');
+    let u = null;
+    try {
+      u = await Promise.race([invoke('check_updates', { install: inst.install, built: info.version || '' }),
+        new Promise((r) => setTimeout(() => r(null), 3000))]);
+    } catch (_) { /* no notice */ }
+    const say = [];
+    // the game first, then the launcher (owner, 2026-11-18; the popup after the game offers the launcher first)
+    if (u && (u.game || u.rebuild)) say.push('Game ' + (u.game ? u.game.version : u.rebuild));
+    if (u && u.launcher) say.push((say.length ? 'launcher ' : 'Launcher ') + u.launcher.version);
+    await invoke('play', { install: inst.install, mods: inst.mods !== false, showLog: !!inst.showLog, onPlay: 'hide',
+      controlsHint: inst.controlsHint !== false, cheats: inst.cheats !== false, theme: THEMES[themeAt] ? THEMES[themeAt].id : 'recomp',
+      disabledMods: (inst && inst.disabledMods) || [], updateNotice: say.join(' and ') });
+    $('stat-last').textContent = 'Today';
+  } catch (e) {
+    console.error(e);
+    if (win) { try { await win.show(); await win.setFocus(); } catch (_) {} }
+  }
+}
+
 // ---- Settings (the top bar's gear): every change is saved at once (launcher.json); moving the saves asks first
 const onScreen = (name) => !document.querySelector(`.screen[data-screen="${name}"]`).hidden;
 function setToggle(id, on) { (typeof id === 'string' ? $(id) : id).setAttribute('aria-checked', String(!!on)); }
@@ -1216,6 +1245,7 @@ async function showSettings() {
   setToggle('set-mods', inst.mods !== false);
   setToggle('set-showlog', !!inst.showLog);
   setToggle('set-hint', inst.controlsHint !== false);
+  setToggle('set-straight', !!inst.straightToGame);
   setToggle('set-cheats', inst.cheats !== false);
   try { setToggle('set-full', await invoke('game_full_screen', { install: inst.install, saves: inst.saves })); } catch (e) { /* off */ }
   setToggle('set-desktop', inst.desktop);
@@ -1329,6 +1359,7 @@ document.querySelectorAll('[data-onplay]').forEach((b) => b.addEventListener('cl
 $('set-mods').addEventListener('click', async () => { inst.mods = inst.mods === false; setToggle('set-mods', inst.mods); await saveInst(); });
 $('set-showlog').addEventListener('click', async () => { inst.showLog = !inst.showLog; setToggle('set-showlog', inst.showLog); await saveInst(); });
 $('set-hint').addEventListener('click', async () => { inst.controlsHint = inst.controlsHint === false; setToggle('set-hint', inst.controlsHint); await saveInst(); });
+$('set-straight').addEventListener('click', async () => { inst.straightToGame = !inst.straightToGame; setToggle('set-straight', inst.straightToGame); await saveInst(); });
 // the game's Cheats page (on by default); off starts the game with YW4_CHEATS=0: the page hidden, every cheat off
 $('set-cheats').addEventListener('click', async () => { inst.cheats = inst.cheats === false; setToggle('set-cheats', inst.cheats); await saveInst(); });
 $('set-full').addEventListener('click', async () => {
@@ -1403,13 +1434,20 @@ function openRebuildOptions() {  // for the Settings page's "Rebuild with other 
   loadOptions();
 }
 
-// ---- updates (decision 0054): a popup when the Play screen opens, at most one offer: a downloaded game update
-// waiting for its rebuild first, then a game update on GitHub, then a newer launcher (installed by the launcher on
-// Update, or by the player from its page when its release has no installer).
-// "Later" doesn't ask again until the launcher is started again.
+// ---- updates (decision 0054): a popup when the Play screen opens, one offer at a time: a downloaded game update
+// waiting for its rebuild first (work the player started), then a newer launcher (installed by the launcher on Update,
+// or by the player from its page when its release has no installer), then a game update on GitHub. The launcher
+// before the game (owner, 2026-11-18): a game update can need a newer launcher, which only its zip says, so offered
+// first it failed after its download each time and the launcher behind it was never offered.
+// "Later" doesn't ask again until the launcher is started again, and goes on to the next offer.
 const updateDlg = $('update-dlg');
 const laterFor = new Set();  // offers put off in this run
-$('update-later').addEventListener('click', () => { laterFor.add(updateDlg.dataset.offer); updateDlg.close(); });
+let updatesFor = null;  // the install info of the last check, for the next offer after "Later"
+$('update-later').addEventListener('click', () => {
+  laterFor.add(updateDlg.dataset.offer);
+  updateDlg.close();
+  if (updatesFor) showUpdates(updatesFor);
+});
 // a release's change log (its GitHub description, Markdown): "-" / "*" lines as a list, "#" lines as headings, the
 // rest as paragraphs; plain text only (nothing from GitHub becomes HTML)
 function renderNotes(md) {
@@ -1435,8 +1473,8 @@ function renderNotes(md) {
   }
   $('update-notes').hidden = !body.childNodes.length;
 }
-function askUpdate(key, title, text, action, run, notes) {
-  if (laterFor.has(key)) return;
+function askUpdate(key, title, text, action, run, notes) {  // 0: put off with "Later" in this run, not shown
+  if (laterFor.has(key)) return false;
   updateDlg.dataset.offer = key;
   $('update-title').textContent = title;
   $('update-text').textContent = text;
@@ -1448,20 +1486,49 @@ function askUpdate(key, title, text, action, run, notes) {
   btn.onclick = run;
   if (!updateDlg.open) updateDlg.showModal();
   btn.focus();  // Enter takes the update
+  return true;
 }
 async function showUpdates(info) {
   let u = null;
   try { u = await invoke('check_updates', { install: inst.install, built: info.version || '' }); } catch (e) { return; }
-  if (u.rebuild) {
-    askUpdate('rebuild ' + u.rebuild, `Game update ${u.rebuild} is ready`,
+  updatesFor = info;
+  if (u.rebuild && askUpdate('rebuild ' + u.rebuild, `Game update ${u.rebuild} is ready`,
       'Rebuild the game to play it. It takes about 5 minutes; your saves stay as they are.', 'Rebuild', async () => {
         updateDlg.close();
         choicesFromInstall();
         await loadOptions();
         show('build');
         startBuild('update');
-      }, u.rebuild_notes);
-  } else if (u.game) {
+      }, u.rebuild_notes)) return;
+  if (u.launcher && u.launcher.sha256 && !u.launcher.portable) {
+    // the release has its installer: downloaded, checked and started here; the launcher closes and comes back new
+    const l = u.launcher;
+    if (askUpdate('launcher ' + l.version, `Launcher ${l.version}`,
+      `A new launcher is out: ${gb(l.size)} to download. The launcher closes, installs it and opens again; your game and saves stay.`,
+      'Update', async () => {
+        const btn = $('update-btn');
+        btn.disabled = true;
+        $('update-later').disabled = true;
+        btn.textContent = 'Downloading…';
+        try {
+          await invoke('download_launcher_update', { version: l.version, url: l.url, sha256: l.sha256 });
+          btn.textContent = 'Installing…';
+          await invoke('run_launcher_update');
+        } catch (e) {
+          updateDlg.close();
+          popup('Launcher update', String(e));
+        }
+      }, l.notes)) return;
+  } else if (u.launcher) {  // the portable launcher, or a release without its installer: its page, by hand
+    const text = u.launcher.portable
+      ? `A new launcher is out. Download YW4-Recomp-Launcher-${u.launcher.version}-portable.zip and unpack it over this folder; your game and saves stay.`
+      : 'A new launcher is out. Download it and install it over this one; your game and saves stay.';
+    if (askUpdate('launcher ' + u.launcher.version, `Launcher ${u.launcher.version}`, text, 'Download', () => {
+        updateDlg.close();
+        invoke('open_release_page', { url: u.launcher.page });
+      }, u.launcher.notes)) return;
+  }
+  if (u.game) {
     askUpdate('game ' + u.game.version, `Game update ${u.game.version}`,
       `A new version of the game is out: ${gb(u.game.size)} to download, then a rebuild of about 5 minutes.`, 'Update', async () => {
         const btn = $('update-btn');
@@ -1478,33 +1545,6 @@ async function showUpdates(info) {
         }
         showUpdates(info);  // now the rebuild question, in the same popup
       }, u.game.notes);
-  } else if (u.launcher && u.launcher.sha256 && !u.launcher.portable) {
-    // the release has its installer: downloaded, checked and started here; the launcher closes and comes back new
-    const l = u.launcher;
-    askUpdate('launcher ' + l.version, `Launcher ${l.version}`,
-      `A new launcher is out: ${gb(l.size)} to download. The launcher closes, installs it and opens again; your game and saves stay.`,
-      'Update', async () => {
-        const btn = $('update-btn');
-        btn.disabled = true;
-        $('update-later').disabled = true;
-        btn.textContent = 'Downloading…';
-        try {
-          await invoke('download_launcher_update', { version: l.version, url: l.url, sha256: l.sha256 });
-          btn.textContent = 'Installing…';
-          await invoke('run_launcher_update');
-        } catch (e) {
-          updateDlg.close();
-          popup('Launcher update', String(e));
-        }
-      }, l.notes);
-  } else if (u.launcher) {  // the portable launcher, or a release without its installer: its page, by hand
-    const text = u.launcher.portable
-      ? `A new launcher is out. Download YW4-Recomp-Launcher-${u.launcher.version}-portable.zip and unpack it over this folder; your game and saves stay.`
-      : 'A new launcher is out. Download it and install it over this one; your game and saves stay.';
-    askUpdate('launcher ' + u.launcher.version, `Launcher ${u.launcher.version}`, text, 'Download', () => {
-        updateDlg.close();
-        invoke('open_release_page', { url: u.launcher.page });
-      }, u.launcher.notes);
   }
 }
 
@@ -1598,6 +1638,7 @@ $('welcome-close').addEventListener('click', closeWelcome);
   // a built install: straight to Play (the welcome popup is for the first run)
   try { inst = invoke ? await invoke('load_state') : null; } catch (e) { inst = null; }
   syncSettingsButton();
+  if (inst && inst.straightToGame) { await straightToGame(); return; }
   if (inst) { showReady(); return; }
   show('home');
   let hidden = false;

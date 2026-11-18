@@ -38,6 +38,10 @@ pub struct State {
     /// Settings: the game's Cheats page (on by default; off starts the game with YW4_CHEATS=0)
     #[serde(default = "yes")]
     cheats: bool,
+    /// Settings: the desktop shortcut opens straight into the game; the launcher's window stays hidden until the game
+    /// closes (owner, 2026-11-18; main.rs, app.js straightToGame)
+    #[serde(rename = "straightToGame", default)]
+    straight_to_game: bool,
     /// Disabled mods by name: skipped during LayeredFS overlay
     #[serde(rename = "disabledMods", default)]
     pub disabled_mods: Vec<String>,
@@ -58,6 +62,11 @@ fn state_path() -> PathBuf {
 
 fn read_state() -> Option<State> {
     serde_json::from_str(&std::fs::read_to_string(state_path()).ok()?).ok()
+}
+
+/// Settings' "Open straight into the game" is on and there is a game to start: the window starts hidden (main.rs).
+pub fn straight_to_game() -> bool {
+    read_state().map_or(false, |s| s.straight_to_game && exe(&s.install).is_file())
 }
 
 #[tauri::command]
@@ -573,7 +582,7 @@ pub fn set_mod_enabled(mod_name: String, enabled: bool) -> Result<Vec<String>, S
 /// Settings (Play): with `mods` off the game starts with none (YW4_MODS=none: an environment variable wins over
 /// game.ini's line); `on_play` says what the launcher's window does meanwhile, and "hide" brings it back afterwards.
 #[tauri::command]
-pub fn play(app: tauri::AppHandle, install: String, mods: Option<bool>, on_play: Option<String>, theme: Option<String>, show_log: Option<bool>, disabled_mods: Option<Vec<String>>, controls_hint: Option<bool>, cheats: Option<bool>) -> Result<(), String> {
+pub fn play(app: tauri::AppHandle, install: String, mods: Option<bool>, on_play: Option<String>, theme: Option<String>, show_log: Option<bool>, disabled_mods: Option<Vec<String>>, controls_hint: Option<bool>, cheats: Option<bool>, update_notice: Option<String>) -> Result<(), String> {
     use tauri::{Emitter, Manager};
     crate::buildrun::ensure_dlc_extracted(&app, Path::new(&install));
     let e = exe(&install);
@@ -596,6 +605,9 @@ pub fn play(app: tauri::AppHandle, install: String, mods: Option<bool>, on_play:
     if controls_hint == Some(false) { cmd.env("YW4_KEYS_NOTICE", "0"); }
     // Settings' "Cheats" off: the game's Cheats page hidden and every cheat off (YW4_CHEATS; on is the game's default)
     if cheats == Some(false) { cmd.env("YW4_CHEATS", "0"); }
+    // started straight from the shortcut with an update out: the game's corner card says so ("Game 1.7.0 and launcher
+    // 1.4.0"); it is taken in the launcher when the game closes
+    if let Some(n) = update_notice.as_deref().filter(|n| !n.is_empty()) { cmd.env("YW4_UPDATE_NOTICE", n); }
     // the game reads the launcher's theme files (decision 0055): its folder, so an installed game finds them
     if let Some(dir) = crate::themes::themes_dir(&app) { cmd.env("YW4_THEMES_DIR", dir); }
     // the theme goes both ways: the game opens in the launcher's theme, and a theme chosen in the game comes back

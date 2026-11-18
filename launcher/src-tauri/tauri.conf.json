@@ -11,6 +11,7 @@
     "windows": [
       {
         "title": "Yo-kai Watch 4 Recomp",
+        "visible": false,
         "width": 1100,
         "height": 732,
         "minWidth": 900,

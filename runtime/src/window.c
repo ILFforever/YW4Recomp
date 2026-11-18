@@ -74,6 +74,7 @@ static VkCommandPool pool;
 static VkCommandBuffer cmd;
 static void window_notice(int high, const char *title, const char *fmt, ...);  /* a fading card (below, with the HUD) */
 static void window_notice_keys(void);  /* the same card for the controls, after the one showing (if any) */
+static void window_notice_update(void);  /* an update the launcher found, before the controls card */
 static VkFence fence;
 static VkSemaphore acquired;
 
@@ -581,6 +582,7 @@ static int vk_init(void) {
             window_notice(!low, low ? "Lighter graphics for this PC" : "High graphics for this PC",
                           "%s \xc2\xb7 Change them in Settings", vk.props.deviceName);
         }
+        window_notice_update();  /* started straight from the launcher's shortcut with an update out (below) */
         window_notice_keys();  /* each start: how to see the controls (after the graphics card, when there is one) */
     }
 
@@ -982,6 +984,7 @@ static struct {
 } nb;
 static char note_title[96], note_text[256];
 static int note_on, note_high;
+static int note_update, note_update_wait;  /* the update card (window_notice_update): showing, waiting its turn */
 static int note_keys, note_keys_wait, note_pad, note_style;  /* the controls card: showing, waiting its turn, the device and the controller make it names */
 static uint64_t note_start;  /* SDL ticks of its first frame (0: not shown yet) */
 static int note_bottom;      /* pixels from the card's image top to the card's bottom (a shadow margin below) */
@@ -992,7 +995,7 @@ static void window_notice(int high, const char *title, const char *fmt, ...) {
     va_start(ap, fmt);
     vsnprintf(note_text, sizeof note_text, fmt, ap);
     va_end(ap);
-    note_high = high, note_keys = 0, note_start = 0, nb.s = 0, note_on = 1;
+    note_high = high, note_keys = note_update = 0, note_start = 0, nb.s = 0, note_on = 1;
     fprintf(stderr, "yw4: window: notice: %s. %s\n", note_title, note_text);
 }
 
@@ -1009,9 +1012,25 @@ static void note_keys_words(int pad) {
     note_pad = pad, note_style = bindings_pad_style(), nb.s = 0;
 }
 static void note_keys_start(void) {
-    note_keys_wait = 0, note_keys = 1, note_start = 0, note_on = 1;
+    note_keys_wait = 0, note_keys = 1, note_update = 0, note_start = 0, note_on = 1;
     note_keys_words(note_keys_pad());
     fprintf(stderr, "yw4: window: notice: %s. %s\n", note_title, note_text);
+}
+/* The update card (owner, 2026-11-18): the launcher's "Open straight into the game" starts the game without showing
+ * its window, so an update it found is said here, before the controls card: YW4_UPDATE_NOTICE is what is out ("Game
+ * 1.7.0 and launcher 1.4.0"); the launcher shows when the game closes and offers it there. */
+static void note_update_start(void) {
+    const char *e = getenv("YW4_UPDATE_NOTICE");
+    note_update_wait = 0, note_update = 1, note_keys = 0, note_start = 0, nb.s = 0, note_on = 1;
+    snprintf(note_title, sizeof note_title, "Update available");
+    snprintf(note_text, sizeof note_text, "%s \xc2\xb7 Get it in the launcher after you close the game", e ? e : "");
+    fprintf(stderr, "yw4: window: notice: %s. %s\n", note_title, note_text);
+}
+static void window_notice_update(void) {
+    const char *e = getenv("YW4_UPDATE_NOTICE");
+    if (!e || !*e) return;
+    if (note_on) note_update_wait = 1;
+    else note_update_start();
 }
 static void window_notice_keys(void) {
     if (!settings_keys_notice() || settings_legacy_keys()) return;  /* the old menus: no quick look to point at */
@@ -1080,7 +1099,7 @@ static void note_render(float s) {
     memset(nb.cpu, 0, (size_t)NOTE_W * NOTE_H * 4);
     UiCanvas c = {nb.cpu, NOTE_W, NOTE_H, s, 0, 0};
     /* green: high; gold: lighter; the theme's lilac: the controls (not a graphics level) */
-    uint32_t tint = note_keys ? th->lilac : note_high ? 0x4cc38a : th->pop_gold;
+    uint32_t tint = note_keys ? th->lilac : note_update || note_high ? 0x4cc38a : th->pop_gold;
     ui_box(&c, m, m, cw, ch, 16, th->pop_deep, 0, 0);  /* no shadow under it (owner, 2026-11-13) */
     ui_box(&c, m, m, tile + 16, ch, 16, tint, 0, 0);  /* the tile, its right corners covered next */
     ui_rect(&c, m + tile, m, 16, ch, th->pop_deep, 1);
@@ -1088,6 +1107,10 @@ static void note_render(float s) {
     /* the controls: a keyboard, or a controller's outline (two grips) with its d-pad and two buttons; a little
      * larger and finer than the gauge, which has less to show */
     const float isz = note_keys ? 48 : 40;
+    if (note_update)  /* a download arrow over a line */
+        ui_icon(&c, "<path d=\"M12 4v11\"/><path d=\"M7 10l5 5 5-5\"/><path d=\"M5 20h14\"/>", m + (tile - isz) / 2,
+                m + (ch - isz) / 2, isz, 2.6f, th->pop_deep);
+    else
     ui_icon(&c, note_keys ? (note_pad ? "<path d=\"M6 6h12a4 4 0 0 1 3.9 3.2l1 6.3a3 3 0 0 1-5.3 1.8L15.5 15h-7l-2.1 2.3a3 3 0 0 1-5.3-1.8l1-6.3A4 4 0 0 1 6 6z\"/>"
                                         "<path d=\"M8 9v3M6.5 10.5h3M15.2 11.6h.01M17.8 9.4h.01\"/>"
                                       : "<rect x=\"2.5\" y=\"6\" width=\"19\" height=\"12\" rx=\"2.5\"/>"
@@ -1115,7 +1138,8 @@ static void note_draw(VkImage dst, uint32_t index, int32_t x0, int32_t y0, uint3
     float t = (float)(now - note_start) / 1000.0f, a = t < in ? t / in : t < in + hold ? 1.0f : 1.0f - (t - in - hold) / out;
     if (a <= 0 && t > in) {
         note_on = 0;
-        if (note_keys_wait) note_keys_start();  /* the controls card's turn, from the next frame */
+        if (note_update_wait) note_update_start();  /* the update card's turn, then the controls card's */
+        else if (note_keys_wait) note_keys_start();  /* the controls card's turn, from the next frame */
         return;
     }
     /* the other device was touched, or the controller turned out to be another make (it is read after the start) */

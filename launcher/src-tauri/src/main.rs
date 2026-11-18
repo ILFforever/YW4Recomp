@@ -92,6 +92,15 @@ fn main() {
                 }
             }
         })
+        // the window starts hidden (tauri.conf.json): shown at once, unless Settings' "Open straight into the game" is
+        // on, when the screens start the game and the window shows when it closes (or when it can't start: app.js)
+        .setup(|app| {
+            use tauri::Manager;
+            if !ready::straight_to_game() {
+                if let Some(w) = app.get_webview_window("main") { let _ = w.show(); }
+            }
+            Ok(())
+        })
         .invoke_handler(tauri::generate_handler![launcher_version, open_project_page, open_link, licences_folder, start_screen, test_paths, check::check_game, check::extracted_files,
             themes::list_themes, themes::read_theme, options::gpu_names, options::disk_space, buildrun::start_build, buildrun::cancel_build, buildrun::builder_bundled, update::check_updates, update::download_game_update, update::game_news, update::open_release_page,
             update::download_launcher_update, update::run_launcher_update,

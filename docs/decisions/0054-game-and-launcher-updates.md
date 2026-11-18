@@ -158,3 +158,20 @@ confused). `v1.0.0` is a plain git tag, which the Releases page doesn't show and
 The first game-code release comes with the first game update (1.0.1), which is what the two kinds exist for:
 players get it inside the launcher and never download the launcher again for a game change. Then: a title that
 says the launcher downloads it, and not "the latest release", so the launcher's stays the one GitHub shows first.
+
+## The order of the offers, and starting straight into the game (2026-11-18)
+
+**Order** (owner): a downloaded game update waiting for its rebuild first (work the player started), then a newer
+launcher, then a game update on GitHub. Before, the game update came before the launcher, which went wrong two
+ways: "Later" on the game update ended the check, so the launcher update was not offered in that run either; and a
+game update that needs a newer launcher (only the `release.toml` inside its zip says so) was refused after every
+download, offered again first the next time, and the launcher update behind it never came up. A newer launcher can
+always build a newer game, so it goes first. "Later" now moves on to the next offer.
+
+**Open straight into the game** (owner; Settings, Shortcuts): the launcher's window starts hidden (`tauri.conf.json`
+`visible: false`, shown at once in `main.rs` unless this is on), the screens start the game with the player's
+settings and the window shows when the game closes (Play's "hide"), with the usual update popup. When the game
+can't start (no build, the DLC needs `prod.keys`) the window shows at once. An update found within 3 s of the start
+(cached for an hour; an offline PC isn't kept waiting) goes to the game as `YW4_UPDATE_NOTICE` ("Game 1.7.0 and
+launcher 1.4.0": the game first in the card, owner), shown as a corner card before the controls card (`window.c`, `window_notice_update`). Not guarded:
+the shortcut clicked again while the game runs starts a second game.
