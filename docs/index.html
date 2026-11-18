@@ -367,9 +367,21 @@ footer img { width: 34px; height: 34px; border-radius: 9px; }
 
 <section class="sec">
   <div class="wrap">
+    <div class="title"><h2>At 4K</h2><p>Gameplay at 3840×2160</p></div>
+    <div class="video" style="background-image:url(compare/img/hero-school-4k.jpg)">
+      <button class="play" type="button" data-yt="udBcr0H6iHQ" data-title="YW4 Recomp gameplay at 4K" aria-label="Play the video: YW4 Recomp gameplay at 4K">
+        <svg viewBox="0 0 68 48" aria-hidden="true"><path d="M66.5 7.7a8.5 8.5 0 0 0-6-6C55.3.3 34 .3 34 .3S12.7.3 7.4 1.7a8.5 8.5 0 0 0-6 6C0 13 0 24 0 24s0 11 1.4 16.3a8.5 8.5 0 0 0 6 6C12.7 47.7 34 47.7 34 47.7s21.3 0 26.6-1.4a8.5 8.5 0 0 0 6-6C68 35 68 24 68 24s0-11-1.5-16.3z" fill="#f00"/><path d="M27 34V14l18 10z" fill="#fff"/></svg>
+      </button>
+    </div>
+    <p class="vcap"><a href="https://youtu.be/udBcr0H6iHQ">Watch on YouTube</a></p>
+  </div>
+</section>
+
+<section class="sec">
+  <div class="wrap">
     <div class="title"><h2>On a low-end laptop</h2><p>An ASUS Zenbook with integrated Radeon graphics, next to an emulator</p></div>
-    <div class="video" id="video" style="background-image:url(compare/img/hero-forest-4k.jpg)">
-      <button class="play" type="button" data-yt="HfCrAkMDOzs" aria-label="Play the video: YW4 Recomp against Eden on a low-end laptop">
+    <div class="video" style="background-image:url(compare/img/hero-forest-4k.jpg)">
+      <button class="play" type="button" data-yt="HfCrAkMDOzs" data-title="YW4 Recomp against Eden on a low-end laptop" aria-label="Play the video: YW4 Recomp against Eden on a low-end laptop">
         <svg viewBox="0 0 68 48" aria-hidden="true"><path d="M66.5 7.7a8.5 8.5 0 0 0-6-6C55.3.3 34 .3 34 .3S12.7.3 7.4 1.7a8.5 8.5 0 0 0-6 6C0 13 0 24 0 24s0 11 1.4 16.3a8.5 8.5 0 0 0 6 6C12.7 47.7 34 47.7 34 47.7s21.3 0 26.6-1.4a8.5 8.5 0 0 0 6-6C68 35 68 24 68 24s0-11-1.5-16.3z" fill="#f00"/><path d="M27 34V14l18 10z" fill="#fff"/></svg>
       </button>
     </div>
@@ -464,18 +476,17 @@ function autoCycle(area, next) {
   restart();
   return restart;
 }
-/* the video: YouTube's player put in on the first click, playing at once */
-(() => {
-  const b = document.querySelector('#video .play');
+/* the videos: YouTube's player put in on the first click, playing at once */
+document.querySelectorAll('.video .play').forEach(b => {
   b.addEventListener('click', () => {
     const f = document.createElement('iframe');
     f.src = `https://www.youtube-nocookie.com/embed/${b.dataset.yt}?autoplay=1`;
-    f.title = 'YW4 Recomp against Eden on a low-end laptop';
+    f.title = b.dataset.title;
     f.allow = 'accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share';
     f.allowFullscreen = true;
     b.replaceWith(f);
   });
-})();
+});
 /* the before / after: the range input moves the line; the scene buttons swap the pair, and cycle on their own */
 (() => {
   const ba = document.getElementById('ba'), range = ba.querySelector('input');
