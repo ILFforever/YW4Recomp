@@ -211,18 +211,22 @@ float contact_shadow(vec3 pos, vec3 n, vec3 l, float jitter) {
 // shade on a wall). Only neighbours at about the same depth count, so nothing bleeds across an outline.
 // Called by every pixel of the block (uniform control flow): the swaps need all four. Pixels that don't use the
 // result (the sky and anything past the last cascade, surfaces facing away from the sun: the mask is 0 or 1
-// there whatever it finds) skip the march and are left out of their neighbours' average.
+// there whatever it finds) get 0 and are left out of their neighbours' average.
+// A block where no pixel uses it skips the march (2026-11-18: the march ran everywhere, sky included). The four
+// decide together: `used` is swapped first, while all four still run, so the branch is the same for the whole block
+// and they meet again at the swaps below (issue #19, #8: a branch that splits a block is what broke them on AMD).
+// The result is unchanged: a skipped pixel's 0 was 0 before, and its weight in the average 0.
 float contact_smoothed(vec3 pos, vec3 n) {
     uvec2 q = uvec2(gl_FragCoord.xy) & 1u;
     float jitter = (float(q.x + 2u * q.y) + 0.5) * 0.25;
     vec3 l = normalize(sun.d[0].xyz);
     float used = -pos.z <= sun.d[9].y && dot(n, l) > 1e-4 ? 1.0 : 0.0;
-    // every pixel marches (no branch before the swaps, as in contact_shadow); those that don't use it get 0
-    float c = contact_shadow(pos, n, l, jitter) * used;
+    vec3 us = vec3(subgroupQuadSwapHorizontal(used), subgroupQuadSwapVertical(used), subgroupQuadSwapDiagonal(used));
+    bool block_uses = used + us.x + us.y + us.z > 0.0;  // the same in all four pixels
+    float c = block_uses ? contact_shadow(pos, n, l, jitter) * used : 0.0;
     float z = pos.z, near = -z * 0.02;
     vec3 cs = vec3(subgroupQuadSwapHorizontal(c), subgroupQuadSwapVertical(c), subgroupQuadSwapDiagonal(c));
     vec3 zs = vec3(subgroupQuadSwapHorizontal(z), subgroupQuadSwapVertical(z), subgroupQuadSwapDiagonal(z));
-    vec3 us = vec3(subgroupQuadSwapHorizontal(used), subgroupQuadSwapVertical(used), subgroupQuadSwapDiagonal(used));
     vec3 wt = vec3(lessThan(abs(zs - z), vec3(near))) * us;
     return (c + dot(cs, wt)) / (1.0 + wt.x + wt.y + wt.z);
 }

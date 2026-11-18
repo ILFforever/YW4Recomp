@@ -56,6 +56,13 @@ Measured again 2026-11-02 with full-size effects (the mask at 2560×1080, the ow
 about 0.85 ms (`YW4_MASK_BREAKDOWN=1`: the mask 3.60 ms as set, 2.76 without contact shadows), well over the
 figures above, which were at half-size effects or in shade.
 
+2026-11-18: every pixel marched, the sky and everything past the last cascade included, and threw the result away
+there. Now a 2x2 block marches only when one of its pixels uses the result (`contact_smoothed`): the four swap their
+`used` flag first, while all four run, so the branch is the same for the block and the swaps after it stay safe on
+AMD. The result is unchanged (a skipped pixel's 0 was 0 before, its weight in the average 0). The mask at 4K with the
+owner's settings, before → after: busy town 2.44 → 2.10 ms, the owner's progress save 2.44 → 2.17, bamboo forest
+3.04 → 3.00 (little sky there); screenshots at the same frame show the same contact shadows.
+
 ## How it was checked
 
 The owner played with F7 at the lamp post, a wall's cap from several angles, hedges and houses (screenshots in the

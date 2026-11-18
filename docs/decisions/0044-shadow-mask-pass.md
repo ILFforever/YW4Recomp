@@ -70,6 +70,12 @@ Owner's verdict in game (2026-10-31): SOFT SHADOW FILTER FAST looks the same, so
 (`YW4_MASK_FILTER=five` for the game's); SOFT SHADOW SEARCH 8 looked the same but put small shadow blobs on some
 objects (a thin caster missed by the halved search gives a pixel a different softness), so it stays off.
 
+Revisited 2026-11-18 (owner's call): SOFT SHADOW SEARCH 8 is now on by default (`YW4_PCSS_SEARCH_TAPS=16` for the
+full search). It saved 0.70 / 0.43 / 0.33 ms of the mask at 4K in the late-game, busy and owner's-progress saves
+(16 vs 8, the owner's settings, `YW4_GPU_PASSES`), and screenshots at the same frame, cropped into the shadows (leaf
+shadows on paving, the characters' feet, foliage), show no blobs and no other difference. The later mask changes
+(one search per pixel, explicit level 0) likely took the blobs away; which one was not checked.
+
 ## Next
 
 Owning the program lets the shadow mask improve: contact shadows for small details the cascades miss (done: decision 0045),

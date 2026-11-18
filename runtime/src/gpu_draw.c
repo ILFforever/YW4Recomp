@@ -1569,7 +1569,9 @@ int gpu_pcss_search8(void) {
     int v = __atomic_load_n(&search8, __ATOMIC_ACQUIRE);
     if (v < 0) {
         const char *e = getenv("YW4_PCSS_SEARCH_TAPS");
-        v = e && atoi(e) == 8;
+        /* 8 by default since 2026-11-18: 0.33-0.70 ms less at 4K (three scenes), and the blobs on thin casters
+         * the owner saw on 2026-10-31 no longer show (leaf shadows on paving, characters' feet: the same as 16) */
+        v = !(e && atoi(e) == 16);
         __atomic_store_n(&search8, v, __ATOMIC_RELEASE);
     }
     return v;
