@@ -41,7 +41,7 @@ GROUPS = {
     "passes": "gbuffer shadow shadow_mask gpu_shadow bloom dof post gpu_post gpu_aa bones widescreen framerate",
     "upscale": "gpu_fsr gpu_dlss gpu_dlssg gpu_fg",
     "overlay": "gamemenu ui hud hud_style theme settings textin pause shortcutwheel mousemenu gamelogo gaiji_create "
-               "bugreport diaryrows cheats battle bindings run",
+               "bugreport diaryrows cheats battle bindings run discord discord_game discord_ipc",
     "debug": "perf events profile gpu_passes gpu_watch gpu_ab memscan trace_drawlist ai_trace",
 }
 
