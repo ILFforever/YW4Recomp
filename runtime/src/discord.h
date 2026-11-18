@@ -1,7 +1,7 @@
 /* Discord Rich Presence (discord.c, decision 0077): "Playing Yo-kai Watch 4" on the player's Discord profile, with
  * where they are (the main menu, the area's name, a battle), their Watch Rank and the time since the game started.
- * Off unless the player turns it on (DISCORD STATUS, YW4_DISCORD=1); nothing happens without the Discord app running
- * on this PC. */
+ * On unless the player turns it off (DISCORD STATUS, YW4_DISCORD=0; off in test runs); nothing happens without the
+ * Discord app running on this PC. */
 #ifndef YW4_DISCORD_H
 #define YW4_DISCORD_H
 

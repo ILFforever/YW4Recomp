@@ -32,11 +32,15 @@ static const char *app_id(void) {
     return e && *e ? e : YW4_DISCORD_APP_ID;
 }
 
+/* On unless the player turns it off (owner, 2026-11-18, for 1.7.0: most games and emulators show it, and Discord's
+ * own Activity Privacy hides it for those who don't want it). Off in test runs (YW4_SETTINGS_FILE=none, as the
+ * controls card), so they don't post to whoever runs them; YW4_DISCORD=0 / 1 decides either way. */
 int discord_enabled(void) {
     int on = __atomic_load_n(&enabled, __ATOMIC_ACQUIRE);
     if (on < 0) {
-        const char *e = getenv("YW4_DISCORD");
-        on = e && atoi(e) == 1;
+        const char *e = getenv("YW4_DISCORD"), *f = getenv("YW4_SETTINGS_FILE");
+        int test_run = f && (!*f || !strcmp(f, "none"));
+        on = e && *e ? atoi(e) == 1 : !test_run;
         __atomic_store_n(&enabled, on, __ATOMIC_RELEASE);
     }
     return on && *app_id();

@@ -1,4 +1,4 @@
-# 0077 — Discord Rich Presence: "Playing Yo-kai Watch 4", where and the Watch Rank, off unless turned on
+# 0077 — Discord Rich Presence: "Playing Yo-kai Watch 4", where and the Watch Rank, on unless turned off
 
 <!-- decision
 state: accepted
@@ -20,7 +20,9 @@ area and the player's level too; the owner then cut it to the basics: the game's
 
 - **What shows:** the Discord application's name (the owner names it "Yo-kai Watch 4"), its art uploaded as `icon`,
   and "elapsed" from when the game started; since 2026-11-18 also where the player is and the Watch Rank (below).
-- **Off unless turned on:** DISCORD STATUS (Settings, ADVANCED), OFF / ON, saved as `YW4_DISCORD=0/1`, default OFF.
+- **On unless turned off** (since 1.7.0, owner 2026-11-18; before: off unless turned on): DISCORD STATUS (Settings,
+  GENERAL), OFF / ON, saved as `YW4_DISCORD=0/1`, default ON. Most games and emulators show it, and Discord's own
+  Activity Privacy setting hides it for a player who doesn't want it. Off in test runs (`YW4_SETTINGS_FILE=none`).
   Turning it off clears the activity at once.
 - **The application ID** is `YW4_DISCORD_APP_ID` in `runtime/src/discord.h`: the owner's application
   `1571532450742665347` (created 2026-11-15; public, it goes in every build). An environment variable of the same
