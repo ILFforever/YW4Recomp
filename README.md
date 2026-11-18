@@ -655,7 +655,7 @@ the panel's WINDOW MODE row). **F12** takes a screenshot. The other function key
 | Reflex | NVIDIA GPUs: off (default), on or on + boost: less input delay, most where the GPU limits the frame rate. On while frame generation is DLSS |
 | **Detail** | |
 | Texture filtering | Off (the Switch's) or anisotropic ×2 to ×16: distant and slanted ground, roads and walls stay sharp. Default ×16 |
-| Effects resolution | Half (the Switch's) or full: the shadow mask, lamp lights and ambient occlusion at the 3D view's size, for sharper shadow edges. Costs ~2 ms of GPU at 1600×900 |
+| Effects resolution | Half (the Switch's) or full: the shadow mask, lamp lights and lighting inputs at the 3D view's size, for sharper shadow edges. Costs ~2 ms of GPU at 1600×900 |
 | Distance blur | Full (the Switch's), half or off: the game blurs everything far away. Default half |
 | **Shadows** | |
 | Shadow map | 1024 (the Switch's), 2048 or 4096: sharper shadow edges. Default 4096 |

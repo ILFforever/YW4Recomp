@@ -1490,7 +1490,7 @@ static int screen_sized(const NvnTexture *t) {
 }
 
 /* How much larger t's image is made (0 / 0: not). */
-/* Effects resolution: the game draws its shadow mask, lamp lights, ambient occlusion and effects into
+/* Effects resolution: the game draws its shadow mask, lamp lights, lighting inputs and effects into
  * half-size targets (800x450, 960x540 in the 1920x1080 chain) and spreads them over the picture, which
  * softens shadow edges and makes them blocky up close. FULL makes those targets twice as large as the
  * rest (the 3D view's size); their readers sample them in 0..1 coordinates. YW4_EFFECTS=0 (the game's,
