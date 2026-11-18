@@ -703,8 +703,8 @@ let inst = null;  // the launcher's state of the install (Rust: ready.rs, %AppDa
 
 // What's new: written for each release (the launcher ships with the notes of the version it builds)
 const NEWS = {
-  version: '1.3.0',
-  items: ['Cheats: unlimited coins, on or off here', 'Report a bug: Open GitHub and Show the zip work again', 'Help: Report a bug under Troubleshooting'],
+  version: '1.4.0',
+  items: ['Open straight into the game: Settings, Shortcuts', 'Discord status: in the game\'s Settings, General', 'Up to 2 ms faster at 4K', 'Mirapo\'s list: the mouse wheel steps its rows'],
 };
 
 function showNews(version, items) {
