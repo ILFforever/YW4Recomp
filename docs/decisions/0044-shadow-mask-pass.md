@@ -55,7 +55,8 @@ Two switches in the panel's SPEED-UPS rows, off by default until the owner has c
 
 - SOFT SHADOW FILTER (`YW4_MASK_FILTER=once`): with soft shadows on, the game's five lookups (points less than a
   texel apart) are each a 16-tap filter; one lookup at the centre covers the same ground.
-- SOFT SHADOW SEARCH (`YW4_PCSS_SEARCH_TAPS=8`): the blocker search with every other tap of its disk.
+- SOFT SHADOW SEARCH: the blocker search with every other tap of its disk. Always on since 2026-11-18 (below);
+  the row and `YW4_PCSS_SEARCH_TAPS` are gone.
 
 The mask at the late-game save, 4K 21:9, soft shadows x2, 4096 maps (300-frame averages): the game's program
 2.62 ms, ours as the game does it 2.54, filter once 1.48, filter once and search 8 1.23. Both depart from the
@@ -75,6 +76,12 @@ full search). It saved 0.70 / 0.43 / 0.33 ms of the mask at 4K in the late-game,
 (16 vs 8, the owner's settings, `YW4_GPU_PASSES`), and screenshots at the same frame, cropped into the shadows (leaf
 shadows on paving, the characters' feet, foliage), show no blobs and no other difference. The later mask changes
 (one search per pixel, explicit level 0) likely took the blobs away; which one was not checked.
+
+Removed 2026-11-18 (owner's call, the same day): the 16-tap search and its row. The owner compared 16 and 8 at a
+sunlit crosswalk in game (F12 screenshots: no difference), and the day and night A/Bs above matched. The shader
+searches with 8 taps always; a `YW4_PCSS_SEARCH_TAPS=16` line left in a settings.ini is no longer read (the game
+reads only settings with a row) and drops out at the next save, so players who chose 16 are on 8. The translated
+game program (Shadow mask: Game) never had the option and keeps its 16.
 
 ## Next
 

@@ -341,12 +341,6 @@ static const Setting developer[] = {
      {"GAME'S", "FAST"},
      {"FIVE FILTERED LOOKUPS PER PIXEL", "ONE FILTERED LOOKUP PER PIXEL (RECOMMENDED)"}, 2, gpu_mask_filter_once,
      gpu_mask_filter_toggle, "YW4_MASK_FILTER", {"five", "once"}, mask_speedup_disabled},
-    {"SPEED-UPS", "SOFT SHADOW SEARCH",
-     "HOW MANY SAMPLES SOFT SHADOWS TAKE TO FIND WHAT CASTS THE SHADOW, WHICH SETS HOW SOFT ITS EDGE IS. 8 IS "
-     "ABOUT 0.3 TO 0.7 MS FASTER AT 4K AND LOOKS THE SAME.",
-     {"16", "8"},
-     {"16 SAMPLES", "8 SAMPLES (RECOMMENDED)"}, 2, gpu_pcss_search8, gpu_pcss_search8_toggle, "YW4_PCSS_SEARCH_TAPS", {"16", "8"},
-     mask_speedup_disabled},
     {"SPEED-UPS", "SOFT SHADOW SAMPLES",
      "HOW MANY SAMPLES MAKE EACH SOFT SHADOW EDGE. 8 TURNS THEM EACH FRAME SO THE ANTI-ALIASING (TAA, FSR, DLSS) "
      "AVERAGES THEM OVER FRAMES: CHEAPER, MAY SHIMMER A LITTLE IN MOTION. WITHOUT THAT ANTI-ALIASING EDGES GET GRAINY.",
@@ -643,16 +637,21 @@ static void fill_theme_row(SettingRow *r) {
 }
 
 /* The overlay's Advanced section also lists the developer page's settings after its own (owner, 2026-11-11: the
- * renderer switches and speed-ups were only on the old panel); in the overlay they are under ADVANCED. */
+ * renderer switches and speed-ups were only on the old panel); in the overlay they are under ADVANCED. Every row but
+ * Advanced's own (Discord status, legacy menus) changes the picture, so Preview can show it (`look`); the developer
+ * rows are all renderer switches and speed-ups (owner, 2026-11-18: Preview was off for them, with all of Advanced). */
 int settings_player_rows(SettingRow *rows, int max) {
     int n = 0, at = theme_row();
     for (int i = 0; i < NPLAYER && n < max; i++) {
-        if (n == at && !strcmp(player[i].category, "ADVANCED")) fill_theme_row(&rows[n++]);
-        if (n < max && !hud_slider_row(&player[i])) n += fill_rows(rows + n, 1, &player[i], 1);
+        if (n == at && !strcmp(player[i].category, "ADVANCED")) fill_theme_row(&rows[n++]), rows[n - 1].look = 1;
+        if (n < max && !hud_slider_row(&player[i])) {
+            n += fill_rows(rows + n, 1, &player[i], 1);
+            rows[n - 1].look = strcmp(player[i].category, "ADVANCED") != 0;
+        }
     }
     for (int i = 0; i < NDEVELOPER && n < max; i++) {
         n += fill_rows(rows + n, 1, &developer[i], 1);
-        rows[n - 1].category = "ADVANCED";
+        rows[n - 1].category = "ADVANCED", rows[n - 1].look = 1;
     }
     return n;
 }

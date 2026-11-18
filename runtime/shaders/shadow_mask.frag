@@ -35,7 +35,7 @@ layout(location = 0) out vec4 o_mask;
 
 // yw4_shadow: one shadow map compare, soft (PCSS) or the game's. The same text recomp/shader.py
 // (PCSS_COMMON, pcss_helper("SHADOWARRAY2D")) puts into the translated program: keep the two alike. Ours only:
-// mode.y bit 1 searches with every other tap (the panel's SOFT SHADOW SEARCH); bit 2 filters with every other tap,
+// the blocker search takes every other tap (8 of 16: as good, 0.3-0.7 ms less at 4K); mode.y bit 2 filters with every other tap,
 // the disk turned a golden angle each frame (bits 3 up: the frame mod 256), for the anti-aliasing's frame
 // blending to average (SOFT SHADOW SAMPLES).
 const vec2 YW4_DISK[16] = vec2[16](
@@ -88,13 +88,12 @@ float yw4_shadow(sampler2DArrayShadow s, sampler2DArray d, vec4 c) {
         r = yw4_search_r;
     } else {
         float gaps = 0.0, casters = 0.0;
-        int step = (int(yw4_pcss.mode.y) & 2) != 0 ? 2 : 1;  // ours, faster: every other tap
-        for (int i = 0; i < 16; i += step) {
+        for (int i = 0; i < 16; i += 2) {  // ours, faster: every other tap (the 16-tap choice removed 2026-11-18)
             float z = textureLod(d, vec3(c.xy + rot * YW4_DISK[i] * yw4_pcss.mode.z, c.z), 0.0).r;
             float gap = c.w - z;
             if (gap > yw4_pcss.tune.x) { gaps += gap; casters += 1.0; }
         }
-        if (yw4_pcss.tune.y == 1.0) return casters * (float(step) / 16.0);
+        if (yw4_pcss.tune.y == 1.0) return casters * (2.0 / 16.0);
         yw4_search_layer = c.z, yw4_search_r = -1.0;
         if (casters == 0.0) return yw4_pcss_remember(c.zw, shadow_cmp(s, vec4(c.xy, c.z, c.w)));
         r = clamp(gaps / casters * yw4_pcss.scale[min(int(c.z + 0.5), 3)], yw4_pcss.mode.w, yw4_pcss.mode.z);

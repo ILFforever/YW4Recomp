@@ -619,21 +619,32 @@ static void accept(void) {
     }
 }
 
-/* Preview: the graphics sections only (Advanced has nothing to see) */
-static int previewable(const char *category) { return strcmp(category, "ADVANCED") != 0; }
+/* Preview: the rows that change the picture (SettingRow.look). In a section, from its first such row to its last:
+ * Advanced's own rows (Discord status, legacy menus) come before its renderer switches and speed-ups. 0: none. */
+static int look_span(const SettingRow *rows, int n, int i, int *first, int *last) {
+    int a = i, z = i;
+    while (a > 0 && !strcmp(rows[a - 1].category, rows[i].category)) a--;
+    while (z < n - 1 && !strcmp(rows[z + 1].category, rows[i].category)) z++;
+    while (a <= z && !rows[a].look) a++;
+    while (z >= a && !rows[z].look) z--;
+    if (a > z) return 0;
+    *first = a, *last = z;
+    return 1;
+}
 
 static int can_preview(void) {  /* the Settings page's chosen section has something to see */
     SettingRow rows[48];
-    int n = settings_player_rows(rows, 48);
-    return n > 0 && previewable(rows[srow < n ? srow : n - 1].category);
+    int n = settings_player_rows(rows, 48), a, z;
+    return n > 0 && look_span(rows, n, srow < n ? srow : n - 1, &a, &z);
 }
 
 static void preview_start(void) {
     SettingRow rows[48];
-    int n = settings_player_rows(rows, 48);
+    int n = settings_player_rows(rows, 48), first, last;
     if (n <= 0) return;
     if (srow >= n) srow = n - 1;
-    if (!previewable(rows[srow].category)) return;
+    if (!look_span(rows, n, srow, &first, &last)) return;
+    if (srow < first || srow > last) srow = first;  /* on Discord status: the section's first row to see */
     preview_hidden = 0, focus = 1, in_rows = 1;
     __atomic_store_n(&preview, 1, __ATOMIC_RELEASE);
     if (window_paused()) window_pause_toggle();  /* the game runs behind the bar (the player's input held back) */
@@ -676,24 +687,28 @@ static void preview_action(int a) {
     if (n <= 0) return;
     if (srow >= n) srow = n - 1;
     int first = srow, last = srow;
-    while (first > 0 && !strcmp(rows[first - 1].category, rows[srow].category)) first--;
-    while (last < n - 1 && !strcmp(rows[last + 1].category, rows[srow].category)) last++;
+    if (!look_span(rows, n, srow, &first, &last)) return;
+    if (srow < first || srow > last) srow = first;
     if (a == GM_UP && srow > first) srow--;
     else if (a == GM_DOWN && srow < last) srow++;
     else if (a == GM_LEFT || a == GM_RIGHT) settings_change(srow, a == GM_RIGHT ? 1 : -1);
     else if (a == GM_ACCEPT) settings_change(srow, 1);
     else if (a == GM_ALT) preview_hidden ^= 1;
     else if (a == GM_BACK || a == GM_LEAVE) preview_stop();
-    else if (a == GM_PREV) {  /* the graphics section before, its first row */
-        int r = first - 1;
-        while (r >= 0 && !previewable(rows[r].category)) r--;
-        if (r < 0) return;
-        while (r > 0 && !strcmp(rows[r - 1].category, rows[r].category)) r--;
-        srow = r;
+    else if (a == GM_PREV) {  /* the section before with something to see, its first such row */
+        for (int r = first - 1, f, l; r >= 0; r--) {
+            if (strcmp(rows[r].category, rows[srow].category) && look_span(rows, n, r, &f, &l)) {
+                srow = f;
+                return;
+            }
+        }
     } else if (a == GM_NEXT) {
-        int r = last + 1;
-        while (r < n && !previewable(rows[r].category)) r++;
-        if (r < n) srow = r;
+        for (int r = last + 1, f, l; r < n; r++) {
+            if (strcmp(rows[r].category, rows[srow].category) && look_span(rows, n, r, &f, &l)) {
+                srow = f;
+                return;
+            }
+        }
     }
 }
 
@@ -1627,8 +1642,8 @@ static void draw_settings_page(const UiCanvas *c, const GameMenuInfo *in) {
     ui_box(c, 448, 40, 1104, 764, 20, PAPER, 0, 0);
     ui_text(c, UI_ROUNDED_800, 34, 488, 76, 34 * 1.25f, "Settings", NIGHT);
     {  /* Preview, at the right of the title (canvas board "Settings page: the Preview button"): an eye, its name, its
-        * key; greyed where there is nothing to see (Advanced) */
-        int can = previewable(sec);
+        * key; greyed where there is nothing to see */
+        int pf, pl, can = look_span(rows, n, cur, &pf, &pl);
         const char *key = in->pad ? alt_button(in) : "P";
         int tri = !strcmp(key, "Triangle");  /* drawn as its shape */
         float kw = tri ? 30 : ui_text_w(UI_GOTHIC_700, 13, key) + 18, tw = ui_text_w(UI_ROUNDED_700, 17, "Preview");
@@ -3144,8 +3159,7 @@ static void draw_preview(const UiCanvas *c, const GameMenuInfo *in) {
     if (n <= 0) return;
     int cur = srow < n ? srow : n - 1;
     int first = cur, last = cur;
-    while (first > 0 && !strcmp(rows[first - 1].category, rows[cur].category)) first--;
-    while (last < n - 1 && !strcmp(rows[last + 1].category, rows[cur].category)) last++;
+    if (!look_span(rows, n, cur, &first, &last)) return;  /* the rows to see (Advanced: not Discord status) */
     char t[200];
     const char *alt = in->pad ? alt_button(in) : "H";
     if (preview_hidden) {
@@ -3168,7 +3182,8 @@ static void draw_preview(const UiCanvas *c, const GameMenuInfo *in) {
     ui_text_wrap(c, UI_ROUNDED_800, 20, 0, cx + 16, cy + 14 + 18 + 8, cw - 32, 20 * 1.25f, 0, t, NIGHT);
     int nsec = 0, isec = 0;
     for (int i = 0; i < n; i++) {
-        if (!previewable(rows[i].category) || (i && !strcmp(rows[i].category, rows[i - 1].category))) continue;
+        int f, l;
+        if ((i && !strcmp(rows[i].category, rows[i - 1].category)) || !look_span(rows, n, i, &f, &l)) continue;
         nsec++;
         if (i <= cur) isec = nsec;
     }

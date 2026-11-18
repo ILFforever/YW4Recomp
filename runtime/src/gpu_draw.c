@@ -1525,13 +1525,14 @@ void gpu_pcss_cycle(void) {
 /* Speed-ups of our shadow mask's soft shadows (shadow_mask.frag; the panel's SPEED-UPS rows):
  * - filter once: one soft lookup at the centre instead of at each of the game's five points (default;
  *   YW4_MASK_FILTER=five for the game's)
- * - search 8: the blocker search with every other one of its 16 taps (YW4_PCSS_SEARCH_TAPS=8)
+ * - search 8: the blocker search with every other one of its 16 taps: always, in the shader (2026-11-18, owner: the
+ *   16-tap search and its YW4_PCSS_SEARCH_TAPS row removed, 8 looked the same and is 0.3-0.7 ms faster at 4K)
  * - filter 8: the soft filter with every other one of its 16 taps, the disk turned a golden angle each frame so
  *   the anti-aliasing's frame blending (TAA, FSR, DLSS) averages the taps over frames
  *   (YW4_PCSS_FILTER_TAPS=8)
- * They go to the program in mode.y: bit 0 filter once, bit 1 search 8, bit 2 filter 8; bits 3 up the frame
+ * They go to the program in mode.y: bit 0 filter once, bit 2 filter 8 (bit 1 unused); bits 3 up the frame
  * (mod 256) for the turn. */
-static int mask_once = -1, search8 = -1, filter8 = -1;
+static int mask_once = -1, filter8 = -1;
 
 int gpu_pcss_filter8(void) {
     int v = __atomic_load_n(&filter8, __ATOMIC_ACQUIRE);
@@ -1563,24 +1564,6 @@ void gpu_mask_filter_toggle(void) {
     int v = !gpu_mask_filter_once();
     __atomic_store_n(&mask_once, v, __ATOMIC_RELEASE);
     fprintf(stderr, "yw4: gpu: shadow mask soft filter %s\n", v ?"once per pixel" : "at the game's five points");
-}
-
-int gpu_pcss_search8(void) {
-    int v = __atomic_load_n(&search8, __ATOMIC_ACQUIRE);
-    if (v < 0) {
-        const char *e = getenv("YW4_PCSS_SEARCH_TAPS");
-        /* 8 by default since 2026-11-18: 0.33-0.70 ms less at 4K (three scenes), and the blobs on thin casters
-         * the owner saw on 2026-10-31 no longer show (leaf shadows on paving, characters' feet: the same as 16) */
-        v = !(e && atoi(e) == 16);
-        __atomic_store_n(&search8, v, __ATOMIC_RELEASE);
-    }
-    return v;
-}
-
-void gpu_pcss_search8_toggle(void) {
-    int v = !gpu_pcss_search8();
-    __atomic_store_n(&search8, v, __ATOMIC_RELEASE);
-    fprintf(stderr, "yw4: gpu: soft shadow search %d taps\n", v ? 8 : 16);
 }
 
 /* Contact shadows in our shadow mask (shadow_mask.frag contact_shadow): a short march toward the sun across the
@@ -1660,7 +1643,7 @@ static void pcss_settings_fill(float *f) {
     int l = gpu_pcss_level();
     float k = (float)(1 << (l ? l - 1 : 0));
     f[0] = l ? 1.0f : 0.0f, f[2] = pcss_max, f[3] = 0.5f / (float)gpu_shadow_res();
-    f[1] = (float)(gpu_mask_filter_once() | gpu_pcss_search8() << 1 | gpu_pcss_filter8() << 2 | (int)(gpu_frames() & 255) << 3);
+    f[1] = (float)(gpu_mask_filter_once() | gpu_pcss_filter8() << 2 | (int)(gpu_frames() & 255) << 3);
     for (int i = 0; i < 4; i++) f[4 + i] = pcss_scale[i] * k;
     f[8] = pcss_eps, f[9] = (float)pcss_debug;
     int once = pcss_search_once;

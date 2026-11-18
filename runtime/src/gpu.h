@@ -84,13 +84,11 @@ void shadow_mask_toggle(void);
 int screen_passes_native(void);
 void screen_passes_toggle(void);
 /* Its soft shadows' speed-ups (gpu_draw.c): one filter per pixel (YW4_MASK_FILTER=once), an 8-tap blocker
- * search (YW4_PCSS_SEARCH_TAPS=8). The panel switches them. */
+ * search (always: shadow_mask.frag). The panel switches the filter. */
 int gpu_mask_filter_once(void);
 void gpu_mask_filter_toggle(void);
 int gpu_contact(void);
 void gpu_contact_toggle(void);
-int gpu_pcss_search8(void);
-void gpu_pcss_search8_toggle(void);
 /* ... and an 8-tap soft filter turned each frame (YW4_PCSS_FILTER_TAPS=8) */
 int gpu_pcss_filter8(void);
 void gpu_pcss_filter8_toggle(void);
