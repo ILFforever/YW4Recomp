@@ -184,7 +184,7 @@ try { const t = localStorage.getItem('yw4-theme'); if (t === 'dark' || t === 'li
     <div>
       <span class="eyebrow">YW4 Recomp · fan PC port</span>
       <h1>Extras</h1>
-      <p>More than the Switch version has: five save slots in the Diary, cheats you switch while playing, and screenshots at full resolution.</p>
+      <p>More than the Switch version has: five save slots in the Diary, cheats you switch while playing, screenshots at full resolution, and your Discord status.</p>
       <div class="links">
         <a class="btn" href="../">Home</a>
         <a class="btn ghost" href="../overlay/">The overlay</a>
@@ -206,6 +206,7 @@ try { const t = localStorage.getItem('yw4-theme'); if (t === 'dark' || t === 'li
       <li><a href="#saving"><span class="n">2</span>Saving in the game</a></li>
       <li><a href="#cheats"><span class="n">3</span>Cheats</a></li>
       <li><a href="#screenshots"><span class="n">4</span>Screenshots</a></li>
+      <li><a href="#discord"><span class="n">5</span>Discord status</a></li>
     </ol>
   </nav>
 
@@ -285,6 +286,25 @@ try { const t = localStorage.getItem('yw4-theme'); if (t === 'dark' || t === 'li
           <img src="../screenshots/92-screenshots.jpg" loading="lazy" alt="Screenshots in the launcher">
           <figcaption>The launcher's screenshots</figcaption>
         </figure>
+      </div>
+    </article>
+
+    <article id="discord">
+      <div class="bar"><span class="q">5</span><h2>Discord status</h2><span class="cat">Extras</span></div>
+      <div class="body">
+        <div class="top">
+          <div class="prose">
+            <p>With the Discord app open on the same PC, your profile shows that you're playing <b>Yo-kai Watch 4</b>, for how long, and where you are: <b>In the main menu</b>, the street or place you're in (<b>Exploring Meeting Bridge</b>, the name the expanded minimap shows, with the area when you hover over the picture), or a <b>battle</b> there, and your <b>Watch Rank</b>. The wording changes as you go: <i>Hunting Yo-kai in</i>, <i>Lost in</i>, <i>Snacking in</i> and 17 more while exploring, six in battles. A <b>Get YW4 Recomp</b> button under it takes friends to this site.</p>
+            <p>It's <b>off</b> until you switch it on: <b>Discord status</b> in the overlay's Settings (Advanced). Switching it off clears your status at once. Nothing is sent anywhere but the Discord app on your PC.</p>
+          </div>
+          <div class="spec"><dl>
+            <dt>Shows</dt><dd>Main menu, place, battle, Watch Rank, time played</dd>
+            <dt>Where</dt><dd>Overlay › Settings › Advanced</dd>
+            <dt>Default</dt><dd>Off</dd>
+            <dt>Since</dt><dd>The next update after 1.6.0</dd>
+            <dt>Record</dt><dd><a href="https://github.com/ILFforever/YW4Recomp/blob/master/docs/decisions/0077-discord-rich-presence.md">decision 0077</a></dd>
+          </dl></div>
+        </div>
       </div>
     </article>
 
