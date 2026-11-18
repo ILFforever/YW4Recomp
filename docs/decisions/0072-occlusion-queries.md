@@ -56,6 +56,15 @@ hiding. Conditional rendering is what the Switch's GPU does here.
 - Frame rate: unchanged within the noise. The town is CPU-bound, so skipping draws buys no speed here; it is on by
   default because it is what the game asks for. `YW4_OCCLUSION=0` turns it off.
 
+## Cost at 4K (2026-11-18)
+
+With the owner's settings (4K, DLSS) the box pass costs ~1.2-1.3 ms in the busy town spot, most of it the ~250
+separate queries rather than the boxes. Resetting queries 512 at a time instead of 64 (each reset ends and restarts
+the render pass behind a barrier) cut the pass's restarts from 7.9 to 4.5 a frame and its time from 1.28 to 1.15 ms;
+nothing else changes. Ordinary instead of precise queries: no difference (1.15 / 1.16 ms), so they stay precise.
+`YW4_OCCLUSION=off` (no queries, every conditional draw made) was 0.15-0.3 ms faster in total, about the run-to-run
+noise: the queries stay on.
+
 ## Not done
 
 - `SetRenderEnable(false)`: not done, logged once if it ever happens (not seen).

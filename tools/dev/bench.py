@@ -324,7 +324,7 @@ def parse(names: list[str], about: dict[str, str]) -> None:
                        for v in sc.values() if "gpu" in v],
             "shadow_mask": res["mask"]}
     SITE.write_text("// Written by python -m tools.dev.bench (a snapshot; see its date). Read by docs/advanced/index.html.\n"
-                    "window.BENCH = " + json.dumps(site, ensure_ascii=False) + ";\n", encoding="utf-8")
+                    "window.BENCH = " + json.dumps(site, ensure_ascii=False) + ";\n", encoding="utf-8", newline="\n")
     print(f"bench: {len(sc)} scenes -> {OUT / 'bench.json'}, {SITE.relative_to(ROOT)}")
 
 

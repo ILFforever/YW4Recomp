@@ -32,7 +32,11 @@
 #include "gpu_internal.h"
 #include "host.h"
 
-enum { QUERIES = 4096, BLOCK = 64, PENDING = 256, KNOWN = 8192 };
+/* BLOCK: queries reset at a time, each reset outside rendering (the render pass ends, a barrier, then it starts
+ * again). 64 meant ~7 such breaks a frame (~110 boxes before each of three cascades and the main view); 512 is about
+ * one (2026-11-18, the GPU-time bench). The pool still holds ~9 frames of queries, so a block is reset long after its
+ * last results were copied. */
+enum { QUERIES = 4096, BLOCK = 512, PENDING = 256, KNOWN = 8192 };
 enum { PAIR_NONE, PAIR_WAITING, PAIR_COUNTING, PAIR_CLOSED };  /* waiting: for its first draw; closed: by a pass's end */
 enum { RESULT_COUNT, RESULT_ZERO, RESULT_VISIBLE };
 
