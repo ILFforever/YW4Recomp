@@ -18,8 +18,8 @@ typedef struct {
 
 /* What the profile shows; NULL or "" leaves a field out. start: when the game started (Unix seconds), 0 none. */
 typedef struct {
-    const char *details, *state, *large_image, *large_text;
-    int64_t start;
+    const char *details, *state, *large_image, *large_text;    int64_t start;
+    const char *button_label, *button_url;  /* one link button under the card (both, or none) */
 } DiscordActivity;
 
 /* Connects to the first Discord socket that answers, or to `path` alone when it isn't NULL (tests). 0: connected. */

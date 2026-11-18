@@ -58,6 +58,13 @@ int host_thread_start(void (*fn)(void *), void *arg, size_t stack) {
 }
 #endif
 
+/* ---- what discord_game.c reads from the game, faked: the field, a UTF-8 area, Watch Rank B */
+void discord_game_read(DiscordGame *g) {
+    memset(g, 0, sizeof *g);
+    g->where = DISCORD_AT_FIELD, g->rank = 3;
+    strcpy(g->area, "Mystic Grove \xc3\xa9");
+}
+
 static int fails;
 #define CHECK(c) do { if (!(c)) { printf("FAIL %s:%d %s\n", __FILE__, __LINE__, #c); fails++; } } while (0)
 
@@ -125,6 +132,47 @@ int main(void) {
     CHECK(!strcmp(j, "{\"cmd\":\"SET_ACTIVITY\",\"args\":{\"pid\":42,\"activity\":null},\"nonce\":\"8\"}"));
     CHECK(discord_activity_json(j, 20, 42, &a, 7) == 0);  /* doesn't fit */
 
+    /* ---- the profile's lines for each place */
+    char d[160], s[64];
+    DiscordGame g = {.where = DISCORD_AT_TITLE, .rank = 3, .area = "Mystic Grove"};
+    discord_presence_text(&g, 0, d, sizeof d, s, sizeof s);
+    CHECK(!strcmp(d, "\xf0\x9f\x8f\xa0 In the main menu") && !strcmp(s, ""));
+    g.where = DISCORD_AT_FIELD;
+    discord_presence_text(&g, 0, d, sizeof d, s, sizeof s);
+    CHECK(!strcmp(d, "\xf0\x9f\x97\xba\xef\xb8\x8f Exploring Mystic Grove") && !strcmp(s, "\xe2\x8c\x9a Watch Rank B"));
+    for (unsigned f = 0; f < DISCORD_FLAVORS; f++) {  /* every wording names the area */
+        discord_presence_text(&g, f, d, sizeof d, s, sizeof s);
+        CHECK(strstr(d, " Mystic Grove") && strlen(d) > 16);
+    }
+    discord_presence_text(&g, 3, d, sizeof d, s, sizeof s);
+    CHECK(!strcmp(d, "\xf0\x9f\x91\xbb Hunting Yo-kai in Mystic Grove"));
+    strcpy(g.sub, "Meeting Bridge");  /* a zone with a name: it, not the area */
+    discord_presence_text(&g, 0, d, sizeof d, s, sizeof s);
+    CHECK(!strcmp(d, "\xf0\x9f\x97\xba\xef\xb8\x8f Exploring Meeting Bridge"));
+    g.sub[0] = 0;
+    g.where = DISCORD_AT_BATTLE;
+    discord_presence_text(&g, 0, d, sizeof d, s, sizeof s);
+    CHECK(!strcmp(d, "\xe2\x9a\x94\xef\xb8\x8f Battling in Mystic Grove") && !strcmp(s, "\xe2\x8c\x9a Watch Rank B"));
+    for (unsigned f = 0; f < DISCORD_BATTLE_FLAVORS; f++) {  /* every battle wording names the place */
+        discord_presence_text(&g, f, d, sizeof d, s, sizeof s);
+        CHECK(strstr(d, " Mystic Grove") && strlen(d) > 16);
+    }
+    g.area[0] = 0, g.rank = 5;
+    discord_presence_text(&g, 0, d, sizeof d, s, sizeof s);
+    CHECK(!strcmp(d, "\xe2\x9a\x94\xef\xb8\x8f In a battle") && !strcmp(s, "\xe2\x8c\x9a Watch Rank S"));
+    g.rank = 6;  /* not a rank we know: no line */
+    discord_presence_text(&g, 0, d, sizeof d, s, sizeof s);
+    CHECK(!strcmp(s, ""));
+    g.where = DISCORD_AT_FIELD;  /* the field, area not known yet: no line */
+    discord_presence_text(&g, 0, d, sizeof d, s, sizeof s);
+    CHECK(!strcmp(d, ""));
+    g.where = DISCORD_AT_START, g.rank = 3;  /* starting up: the game's name alone */
+    discord_presence_text(&g, 0, d, sizeof d, s, sizeof s);
+    CHECK(!strcmp(d, "") && !strcmp(s, ""));
+    DiscordActivity b = {.details = "x", .button_label = "Get YW4 Recomp", .button_url = "https://example.org/"};
+    discord_activity_json(j, sizeof j, 42, &b, 9);
+    CHECK(strstr(j, "\"buttons\":[{\"label\":\"Get YW4 Recomp\",\"url\":\"https://example.org/\"}]"));
+
     /* ---- nobody listening: connect fails, quietly */
     DiscordIpc c;
     CHECK(discord_ipc_connect(&c, "/nonexistent/discord-ipc-0") != 0);
@@ -147,8 +195,9 @@ int main(void) {
     CHECK(op == 0 && !strcmp(json, "{\"v\":1,\"client_id\":\"1234567890\"}"));
     frame_out(1, "{\"cmd\":\"DISPATCH\",\"evt\":\"READY\",\"data\":{\"v\":1}}");
     CHECK(!frame_in(&op, json, sizeof json));
-    CHECK(op == 1 && strstr(json, "\"cmd\":\"SET_ACTIVITY\"") && !strstr(json, "\"details\"")
-          && strstr(json, "\"large_text\":\"Yo-kai Watch 4\"") && strstr(json, "\"timestamps\":{\"start\":"));
+    CHECK(op == 1 && strstr(json, "\"cmd\":\"SET_ACTIVITY\"") && strstr(json, " Mystic Grove \xc3\xa9\",\"state\":")
+          && strstr(json, "Watch Rank B\"") && strstr(json, "\"large_text\":\"Mystic Grove \xc3\xa9\"")
+          && strstr(json, "\"buttons\":[{\"label\":\"Get YW4 Recomp\"") && strstr(json, "\"timestamps\":{\"start\":"));
     printf("activity: %s\n", json);
     server_close();
     printf(fails ? "%d failed\n" : "all passed\n", fails);
@@ -161,14 +210,15 @@ class DiscordTest(unittest.TestCase):
     def test_messages_and_handshake(self):
         with tempfile.TemporaryDirectory() as t:
             t = Path(t)
-            (t / "drv.c").write_text(DRIVER)
+            (t / "drv.c").write_text(DRIVER, encoding="utf-8")
             exe = t / "discord_test.exe"
             src = RUNTIME / "src"
             r = subprocess.run([check.host_cc(), "-std=c11", "-O1", "-Wall", *POSIX, f"-I{src}", f"-I{RUNTIME / 'include'}",
                                 "-o", str(exe), str(t / "drv.c"), str(src / "discord.c"), str(src / "discord_ipc.c")],
                                capture_output=True, text=True)
             self.assertEqual(r.returncode, 0, r.stderr[-3000:])
-            got = subprocess.run([str(exe)], capture_output=True, text=True, timeout=60)
+            got = subprocess.run([str(exe)], capture_output=True, text=True, encoding="utf-8", errors="replace",
+                                 timeout=60)  # the activity it prints has emoji
             self.assertEqual(got.returncode, 0, got.stdout + got.stderr)
             self.assertIn("all passed", got.stdout)
 

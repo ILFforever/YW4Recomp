@@ -280,8 +280,9 @@ static const Setting player[] = {
      gpu_contact_toggle, "YW4_CONTACT", {"0", "1"}, contact_disabled},
     {"ADVANCED", "DISCORD STATUS",
      /* (decision 0077: Discord's local IPC, the Discord app on this PC; nothing goes anywhere else) */
-     "SHOWS ON YOUR DISCORD PROFILE THAT YOU ARE PLAYING YO-KAI WATCH 4, AND FOR HOW LONG. NEEDS THE DISCORD APP "
-     "OPEN ON THIS PC. OFF: NOTHING IS SENT.",
+     "SHOWS ON YOUR DISCORD PROFILE THAT YOU ARE PLAYING YO-KAI WATCH 4, WHERE YOU ARE (THE MAIN MENU, THE AREA, A "
+     "BATTLE), YOUR WATCH RANK AND HOW LONG YOU HAVE PLAYED. NEEDS THE DISCORD APP OPEN ON THIS PC. OFF: NOTHING IS "
+     "SENT.",
      {"OFF", "ON"},
      {"NOTHING SHOWN ON DISCORD", "SHOWN ON YOUR DISCORD PROFILE"}, 2,
      discord_enabled, discord_toggle, "YW4_DISCORD", {"0", "1"}, discord_disabled},

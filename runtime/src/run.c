@@ -26,6 +26,7 @@
 
 #include "battle.h"
 #include "bindings.h"
+#include "discord_game.h"
 #include "run.h"
 #include "yw4load.h"
 #include "yw4rt.h"
@@ -93,6 +94,7 @@ static int hook_inner(CPUState *ctx);
 static _Thread_local int in_original;
 int yw4_hook_player_run(CPUState *ctx) {
     if (in_original) return 0;
+    discord_game_field_frame(ctx);  /* the area and Watch Rank for Discord (decision 0077); nothing while it's off */
     if (!log_on()) return hook_inner(ctx);
     static long calls;
     uint64_t ctrl = ctx->x[0], base = *yw4_modules[YW4_MAIN].base;

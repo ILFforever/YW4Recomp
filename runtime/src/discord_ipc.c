@@ -91,6 +91,14 @@ size_t discord_activity_json(char *out, size_t n, long pid, const DiscordActivit
             put(&o, "}");
             first = 0;
         }
+        if (a->button_label && *a->button_label && a->button_url && *a->button_url) {
+            int f2 = 1;
+            put(&o, "%s\"buttons\":[{", first ? "" : ",");
+            put_field(&o, &f2, "label", a->button_label);
+            put_field(&o, &f2, "url", a->button_url);
+            put(&o, "}]");
+            first = 0;
+        }
         put(&o, "}");
     }
     put(&o, "},\"nonce\":\"%u\"}", nonce);
