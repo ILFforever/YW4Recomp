@@ -12,6 +12,9 @@ int mousemenu_talking(void);
 /* Returns 1 while the map is open: moving the mouse pans it (the left stick, window.c), the wheel zooms (the
  * right stick, bindings.c). */
 int mousemenu_map(void);
+/* Returns 1 while Mirapo's small screen is up over the map: the mouse works it as a menu instead (no panning, the
+ * wheel steps its rows, left confirms, right goes back). */
+int mousemenu_mirapo(void);
 /* The field HUD's shortcut cross was updated (shortcutwheel.c): the field is back, so a map closed without the field's
  * menu focusing again (Mirapo's list backed out of) stops counting as open. */
 void mousemenu_field_hud_seen(void);

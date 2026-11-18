@@ -125,3 +125,11 @@ Also found: locked boxes ("Diary / Lambert Mail / Ark Swap App isn't available")
 and a right click does not close them. Not fixed; a possible row for the box is in the notes above.
 
 The Pad focus fix (page closed when the screen's own control gets focus back) is in `yw4_hook_menu_focus`.
+
+## The map and Mirapo's list (2026-11-18)
+
+Both are the map's class (vt `main+0x14c14f8`). The plain map focuses `0xb05d3ff0`, `0xc9818754`, `0xde413e27`
+and `0xf56c6de4`; Mirapo's small screen over it focuses its rows as `0xb730fbe9` (visible row at `+0x13e`) and its
+list view as `0xc037cb7f` (9 places, 8 shown). On the plain map moving the mouse pans and the wheel zooms; while
+Mirapo's screen is up (`mousemenu_mirapo`) the mouse is a menu's instead: no panning (it moved the selection), the
+wheel steps the rows, left click picks, right click goes back. Confirmed by the owner in game.

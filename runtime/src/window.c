@@ -2645,7 +2645,7 @@ static void update_input(void) {
         float ax = map_accum_x, ay = map_accum_y;
         map_accum_x = map_accum_y = 0.0f;
         host_unlock(&mouse_lock);
-        if (mousemenu_map() && !mouse_off() && window && SDL_GetWindowRelativeMouseMode(window)) {
+        if (mousemenu_map() && !mousemenu_mirapo() && !mouse_off() && window && SDL_GetWindowRelativeMouseMode(window)) {
             vx = vx * 0.5f + ax * 0.5f, vy = vy * 0.5f + ay * 0.5f;
             const float start = 11000.0f, gain = 6000.0f;  /* stick units: the first push, then per pixel per read */
             float fx = vx > 0.3f ? start + vx * gain : vx < -0.3f ? -start + vx * gain : 0.0f;

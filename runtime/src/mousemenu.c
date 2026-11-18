@@ -168,6 +168,16 @@ static int map_shown;
 static uint64_t map_event_ms;  /* the map's last focus, back or layer (SDL ticks) */
 int mousemenu_map(void) { return enabled() && __atomic_load_n(&map_shown, __ATOMIC_ACQUIRE); }
 
+/* Mirapo's small screen over the map (same class): its rows focus as 0xb730fbe9 (the visible row at +0x13e) and its
+ * list view as 0xc037cb7f, which the plain map never focuses (its controls: 0xb05d3ff0, 0xc9818754, 0xde413e27,
+ * 0xf56c6de4; owner's run, 2026-11-18). Up from one of those until another of the map's controls focuses or the map
+ * is gone. While up the mouse is a menu's: moving it no longer pans (it moved the selection), the wheel steps the
+ * rows (owner, 2026-11-18). */
+#define MIRAPO_ROWS_HASH 0xb730fbe9u
+#define MIRAPO_LIST_HASH 0xc037cb7fu
+static int mirapo;
+int mousemenu_mirapo(void) { return mousemenu_map() && __atomic_load_n(&mirapo, __ATOMIC_ACQUIRE); }
+
 /* The field HUD's shortcut cross was updated (shortcutwheel.c's hook): the field is back. Mirapo's list is this map
  * class too, and backed out of (B twice) the field's HUD menu doesn't focus again, so the map stayed "shown" and the
  * shortcut wheel never opened again (owner, 2026-11-16). The cross isn't updated while the map is up; half a second
@@ -189,6 +199,7 @@ void mousemenu_field_hud_seen(void) {
     if (!__atomic_load_n(&map_shown, __ATOMIC_ACQUIRE)) return;
     if (now - __atomic_load_n(&map_event_ms, __ATOMIC_ACQUIRE) < 500) return;
     __atomic_store_n(&map_shown, 0, __ATOMIC_RELEASE);
+    __atomic_store_n(&mirapo, 0, __ATOMIC_RELEASE);
     if (menu_log_on()) fprintf(stderr, "yw4: menu: map gone (the field's HUD is updated again)\n");
 }
 
@@ -301,6 +312,13 @@ int yw4_hook_menu_focus(CPUState *ctx) {
         }
     }
     talk_note(vt);
+    if (vt == MAP_VTABLE) {
+        int m = hash == MIRAPO_ROWS_HASH || hash == MIRAPO_LIST_HASH;
+        if (m != __atomic_exchange_n(&mirapo, m, __ATOMIC_ACQ_REL) && menu_log_on())
+            fprintf(stderr, "yw4: menu: Mirapo's list %s\n", m ? "up" : "gone (the map's own controls)");
+    } else if (vt == FIELD_HUD_VTABLE) {
+        __atomic_store_n(&mirapo, 0, __ATOMIC_RELEASE);
+    }
     __atomic_store_n(&sideways, vt == GENERAL_WINDOW_VTABLE && hash == YES_NO_HASH, __ATOMIC_RELEASE);
     /* the last focus decides: the Stopwatching menu's choice list or the battle's start choice, its pages, or a Yes /
      * No box over them: on. The class's info-card controls (0x81f8dde3, 0xcf634eb0: the ally or enemy picked with L or
