@@ -65,3 +65,15 @@ frame, and the lamp lights on `save_base_yokaiworld`, 1 texel in 3 of 32 frames.
 channel of the packed R11G11B10 colour (format 122), e.g. 0x6918d329 against 0x6918db29: the same driver-level
 difference as the shadow mask's (0044), where the same operations in the same order still compile a little
 differently. Accepted as there: one step of one channel at a few scattered pixels is not visible.
+
+## Lamp lights, faster (2026-11-18)
+
+`lamp_light.frag` departs from the game's program where the result can only be 0: a light whose colour is 0 reads
+nothing (in daylight every lamp is), and a pixel past the light's reach (falloff 0, most of a volume's pixels) skips
+the normals. Both write the (0, 0, 0, 1) the full sum gives there. The reads now take gradients worked out before any
+pixel stops (`textureGrad`), not `texture()`'s own from its neighbours, which may have stopped (AMD, issue #8). At 4K
+with full-size effects, the owner's settings, the third-size pass (shrink-copy + lamp lights): busy street 1.09 →
+0.50 ms, the owner's progress save 1.22 → 0.49, schoolyard 0.49 → 0.18. The pass reads 4K images at a third of the
+size, so each read saved counts. Same-frame screenshots: the lamp pools differ between two runs of the unchanged game
+as much as against this one (rain, wet road). Tried and left out: lighting half the pixels in a checkerboard (no
+saving: the GPU shades 2x2 blocks).
