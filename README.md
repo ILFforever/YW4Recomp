@@ -12,7 +12,7 @@
   <img alt="Phase 4: renderer" src="https://img.shields.io/badge/phase-4%20·%20renderer-6f42c1">
   <img alt="Platform: Windows, Linux" src="https://img.shields.io/badge/platform-Windows%20%7C%20Linux-informational">
   <img alt="Graphics" src="https://img.shields.io/badge/graphics-Vulkan-ac162c">
-  <img alt="Version: 1.6.0" src="https://img.shields.io/badge/version-1.6.0-blue">
+  <img alt="Version: 1.7.0" src="https://img.shields.io/badge/version-1.7.0-blue">
   <a href="https://buymeacoffee.com/ilfforever"><img alt="Buy Me a Coffee" src="https://img.shields.io/badge/Buy%20Me%20a%20Coffee-ilfforever-FFDD00?style=flat&logo=buy-me-a-coffee&logoColor=black"></a>
 </p>
 
@@ -48,7 +48,7 @@
 ## Status
 
 > [!TIP]
-> **1.6.0 is out (beta):** get the launcher, it installs the game and keeps it up to date.
+> **1.7.0 is out (beta):** get the launcher, it installs the game and keeps it up to date.
 > [**Download it here**](https://github.com/ILFforever/YW4Recomp/releases/latest), then see [How to play](#how-to-play).
 
 **Playable, but not finished.** Nobody has played the game from start to finish yet.
@@ -738,7 +738,7 @@ On Ordinary Street with the performance HUD on (F3). The frame takes about 19 ms
 | **Shortcut wheel** | Hold L's key (1) while exploring and all eight field shortcuts appear in a wheel you point at with the mouse ([decision 0075](docs/decisions/0075-shortcut-wheel.md)) |
 | **Image sharpening** | A Sharpening slider after every anti-aliasing and upscaling choice, Off to Max ([decision 0076](docs/decisions/0076-sharpening.md), [#11](https://github.com/ILFforever/YW4Recomp/issues/11)) |
 | **Running modes** | Default, Always, Toggle or Hold, with a Run key (Left Shift, the left stick press), so you don't have to hold B to run ([decision 0080](docs/decisions/0080-running-modes.md), [#18](https://github.com/ILFforever/YW4Recomp/issues/18)) |
-| **Discord status** | Your Discord profile shows where you are (the main menu, the street or place, a battle), your Watch Rank and the time played; off unless you switch it on ([decision 0077](docs/decisions/0077-discord-rich-presence.md)). In the next update after 1.6.0 |
+| **Discord status** | Your Discord profile shows where you are (the main menu, the street or place, a battle), your Watch Rank and the time played; on unless you switch it off ([decision 0077](docs/decisions/0077-discord-rich-presence.md)). Since 1.7.0 |
 
 </details>
 
