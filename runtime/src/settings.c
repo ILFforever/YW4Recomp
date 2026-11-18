@@ -174,6 +174,22 @@ int settings_keys_notice(void) {
  * before. The last row opens the developer page. The texts use the HUD font's characters (hud.c): upper case,
  * digits, . , : % / - ( ) ' ! ? */
 static const Setting player[] = {
+    /* General: what isn't graphics (owner, 2026-11-18: Discord status didn't belong in Advanced) */
+    {"GENERAL", "DISCORD STATUS",
+     /* (decision 0077: Discord's local IPC, the Discord app on this PC; nothing goes anywhere else) */
+     "SHOWS ON YOUR DISCORD PROFILE THAT YOU ARE PLAYING YO-KAI WATCH 4, WHERE YOU ARE (THE MAIN MENU, THE AREA, A "
+     "BATTLE), YOUR WATCH RANK AND HOW LONG YOU HAVE PLAYED. NEEDS THE DISCORD APP OPEN ON THIS PC. OFF: NOTHING IS "
+     "SENT.",
+     {"OFF", "ON"},
+     {"NOTHING SHOWN ON DISCORD", "SHOWN ON YOUR DISCORD PROFILE"}, 2,
+     discord_enabled, discord_toggle, "YW4_DISCORD", {"0", "1"}, discord_disabled},
+    {"GENERAL", "LEGACY MENUS",
+     "THE OLD KEYS: F1 OPENS THE OLD SETTINGS PANEL AND ITS DEVELOPER OPTIONS, F2 THE OLD CONTROLS PAGE, F3 SHOWS OR "
+     "HIDES THE PERFORMANCE HUD. OFF, F1 AND F2 OPEN THIS MENU'S SETTINGS AND CONTROLS PAGES (IT HAS ALL OF IT, THE "
+     "RENDERER SWITCHES AND SPEED-UPS UNDER ADVANCED) AND F3 STEPS THE PERFORMANCE HUD: OFF, COMPACT, DETAILED.",
+     {"OFF", "ON"},
+     {"F1 AND F2 OPEN THIS MENU'S PAGES, F3 THE HUD", "F1, F2 AND F3 OPEN THE OLD MENUS"}, 2, settings_legacy_keys, legacy_keys_toggle,
+     "YW4_LEGACY_KEYS", {"0", "1"}},
     {"DISPLAY", "WINDOW MODE",
      "A WINDOW, OR THE WHOLE SCREEN WITHOUT BORDERS. THE MONITOR'S OWN MODE NEVER CHANGES, SO ALT+TAB IS INSTANT. "
      "F11 SWITCHES TOO.",
@@ -278,21 +294,6 @@ static const Setting player[] = {
      {"OFF", "ON"},
      {"THE SWITCH'S DEFAULT", "MORE DEPTH IN LEAVES AND UNDER EDGES"}, 2, gpu_contact,
      gpu_contact_toggle, "YW4_CONTACT", {"0", "1"}, contact_disabled},
-    {"ADVANCED", "DISCORD STATUS",
-     /* (decision 0077: Discord's local IPC, the Discord app on this PC; nothing goes anywhere else) */
-     "SHOWS ON YOUR DISCORD PROFILE THAT YOU ARE PLAYING YO-KAI WATCH 4, WHERE YOU ARE (THE MAIN MENU, THE AREA, A "
-     "BATTLE), YOUR WATCH RANK AND HOW LONG YOU HAVE PLAYED. NEEDS THE DISCORD APP OPEN ON THIS PC. OFF: NOTHING IS "
-     "SENT.",
-     {"OFF", "ON"},
-     {"NOTHING SHOWN ON DISCORD", "SHOWN ON YOUR DISCORD PROFILE"}, 2,
-     discord_enabled, discord_toggle, "YW4_DISCORD", {"0", "1"}, discord_disabled},
-    {"ADVANCED", "LEGACY MENUS",
-     "THE OLD KEYS: F1 OPENS THE OLD SETTINGS PANEL AND ITS DEVELOPER OPTIONS, F2 THE OLD CONTROLS PAGE, F3 SHOWS OR "
-     "HIDES THE PERFORMANCE HUD. OFF, F1 AND F2 OPEN THIS MENU'S SETTINGS AND CONTROLS PAGES (IT HAS ALL OF IT, THE "
-     "DEVELOPER OPTIONS AT THE END OF ADVANCED) AND F3 STEPS THE PERFORMANCE HUD: OFF, COMPACT, DETAILED.",
-     {"OFF", "ON"},
-     {"F1 AND F2 OPEN THIS MENU'S PAGES, F3 THE HUD", "F1, F2 AND F3 OPEN THE OLD MENUS"}, 2, settings_legacy_keys, legacy_keys_toggle,
-     "YW4_LEGACY_KEYS", {"0", "1"}},
 };
 /* The developer page (DEVELOPER OPTIONS): behind-the-scenes switches for testing the port, which the picture
  * doesn't show: who draws each part of it, and speed-ups that look the same. The defaults are the recommended
@@ -619,11 +620,11 @@ static int hud_slider_row(const Setting *s) { return s->get == hud_scale_get || 
 
 /* The HUD's sliders live on the overlay's Overlay page, next to their preview, so its Settings page leaves them out
  * (the old panel keeps them). */
-/* The overlay's Look > Theme row (theme.h): before Advanced, overlay only (the old panel's pixel font has no lower
+/* The overlay's Look > Theme row (theme.h): after the player's settings, before Advanced, overlay only (the old panel's pixel font has no lower
  * case for the names); its value one theme's name, Left / Right step through them. */
 static int theme_row(void) {
     int n = 0;
-    for (int i = 0; i < NPLAYER && strcmp(player[i].category, "ADVANCED"); i++) n += !hud_slider_row(&player[i]);
+    for (int i = 0; i < NPLAYER; i++) n += !hud_slider_row(&player[i]);
     return n;
 }
 
@@ -636,19 +637,17 @@ static void fill_theme_row(SettingRow *r) {
     r->options[0] = theme_name(theme_index()), r->notes[0] = note, r->noptions = 1, r->current = 0;
 }
 
-/* The overlay's Advanced section also lists the developer page's settings after its own (owner, 2026-11-11: the
- * renderer switches and speed-ups were only on the old panel); in the overlay they are under ADVANCED. Every row but
- * Advanced's own (Discord status, legacy menus) changes the picture, so Preview can show it (`look`); the developer
- * rows are all renderer switches and speed-ups (owner, 2026-11-18: Preview was off for them, with all of Advanced). */
+/* The overlay's rows: the player's settings (General first, then the graphics sections), Look > Theme, then the
+ * developer page's settings as ADVANCED (owner, 2026-11-11: the renderer switches and speed-ups were only on the old
+ * panel). Every row but General's (Discord status, legacy menus) changes the picture, so Preview can show it (`look`). */
 int settings_player_rows(SettingRow *rows, int max) {
     int n = 0, at = theme_row();
-    for (int i = 0; i < NPLAYER && n < max; i++) {
-        if (n == at && !strcmp(player[i].category, "ADVANCED")) fill_theme_row(&rows[n++]), rows[n - 1].look = 1;
-        if (n < max && !hud_slider_row(&player[i])) {
+    for (int i = 0; i < NPLAYER && n < max; i++)
+        if (!hud_slider_row(&player[i])) {
             n += fill_rows(rows + n, 1, &player[i], 1);
-            rows[n - 1].look = strcmp(player[i].category, "ADVANCED") != 0;
+            rows[n - 1].look = strcmp(player[i].category, "GENERAL") != 0;
         }
-    }
+    if (n == at && n < max) fill_theme_row(&rows[n++]), rows[n - 1].look = 1;
     for (int i = 0; i < NDEVELOPER && n < max; i++) {
         n += fill_rows(rows + n, 1, &developer[i], 1);
         rows[n - 1].category = "ADVANCED", rows[n - 1].look = 1;
