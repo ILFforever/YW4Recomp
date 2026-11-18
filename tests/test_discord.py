@@ -195,7 +195,9 @@ int main(void) {
     CHECK(op == 0 && !strcmp(json, "{\"v\":1,\"client_id\":\"1234567890\"}"));
     frame_out(1, "{\"cmd\":\"DISPATCH\",\"evt\":\"READY\",\"data\":{\"v\":1}}");
     CHECK(!frame_in(&op, json, sizeof json));
-    CHECK(op == 1 && strstr(json, "\"cmd\":\"SET_ACTIVITY\"") && strstr(json, " Mystic Grove \xc3\xa9\",\"state\":")
+    /* the wording is picked by the clock: the area's name isn't always last ("Scanning ... with the Watch") */
+    CHECK(op == 1 && strstr(json, "\"cmd\":\"SET_ACTIVITY\"") && strstr(json, " Mystic Grove \xc3\xa9")
+          && strstr(json, "\",\"state\":")
           && strstr(json, "Watch Rank B\"") && strstr(json, "\"large_text\":\"Mystic Grove \xc3\xa9\"")
           && strstr(json, "\"buttons\":[{\"label\":\"Get YW4 Recomp\"") && strstr(json, "\"timestamps\":{\"start\":"));
     printf("activity: %s\n", json);

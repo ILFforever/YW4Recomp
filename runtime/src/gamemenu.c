@@ -1529,6 +1529,8 @@ static void prose_case(const char *in, char *out, size_t n) {
         {"HUD", "HUD"}, {"FXAA", "FXAA"}, {"SMAA", "SMAA"}, {"TAA", "TAA"}, {"FSR", "FSR"}, {"DLSS", "DLSS"},
         {"RTX", "RTX"}, {"AI", "AI"}, {"HD", "HD"}, {"PCSS", "PCSS"}, {"VSYNC", "VSync"}, {"F1", "F1"}, {"F2", "F2"},
         {"F3", "F3"}, {"F11", "F11"}, {"ZL", "ZL"}, {"ZR", "ZR"}, {"LB", "LB"}, {"RB", "RB"}, {"OK", "OK"},
+        /* names in Discord status's text: "Yo-kai Watch 4" ("KAI" stays lower case), "Watch rank", "this PC" */
+        {"DISCORD", "Discord"}, {"PC", "PC"}, {"YO", "Yo"}, {"WATCH", "Watch"},
     };
     size_t o = 0;
     int start = 1;     /* at a sentence's start */
