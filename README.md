@@ -691,29 +691,32 @@ On Ordinary Street with the performance HUD on (F3). The frame takes about 19 ms
 ## Goals
 
 <details>
-<summary><b>Planned</b> (1)</summary>
+<summary><b>Planned</b> (3)</summary>
 
 | Goal | What it will be |
 |---|---|
 | **More cheats** | More switches on the overlay's Cheats page, next to unlimited Crank-a-kai and unlimited coins |
+| **Easier Soultimates on the keyboard** | A little leeway for the two keys pressed together (Q + E by default), so it works whichever of them goes down first |
+| **Enemy-only target switch** | A key that cycles through the enemies alone in battles; the game has Tab for allies and Left / Right for everyone ([#18](https://github.com/ILFforever/YW4Recomp/issues/18)) |
 
 </details>
 
 <details>
-<summary><b>Ongoing</b> (5)</summary>
+<summary><b>Ongoing</b> (6)</summary>
 
 | Goal | Where it stands |
 |---|---|
 | **Performance (CPU)** | Less work per frame on the CPU, so busy places hold their frame rate on slower PCs: the renderer's GPU commands are being made cheaper to build (in testing) |
 | **Our own renderer** | Ours: shadows, surfaces, bloom, distance blur, lighting, sky, tone mapping. **Left:** choosing what to draw, two screen passes, the UI and menus |
 | **Steadier shadows** | Shadows still shimmer a little as the camera moves; steadier cascades next |
+| **Shadows on AMD graphics cards** | Our shadow mask still draws streaks on some AMD cards as the camera turns ([#8](https://github.com/ILFforever/YW4Recomp/issues/8)); a fix tried in 1.6.0 didn't cure it, and it doesn't happen on NVIDIA. Next: testing on an AMD card. Until then, Shadow mask → Game avoids it |
 | **Better anti-aliasing** | FXAA, SMAA and TAA (steady thin edges: fences, nets, leaves) on the 3D scene before the UI is drawn, so text stays crisp; per-object motion for TAA next (a first version is in, off by default) |
 | **Mouse in the game's menus** | Pointing, clicking and wheel scrolling work on the Yo-kai Pad and the pages opened from it, such as the item and quest lists, Ukiukipedia and Members ([decision 0057](docs/decisions/0057-mouse-menu-lists.md)). Clicks and the wheel also work on the title screen, in conversations and shops, on the map, in the battle's Stopwatching menu and on Naviwoof Guide (see [Keyboard, mouse and controllers](#features)). Some Pad pages still had open issues on 2026-11-08 (Watch skills, Soulmate, Trophies, Treasure photos, Switch moves) |
 
 </details>
 
 <details>
-<summary><b>Finished</b> (16)</summary>
+<summary><b>Finished</b> (20)</summary>
 
 | Goal | Where it stands |
 |---|---|
@@ -733,6 +736,10 @@ On Ordinary Street with the performance HUD on (F3). The frame takes about 19 ms
 | **Launcher for Linux** | The same launcher as an AppImage, from launcher 1.2.0 (2026-11-15), so the game no longer has to be built by hand on Linux ([decision 0071](docs/decisions/0071-linux-launcher.md)). Players use it on their Linux desktops |
 | **Built-in cheats** | A Cheats page in the overlay, switched while playing: unlimited Crank-a-kai and unlimited coins so far, with a switch in the launcher ([decision 0074](docs/decisions/0074-cheats.md)) |
 | **Diary save slots** | Five save slots stacked in the Diary like the game's own rows, with one Autosave under them; pick a slot for a new game, Left / Right on the in-game Save screen, X to delete ([decision 0078](docs/decisions/0078-diary-save-slots.md)) |
+| **Shortcut wheel** | Hold L's key (1) while exploring and all eight field shortcuts appear in a wheel you point at with the mouse ([decision 0075](docs/decisions/0075-shortcut-wheel.md)) |
+| **Image sharpening** | A Sharpening slider after every anti-aliasing and upscaling choice, Off to Max ([decision 0076](docs/decisions/0076-sharpening.md), [#11](https://github.com/ILFforever/YW4Recomp/issues/11)) |
+| **Running modes** | Default, Always, Toggle or Hold, with a Run key (Left Shift, the left stick press), so you don't have to hold B to run ([decision 0080](docs/decisions/0080-running-modes.md), [#18](https://github.com/ILFforever/YW4Recomp/issues/18)) |
+| **Discord status** | Your Discord profile shows where you are (the main menu, the street or place, a battle), your Watch Rank and the time played; off unless you switch it on ([decision 0077](docs/decisions/0077-discord-rich-presence.md)). In the next update after 1.6.0 |
 
 </details>
 
