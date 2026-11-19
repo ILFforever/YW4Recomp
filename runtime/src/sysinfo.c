@@ -107,4 +107,13 @@ void yw4_sysinfo_dump(void) {
     fprintf(stderr, "yw4: system: display session %s%s\n", session ? session : "unknown",
             getenv("WAYLAND_DISPLAY") ? " (Wayland)" : "");
 #endif
+#if defined(__x86_64__)
+    /* The game's double-precision fused multiply-add is the CPU's FMA3 instruction (yw4fp.h yw4_fma: the C library's
+     * fma() is off by one bit on hard cases). CPUs before ~2013 and older Pentium/Celeron have none: this line says
+     * so in the log, so an "illegal instruction" crash on such a PC has its reason (review 2026-11-19). */
+    __builtin_cpu_init();
+    if (!__builtin_cpu_supports("fma"))
+        fprintf(stderr, "yw4: system: this CPU has no FMA3 (Intel before 2013, older Pentium and Celeron): the game "
+                        "stops with an illegal instruction if it reaches its one fused multiply-add\n");
+#endif
 }
