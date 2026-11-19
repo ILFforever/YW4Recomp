@@ -562,7 +562,9 @@ void bindings_read(const bool *keyboard, uint32_t mouse_buttons, int wheel_up, i
     if (savefs_diary_open()) mouse = savefs_diary_rows() && !mousemenu_sideways() ? title_mouse : sideways_mouse;
     /* the map (mousemenu_map): the wheel zooms (the right stick up and down); its moving pans (window.c). Mirapo's
      * list over it (mousemenu_mirapo): a menu's mouse, the wheel up and down its rows (owner, 2026-11-18) */
-    if (mousemenu_map() && !battle) mouse = mousemenu_mirapo() ? title_mouse : map_mouse;
+    /* (its Map Pin row, mousemenu_map_pin: the wheel steps the pins left and right, the clicks place and go back) */
+    if (mousemenu_map() && !battle)
+        mouse = mousemenu_mirapo() ? title_mouse : mousemenu_map_pin() ? sideways_mouse : map_mouse;
     /* Naviwoof Guide's row of pins (mousemenu_naviwoof): the wheel steps left and right, left click confirms (Start
      * guiding), right click goes back (owner, 2026-11-16) */
     if (mousemenu_naviwoof() && !battle) mouse = sideways_mouse;

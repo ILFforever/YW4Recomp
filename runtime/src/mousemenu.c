@@ -178,6 +178,14 @@ int mousemenu_map(void) { return enabled() && __atomic_load_n(&map_shown, __ATOM
 static int mirapo;
 int mousemenu_mirapo(void) { return mousemenu_map() && __atomic_load_n(&mirapo, __ATOMIC_ACQUIRE); }
 
+/* The map's Map Pin row (A on the map: five pins side by side, its control 0x79c3b11f; owner, 2026-11-19): up from its
+ * focus until another of the map's controls focuses, it is backed out of, or the map is gone. While up the mouse is a
+ * menu's, sideways: moving it no longer pans (its pushes moved the selection), the wheel steps the pins left and
+ * right, left places the pin, right goes back (bindings.c). */
+#define MAP_PIN_HASH 0x79c3b11fu
+static int map_pin;
+int mousemenu_map_pin(void) { return mousemenu_map() && __atomic_load_n(&map_pin, __ATOMIC_ACQUIRE); }
+
 /* The field HUD's shortcut cross was updated (shortcutwheel.c's hook): the field is back. Mirapo's list is this map
  * class too, and backed out of (B twice) the field's HUD menu doesn't focus again, so the map stayed "shown" and the
  * shortcut wheel never opened again (owner, 2026-11-16). The cross isn't updated while the map is up; half a second
@@ -200,6 +208,7 @@ void mousemenu_field_hud_seen(void) {
     if (now - __atomic_load_n(&map_event_ms, __ATOMIC_ACQUIRE) < 500) return;
     __atomic_store_n(&map_shown, 0, __ATOMIC_RELEASE);
     __atomic_store_n(&mirapo, 0, __ATOMIC_RELEASE);
+    __atomic_store_n(&map_pin, 0, __ATOMIC_RELEASE);
     if (menu_log_on()) fprintf(stderr, "yw4: menu: map gone (the field's HUD is updated again)\n");
 }
 
@@ -318,6 +327,9 @@ int yw4_hook_menu_focus(CPUState *ctx) {
         int m = hash == MIRAPO_ROWS_HASH;
         if (m != __atomic_exchange_n(&mirapo, m, __ATOMIC_ACQ_REL) && menu_log_on())
             fprintf(stderr, "yw4: menu: Mirapo's list %s\n", m ? "up" : "gone (the map's own controls)");
+        int pin = hash == MAP_PIN_HASH;
+        if (pin != __atomic_exchange_n(&map_pin, pin, __ATOMIC_ACQ_REL) && menu_log_on())
+            fprintf(stderr, "yw4: menu: Map Pin row %s\n", pin ? "up" : "gone");
     } else if (vt == FIELD_HUD_VTABLE) {
         __atomic_store_n(&mirapo, 0, __ATOMIC_RELEASE);
     }
@@ -394,6 +406,7 @@ int yw4_hook_menu_back(CPUState *ctx) {
      * list (the same class) goes back to the map: the map stays, its next back closes it. */
     if (vt == MAP_VTABLE) {
         __atomic_store_n(&map_event_ms, 0, __ATOMIC_RELEASE);  /* and the next field HUD update ends it at once */
+        __atomic_store_n(&map_pin, 0, __ATOMIC_RELEASE);       /* the Map Pin row backed out of, if it was up */
         if (__atomic_exchange_n(&mirapo, 0, __ATOMIC_ACQ_REL)) {
             if (menu_log_on()) fprintf(stderr, "yw4: menu: Mirapo's list backed out of: the map again\n");
         } else if (__atomic_exchange_n(&map_shown, 0, __ATOMIC_ACQ_REL) && menu_log_on()) {
