@@ -1,4 +1,4 @@
-# Two games on one PC, playing together through a relay on this PC (decision 0057, phase 1).
+# Two games on one PC, playing together through a relay on this PC (decision 0082, phase 1).
 #
 # Put this file in the install folder (next to "YW4 Recomp.exe") and run it (right click, "Run with PowerShell").
 # It starts the relay (its window shows who connects), then game 1 with your save and game 2 with a copy of it

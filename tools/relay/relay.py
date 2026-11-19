@@ -1,4 +1,4 @@
-"""The relay for playing together over the internet (decision 0057).
+"""The relay for playing together over the internet (decision 0082).
 
 Every game connects here over TCP. The game's local play (nn::ldn) creates, finds and joins rooms here, and the
 UDP packets between the players of a room pass through here. The relay knows nothing of the game: rooms are
@@ -6,7 +6,8 @@ NetworkInfo blobs (0x480 bytes, Switchbrew "LDN services"), packets are opaque.
 
     python tools/relay/relay.py [--port 41230]
 
-Players see each other only with the same room code (YW4_ROOM, empty is a room code too). Standard library only.
+Players see each other only with the same room code (YW4_ROOM, empty is a room code too; case and spaces do not count).
+Standard library only.
 
 Protocol, both ways: frames of u32 length (little endian, the bytes after it), u8 type, payload.
 
@@ -139,7 +140,7 @@ class Client:
     async def handle(self, kind: int, p: bytes) -> None:
         relay = self.relay
         if kind == HELLO:
-            self.code = p[:64].rstrip(b"\0")
+            self.code = p[:64].rstrip(b"\0").strip().lower()  # "YW4 " and "yw4" are the same room
             self.log(f"hello, room code {self.code.decode(errors='replace')!r}")
             await self.send(HELLO, struct.pack("<I", PROTOCOL))
         elif kind == CREATE and len(p) >= NETINFO:

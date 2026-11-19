@@ -1,4 +1,4 @@
-/* The game's side of the relay (tools/relay/relay.py, decision 0057): one TCP connection that carries local play
+/* The game's side of the relay (tools/relay/relay.py, decision 0082): one TCP connection that carries local play
  * over the internet. ldn.c makes and finds rooms through it, socket.c sends and receives the players' packets. */
 #ifndef RELAY_H
 #define RELAY_H

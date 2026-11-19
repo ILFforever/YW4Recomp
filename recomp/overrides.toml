@@ -497,364 +497,364 @@ offset = "0x9f4020"
 native = "yw4_hook_menu_row_focus"
 why = "a menu's focus set, done by the Diary row code for row 0: skipped during a Diary paint pass (runtime/src/savefs.c)"
 
-# Local play (nn::ldn), its network request (nn::nifm) and sockets (nn::socket), native (decision 0057): the sdk's
+# Local play (nn::ldn), its network request (nn::nifm) and sockets (nn::socket), native (decision 0082): the sdk's
 # versions talk to ldn:u, nifm and bsd:u over IPC; ours keep the local network ourselves and carry it over the
 # internet (the relay). Phase 0: a Switch alone in a room, every call logged (runtime/src/ldn.c, socket.c).
 [[override]]
 module = "sdk"
 symbol = "_ZN2nn3ldn10InitializeEv"
 native = "yw4_ldn_Initialize"
-why = "nn::ldn::Initialize: native local play (decision 0057)"
+why = "nn::ldn::Initialize: native local play (decision 0082)"
 
 [[override]]
 module = "sdk"
 symbol = "_ZN2nn3ldn8FinalizeEv"
 native = "yw4_ldn_Finalize"
-why = "nn::ldn::Finalize: native local play (decision 0057)"
+why = "nn::ldn::Finalize: native local play (decision 0082)"
 
 [[override]]
 module = "sdk"
 symbol = "_ZN2nn3ldn8GetStateEv"
 native = "yw4_ldn_GetState"
-why = "nn::ldn::GetState: native local play (decision 0057)"
+why = "nn::ldn::GetState: native local play (decision 0082)"
 
 [[override]]
 module = "sdk"
 symbol = "_ZN2nn3ldn22AttachStateChangeEventEPNS_2os15SystemEventTypeE"
 native = "yw4_ldn_AttachStateChangeEvent"
-why = "nn::ldn::AttachStateChangeEvent: native local play (decision 0057)"
+why = "nn::ldn::AttachStateChangeEvent: native local play (decision 0082)"
 
 [[override]]
 module = "sdk"
 symbol = "_ZN2nn3ldn15OpenAccessPointEv"
 native = "yw4_ldn_OpenAccessPoint"
-why = "nn::ldn::OpenAccessPoint: native local play (decision 0057)"
+why = "nn::ldn::OpenAccessPoint: native local play (decision 0082)"
 
 [[override]]
 module = "sdk"
 symbol = "_ZN2nn3ldn16CloseAccessPointEv"
 native = "yw4_ldn_CloseAccessPoint"
-why = "nn::ldn::CloseAccessPoint: native local play (decision 0057)"
+why = "nn::ldn::CloseAccessPoint: native local play (decision 0082)"
 
 [[override]]
 module = "sdk"
 symbol = "_ZN2nn3ldn13CreateNetworkERKNS0_13NetworkConfigERKNS0_14SecurityConfigERKNS0_10UserConfigE"
 native = "yw4_ldn_CreateNetwork"
-why = "nn::ldn::CreateNetwork: native local play (decision 0057)"
+why = "nn::ldn::CreateNetwork: native local play (decision 0082)"
 
 [[override]]
 module = "sdk"
 symbol = "_ZN2nn3ldn20CreateNetworkPrivateERKNS0_13NetworkConfigERKNS0_14SecurityConfigERKNS0_17SecurityParameterERKNS0_10UserConfigEiPKNS0_12AddressEntryE"
 native = "yw4_ldn_CreateNetworkPrivate"
-why = "nn::ldn::CreateNetworkPrivate: native local play (decision 0057)"
+why = "nn::ldn::CreateNetworkPrivate: native local play (decision 0082)"
 
 [[override]]
 module = "sdk"
 symbol = "_ZN2nn3ldn14DestroyNetworkEv"
 native = "yw4_ldn_DestroyNetwork"
-why = "nn::ldn::DestroyNetwork: native local play (decision 0057)"
+why = "nn::ldn::DestroyNetwork: native local play (decision 0082)"
 
 [[override]]
 module = "sdk"
 symbol = "_ZN2nn3ldn16SetAdvertiseDataEPKvm"
 native = "yw4_ldn_SetAdvertiseData"
-why = "nn::ldn::SetAdvertiseData: native local play (decision 0057)"
+why = "nn::ldn::SetAdvertiseData: native local play (decision 0082)"
 
 [[override]]
 module = "sdk"
 symbol = "_ZN2nn3ldn22SetStationAcceptPolicyENS0_12AcceptPolicyE"
 native = "yw4_ldn_SetStationAcceptPolicy"
-why = "nn::ldn::SetStationAcceptPolicy: native local play (decision 0057)"
+why = "nn::ldn::SetStationAcceptPolicy: native local play (decision 0082)"
 
 [[override]]
 module = "sdk"
 symbol = "_ZN2nn3ldn6RejectENS0_11Ipv4AddressE"
 native = "yw4_ldn_Reject"
-why = "nn::ldn::Reject: native local play (decision 0057)"
+why = "nn::ldn::Reject: native local play (decision 0082)"
 
 [[override]]
 module = "sdk"
 symbol = "_ZN2nn3ldn11OpenStationEv"
 native = "yw4_ldn_OpenStation"
-why = "nn::ldn::OpenStation: native local play (decision 0057)"
+why = "nn::ldn::OpenStation: native local play (decision 0082)"
 
 [[override]]
 module = "sdk"
 symbol = "_ZN2nn3ldn12CloseStationEv"
 native = "yw4_ldn_CloseStation"
-why = "nn::ldn::CloseStation: native local play (decision 0057)"
+why = "nn::ldn::CloseStation: native local play (decision 0082)"
 
 [[override]]
 module = "sdk"
 symbol = "_ZN2nn3ldn4ScanEPNS0_11NetworkInfoEPiiRKNS0_10ScanFilterEi"
 native = "yw4_ldn_Scan"
-why = "nn::ldn::Scan: native local play (decision 0057)"
+why = "nn::ldn::Scan: native local play (decision 0082)"
 
 [[override]]
 module = "sdk"
 symbol = "_ZN2nn3ldn11ScanPrivateEPNS0_11NetworkInfoEPiiRKNS0_10ScanFilterEi"
 native = "yw4_ldn_ScanPrivate"
-why = "nn::ldn::ScanPrivate: native local play (decision 0057)"
+why = "nn::ldn::ScanPrivate: native local play (decision 0082)"
 
 [[override]]
 module = "sdk"
 symbol = "_ZN2nn3ldn7ConnectERKNS0_11NetworkInfoERKNS0_14SecurityConfigERKNS0_10UserConfigEiNS0_13ConnectOptionE"
 native = "yw4_ldn_Connect"
-why = "nn::ldn::Connect: native local play (decision 0057)"
+why = "nn::ldn::Connect: native local play (decision 0082)"
 
 [[override]]
 module = "sdk"
 symbol = "_ZN2nn3ldn14ConnectPrivateERKNS0_13NetworkConfigERKNS0_14SecurityConfigERKNS0_17SecurityParameterERKNS0_10UserConfigEiNS0_13ConnectOptionE"
 native = "yw4_ldn_ConnectPrivate"
-why = "nn::ldn::ConnectPrivate: native local play (decision 0057)"
+why = "nn::ldn::ConnectPrivate: native local play (decision 0082)"
 
 [[override]]
 module = "sdk"
 symbol = "_ZN2nn3ldn10DisconnectEv"
 native = "yw4_ldn_Disconnect"
-why = "nn::ldn::Disconnect: native local play (decision 0057)"
+why = "nn::ldn::Disconnect: native local play (decision 0082)"
 
 [[override]]
 module = "sdk"
 symbol = "_ZN2nn3ldn14GetNetworkInfoEPNS0_11NetworkInfoE"
 native = "yw4_ldn_GetNetworkInfo"
-why = "nn::ldn::GetNetworkInfo: native local play (decision 0057)"
+why = "nn::ldn::GetNetworkInfo: native local play (decision 0082)"
 
 [[override]]
 module = "sdk"
 symbol = "_ZN2nn3ldn16GetNetworkConfigEPNS0_13NetworkConfigE"
 native = "yw4_ldn_GetNetworkConfig"
-why = "nn::ldn::GetNetworkConfig: native local play (decision 0057)"
+why = "nn::ldn::GetNetworkConfig: native local play (decision 0082)"
 
 [[override]]
 module = "sdk"
 symbol = "_ZN2nn3ldn20GetSecurityParameterEPNS0_17SecurityParameterE"
 native = "yw4_ldn_GetSecurityParameter"
-why = "nn::ldn::GetSecurityParameter: native local play (decision 0057)"
+why = "nn::ldn::GetSecurityParameter: native local play (decision 0082)"
 
 [[override]]
 module = "sdk"
 symbol = "_ZN2nn3ldn14GetIpv4AddressEPNS0_11Ipv4AddressEPNS0_10SubnetMaskE"
 native = "yw4_ldn_GetIpv4Address"
-why = "nn::ldn::GetIpv4Address: native local play (decision 0057)"
+why = "nn::ldn::GetIpv4Address: native local play (decision 0082)"
 
 [[override]]
 module = "sdk"
 symbol = "_ZN2nn3ldn19GetDisconnectReasonEv"
 native = "yw4_ldn_GetDisconnectReason"
-why = "nn::ldn::GetDisconnectReason: native local play (decision 0057)"
+why = "nn::ldn::GetDisconnectReason: native local play (decision 0082)"
 
 [[override]]
 module = "sdk"
 symbol = "_ZN2nn4nifm10InitializeEv"
 native = "yw4_nifm_Initialize"
-why = "nn::nifm::Initialize: native local play (decision 0057)"
+why = "nn::nifm::Initialize: native local play (decision 0082)"
 
 [[override]]
 module = "sdk"
 symbol = "_ZN2nn4nifm19SetLocalNetworkModeEb"
 native = "yw4_nifm_SetLocalNetworkMode"
-why = "nn::nifm::SetLocalNetworkMode: native local play (decision 0057)"
+why = "nn::nifm::SetLocalNetworkMode: native local play (decision 0082)"
 
 [[override]]
 module = "sdk"
 symbol = "_ZN2nn4nifm20SubmitNetworkRequestEv"
 native = "yw4_nifm_SubmitNetworkRequest"
-why = "nn::nifm::SubmitNetworkRequest: native local play (decision 0057)"
+why = "nn::nifm::SubmitNetworkRequest: native local play (decision 0082)"
 
 [[override]]
 module = "sdk"
 symbol = "_ZN2nn4nifm20CancelNetworkRequestEv"
 native = "yw4_nifm_CancelNetworkRequest"
-why = "nn::nifm::CancelNetworkRequest: native local play (decision 0057)"
+why = "nn::nifm::CancelNetworkRequest: native local play (decision 0082)"
 
 [[override]]
 module = "sdk"
 symbol = "_ZN2nn4nifm22IsNetworkRequestOnHoldEv"
 native = "yw4_nifm_IsNetworkRequestOnHold"
-why = "nn::nifm::IsNetworkRequestOnHold: native local play (decision 0057)"
+why = "nn::nifm::IsNetworkRequestOnHold: native local play (decision 0082)"
 
 [[override]]
 module = "sdk"
 symbol = "_ZN2nn4nifm18IsNetworkAvailableEv"
 native = "yw4_nifm_IsNetworkAvailable"
-why = "nn::nifm::IsNetworkAvailable: native local play (decision 0057)"
+why = "nn::nifm::IsNetworkAvailable: native local play (decision 0082)"
 
 [[override]]
 module = "sdk"
 symbol = "_ZN2nn4nifm31HandleNetworkRequestErrorResultEv"
 native = "yw4_nifm_HandleNetworkRequestErrorResult"
-why = "nn::nifm::HandleNetworkRequestErrorResult: native local play (decision 0057)"
+why = "nn::nifm::HandleNetworkRequestErrorResult: native local play (decision 0082)"
 
 [[override]]
 module = "sdk"
 symbol = "_ZN2nn4nifm22GetCurrentProxySettingEPNS0_12ProxySettingE"
 native = "yw4_nifm_GetCurrentProxySetting"
-why = "nn::nifm::GetCurrentProxySetting: native local play (decision 0057)"
+why = "nn::nifm::GetCurrentProxySetting: native local play (decision 0082)"
 
 [[override]]
 module = "sdk"
 symbol = "_ZN2nn4nifm26GetCurrentPrimaryIpAddressEP7in_addr"
 native = "yw4_nifm_GetCurrentPrimaryIpAddress"
-why = "nn::nifm::GetCurrentPrimaryIpAddress: native local play (decision 0057)"
+why = "nn::nifm::GetCurrentPrimaryIpAddress: native local play (decision 0082)"
 
 [[override]]
 module = "sdk"
 symbol = "_ZN2nn6socket10InitializeERKNS0_6ConfigE"
 native = "yw4_socket_Initialize"
-why = "nn::socket::Initialize: native local play (decision 0057)"
+why = "nn::socket::Initialize: native local play (decision 0082)"
 
 [[override]]
 module = "sdk"
 symbol = "_ZN2nn6socket8FinalizeEv"
 native = "yw4_socket_Finalize"
-why = "nn::socket::Finalize: native local play (decision 0057)"
+why = "nn::socket::Finalize: native local play (decision 0082)"
 
 [[override]]
 module = "sdk"
 symbol = "_ZN2nn6socket12GetLastErrnoEv"
 native = "yw4_socket_GetLastErrno"
-why = "nn::socket::GetLastErrno: native local play (decision 0057)"
+why = "nn::socket::GetLastErrno: native local play (decision 0082)"
 
 [[override]]
 module = "sdk"
 symbol = "_ZN2nn6socket6SocketEiii"
 native = "yw4_socket_Socket"
-why = "nn::socket::Socket: native local play (decision 0057)"
+why = "nn::socket::Socket: native local play (decision 0082)"
 
 [[override]]
 module = "sdk"
 symbol = "_ZN2nn6socket6SocketENS0_6FamilyENS0_4TypeENS0_8ProtocolE"
 native = "yw4_socket_Socket"
-why = "nn::socket::Socket: native local play (decision 0057)"
+why = "nn::socket::Socket: native local play (decision 0082)"
 
 [[override]]
 module = "sdk"
 symbol = "_ZN2nn6socket5CloseEi"
 native = "yw4_socket_Close"
-why = "nn::socket::Close: native local play (decision 0057)"
+why = "nn::socket::Close: native local play (decision 0082)"
 
 [[override]]
 module = "sdk"
 symbol = "_ZN2nn6socket8ShutdownEii"
 native = "yw4_socket_Shutdown"
-why = "nn::socket::Shutdown: native local play (decision 0057)"
+why = "nn::socket::Shutdown: native local play (decision 0082)"
 
 [[override]]
 module = "sdk"
 symbol = "_ZN2nn6socket4BindEiPK8sockaddrj"
 native = "yw4_socket_Bind"
-why = "nn::socket::Bind: native local play (decision 0057)"
+why = "nn::socket::Bind: native local play (decision 0082)"
 
 [[override]]
 module = "sdk"
 symbol = "_ZN2nn6socket4BindEiPKNS0_8SockAddrEj"
 native = "yw4_socket_Bind"
-why = "nn::socket::Bind: native local play (decision 0057)"
+why = "nn::socket::Bind: native local play (decision 0082)"
 
 [[override]]
 module = "sdk"
 symbol = "_ZN2nn6socket11GetSockNameEiP8sockaddrPj"
 native = "yw4_socket_GetSockName"
-why = "nn::socket::GetSockName: native local play (decision 0057)"
+why = "nn::socket::GetSockName: native local play (decision 0082)"
 
 [[override]]
 module = "sdk"
 symbol = "_ZN2nn6socket7ConnectEiPK8sockaddrj"
 native = "yw4_socket_Connect"
-why = "nn::socket::Connect: native local play (decision 0057)"
+why = "nn::socket::Connect: native local play (decision 0082)"
 
 [[override]]
 module = "sdk"
 symbol = "_ZN2nn6socket6ListenEii"
 native = "yw4_socket_Listen"
-why = "nn::socket::Listen: native local play (decision 0057)"
+why = "nn::socket::Listen: native local play (decision 0082)"
 
 [[override]]
 module = "sdk"
 symbol = "_ZN2nn6socket6AcceptEiP8sockaddrPj"
 native = "yw4_socket_Accept"
-why = "nn::socket::Accept: native local play (decision 0057)"
+why = "nn::socket::Accept: native local play (decision 0082)"
 
 [[override]]
 module = "sdk"
 symbol = "_ZN2nn6socket6SendToEiPKvmiPK8sockaddrj"
 native = "yw4_socket_SendTo"
-why = "nn::socket::SendTo: native local play (decision 0057)"
+why = "nn::socket::SendTo: native local play (decision 0082)"
 
 [[override]]
 module = "sdk"
 symbol = "_ZN2nn6socket6SendToEiPKvmNS0_7MsgFlagEPKNS0_8SockAddrEj"
 native = "yw4_socket_SendTo"
-why = "nn::socket::SendTo: native local play (decision 0057)"
+why = "nn::socket::SendTo: native local play (decision 0082)"
 
 [[override]]
 module = "sdk"
 symbol = "_ZN2nn6socket4SendEiPKvmi"
 native = "yw4_socket_Send"
-why = "nn::socket::Send: native local play (decision 0057)"
+why = "nn::socket::Send: native local play (decision 0082)"
 
 [[override]]
 module = "sdk"
 symbol = "_ZN2nn6socket8RecvFromEiPvmiP8sockaddrPj"
 native = "yw4_socket_RecvFrom"
-why = "nn::socket::RecvFrom: native local play (decision 0057)"
+why = "nn::socket::RecvFrom: native local play (decision 0082)"
 
 [[override]]
 module = "sdk"
 symbol = "_ZN2nn6socket8RecvFromEiPvmNS0_7MsgFlagEPNS0_8SockAddrEPj"
 native = "yw4_socket_RecvFrom"
-why = "nn::socket::RecvFrom: native local play (decision 0057)"
+why = "nn::socket::RecvFrom: native local play (decision 0082)"
 
 [[override]]
 module = "sdk"
 symbol = "_ZN2nn6socket4RecvEiPvmi"
 native = "yw4_socket_Recv"
-why = "nn::socket::Recv: native local play (decision 0057)"
+why = "nn::socket::Recv: native local play (decision 0082)"
 
 [[override]]
 module = "sdk"
 symbol = "_ZN2nn6socket4PollEP6pollfdmi"
 native = "yw4_socket_Poll"
-why = "nn::socket::Poll: native local play (decision 0057)"
+why = "nn::socket::Poll: native local play (decision 0082)"
 
 [[override]]
 module = "sdk"
 symbol = "_ZN2nn6socket5FcntlEiiz"
 native = "yw4_socket_Fcntl"
-why = "nn::socket::Fcntl: native local play (decision 0057)"
+why = "nn::socket::Fcntl: native local play (decision 0082)"
 
 [[override]]
 module = "sdk"
 symbol = "_ZN2nn6socket10SetSockOptEiiiPKvj"
 native = "yw4_socket_SetSockOpt"
-why = "nn::socket::SetSockOpt: native local play (decision 0057)"
+why = "nn::socket::SetSockOpt: native local play (decision 0082)"
 
 [[override]]
 module = "sdk"
 symbol = "_ZN2nn6socket10SetSockOptEiNS0_5LevelENS0_6OptionEPKvj"
 native = "yw4_socket_SetSockOpt"
-why = "nn::socket::SetSockOpt: native local play (decision 0057)"
+why = "nn::socket::SetSockOpt: native local play (decision 0082)"
 
 [[override]]
 module = "sdk"
 symbol = "_ZN2nn6socket10GetSockOptEiiiPvPj"
 native = "yw4_socket_GetSockOpt"
-why = "nn::socket::GetSockOpt: native local play (decision 0057)"
+why = "nn::socket::GetSockOpt: native local play (decision 0082)"
 
 [[override]]
 module = "sdk"
 symbol = "_ZN2nn6socket11GetAddrInfoEPKcS2_PK8addrinfoPPS3_"
 native = "yw4_socket_GetAddrInfo"
-why = "nn::socket::GetAddrInfo: native local play (decision 0057)"
+why = "nn::socket::GetAddrInfo: native local play (decision 0082)"
 
 [[override]]
 module = "sdk"
 symbol = "_ZN2nn6socket11GetAddrInfoEPKcS2_PKNS0_8AddrInfoEPPS3_"
 native = "yw4_socket_GetAddrInfo"
-why = "nn::socket::GetAddrInfo: native local play (decision 0057)"
+why = "nn::socket::GetAddrInfo: native local play (decision 0082)"
 
-# nn::friends, which local play reads first (decision 0057): no Nintendo friends here (runtime/src/ldn.c)
+# nn::friends, which local play reads first (decision 0082): no Nintendo friends here (runtime/src/ldn.c)
 [[override]]
 module = "sdk"
 symbol = "_ZN2nn7friends13GetFriendListEPiPNS0_6FriendERKNS_7account3UidEiiRKNS0_12FriendFilterE"
@@ -873,7 +873,7 @@ symbol = "_ZN2nn7friends14AddPlayHistoryERKNS_7account3UidERKNS0_26PlayHistoryRe
 native = "yw4_friends_AddPlayHistory"
 why = "nn::friends::AddPlayHistory asks friend:u: accepted, not kept"
 
-# nn::ngc (other players' names) and nn::err (the error window), reached from local play (decision 0057)
+# nn::ngc (other players' names) and nn::err (the error window), reached from local play (decision 0082)
 [[override]]
 module = "sdk"
 symbol = "_ZN2nn3ngc15ProfanityFilterC1Ev"
@@ -885,24 +885,7 @@ module = "sdk"
 symbol = "_ZN2nn3ngc15ProfanityFilterD1Ev"
 native = "yw4_ngc_ProfanityFilter_dtor"
 why = "the counterpart of its constructor"
-
-[[override]]
-module = "sdk"
-symbol = "_ZN2nn3ngc15ProfanityFilter10InitializeEPvm"
-native = "yw4_ngc_ProfanityFilter_Initialize"
-why = "opens ngc:u"
-
-[[override]]
-module = "sdk"
-symbol = "_ZN2nn3ngc15ProfanityFilter17GetContentVersionEv"
-native = "yw4_ngc_ProfanityFilter_GetContentVersion"
-why = "asks ngc:u"
-
-[[override]]
-module = "sdk"
-symbol = "_ZN2nn3ngc15ProfanityFilter24MaskProfanityWordsInTextEPiPcj"
-native = "yw4_ngc_ProfanityFilter_MaskProfanityWordsInText"
-why = "asks ngc:u: masks nothing"
+# (Initialize, GetContentVersion and MaskProfanityWordsInText are the text-entry overrides near the top, swkbd.c)
 
 [[override]]
 module = "sdk"

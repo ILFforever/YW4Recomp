@@ -1,12 +1,26 @@
-# 0057 — Playing together over the internet: the Switch's local play, carried by our own server
+# 0082 — Playing together over the internet: the Switch's local play, carried by our own server
 <!-- decision
 state: plan
-date: 2026-11-09
+date: 2026-11-19
 replaces: none
-code: recomp/overrides.toml, runtime/src/ldn.c, runtime/src/socket.c, tools/relay/ (to come)
+code: recomp/overrides.toml, runtime/src/ldn.c, runtime/src/socket.c, runtime/src/relay.c, runtime/src/relay.h, runtime/src/svc_csrng.c, runtime/src/svc_misc.c, runtime/src/svc_acc.c, runtime/src/settings.c, tools/relay/relay.py
 -->
 
-Status: **plan** (2026-11-09, the owner asked for it: trading and the Blasters mode with friends).
+Status: **plan**. Written and built by **Quandiy** in their fork (github.com/Quandiy/YW4Recomp, branch `amd-fixes`,
+2026-11-09/10, as their decision 0057: their owner asked for trading and the Blasters mode with friends). Brought into
+this repo on 2026-11-19 at the owner's request, with their commits cherry-picked so they stay the author (each says
+`cherry picked from commit ...`), renumbered 0082 (our 0057 is the mouse menu lists).
+
+Changes made bringing it over:
+
+- nn::ngc: this repo already had `ProfanityFilter::Initialize`, `GetContentVersion` and `MaskProfanityWordsInText`
+  (swkbd.c, the name keyboard); the fork's copies of those three are left out, its constructor and destructor kept.
+- Settings: `YW4_RELAY`, `YW4_ROOM` and `YW4_NICKNAME` are lines in `settings.ini` (added by hand for now, like
+  `YW4_PERF`), not the fork's separate `online.ini`.
+- The fork's launcher Online page is not brought over yet: the launcher has changed a lot since; it gets its own page
+  in the current launcher's style (a mockup first).
+- Not yet known: whether a trade or a Blasters match goes through end to end. The fork got as far as one game seeing
+  the other's room (its commit ba5fdf8).
 
 ## Context
 

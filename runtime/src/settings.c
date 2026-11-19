@@ -445,8 +445,9 @@ static int first_run;
 
 /* Lines a player adds to settings.ini by hand when a bug report asks for them (no panel row): read like the panel's,
  * and written back as they were, so the game's own saves don't drop them. YW4_PERF=1: the per-frame performance CSV
- * (perf.c; owner, 2026-11-16: "we are asking them", so a line in the file is enough). */
-static const char *const by_hand[] = {"YW4_PERF"};
+ * (perf.c; owner, 2026-11-16: "we are asking them", so a line in the file is enough). YW4_RELAY (host:port),
+ * YW4_ROOM and YW4_NICKNAME: playing together through the relay (relay.c, ldn.c; decision 0082). */
+static const char *const by_hand[] = {"YW4_PERF", "YW4_RELAY", "YW4_ROOM", "YW4_NICKNAME"};
 enum { BY_HAND = sizeof by_hand / sizeof *by_hand };
 static char by_hand_value[BY_HAND][64];
 

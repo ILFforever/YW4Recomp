@@ -1,4 +1,4 @@
-/* nn::ldn, the Switch's local wireless play, native (decision 0057).
+/* nn::ldn, the Switch's local wireless play, native (decision 0082).
  *
  * The sdk's nn::ldn functions send IPC to ldn:u; here they are native overrides (recomp/overrides.toml) on the
  * structs Switchbrew documents ("LDN services"): NetworkInfo 0x480, NetworkConfig 0x20, SecurityConfig 0x44,
@@ -529,13 +529,7 @@ void yw4_friends_AddPlayHistory(CPUState *c) {
  * masks nothing: names come from friends the player chose to play with. */
 void yw4_ngc_ProfanityFilter_ctor(CPUState *c) { (void)c; }
 void yw4_ngc_ProfanityFilter_dtor(CPUState *c) { (void)c; }
-void yw4_ngc_ProfanityFilter_Initialize(CPUState *c) { c->x[0] = R_OK; }
-void yw4_ngc_ProfanityFilter_GetContentVersion(CPUState *c) { c->x[0] = 1; }
-/* MaskProfanityWordsInText(int *count, char *text, u32 languages) */
-void yw4_ngc_ProfanityFilter_MaskProfanityWordsInText(CPUState *c) {
-    if (c->x[1]) { int32_t zero = 0; memcpy(GPTR(c->x[1]), &zero, 4); }
-    c->x[0] = R_OK;
-}
+/* Initialize, GetContentVersion and MaskProfanityWordsInText: swkbd.c (the name keyboard has them too) */
 
 /* ---- nn::err::ShowError: the system's error applet, which we don't have: the error goes to the log, and the
  * game goes on as after the player closed the error window */

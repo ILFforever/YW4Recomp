@@ -1,4 +1,4 @@
-/* nn::socket, native on the host's sockets (decision 0057).
+/* nn::socket, native on the host's sockets (decision 0082).
  *
  * The sdk's nn::socket functions send IPC to bsd:u; here they are native overrides on Winsock (BSD sockets
  * elsewhere). What differs from the host and is translated:

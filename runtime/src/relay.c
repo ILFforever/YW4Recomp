@@ -1,4 +1,4 @@
-/* The connection to the relay (relay.h, tools/relay/relay.py, decision 0057).
+/* The connection to the relay (relay.h, tools/relay/relay.py, decision 0082).
  *
  * Frames both ways: u32 length (little endian, of what follows), u8 type, payload. One request waits for its
  * answer at a time (ldn's calls are few and the game makes them one after another); pushed frames (room changes,
