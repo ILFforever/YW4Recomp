@@ -63,6 +63,10 @@ void gamemenu_prompt_options(int min_chars, int cancel);
 void gamemenu_prompt_cancel(void);
 /* 0 still open, 1 answered (out), 2 cancelled */
 int gamemenu_prompt_take(char *out, size_t n);
+/* The same popup opened by the overlay itself, over its Settings page (General > Player name): the field starts with
+ * initial, has Cancel, and on OK done() gets the text (empty: fallback); the overlay stays open on the page. */
+void gamemenu_name_edit(const char *title, int max_chars, const char *fallback, const char *initial,
+                        void (*done)(const char *name));
 /* The same popup with a message instead of a field, and OK (a pad's A or B, Enter, Escape); taken the same way. */
 void gamemenu_message_begin(const char *title, const char *body);
 int gamemenu_prompting(void);

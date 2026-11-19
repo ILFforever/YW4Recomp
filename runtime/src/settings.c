@@ -19,6 +19,7 @@
 #include "hud.h"
 #include "cheats.h"
 #include "discord.h"
+#include "gamemenu.h"
 #include "settings.h"
 #include "theme.h"
 #include "shadow.h"
@@ -183,11 +184,37 @@ int settings_keys_notice(void) {
     return e && *e ? strcmp(e, "0") != 0 : *settings_file() != 0;
 }
 
+/* General > Player name (decision 0082): the name the other players see when playing together (trades, Blasters,
+ * through the relay). It is YW4_NICKNAME, which acc's GetProfile hands the game (svc_acc.c); none: "Player". The
+ * overlay's name popup changes it (gamemenu_name_edit), at most 10 letters as on a Switch. Saved by settings_save. */
+static void put_env(const char *name, const char *value) {
+#ifdef _WIN32
+    _putenv_s(name, value);
+#else
+    setenv(name, value, 1);
+#endif
+}
+static const char *player_name(void) {
+    const char *n = getenv("YW4_NICKNAME");
+    return n && *n ? n : "Player";
+}
+static int player_name_index(void) { return 0; }
+static void player_name_set(const char *name) {
+    put_env("YW4_NICKNAME", name && *name ? name : "Player");
+    settings_save();
+    fprintf(stderr, "yw4: settings: player name %s\n", player_name());
+}
+static void player_name_edit(void) { gamemenu_name_edit("Your name when playing together", 10, "Player", player_name(), player_name_set); }
+
 /* The player's settings, in the order shown; a row starts a new group when its category differs from the row
  * before. The last row opens the developer page. The texts use the HUD font's characters (hud.c): upper case,
  * digits, . , : % / - ( ) ' ! ? */
 static const Setting player[] = {
     /* General: what isn't graphics (owner, 2026-11-18: Discord status didn't belong in Advanced) */
+    {"GENERAL", "PLAYER NAME",
+     "YOUR USERNAME SHOWN TO OTHER PLAYERS WHEN YOU PLAY TOGETHER ONLINE: TRADES AND BLASTERS. SUPPORTS UP TO "
+     "10 LETTERS. NAMES ARE ONLY SEEN BY THE PLAYERS IN YOUR ROOM. ENTER OR A: CHANGE IT.",
+     {"PLAYER"}, {""}, 1, player_name_index, player_name_edit, "YW4_NICKNAME", {""}},
     {"GENERAL", "DISCORD STATUS",
      /* (decision 0077: Discord's local IPC, the Discord app on this PC; nothing goes anywhere else) */
      "SHOWS ON YOUR DISCORD PROFILE THAT YOU ARE PLAYING YO-KAI WATCH 4, WHERE YOU ARE (THE MAIN MENU, THE AREA, A "
@@ -446,8 +473,8 @@ static int first_run;
 /* Lines a player adds to settings.ini by hand when a bug report asks for them (no panel row): read like the panel's,
  * and written back as they were, so the game's own saves don't drop them. YW4_PERF=1: the per-frame performance CSV
  * (perf.c; owner, 2026-11-16: "we are asking them", so a line in the file is enough). YW4_RELAY (host:port),
- * YW4_ROOM and YW4_NICKNAME: playing together through the relay (relay.c, ldn.c; decision 0082). */
-static const char *const by_hand[] = {"YW4_PERF", "YW4_RELAY", "YW4_ROOM", "YW4_NICKNAME"};
+ * YW4_ROOM: playing together through the relay (relay.c, ldn.c; decision 0082; the name is General > Player name). */
+static const char *const by_hand[] = {"YW4_PERF", "YW4_RELAY", "YW4_ROOM"};
 enum { BY_HAND = sizeof by_hand / sizeof *by_hand };
 static char by_hand_value[BY_HAND][64];
 
@@ -501,6 +528,11 @@ void settings_save(void) {
                "# name wins over its line here.\n");
     for (int i = 0; i < NSETTINGS; i++) {
         const Setting *t = setting(i);
+        if (t->next == player_name_edit) {  /* a name, not one of the options */
+            const char *n = getenv("YW4_NICKNAME");
+            if (n && *n) fprintf(f, "YW4_NICKNAME=%s\n", n);
+            continue;
+        }
         if (!t->noptions) {
             char v[16];
             slider_text(t, NULL, 0, v, sizeof v);
@@ -590,6 +622,7 @@ void settings_action(int action) {
     }
     if (!developer_page && *sel == LINK_ROW) return;
     const Setting *s = developer_page ? &developer[*sel] : &player[*sel];
+    if (s->next == player_name_edit) return;  /* typed in the overlay's popup only (this panel's font has no lower case) */
     if ((action == SETTINGS_LEFT || action == SETTINGS_RIGHT) && s->disabled && s->disabled()) return;  /* greyed out */
     switch (action) {
     case SETTINGS_RIGHT: setting_step(s, 1), settings_save(); break;
@@ -607,6 +640,7 @@ static int fill_rows(SettingRow *rows, int max, const Setting *list, int count) 
         memcpy(rows[i].options, list[i].options, sizeof rows[i].options);
         memcpy(rows[i].notes, list[i].notes, sizeof rows[i].notes);
         rows[i].noptions = list[i].noptions;
+        if (list[i].next == player_name_edit) rows[i].options[0] = player_name(), rows[i].verbatim = rows[i].textbox = 1;
         /* leave out options this GPU or build can't run, only from the end of the list (FSR, then DLSS): an
          * option in the middle stays listed, as the row's index is the mode (the cycle skips it) */
         if (list[i].next == gpu_aa_cycle || list[i].next == gpu_fg_cycle) {

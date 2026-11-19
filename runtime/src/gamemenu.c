@@ -55,6 +55,7 @@ static TextField prompt_text;
 static char prompt_title[256], prompt_fallback[64], prompt_answer[TEXTIN_MAX];
 static char prompt_body[512];  /* a message instead of a field ("" for a field) */
 static const char *prompt_label = "Name";
+static void (*prompt_done)(const char *);  /* not NULL: the overlay's own name entry (gamemenu_name_edit) */
 static int prompt_min, prompt_cancel;  /* letters the game needs at least; Cancel offered */
 /* the list popup (gamemenu_choice_begin): the New Game slot picker (savefs.c); prompting is 1 while it shows, the
  * title and prompt_body are its question; pick_n 0: not a list */
@@ -297,6 +298,15 @@ void gamemenu_prompt_begin(const char *title, int max_chars, const char *fallbac
     fprintf(stderr, "yw4: overlay: name entry \"%s\" (at most %d letters)\n", prompt_title, max_chars);
 }
 
+void gamemenu_name_edit(const char *title, int max_chars, const char *fallback, const char *initial,
+                        void (*done)(const char *name)) {
+    if (gamemenu_prompting()) return;  /* the game's own question is up */
+    gamemenu_prompt_options(0, 1);
+    gamemenu_prompt_begin(title, max_chars, fallback);
+    prompt_done = done;
+    if (initial && *initial) textin_type(initial);  /* the field is focused: the current name, to edit */
+}
+
 void gamemenu_message_begin(const char *title, const char *body) {
     snprintf(prompt_title, sizeof prompt_title, "%s", title);
     snprintf(prompt_body, sizeof prompt_body, "%s", body);
@@ -425,6 +435,14 @@ static void prompt_close(int how) {
     }
     osk_switched = 0;
     textin_focus(NULL);
+    if (prompt_done) {  /* the overlay's own (a settings row): the answer goes to the row, the overlay stays open */
+        void (*done)(const char *) = prompt_done;
+        prompt_done = NULL;
+        __atomic_store_n(&prompting, 0, __ATOMIC_RELEASE);
+        if (how == 1) done(prompt_answer);
+        changed();
+        return;
+    }
     __atomic_store_n(&prompting, 0, __ATOMIC_RELEASE);
     __atomic_store_n(&open_, 0, __ATOMIC_RELEASE);
     __atomic_store_n(&prompt_finished, how, __ATOMIC_RELEASE);
@@ -1377,6 +1395,8 @@ static const char *const ICON_TITLE = "<path d=\"M3 11l9-7 9 7M5 10v10h14V10\"/>
 /* the value arrows (‹ ›): drawn as icons, not the font's characters, which sit low in their line */
 static const char *const ICON_PREV = "<path d=\"M14.5 6l-6 6 6 6\"/>";
 static const char *const ICON_NEXT = "<path d=\"M9.5 6l6 6-6 6\"/>";
+/* a pencil: a text row's Edit button (General > Player name) */
+static const char *const ICON_EDIT = "<path d=\"M16 3l5 5L8 21H3v-5z\"/><path d=\"M13 6l5 5\"/>";
 static int hovered(int kind, int a, int b) { return hover_kind == kind && hover_a == a && hover_b == b; }
 static const char *const ICON_EYE =
     "<path d=\"M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12z\"/><circle cx=\"12\" cy=\"12\" r=\"3\"/>";
@@ -1531,6 +1551,7 @@ static void prose_case(const char *in, char *out, size_t n) {
         {"F3", "F3"}, {"F11", "F11"}, {"ZL", "ZL"}, {"ZR", "ZR"}, {"LB", "LB"}, {"RB", "RB"}, {"OK", "OK"},
         /* names in Discord status's text: "Yo-kai Watch 4" ("KAI" stays lower case), "Watch rank", "this PC" */
         {"DISCORD", "Discord"}, {"PC", "PC"}, {"YO", "Yo"}, {"WATCH", "Watch"},
+        {"BLASTERS", "Blasters"},  /* the game mode, in Player name's text */
     };
     size_t o = 0;
     int start = 1;     /* at a sentence's start */
@@ -1714,6 +1735,20 @@ static void draw_settings_page(const UiCanvas *c, const GameMenuInfo *in) {
         float nx = x + w - 12 - 44, vx = nx - 10 - 300, px = vx - 10 - 44, by = y + 14;
         if (r->slider) {  /* SHARPENING: a slider where the arrows and the value are on the other rows */
             row_slider(c, r, i, px, y, nx + 44 - px, 72, 18, off);
+            y += 72 + 10;
+            continue;
+        }
+        if (r->textbox) {  /* Player name (owner's pick, 2026-11-19): the text in a box, an Edit button for the popup */
+            const char *value = r->options[0] ? r->options[0] : "";
+            float ew = 22 + 8 + ui_text_w(UI_ROUNDED_800, 16, "Edit") + 2 * 16, ex = nx + 44 - ew;
+            float fx = px, fw = ex - 10 - px, fh = 44, fy = y + (72 - fh) / 2;
+            ui_box(c, fx, fy, fw, fh, 10, WHITE, 2, LINE);
+            ui_text_in(c, UI_ROUNDED_700, 18, fx + 16, fy, fw - 32, fh, 0, value, off ? MUTED : NIGHT);
+            int hv = !off && hovered(HIT_ROW_NEXT, i, 0);
+            ui_box(c, ex, fy, ew, fh, 10, hv ? LILAC : SOFT, 2, hv ? PLUM : LINE);
+            ui_icon(c, ICON_EDIT, ex + 16, fy + (fh - 22) / 2, 22, 2.2f, off ? MUTED : PLUM);
+            ui_text_in(c, UI_ROUNDED_800, 16, ex + 16 + 22 + 8, fy, 0, fh, 0, "Edit", off ? MUTED : PLUM);
+            hit_add(fx, fy, fw, fh, HIT_ROW_NEXT, i, 0), hit_add(ex, fy, ew, fh, HIT_ROW_NEXT, i, 0);
             y += 72 + 10;
             continue;
         }
@@ -3615,6 +3650,8 @@ static void draw_pick(const UiCanvas *c, const GameMenuInfo *in, float W, float 
 void gamemenu_draw(const UiCanvas *c, const GameMenuInfo *in) {
     TH = theme_colors();
     draw_text_has = 0;
+    /* the overlay's own name entry has no thread waiting in gamemenu_prompt_take: Enter (the field let go) is OK here */
+    if (prompt_done && gamemenu_prompting() && !textin_has(&prompt_text)) prompt_finish();
     if (gamemenu_peeking()) {  /* F2's quick look: the keyboard Overview alone, in the game's current mode */
         int hk = hit_back();
         hit_n[hk] = 0;  /* only the keys and the mode switch can be pointed at (gamemenu_peek_point) */

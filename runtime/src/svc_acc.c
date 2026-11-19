@@ -16,11 +16,11 @@ void yw4_account_user_id(uint8_t out[16]) { memcpy(out, user_id, 16); }
 /* IManagerForApplication: the user's Nintendo Account (online), which this user doesn't have */
 static void manager(Service *s, IpcRequest *req, IpcResponse *resp) { ipc_unimplemented(s, req, resp); }
 
-/* The user's nickname, as other players see it in local play: YW4_NICKNAME (settings.ini), else the Windows
- * user's name; at most 10 characters, as on the Switch, in UTF-8. */
+/* The user's nickname, as other players see it in local play: YW4_NICKNAME (the overlay's General > Player name,
+ * settings.ini), else "Player" (not the Windows user's name: strangers on a relay would see it); at most 10
+ * characters, as on the Switch, in UTF-8. */
 static void nickname(uint8_t out[0x21]) {
     const char *n = getenv("YW4_NICKNAME");
-    if (!n || !*n) n = getenv("USERNAME");
     if (!n || !*n) n = "Player";
     memset(out, 0, 0x21);
     size_t i = 0, chars = 0;

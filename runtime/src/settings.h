@@ -27,6 +27,7 @@ typedef struct {
     int nmarks;
     int verbatim;  /* options[] are names to show as they are (the overlay's Theme row: "Jibanyan", "YW4 Recomp") */
     int look;      /* changes what's on screen: the overlay's Preview can show it (settings_player_rows) */
+    int textbox;   /* a text (options[0], as written) in a box with an Edit button, not ‹ ›: General > Player name */
 } SettingRow;
 
 enum { SETTINGS_UP, SETTINGS_DOWN, SETTINGS_LEFT, SETTINGS_RIGHT, SETTINGS_CLOSE, SETTINGS_ACCEPT, SETTINGS_CLEAR,
