@@ -236,6 +236,28 @@ Off and on, same spot:
 </details>
 
 <details>
+<summary><b>Soft point light shadows</b> (experimental): characters cast shadows from street lamps at night</summary>
+
+In the game only the sun and moon cast shadows. At night, street lamps, porch lights and lit windows light up the
+people and Yo-kai standing under them, but nobody throws a shadow. Now the few lamps nearest the characters cast real,
+soft shadows of them on walls, doors and the ground:
+
+- **Real shadow shapes**: each lamp gets its own shadow map, so you see a body's outline, not a blob under the feet.
+- **Soft and fading**: the edges are filtered, and a shadow fades out over 1–3 m from whoever casts it.
+- **Cheap**: about 0.2 ms per frame on a busy night street.
+
+Off by default while it's experimental: the panel (F1, SHADOWS, POINT LIGHT SHADOWS: LOW to MAX, MEDIUM
+recommended). [Decision 0081](docs/decisions/0081-lamp-shadows.md).
+
+![Yo-kai Watch gate · point light shadows off; on: Bruno's shadow on the wall](docs/screenshots/102-point-light-shadows-gate.jpg)
+
+![Claw machines · point light shadows off; on: Summer's shadow on the door](docs/screenshots/102-point-light-shadows-claw.jpg)
+
+![The detectives' base · point light shadows off; on: shadows from the ceiling light](docs/screenshots/102-point-light-shadows-base.jpg)
+
+</details>
+
+<details>
 <summary><b>Anti-aliasing</b>: FXAA, SMAA and TAA, with the UI kept sharp</summary>
 
 The Switch version has none. Three kinds are in, all applied to the 3D scene before the UI is
@@ -488,6 +510,8 @@ greyed out, and one that is on (the bike) shows green. Pressing an arrow key whi
 old way. **Mouse shortcut wheel** on the overlay's Controls page turns it off
 ([decision 0075](docs/decisions/0075-shortcut-wheel.md)).
 
+![The shortcut wheel open over the bamboo forest, the mouse pointing at Mirapo](docs/screenshots/103-shortcut-wheel.jpg)
+
 </details>
 
 **Mods**
@@ -702,7 +726,7 @@ On Ordinary Street with the performance HUD on (F3). The frame takes about 19 ms
 </details>
 
 <details>
-<summary><b>Ongoing</b> (7)</summary>
+<summary><b>Ongoing</b> (8)</summary>
 
 | Goal | Where it stands |
 |---|---|
@@ -712,6 +736,7 @@ On Ordinary Street with the performance HUD on (F3). The frame takes about 19 ms
 | **Steadier shadows** | Shadows still shimmer a little as the camera moves; steadier cascades next |
 | **Shadows on AMD graphics cards** | Our shadow mask still draws streaks on some AMD cards as the camera turns ([#8](https://github.com/ILFforever/YW4Recomp/issues/8)); a fix tried in 1.6.0 didn't cure it, and it doesn't happen on NVIDIA. Next: testing on an AMD card. Until then, Shadow mask → Game avoids it |
 | **Better anti-aliasing** | FXAA, SMAA and TAA (steady thin edges: fences, nets, leaves) on the 3D scene before the UI is drawn, so text stays crisp; per-object motion for TAA next (a first version is in, off by default) |
+| **Clean moving characters with frame generation** | DLSS's red trail behind characters in the rain is gone with the new DLSS MODEL: HIGH QUALITY setting. Still open: with frame generation on (DLSS or FSR), a fine noisy outline around characters while the camera turns |
 | **Mouse in the game's menus** | Pointing, clicking and wheel scrolling work on the Yo-kai Pad and the pages opened from it, such as the item and quest lists, Ukiukipedia and Members ([decision 0057](docs/decisions/0057-mouse-menu-lists.md)). Clicks and the wheel also work on the title screen, in conversations and shops, on the map, in the battle's Stopwatching menu and on Naviwoof Guide (see [Keyboard, mouse and controllers](#features)). Some Pad pages still had open issues on 2026-11-08 (Watch skills, Soulmate, Trophies, Treasure photos, Switch moves) |
 
 </details>
