@@ -1251,9 +1251,6 @@ pub fn locate_installed_game_path(raw_path: PathBuf) -> Result<State, String> {
                 if let Some(u) = input.get("update_nsp").and_then(|v| v.as_str()) {
                     state.paths.insert("update".into(), u.into());
                 }
-                if let Some(k) = input.get("keys_dir").and_then(|v| v.as_str()) {
-                    state.paths.insert("keys".into(), k.into());
-                }
                 if let Some(d) = input.get("dlc_dir").and_then(|v| v.as_str()) {
                     state.paths.insert("dlc".into(), d.into());
                 }
@@ -1263,6 +1260,13 @@ pub fn locate_installed_game_path(raw_path: PathBuf) -> Result<State, String> {
                 if let Some(r) = input.get("romfs_dir").and_then(|v| v.as_str()) {
                     state.paths.insert("romfs".into(), r.into());
                 }
+            }
+            // keys_dir is a [tools] key (write_config, save_keys_dir; tools/yw4/config.py reads it there). Read from
+            // [input] only, Locate lost it, and the Upgrade Pack showed "needs prod.keys" (review 2026-11-19).
+            let keys = ["tools", "input"].iter()
+                .find_map(|s| t.get(*s).and_then(|v| v.get("keys_dir")).and_then(|v| v.as_str()));
+            if let Some(k) = keys {
+                state.paths.insert("keys".into(), k.into());
             }
         }
     }

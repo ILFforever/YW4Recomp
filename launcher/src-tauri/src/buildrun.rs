@@ -122,8 +122,10 @@ fn repo_tools(repo: &Path) -> toml::Table {
         .unwrap_or_default()
 }
 
+/// A path as a TOML string, quoted by the toml crate: Windows paths can contain ' ("Dean's games", O'Brien), which
+/// the plain '...' literal this used to write turned into a config.toml no build step could read (review 2026-11-19).
 fn lit(p: &Path) -> String {
-    format!("'{}'", p.display())  // a TOML literal string: no escapes, Windows paths can't contain '
+    toml::Value::String(p.display().to_string()).to_string()
 }
 
 /// The game code's protocol (release.toml, or build_install.py --protocol).
@@ -393,5 +395,20 @@ pub fn cancel_build(app: AppHandle) {
     let pid = run.child.lock().unwrap().as_ref().map(|c| c.id());
     if let Some(pid) = pid {
         platform::kill_tree(pid);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::lit;
+    use std::path::Path;
+
+    #[test]
+    fn lit_paths_read_back_as_written() {
+        for p in [r"E:\Dumps\O'Brien\base.nsp", r"D:\Dean's games\YW4 Recomp", "/home/me/it's \"here\"",
+                  r"C:\Games\José 日本\x"] {
+            let doc: toml::Table = format!("k = {}\n", lit(Path::new(p))).parse().expect(p);
+            assert_eq!(doc["k"].as_str(), Some(p));
+        }
     }
 }
