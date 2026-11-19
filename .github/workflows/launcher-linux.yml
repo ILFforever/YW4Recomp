@@ -1,0 +1,50 @@
+# The launcher on Linux: compiles and tests its Linux-only code (the `cfg(not(windows))` parts: starting tools,
+# unzip, free disk space, shortcuts), which Build check's Windows launcher job never compiles. Review 2026-11-19 found
+# that code had no build check at all; the AppImage itself is still made by hand (launcher/package.py, decision 0071).
+#
+# Tauri needs WebKitGTK's headers from apt, whose mirror once held a run up 12 minutes (2026-11-19), so this runs
+# only when the launcher changes and by hand (Actions > Launcher (Linux) > Run workflow, e.g. before a release),
+# not on every push.
+name: Launcher (Linux)
+
+on:
+  push:
+    branches: [master]
+    paths:
+      - "launcher/src-tauri/**"
+      - "launcher/ui/**"
+      - ".github/workflows/launcher-linux.yml"
+  pull_request:
+    paths:
+      - "launcher/src-tauri/**"
+      - "launcher/ui/**"
+      - ".github/workflows/launcher-linux.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: launcher-linux-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  launcher:
+    name: Launcher (Linux)
+    runs-on: ubuntu-24.04
+    defaults:
+      run:
+        working-directory: launcher/src-tauri
+    steps:
+      - uses: actions/checkout@v4
+      - name: WebKitGTK and the other libraries Tauri links on Linux
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq libwebkit2gtk-4.1-dev librsvg2-dev libxdo-dev libssl-dev
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: launcher/src-tauri
+      - name: Build
+        run: cargo build --locked
+      - name: Tests
+        run: cargo test --locked
