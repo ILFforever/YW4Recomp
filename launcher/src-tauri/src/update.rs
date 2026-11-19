@@ -233,7 +233,12 @@ pub async fn download_game_update(install: String, version: String, url: String,
     tauri::async_runtime::spawn_blocking(move || {
         // GitHub only; a test feed (YW4_UPDATE_FEED) may also point at a local file
         let local_test = std::env::var("YW4_UPDATE_FEED").is_ok() && url.starts_with("file:///");
-        if ver(&version).is_none() || sha256.len() != 64 || !(url.starts_with("https://github.com/") || local_test) {
+        // The version names the folders deleted below, so it is exactly "X.Y.Z" (ver() alone reads the first three
+        // numbers only: "1.2.3.\..\..\x" passed), and the file is this repo's release file for that version, as
+        // for the launcher's own update (review 2026-11-19: any github.com address was taken).
+        let plain = version.split('.').count() == 3 && version.chars().all(|c| c.is_ascii_digit() || c == '.');
+        let github = format!("https://github.com/ILFforever/YW4Recomp/releases/download/v{version}/yw4recomp-game-{version}.zip");
+        if !plain || ver(&version).is_none() || sha256.len() != 64 || !(url == github || local_test) {
             return Err("not a game update".to_string());
         }
         let dir = PathBuf::from(&install).join("builder").join("game");
