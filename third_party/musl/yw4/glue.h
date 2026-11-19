@@ -10,6 +10,12 @@
 #ifndef _DEFAULT_SOURCE
 #define _DEFAULT_SOURCE    /* the same from glibc's, which hides them under -std=c99 */
 #endif
+/* musl's style "x>>64-d" (fma.c) means x>>(64-d), as written: the compilers' precedence warning only */
+#if defined(__clang__)
+#pragma clang diagnostic ignored "-Wshift-op-parentheses"
+#elif defined(__GNUC__)
+#pragma GCC diagnostic ignored "-Wparentheses"
+#endif
 
 /* The host's headers are read here, before the names change. Read after (as musl's libm.h would, its own
  * include then finding them already read), glibc's <math.h> breaks: it pastes each function's name into a macro
@@ -49,6 +55,7 @@
 #define exp2f musl_exp2f
 #define expf musl_expf
 #define expm1 musl_expm1
+#define fma musl_fma  /* not an import: runtime/include/yw4fp.h's FMADD on CPUs without FMA3 */
 #define fmod musl_fmod
 #define fmodf musl_fmodf
 #define frexp musl_frexp
@@ -76,7 +83,7 @@
 /* the renamed functions, as <math.h> declares the originals */
 double acos(double), asin(double), atan(double), cos(double), cosh(double), exp(double), expm1(double),
        log(double), log10(double), sin(double), sinh(double), tan(double), tanh(double), sqrt(double), floor(double);
-double atan2(double, double), fmod(double, double), pow(double, double);
+double atan2(double, double), fmod(double, double), pow(double, double), fma(double, double, double);
 double frexp(double, int *), ldexp(double, int), modf(double, double *), scalbn(double, int);
 float acosf(float), asinf(float), atanf(float), cosf(float), exp2f(float), expf(float), log10f(float), logf(float),
       sinf(float), tanf(float), sqrtf(float);

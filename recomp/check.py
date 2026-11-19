@@ -154,6 +154,22 @@ def host_cc() -> str:
         return "gcc"
 
 
+def musl_fma_objects(tmp: Path) -> list[str]:
+    """musl's fma (and the scalbn it calls), as the game build compiles them: yw4fp.h's FMADD for CPUs without
+    FMA3, which YW4_FMA=soft makes the checks use on any PC. Compiled once per folder."""
+    from recomp import build  # build imports this module
+    objs = []
+    for name in ("fma", "scalbn"):
+        obj = tmp / f"musl_{name}.o"
+        if not obj.exists():
+            proc = subprocess.run([host_cc(), *build.MUSL_CFLAGS, "-c", str(build.MUSL / "src" / "math" / f"{name}.c"),
+                                   "-o", str(obj)], capture_output=True, text=True)
+            if proc.returncode != 0:
+                raise RuntimeError(f"musl {name}.c compile failed:\n{proc.stderr[-3000:]}")
+        objs.append(str(obj))
+    return objs
+
+
 def build_program(encodings: list[int], exe: Path, flags: list[str]) -> None:
     """Encodings the lifter rejects are left out; they then print UNSUPPORTED and mismatch."""
     cases = []
@@ -165,7 +181,8 @@ def build_program(encodings: list[int], exe: Path, flags: list[str]) -> None:
     src = exe.with_suffix(".c")
     src.write_text(PROGRAM % "\n".join(cases))
     proc = subprocess.run([host_cc(), "-std=c11", *flags, "-ffp-contract=off", "-Wall", "-Werror", f"-I{INCLUDE}", f"-I{PI_DIR}",
-                           "-o", str(exe), str(src), str(REPO / "runtime" / "src" / "crypto.c")],
+                           "-o", str(exe), str(src), str(REPO / "runtime" / "src" / "crypto.c"),
+                           *musl_fma_objects(exe.parent)],
                           capture_output=True, text=True)
     if proc.returncode != 0:
         raise RuntimeError(f"compile failed:\n{proc.stderr[-3000:]}")

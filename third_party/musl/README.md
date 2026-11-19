@@ -7,7 +7,7 @@ The sdk's math functions, so the native runtime returns exactly what the Switch 
 | Version | musl **1.1.19** (2018-01-30) |
 | Source | https://musl.libc.org/releases/musl-1.1.19.tar.gz |
 | Signature | `musl-1.1.19.tar.gz.asc`, good signature from the musl signing key `8364 8929 0BB6 B70F 99FF DA05 56BC DB59 3020 450F` |
-| Files | `src/internal/libm.h` and 45 files of `src/math/`: the 36 functions main imports that aren't single instructions, plus what they call (link closure) |
+| Files | `src/internal/libm.h` and 46 files of `src/math/`: the 36 functions main imports that aren't single instructions, plus what they call (link closure), and `fma.c` (below) |
 
 **Why 1.1.19:** checked against the sdk's own code, run natively on the ARM64 reference machine (`python -m tools.yw4.sdkref`). With 20,000 inputs per function:
 
@@ -21,9 +21,12 @@ The sdk's math functions, so the native runtime returns exactly what the Switch 
 
 - **`src/math/acosf.c`** (marked `YW4 PATCH`): for |x| < 2^-26 and x = −1, the sdk returns the correctly rounded π/2 and π (`0x3fc90fdb`, `0x40490fdb`). musl's `pio2_hi + 0x1p-120f` gives `0x3fc90fda`/`0x40490fda`. The sdk loads these as constants, so Nintendo's compiler folded the expression differently. All 1,249 mismatches were these two values.
 
+- **`src/math/fma.c`** (added 2026-11-20, not an import; marked `YW4 PATCH`): the FMADD of CPUs without FMA3 (`runtime/include/yw4fp.h` `yw4_fma`; the host C library's `fma()` is off by one ulp on hard cases). For z = 0, musl returned `x*y + z`, which is +0 when x·y rounds to −0 and z is +0; the exact sum is negative, so FMADD gives −0. The patch returns `x*y` there (x and y are finite and not 0 at that point, so x·y + z is x·y exactly). Checked with `YW4_FMA=soft python -m recomp.check fp_dp3 ...` against the Pi's golden results and with `tests/test_fma_soft.py` against the FMA3 instruction.
+
 Nothing else is changed. Our own files are in `yw4/`:
 - `glue.h`: force-included. Gives every function a `musl_` prefix, so it can't mix with the host libm or be constant-folded as a builtin. It reads the host's `<math.h>` first, under the real names, and declares the renamed functions itself: glibc's header does not compile with the names changed.
 - `endian.h`: byte order for hosts without `<endian.h>`.
+- `atomic.h`: `a_clz_64`, the one part of musl's `atomic.h` that `fma.c` uses.
 
 `sqrt`, `sqrtf`, `floor` (called inside musl) and the imports `ceil`, `floor`, `sqrt`, `fabs` (+ `f` versions) are not taken from here. musl's aarch64 build makes them single instructions, so `runtime/src/hle_math.c` uses the recompiler's exact models of those instructions.
 

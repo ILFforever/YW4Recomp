@@ -16,6 +16,7 @@
 
 #include <math.h>
 #include <stdint.h>
+#include <stdlib.h>
 #include <string.h>
 
 /* Exact square root and fused multiply-add. Library sqrt()/fma() are not always correctly
@@ -25,8 +26,26 @@
 #include <immintrin.h>
 static inline double yw4_sqrt(double x) { return _mm_cvtsd_f64(_mm_sqrt_sd(_mm_setzero_pd(), _mm_set_sd(x))); }
 static inline float yw4_sqrtf(float x) { return _mm_cvtss_f32(_mm_sqrt_ss(_mm_set_ss(x))); }
-__attribute__((target("fma"))) static inline double yw4_fma(double a, double b, double c) {
+__attribute__((target("fma"))) static inline double yw4_fma_hw(double a, double b, double c) {
     return _mm_cvtsd_f64(_mm_fmadd_sd(_mm_set_sd(a), _mm_set_sd(b), _mm_set_sd(c)));
+}
+/* A CPU without FMA3 (before ~2013, older Pentium and Celeron) gets musl's exact software fma
+ * (third_party/musl/src/math/fma.c) instead of an illegal-instruction crash (review 2026-11-19).
+ * YW4_FMA=soft forces it, so the instruction checks test it on any PC. Asked once per file. */
+double musl_fma(double, double, double);
+static inline int yw4_fma_hw_ok(void) {
+    static int ok = -1;
+    int v = __atomic_load_n(&ok, __ATOMIC_RELAXED);
+    if (__builtin_expect(v < 0, 0)) {
+        const char *e = getenv("YW4_FMA");
+        __builtin_cpu_init();
+        v = !(e && !strcmp(e, "soft")) && __builtin_cpu_supports("fma");
+        __atomic_store_n(&ok, v, __ATOMIC_RELAXED);
+    }
+    return v;
+}
+static inline double yw4_fma(double a, double b, double c) {
+    return __builtin_expect(yw4_fma_hw_ok(), 1) ? yw4_fma_hw(a, b, c) : musl_fma(a, b, c);
 }
 #else
 static inline double yw4_sqrt(double x) { return __builtin_sqrt(x); }
