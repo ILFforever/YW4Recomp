@@ -12,7 +12,33 @@ import tomllib
 from dataclasses import dataclass
 from pathlib import Path
 
-REPO_ROOT = Path(__file__).resolve().parents[2]
+def no_backslash(p: Path) -> Path:
+    """Linux: a path through a folder whose name has a backslash, reached through a link without one instead. Clang
+    can't find an #embed file by a relative path from such a folder (ui.c's fonts: "file not found"), zig can't read
+    its dependency lists there, and AMD's shader compiler crashed (issue #22: launchers before 1.5.0 named a folder
+    chosen on Linux "...\\YW4 Recomp"). The link is the one the zig wrappers make (deps.ZIG_WRAPPER), made atomically.
+    Elsewhere, and on Windows, `p` as it is."""
+    s = str(p)
+    if os.name != "posix" or "\\" not in s:
+        return p
+    head, tail = s.split("\\", 1)
+    top = head + "\\" + tail.split("/", 1)[0]  # the folder whose name has the (first) backslash
+    link = Path(os.environ.get("XDG_RUNTIME_DIR") or "/tmp") / f"yw4-recomp-{os.getuid()}"
+    try:
+        if os.readlink(link) == top:
+            return Path(str(link) + s[len(top):])
+    except OSError:
+        pass
+    try:
+        tmp = f"{link}.{os.getpid()}"
+        os.symlink(top, tmp)
+        os.replace(tmp, link)
+    except OSError:
+        return p  # no link (a read-only /tmp?): as before
+    return Path(str(link) + s[len(top):])
+
+
+REPO_ROOT = no_backslash(Path(__file__).resolve().parents[2])
 # YW4_CONFIG: another config file, e.g. the one the launcher writes for an install folder (decision 0050)
 CONFIG_PATH = Path(os.environ["YW4_CONFIG"]) if os.environ.get("YW4_CONFIG") else REPO_ROOT / "config.local.toml"
 EXAMPLE_PATH = REPO_ROOT / "config.example.toml"
@@ -50,7 +76,7 @@ class Config:
 
 def _resolve(value: str) -> Path:
     p = Path(value).expanduser()
-    return p if p.is_absolute() else (REPO_ROOT / p).resolve()
+    return no_backslash(p if p.is_absolute() else (REPO_ROOT / p).resolve())
 
 
 def _optional(value: str) -> Path | None:

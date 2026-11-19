@@ -27,8 +27,10 @@ import tempfile
 from pathlib import Path
 
 from . import lift
+from tools.yw4.config import no_backslash
 
-REPO = Path(__file__).resolve().parents[1]
+# the build's runtime and library sources come from here: no backslash in what the compiler sees (issue #22)
+REPO = no_backslash(Path(__file__).resolve().parents[1])
 INCLUDE = REPO / "runtime" / "include"
 PI_DIR = REPO / "recomp" / "pi"
 GOLDEN = REPO / "tests" / "golden"
