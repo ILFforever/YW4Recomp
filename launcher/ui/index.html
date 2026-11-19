@@ -187,7 +187,7 @@
       <div class="settings-head">
         <h1>Settings</h1>
         <!-- two pages (no scrolling): the arrows switch, the middle says which one is shown -->
-        <div class="pager" role="group" aria-label="Settings page">
+        <div class="pager" role="group" aria-label="Settings page" id="settings-pager">
           <button class="pager-btn" type="button" id="page-prev" aria-label="Previous page">&lsaquo;</button>
           <span id="page-num">1 / 2</span>
           <button class="pager-btn" type="button" id="page-next" aria-label="Next page">&rsaquo;</button>
@@ -244,7 +244,7 @@
             <button class="toggle" type="button" role="switch" aria-label="Controls hint" id="set-hint"></button>
           </div>
         </section>
-        <section class="card">
+        <section class="card" id="set-support-card">
           <h2>Support</h2>
           <div class="switch-row">
             <span><b>Enjoying YW4 Recomp?</b><small>It's free and made in spare time. A coffee helps it keep going.</small></span>
@@ -306,11 +306,30 @@
             <button class="btn small" type="button" id="set-rebuild">Change</button>
           </div>
         </section>
-        <section class="card">
+        <section class="card" id="set-updates-card">
           <h2>Updates</h2>
           <div class="set-row">
             <span><b id="set-versions"></b><small id="set-update-line">Checked when the launcher starts</small></span>
             <button class="btn small" type="button" id="set-check">Check now</button>
+          </div>
+        </section>
+        </div>
+      </div>
+      <!-- Before a build (no install yet): only what works without a game (owner, 2026-11-19: Settings was locked, so
+           Check now couldn't be reached). The theme row, Support and Updates move in here from the pages above while
+           it shows and back after (app.js showSettingsLite) -->
+      <div class="settings-grid two" data-page="lite" hidden>
+        <div class="settings-col" id="lite-col1">
+        <section class="card look-host" id="lite-look">
+          <h2>Look</h2>
+        </section>
+        </div>
+        <div class="settings-col" id="lite-col2">
+        <section class="card">
+          <h2>Built it before?</h2>
+          <div class="set-row">
+            <span><b>Find my game</b><small>Point the launcher at the folder it's in</small></span>
+            <button class="btn small" type="button" data-locate>Find</button>
           </div>
         </section>
         </div>
@@ -593,7 +612,7 @@
   </div>
   <div class="welcome-foot">
     <label class="check"><input type="checkbox" id="welcome-hide"> Don't show this again</label>
-    <button class="btn primary" type="button" id="welcome-close">Enter</button>
+    <button class="btn primary" type="button" id="welcome-close" autofocus>Enter</button>
   </div>
 </dialog>
 

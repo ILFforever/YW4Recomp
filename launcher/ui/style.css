@@ -32,7 +32,8 @@
   --step-done-ink: oklch(78% 0.07 85);
   --gold-hi: oklch(85% 0.12 85);
   --gold-press: oklch(74% 0.12 82);
-  --gold-ink: var(--violet-deep);  /* text on primary buttons: a theme whose title-bar colour is light sets its own */
+  --gold-ink: var(--violet-deep);  /* text on gold (primary buttons, step numbers, the caption): a theme whose title-bar
+                                     * colour is light sets its own (Happierre's violet-deep IS its gold: numbers vanished) */
   --gold-soft-press: oklch(93% 0.05 88);
   --ink-3: oklch(62% 0.03 295);
   --bad-bg: oklch(95% 0.035 30);
@@ -123,8 +124,8 @@ body.pointer :focus-visible { outline: none; }
   border: 1.5px solid var(--step-line); font-size: 12px; }
 .steps-bar li.done { background: var(--step-done); color: var(--violet-deep); }
 .steps-bar li.done .n { border-color: transparent; background: var(--violet-deep); color: var(--step-done-ink); }
-.steps-bar li.now { background: var(--gold); color: var(--violet-deep); }
-.steps-bar li.now .n { border-color: transparent; background: var(--violet-deep); color: var(--gold); }
+.steps-bar li.now { background: var(--gold); color: var(--gold-ink); }
+.steps-bar li.now .n { border-color: transparent; background: var(--gold-ink); color: var(--gold); }
 
 /* a setup screen: its content, then a footer with Back and the next step */
 .screen.setup { flex: 1; min-height: 0; display: flex; flex-direction: column; }
@@ -426,7 +427,7 @@ p.list-card { padding: 14px 18px; }
 .art .slide.on { opacity: 1; }
 .art:has(.slide)::before { display: none; }  /* the wave pattern only when there are no pictures */
 .art-cap { position: relative; z-index: 1; align-self: flex-start; margin-bottom: 10px; padding: 6px 11px; border-radius: 999px;
-  background: var(--gold); color: var(--violet-deep); font: 800 13px/1 var(--display); }
+  background: var(--gold); color: var(--gold-ink); font: 800 13px/1 var(--display); }
 .dots { position: absolute; z-index: 1; right: 24px; bottom: 26px; display: flex; gap: 8px; }
 .dots button { width: 12px; height: 12px; padding: 0; border-radius: 50%; border: 2px solid var(--white); background: var(--dot);
   cursor: pointer; }
@@ -495,7 +496,7 @@ dialog p { margin: 0 0 10px; font-size: 14px; overflow-wrap: anywhere; }
 .steps b { display: block; font: 700 15px/1.3 var(--display); }
 .steps small { display: block; font-size: 13px; color: var(--ink-2); }
 .num { flex-shrink: 0; display: grid; place-items: center; width: 30px; height: 30px; border-radius: 50%; background: var(--gold);
-  color: var(--violet-deep); font: 800 15px/1 var(--display); }
+  color: var(--gold-ink); font: 800 15px/1 var(--display); }
 .sub { margin: 4px 0 8px; font: 800 14px/1.2 var(--display); color: var(--violet); }
 /* Report a bug (the game overlay's form): choice pills, the text box, the ticks, the saved page */
 #report-dlg { width: 680px; }

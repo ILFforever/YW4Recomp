@@ -14,7 +14,10 @@ if (LINUX) {
   $('set-startmenu').setAttribute('aria-label', 'App menu entry');
   document.querySelectorAll('#hero .slide.win-only').forEach((img) => img.remove());  // the slideshow counts what's left
 }
-// the focus ring only after keyboard use (style.css body.pointer): a click hides it, a key brings it back
+// the focus ring only after keyboard use (style.css body.pointer): a click hides it, a key brings it back. It starts
+// hidden: a popup open at start (the welcome) focuses its first control, which drew a box round its checkbox before
+// anything was pressed (owner, 2026-11-19)
+document.body.classList.add('pointer');
 document.addEventListener('pointerdown', () => document.body.classList.add('pointer'), true);
 document.addEventListener('keydown', () => document.body.classList.remove('pointer'), true);
 
@@ -50,12 +53,13 @@ $('help-back').addEventListener('click', () => show(helpFrom));
 $('help-logs').addEventListener('click', () => invoke('open_folder', { install: inst.install, which: 'logs', saves: inst.saves }));
 $('help-licences').addEventListener('click', () => invoke('licences_folder', { open: true }));
 document.querySelectorAll('[data-link]').forEach((b) => b.addEventListener('click', () => invoke('open_link', { which: b.dataset.link })));
-// the top bar's gear: the Settings page once the game is built. Until then it is disabled (syncSettingsButton).
+// the top bar's gear: the Settings page; before a build its short form (showSettingsLite: theme, updates, support).
+// It was disabled until a build, so a launcher that couldn't build never reached Check now (owner, 2026-11-19).
 $('top-settings').addEventListener('click', () => showSettings());
 function syncSettingsButton() {  // inst is the built install's state, null before a build
   const gear = $('top-settings');
-  gear.disabled = !inst;
-  gear.title = inst ? 'Settings' : 'Settings are here once your game is built';
+  gear.disabled = false;
+  gear.title = 'Settings';
 }
 // Locate an installed game (a folder built earlier, or moved): the folder picker, the folder checked and kept as this
 // launcher's install (locate_installed_game), then its Ready screen. Any button with data-locate does this.
@@ -1229,7 +1233,39 @@ function setToggle(id, on) { (typeof id === 'string' ? $(id) : id).setAttribute(
 async function saveInst() {
   try { await invoke('save_state', { state: inst }); } catch (e) { popup('Settings', 'Could not save: ' + e); }
 }
+// Settings before a build: the parts that work with no game, on a page of their own (index.html data-page="lite").
+// The theme row and the Support and Updates cards are moved there and back (their ids are wired once), not copied.
+const liteParts = [['.look-row', 'lite-look'], ['#set-support-card', 'lite-col1'], ['#set-updates-card', 'lite-col2']];
+let liteHome = null;  // where each part sits on the full pages, while it is on the short one
+let liteFrom = 'home';  // the screen Settings was opened from: Back returns there (a first build keeps running)
+function liteMove(toLite) {
+  if (toLite && !liteHome) {
+    liteHome = liteParts.map(([sel, into]) => {
+      const el = document.querySelector(sel), home = { el, parent: el.parentNode, next: el.nextSibling };
+      $(into).append(el);
+      return home;
+    });
+  } else if (!toLite && liteHome) {
+    for (const h of liteHome) h.parent.insertBefore(h.el, h.next);
+    liteHome = null;
+  }
+  $('settings-pager').hidden = toLite;
+  $('set-rebuild-now').hidden = toLite;
+  $('set-uninstall').hidden = toLite;
+}
+function showSettingsLite() {
+  const now = document.querySelector('.screen:not([hidden])');
+  if (now && now.dataset.screen !== 'settings') liteFrom = now.dataset.screen;
+  liteMove(true);
+  show('settings');
+  document.querySelectorAll('.settings-grid[data-page]').forEach((g) => { g.hidden = g.dataset.page !== 'lite'; });
+  $('set-versions').textContent = $('launcher-version').textContent;
+  $('set-update-line').textContent = 'Checked when the launcher starts';
+}
+
 async function showSettings() {
+  if (!inst) { showSettingsLite(); return; }
+  liteMove(false);
   rebuildFlow = false;
   freshFiles = false;
   foundFrom = null;
@@ -1269,7 +1305,7 @@ function settingsPage(n) {
 }
 $('page-prev').addEventListener('click', () => settingsPage(1));
 $('page-next').addEventListener('click', () => settingsPage(2));
-$('settings-back').addEventListener('click', () => showReady());
+$('settings-back').addEventListener('click', () => { if (inst) showReady(); else show(liteFrom); });
 
 // Settings › Cheats › Manage: the game's own cheat lines in its settings.ini (ready.rs game_cheats), so the launcher
 // and the game's Cheats page change the same thing; locked while the game runs (it rewrites the file as it plays)
@@ -1402,6 +1438,18 @@ $('set-check').addEventListener('click', async () => {
   const btn = $('set-check');
   btn.disabled = true;
   btn.textContent = 'Checking…';
+  if (!inst) {  // before a build: the launcher only (the first build takes the newest game code itself)
+    let u = null;
+    try { u = await invoke('check_updates', { install: options.install || '', built: '', fresh: true }); } catch (e) { /* below */ }
+    btn.disabled = false;
+    btn.textContent = 'Check now';
+    if (!u) return;
+    laterFor.clear();
+    updatesFor = null;
+    if (u.launcher && offerLauncher(u.launcher)) return;
+    $('set-update-line').textContent = u.offline ? "Couldn't reach GitHub. Try again later." : 'This launcher is up to date';
+    return;
+  }
   const info = await invoke('install_info', { install: inst.install });
   let u = null;
   try { u = await invoke('check_updates', { install: inst.install, built: info.version || '', fresh: true }); } catch (e) { /* below */ }
@@ -1488,22 +1536,12 @@ function askUpdate(key, title, text, action, run, notes) {  // 0: put off with "
   btn.focus();  // Enter takes the update
   return true;
 }
-async function showUpdates(info) {
-  let u = null;
-  try { u = await invoke('check_updates', { install: inst.install, built: info.version || '' }); } catch (e) { return; }
-  updatesFor = info;
-  if (u.rebuild && askUpdate('rebuild ' + u.rebuild, `Game update ${u.rebuild} is ready`,
-      'Rebuild the game to play it. It takes about 5 minutes; your saves stay as they are.', 'Rebuild', async () => {
-        updateDlg.close();
-        choicesFromInstall();
-        await loadOptions();
-        show('build');
-        startBuild('update');
-      }, u.rebuild_notes)) return;
-  if (u.launcher && u.launcher.sha256 && !u.launcher.portable) {
+// A newer launcher in the update popup (the Play screen's offers, and the home screen's before a build): true when it
+// is shown, false when "Later" put it off in this run.
+function offerLauncher(l) {
+  if (l.sha256 && !l.portable && !LINUX) {
     // the release has its installer: downloaded, checked and started here; the launcher closes and comes back new
-    const l = u.launcher;
-    if (askUpdate('launcher ' + l.version, `Launcher ${l.version}`,
+    return askUpdate('launcher ' + l.version, `Launcher ${l.version}`,
       `A new launcher is out: ${gb(l.size)} to download. The launcher closes, installs it and opens again; your game and saves stay.`,
       'Update', async () => {
         const btn = $('update-btn');
@@ -1518,16 +1556,45 @@ async function showUpdates(info) {
           updateDlg.close();
           popup('Launcher update', String(e));
         }
-      }, l.notes)) return;
-  } else if (u.launcher) {  // the portable launcher, or a release without its installer: its page, by hand
-    const text = u.launcher.portable
-      ? `A new launcher is out. Download YW4-Recomp-Launcher-${u.launcher.version}-portable.zip and unpack it over this folder; your game and saves stay.`
-      : 'A new launcher is out. Download it and install it over this one; your game and saves stay.';
-    if (askUpdate('launcher ' + u.launcher.version, `Launcher ${u.launcher.version}`, text, 'Download', () => {
-        updateDlg.close();
-        invoke('open_release_page', { url: u.launcher.page });
-      }, u.launcher.notes)) return;
+      }, l.notes);
   }
+  // the AppImage, the portable launcher, or a release without its installer: its page, by hand (on Linux the
+  // portable text had been shown: an AppImage has no uninstaller either, 2026-11-19)
+  const text = LINUX
+    ? `A new launcher is out. Download YW4-Recomp-Launcher-${l.version}-x86_64.AppImage, make it executable and use it instead of this one; your game and saves stay.`
+    : l.portable
+      ? `A new launcher is out. Download YW4-Recomp-Launcher-${l.version}-portable.zip and unpack it over this folder; your game and saves stay.`
+      : 'A new launcher is out. Download it and install it over this one; your game and saves stay.';
+  return askUpdate('launcher ' + l.version, `Launcher ${l.version}`, text, 'Download', () => {
+    updateDlg.close();
+    invoke('open_release_page', { url: l.page });
+  }, l.notes);
+}
+
+// Before a build there is no Play screen to offer updates on, and Settings (its Check now) is locked, so a newer
+// launcher was never offered (owner, 2026-11-19): a launcher that can't build (a Linux one on Bazzite) stayed stuck.
+// The home screen asks GitHub for the launcher alone; the game's newest code comes with the first build
+// (newestGameCode). Null: none newer, no GitHub, or a launcher run from the repo.
+async function newerLauncher() {
+  try {
+    const u = await invoke('check_updates', { install: options.install || '', built: '' });
+    return (u && u.launcher) || null;
+  } catch (e) { return null; }
+}
+
+async function showUpdates(info) {
+  let u = null;
+  try { u = await invoke('check_updates', { install: inst.install, built: info.version || '' }); } catch (e) { return; }
+  updatesFor = info;
+  if (u.rebuild && askUpdate('rebuild ' + u.rebuild, `Game update ${u.rebuild} is ready`,
+      'Rebuild the game to play it. It takes about 5 minutes; your saves stay as they are.', 'Rebuild', async () => {
+        updateDlg.close();
+        choicesFromInstall();
+        await loadOptions();
+        show('build');
+        startBuild('update');
+      }, u.rebuild_notes)) return;
+  if (u.launcher && offerLauncher(u.launcher)) return;
   if (u.game) {
     askUpdate('game ' + u.game.version, `Game update ${u.game.version}`,
       `A new version of the game is out: ${gb(u.game.size)} to download, then a rebuild of about 5 minutes.`, 'Update', async () => {
@@ -1641,7 +1708,19 @@ $('welcome-close').addEventListener('click', closeWelcome);
   if (inst && inst.straightToGame) { await straightToGame(); return; }
   if (inst) { showReady(); return; }
   show('home');
+  // no game built yet: a newer launcher is asked for now (in the background, the welcome isn't held up) and offered
+  // once the welcome is closed, not on top of it; not while a build runs (its Update would close the launcher)
+  const launcherOffer = newerLauncher();
+  const offerAfterWelcome = async () => {
+    const l = await launcherOffer;
+    if (!l || inst || updateDlg.open || onScreen('build')) return;
+    updatesFor = null;  // "Later" ends here: no Play screen offers behind it
+    offerLauncher(l);
+  };
   let hidden = false;
   try { hidden = localStorage.getItem(HIDE) === '1'; } catch (e) { /* storage unavailable: show it */ }
-  if (!hidden) welcome.showModal();
+  if (!hidden) {
+    welcome.addEventListener('close', offerAfterWelcome, { once: true });
+    welcome.showModal();
+  } else offerAfterWelcome();
 })();
