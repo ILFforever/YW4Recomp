@@ -182,9 +182,9 @@ try { const t = localStorage.getItem('yw4-theme'); if (t === 'dark' || t === 'li
     <div>
       <span class="eyebrow">YW4 Recomp · fan PC port</span>
       <h1>Building from source</h1>
-      <p>Build the PC version of <i>Yo-kai Watch 4++</i> yourself, from your own game files. On Windows the
-        <a href="../launcher/" style="color: var(--gold)">launcher</a> does all of this for you; on Linux, this is the
-        way for now.</p>
+      <p>Build the PC version of <i>Yo-kai Watch 4++</i> yourself, from your own game files. The
+        <a href="../launcher/" style="color: var(--gold)">launcher</a> does all of this for you, on Windows and
+        Linux.</p>
       <div class="stats">
         <div class="stat"><b>Windows · Linux</b><span>x86-64 with a Vulkan 1.3 GPU</span></div>
         <div class="stat"><b>10–15 min</b><span>to build the game, once</span></div>
@@ -327,6 +327,9 @@ python3 -m tools.yw4.shaders
 python3 -m recomp.shader --check
 python3 -m recomp.build --run</pre></span></li>
             </ol>
+            <p class="note"><b>Bazzite, SteamOS</b> or any system where you can't or won't install these:
+              <code>python3 -m tools.yw4.system</code> downloads the compiler and glslang into the build folder and
+              prints the two config lines to add. The launcher does this by itself.</p>
             <p class="note"><b>Ubuntu 24.04</b> has no SDL3 package and an older Clang: install <code>clang-19</code>,
               build <a href="https://github.com/libsdl-org/SDL/releases">SDL3</a> with CMake into a folder of your own,
               and build and run with <code>PKG_CONFIG_PATH=&lt;folder&gt;/lib/pkgconfig</code> and
