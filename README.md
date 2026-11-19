@@ -690,21 +690,23 @@ On Ordinary Street with the performance HUD on (F3). The frame takes about 19 ms
 ## Goals
 
 <details>
-<summary><b>Planned</b> (3)</summary>
+<summary><b>Planned</b> (4)</summary>
 
 | Goal | What it will be |
 |---|---|
 | **More cheats** | More switches on the overlay's Cheats page, next to unlimited Crank-a-kai and unlimited coins |
 | **Easier Soultimates on the keyboard** | A little leeway for the two keys pressed together (Q + E by default), so it works whichever of them goes down first |
 | **Enemy-only target switch** | A key that cycles through the enemies alone in battles; the game has Tab for allies and Left / Right for everyone ([#18](https://github.com/ILFforever/YW4Recomp/issues/18)) |
+| **Yo-kai Arks** | Ark Scan on PC: the Switch reads the Ark toys over NFC, so the game gets a virtual Ark instead (or a USB NFC reader for real ones) |
 
 </details>
 
 <details>
-<summary><b>Ongoing</b> (6)</summary>
+<summary><b>Ongoing</b> (7)</summary>
 
 | Goal | Where it stands |
 |---|---|
+| **Playing together online** | Trading and Blasters with friends over the internet: the game's local wireless play, carried by a small server of ours. First built by [Quandiy](https://github.com/Quandiy) in their fork. Trading works between two games; Blasters is next, then a server to join and an Online page in the launcher ([decision 0082](docs/decisions/0082-online-play-over-ldn.md)) |
 | **Performance (CPU)** | Less work per frame on the CPU, so busy places hold their frame rate on slower PCs: the renderer's GPU commands are being made cheaper to build (in testing) |
 | **Our own renderer** | Ours: shadows, surfaces, bloom, distance blur, lighting, sky, tone mapping. **Left:** choosing what to draw, two screen passes, the UI and menus |
 | **Steadier shadows** | Shadows still shimmer a little as the camera moves; steadier cascades next |
