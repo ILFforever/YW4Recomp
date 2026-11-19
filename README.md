@@ -792,6 +792,9 @@ sudo dnf install clang python3 git pkgconf glslang SDL3-devel               # Fe
 sudo apt install clang python3 git pkg-config glslang-tools libsdl3-dev     # Debian 13, Ubuntu 25.04+
 ```
 
+No compiler or glslang, or a system you can't install on (Bazzite, SteamOS)? `python3 -m tools.yw4.system` downloads
+them and prints the two `[tools]` lines to add to your config.
+
 Set `[tools] cc = "clang"` in `config.local.toml`, then build as in steps 1-5. After that, start the game with
 `./work/build/yw4` alone: the build writes your game and DLC folders into `work/build/game.ini`. Saves go to
 `~/.local/share/YW4Recomp/save`. Ubuntu 24.04 has no SDL3 package: see

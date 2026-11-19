@@ -73,3 +73,22 @@ No Vulkan validation errors.
 - The transformer models' cost may suit a desktop GPU better; not measured on one.
 - The jitter and motion signs were taken over from FSR and look right in still and moving shots; switches to
   flip them for tests: `YW4_DLSS_JITTER_SIGN`, `YW4_DLSS_MV_SIGN`.
+
+## Change 2026-11-19: a DLSS MODEL row again (K or M)
+
+In the night rain the owner saw a red trail behind the girl's hood and the Yo-kai's hair when the camera swings side
+to side (4K, DLSS without upscaling, model K). Only with DLSS, only in the rain; FSR and TAA have none. Without rain
+DLSS and FSR leave only the usual slight noise at character edges (a separate, open item). Tested by hand in the
+night save (`save_base_lamp`), since a replay doesn't land on the same frames:
+
+| Test | Trail | Game frames/s |
+|---|---|---|
+| K (as before) | yes | ~48 |
+| K, DLSS's auto exposure off (a test switch, since removed) | yes | ~48 |
+| `YW4_OBJECT_MOTION=1` (decision 0032's per-object world history) | (not judged: glitches in the material pass; its G-buffer draws got no motion from it) | |
+| M, no upscaling | no | ~31-35 |
+| M, upscaling quality | no, picture as good | ~50 |
+
+So the panel's ANTI-ALIASING AND UPSCALING section gets **DLSS MODEL** (between ANTI-ALIASING and UPSCALING): STANDARD (K, the default) or HIGH QUALITY
+(M), `YW4_DLSS_MODEL=k|m` (`0` the CNN, tests). Changing it rebuilds DLSS's feature. The overlay lists the row only
+while DLSS runs (anti-aliasing DLSS on a GPU that has it), owner's choice; the old panel greys it out instead.

@@ -46,6 +46,9 @@ typedef struct {
     /* a slider's names for the points along it, evenly spread from end to end (SHARPENING: OFF .. MAX at 0, 25, 50,
      * 75, 100%): the overlay marks them on the track, and the nearest one's name is shown instead of a number */
     const char *marks[SETTINGS_MAX_OPTIONS];
+    /* NULL, or 1 when the overlay leaves the row out for now (DLSS MODEL without DLSS: owner, 2026-11-19); the old
+     * panel greys it out instead (`disabled`), so a hidden row needs a `disabled` too */
+    int (*hidden)(void);
 } Setting;
 
 /* A slider's value as shown and as saved. */
@@ -150,6 +153,12 @@ static const char *upscale_disabled(void) {
     return gpu_aa() >= 4 ? NULL : (gpu_dlss_available() ? "NEEDS ANTI-ALIASING SET TO FSR OR DLSS"
                                                         : "NEEDS ANTI-ALIASING SET TO FSR");
 }
+/* DLSS MODEL: only while DLSS itself runs (anti-aliasing DLSS on a GPU that has it; else FSR stands in) */
+static int dlss_model_hidden(void) { return gpu_aa() != 5 || !gpu_dlss_available(); }
+static const char *dlss_model_disabled(void) {
+    if (!gpu_dlss_built()) return NOT_BUILT;
+    return dlss_model_hidden() ? "NEEDS ANTI-ALIASING SET TO DLSS" : NULL;
+}
 
 /* LEGACY MENUS: the keys from before the in-game overlay. Read once, after settings_load has filled the
  * environment. Only the window's real key presses ask (window.c); a replay's F1 and F2 still open the panel, so
@@ -233,6 +242,14 @@ static const Setting player[] = {
       "STEADY EDGES: NO SHIMMER ON FENCES, LEAVES AND SHADOWS", "AMD FSR: STEADY EDGES, BEST WITH UPSCALING",
       "NVIDIA DLSS: AI UPSCALING, NVIDIA RTX GPUS (ELSE FSR)"}, 6, gpu_aa,
      gpu_aa_cycle, "YW4_AA", {"0", "1", "2", "3", "4", "5"}},
+    {"ANTI-ALIASING AND UPSCALING", "DLSS MODEL",
+     /* (decision 0040: K, or M with no trail behind characters in the night rain; shown only with DLSS) */
+     "WHICH NVIDIA DLSS MODEL REBUILDS THE PICTURE. HIGH QUALITY REMOVES THE TRAILS BEHIND MOVING CHARACTERS IN "
+     "THE RAIN, BUT COSTS MORE GPU TIME: PAIR IT WITH UPSCALING SET TO QUALITY.",
+     {"STANDARD", "HIGH QUALITY"},
+     {"FASTER (RECOMMENDED)", "NO TRAILS IN THE RAIN, FEWER FRAMES"}, 2,
+     gpu_dlss_model_setting, gpu_dlss_model_cycle, "YW4_DLSS_MODEL", {"k", "m"}, dlss_model_disabled,
+     NULL, NULL, 0, 0, 0, NULL, 0, NULL, {NULL}, dlss_model_hidden},
     {"ANTI-ALIASING AND UPSCALING", "UPSCALING",
      "DRAWS THE WORLD SMALLER THAN THE RESOLUTION, THEN AMD FSR OR NVIDIA DLSS REBUILDS IT AT FULL SIZE: MORE "
      "FRAMES. MENUS AND TEXT STAY FULL SIZE. NEEDS ANTI-ALIASING SET TO FSR OR DLSS.",
@@ -630,6 +647,9 @@ int settings_rows(SettingRow *rows, int max, int *sel) {
 /* The in-game overlay's settings page (gamemenu.c): the player's settings, without the developer page's link, and
  * changing one of them by row (as Left / Right on it), whatever the panel shows. */
 static int hud_slider_row(const Setting *s) { return s->get == hud_scale_get || s->get == hud_opacity_get; }
+/* A player setting the overlay's Settings page lists now: not the HUD's sliders, not a row hidden for now. The row
+ * list (settings_player_rows), the Theme row's place and a row's setting (player_row_setting) all count with it. */
+static int overlay_row(const Setting *s) { return !hud_slider_row(s) && !(s->hidden && s->hidden()); }
 
 /* The HUD's sliders live on the overlay's Overlay page, next to their preview, so its Settings page leaves them out
  * (the old panel keeps them). */
@@ -637,7 +657,7 @@ static int hud_slider_row(const Setting *s) { return s->get == hud_scale_get || 
  * case for the names); its value one theme's name, Left / Right step through them. */
 static int theme_row(void) {
     int n = 0;
-    for (int i = 0; i < NPLAYER; i++) n += !hud_slider_row(&player[i]);
+    for (int i = 0; i < NPLAYER; i++) n += overlay_row(&player[i]);
     return n;
 }
 
@@ -656,7 +676,7 @@ static void fill_theme_row(SettingRow *r) {
 int settings_player_rows(SettingRow *rows, int max) {
     int n = 0, at = theme_row();
     for (int i = 0; i < NPLAYER && n < max; i++)
-        if (!hud_slider_row(&player[i])) {
+        if (overlay_row(&player[i])) {
             n += fill_rows(rows + n, 1, &player[i], 1);
             rows[n - 1].look = strcmp(player[i].category, "GENERAL") != 0;
         }
@@ -796,7 +816,7 @@ static const Setting *player_row_setting(int row) {
     const Setting *s = NULL;
     int seen = 0;
     for (int i = 0; i < NPLAYER && !s; i++)
-        if (!hud_slider_row(&player[i]) && seen++ == row) s = &player[i];
+        if (overlay_row(&player[i]) && seen++ == row) s = &player[i];
     if (!s && row - seen >= 0 && row - seen < NDEVELOPER) s = &developer[row - seen];  /* Advanced's developer rows */
     return s;
 }

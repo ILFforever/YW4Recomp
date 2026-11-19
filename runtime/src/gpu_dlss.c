@@ -42,11 +42,28 @@ int gpu_dlss_device_extensions(uint32_t vendor, const char ***exts, unsigned *co
  * (quality, balanced) and M (performance), cost 5.3 / 7.4 ms; the CNN preset E 2.6 ms (FSR 3.7). The CNN was the
  * default until 2026-10-31, when it turned out to make shadow edges flicker (the character's shadow, standing
  * still: 4-6% of its edge pixels over 16 frames, the transformers 0%; the same in the build that brought DLSS in).
- * So the transformers only, no panel row; YW4_DLSS_MODEL=0 still picks the CNN for tests. */
+ * So the transformers only; YW4_DLSS_MODEL=0 still picks the CNN for tests.
+ * 2026-11-19: K left a red trail behind characters in the night rain when the camera swings side to side (DLSS only;
+ * DLSS's auto exposure ruled out); the second-generation transformer M has none. M at 4K DLAA: ~31-35 game frames/s
+ * against K's ~48; M with upscaling at quality ~50, about K at DLAA. So a panel row, K by default: 1 K, 2 M. */
+static int model_v = -1;
+
 int gpu_dlss_model(void) {
-    static int m = -1;
-    if (m < 0) m = !(getenv("YW4_DLSS_MODEL") && atoi(getenv("YW4_DLSS_MODEL")) == 0);
+    int m = __atomic_load_n(&model_v, __ATOMIC_ACQUIRE);
+    if (m < 0) {
+        const char *e = getenv("YW4_DLSS_MODEL");
+        m = e && *e == '0' ? 0 : e && (*e == 'm' || *e == 'M') ? 2 : 1;
+        __atomic_store_n(&model_v, m, __ATOMIC_RELEASE);
+    }
     return m;
+}
+
+int gpu_dlss_model_setting(void) { return gpu_dlss_model() == 2; }
+
+void gpu_dlss_model_cycle(void) {
+    int m = gpu_dlss_model() == 2 ? 1 : 2;
+    __atomic_store_n(&model_v, m, __ATOMIC_RELEASE);
+    fprintf(stderr, "yw4: dlss: model %s (settings panel)\n", m == 2 ? "M, high quality" : "K, standard");
 }
 
 static int state = -1;  /* -1 not tried, 0 unavailable, 1 ready */
@@ -125,12 +142,14 @@ static int create(VkCommandBuffer cb, const GpuDlssInputs *in) {
     cp.Feature.InTargetWidth = in->output_w, cp.Feature.InTargetHeight = in->output_h;
     cp.Feature.InPerfQualityValue = (NVSDK_NGX_PerfQuality_Value)perf[in->quality & 3];
     cp.InFeatureCreateFlags = NVSDK_NGX_DLSS_Feature_Flags_MVLowRes | NVSDK_NGX_DLSS_Feature_Flags_AutoExposure;
-    /* the model for every mode: the transformer preset K (fast = the CNN's E, tests only); YW4_DLSS_PRESET=<letter>
-     * forces one. DLSS's own default for performance is M, the second-generation transformer: at 4K 21:9 output it
-     * cost 7.4 ms against K's 5.3, so performance mode was slower than quality (2026-11-02; NVIDIA's defaults are K
-     * for DLAA/quality/balanced, M for performance, L for ultra performance). */
+    /* the model for every mode: the panel's K or M (the CNN's E, tests only); YW4_DLSS_PRESET=<letter> forces one.
+     * DLSS's own default for performance is M, the second-generation transformer: at 4K 21:9 output it cost 7.4 ms
+     * against K's 5.3, so performance mode was slower than quality (2026-11-02; NVIDIA's defaults are K for
+     * DLAA/quality/balanced, M for performance, L for ultra performance). */
     const char *pe = getenv("YW4_DLSS_PRESET");
-    unsigned v = model ? NVSDK_NGX_DLSS_Hint_Render_Preset_K : NVSDK_NGX_DLSS_Hint_Render_Preset_E;
+    unsigned v = model == 2 ? NVSDK_NGX_DLSS_Hint_Render_Preset_M
+                 : model    ? NVSDK_NGX_DLSS_Hint_Render_Preset_K
+                            : NVSDK_NGX_DLSS_Hint_Render_Preset_E;
     if (pe && *pe >= 'A' && *pe <= 'Z') v = (unsigned)(*pe - 'A' + 1);
     {
         static const char *const hints[] = {
@@ -148,8 +167,8 @@ static int create(VkCommandBuffer cb, const GpuDlssInputs *in) {
         feature = NULL, f_failed = 1;
         return 0;
     }
-    fprintf(stderr, "yw4: dlss: %ux%u -> %ux%u, %s model, ready in %.0f ms\n", in->render_w, in->render_h,
-            in->output_w, in->output_h, model ? "best" : "fast", (double)(host_now_ns() - t0) / 1e6);
+    fprintf(stderr, "yw4: dlss: %ux%u -> %ux%u, model preset %c, ready in %.0f ms\n", in->render_w, in->render_h,
+            in->output_w, in->output_h, 'A' + (int)v - 1, (double)(host_now_ns() - t0) / 1e6);
     return 1;
 }
 
@@ -194,6 +213,8 @@ int gpu_dlss_device_extensions(uint32_t vendor, const char ***exts, unsigned *co
 }
 int gpu_dlss_available(void) { return 0; }
 int gpu_dlss_model(void) { return 1; }
+int gpu_dlss_model_setting(void) { return 0; }
+void gpu_dlss_model_cycle(void) {}
 int gpu_dlss_dispatch(VkCommandBuffer cb, const GpuDlssInputs *in) {
     (void)cb, (void)in;
     return 0;
