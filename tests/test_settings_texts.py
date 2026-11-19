@@ -52,8 +52,8 @@ def settings() -> list[dict]:
         out.append({"category": category, "name": name, "help": "".join(help_parts),
                     "options": c_strings(lists[0]), "notes": c_strings(lists[1]), "count": count,
                     "values": c_strings(lists[2]) if len(lists) > 2 else [],
-                    # a typed text, not choices (General > Player name: a box and an Edit button, no note under it)
-                    "typed": "player_name_edit" in e})
+                    # a typed text, not choices (Profile > Player name, Online play's codes: a box and an Edit button, no note under it)
+                    "typed": "player_name_edit" in e or "_code_edit" in e})
     return out
 
 

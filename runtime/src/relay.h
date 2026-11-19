@@ -6,6 +6,8 @@
 #include <stddef.h>
 #include <stdint.h>
 
+#include "yw4cpu.h"
+
 enum { RELAY_HELLO = 1, RELAY_CREATE, RELAY_UPDATE, RELAY_SCAN, RELAY_JOIN, RELAY_NETINFO, RELAY_LEAVE,
        RELAY_PACKET, RELAY_REJECT };
 
@@ -27,5 +29,21 @@ uint32_t ldn_my_address(void);                         /* our address in the roo
 /* The room we host or joined, for Discord status (discord_game.c): 1 and its players now, its most players and
  * the game's scene number for it (a trade: scene 1, 2 players at most); 0 in none. Any thread. */
 int ldn_room(int *players, int *max_players, int *scene);
+
+/* The menus' Online / Local choice (yw4_hook_net_mode, ldn.c): 1 Online (our server), 0 Local (YW4_RELAY or alone),
+ * for which activity (its public / private room settings). An open connection that no longer fits is closed; the
+ * next request connects to the chosen server with the chosen room code. */
+enum { RELAY_SWAP, RELAY_BLASTERS };
+void relay_choose(int online, int activity);
+
+/* The overlay's Online tab: each server's ping, measured on a thread (HELLO -> WELCOME, best of three); while it runs
+ * a second start does nothing. relay_ping_ms: milliseconds, -1 still measuring, -2 no answer. */
+void relay_ping_start(const char *const *addrs, int n);
+int relay_ping_ms(int i);
+
+/* Online-mode recon (ssl.c): YW4_NET_TRACE=1 prints the guest call stack at `what`; YW4_FAKE_INTERNET=1 lets the
+ * game's internet request through (tests only) */
+void yw4_net_trace(const CPUState *c, const char *what);
+int yw4_fake_internet(void);
 
 #endif

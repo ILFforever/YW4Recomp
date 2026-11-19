@@ -396,6 +396,13 @@ why = "the field HUD's shortcut cross setting one button's state (x1 the button 
 
 [[hook]]
 module = "main"
+offset = "0x78a260"
+at = "0x78a2d0"
+native = "yw4_hook_net_mode"
+why = "the trade menu storing the player's Online / Local choice (w8: 1 Online; menu byte +0x239c): Online goes to our relay server and the game is told Local, so it runs local play instead of logging in to Nintendo's servers (runtime/src/ldn.c, decision 0082)"
+
+[[hook]]
+module = "main"
 offset = "0x8a7dc0"
 native = "yw4_hook_save_load"
 why = "save load job starter (x0 req: +0 u8 kind, +2 u16 slot): switches active slot to selected Diary slot; YW4_SAVE_SLOT_TEST=1 redirects manual slot 0 to slot 1 when YW4_DIARY_SLOTS=0 (runtime/src/savefs.c)"

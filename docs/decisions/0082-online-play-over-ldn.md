@@ -3,7 +3,7 @@
 state: plan
 date: 2026-11-19
 replaces: none
-code: recomp/overrides.toml, runtime/src/ldn.c, runtime/src/socket.c, runtime/src/relay.c, runtime/src/relay.h, runtime/src/svc_csrng.c, runtime/src/svc_misc.c, runtime/src/svc_acc.c, runtime/src/settings.c, tools/relay/relay.py
+code: recomp/overrides.toml, runtime/src/ldn.c, runtime/src/socket.c, runtime/src/relay.c, runtime/src/relay.h, runtime/src/ssl.c, runtime/src/svc_csrng.c, runtime/src/svc_misc.c, runtime/src/svc_acc.c, runtime/src/settings.c, runtime/src/gamemenu.c, tools/relay/relay.py, tools/relay/setup_server.sh, tools/relay/keepalive.py
 -->
 
 Status: **plan**. Written and built by **Quandiy** in their fork (github.com/Quandiy/YW4Recomp, branch `amd-fixes`,
@@ -73,10 +73,40 @@ One small program (`tools/relay/`, Python, no dependencies) that one friend runs
   TCP/UDP connection per player, which passes it on. Pia does its own reliability, so passing packets on is enough.
 - **Room code**: an optional word the players agree on, so strangers on the same relay don't see each other.
 
-### In the launcher
+### The game's Online button goes to our server (2026-11-19)
 
-Settings → Online: the relay address (`host:port`) and the room code, and the player's name. Written to
-`settings.ini` (`YW4_RELAY`, `YW4_ROOM`) as the other settings are.
+The owner's model: **Online** means our server, **Local** means the home network. The game's own Online mode logs in
+to Nintendo's servers (an account check, then NEX), which are gone, so Online is turned into local play at the
+moment the player chooses it:
+
+- How it was found: the call stacks of `ssl`'s start (Online) and `ldn`'s start (Local), `YW4_NET_TRACE=1`, both
+  lead into the Lua interpreter (`main+0xd2…–0xd5…`: `lua_resume` at `0xd2e090`, called by `0x8a9760`); the menu
+  script `trade_menu_top_5.00.01.lua.bin` (script.cpk) calls commands by the CRC32 of their name, kept as numbers:
+  `funcLuaMenuTradeCommand(0xbfba3718)` asks "Online?" and the script then runs either the login (network command
+  `0xe7eb7a7d`, handler `f_7163f0`) or local play. The answer is one byte of the trade menu object (+0x239c), which
+  the trade command `0x1c105a8d` (`f_78a260`) stores when the player picks Online or Local. The same hash appears in
+  `busters_top_*.lua.bin`: Blasters' menu asks the same way (its object and setter not hooked yet).
+- The hook (`recomp/overrides.toml`, `yw4_hook_net_mode` in `ldn.c`, at `main+0x78a2d0`, the store): the choice
+  goes to the relay (`relay_choose`) and the game stores Local. Online then connects to `YW4_ONLINE_SERVER` with the
+  room settings of that activity; Local to `YW4_RELAY` (or alone, until a home-network discovery exists).
+- With the internet request granted (`YW4_FAKE_INTERNET=1`) the Online path stops at the Nintendo account check
+  (`acc` IManagerForApplication command 0): rebuilding it would mean faking Nintendo accounts and NEX, not done.
+- `runtime/src/ssl.c`: nn::ssl starts without a service, so before the hook (and in any menu not hooked yet) the
+  Online button shows the game's own "connection failed" instead of stopping the run.
+
+### Servers
+
+Two relays on Oracle Cloud's free tier (US East `129.153.179.140`, Singapore `161.118.234.155`, port 41230), each
+set up with `tools/relay/setup_server.sh` (a systemd service; `--keepalive N` a lowest-priority CPU load so the free
+machine isn't reclaimed as idle). The relay counts each room's traffic (a line a minute and a total), for sizing.
+
+### In the game: the overlay's Online tab
+
+A tab of its own (owner, 2026-11-19, the "Cards" layout; `draw_online_page` in `gamemenu.c`): the server (each
+with its live ping, `relay_ping_start`), Ark Swap and Blasters each **Public** (the server's shared lobby) or
+**Private** with a code, and the profile: the player's name (`YW4_NICKNAME`, which acc's GetProfile hands the game)
+and Discord status. Saved in `settings.ini` like the other settings. Home-network play keeps `YW4_RELAY` /
+`YW4_ROOM` lines for now; a launcher page can come later.
 
 ### Phases
 

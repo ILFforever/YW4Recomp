@@ -167,6 +167,8 @@ static void host_update(void) {
 /* ---- the overrides: arguments in x0.., Result in x0 */
 
 void yw4_ldn_Initialize(CPUState *c) {
+    static int traced;
+    if (!traced++) yw4_net_trace(c, "ldn Initialize (local play)");
     host_lock(&lock);
     LOG("Initialize\n");
     if (state == ST_NONE) set_state(ST_INITIALIZED);
@@ -476,6 +478,19 @@ void ldn_relay_closed(uint8_t reason) {
     host_unlock(&lock);
 }
 
+/* ---- the trade menu's Online / Local choice (main+0x78a260, the script command 0x1c105a8d that stores it in the
+ * menu's byte +0x239c, which the "is Online?" command 0xbfba3718 reads back for the script, and the "ready?" command
+ * 0x24b742bb reads too). Online would log in to Nintendo's servers, which are gone; so the choice is passed to the
+ * relay (Online: our server; Local: the home network) and the game stores Local, running local play either way.
+ * Found 2026-11-19 from the Online path's call stack (YW4_NET_TRACE) and the menu script trade_menu_top. */
+int yw4_hook_net_mode(CPUState *c) {
+    int on = (int)(c->x[8] & 1);  /* the byte about to be stored: 1 Online, 0 Local */
+    LOG("the menu chose %s%s\n", on ? "Online" : "Local", on ? ": the game is told Local, our server instead" : "");
+    relay_choose(on, RELAY_SWAP);  /* the trade menu: Ark Swap (Blasters' menu: not hooked yet) */
+    c->x[8] = 0;
+    return 0;
+}
+
 /* ---- nn::nifm: the game asks for a network before local play too. A local network request (SetLocalNetworkMode
  * true) is always granted, as on a Switch with its wireless on; an internet one never is (NEX is gone). */
 
@@ -491,9 +506,10 @@ void yw4_nifm_CancelNetworkRequest(CPUState *c) { LOG("nifm CancelNetworkRequest
 void yw4_nifm_IsNetworkRequestOnHold(CPUState *c) { c->x[0] = 0; }
 void yw4_nifm_IsNetworkAvailable(CPUState *c) {
     static int last = -1;
-    if (last != local_mode) LOG("nifm IsNetworkAvailable -> %d\n", local_mode);
-    last = local_mode;
-    c->x[0] = (uint64_t)local_mode;
+    int ok = local_mode || yw4_fake_internet();  /* YW4_FAKE_INTERNET: Online-mode recon (ssl.c) */
+    if (last != ok) LOG("nifm IsNetworkAvailable -> %d%s\n", ok, !local_mode && ok ? " (YW4_FAKE_INTERNET)" : "");
+    last = ok;
+    c->x[0] = (uint64_t)ok;
 }
 /* HandleNetworkRequestErrorResult(): shows the system's error applet on a Switch; here: the request "failed" */
 void yw4_nifm_HandleNetworkRequestErrorResult(CPUState *c) {
@@ -505,10 +521,10 @@ void yw4_nifm_GetCurrentProxySetting(CPUState *c) {
     c->x[0] = R_OK;
 }
 void yw4_nifm_GetCurrentPrimaryIpAddress(CPUState *c) {
-    uint32_t a = 0;
+    uint32_t a = yw4_fake_internet() && !local_mode ? 0x0F02000Au : 0;  /* recon: 10.0.2.15 (bytes in network order) */
     memcpy(GPTR(c->x[0]), &a, 4);
     LOG("nifm GetCurrentPrimaryIpAddress\n");
-    c->x[0] = local_mode ? R_OK : (0x6E | (300u << 9));
+    c->x[0] = local_mode || yw4_fake_internet() ? R_OK : (0x6E | (300u << 9));
 }
 
 /* ---- nn::friends: before local play the game reads the friend list and, with the others, records them in the

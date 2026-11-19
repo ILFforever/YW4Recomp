@@ -55,6 +55,22 @@ int settings_rows(SettingRow *rows, int max, int *selected);
 /* The in-game overlay's settings page (gamemenu.c): the player's settings (no developer link), and changing row
  * `row` one option forward (dir 1) or back (-1), as Right / Left on it. */
 int settings_player_rows(SettingRow *rows, int max);
+
+/* The overlay's Online tab (decision 0082): our servers (name, region, relay address; the chosen one), Ark Swap's and
+ * Blasters' (blasters 0 / 1) public / private switch and code, and the player's name. The setters save the file; the
+ * edits open the overlay's name popup. */
+int settings_online_servers(void);
+const char *settings_online_server_name(int i);
+const char *settings_online_server_region(int i);
+const char *settings_online_server_address(int i);
+int settings_online_server(void);
+void settings_online_server_set(int i);
+int settings_online_private(int blasters);
+void settings_online_private_set(int blasters, int on);
+const char *settings_online_code(int blasters);
+void settings_online_code_edit(int blasters);
+const char *settings_player_name(void);
+void settings_player_name_edit(void);
 void settings_change(int row, int dir);
 /* A slider row of that page set from a position along its track (0..1, the mouse), on its steps, saved. */
 void settings_slide(int row, float frac);

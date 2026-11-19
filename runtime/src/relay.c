@@ -41,9 +41,48 @@ static uint8_t *answer;
 static size_t answer_cap;
 static long answer_len;
 
-int relay_enabled(void) {
-    const char *e = getenv("YW4_RELAY");
-    return e && *e;
+/* Which server (2026-11-19, owner: "the game's Online goes to our server, local play stays local"). The trade and
+ * Blasters menus' Online / Local choice is caught where the game stores it (yw4_hook_net_mode, below) and the game
+ * is told Local, so both run the local-play flow (ldn) and only the server differs:
+ *   Online: YW4_ONLINE_SERVER (the overlay's Online play > Server; default: our US East server); the room code by
+ *           activity: Ark Swap / Blasters public (empty: the public lobby) or private (YW4_SWAP_CODE /
+ *           YW4_BLASTERS_CODE when YW4_SWAP_PRIVATE / YW4_BLASTERS_PRIVATE is 1)
+ *   Local:  YW4_RELAY (a relay on the home network, or none: a Switch alone in its room), room code YW4_ROOM */
+#define DEFAULT_ONLINE_SERVER "129.153.179.140:41230" /* Oracle Cloud, US East (memory: online-play-2026-11-19) */
+static int online = -1;                               /* the menus' last choice: 1 Online, 0 Local, -1 none yet */
+static int activity;                                  /* RELAY_SWAP or RELAY_BLASTERS: whose room settings */
+
+static const char *target(void) {
+    const char *e;
+    if (online == 1) return (e = getenv("YW4_ONLINE_SERVER")) && *e ? e : DEFAULT_ONLINE_SERVER;
+    return (e = getenv("YW4_RELAY")) && *e ? e : NULL;
+}
+
+static const char *room_code(void) {
+    const char *e;
+    if (online != 1) return (e = getenv("YW4_ROOM")) ? e : "";
+    e = getenv(activity == RELAY_BLASTERS ? "YW4_BLASTERS_PRIVATE" : "YW4_SWAP_PRIVATE");
+    if (!e || strcmp(e, "1")) return "";  /* public: the lobby everyone on the server shares */
+    e = getenv(activity == RELAY_BLASTERS ? "YW4_BLASTERS_CODE" : "YW4_SWAP_CODE");
+    return e ? e : "";  /* private without a code yet: the public lobby too (the overlay says "Not set") */
+}
+
+int relay_enabled(void) { return target() != NULL; }
+
+void relay_choose(int on, int what) {
+    host_lock(&lock);
+    int changed = on != online || (on && what != activity);
+    online = on, activity = what;
+    if (changed && sock != RBAD) {  /* open to the other server: the next request connects to this one */
+        generation++;               /* its reader ends without reporting a lost room */
+        rclose(sock);
+        sock = RBAD;
+        host_cond_broadcast(&answered);
+    }
+    host_unlock(&lock);
+    const char *t = target();
+    fprintf(stderr, "yw4: relay: the menu chose %s: %s, room code \"%s\"\n", on ? "Online" : "Local",
+            t ? t : "no relay (alone in the room; set YW4_RELAY for a home-network one)", room_code());
 }
 
 static int read_all(RSock s, uint8_t *p, size_t n) {
@@ -122,20 +161,23 @@ static void reader(void *arg) {
     }
 }
 
+static void net_start(void) {
+#ifdef _WIN32
+    static int wsa;
+    if (!__atomic_exchange_n(&wsa, 1, __ATOMIC_ACQ_REL)) {
+        WSADATA w;
+        WSAStartup(MAKEWORD(2, 2), &w);
+    }
+#endif
+}
+
 /* the connection, made on first use; lock held */
 static int connect_locked(void) {
     if (sock != RBAD) return 0;
     if (!relay_enabled()) return -1;
-#ifdef _WIN32
-    static int wsa;
-    if (!wsa) {
-        WSADATA w;
-        WSAStartup(MAKEWORD(2, 2), &w);
-        wsa = 1;
-    }
-#endif
+    net_start();
     char host[256];
-    snprintf(host, sizeof host, "%s", getenv("YW4_RELAY"));
+    snprintf(host, sizeof host, "%s", target());
     const char *port = "41230";
     char *colon = strrchr(host, ':');
     if (colon) *colon = 0, port = colon + 1;
@@ -162,8 +204,8 @@ static int connect_locked(void) {
     int one = 1;
     setsockopt(s, IPPROTO_TCP, TCP_NODELAY, (const char *)&one, sizeof one);
     uint8_t room[64] = {0};
-    const char *code = getenv("YW4_ROOM");
-    if (code) memcpy(room, code, strlen(code) < 64 ? strlen(code) : 64);
+    const char *code = room_code();
+    memcpy(room, code, strlen(code) < 64 ? strlen(code) : 64);
     if (write_frame(s, RELAY_HELLO, room, sizeof room)) {
         rclose(s);
         return -1;
@@ -213,3 +255,68 @@ int relay_send_packet(uint32_t dst, uint16_t dport, uint32_t src, uint16_t sport
     host_unlock(&lock);
     return s == RBAD ? -1 : write_frame2(s, RELAY_PACKET, head, 12, data, n);
 }
+
+/* ---- the overlay's Online tab: each server's ping (decision 0082). A connection of its own per server: connected,
+ * then HELLO -> WELCOME timed, the best of three (one network round trip and the relay's answer, as a player's room
+ * request takes). On a thread of its own; the page reads the results as they come. */
+enum { PING_MAX = 4 };
+static int ping_ms[PING_MAX];  /* -1 measuring, -2 no answer */
+static char ping_addr[PING_MAX][64];
+static int ping_n, ping_busy;
+
+static int ping_once(const char *addr) {
+    char host[64];
+    snprintf(host, sizeof host, "%s", addr);
+    const char *port = "41230";
+    char *colon = strrchr(host, ':');
+    if (colon) *colon = 0, port = colon + 1;
+    struct addrinfo hints = {0}, *res = NULL;
+    hints.ai_family = AF_UNSPEC, hints.ai_socktype = SOCK_STREAM;
+    if (getaddrinfo(host, port, &hints, &res) || !res) return -2;
+    RSock s = socket(res->ai_family, res->ai_socktype, res->ai_protocol);
+    int ms = -2;
+    if (s != RBAD && !connect(s, res->ai_addr, (int)res->ai_addrlen)) {
+#ifdef _WIN32
+        DWORD to = 3000;
+#else
+        struct timeval to = {3, 0};
+#endif
+        setsockopt(s, SOL_SOCKET, SO_RCVTIMEO, (const char *)&to, sizeof to);
+        int one = 1;
+        setsockopt(s, IPPROTO_TCP, TCP_NODELAY, (const char *)&one, sizeof one);
+        uint8_t room[64] = "ping", ans[9];
+        int64_t t0 = host_now_ns();
+        if (!write_frame(s, RELAY_HELLO, room, sizeof room) && !read_all(s, ans, sizeof ans) && ans[4] == RELAY_HELLO)
+            ms = (int)((host_now_ns() - t0 + 500000) / 1000000);
+    }
+    if (s != RBAD) rclose(s);
+    freeaddrinfo(res);
+    return ms;
+}
+
+static void ping_thread(void *arg) {
+    (void)arg;
+    for (int i = 0; i < ping_n; i++) {
+        int best = -2;
+        for (int k = 0; k < 3; k++) {
+            int ms = ping_once(ping_addr[i]);
+            if (ms >= 0 && (best < 0 || ms < best)) best = ms;
+            if (ms == -2 && k == 0) break;  /* no answer at all: don't wait three times */
+        }
+        __atomic_store_n(&ping_ms[i], best, __ATOMIC_RELEASE);
+    }
+    __atomic_store_n(&ping_busy, 0, __ATOMIC_RELEASE);
+}
+
+void relay_ping_start(const char *const *addrs, int n) {
+    if (__atomic_exchange_n(&ping_busy, 1, __ATOMIC_ACQ_REL)) return;  /* already measuring */
+    net_start();
+    ping_n = n < PING_MAX ? n : PING_MAX;
+    for (int i = 0; i < ping_n; i++) {
+        snprintf(ping_addr[i], sizeof ping_addr[i], "%s", addrs[i]);
+        __atomic_store_n(&ping_ms[i], -1, __ATOMIC_RELEASE);
+    }
+    if (host_thread_start(ping_thread, NULL, 1 << 16)) __atomic_store_n(&ping_busy, 0, __ATOMIC_RELEASE);
+}
+
+int relay_ping_ms(int i) { return i >= 0 && i < ping_n ? __atomic_load_n(&ping_ms[i], __ATOMIC_ACQUIRE) : -1; }

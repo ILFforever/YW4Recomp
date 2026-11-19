@@ -184,9 +184,10 @@ int settings_keys_notice(void) {
     return e && *e ? strcmp(e, "0") != 0 : *settings_file() != 0;
 }
 
-/* General > Player name (decision 0082): the name the other players see when playing together (trades, Blasters,
- * through the relay). It is YW4_NICKNAME, which acc's GetProfile hands the game (svc_acc.c); none: "Player". The
- * overlay's name popup changes it (gamemenu_name_edit), at most 10 letters as on a Switch. Saved by settings_save. */
+/* Online play and Profile (decision 0082; owner's layout, 2026-11-19): the game's Online button goes to our relay
+ * server (relay.c), Ark Swap and Blasters each public or private with their own code; the profile is the name the
+ * other players see (YW4_NICKNAME, handed to the game by acc's GetProfile, svc_acc.c; none: "Player").
+ * Typed values use the overlay's name popup (gamemenu_name_edit) and are saved by settings_save. */
 static void put_env(const char *name, const char *value) {
 #ifdef _WIN32
     _putenv_s(name, value);
@@ -194,11 +195,15 @@ static void put_env(const char *name, const char *value) {
     setenv(name, value, 1);
 #endif
 }
+static int env_on(const char *name) {
+    const char *v = getenv(name);
+    return v && !strcmp(v, "1");
+}
 static const char *player_name(void) {
     const char *n = getenv("YW4_NICKNAME");
     return n && *n ? n : "Player";
 }
-static int player_name_index(void) { return 0; }
+static int text_row_index(void) { return 0; }
 static void player_name_set(const char *name) {
     put_env("YW4_NICKNAME", name && *name ? name : "Player");
     settings_save();
@@ -206,16 +211,95 @@ static void player_name_set(const char *name) {
 }
 static void player_name_edit(void) { gamemenu_name_edit("Your name when playing together", 10, "Player", player_name(), player_name_set); }
 
+/* the server: ours, by region (the relay's address; tools/relay/setup_server.sh) */
+static const char *const servers[] = {"129.153.179.140:41230", "161.118.234.155:41230"};
+static int server_index(void) {
+    const char *v = getenv("YW4_ONLINE_SERVER");
+    for (int i = 0; v && i < 2; i++)
+        if (!strcmp(v, servers[i])) return i;
+    return 0;
+}
+static void server_cycle(void) { put_env("YW4_ONLINE_SERVER", servers[(server_index() + 1) % 2]); }
+
+/* Public / Private and the code, per activity: private rooms are seen only by players with the same code */
+static int swap_private(void) { return env_on("YW4_SWAP_PRIVATE"); }
+static void swap_private_toggle(void) { put_env("YW4_SWAP_PRIVATE", swap_private() ? "0" : "1"); }
+static int blasters_private(void) { return env_on("YW4_BLASTERS_PRIVATE"); }
+static void blasters_private_toggle(void) { put_env("YW4_BLASTERS_PRIVATE", blasters_private() ? "0" : "1"); }
+static const char *code_of(const char *env) {
+    const char *v = getenv(env);
+    return v && *v ? v : "";
+}
+static void swap_code_set(const char *c) { put_env("YW4_SWAP_CODE", c ? c : ""), settings_save(); }
+static void swap_code_edit(void) { gamemenu_name_edit("Ark Swap code", 16, "", code_of("YW4_SWAP_CODE"), swap_code_set); }
+static void blasters_code_set(const char *c) { put_env("YW4_BLASTERS_CODE", c ? c : ""), settings_save(); }
+static void blasters_code_edit(void) { gamemenu_name_edit("Blasters code", 16, "", code_of("YW4_BLASTERS_CODE"), blasters_code_set); }
+static const char *swap_code_off(void) { return swap_private() ? NULL : "SET ARK SWAP TO PRIVATE TO USE A CODE."; }
+static const char *blasters_code_off(void) { return blasters_private() ? NULL : "SET BLASTERS TO PRIVATE TO USE A CODE."; }
+
+/* A typed row's settings line and what it shows (NULL: not a typed row) */
+static const char *typed_env(const Setting *s) {
+    return s->next == player_name_edit ? "YW4_NICKNAME" : s->next == swap_code_edit ? "YW4_SWAP_CODE"
+         : s->next == blasters_code_edit ? "YW4_BLASTERS_CODE" : NULL;
+}
+static const char *typed_shown(const Setting *s) {
+    if (s->next == player_name_edit) return player_name();
+    const char *c = code_of(typed_env(s));
+    return *c ? c : "Not set";
+}
+
+/* ---- the overlay's Online tab (gamemenu.c draw_online_page; settings.h) */
+static const char *const server_names[] = {"US East", "Singapore"};
+static const char *const server_regions[] = {"North America and Europe", "Asia and Oceania"};
+int settings_online_servers(void) { return 2; }
+const char *settings_online_server_name(int i) { return server_names[i & 1]; }
+const char *settings_online_server_region(int i) { return server_regions[i & 1]; }
+const char *settings_online_server_address(int i) { return servers[i & 1]; }
+int settings_online_server(void) { return server_index(); }
+void settings_online_server_set(int i) { put_env("YW4_ONLINE_SERVER", servers[i & 1]), settings_save(); }
+int settings_online_private(int blasters) { return blasters ? blasters_private() : swap_private(); }
+void settings_online_private_set(int blasters, int on) {
+    put_env(blasters ? "YW4_BLASTERS_PRIVATE" : "YW4_SWAP_PRIVATE", on ? "1" : "0");
+    settings_save();
+}
+const char *settings_online_code(int blasters) { return code_of(blasters ? "YW4_BLASTERS_CODE" : "YW4_SWAP_CODE"); }
+void settings_online_code_edit(int blasters) { (blasters ? blasters_code_edit : swap_code_edit)(); }
+const char *settings_player_name(void) { return player_name(); }
+void settings_player_name_edit(void) { player_name_edit(); }
+
 /* The player's settings, in the order shown; a row starts a new group when its category differs from the row
  * before. The last row opens the developer page. The texts use the HUD font's characters (hud.c): upper case,
  * digits, . , : % / - ( ) ' ! ? */
 static const Setting player[] = {
-    /* General: what isn't graphics (owner, 2026-11-18: Discord status didn't belong in Advanced) */
-    {"GENERAL", "PLAYER NAME",
+    /* Online play (owner, 2026-11-19: sections, a Public / Private switch and a code for each): the server and who
+     * sees your rooms when you press the game's Online button; Profile: what the others see of you. Legacy menus
+     * went back to Advanced. */
+    {"ONLINE PLAY", "SERVER",
+     "OUR SERVER FOR THE GAME'S ONLINE BUTTON (ARK SWAP AND BLASTERS). PICK THE ONE NEAREST YOU: PLAYERS ONLY MEET "
+     "OTHERS ON THE SAME SERVER.",
+     {"US EAST", "SINGAPORE"}, {"NORTH AMERICA AND EUROPE", "ASIA AND OCEANIA"}, 2, server_index, server_cycle,
+     "YW4_ONLINE_SERVER", {"129.153.179.140:41230", "161.118.234.155:41230"}},
+    {"ONLINE PLAY", "ARK SWAP",
+     "WHO SEES YOUR ARK SWAP ROOM WHEN YOU PRESS ONLINE. PUBLIC: EVERYONE ON THE SERVER. PRIVATE: ONLY PLAYERS WITH "
+     "THE SAME ARK SWAP CODE.",
+     {"PUBLIC", "PRIVATE"}, {"EVERYONE ON THE SERVER", "ONLY PLAYERS WITH YOUR CODE"}, 2, swap_private,
+     swap_private_toggle, "YW4_SWAP_PRIVATE", {"0", "1"}},
+    {"ONLINE PLAY", "ARK SWAP CODE",
+     "THE CODE FOR PRIVATE ARK SWAP: AGREE ON ONE WITH YOUR FRIENDS. UP TO 16 LETTERS. ENTER OR A: CHANGE IT.",
+     {"NOT SET"}, {""}, 1, text_row_index, swap_code_edit, "YW4_SWAP_CODE", {""}, swap_code_off},
+    {"ONLINE PLAY", "BLASTERS",
+     "WHO SEES YOUR BLASTERS ROOM WHEN YOU PRESS ONLINE. PUBLIC: EVERYONE ON THE SERVER. PRIVATE: ONLY PLAYERS WITH "
+     "THE SAME BLASTERS CODE.",
+     {"PUBLIC", "PRIVATE"}, {"EVERYONE ON THE SERVER", "ONLY PLAYERS WITH YOUR CODE"}, 2, blasters_private,
+     blasters_private_toggle, "YW4_BLASTERS_PRIVATE", {"0", "1"}},
+    {"ONLINE PLAY", "BLASTERS CODE",
+     "THE CODE FOR PRIVATE BLASTERS: AGREE ON ONE WITH YOUR FRIENDS. UP TO 16 LETTERS. ENTER OR A: CHANGE IT.",
+     {"NOT SET"}, {""}, 1, text_row_index, blasters_code_edit, "YW4_BLASTERS_CODE", {""}, blasters_code_off},
+    {"PROFILE", "PLAYER NAME",
      "YOUR USERNAME SHOWN TO OTHER PLAYERS WHEN YOU PLAY TOGETHER ONLINE: TRADES AND BLASTERS. SUPPORTS UP TO "
      "10 LETTERS. NAMES ARE ONLY SEEN BY THE PLAYERS IN YOUR ROOM. ENTER OR A: CHANGE IT.",
-     {"PLAYER"}, {""}, 1, player_name_index, player_name_edit, "YW4_NICKNAME", {""}},
-    {"GENERAL", "DISCORD STATUS",
+     {"PLAYER"}, {""}, 1, text_row_index, player_name_edit, "YW4_NICKNAME", {""}},
+    {"PROFILE", "DISCORD STATUS",
      /* (decision 0077: Discord's local IPC, the Discord app on this PC; nothing goes anywhere else) */
      "SHOWS ON YOUR DISCORD PROFILE THAT YOU ARE PLAYING YO-KAI WATCH 4, WHERE YOU ARE (THE MAIN MENU, THE AREA, A "
      "BATTLE), YOUR WATCH RANK AND HOW LONG YOU HAVE PLAYED. NEEDS THE DISCORD APP OPEN ON THIS PC. OFF: NOTHING IS "
@@ -223,13 +307,6 @@ static const Setting player[] = {
      {"OFF", "ON"},
      {"NOTHING SHOWN ON DISCORD", "SHOWN ON YOUR DISCORD PROFILE"}, 2,
      discord_enabled, discord_toggle, "YW4_DISCORD", {"0", "1"}, discord_disabled},
-    {"GENERAL", "LEGACY MENUS",
-     "THE OLD KEYS: F1 OPENS THE OLD SETTINGS PANEL AND ITS DEVELOPER OPTIONS, F2 THE OLD CONTROLS PAGE, F3 SHOWS OR "
-     "HIDES THE PERFORMANCE HUD. OFF, F1 AND F2 OPEN THIS MENU'S SETTINGS AND CONTROLS PAGES (IT HAS ALL OF IT, THE "
-     "RENDERER SWITCHES AND SPEED-UPS UNDER ADVANCED) AND F3 STEPS THE PERFORMANCE HUD: OFF, COMPACT, DETAILED.",
-     {"OFF", "ON"},
-     {"F1 AND F2 OPEN THIS MENU'S PAGES, F3 THE HUD", "F1, F2 AND F3 OPEN THE OLD MENUS"}, 2, settings_legacy_keys, legacy_keys_toggle,
-     "YW4_LEGACY_KEYS", {"0", "1"}},
     {"DISPLAY", "WINDOW MODE",
      "A WINDOW, OR THE WHOLE SCREEN WITHOUT BORDERS. THE MONITOR'S OWN MODE NEVER CHANGES, SO ALT+TAB IS INSTANT. "
      "F11 SWITCHES TOO.",
@@ -351,6 +428,14 @@ static const Setting player[] = {
      {"THE SWITCH'S DEFAULT: LIGHTS CAST NO SHADOWS", "FAINT SHADOWS", "SOFT SHADOWS (RECOMMENDED)", "DARK SHADOWS",
       "DARKEST SHADOWS"}, 5, gpu_lamp_shadow_level,
      gpu_lamp_shadow_cycle, "YW4_LAMP_SHADOWS", {"0", "0.25", "0.4", "0.6", "1"}, lamp_shadows_disabled},
+    /* Advanced: before the developer page's rows (owner, 2026-11-19: back from General) */
+    {"ADVANCED", "LEGACY MENUS",
+     "THE OLD KEYS: F1 OPENS THE OLD SETTINGS PANEL AND ITS DEVELOPER OPTIONS, F2 THE OLD CONTROLS PAGE, F3 SHOWS OR "
+     "HIDES THE PERFORMANCE HUD. OFF, F1 AND F2 OPEN THIS MENU'S SETTINGS AND CONTROLS PAGES (IT HAS ALL OF IT, THE "
+     "RENDERER SWITCHES AND SPEED-UPS UNDER ADVANCED) AND F3 STEPS THE PERFORMANCE HUD: OFF, COMPACT, DETAILED.",
+     {"OFF", "ON"},
+     {"F1 AND F2 OPEN THIS MENU'S PAGES, F3 THE HUD", "F1, F2 AND F3 OPEN THE OLD MENUS"}, 2, settings_legacy_keys, legacy_keys_toggle,
+     "YW4_LEGACY_KEYS", {"0", "1"}},
 };
 /* The developer page (DEVELOPER OPTIONS): behind-the-scenes switches for testing the port, which the picture
  * doesn't show: who draws each part of it, and speed-ups that look the same. The defaults are the recommended
@@ -473,7 +558,8 @@ static int first_run;
 /* Lines a player adds to settings.ini by hand when a bug report asks for them (no panel row): read like the panel's,
  * and written back as they were, so the game's own saves don't drop them. YW4_PERF=1: the per-frame performance CSV
  * (perf.c; owner, 2026-11-16: "we are asking them", so a line in the file is enough). YW4_RELAY (host:port),
- * YW4_ROOM: playing together through the relay (relay.c, ldn.c; decision 0082; the name is General > Player name). */
+ * YW4_ROOM: local play through a home-network relay (relay.c, ldn.c; decision 0082; the Online button's server and
+ * codes are Online play rows). */
 static const char *const by_hand[] = {"YW4_PERF", "YW4_RELAY", "YW4_ROOM"};
 enum { BY_HAND = sizeof by_hand / sizeof *by_hand };
 static char by_hand_value[BY_HAND][64];
@@ -528,9 +614,9 @@ void settings_save(void) {
                "# name wins over its line here.\n");
     for (int i = 0; i < NSETTINGS; i++) {
         const Setting *t = setting(i);
-        if (t->next == player_name_edit) {  /* a name, not one of the options */
-            const char *n = getenv("YW4_NICKNAME");
-            if (n && *n) fprintf(f, "YW4_NICKNAME=%s\n", n);
+        if (typed_env(t)) {  /* typed (a name, a code), not one of the options; empty: no line */
+            const char *v = getenv(typed_env(t));
+            if (v && *v) fprintf(f, "%s=%s\n", typed_env(t), v);
             continue;
         }
         if (!t->noptions) {
@@ -622,7 +708,7 @@ void settings_action(int action) {
     }
     if (!developer_page && *sel == LINK_ROW) return;
     const Setting *s = developer_page ? &developer[*sel] : &player[*sel];
-    if (s->next == player_name_edit) return;  /* typed in the overlay's popup only (this panel's font has no lower case) */
+    if (typed_env(s)) return;  /* typed in the overlay's popup only (this panel's font has no lower case) */
     if ((action == SETTINGS_LEFT || action == SETTINGS_RIGHT) && s->disabled && s->disabled()) return;  /* greyed out */
     switch (action) {
     case SETTINGS_RIGHT: setting_step(s, 1), settings_save(); break;
@@ -640,7 +726,7 @@ static int fill_rows(SettingRow *rows, int max, const Setting *list, int count) 
         memcpy(rows[i].options, list[i].options, sizeof rows[i].options);
         memcpy(rows[i].notes, list[i].notes, sizeof rows[i].notes);
         rows[i].noptions = list[i].noptions;
-        if (list[i].next == player_name_edit) rows[i].options[0] = player_name(), rows[i].verbatim = rows[i].textbox = 1;
+        if (typed_env(&list[i])) rows[i].options[0] = typed_shown(&list[i]), rows[i].verbatim = rows[i].textbox = 1;
         /* leave out options this GPU or build can't run, only from the end of the list (FSR, then DLSS): an
          * option in the middle stays listed, as the row's index is the mode (the cycle skips it) */
         if (list[i].next == gpu_aa_cycle || list[i].next == gpu_fg_cycle) {
@@ -684,7 +770,10 @@ int settings_rows(SettingRow *rows, int max, int *sel) {
 static int hud_slider_row(const Setting *s) { return s->get == hud_scale_get || s->get == hud_opacity_get; }
 /* A player setting the overlay's Settings page lists now: not the HUD's sliders, not a row hidden for now. The row
  * list (settings_player_rows), the Theme row's place and a row's setting (player_row_setting) all count with it. */
-static int overlay_row(const Setting *s) { return !hud_slider_row(s) && !(s->hidden && s->hidden()); }
+/* Online play and Profile are the overlay's Online tab (owner, 2026-11-19: "move online stuff out of settings"),
+ * settings_online_* below; they stay in player[] for the settings file and the old panel */
+static int online_row(const Setting *s) { return !strcmp(s->category, "ONLINE PLAY") || !strcmp(s->category, "PROFILE"); }
+static int overlay_row(const Setting *s) { return !hud_slider_row(s) && !(s->hidden && s->hidden()) && !online_row(s); }
 
 /* The HUD's sliders live on the overlay's Overlay page, next to their preview, so its Settings page leaves them out
  * (the old panel keeps them). */
@@ -692,7 +781,7 @@ static int overlay_row(const Setting *s) { return !hud_slider_row(s) && !(s->hid
  * case for the names); its value one theme's name, Left / Right step through them. */
 static int theme_row(void) {
     int n = 0;
-    for (int i = 0; i < NPLAYER; i++) n += overlay_row(&player[i]);
+    for (int i = 0; i < NPLAYER && strcmp(player[i].category, "ADVANCED"); i++) n += overlay_row(&player[i]);
     return n;
 }
 
@@ -705,17 +794,23 @@ static void fill_theme_row(SettingRow *r) {
     r->options[0] = theme_name(theme_index()), r->notes[0] = note, r->noptions = 1, r->current = 0;
 }
 
-/* The overlay's rows: the player's settings (General first, then the graphics sections), Look > Theme, then the
- * developer page's settings as ADVANCED (owner, 2026-11-11: the renderer switches and speed-ups were only on the old
- * panel). Every row but General's (Discord status, legacy menus) changes the picture, so Preview can show it (`look`). */
+/* The overlay's rows: the player's settings (Online play and Profile first, then the graphics sections), Look > Theme, then Advanced:
+ * Legacy menus and the developer page's settings (owner, 2026-11-11: the renderer switches and speed-ups were only on
+ * the old panel). Every row but Online play's, Profile's and Legacy menus changes the picture, so Preview can show it
+ * (`look`). */
 int settings_player_rows(SettingRow *rows, int max) {
     int n = 0, at = theme_row();
-    for (int i = 0; i < NPLAYER && n < max; i++)
-        if (overlay_row(&player[i])) {
+    int themed = 0;
+    for (int i = 0; i < NPLAYER && n < max; i++) {
+        if (!themed && !strcmp(player[i].category, "ADVANCED") && n == at)  /* Look > Theme just before Advanced */
+            fill_theme_row(&rows[n++]), rows[n - 1].look = 1, themed = 1;
+        if (n < max && overlay_row(&player[i])) {
             n += fill_rows(rows + n, 1, &player[i], 1);
-            rows[n - 1].look = strcmp(player[i].category, "GENERAL") != 0;
+            rows[n - 1].look = strcmp(player[i].category, "ONLINE PLAY") && strcmp(player[i].category, "PROFILE") &&
+                               strcmp(player[i].category, "ADVANCED");
         }
-    if (n == at && n < max) fill_theme_row(&rows[n++]), rows[n - 1].look = 1;
+    }
+    if (!themed && n == at && n < max) fill_theme_row(&rows[n++]), rows[n - 1].look = 1;
     for (int i = 0; i < NDEVELOPER && n < max; i++) {
         n += fill_rows(rows + n, 1, &developer[i], 1);
         rows[n - 1].category = "ADVANCED", rows[n - 1].look = 1;

@@ -21,6 +21,8 @@
 #include "window.h"
 #include "host.h"
 #include "romfs.h"
+#include "discord.h"
+#include "relay.h"
 
 static int open_, sel, confirm, choice;
 static int focus;             /* 0 the side panel, 1 the page it shows (Settings) */
@@ -48,6 +50,7 @@ static int preview, preview_hidden;  /* Preview: the game runs under the bar; th
 static float pv_rect[4];             /* the part of the overlay the window shows while previewing (design units) */
 static int bug_page, brow;           /* Report a bug: its page and chosen row (below, with the rest of it) */
 static int crow;                     /* the chosen row on the Cheats page (settings_cheat_rows) */
+static int orow;                     /* the chosen control on the Online page (ON_*) */
 
 /* name entry (gamemenu.h): the popup's state; the game's thread waits in swkbd.c meanwhile */
 static int prompting, prompt_finished;  /* prompt_finished: 1 answered, 2 cancelled */
@@ -627,6 +630,7 @@ static void accept(void) {
     case GM_RESUME: close_and_resume(); break;
     case GM_SETTINGS: focus = 1, in_rows = 0; break;  /* into its page: its sections first */
     case GM_CONTROLS: focus = 1, mb_open = 0; break;
+    case GM_ONLINE: focus = 1; break;
     case GM_PERF: focus = 1; break;
     case GM_CHEATS: focus = 1; break;
     case GM_BUG: focus = 1, bug_page = 0, brow = 0; break;  /* the report's first page (below) */
@@ -638,7 +642,7 @@ static void accept(void) {
 }
 
 /* Preview: the rows that change the picture (SettingRow.look). In a section, from its first such row to its last:
- * Advanced's own rows (Discord status, legacy menus) come before its renderer switches and speed-ups. 0: none. */
+ * Advanced's own row (Legacy menus) comes before its renderer switches and speed-ups. 0: none. */
 static int look_span(const SettingRow *rows, int n, int i, int *first, int *last) {
     int a = i, z = i;
     while (a > 0 && !strcmp(rows[a - 1].category, rows[i].category)) a--;
@@ -886,6 +890,64 @@ static void perf_page_action(int a) {
     }
 }
 
+/* ---- the Online tab (owner, 2026-11-19, the "Cards" layout): our servers with their ping, Ark Swap's and Blasters'
+ * Public / Private switch and code, the profile (player name, Discord status). Its controls in order (orow); a code
+ * is passed over while its switch says Public, Discord status while it can't be used. */
+enum { ON_SERVER0, ON_SERVER1, ON_SWAP, ON_SWAP_CODE, ON_BLAST, ON_BLAST_CODE, ON_NAME, ON_DISCORD, ON_ITEMS };
+
+static int online_enabled(int i) {
+    if (i == ON_SWAP_CODE) return settings_online_private(0);
+    if (i == ON_BLAST_CODE) return settings_online_private(1);
+    if (i == ON_DISCORD) return discord_disabled() == NULL;
+    return 1;
+}
+
+/* use control i: dir -1 Left (Public, Off), 1 Right (Private, On), 0 Enter / a click (the other one, or edit) */
+static void online_use(int i, int dir) {
+    if (!online_enabled(i)) return;
+    switch (i) {
+    case ON_SERVER0: case ON_SERVER1:
+        if (dir == 0) settings_online_server_set(i - ON_SERVER0);
+        break;
+    case ON_SWAP: case ON_BLAST: {
+        int b = i == ON_BLAST, on = settings_online_private(b);
+        settings_online_private_set(b, dir ? dir > 0 : !on);
+        break;
+    }
+    case ON_SWAP_CODE: case ON_BLAST_CODE:
+        if (dir == 0) settings_online_code_edit(i == ON_BLAST_CODE);
+        break;
+    case ON_NAME:
+        if (dir == 0) settings_player_name_edit();
+        break;
+    case ON_DISCORD:
+        if (dir == 0 || (dir > 0) != discord_enabled()) discord_toggle(), settings_save();
+        break;
+    }
+    changed();
+}
+
+static void online_page_action(int a) {
+    if (a == GM_BACK || a == GM_LEAVE) {
+        focus = 0;
+        return;
+    }
+    if (orow < 0 || orow >= ON_ITEMS) orow = 0;
+    if (a == GM_UP || a == GM_DOWN) {  /* the next usable control that way; the ends stop */
+        int d = a == GM_UP ? -1 : 1;
+        for (int i = orow + d; i >= 0 && i < ON_ITEMS; i += d)
+            if (online_enabled(i)) {
+                orow = i;
+                break;
+            }
+    } else if (a == GM_LEFT || a == GM_RIGHT) {
+        if (orow <= ON_SERVER1) orow = a == GM_LEFT ? ON_SERVER0 : ON_SERVER1, online_use(orow, 0);  /* across */
+        else online_use(orow, a == GM_LEFT ? -1 : 1);
+    } else if (a == GM_ACCEPT) {
+        online_use(orow, 0);
+    }
+}
+
 /* ---- Report a bug (owner, 2026-11-07, canvas https://claude.ai/artifact/FiVFwHh4mEGWk3dCcYcZ85 board D): two short
  * pages the player fills in. Page 1: what's wrong (chips), what happened (typed, textin.h), how often (chips), Next.
  * Page 2: the paused picture, what to attach (ticks), Back, Save only, Send to GitHub. */
@@ -1049,6 +1111,7 @@ void gamemenu_action(int a) {
     }
     if (focus) {
         if (sel == GM_CONTROLS) controls_page_action(a);
+        else if (sel == GM_ONLINE) online_page_action(a);
         else if (sel == GM_PERF) perf_page_action(a);
         else if (sel == GM_BUG) bug_page_action(a);
         else if (sel == GM_CHEATS) cheats_page_action(a);
@@ -1062,7 +1125,7 @@ void gamemenu_action(int a) {
     if ((a == GM_UP || a == GM_DOWN) && sel == GM_TITLE && window_pause_title_state() <= 0)
         sel = a == GM_UP ? GM_BUG : GM_EXIT;  /* greyed out: passed over */
     else if (a == GM_ACCEPT ||
-             (a == GM_RIGHT && (sel == GM_SETTINGS || sel == GM_CONTROLS || sel == GM_PERF || sel == GM_CHEATS ||
+             (a == GM_RIGHT && (sel == GM_SETTINGS || sel == GM_CONTROLS || sel == GM_ONLINE || sel == GM_PERF || sel == GM_CHEATS ||
                                 sel == GM_BUG)))
         accept();
     else if (a == GM_BACK) close_and_resume();  /* Escape, Backspace, B on the side panel: back to the game */
@@ -1078,7 +1141,8 @@ enum { HIT_SIDE, HIT_SECTION, HIT_ROW, HIT_ROW_PREV, HIT_ROW_NEXT, HIT_BIND, HIT
        HIT_BUG_KIND, HIT_BUG_TEXT, HIT_BUG_OFTEN, HIT_BUG_NEXT, HIT_BUG_TICK, HIT_BUG_BTN, HIT_BUG_DONE,
        HIT_PROMPT_FIELD, HIT_PROMPT_OK, HIT_PROMPT_CANCEL, HIT_OSK_KEY, HIT_OSK_PAGE,
        HIT_KV_TAB, HIT_KV_MODE, HIT_KV_KEY, HIT_PV_PART,
-       HIT_MB_BACK, HIT_MB_SET, HIT_MB_ROW, HIT_MB_STEP, HIT_MB_OPT, HIT_MB_SCRIM, HIT_MB_POP, HIT_ROW_SLIDER, HIT_PICK_ROW };
+       HIT_MB_BACK, HIT_MB_SET, HIT_MB_ROW, HIT_MB_STEP, HIT_MB_OPT, HIT_MB_SCRIM, HIT_MB_POP, HIT_ROW_SLIDER, HIT_PICK_ROW,
+       HIT_ON_ITEM };
 enum { ROW_SLIDER_PAD = 12 };  /* HIT_ROW_SLIDER: the track's hit box reaches this far past each end */
 #define HINT_CLOSE (-1)  /* a key hint's action: close the overlay */
 typedef struct {
@@ -1184,7 +1248,8 @@ void gamemenu_mouse(float x, float y, int button) {
     if (button == 1 && textin_has(&bug_text) && (!found || h.kind != HIT_BUG_TEXT)) textin_edit(TI_DONE), changed();
     if (!found) return;
     int click = button == 1, drag = button == 4;  /* 4: moved with the left button held (a slider's thumb) */
-    int before = sel * 1000 + focus * 100 + srow + prow * 37 + choice * 7 + in_rows * 500 + brow * 11 + bug_page * 3 + crow * 13;
+    int before = sel * 1000 + focus * 100 + srow + prow * 37 + choice * 7 + in_rows * 500 + brow * 11 + bug_page * 3 + crow * 13 +
+                 orow * 17;
     switch (h.kind) {
     case HIT_SIDE:
         /* hovering chooses on the side panel; on a page, only a click goes to another item */
@@ -1247,6 +1312,11 @@ void gamemenu_mouse(float x, float y, int button) {
         if (click) focus = 1, kv_mode = h.a;
         break;
     case HIT_KV_KEY: case HIT_PV_PART:  /* pointing is enough: the detail bar follows the hover */
+        break;
+    case HIT_ON_ITEM:  /* the Online page: a: its control (ON_*); b: a switch's side (0 Public / Off, 1 Private / On), -1 */
+        if (!online_enabled(h.a)) break;
+        focus = 1, orow = h.a;
+        if (click) online_use(h.a, h.b < 0 ? 0 : h.b ? 1 : -1);
         break;
     case HIT_MODE:
         focus = 1, prow = 0;
@@ -1383,6 +1453,9 @@ static const char *const ICON_CONTROLS =
     "C2.4 8.3 4.7 6 8 6zM8 9.5v4M6 11.5h4\"/><circle cx=\"15.4\" cy=\"10.2\" r=\"0.7\"/>"
     "<circle cx=\"18.4\" cy=\"13\" r=\"0.7\"/>";
 static const char *const ICON_PERF = "<path d=\"M3 20h18M5 16l4-5 4 3 6-8\"/>";
+/* a globe: the Online tab */
+static const char *const ICON_ONLINE =
+    "<circle cx=\"12\" cy=\"12\" r=\"9\"/><path d=\"M3 12h18M12 3a14 14 0 0 1 0 18M12 3a14 14 0 0 0 0 18\"/>";
 /* a bug: its body, a line down its back, legs and feelers */
 static const char *const ICON_BUG =
     "<path d=\"M8 10a4 4 0 0 1 8 0v4a4 4 0 0 1-8 0zM12 10v8M4 12h4M16 12h4M5 7.5l3 2M19 7.5l-3 2M5 18.5l3-2M19 18.5"
@@ -3050,6 +3123,125 @@ static void draw_perf_page(const UiCanvas *c, const GameMenuInfo *in) {
     perf_slider(c, px, py + lh + 10 + 52 + 22, 360, "Opacity", lh, 1, focus && prow == 7);
 }
 
+/* ---- the Online page (the "Cards" layout): its cards are outlined on the page's paper, their rows white */
+static void online_card(const UiCanvas *c, float x, float y, float w, float h, const char *title, float lh) {
+    ui_box(c, x, y, w, h, 16, PAPER, 2, LINE);
+    ui_text(c, UI_GOTHIC_700, 16, x + 24, y + 18, lh, title, PLUM);
+}
+
+/* a typed value in a box with an Edit button (a code, the player's name); greyed out when off */
+static void online_edit_box(const UiCanvas *c, float x, float y, float w, float h, const char *text, int off, int item) {
+    int ring = focus && orow == item && !off;
+    float ew = 22 + 8 + ui_text_w(UI_ROUNDED_800, 16, "Edit") + 2 * 16, ex = x + w - ew;
+    ui_box(c, x, y, ex - 10 - x, h, 10, WHITE, ring ? 3 : 2, ring ? RING : LINE);
+    ui_text_in(c, UI_ROUNDED_700, 18, x + 16, y, ex - 10 - x - 32, h, 0, text, off ? MUTED : NIGHT);
+    int hv = !off && hovered(HIT_ON_ITEM, item, -1);
+    ui_box(c, ex, y, ew, h, 10, hv ? LILAC : SOFT, 2, hv ? PLUM : LINE);
+    ui_icon(c, ICON_EDIT, ex + 16, y + (h - 22) / 2, 22, 2.2f, off ? MUTED : PLUM);
+    ui_text_in(c, UI_ROUNDED_800, 16, ex + 16 + 22 + 8, y, 0, h, 0, "Edit", off ? MUTED : PLUM);
+    hit_add(x, y, w, h, HIT_ON_ITEM, item, -1);
+}
+
+/* two chips side by side, the chosen one filled; the ring on it while the control has the focus */
+static void online_switch(const UiCanvas *c, float x, float y, float w, const char *a, const char *b, int on, int item,
+                          int off) {
+    float cw = (w - 10) / 2;
+    for (int k = 0; k < 2; k++) {
+        float cx = x + (float)k * (cw + 10);
+        if (off) {
+            ui_box(c, cx, y, cw, 52, 12, WHITE, 2, LINE);
+            ui_text_in(c, UI_GOTHIC_700, 17, cx, y, cw, 52, 1, k ? b : a, MUTED);
+            continue;
+        }
+        chip(c, cx, y, cw, k ? b : a, on == k, focus && orow == item && on == k);
+        hit_add(cx, y, cw, 52, HIT_ON_ITEM, item, k);
+    }
+}
+
+static void draw_online_page(const UiCanvas *c, const GameMenuInfo *in) {
+    (void)in;
+    ui_box(c, 448, 40, 1104, 764, 20, PAPER, 0, 0);
+    ui_text(c, UI_ROUNDED_800, 34, 488, 76, 34 * 1.25f, "Online", NIGHT);
+    float lh = 16 * 1.45f, x = 488, w = 1024, y = 76 + 34 * 1.25f + 6;
+    ui_text(c, UI_GOTHIC_500, 15, x, y, 15 * 1.45f,
+            "The game's Online button plays through our servers. Local play stays local.", MUTED);
+    y += 15 * 1.45f + 18;
+
+    /* the servers, with their ping (measured when the page opens, again every 20 s while it shows) */
+    int n = settings_online_servers(), chosen = settings_online_server();
+    static int64_t pinged;
+    int64_t now = host_now_ns();
+    if (!pinged || now - pinged > 20000000000LL) {
+        const char *addrs[4];
+        for (int i = 0; i < n && i < 4; i++) addrs[i] = settings_online_server_address(i);
+        relay_ping_start(addrs, n);
+        pinged = now;
+    }
+    int best = -1;
+    for (int i = 0; i < n; i++) {
+        int ms = relay_ping_ms(i);
+        if (ms >= 0 && (best < 0 || ms < relay_ping_ms(best))) best = i;
+        if (ms == -1) changed();  /* still measuring: draw again until the numbers are in */
+    }
+    float hs = 18 + lh + 10 + (float)n * 52 + (float)(n - 1) * 10 + 20;
+    online_card(c, x, y, w, hs, "Server", lh);
+    float ry = y + 18 + lh + 10;
+    for (int i = 0; i < n; i++, ry += 52 + 10) {
+        int item = ON_SERVER0 + i, on = i == chosen, ring = focus && orow == item, ms = relay_ping_ms(i);
+        float rx = x + 24, rw = w - 48;
+        ui_box(c, rx, ry, rw, 52, 12, WHITE, ring ? 3 : 2, ring ? RING : LINE);
+        ui_box(c, rx + 18, ry + 15, 22, 22, 11, WHITE, 2, on ? PLUM : EDGE);
+        if (on) ui_box(c, rx + 23, ry + 20, 12, 12, 6, PLUM, 0, 0);
+        const char *name = settings_online_server_name(i);
+        ui_text_in(c, UI_GOTHIC_700, 17, rx + 54, ry, 0, 52, 0, name, PLUM);
+        ui_text_in(c, UI_GOTHIC_500, 15, rx + 54 + ui_text_w(UI_GOTHIC_700, 17, name) + 14, ry, 0, 52, 0,
+                   settings_online_server_region(i), MUTED);
+        char p[32];
+        if (ms >= 0) snprintf(p, sizeof p, "%d ms", ms);
+        else snprintf(p, sizeof p, "%s", ms == -1 ? "Measuring..." : "No answer");
+        float pw = ui_text_w(UI_GOTHIC_700, 16, p);
+        ui_text_in(c, UI_GOTHIC_700, 16, rx + rw - 20 - pw, ry, pw, 52, 0, p, ms == -2 ? WINE : NIGHT);
+        if (i == best && n > 1) {
+            float tw = tag(c, 0, 0, "Nearest", 0, 0, 1);
+            tag(c, rx + rw - 20 - pw - 12 - tw, ry + 17, "Nearest", GOLD, ON_GOLD, 0);
+        }
+        hit_add(rx, ry, rw, 52, HIT_ON_ITEM, item, -1);
+    }
+    y += hs + 20;
+
+    /* Ark Swap and Blasters: who sees your room, and the code for Private */
+    float cw = (w - 24) / 2, ha = 18 + lh + 10 + 52 + 14 + 48 + 12 + 15 * 1.45f + 18;
+    for (int b = 0; b < 2; b++) {
+        float cx = x + (float)b * (cw + 24), ix = cx + 24, iw = cw - 48;
+        int priv = settings_online_private(b);
+        online_card(c, cx, y, cw, ha, b ? "Blasters" : "Ark Swap", lh);
+        float iy = y + 18 + lh + 10;
+        online_switch(c, ix, iy, iw, "Public", "Private", priv, b ? ON_BLAST : ON_SWAP, 0);
+        iy += 52 + 14;
+        const char *code = settings_online_code(b);
+        ui_text_in(c, UI_GOTHIC_700, 15, ix, iy, 0, 48, 0, "Code", priv ? PLUM : MUTED);
+        online_edit_box(c, ix + 56, iy, iw - 56, 48, !priv ? "Not needed" : *code ? code : "Not set", !priv,
+                        b ? ON_BLAST_CODE : ON_SWAP_CODE);
+        iy += 48 + 12;
+        const char *note = b ? "Coming soon: Blasters' Online button isn't connected yet."
+                         : priv ? "Only players with the same code see your room."
+                                : "Everyone on the server sees your room.";
+        ui_text(c, UI_GOTHIC_500, 14, ix, iy, 15 * 1.45f, note, MUTED);
+    }
+    y += ha + 20;
+
+    /* the profile: the name the others see, and Discord status */
+    float hp = 18 + lh + 10 + 52 + 20;
+    online_card(c, x, y, w, hp, "Profile", lh);
+    float py = y + 18 + lh + 10, px = x + 24;
+    ui_text_in(c, UI_GOTHIC_700, 15, px, py, 0, 52, 0, "Player name", PLUM);
+    online_edit_box(c, px + 120, py, 440, 52, settings_player_name(), 0, ON_NAME);
+    int doff = discord_disabled() != NULL;
+    float dx = x + w - 24 - 250;
+    ui_text_in(c, UI_GOTHIC_700, 15, dx - 140, py, 0, 52, 0, "Discord status", doff ? MUTED : PLUM);
+    online_switch(c, dx, py, 250, "Off", "On", discord_enabled(), ON_DISCORD, doff);
+}
+
 /* A gold button (page 2's Send, page 1's Next) or a white one; ringed where the focus is. Returns its width. */
 static float bug_button(const UiCanvas *c, float x, float y, const char *label, int gold, int ring, int measure) {
     float w = ui_text_w(UI_ROUNDED_800, 18, label) + 2 * 28;
@@ -3856,11 +4048,12 @@ void gamemenu_draw(const UiCanvas *c, const GameMenuInfo *in) {
         return;
     }
     int cheats = cheats_allowed();
-    int page = (sel == GM_SETTINGS || sel == GM_CONTROLS || sel == GM_PERF || (sel == GM_CHEATS && cheats) ||
+    int page = (sel == GM_SETTINGS || sel == GM_CONTROLS || sel == GM_ONLINE || sel == GM_PERF || (sel == GM_CHEATS && cheats) ||
                 sel == GM_BUG) && !confirm;  /* these show a page */
     ui_rect(c, 0, T - 1, W, H + 2 * E + 2, SHADE, page ? 0.62f : 0.35f);  /* the tint over the game, darker behind a page */
     if (page && sel == GM_SETTINGS) draw_settings_page(c, in);
     if (page && sel == GM_CONTROLS) draw_controls_page(c, in);
+    if (page && sel == GM_ONLINE) draw_online_page(c, in);
     if (page && sel == GM_PERF) draw_perf_page(c, in);
     if (page && sel == GM_CHEATS) draw_cheats_page(c, in);
     if (page && sel == GM_BUG) draw_bug_page(c, in);
@@ -3880,8 +4073,8 @@ void gamemenu_draw(const UiCanvas *c, const GameMenuInfo *in) {
     ui_text(c, UI_GOTHIC_400, 14, 100, ty + th + 4, sh, "Game version " GAME_VERSION, ON_DARK);
 
     /* the items with a page, GM_RESUME..GM_BUG; Cheats only while the launcher allows them (cheats.h) */
-    static const char *const labels[] = {"Resume", "Settings", "Controls", "Overlay", "Cheats", "Report a bug"};
-    const char *icons[] = {ICON_RESUME, ICON_SETTINGS, ICON_CONTROLS, ICON_PERF, ICON_CHEATS, ICON_BUG};
+    static const char *const labels[] = {"Resume", "Settings", "Controls", "Online", "Overlay", "Cheats", "Report a bug"};
+    const char *icons[] = {ICON_RESUME, ICON_SETTINGS, ICON_CONTROLS, ICON_ONLINE, ICON_PERF, ICON_CHEATS, ICON_BUG};
     for (int i = 0, k = 0; i <= GM_BUG; i++) {
         if (i == GM_CHEATS && !cheats) continue;
         side_button(c, 20, T + 128 + k * 66, 356, icons[i], labels[i], sel == i, PLUM);
