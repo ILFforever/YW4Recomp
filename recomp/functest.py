@@ -38,6 +38,8 @@ int yw4_call_stack(const void *ctx, uint64_t *out, int n) { (void)ctx; (void)out
 void yw4_setjmp_resume(uint64_t target) { (void)target; abort(); }
 _Noreturn void yw4_stop(void) { abort(); }
 int yw4_write_watch_arm(uint64_t addr, uint64_t size) { (void)addr; (void)size; return -1; }
+/* dispatch.c exits through it since edbf789 (host.c, not linked here) */
+_Noreturn void yw4_exit(int code, const char *file, int line) { (void)file; (void)line; exit(code); }
 """
 REMOTE_DIR = "yw4-functest"
 
