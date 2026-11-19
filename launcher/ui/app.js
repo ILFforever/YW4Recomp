@@ -711,8 +711,8 @@ let inst = null;  // the launcher's state of the install (Rust: ready.rs, %AppDa
 
 // What's new: written for each release (the launcher ships with the notes of the version it builds)
 const NEWS = {
-  version: '1.4.0',
-  items: ['Open straight into the game: Settings, Shortcuts', 'Discord status: in the game\'s Settings, General', 'Up to 2 ms faster at 4K', 'Mirapo\'s list: the mouse wheel steps its rows'],
+  version: '1.5.0',
+  items: ['Settings before your first build: theme, updates, support', 'New launchers offered before your first build', 'Linux: the update offer names the AppImage', 'Happierre theme: the step numbers show again'],
 };
 
 function showNews(version, items) {

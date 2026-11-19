@@ -88,7 +88,9 @@ def game_tree(ref: str, dest: Path) -> str:
     """The game's build code at `ref` into `dest`: committed files only (git archive), the commit (recomp/build.py's
     build stamp: a player's PC has no git) and release.toml, which the launcher reads before using it."""
     shutil.rmtree(dest, ignore_errors=True)
-    with tarfile.open(fileobj=io.BytesIO(git("archive", "--format=tar", ref, "--", *SOURCES))) as t:
+    # only the folders the commit has: a game update cut before one was added (1.8.0 has no tools/relay) still packs
+    have = [s for s in SOURCES if git("ls-tree", "--name-only", ref, "--", s).strip()]
+    with tarfile.open(fileobj=io.BytesIO(git("archive", "--format=tar", ref, "--", *have))) as t:
         t.extractall(dest, filter="data")
     commit = git("rev-parse", "--short=7", ref).decode().strip()
     (dest / "COMMIT").write_text(commit + "\n")
