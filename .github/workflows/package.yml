@@ -54,6 +54,8 @@ jobs:
       - name: Tauri CLI (launcher/package.json's)
         working-directory: launcher
         run: npm ci
+      - name: Pillow (installer_art.py draws the installer's pictures)
+        run: python -m pip install --quiet pillow==11.3.0
       # --ref HEAD: the commit checked out above; package.py then also checks launcher/ matches it
       - name: Package
         run: python launcher/package.py launcher --ref HEAD
