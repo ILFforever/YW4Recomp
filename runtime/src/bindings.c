@@ -165,10 +165,11 @@ static void battle_starting_set(void) {
         for (int k = 0; k < BIND_KEYS; k++) sets[SET_BATTLE][i].keys[k] = battle_keys[i][k];
         sets[SET_BATTLE][i].pad = inputs[i].pad;
     }
-    /* the owner's battle pad (2026-11-14): Y (attack) on the left face button, X on the top one, by place on every
-     * pad (Xbox X / PlayStation square / Nintendo Y attacks); the rest as when exploring */
-    sets[SET_BATTLE][input_by_id("X")].pad = SDL_GAMEPAD_BUTTON_NORTH;
-    sets[SET_BATTLE][input_by_id("Y")].pad = SDL_GAMEPAD_BUTTON_WEST;
+    /* the owner's battle pad (2026-11-20, swapped from 2026-11-14's): Y (attack) on the top face button, X on the
+     * left one, by place on every pad (Xbox Y / PlayStation triangle / Nintendo X attacks); the rest as when
+     * exploring. A battle set already in the settings file keeps its buttons. */
+    sets[SET_BATTLE][input_by_id("X")].pad = SDL_GAMEPAD_BUTTON_WEST;
+    sets[SET_BATTLE][input_by_id("Y")].pad = SDL_GAMEPAD_BUTTON_NORTH;
     mouse_starting(SET_BATTLE);
 }
 
