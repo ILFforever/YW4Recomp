@@ -117,3 +117,19 @@ this is where FSR blends instead of moving the pixels.
 - Frame generation off in menus and loading screens (NVIDIA's advice).
 - The FRAME RATE setting counts the game's frames; what is shown is about twice that.
 - Linux: no FSR DLLs there yet.
+
+## Change 2026-11-19: the game's camera for frame generation
+
+Both frame generators had been given placeholder camera values: near 0.1, far 1000, 45°, and for DLSS's also an
+identity clip-to-last-clip and a camera at the origin. The game's view camera block (vertex cbuf 1,
+`CBUSE_UB_WORLD_MATRIX_IDX`) holds the real ones (rows 0-3 view, 4-7 projection, 8-11 their product, 12-23 the
+inverses, 24-35 last frame's; near 0.05, far ~4000-5000, 45°). It is copied when a G-buffer draw binds it, latched
+with the motion, and turned into Streamline's conventions in `gpu_aa.c` (`fg_camera`): row vectors, clip depth
+0..1, the view looking down +z. FSR's gets the real near, far and field of view. `YW4_FG_CAMERA=0` keeps the
+placeholders.
+
+It did not change what it was made for: with frame generation on, a slowly turning camera shows a fine noisy
+outline around the characters (both DLSS and FSR frame generation; gone with frame generation off; F12 doesn't
+show it, as it saves only the game's own frames). Still open. Next suspects: the characters' black outline drawn
+without motion or depth (compare a motion view and a normal picture while orbiting, by hand: replays don't frame
+it), and the base frame rate (~50-57 here, under NVIDIA's suggested 60).

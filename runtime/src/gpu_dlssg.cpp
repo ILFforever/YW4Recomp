@@ -353,6 +353,16 @@ extern "C" void dlssg_tag(VkCommandBuffer cb, const GpuFgPrepare *p, uint32_t ow
     c.cameraPinholeOffset = {0.0f, 0.0f};
     c.cameraPos = {0.0f, 0.0f, 0.0f}, c.cameraUp = {0.0f, 1.0f, 0.0f}, c.cameraRight = {1.0f, 0.0f, 0.0f};
     c.cameraFwd = {0.0f, 0.0f, 1.0f};
+    if (p->has_cam) {  /* the game's camera (gpu_aa.c fg_camera: already in Streamline's conventions) */
+        memcpy(&c.cameraViewToClip, p->view_to_clip, sizeof c.cameraViewToClip);
+        memcpy(&c.clipToCameraView, p->clip_to_view, sizeof c.clipToCameraView);
+        memcpy(&c.clipToPrevClip, p->clip_to_prev_clip, sizeof c.clipToPrevClip);
+        memcpy(&c.prevClipToClip, p->prev_clip_to_clip, sizeof c.prevClipToClip);
+        c.cameraPos = {p->cam_pos[0], p->cam_pos[1], p->cam_pos[2]};
+        c.cameraRight = {p->cam_right[0], p->cam_right[1], p->cam_right[2]};
+        c.cameraUp = {p->cam_up[0], p->cam_up[1], p->cam_up[2]};
+        c.cameraFwd = {p->cam_fwd[0], p->cam_fwd[1], p->cam_fwd[2]};
+    }
     c.cameraNear = n, c.cameraFar = f, c.cameraFOV = p->fov_y, c.cameraAspectRatio = aspect;
     c.depthInverted = sl::Boolean::eFalse;
     c.cameraMotionIncluded = sl::Boolean::eTrue;

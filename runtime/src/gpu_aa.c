@@ -15,6 +15,7 @@
  * YW4_AA=0 off / 1 FXAA / 2 SMAA / 3 TAA / 4 FSR / 5 DLSS at start; the settings panel (F1) cycles it.
  * SHARPENING (gpu_sharpen, decision 0076) comes after any of them, OFF included. */
 #include <inttypes.h>
+#include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -563,11 +564,36 @@ int gpu_taa_clip_jitter(float *cx, float *cy) {
     return 1;
 }
 
+/* The view's camera block (vertex cbuf 1, CBUSE_UB_WORLD_MATRIX_IDX) as a G-buffer draw had it bound, for frame
+ * generation's camera (fg_camera). Read like the other blocks we copy at bind time, from guest memory. Its rows
+ * (YW4_CAMERA_LOG, night street 2026-11-19), each matrix for column vectors, OpenGL's clip (depth -1..1, the view
+ * looking down -z), without the anti-aliasing's shift (that is a viewport shift):
+ *   0-3 view, 4-7 projection (45 degrees, near 0.05, far 4000), 8-11 projection x view, 12-15 the view's inverse
+ *   (column 3: the camera's position), 16-19 the projection's inverse, 20-23 (projection x view)'s inverse,
+ *   24-35 last frame's view, projection, projection x view. */
+enum { CAM_ROWS = 36 };
+static float gbuf_cam[CAM_ROWS * 4], motion_cam[CAM_ROWS * 4];
+static int gbuf_cam_valid, motion_cam_valid;  /* motion_cam: latched with the motion (gpu_taa_targets_end) */
+
 /* A draw's targets: the G-buffer's (3 colour targets, the first RG16F: the game's motion) is noted. */
 void gpu_taa_note_targets(const GpuState *s) {
     if (gpu_aa() < 3 || s->ncolor != 3 || !s->rt.color[0]) return;
     const GpuImage *g = image_find(s->rt.color[0]);
-    if (g && g->format == VK_FORMAT_R16G16_SFLOAT) gbuffer_motion = s->rt.color[0];
+    if (!g || g->format != VK_FORMAT_R16G16_SFLOAT) return;
+    gbuffer_motion = s->rt.color[0];
+    const GpuRange *cam = &s->ubo[0][1];
+    if (cam->addr && cam->size >= sizeof gbuf_cam) {
+        memcpy(gbuf_cam, (const void *)(uintptr_t)cam->addr, sizeof gbuf_cam);
+        gbuf_cam_valid = 1;
+        static int logged = -1;  /* YW4_CAMERA_LOG: the block's rows once, to tell them apart */
+        if (logged < 0) logged = getenv("YW4_CAMERA_LOG") ? 0 : 1;
+        if (!logged && gpu_frames() > 3000) {
+            logged = 1;
+            for (int r = 0; r < CAM_ROWS; r++)
+                fprintf(stderr, "yw4: camera: cbuf 1 row %2d: %12.6f %12.6f %12.6f %12.6f\n", r, gbuf_cam[r * 4],
+                        gbuf_cam[r * 4 + 1], gbuf_cam[r * 4 + 2], gbuf_cam[r * 4 + 3]);
+        }
+    }
 }
 
 /* The render targets change (rendering has ended): if the G-buffer was drawn into, copy its motion. */
@@ -589,6 +615,9 @@ void gpu_taa_targets_end(VkCommandBuffer cb) {
     vkCmdCopyImage(cb, g->image, VK_IMAGE_LAYOUT_GENERAL, motion.image, VK_IMAGE_LAYOUT_GENERAL, 1, &c);
     full_barrier(cb);
     motion_frame = gpu_frames();
+    motion_cam_valid = gbuf_cam_valid;  /* the camera that goes with this motion */
+    if (gbuf_cam_valid) memcpy(motion_cam, gbuf_cam, sizeof motion_cam);
+    gbuf_cam_valid = 0;
 }
 
 static void taa(VkCommandBuffer cb, VkImageView target, VkFormat fmt, uint32_t w, uint32_t h, int debug) {
@@ -754,6 +783,84 @@ static int dlss(VkCommandBuffer cb, GpuImage *d, VkImageView depth_view, VkImage
 
 /* Frame generation's prepare pass (gpu_fg.c): the 3D's depth and the game's motion, with the jitter this frame
  * was drawn with (as gpu_taa_jitter chose it) and the motion's scale as FSR's upscaler gets them. */
+/* 4x4 matrices stored row by row, for column vectors: o = a x b. */
+static void m4_mul(const float *a, const float *b, float *o) {
+    for (int r = 0; r < 4; r++)
+        for (int c = 0; c < 4; c++)
+            o[r * 4 + c] = a[r * 4] * b[c] + a[r * 4 + 1] * b[4 + c] + a[r * 4 + 2] * b[8 + c] + a[r * 4 + 3] * b[12 + c];
+}
+static void m4_transpose(const float *m, float *o) {
+    for (int r = 0; r < 4; r++)
+        for (int c = 0; c < 4; c++) o[c * 4 + r] = m[r * 4 + c];
+}
+static int m4_invert(const float *m, float *o) {  /* Gauss-Jordan with pivoting; 0 when singular */
+    double a[4][8];
+    for (int r = 0; r < 4; r++)
+        for (int c = 0; c < 8; c++) a[r][c] = c < 4 ? m[r * 4 + c] : (c - 4 == r);
+    for (int c = 0; c < 4; c++) {
+        int p = c;
+        for (int r = c + 1; r < 4; r++)
+            if (fabs(a[r][c]) > fabs(a[p][c])) p = r;
+        if (fabs(a[p][c]) < 1e-12) return 0;
+        for (int k = 0; k < 8; k++) {
+            double t = a[c][k];
+            a[c][k] = a[p][k], a[p][k] = t;
+        }
+        double inv = 1.0 / a[c][c];
+        for (int k = 0; k < 8; k++) a[c][k] *= inv;
+        for (int r = 0; r < 4; r++)
+            if (r != c) {
+                double f = a[r][c];
+                for (int k = 0; k < 8; k++) a[r][k] -= f * a[c][k];
+            }
+    }
+    for (int r = 0; r < 4; r++)
+        for (int c = 0; c < 4; c++) o[r * 4 + c] = (float)a[r][c + 4];
+    return 1;
+}
+
+/* Frame generation's camera from the block latched with the motion (motion_cam), instead of placeholders (near 0.1,
+ * far 1000, no camera motion at all: DLSS's frame generation got identity clip-to-last-clip and a camera at the
+ * origin; owner, 2026-11-19: a noisy outline around the characters in generated frames as the camera turns).
+ * Streamline wants row vectors (the transposes), clip depth 0..1 and the view looking down +z: so the game's clip
+ * goes through C = (y flipped with the upper-left window origin, as the motion's scale) x (z: 0.5 z + 0.5 w), and
+ * its view through S = z flipped. YW4_FG_CAMERA=0: the placeholders (A/B). */
+static void fg_camera(GpuFgPrepare *p) {
+    static int on = -1;
+    if (on < 0) on = !(getenv("YW4_FG_CAMERA") && *getenv("YW4_FG_CAMERA") == '0');
+    static int why;  /* once: why the placeholders stayed */
+    if (!on || !motion_cam_valid) {
+        if (!why++) fprintf(stderr, "yw4: fg: no game camera (%s)\n", on ? "none with the motion" : "YW4_FG_CAMERA=0");
+        return;
+    }
+    const float *cam = motion_cam, *view = cam, *proj = cam + 16, *inv_vp = cam + 80, *prev_vp = cam + 128;
+    const float *inv_view = cam + 48;
+    float a = proj[10], b = proj[11];  /* row 2: z' = a z + b w; near and far where z' / -z is -1 and 1 */
+    if (a == 1.0f || a == -1.0f || proj[5] == 0.0f) return;
+    float sy = nvn_window_origin == 1 ? -1.0f : 1.0f;
+    const float C[16] = {1, 0, 0, 0, 0, sy, 0, 0, 0, 0, 0.5f, 0.5f, 0, 0, 0, 1};
+    const float S[16] = {1, 0, 0, 0, 0, 1, 0, 0, 0, 0, -1, 0, 0, 0, 0, 1};
+    float c_inv[16], cp[16], v2c[16], c2v[16], t[16], t2[16], c2p[16], p2c[16];
+    if (!m4_invert(C, c_inv)) return;
+    m4_mul(C, proj, cp), m4_mul(cp, S, v2c);
+    if (!m4_invert(v2c, c2v)) return;
+    m4_mul(C, prev_vp, t), m4_mul(t, inv_vp, t2), m4_mul(t2, c_inv, c2p);  /* C x last VP x VP^-1 x C^-1 */
+    if (!m4_invert(c2p, p2c)) return;
+    m4_transpose(v2c, p->view_to_clip), m4_transpose(c2v, p->clip_to_view);
+    m4_transpose(c2p, p->clip_to_prev_clip), m4_transpose(p2c, p->prev_clip_to_clip);
+    for (int i = 0; i < 3; i++) {
+        p->cam_pos[i] = inv_view[i * 4 + 3];
+        p->cam_right[i] = view[i], p->cam_up[i] = view[4 + i], p->cam_fwd[i] = -view[8 + i];
+    }
+    p->cam_near = b / (a - 1.0f), p->cam_far = b / (a + 1.0f);
+    p->fov_y = 2.0f * atanf(1.0f / fabsf(proj[5]));
+    p->has_cam = 1;
+    static int logged;
+    if (!logged++)
+        fprintf(stderr, "yw4: fg: the game's camera for frame generation: near %.3f, far %.1f, %.1f degrees\n",
+                (double)p->cam_near, (double)p->cam_far, (double)(p->fov_y * 57.29578f));
+}
+
 static void fg_prepare(VkCommandBuffer cb, GpuImage *d, VkImageView dv, uint32_t w, uint32_t h, uint32_t ow,
                        uint32_t oh, GpuImage *scene) {
     int dlssg = gpu_fg() == 2 && dlssg_available();  /* DLSS's: tagged for Streamline instead */
@@ -769,6 +876,7 @@ static void fg_prepare(VkCommandBuffer cb, GpuImage *d, VkImageView dv, uint32_t
                       .depth_format = d->format, .render_w = w,
                       .render_h = h, .frame_ms = last_ns ? (float)(t - last_ns) / 1e6f : 16.7f, .cam_near = 0.1f,
                       .cam_far = 1000.0f, .fov_y = 0.785398f};
+    fg_camera(&p);
     last_ns = t;
     int mode = gpu_aa();
     if (mode == 4 && gpu_fsr_available() == 1) {

@@ -31,6 +31,11 @@ typedef struct {
     float jitter[2];        /* as told to FSR's upscaler: the same conventions */
     float motion_scale[2];
     float frame_ms, cam_near, cam_far, fov_y;
+    /* The game's camera for this frame (has_cam; else the placeholders above stay): Streamline's conventions, ready to
+     * copy: row-major for row vectors, clip depth 0..1, the view looking down +z (gpu_aa.c, fg_camera) */
+    int has_cam;
+    float view_to_clip[16], clip_to_view[16], clip_to_prev_clip[16], prev_clip_to_clip[16];
+    float cam_pos[3], cam_right[3], cam_up[3], cam_fwd[3];
 } GpuFgPrepare;
 
 /* After the anti-aliasing (in cb, outside rendering): this frame's depth and motion. */
