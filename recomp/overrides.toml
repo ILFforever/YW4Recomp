@@ -898,3 +898,70 @@ module = "sdk"
 symbol = "_ZN2nn3err9ShowErrorERKNS0_18ErrorResultVariantE"
 native = "yw4_err_ShowErrorVariant"
 why = "launches the error applet: logged instead"
+
+# nn::ssl: the game's internet (Online) menu starts it; no ssl service, no servers to reach (decision 0082)
+[[override]]
+module = "sdk"
+symbol = "nnsslInitialize"
+native = "yw4_ssl_Initialize"
+why = "starts the ssl library, which opens the ssl service we don't have: started without it (internet play has no servers; runtime/src/ssl.c)"
+
+[[override]]
+module = "sdk"
+symbol = "nnsslInitializeWithConcurrencyLimit"
+native = "yw4_ssl_Initialize"
+why = "as nnsslInitialize"
+
+[[override]]
+module = "sdk"
+symbol = "_ZN2nn3ssl10InitializeEv"
+native = "yw4_ssl_Initialize"
+why = "as nnsslInitialize"
+
+[[override]]
+module = "sdk"
+symbol = "_ZN2nn3ssl10InitializeEj"
+native = "yw4_ssl_Initialize"
+why = "as nnsslInitialize"
+
+[[override]]
+module = "sdk"
+symbol = "nnsslFinalize"
+native = "yw4_ssl_Finalize"
+why = "the counterpart of nnsslInitialize"
+
+[[override]]
+module = "sdk"
+symbol = "_ZN2nn3ssl8FinalizeEv"
+native = "yw4_ssl_Finalize"
+why = "the counterpart of nnsslInitialize"
+
+[[override]]
+module = "sdk"
+symbol = "nnsslContextCreate"
+native = "yw4_ssl_ContextCreate"
+why = "a secure context: refused, so no connection is ever tried (runtime/src/ssl.c)"
+
+[[override]]
+module = "sdk"
+symbol = "_ZN2nn3ssl7Context6CreateENS1_10SslVersionE"
+native = "yw4_ssl_ContextCreate"
+why = "as nnsslContextCreate"
+
+[[override]]
+module = "sdk"
+symbol = "_ZN2nn3ssl14ContextPrivate6CreateENS1_10SslVersionE"
+native = "yw4_ssl_ContextCreate"
+why = "as nnsslContextCreate"
+
+[[override]]
+module = "sdk"
+symbol = "nnsslContextDestroy"
+native = "yw4_ssl_ContextDestroy"
+why = "nothing was made"
+
+[[override]]
+module = "sdk"
+symbol = "_ZN2nn3ssl7Context7DestroyEv"
+native = "yw4_ssl_ContextDestroy"
+why = "nothing was made"
