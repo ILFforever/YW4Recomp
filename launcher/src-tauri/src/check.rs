@@ -265,11 +265,46 @@ fn keys_row(dir: Option<&String>, rights: &[String]) -> Row {
     }
 }
 
+/// What a file's name says it is, when its contents can't be read without the keys: dump tools name NSPs with the
+/// title ID and version, e.g. "… [010086C00AF7C800][v917504].nsp". Some(true) the update (the update's title ID, or a
+/// version above v0), Some(false) the base game (its title ID, or [v0]), None nothing to go by.
+fn named_update(path: &str, app: u64) -> Option<bool> {
+    let name = Path::new(path).file_name()?.to_string_lossy().to_lowercase();
+    if name.contains(&format!("{:016x}", app | 0x800)) { return Some(true); }
+    if name.contains(&format!("{:016x}", app)) { return Some(false); }
+    let v = name.find("[v")?;
+    let digits: String = name[v + 2..].chars().take_while(|c| c.is_ascii_digit()).collect();
+    if digits.is_empty() || name[v + 2 + digits.len()..].chars().next() != Some(']') { return None; }
+    Some(digits.parse::<u64>().map_or(true, |n| n > 0))
+}
+
+/// The same file chosen in two boxes (a link or another spelling of its path included).
+fn same_file(a: &str, b: &str) -> bool {
+    match (std::fs::canonicalize(a), std::fs::canonicalize(b)) {
+        (Ok(x), Ok(y)) => x == y,
+        _ => a == b,
+    }
+}
+
+// Mix-ups said at Check, not after unpacking (owner, 2026-11-20: the build stopped on "two update Program NCAs"):
+// the same file in both boxes, the update in the base box or the base game in the update box (by its ticket or
+// metadata, else by its name when that says).
 fn check_files(paths: &HashMap<String, String>, t: &Target) -> Vec<Row> {
     let upd_id = t.app | 0x800;
     let mut rows = Vec::new();
     let mut rights = Vec::new();
     let base_path = paths.get("base").filter(|p| !p.is_empty());
+    if let (Some(b), Some(u)) = (base_path, paths.get("update").filter(|p| !p.is_empty())) {
+        if same_file(b, u) {
+            rows.push(row("Base game", "bad", "The same file is chosen as the update. Choose the base game ([v0]) here"));
+            rows.push(row("Update", "bad", "The same file is chosen as the base game. Choose the 2.2.0 update here"));
+            let krow = keys_row(paths.get("keys"), &[]);
+            let has_keys = krow.state == "ok";
+            rows.push(krow);
+            rows.push(dlc_row(paths.get("dlc"), has_keys, t));
+            return rows;
+        }
+    }
     let mut base_is_xci = false;
     match base_path.map(|p| contents(Path::new(p))) {
         None => rows.push(row("Base game", "bad", "Choose the base game")),
@@ -283,8 +318,14 @@ fn check_files(paths: &HashMap<String, String>, t: &Target) -> Vec<Row> {
                 rows.push(row("Base game", "ok", "Game card image (XCI)"));
             } else if titles.iter().any(|(id, _)| *id == t.app) || named.contains(&t.app) {
                 rows.push(row("Base game", "ok", format!("Yo-kai Watch 4++ · {:016X}", t.app)));
+            } else if titles.iter().any(|(id, _)| *id == upd_id) || named.contains(&upd_id) {
+                rows.push(row("Base game", "bad", "This is the update. Choose the base game ([v0]) here"));
             } else if titles.is_empty() && named.is_empty() {
-                rows.push(row("Base game", "warn", "No ticket or metadata to check it by: checked while building"));
+                if named_update(base_path.unwrap(), t.app) == Some(true) {
+                    rows.push(row("Base game", "bad", "Its name says it's an update. Choose the base game ([v0]) here"));
+                } else {
+                    rows.push(row("Base game", "warn", "No ticket or metadata to check it by: checked while building"));
+                }
             } else {
                 rows.push(row("Base game", "bad", "This NSP isn't Yo-kai Watch 4++"));
             }
@@ -301,8 +342,14 @@ fn check_files(paths: &HashMap<String, String>, t: &Target) -> Vec<Row> {
             let named = cnmt_titles(path, &entries);
             if titles.iter().any(|(id, _)| *id == upd_id) || named.contains(&upd_id) {
                 rows.push(row("Update", "ok", format!("An update of this game · {upd_id:016X}")));
+            } else if titles.iter().any(|(id, _)| *id == t.app) || named.contains(&t.app) {
+                rows.push(row("Update", "bad", "This is the base game. Choose the 2.2.0 update here"));
             } else if titles.is_empty() && named.is_empty() {
-                rows.push(row("Update", "warn", "No ticket or metadata to check it by: checked while building"));
+                if named_update(paths.get("update").unwrap(), t.app) == Some(false) {
+                    rows.push(row("Update", "bad", "Its name says it's the base game. Choose the 2.2.0 update here"));
+                } else {
+                    rows.push(row("Update", "warn", "No ticket or metadata to check it by: checked while building"));
+                }
             } else {
                 rows.push(row("Update", "bad", "This NSP isn't an update of Yo-kai Watch 4++"));
             }
@@ -372,4 +419,28 @@ pub async fn check_game(req: Request) -> Vec<Row> {
     })
     .await
     .unwrap_or_default()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    const APP: u64 = 0x010086C00AF7C000;
+
+    #[test]
+    fn names_say_update_or_base() {
+        assert_eq!(named_update("Yo-kai Watch 4++ [010086C00AF7C800][v917504].nsp", APP), Some(true));
+        assert_eq!(named_update("/games/YW4 [010086c00af7c000][v0].nsp", APP), Some(false));
+        assert_eq!(named_update(r"C:\dump\yw4 [v917504].nsp", APP), Some(true));
+        assert_eq!(named_update("yw4 [v0].nsp", APP), Some(false));
+        assert_eq!(named_update("yw4-update.nsp", APP), None);
+        assert_eq!(named_update("yw4 [v1.0.0].nsp", APP), None);  // not a dump tool's [v<number>]
+    }
+
+    #[test]
+    fn same_file_in_both_boxes() {
+        assert!(same_file(r"C:\no\such\file.nsp", r"C:\no\such\file.nsp"));
+        assert!(!same_file(r"C:\no\such\base.nsp", r"C:\no\such\upd.nsp"));
+        let here = std::env::current_dir().unwrap().join("Cargo.toml");
+        assert!(same_file(here.to_str().unwrap(), "Cargo.toml"));  // two spellings of one file
+    }
 }
