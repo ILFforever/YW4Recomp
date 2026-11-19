@@ -924,14 +924,34 @@ pub async fn free_space(install: String) -> u64 {
 #[derive(Serialize)]
 pub struct Original { path: String, size: u64 }
 
-/// The player's own files the install no longer needs: the NSP/XCI (or extracted folders) and the add-on NSPs
-/// that were checked and copied. Never the keys, never anything else in those folders.
+/// An ExeFS folder's own files: only these are deleted from it, never the folder with whatever else the player
+/// keeps there (keys, NSPs; the check only asks for main and sdk in it).
+const EXEFS_FILES: [&str; 14] = ["main", "main.npdm", "rtld", "sdk", "subsdk0", "subsdk1", "subsdk2", "subsdk3",
+                                 "subsdk4", "subsdk5", "subsdk6", "subsdk7", "subsdk8", "subsdk9"];
+
+/// Is `p` somewhere an original can't be: the install folder or inside it (its own data\exefs, data\romfs and
+/// data\dlc copies, which the game runs from), a folder that holds the install, or a drive or file-system root.
+fn never_an_original(p: &Path, install: &Path) -> bool {
+    let full = |x: &Path| x.canonicalize().unwrap_or_else(|_| x.to_path_buf());
+    let (p, inst) = (full(p), full(install));
+    p.parent().is_none() || (!install.as_os_str().is_empty() && (p.starts_with(&inst) || inst.starts_with(&p)))
+}
+
+/// The player's own files the install no longer needs: the NSP/XCI (or the ExeFS files and the RomFS folder) and
+/// the add-on NSPs that were checked and copied. Never the keys, never anything else in those folders, and never
+/// anything of the install itself (review 2026-11-19: Locate fills the paths from config.toml, which names the
+/// install's own copies).
 fn originals_of(s: &State) -> Vec<PathBuf> {
+    let install = Path::new(&s.install);
     let mut out = Vec::new();
     let get = |k: &str| s.paths.get(k).filter(|p| !p.is_empty()).map(PathBuf::from);
-    let keys = ["base", "update", "exefs", "romfs"];
-    for k in if s.mode == "folders" { &keys[2..] } else { &keys[..2] } {
-        if let Some(p) = get(k).filter(|p| p.exists()) { out.push(p); }
+    if s.mode == "folders" {
+        if let Some(exefs) = get("exefs").filter(|p| p.is_dir()) {
+            out.extend(EXEFS_FILES.iter().map(|f| exefs.join(f)).filter(|p| p.is_file()));
+        }
+        out.extend(get("romfs").filter(|p| p.is_dir()));
+    } else {
+        out.extend(["base", "update"].iter().filter_map(|k| get(k)).filter(|p| p.is_file()));
     }
     if let Some(dlc) = get("dlc") {
         for p in std::fs::read_dir(dlc).into_iter().flatten().flatten().map(|e| e.path()) {
@@ -940,6 +960,7 @@ fn originals_of(s: &State) -> Vec<PathBuf> {
             }
         }
     }
+    out.retain(|p| !never_an_original(p, install));
     out
 }
 
@@ -961,6 +982,14 @@ pub async fn delete_originals(state: State) -> Result<u64, String> {
             let r = if p.is_dir() { std::fs::remove_dir_all(&p) } else { std::fs::remove_file(&p) };
             r.map_err(|e| format!("couldn't delete {} ({e})", p.display()))?;
             freed += n;
+        }
+        // the ExeFS folder itself only when nothing else was in it (remove_dir refuses a folder that isn't empty)
+        if state.mode == "folders" {
+            if let Some(exefs) = state.paths.get("exefs").filter(|p| !p.is_empty()) {
+                if !never_an_original(Path::new(exefs), Path::new(&state.install)) {
+                    let _ = std::fs::remove_dir(exefs);
+                }
+            }
         }
         Ok(freed)
     })
@@ -1619,5 +1648,40 @@ mod tests {
         let _ = std::fs::remove_dir_all(&temp);
         let _ = std::fs::remove_file(&temp_state);
         std::env::remove_var("YW4_LAUNCHER_STATE");
+    }
+
+    #[test]
+    fn originals_never_the_install_and_only_exefs_files() {
+        let temp = std::env::temp_dir().join("yw4_test_originals");
+        let _ = std::fs::remove_dir_all(&temp);
+        let (install, dump) = (temp.join("YW4 Recomp"), temp.join("dump"));
+        for d in [install.join("data/exefs"), install.join("data/romfs"), dump.join("romfs")] {
+            std::fs::create_dir_all(&d).unwrap();
+        }
+        for f in ["data/exefs/main", "data/exefs/sdk", "data/romfs/a.cpk"] {
+            std::fs::write(install.join(f), b"x").unwrap();
+        }
+        for f in ["main", "main.npdm", "sdk", "prod.keys", "base.nsp", "romfs/a.cpk"] {
+            std::fs::write(dump.join(f), b"x").unwrap();
+        }
+        let mut s = State { install: install.display().to_string(), mode: "folders".into(), ..Default::default() };
+
+        // Locate's paths: the install's own copies (config.toml's exefs_dir, romfs_dir) are never offered
+        s.paths.insert("exefs".into(), install.join("data/exefs").display().to_string());
+        s.paths.insert("romfs".into(), install.join("data/romfs").display().to_string());
+        assert!(originals_of(&s).is_empty());
+        // nor a folder that holds the install
+        s.paths.insert("romfs".into(), temp.display().to_string());
+        assert!(originals_of(&s).is_empty());
+
+        // the player's ExeFS folder with other files in it: only the ExeFS files go, keys and NSPs stay
+        s.paths.insert("exefs".into(), dump.display().to_string());
+        s.paths.insert("romfs".into(), dump.join("romfs").display().to_string());
+        let mut got: Vec<String> = originals_of(&s).iter()
+            .map(|p| p.strip_prefix(&dump).unwrap().display().to_string().replace('\\', "/")).collect();
+        got.sort();
+        assert_eq!(got, ["main", "main.npdm", "romfs", "sdk"]);
+
+        let _ = std::fs::remove_dir_all(&temp);
     }
 }
