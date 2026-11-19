@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<!-- yw4.exe's application manifest (recomp/build.py links it in on Windows). activeCodePage UTF-8 makes the process's
+     "ANSI" code page UTF-8 (Windows 10 1903 and later; older Windows ignore it): fopen, _mkdir, _stat, opendir, getenv
+     and argv then take the UTF-8 paths that SDL_GetBasePath and the launcher's game.ini give. Without it a player's
+     folder with any non-ASCII character ("José", Japanese mod folders) wasn't found (review 2026-11-19). -->
+<assembly manifestVersion="1.0" xmlns="urn:schemas-microsoft-com:asm.v1">
+  <application xmlns="urn:schemas-microsoft-com:asm.v3">
+    <windowsSettings>
+      <activeCodePage xmlns="http://schemas.microsoft.com/SMI/2019/WindowsSettings">UTF-8</activeCodePage>
+    </windowsSettings>
+  </application>
+</assembly>

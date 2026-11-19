@@ -5,6 +5,7 @@
 
 #include <stddef.h>
 #include <stdint.h>
+#include <stdio.h>
 
 #include "c11_keywords.h"
 
@@ -81,6 +82,17 @@ int host_readable(uint64_t addr, uint64_t size);
 int host_write_watch(uint64_t addr, uint64_t size, void (*report)(uint64_t pc, uint64_t addr));
 /* A read watchpoint: report (on the reading thread) up to `reports` reads of [addr, addr + size). 0, or -1. */
 int host_read_watch(uint64_t addr, uint64_t size, long reports, void (*report)(uint64_t pc, uint64_t addr));
+
+/* Writes a file safely: host_file_sync puts f's data on the disk (fflush, then fsync / _commit); host_replace_file
+ * renames tmp over path in one step, so there is never a moment with no file or half a file (Windows' rename()
+ * refuses an existing target). Both 0 on success. Usage: write path.tmp, sync, fclose, replace. */
+int host_file_sync(FILE *f);
+int host_replace_file(const char *tmp, const char *path);
+#ifdef _WIN32
+/* A narrow path (the process's code page, as fopen reads it: UTF-8 with yw4.manifest) as UTF-16 for the _w file
+ * functions; 0 on success, -1 if it doesn't fit in n characters or isn't valid in that code page. */
+int host_wide_path(const char *path, wchar_t *out, int n);
+#endif
 
 /* Relaunches the current process with a fresh ASLR layout (one retry on memory collision). */
 void host_respawn(int argc, char **argv);

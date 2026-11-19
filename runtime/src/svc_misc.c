@@ -25,6 +25,8 @@ static uint32_t naoc = UINT32_MAX;
 #ifdef _WIN32
 #include <io.h>
 #include <wchar.h>
+
+#include "host.h"  /* host_wide_path (not windows.h here: its GPTR clashes with the guest-pointer macro) */
 #define seek64(f, o) _fseeki64(f, (long long)(o), SEEK_SET)
 #else
 #define seek64(f, o) fseeko(f, (off_t)(o), SEEK_SET)
@@ -168,9 +170,11 @@ static void aoc_load(void) {
 #ifdef _WIN32
     /* _wfindfirst64 / _wfopen: add-on NSPs often have Japanese titles in their file names, and UCRT's narrow
      * readdir turns characters outside the active code page into '?' before fopen sees them. */
+    /* The folder name is in the process's code page, as fopen reads it: UTF-8 with yw4.manifest (Windows 10 1903+),
+     * else the system's. mbstowcs in the "C" locale would read each byte as one character, which breaks a UTF-8
+     * "José" folder. */
     wchar_t wdir[1024], pat[1040];
-    size_t wn = mbstowcs(wdir, dir, 1024);
-    if (wn != (size_t)-1 && wn < 1024) {
+    if (host_wide_path(dir, wdir, 1024) == 0) {
         swprintf(pat, 1040, L"%ls\\*", wdir);
         struct _wfinddata64_t fd;
         intptr_t h = _wfindfirst64(pat, &fd);

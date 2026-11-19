@@ -33,6 +33,36 @@ void yw4_exit(int code, const char *file, int line) {
 }
 
 #ifdef _WIN32
+#include <io.h>  /* _commit */
+#else
+#include <unistd.h>  /* fsync */
+#endif
+
+int host_file_sync(FILE *f) {
+    if (fflush(f)) return -1;
+#ifdef _WIN32
+    return _commit(_fileno(f));
+#else
+    return fsync(fileno(f));
+#endif
+}
+
+int host_replace_file(const char *tmp, const char *path) {
+#ifdef _WIN32
+    /* the A form: names in the process's code page, as fopen reads them (UTF-8 with yw4.manifest) */
+    return MoveFileExA(tmp, path, MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH) ? 0 : -1;
+#else
+    return rename(tmp, path);
+#endif
+}
+
+#ifdef _WIN32
+int host_wide_path(const char *path, wchar_t *out, int n) {
+    return MultiByteToWideChar(CP_ACP, MB_ERR_INVALID_CHARS, path, -1, out, n) > 0 ? 0 : -1;
+}
+#endif
+
+#ifdef _WIN32
 #include <process.h>
 #include <windows.h>
 #include <timeapi.h>

@@ -16,6 +16,7 @@ import hashlib
 import json
 import os
 import platform
+import shutil
 import subprocess
 import sys
 import time
@@ -345,19 +346,33 @@ def main(argv: list[str] | None = None) -> int:
         objs.append(gobj)
         if not gobj.exists() or gobj.stat().st_mtime < gsrc.stat().st_mtime:
             todo.append((gsrc, gobj))
-    # The game's icon in the exe (decision 0048): only when tools.yw4.icon made it from the user's own files
+    # Windows resources: the application manifest (runtime/yw4.manifest: UTF-8 as the process's code page, so paths
+    # with non-ASCII characters work), and the game's icon (decision 0048) only when tools.yw4.icon made it from the
+    # user's own files
     ico = cfg.work_dir / "icon" / "yw4.ico"
+    manifest = RUNTIME / "yw4.manifest"
     res = objdir / "icon_res.o"
-    if sys.platform == "win32" and ico.is_file():
-        if not res.exists() or res.stat().st_mtime < ico.stat().st_mtime:
-            rc = objdir / "icon.rc"
-            rc.write_text(f'1 ICON "{ico.as_posix()}"\n')  # resource 1: Explorer's icon and the window's (window.c)
-            r = subprocess.run([str(Path(cc).with_name("llvm-windres.exe")), str(rc), "-O", "coff", "-o", str(res)],
-                               capture_output=True, text=True)
-            if r.returncode:
-                print(f"icon resource failed:\n{r.stderr[-1000:]}", file=sys.stderr)
-                return 1
-        objs.append(res)
+    if sys.platform == "win32":
+        rc = objdir / "icon.rc"
+        text = f'1 24 "{manifest.as_posix()}"\n'  # 24 = RT_MANIFEST, 1 = the manifest Windows reads at process start
+        if ico.is_file():
+            text += f'1 ICON "{ico.as_posix()}"\n'  # resource 1: Explorer's icon and the window's (window.c)
+        inputs = [manifest, *([ico] if ico.is_file() else [])]
+        windres = Path(cc).with_name("llvm-windres.exe")
+        windres = str(windres) if windres.is_file() else shutil.which("llvm-windres") or shutil.which("windres")
+        if not windres:  # a compiler without llvm-mingw's tools: the game still builds, without manifest and icon
+            print("note: no llvm-windres next to the compiler: yw4.exe gets no manifest (non-ASCII paths fail) "
+                  "and no icon", file=sys.stderr)
+            res.unlink(missing_ok=True)
+        else:
+            if (not res.exists() or not rc.is_file() or rc.read_text() != text
+                    or res.stat().st_mtime < max(p.stat().st_mtime for p in inputs)):
+                rc.write_text(text)
+                r = subprocess.run([windres, str(rc), "-O", "coff", "-o", str(res)], capture_output=True, text=True)
+                if r.returncode:
+                    print(f"resource (manifest, icon) failed:\n{r.stderr[-1000:]}", file=sys.stderr)
+                    return 1
+            objs.append(res)
     else:
         res.unlink(missing_ok=True)
 

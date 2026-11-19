@@ -59,6 +59,8 @@ void yw4_sysinfo_dump(void) {
                 (unsigned long)vi.dwMinorVersion, (unsigned long)vi.dwBuildNumber);
     else
         fprintf(stderr, "yw4: system: OS Windows (version not read)\n");
+    /* 65001: UTF-8, from yw4.manifest; anything else: paths with non-ASCII characters may not be found */
+    fprintf(stderr, "yw4: system: code page %u\n", GetACP());
 
     SYSTEM_INFO si;
     GetSystemInfo(&si);

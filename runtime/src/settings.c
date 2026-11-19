@@ -7,6 +7,7 @@
 #include <SDL3/SDL_filesystem.h>
 
 #include "events.h"
+#include "host.h"
 #include "bindings.h"
 #include "framerate.h"
 #include "gpu_dlss.h"
@@ -606,10 +607,33 @@ void settings_load(void) {
     fprintf(stderr, "yw4: settings: %d from %s%s\n", n, path, graphics ? "" : " (graphics not picked yet)");
 }
 
+/* settings_save runs on the window thread (F1/F11 pages) and on the game thread (the name popup's keyboard language,
+ * gamemenu.c): one at a time, or two writers would mix their lines. */
+static HostLock save_lock = HOST_LOCK_INIT;
+static void write_settings(FILE *f);
+
+/* Written to settings.ini.tmp, put on the disk, then renamed over settings.ini in one step: a crash, a force-close
+ * or a power cut in the middle leaves the old file whole, never an empty one that the next start would take for a
+ * first run (graphics and key bindings back to defaults; review 2026-11-19). */
 void settings_save(void) {
     const char *path = settings_file();
-    FILE *f = *path ? fopen(path, "w") : NULL;
-    if (!f) return;
+    if (!*path) return;
+    host_lock(&save_lock);
+    char tmp[1040];
+    snprintf(tmp, sizeof tmp, "%s.tmp", path);
+    FILE *f = fopen(tmp, "w");
+    if (f) {
+        write_settings(f);
+        int bad = ferror(f) || host_file_sync(f);
+        if (fclose(f) || bad || host_replace_file(tmp, path)) {
+            fprintf(stderr, "yw4: settings: couldn't save %s (the last saved file stays)\n", path);
+            remove(tmp);
+        }
+    }
+    host_unlock(&save_lock);
+}
+
+static void write_settings(FILE *f) {
     fprintf(f, "# The settings panel's choices (F1), written when one changes. An environment variable of the same\n"
                "# name wins over its line here.\n");
     for (int i = 0; i < NSETTINGS; i++) {
@@ -640,7 +664,6 @@ void settings_save(void) {
     for (int i = 0; i < BY_HAND; i++)  /* the lines added by hand, as they were */
         if (by_hand_value[i][0]) fprintf(f, "%s=%s\n", by_hand[i], by_hand_value[i]);
     bindings_save(f);
-    fclose(f);
 }
 
 int settings_open(void) { return __atomic_load_n(&panel_open, __ATOMIC_ACQUIRE); }
