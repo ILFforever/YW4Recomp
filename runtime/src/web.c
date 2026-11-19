@@ -90,11 +90,34 @@ void yw4_web_ShowOfflineHtmlPage(CPUState *c) {
         return;
     }
     fclose(f);
+    /* the one-page manual in the site's look (tools/yw4/manual.py, manual.html), at the asked-for page's section
+     * ("manual.htdocs/page08.html" -> manual.html#page08); without it, the game's own page */
+    char one[1024];
+    snprintf(one, sizeof one, "%s/manual.html", dir && *dir ? dir : "work/manual");
+#ifdef _WIN32
+    if (!_fullpath(full, one, sizeof full)) snprintf(full, sizeof full, "%s", one);
+#else
+    if (!realpath(one, full)) snprintf(full, sizeof full, "%s", one);
+#endif
+    char anchor[128] = "";
+    if ((f = fopen(full, "rb")) != NULL) {
+        fclose(f);
+        const char *base = strrchr(doc, '/') ? strrchr(doc, '/') + 1 : doc;
+        size_t len = strcspn(base, ".");
+        if (len && len < sizeof anchor - 1) anchor[0] = '#', memcpy(anchor + 1, base, len), anchor[len + 1] = 0;
+    } else {
+#ifdef _WIN32
+        if (!_fullpath(full, rel, sizeof full)) snprintf(full, sizeof full, "%s", rel);
+#else
+        if (!realpath(rel, full)) snprintf(full, sizeof full, "%s", rel);
+#endif
+    }
     file_url(full, url, sizeof url);
+    strncat(url, anchor, sizeof url - strlen(url) - 1);
     int ok = SDL_OpenURL(url);
     fprintf(stderr, "yw4: web: the game's page %s %s %s\n", doc, ok ? "opened in the browser:" : "couldn't be opened:",
             ok ? url : SDL_GetError());
     if (!ok) popup("The manual couldn't be opened", "Your web browser didn't open the manual. It is in the game's "
-                                                    "folder: work/manual/manual.htdocs/index.html.");
+                                                    "folder: work/manual/manual.html.");
     c->x[0] = 0;
 }
