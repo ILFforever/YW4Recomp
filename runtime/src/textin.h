@@ -19,6 +19,9 @@ typedef struct {
     int cursor;     /* a byte offset at the start of a character */
     int sel_anchor; /* selection anchor; selection is [min(sel_anchor, cursor), max(sel_anchor, cursor)) */
     int max_chars;  /* at most this many characters (0: no limit beyond TEXTIN_MAX) */
+    int bmp_only;   /* only characters below U+10000, and no emoji joiners: the game's names (its font has no emoji,
+                     * and its keyboard answer and name check are UTF-16; review 2026-11-19: an emoji became
+                     * a random kanji in the save). Others are left out as they are typed or pasted. */
 } TextField;
 
 enum {

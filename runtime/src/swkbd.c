@@ -46,6 +46,9 @@ int yw4_hook_kbd_fullwidth(CPUState *ctx) {
         int k = 1;
         for (; k < len && (src[k] & 0xc0) == 0x80; k++) c = c << 6 | (src[k] & 0x3f);
         src += k;
+        /* U+10000 and up, or a broken sequence: left out. The 3-byte output below kept only its low 16 bits, so
+         * an emoji became some other character in the save (review 2026-11-19); the name box keeps them out too. */
+        if (c >= 0x10000 || k < len || (len == 1 && c >= 0x80)) continue;
         /* the game's table (sorted by its first column), not for ASCII */
         if (c >= 0x80)
             for (int lo = 0, hi = ENTRIES - 2; lo <= hi;) {  /* the last entry is the 0, 0 end */
@@ -95,6 +98,10 @@ static int check_name(CPUState *c, const uint8_t *a, const char *name, int utf8,
         for (const unsigned char *p = (const unsigned char *)name; *p && n + 1 < room;) {
             uint32_t cp = *p;
             int len = 1;
+            if (cp >= 0xF0) {  /* U+10000 and up: left out whole (the name box doesn't take them either) */
+                for (p++; (*p & 0xC0) == 0x80; p++) {}
+                continue;
+            }
             if (cp >= 0xE0) cp = (cp & 15) << 12 | (p[1] & 63) << 6 | (p[2] & 63), len = 3;
             else if (cp >= 0xC0) cp = (cp & 31) << 6 | (p[1] & 63), len = 2;
             if (max > 0 && (int)chars >= max) break;
@@ -347,6 +354,10 @@ void yw4_swkbd_ShowKeyboard(CPUState *c) {
         for (const unsigned char *p = (const unsigned char *)name; buf && *p && n + 1 < room;) {
             uint32_t cp = *p;
             int len = 1;
+            if (cp >= 0xF0) {  /* U+10000 and up: left out whole (the name box doesn't take them either) */
+                for (p++; (*p & 0xC0) == 0x80; p++) {}
+                continue;
+            }
             if (cp >= 0xE0) cp = (cp & 15) << 12 | (p[1] & 63) << 6 | (p[2] & 63), len = 3;
             else if (cp >= 0xC0) cp = (cp & 31) << 6 | (p[1] & 63), len = 2;
             if (max > 0 && (int)chars >= max) break;

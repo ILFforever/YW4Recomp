@@ -281,6 +281,7 @@ void gamemenu_prompt_begin(const char *title, int max_chars, const char *fallbac
     prompt_label = strstr(low, "password") ? "Password" : strstr(low, "code") ? "Code" : "Name";
     textin_clear(&prompt_text);
     prompt_text.max_chars = max_chars > 0 ? max_chars : 0;
+    prompt_text.bmp_only = 1;  /* the game's text: no emoji (textin.h) */
     /* A name: the language picked last; before any pick, 日本語 in the Japanese game, English with a translation mod
      * (it has its own character names, swkbd.c reads them from the same file). Passwords and codes: English. On a
      * kana page the cursor starts on あ itself (the top right), on English on Q. */

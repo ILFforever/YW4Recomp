@@ -69,6 +69,18 @@ void textin_type(const char *s) {
     int n = 0;
     for (const unsigned char *p = (const unsigned char *)s; *p && n < (int)sizeof add - 1; p++) {
         unsigned char ch = *p;
+        if (f->bmp_only && ch >= 0x80) {  /* a whole character at a time: kept, or left out with all its bytes */
+            int len = ch >= 0xf0 ? 4 : ch >= 0xe0 ? 3 : ch >= 0xc0 ? 2 : 1;
+            uint32_t c = len == 1 ? 0xfffd : ch & (0x3f >> (len - 1));
+            int k = 1;
+            for (; k < len && (p[k] & 0xc0) == 0x80; k++) c = c << 6 | (p[k] & 0x3f);
+            /* U+10000 and up (emoji), a broken sequence, and the joiners that build emoji out of other ones (zero
+             * width joiner, variation selectors, keycap): an emoji pasted whole leaves nothing behind */
+            int drop = len == 4 || len == 1 || k < len || c == 0x200d || (c >= 0xfe00 && c <= 0xfe0f) || c == 0x20e3;
+            if (!drop && n + len < (int)sizeof add) memcpy(add + n, p, (size_t)len), n += len;
+            p += k - 1;
+            continue;
+        }
         if (ch == '\r') continue;
         if (ch == '\n' || ch == '\t') ch = ' ';
         else if (ch < 32 || ch == 127) continue;
