@@ -22,17 +22,32 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  # The compiler and glslang a Linux player without them gets (decision 0083: Zig 0.17.1's Clang 22 and Khronos'
+  # glslang, pinned by SHA-256), the Bazzite / SteamOS path; no apt, whose mirror once held a run up 12 minutes
+  # (2026-11-19). The distributions' own Clang 19 has its own weekly workflow (linux-system-clang.yml).
   linux:
-    name: Linux (Clang 19)
+    name: Linux (our tools, Clang 22)
     runs-on: ubuntu-24.04
-    env:
-      CC: clang-19
     steps:
       - uses: actions/checkout@v4
-      - name: Compiler and glslang
+      - uses: actions/cache@v4
+        with:
+          path: ${{ runner.temp }}/linux-tools
+          key: linux-tools-${{ hashFiles('tools/yw4/deps.py') }}
+      - name: Compiler and glslang (our downloads)
         run: |
-          sudo apt-get update -qq
-          sudo apt-get install -y -qq clang-19 glslang-tools
+          python3 - <<'EOF'
+          import os
+          from pathlib import Path
+          from tools.yw4 import deps
+          tools = Path(os.environ["RUNNER_TEMP"]) / "linux-tools"
+          cc, glslang = deps.fetch_zig(tools), deps.fetch_glslang_linux(tools)
+          with open(os.environ["GITHUB_ENV"], "a") as f:
+              f.write(f"CC={cc}\n")
+          with open(os.environ["GITHUB_PATH"], "a") as f:  # ahead of anything the image has
+              f.write(f"{glslang.parent}\n")
+          print(cc, glslang)
+          EOF
       - name: Compile the runtime, musl's math and our shaders
         run: python3 -m recomp.ci
       - name: Tests

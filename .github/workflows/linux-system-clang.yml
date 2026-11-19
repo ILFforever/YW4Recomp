@@ -1,0 +1,32 @@
+# Linux with the distribution's own compiler: Clang 19 and glslang from Ubuntu's packages, as on Arch, Fedora and
+# Debian players' PCs, which build with what their system has (decision 0083 downloads ours only where it's
+# missing). Build check (build.yml) uses our downloaded tools on every push; this one runs weekly, on version tags
+# and by hand, so it doesn't wait on apt's mirror every time (it once took 12 minutes, 2026-11-19).
+name: Linux (system Clang 19)
+
+on:
+  schedule:
+    - cron: "17 3 * * 1"  # Mondays, 03:17 UTC
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  linux:
+    name: Linux (system Clang 19)
+    runs-on: ubuntu-24.04
+    env:
+      CC: clang-19
+    steps:
+      - uses: actions/checkout@v4
+      - name: Compiler and glslang (Ubuntu's packages)
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq clang-19 glslang-tools
+      - name: Compile the runtime, musl's math and our shaders
+        run: python3 -m recomp.ci
+      - name: Tests
+        run: python3 -m unittest discover -s tests -t .
