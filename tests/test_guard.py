@@ -16,9 +16,12 @@ class GuardTest(unittest.TestCase):
             self.assertIn("home folder", guard.problem("notes.md", text), text)
 
     def test_placeholders_and_ci_runners_pass(self):
-        for text in (rb"C:\Users\<name>\AppData", b"C:/Users/runneradmin/work", rb"C:\Users\RUNNER~1\x",
-                     rb"C:\Users\%USERNAME%\x", rb"C:\Users\Public\x"):
-            self.assertIsNone(guard.problem("notes.md", text), text)
+        # this PC's own home folder is its own check (test_own_home_folder): pinned here, since on GitHub's Windows
+        # machines it really is C:\Users\runneradmin
+        with mock.patch.object(os.path, "expanduser", return_value="/home/someone-else"):
+            for text in (rb"C:\Users\<name>\AppData", b"C:/Users/runneradmin/work", rb"C:\Users\RUNNER~1\x",
+                         rb"C:\Users\%USERNAME%\x", rb"C:\Users\Public\x"):
+                self.assertIsNone(guard.problem("notes.md", text), text)
 
     def test_own_home_folder(self):
         with mock.patch.object(os.path, "expanduser", return_value="/home/someone"):
