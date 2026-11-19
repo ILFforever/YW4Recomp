@@ -34,6 +34,7 @@
 
 #include <SDL3/SDL.h>
 
+#include "kernel.h"
 #include "mousemenu.h"
 #include "window.h"
 #include "yw4rt.h"
@@ -46,7 +47,10 @@ enum { PAGE_NONE, PAGE_OPENING, PAGE_OPEN };  /* a page over the active screen: 
 /* SCR_COUNT: slots past the focus control's own item count (+0x138) are not slots (a message box with one button
  * on the Yes / No row, a room list with fewer rooms than rows) */
 /* SCR_WHEEL_LR: the wheel steps left / right along a row (a message box's Yes / No), not up / down or the Pad's pages */
-enum { SCR_HOVER = 1 << 0, SCR_CLICK = 1 << 1, SCR_WHEEL = 1 << 2, SCR_COUNT = 1 << 3, SCR_WHEEL_LR = 1 << 4 };
+/* SCR_CLICK_ANY: a left click off the slots picks the highlighted one (A), as on a box (owner, 2026-11-20: the room
+ * list) */
+enum { SCR_HOVER = 1 << 0, SCR_CLICK = 1 << 1, SCR_WHEEL = 1 << 2, SCR_COUNT = 1 << 3, SCR_WHEEL_LR = 1 << 4,
+       SCR_CLICK_ANY = 1 << 5 };
 
 typedef struct {
     const char *name;
@@ -110,13 +114,20 @@ static const Screen screens[] = {
      * 2026-11-19 on the owner's F12 shots of a trade (work/screenshots frame_003228 .. 010759, 1280 x 720):
      * the start: Swap Locally (270, 290), Swap Online (270, 376), rows about 536 x 64 */
     {"trade_start",      0x14c8de8u, 0xb000c468u, 0,           1, 2, 270.0f, 290.0f,   0.0f,  86.0f, 268.0f,  32.0f, SCR_HOVER | SCR_CLICK | SCR_WHEEL | SCR_COUNT},
-    /* the room list: Recruit by myself (270, 192), the first host (270, 310); more hosts not measured yet (one only) */
-    {"trade_rooms",      0x14c8de8u, 0x2649a77au, 0,           1, 2, 270.0f, 192.0f,   0.0f, 118.0f, 200.0f,  30.0f, SCR_HOVER | SCR_CLICK | SCR_WHEEL | SCR_COUNT},
+    /* the room list: Recruit by myself (270, 192), the first host (270, 310); more hosts not measured yet (one only).
+     * Two controls, one list here: Recruit is its own control (TRADE_RECRUIT_HASH), the hosts are this one (its
+     * +0x13c counts from the first host, +0x13a the hosts); see rooms_recruit. Owner's F12 2026-11-20: Player2's bar
+     * x 59 .. 444, y 282 .. 337 */
+    {"trade_rooms",      0x14c8de8u, 0x2649a77au, 0,           1, 2, 270.0f, 192.0f,   0.0f, 118.0f, 200.0f,  30.0f,
+     SCR_HOVER | SCR_CLICK | SCR_WHEEL | SCR_COUNT | SCR_CLICK_ANY},
     /* which Yo-kai to offer: 8 rows from (290, 192), step 58.65, about 450 wide (its list view: 0xd8deebe3) */
     {"trade_yokai",      0x14c8de8u, 0xceb4579bu, 0xd8deebe3u, 1, 8, 290.0f, 192.0f,   0.0f, 58.65f, 225.0f,  27.5f, SCR_HOVER | SCR_CLICK | SCR_WHEEL},
     /* the swap screen's Swap button (640, 385), about 240 x 52 (its focus hash: the last one-item control the screen
      * focused before Swap was pressed; to confirm in a run) */
     {"trade_swap",       0x14c8de8u, 0x887ea52eu, 0,           1, 1, 640.0f, 385.0f,   0.0f,   0.0f, 120.0f,  26.0f, SCR_HOVER | SCR_CLICK},
+    /* the trade's result: the Yo-kai that came, talking (vt main+0x14c8598, one item; owner's F12 2026-11-20): a
+     * click anywhere goes on, as A */
+    {"trade_result",     0x14c8598u, 0x5015be9du, 0,           1, 1, 640.0f, 360.0f,   0.0f,   0.0f, 640.0f, 360.0f, SCR_CLICK},
     /* the game's message box (vt main+0x14bfa78): Yes (490, 450), No (790, 450), about 240 x 52, the same in every
      * box of the trade; a box with one button takes the Yes spot (SCR_COUNT) */
     {"message_yes_no",   0x14bfa78u, 0xf51efb06u, 0,           2, 1, 490.0f, 450.0f, 300.0f,   0.0f, 120.0f,  26.0f,
@@ -132,8 +143,22 @@ enum { NSCREENS = sizeof screens / sizeof *screens };
  * through OnChangeFocus (control 0x5b8ae332 keeps focus index 0; replay runs Q and R on 2026-11-16: screenshots show the
  * highlight move Cole -> Summer -> Hammy -> ...). So the mouse keeps its own count: 0 when the screen opens from the Pad,
  * +1 for each RIGHT and -1 for each LEFT the mouse sends. Presses by the player's keys are not counted. */
+/* Ark Swap's room list is two controls: Recruit by myself and the hosts' list. The mouse takes them as one list,
+ * slot 0 Recruit and slot 1 + n the host n, so moving between them is a D-pad step like any other (owner, 2026-11-20:
+ * the mouse read Player2's focus as Recruit's, so it pressed down on Player2 and did nothing on Recruit). */
+#define TRADE_VTABLE 0x14c8de8u
+#define TRADE_ROOMS_HASH 0x2649a77au
+#define TRADE_RECRUIT_HASH 0xd36583bbu
+static int rooms_recruit;     /* the room list's focus is on Recruit by myself */
+/* The Ark Swap screen a message box opened over: a pick in the box closes it and the screen is back, but the game
+ * focuses nothing then (its focus never moved), so the mouse kept working the gone box (owner's F12, 2026-11-20:
+ * the room list after a Yes / No: the wheel stepped left / right, clicks missed). Put back on the box's pick. */
+static int under_idx = -1, under_recruit;
+static uint64_t under_menu, under_ctrl, under_lv;
+static int is_trade_rooms(const Screen *s) { return s && s->vtable == TRADE_VTABLE && s->hash == TRADE_ROOMS_HASH; }
+
 #define WATCH_SKILLS_VTABLE 0x14c6b78u
-static int wsk_index;         /* the character highlighted on Watch Skills, by the mouse's count */
+static int wsk_index;        /* the character highlighted on Watch Skills, by the mouse's count */
 
 /* Written by the hooks (the game's threads), read by the window's thread. */
 static int pad_open;          /* the Pad (or a page it opened) is on screen */
@@ -376,8 +401,23 @@ int yw4_hook_menu_focus(CPUState *ctx) {
         __atomic_store_n(&pad_open, 1, __ATOMIC_RELEASE);
     if (!__atomic_load_n(&pad_open, __ATOMIC_ACQUIRE)) return 0;
 
+    /* the room list's Recruit row: the hosts' screen, its control (for the hosts' count), and slot 0 */
+    const int on_recruit = vt == TRADE_VTABLE && hash == TRADE_RECRUIT_HASH;
+    if (on_recruit) hash = TRADE_ROOMS_HASH;
     int idx = find_screen(vt, hash);
     if (idx >= 0) {
+        if (screens[idx].vtable == GENERAL_WINDOW_VTABLE) {  /* a box over an Ark Swap screen: remember that screen */
+            int prev = __atomic_load_n(&active_idx, __ATOMIC_ACQUIRE);
+            if (prev >= 0 && screens[prev].vtable == TRADE_VTABLE) {
+                under_idx = prev, under_recruit = __atomic_load_n(&rooms_recruit, __ATOMIC_ACQUIRE);
+                under_menu = __atomic_load_n(&active_menu, __ATOMIC_ACQUIRE);
+                under_ctrl = __atomic_load_n(&active_ctrl, __ATOMIC_ACQUIRE);
+                under_lv = __atomic_load_n(&active_lv, __ATOMIC_ACQUIRE);
+            }
+        } else {
+            under_idx = -1;
+        }
+        __atomic_store_n(&rooms_recruit, on_recruit, __ATOMIC_RELEASE);
         uint64_t prev_menu = __atomic_load_n(&active_menu, __ATOMIC_ACQUIRE);
         int prev_idx = __atomic_load_n(&active_idx, __ATOMIC_ACQUIRE);
         /* CMemberMenu initializes both members_watcher and members_grid during open,
@@ -451,6 +491,19 @@ int yw4_hook_menu_back(CPUState *ctx) {
     return 0;
 }
 
+/* The box over an Ark Swap screen is gone: that screen is the mouse's again */
+static void box_gone(const char *why) {
+    __atomic_store_n(&rooms_recruit, under_recruit, __ATOMIC_RELEASE);
+    __atomic_store_n(&active_ctrl, under_ctrl, __ATOMIC_RELEASE);
+    __atomic_store_n(&active_lv, under_lv, __ATOMIC_RELEASE);
+    __atomic_store_n(&active_menu, under_menu, __ATOMIC_RELEASE);
+    __atomic_store_n(&active_idx, under_idx, __ATOMIC_RELEASE);
+    __atomic_store_n(&page, PAGE_NONE, __ATOMIC_RELEASE);
+    __atomic_store_n(&wheel_steps, 0, __ATOMIC_RELEASE);
+    if (menu_log_on()) fprintf(stderr, "yw4: mouse menus: %s: %s again\n", why, screens[under_idx].name);
+    under_idx = -1;
+}
+
 /* OnDecideFocus (main+0x6c6ba0): an item or icon was chosen; a page or dialog may open over the screen. */
 int yw4_hook_menu_decide(CPUState *ctx) {
     if (!enabled() || !ctx->x[0]) return 0;
@@ -460,6 +513,12 @@ int yw4_hook_menu_decide(CPUState *ctx) {
         fprintf(stderr, "yw4: menu_decide: menu=%#llx vt=%#llx\n", (unsigned long long)menu, (unsigned long long)vt);
     if (vt == STOPWATCH_VTABLE || vt == STOPWATCH_MEMBERS_VTABLE || vt == STOPWATCH_ITEMS_VTABLE)
         __atomic_store_n(&stopwatch_off_at, 0, __ATOMIC_RELEASE);  /* a pick in it: still open */
+    if (vt == GENERAL_WINDOW_VTABLE && under_idx >= 0 && menu == __atomic_load_n(&active_menu, __ATOMIC_ACQUIRE)) {
+        /* a pick in a box over an Ark Swap screen: the box closes, the screen under it is back (a box or page the
+         * pick opens focuses itself, and takes over) */
+        box_gone("a pick in the box");
+        return 0;
+    }
     if (menu == __atomic_load_n(&active_menu, __ATOMIC_ACQUIRE) &&
         __atomic_load_n(&page, __ATOMIC_ACQUIRE) == PAGE_NONE) {
         __atomic_store_n(&page_base, __atomic_load_n(&layers_open, __ATOMIC_ACQUIRE), __ATOMIC_RELEASE);
@@ -545,6 +604,12 @@ static int screen_focus(const Screen *s, uint64_t ctrl, uint64_t lv) {
         if (top < 0) top = 0;
         int vis = sel - top;
         return vis >= 0 && vis < s->cols * s->rows ? vis : -1;
+    }
+    if (is_trade_rooms(s)) {  /* Recruit is slot 0, the host n slot 1 + n */
+        if (__atomic_load_n(&rooms_recruit, __ATOMIC_ACQUIRE)) return 0;
+        if (!ctrl) return -1;
+        int f = 1 + (int)ld16(ctrl + 0x13c);
+        return f < s->cols * s->rows ? f : -1;
     }
     if (!ctrl) return -1;
     int f = (int)ld16(ctrl + 0x13c);
@@ -647,6 +712,17 @@ uint64_t mousemenu_update(float mx, float my, int w, int h, uint32_t mouse_butto
         return 0;
     }
     *want_cursor = 1;
+    /* a box over an Ark Swap screen that closed with no pick (the room list's after its scan; owner's runs 2026-11-20:
+     * the wheel worked there only after opening and backing out of Recruit's box): the game destroyed it, so its
+     * object is no longer a box (the destructors set its type back to a base class's). A box waiting for its click
+     * (Please select a Yo-kai to swap) stays one until then. The screen's own layer events can't tell the two apart. */
+    if (under_idx >= 0) {
+        int cur = __atomic_load_n(&active_idx, __ATOMIC_ACQUIRE);
+        uint64_t box = __atomic_load_n(&active_menu, __ATOMIC_ACQUIRE);
+        if (cur >= 0 && screens[cur].vtable == GENERAL_WINDOW_VTABLE && box &&
+            ld64(box) - yw4_image_base != GENERAL_WINDOW_VTABLE)
+            box_gone("the box was destroyed");
+    }
     int idx = __atomic_load_n(&active_idx, __ATOMIC_ACQUIRE);
     uint64_t menu = __atomic_load_n(&active_menu, __ATOMIC_ACQUIRE);
     const Screen *s = idx >= 0 && idx < NSCREENS ? &screens[idx] : NULL;
@@ -667,6 +743,16 @@ uint64_t mousemenu_update(float mx, float my, int w, int h, uint32_t mouse_butto
     int front = s && __atomic_load_n(&page, __ATOMIC_ACQUIRE) == PAGE_NONE;
     uint64_t ctrl = __atomic_load_n(&active_ctrl, __ATOMIC_ACQUIRE);
     uint64_t lv = __atomic_load_n(&active_lv, __ATOMIC_ACQUIRE);
+    /* the room list: Up from the first host to Recruit focuses nothing in the game (its focus comes only on the way
+     * down; nothing in either control or the menu changes either, 2026-11-20 probe), so an Up the game reads there,
+     * from any device or the mouse, is the move to Recruit. A host's focus takes it back (yw4_hook_menu_focus). */
+    if (is_trade_rooms(s)) {
+        static uint64_t was;
+        const uint64_t b = hid_current_buttons(), up = (1ull << 13) | (1ull << 17);  /* D-pad Up, left stick up */
+        if ((b & up) && !(was & up) && front && ctrl && ld16(ctrl + 0x13c) == 0)
+            __atomic_store_n(&rooms_recruit, 1, __ATOMIC_RELEASE);
+        was = b;
+    }
     int focus = front ? screen_focus(s, ctrl, lv) : -1;
     if (mx != last_x || my != last_y) moved = 1, last_x = mx, last_y = my;
     /* what the mouse asks for, every update (also while a press is under way): a right click is B; on an active
@@ -676,6 +762,8 @@ uint64_t mousemenu_update(float mx, float my, int w, int h, uint32_t mouse_butto
     int under = front ? slot_at(s, lv, mx, my, w, h) : -1;
     if (under >= 0 && (s->flags & SCR_COUNT) && ctrl) {  /* fewer items than slots: the rest are not slots */
         int16_t items = (int16_t)ld16(ctrl + 0x138);
+        /* the room list: Recruit and the hosts (+0x13a: 1 with one host, where +0x138 was 8; none not seen yet) */
+        if (is_trade_rooms(s)) items = (int16_t)(1 + ((int16_t)ld16(ctrl + 0x13a) > 0 ? ld16(ctrl + 0x13a) : 0));
         if (items > 0 && under >= items) under = -1;
     }
     /* the game's message box with one item ("Connection will now begin", "Finished saving": no button drawn, or one
@@ -716,6 +804,9 @@ uint64_t mousemenu_update(float mx, float my, int w, int h, uint32_t mouse_butto
         __atomic_store_n(&wheel_steps, 0, __ATOMIC_RELEASE);
     } else if ((down & SDL_BUTTON_LMASK) && under >= 0 && (s->flags & SCR_CLICK)) {
         click_target = under;
+        target_is_sib = 0;
+    } else if ((down & SDL_BUTTON_LMASK) && under < 0 && front && focus >= 0 && (s->flags & SCR_CLICK_ANY)) {
+        click_target = focus;  /* off the rows: the highlighted one, as A */
         target_is_sib = 0;
     }
     if (under >= 0) {
