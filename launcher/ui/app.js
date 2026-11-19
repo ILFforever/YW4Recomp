@@ -414,14 +414,18 @@ $('install-change').addEventListener('click', async () => {
   if (!T || !T.dialog) return;
   const dir = await T.dialog.open({ title: 'Install to', directory: true });
   if (typeof dir === 'string' && dir) {
-    let next = /YW4 Recomp$/i.test(dir) ? dir : dir.replace(/[\\/]$/, '') + '\\YW4 Recomp';
+    // Linux's separator is /: a '\\YW4 Recomp' there made one folder called "Games\YW4 Recomp" (review 2026-11-19)
+    const SEP = LINUX ? '/' : '\\';
+    let next = /YW4 Recomp$/i.test(dir) ? dir : dir.replace(/[\\/]+$/, '') + SEP + 'YW4 Recomp';
     if (rebuildFlow || optionsFromPlay) {  // this install has a game already
-      const low = (p) => p.replace(/[\\/]+$/, '').toLowerCase(), old = low(inst.install);
-      if (low(dir) === old) next = inst.install;  // its own folder again: no new folder inside it
-      else if ((low(next) + '\\').startsWith(old + '\\')) {
+      // one spelling per folder for comparing: no slash at the end; on Windows every slash a \ and case ignored
+      const key = (p) => { p = p.replace(/[\\/]+$/, ''); return LINUX ? p : p.replace(/\//g, '\\').toLowerCase(); };
+      const old = key(inst.install);
+      if (key(dir) === old) next = inst.install;  // its own folder again: no new folder inside it
+      else if ((key(next) + SEP).startsWith(old + SEP)) {
         popup('Choose another folder', 'That is inside your game folder. Deleting the old copy would delete the new one too.');
         return;
-      } else if (low(next) !== old && !await confirmNewFolder(next)) return;
+      } else if (key(next) !== old && !await confirmNewFolder(next)) return;
     }
     options.install = next;
     refreshSpace();
