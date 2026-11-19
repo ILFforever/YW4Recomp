@@ -366,15 +366,29 @@ def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("what", nargs="?", choices=("launcher", "game"), default="launcher")
     ap.add_argument("--stage-only", action="store_true")
-    ap.add_argument("--ref", default="HEAD", help="the commit whose build code ships (default: HEAD)")
+    ap.add_argument("--ref", help="the commit whose build code ships (default: HEAD); with it, launcher/ on disk must "
+                                  "match that commit too")
+    ap.add_argument("--allow-dirty", action="store_true",
+                    help="build the launcher even though launcher/ on disk differs from --ref")
     args = ap.parse_args()
+    ref = args.ref or "HEAD"
     if args.what == "game":
-        game(args.ref)
+        game(ref)
         return 0
-    stage(args.ref)
+    stage(ref)
     if not args.stage_only:
-        if git("status", "--porcelain", "--", "launcher"):
-            print("note: launcher/ has uncommitted changes, and they will be in this build", file=sys.stderr)
+        # builder/src comes from `ref` (git archive), but the launcher's own Rust and UI are built from the files on
+        # disk. A release (--ref launcher-vX.Y.Z) is built on Windows and on Linux from the same tag, so both builds
+        # have to be that tag's launcher, not whatever the working tree holds (review 2026-11-19: uncommitted
+        # launcher/ui edits would have shipped in one platform's download only).
+        differs = git("diff", "--name-only", ref, "--", "launcher").decode().split()
+        differs += git("ls-files", "--others", "--exclude-standard", "--", "launcher").decode().split()
+        if differs and args.ref and not args.allow_dirty:
+            raise SystemExit(f"launcher/ on disk differs from {ref} ({', '.join(differs[:5])}"
+                             f"{', ...' if len(differs) > 5 else ''}): check out {ref} (a worktree is fine) or pass "
+                             "--allow-dirty")
+        if differs:
+            print(f"note: launcher/ differs from {ref}, and the files on disk will be in this build", file=sys.stderr)
         build()
     return 0
 
