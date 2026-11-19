@@ -24,4 +24,8 @@ void ldn_relay_closed(uint8_t reason);                 /* the room is gone for u
 void socket_relay_packet(uint32_t dst, uint16_t dport, uint32_t src, uint16_t sport, const uint8_t *data, size_t n);
 uint32_t ldn_my_address(void);                         /* our address in the room, 0 when in none */
 
+/* The room we host or joined, for Discord status (discord_game.c): 1 and its players now, its most players and
+ * the game's scene number for it (a trade: scene 1, 2 players at most); 0 in none. Any thread. */
+int ldn_room(int *players, int *max_players, int *scene);
+
 #endif

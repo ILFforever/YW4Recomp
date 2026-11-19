@@ -169,6 +169,15 @@ int main(void) {
     g.where = DISCORD_AT_START, g.rank = 3;  /* starting up: the game's name alone */
     discord_presence_text(&g, 0, d, sizeof d, s, sizeof s);
     CHECK(!strcmp(d, "") && !strcmp(s, ""));
+    g.where = DISCORD_AT_TRADE, g.players = 1, g.max_players = 2;  /* local play (decision 0082): a trade's room */
+    discord_presence_text(&g, 0, d, sizeof d, s, sizeof s);
+    CHECK(!strcmp(d, "\xf0\x9f\x94\x84 Waiting for a trade") && !strcmp(s, "\xe2\x8c\x9a Watch Rank B"));
+    g.players = 2;
+    discord_presence_text(&g, 0, d, sizeof d, s, sizeof s);
+    CHECK(!strcmp(d, "\xf0\x9f\x94\x84 Trading Yo-kai with a friend"));
+    g.where = DISCORD_AT_TOGETHER, g.players = 3, g.max_players = 4;  /* another room: its players */
+    discord_presence_text(&g, 0, d, sizeof d, s, sizeof s);
+    CHECK(!strcmp(d, "\xf0\x9f\x91\xa5 Playing together (3 of 4)"));
     DiscordActivity b = {.details = "x", .button_label = "Get YW4 Recomp", .button_url = "https://example.org/"};
     discord_activity_json(j, sizeof j, 42, &b, 9);
     CHECK(strstr(j, "\"buttons\":[{\"label\":\"Get YW4 Recomp\",\"url\":\"https://example.org/\"}]"));

@@ -439,6 +439,18 @@ void yw4_ldn_GetDisconnectReason(CPUState *c) {
     c->x[0] = (uint64_t)(int64_t)disconnect_reason;
 }
 
+int ldn_room(int *players, int *max_players, int *scene) {
+    host_lock(&lock);
+    int in = state == ST_AP_CREATED || state == ST_STATION_CONNECTED;
+    if (in) {  /* NetworkInfo: the scene in its NetworkId (+0xA), the counts in its LDN part (+0x50: +0x16, +0x17) */
+        uint16_t s;
+        memcpy(&s, network + 0xA, 2);
+        *scene = s, *max_players = network[0x50 + 0x16], *players = network[0x50 + 0x17];
+    }
+    host_unlock(&lock);
+    return in;
+}
+
 /* ---- what the relay tells (its reader thread) */
 
 void ldn_relay_netinfo(const uint8_t *info) {

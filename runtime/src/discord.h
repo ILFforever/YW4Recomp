@@ -14,10 +14,13 @@
 #include <stddef.h>
 
 /* Where the player is, the area's name and the Watch Rank (discord_game.c reads them from the game). */
-enum { DISCORD_AT_START, DISCORD_AT_TITLE, DISCORD_AT_FIELD, DISCORD_AT_BATTLE };
+enum { DISCORD_AT_START, DISCORD_AT_TITLE, DISCORD_AT_FIELD, DISCORD_AT_BATTLE,
+       DISCORD_AT_TRADE,      /* in a trade's room (local play, decision 0082) */
+       DISCORD_AT_TOGETHER }; /* in another local play room (Blasters: its scene number not measured yet) */
 enum { DISCORD_AREA_MAX = 96 };
 typedef struct {
     int where;                    /* DISCORD_AT_... */
+    int players, max_players;     /* DISCORD_AT_TRADE / TOGETHER: the room's players now and at most */
     int rank;                     /* the Watch Rank, 0 E .. 5 S (3: B); -1 not known */
     char area[DISCORD_AREA_MAX];  /* UTF-8; "" not known */
     char sub[DISCORD_AREA_MAX];   /* the zone in it ("Meeting Bridge"), UTF-8; "" none */

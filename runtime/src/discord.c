@@ -109,6 +109,8 @@ static void drain(DiscordIpc *c) {
 #define E_SWORDS "\xe2\x9a\x94\xef\xb8\x8f "   /* crossed swords */
 #define E_HOME "\xf0\x9f\x8f\xa0 "             /* house */
 #define E_WATCH "\xe2\x8c\x9a "                /* watch */
+#define E_TRADE "\xf0\x9f\x94\x84 "            /* counterclockwise arrows */
+#define E_FRIENDS "\xf0\x9f\x91\xa5 "          /* busts in silhouette */
 
 void discord_presence_text(const DiscordGame *g, unsigned flavor, char *details, size_t dn, char *state, size_t sn) {
     static const char ranks[] = "EDCBAS";
@@ -135,6 +137,13 @@ void discord_presence_text(const DiscordGame *g, unsigned flavor, char *details,
         break;
     case DISCORD_AT_FIELD:
         if (place[0]) snprintf(details, dn, field[flavor % DISCORD_FLAVORS], place);
+        break;
+    case DISCORD_AT_TRADE:  /* the room open, alone: the host waits for the other player */
+        snprintf(details, dn, g->players >= 2 ? E_TRADE "Trading Yo-kai with a friend" : E_TRADE "Waiting for a trade");
+        break;
+    case DISCORD_AT_TOGETHER:
+        if (g->max_players > 1) snprintf(details, dn, E_FRIENDS "Playing together (%d of %d)", g->players, g->max_players);
+        else snprintf(details, dn, E_FRIENDS "Playing together");
         break;
     default: return;  /* starting up: the game's name alone */
     }
