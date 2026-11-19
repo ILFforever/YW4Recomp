@@ -24,7 +24,7 @@ from pathlib import Path
 
 import shutil
 
-from tools.yw4 import config, deps, progress
+from tools.yw4 import config, deps, progress, system
 from tools.yw4 import fsr_linux as fsr_linux_build
 
 from . import check
@@ -277,20 +277,23 @@ def main(argv: list[str] | None = None) -> int:
             includes.append(f"-I{sl / 'include'}")
             feature_defs.append("-DYW4_STREAMLINE=1")
     else:
-        try:
-            pc = lambda *a: subprocess.run(["pkg-config", *a, "sdl3"], capture_output=True, text=True, check=True).stdout.split()
-            includes += pc("--cflags")
-            sdl_libs = pc("--libs")
-        except (subprocess.CalledProcessError, FileNotFoundError):
-            print("error: SDL3 not found via pkg-config (install sdl3 / libsdl3-dev)", file=sys.stderr)
+        # the system's SDL3 (pkg-config) or the launcher's own copy (decisions 0071, 0083: tools/yw4/system.py)
+        found = system.sdl3()
+        if not found:
+            print("error: SDL3 not found (install sdl3 / libsdl3-dev / SDL3-devel)", file=sys.stderr)
             return 1
+        sdl_cflags, sdl_libs, sdl_libdir = found
+        includes += sdl_cflags
         # NVIDIA DLSS upscaling on Linux (decision 0073): NVIDIA's static NGX library (built with GCC: C++ runtime and
         # dlopen) and its DLSS library, copied next to yw4 below. No frame generation or Reflex: Streamline is Windows only
-        if not args.no_dlss and platform.machine() in ("x86_64", "AMD64"):
+        cxx_rt = system.cxx_runtime(cc)
+        if not args.no_dlss and platform.machine() in ("x86_64", "AMD64") and cxx_rt is None:
+            print("dlss: no libstdc++.so.6 on this system, the game is built without DLSS", file=sys.stderr)
+        elif not args.no_dlss and platform.machine() in ("x86_64", "AMD64"):
             dlss = deps.fetch_dlss(cfg)
             includes.append(f"-I{dlss / 'include'}")
             feature_defs.append("-DYW4_DLSS=1")
-            sdl_libs += [str(dlss / "lib" / "Linux_x86_64" / "libnvsdk_ngx.a"), "-lstdc++", "-ldl"]
+            sdl_libs += [str(dlss / "lib" / "Linux_x86_64" / "libnvsdk_ngx.a"), *cxx_rt, "-ldl"]
         # AMD FSR upscaling on Linux (decision 0073): built from AMD's SDK v1.1.4 source (tools/yw4/fsr_linux.py), its
         # headers here, libamd_fidelityfx_vk.so copied next to yw4 below and opened at run time (dlopen)
         if not args.no_fsr and platform.machine() in ("x86_64", "AMD64"):
@@ -431,11 +434,7 @@ def main(argv: list[str] | None = None) -> int:
     else:
         # Linux: an SDL3 outside the system's folders (the launcher's own builder/sdl3, decision 0071, or one built by
         # hand) goes next to yw4, which finds it there through its run path ($ORIGIN): no LD_LIBRARY_PATH to set
-        try:
-            libdir = subprocess.run(["pkg-config", "--variable=libdir", "sdl3"], capture_output=True, text=True,
-                                    check=True).stdout.strip()
-        except (subprocess.CalledProcessError, FileNotFoundError):
-            libdir = ""
+        libdir = sdl_libdir
         so = Path(libdir) / "libSDL3.so.0" if libdir else None
         if so and so.is_file() and not libdir.startswith(("/usr/", "/lib")):
             (exe.parent / "libSDL3.so.0").unlink(missing_ok=True)

@@ -16,6 +16,10 @@ the decompressed `main`).
   on Linux install it from your distribution (`pkg-config sdl3` must find it). Where there is no package (Ubuntu
   24.04), build [SDL3](https://github.com/libsdl-org/SDL/releases) from source with CMake into a folder of your
   own, then build and run with `PKG_CONFIG_PATH=<folder>/lib/pkgconfig` and `LD_LIBRARY_PATH=<folder>/lib`.
+- Linux without a compiler or glslang (Bazzite, SteamOS, or anything you'd rather not install on): the launcher
+  downloads them on the first build ([decision 0083](decisions/0083-linux-own-build-tools.md): Zig's Clang and
+  Khronos' glslang, pinned and hash-checked), and uses its own SDL3. By hand, `python3 -m tools.yw4.system`
+  downloads what is missing into `work/deps/linux-tools/` and prints the `[tools]` lines to put in your config.
 - Linux works: first built 2026-11-12 (Ubuntu 24.04 under WSL, Clang 19); on 2026-11-13 tester [ouni666](https://github.com/ouni666) played it on
   AOSC OS (KDE Plasma, Wayland, Mesa RADV) with an AMD RX 6600 XT at about 110-120 frames/s. DLSS frame
   generation and Reflex are Windows only: their rows in the settings are locked with "Not supported on Linux yet". AMD

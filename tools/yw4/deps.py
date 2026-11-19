@@ -3,7 +3,9 @@
     python -m tools.yw4.deps
 
 SDL3 (zlib licence): on Windows the official MinGW development release, pinned by version
-and SHA-256. Linux builds use the system's SDL3 (pkg-config sdl3) instead.
+and SHA-256. Linux builds use the system's SDL3 (pkg-config sdl3) or the launcher's own copy instead.
+On Linux, for a system without them (decision 0083): Zig (MIT; Clang with the C library's headers) and
+Khronos' glslang release, fetched by tools/yw4/system.py into the build's deps/linux-tools/.
 AMD FSR (decision 0039): the FSR SDK's source archive, pinned the same way; only the MIT
 headers the runtime compiles against and the three signed Vulkan DLLs (loader, upscaler and
 frame generation, MIT too, listed in its Kits/FidelityFX/docs/license.md) are taken out. Windows only.
@@ -252,6 +254,98 @@ def fetch_toolchain(dest: Path) -> Path:
     archive.unlink()
     stamp.write_text(TOOLCHAIN_NAME + "\n")
     return out
+
+
+# Linux (decision 0083): the compiler and glslang for a system that has none of its own. Bazzite and SteamOS keep the
+# system read-only, so the package-manager line of decision 0071 doesn't work there. Zig's release is one archive
+# holding Clang and the C library's headers for every glibc version, so it builds on any distribution with nothing
+# installed; two small scripts (bin/zig-clang, bin/zig-clang++) run `zig cc` / `zig c++` and look like any other Clang
+# to the build. glslang: Khronos' Linux release of the version the Windows download ships (launcher/package.py).
+ZIG_VERSION = "0.17.1"  # Clang 22.1.8
+ZIG_NAME = f"zig-x86_64-linux-{ZIG_VERSION}"
+ZIG_URL = f"https://ziglang.org/download/{ZIG_VERSION}/{ZIG_NAME}.tar.xz"
+ZIG_SHA256 = "3581863e3cbcfd0fce0efc682ce7e9e93da96668a977791d356a26d2a7e9b17a"
+GLSLANG_VERSION = "16.6.0"
+GLSLANG_NAME = f"glslang-{GLSLANG_VERSION}-linux-x86_64-release"
+GLSLANG_URL = f"https://github.com/KhronosGroup/glslang/releases/download/{GLSLANG_VERSION}/{GLSLANG_NAME}.tar.gz"
+GLSLANG_SHA256 = "2c34071f56ecf39d16233294d3739cf43f981fd39080f2fd9dccb782101191ce"
+ZIG_WRAPPER = """#!/bin/sh
+# Written by tools/yw4/deps.py (decision 0083): `zig {mode}` as a plain compiler. Its caches (the C library's stubs,
+# LLVM's C++ runtime, built on first use) stay in this folder, which Free up space deletes.
+d=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
+export ZIG_GLOBAL_CACHE_DIR="$d/cache" ZIG_LOCAL_CACHE_DIR="$d/cache"
+# Zig names CPUs with _ where Clang has - (x86-64-v3 is x86_64_v3): -march=x86-64 stopped every file otherwise
+for a do
+  shift
+  case $a in -march=*) a="-march=$(printf %s "${{a#-march=}}" | tr - _)" ;; esac
+  set -- "$@" "$a"
+done
+# -g0: zig adds debug info unless told not to, unlike gcc and clang (yw4 was 883 MB, compiling ~25% slower)
+exec "$d/zig" {mode} -g0 "$@"
+"""
+
+
+def unpack_tar(archive: Path, out: Path, top: str, step: str, only: str = "") -> None:
+    """`archive` into `out` without its top folder `top` (members under `only` alone, if given), with progress by the
+    archive's bytes read. Read as a stream: an .xz can't seek back cheaply."""
+    size = archive.stat().st_size
+    with open(archive, "rb") as f, tarfile.open(fileobj=f, mode="r|*") as t:
+        for m in t:
+            parts = Path(m.name).parts
+            if top:
+                if not parts or parts[0] != top:
+                    raise RuntimeError(f"{archive.name}: unexpected path {m.name}")
+                parts = parts[1:]
+            if not parts or ".." in parts or (only and parts[0] != only):
+                continue
+            m.name = str(Path(*parts))
+            t.extract(m, out, filter="data")  # "data": no absolute paths, no links out of `out`, no devices
+            progress.report(step, f.tell(), size, every=0.25)
+
+
+def fetch_zig(dest: Path) -> Path:
+    """The Linux compiler in <dest>/zig, downloaded and checked unless already there; returns bin/zig-clang. The
+    `.version` file is written last: a stopped unpack, or an older pin, starts over."""
+    out = dest / "zig"
+    cc = out / "bin" / "zig-clang"
+    stamp = out / ".version"
+    if not (stamp.is_file() and stamp.read_text().strip() == ZIG_NAME):
+        dest.mkdir(parents=True, exist_ok=True)
+        archive = dest / f"{ZIG_NAME}.tar.xz"
+        fetch_pinned([MIRROR + archive.name, ZIG_URL], archive, ZIG_SHA256, "compiler")  # ~57 MB, ~400 MB unpacked
+        shutil.rmtree(out, ignore_errors=True)
+        unpack_tar(archive, out, ZIG_NAME, "compilerunpack")
+        if not (out / "zig").is_file():
+            raise RuntimeError(f"{archive.name} unpacked without zig")
+        archive.unlink()
+        stamp.write_text(ZIG_NAME + "\n")
+    # the scripts are this game code's, so written on every build: a game update's fix to them takes effect at once
+    (out / "bin").mkdir(exist_ok=True)
+    for name, mode in (("zig-clang", "cc"), ("zig-clang++", "c++")):
+        text = ZIG_WRAPPER.format(mode=mode)
+        if not (out / "bin" / name).is_file() or (out / "bin" / name).read_text() != text:
+            (out / "bin" / name).write_text(text)
+        (out / "bin" / name).chmod(0o755)
+    return cc
+
+
+def fetch_glslang_linux(dest: Path) -> Path:
+    """glslang for Linux in <dest>/glslang/bin, downloaded and checked unless already there; returns glslangValidator."""
+    out = dest / "glslang"
+    exe = out / "bin" / "glslangValidator"
+    stamp = out / ".version"
+    if stamp.is_file() and stamp.read_text().strip() == GLSLANG_NAME and exe.is_file():
+        return exe
+    dest.mkdir(parents=True, exist_ok=True)
+    archive = dest / f"{GLSLANG_NAME}.tar.gz"
+    fetch_pinned([MIRROR + archive.name, GLSLANG_URL], archive, GLSLANG_SHA256, "glslang")  # ~30 MB
+    shutil.rmtree(out, ignore_errors=True)
+    unpack_tar(archive, out, "", "glslang", only="bin")
+    if not exe.is_file():
+        raise RuntimeError(f"{archive.name} unpacked without bin/glslangValidator")
+    archive.unlink()
+    stamp.write_text(GLSLANG_NAME + "\n")
+    return exe
 
 
 def main() -> int:

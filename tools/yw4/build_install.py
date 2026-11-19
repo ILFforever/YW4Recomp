@@ -39,15 +39,19 @@ PROTOCOL = 2  # 2 adds --fresh-files; the @steps/@step/@progress lines and the o
 MIN_LAUNCHER = "0.5.0"
 
 
-def steps(mode: str, toolchain: bool) -> list[dict]:
+def steps(mode: str, toolchain: bool, linux_download: bool = False) -> list[dict]:
     cores = os.cpu_count() or 16
     out = []
     if toolchain:
         out.append({"id": "tools", "label": "Downloading the compiler", "seconds": 30,
                     "parts": {"compiler": [0, 0.6, "Downloading the compiler", "bytes"],
                               "compilerunpack": [0.6, 1, "Unpacking the compiler", "bytes"]}})
-    elif sys.platform != "win32":  # Linux: the distribution's compiler and tools (decision 0071)
-        out.append({"id": "tools", "label": "Checking the build tools", "seconds": 1, "parts": {}})
+    elif sys.platform != "win32":  # Linux: the distribution's tools, else our own, downloaded (decisions 0071, 0083)
+        out.append({"id": "tools", "label": "Getting the build tools" if linux_download else "Checking the build tools",
+                    "seconds": 30 if linux_download else 1,
+                    "parts": {"compiler": [0, 0.5, "Downloading the compiler", "bytes"],
+                              "compilerunpack": [0.5, 0.9, "Unpacking the compiler", "bytes"],
+                              "glslang": [0.9, 1, "Downloading glslang", "bytes"]}})
     out += [
         {"id": "game", "label": "Unpacking your game files" if mode == "files" else "Copying your game files",
          "seconds": 60, "parts": {"unpack": [0, 0.07, "Unpacking the NSP or XCI", "bytes"],
@@ -263,13 +267,20 @@ def game_runtime_files(work: Path) -> list[str]:
 
 
 def tools(args: argparse.Namespace, cfg: config.Config) -> None:
-    """Windows: the compiler, downloaded. Linux: the system's tools checked; the compiler found goes to every later
-    step through CC (recomp/check.py host_cc reads it first)."""
-    if args.toolchain:
+    """Windows: the compiler, downloaded. Linux: the system's tools, what it lacks downloaded (system.check); the
+    compiler goes to every later step through CC (recomp/check.py host_cc reads it first), a downloaded glslang
+    through PATH."""
+    if args.toolchain and sys.platform == "win32":
         say(f"compiler: {deps.fetch_toolchain(Path(args.toolchain))}")
         return
-    os.environ["CC"] = system.check(cfg)
+    os.environ["CC"] = system.check(cfg, linux_tools_dir(args, cfg))
     say(f"compiler: {os.environ['CC']}")
+
+
+def linux_tools_dir(args: argparse.Namespace, cfg: config.Config) -> Path:
+    """Where Linux's downloaded tools go: --toolchain (its own folder in it) if a launcher names one, else the build's
+    deps/linux-tools."""
+    return Path(args.toolchain) / "linux" if args.toolchain else system.default_tools_dir(cfg)
 
 
 def main() -> int:
@@ -302,9 +313,11 @@ def main() -> int:
     if args.mode == "folders" and not (args.exefs and args.romfs):
         ap.error("--mode folders needs --exefs and --romfs")
 
-    plan = steps(args.mode, bool(args.toolchain))
-    say("@steps " + json.dumps(plan))
     cfg = config.load(require_exefs=False)
+    windows_toolchain = bool(args.toolchain) and sys.platform == "win32"
+    linux_download = sys.platform != "win32" and system.will_download(cfg, linux_tools_dir(args, cfg))
+    plan = steps(args.mode, windows_toolchain, linux_download)
+    say("@steps " + json.dumps(plan))
     prev = Previous(cfg.work_dir)
     put_files_back(cfg)
     if prev.put_back():  # a stopped build's leftovers first: the kept game is the one that works

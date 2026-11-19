@@ -22,6 +22,7 @@ from __future__ import annotations
 import concurrent.futures
 import hashlib
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -94,7 +95,7 @@ def compilers(cfg: config.Config) -> tuple[str, str]:
     cc = os.environ.get("CC") or cfg.cc or shutil.which("cc") or "cc"
     name = Path(cc).name
     for c, cxx in (("clang", "clang++"), ("gcc", "g++")):
-        if name.startswith(c):
+        if name.startswith(c) or name.startswith("zig-" + c):  # zig-clang: the downloaded compiler (decision 0083)
             sibling = str(Path(cc).with_name(name.replace(c, cxx, 1))) if os.sep in cc else name.replace(c, cxx, 1)
             if shutil.which(sibling):
                 return cc, sibling
@@ -130,21 +131,61 @@ def unpack(archive: Path, src: Path) -> None:
         t.extractall(src, members=members, filter="data")
 
 
+def apply_patch(patch: Path, root: Path) -> None:
+    """A unified diff (git's, paths a/ b/) applied to the files under `root`. Every hunk's old lines must be found as
+    they are, at its line or the nearest place to it, or nothing is written: like `git apply`, without needing git or
+    patch on the PC (Bazzite and SteamOS have neither for sure, decision 0083). Line ends are the file's own."""
+    files: dict[str, list[tuple[int, list[str], list[str]]]] = {}
+    text = patch.read_text(encoding="utf-8").splitlines()
+    name, i = None, 0
+    while i < len(text):
+        line = text[i]
+        i += 1
+        m = re.match(r"@@ -(\d+)(?:,(\d+))? \+\d+(?:,(\d+))? @@", line)
+        if line.startswith("+++ "):
+            name = line[4:].split("\t")[0].removeprefix("b/")
+            files[name] = []
+        elif m and name:
+            # a hunk is exactly as many lines as its header counts (a removed "-- x" line starts with "---")
+            old_n, new_n = int(m[2] or 1), int(m[3] or 1)
+            old, new = [], []
+            while (len(old) < old_n or len(new) < new_n) and i < len(text):
+                line = text[i]
+                i += 1
+                if line.startswith("\\"):  # "\ No newline at end of file"
+                    continue
+                tag, body = (line[0], line[1:]) if line else (" ", "")  # an empty context line lost its space
+                if tag != "+":
+                    old.append(body)
+                if tag != "-":
+                    new.append(body)
+            files[name].append((int(m[1]), old, new))
+    new_text = {}
+    for name, hunks in files.items():
+        path = root / name
+        lines = path.read_bytes().decode("utf-8").splitlines(keepends=True)
+        eol = "\r\n" if lines and lines[0].endswith("\r\n") else "\n"
+        bare = [ln.rstrip("\r\n") for ln in lines]
+        shift = 0
+        for start, old, new in hunks:
+            at = start - 1 + shift if old else start + shift
+            places = sorted(range(len(bare) - len(old) + 1), key=lambda i: abs(i - at))
+            hit = next((i for i in places if bare[i:i + len(old)] == old), None)
+            if hit is None:
+                raise RuntimeError(f"{patch.name}: a change to {name} near line {start} doesn't fit the SDK's source")
+            bare[hit:hit + len(old)] = new
+            lines[hit:hit + len(old)] = [s + eol for s in new]
+            shift += len(new) - len(old)
+        new_text[path] = "".join(lines)
+    for path, text in new_text.items():
+        path.write_bytes(text.encode("utf-8"))
+
+
 def apply_patches(src: Path) -> None:
-    # git apply refuses a patch that doesn't fit, and works outside a repository too. But inside one (the default work
-    # folder is <clone>/work) it reads the patch's paths from the repository's top, finds them outside the folder it
-    # runs in, and skips them, saying nothing and exiting 0: the SDK then built unpatched and failed on its context
-    # size (issue #12). GIT_CEILING_DIRECTORIES stops it looking for a repository above the sources.
-    env = {**os.environ, "GIT_CEILING_DIRECTORIES": str(src.parent)}
+    # In Python, not git apply: git isn't on every PC (decision 0083), and git apply inside a repository (the default
+    # work folder is <clone>/work) once skipped the patches silently (issue #12)
     for patch in ("fidelityfx-sdk-v1.1.4-linux.patch", "fsr-3.1.5-backport.patch"):
-        p = PORT / "patches" / patch
-        if shutil.which("git"):
-            r = subprocess.run(["git", "apply", "--whitespace=nowarn", str(p)], cwd=src, env=env, capture_output=True,
-                               text=True)
-            if r.returncode:
-                raise RuntimeError(f"git apply {patch} failed:\n{(r.stdout + r.stderr)[-3000:]}")
-        else:
-            run(["patch", "-p1", "--forward", "-i", str(p)], cwd=src)
+        apply_patch(PORT / "patches" / patch, src)
     # however they were applied: a line the Linux patch adds must be there
     types = src / "sdk" / "include" / "FidelityFX" / "host" / "ffx_types.h"
     if "#ifndef FFX_SDK_DEFAULT_CONTEXT_SIZE" not in types.read_text(encoding="utf-8", errors="replace"):
@@ -215,9 +256,16 @@ def build_library(src: Path, build: Path, shaders: Path, cxx: str, out: Path) ->
             objs.append(o)
             progress.report("fsrlib", i + 1, len(jobs))
     (out / "lib").mkdir(parents=True, exist_ok=True)
+    if Path(cxx).name.startswith("zig-"):
+        # the downloaded compiler (decision 0083) always links LLVM's C++ runtime in, and refuses --exclude-libs: a
+        # list of what the library shows instead (the ffx-api functions and yw4FfxHostSet), everything else hidden
+        exports = build / "exports.map"
+        exports.write_text("{ global: ffx*; yw4*; local: *; };\n")
+        runtime = [f"-Wl,--version-script={exports}"]
+    else:
+        runtime = ["-static-libstdc++", "-static-libgcc", "-Wl,--exclude-libs,ALL"]  # the C++ runtime inside, hidden
     run([cxx, "-shared", "-o", str(out / "lib" / LIB), *objs, *(f"-Wl,--wrap={f}" for f in WRAPPED),
-         "-static-libstdc++", "-static-libgcc", "-Wl,--exclude-libs,ALL",  # the C++ runtime inside, its names hidden
-         "-Wl,--no-undefined", "-pthread", "-lm"])
+         *runtime, "-Wl,--no-undefined", "-pthread", "-lm"])
     shutil.rmtree(out / "include", ignore_errors=True)
     shutil.copytree(src / "ffx-api" / "include", out / "include")
 
