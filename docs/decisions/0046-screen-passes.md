@@ -77,3 +77,8 @@ with full-size effects, the owner's settings, the third-size pass (shrink-copy +
 size, so each read saved counts. Same-frame screenshots: the lamp pools differ between two runs of the unchanged game
 as much as against this one (rain, wet road). Tried and left out: lighting half the pixels in a checkerboard (no
 saving: the GPU shades 2x2 blocks).
+
+## Lamp shadows (2026-11-19)
+
+`lamp_light.frag` also gives the lamps shadows of the characters: decision 0081 (a short march across the screen was
+tried first and dropped there).

@@ -3629,7 +3629,8 @@ void window_run(void (*guest)(void *), void *arg) {
                 else gamemenu_open_page(GM_CONTROLS), yw4_hid_note_key("M_CTRL");
                 break;
             }
-            if (e.key.key == SDLK_F4 && !e.key.repeat) game_pause_toggle();  /* test: the overlay's pause (below) */
+            /* F4: nothing (owner, 2026-11-19; it was the overlay's pause test, still in replays as PAUSE, then lamp
+             * shadows for a while) */
             if (e.key.key == SDLK_F5) gpu_passes_toggle();  /* per-pass GPU timing in the log */
             if (e.key.key == SDLK_F7 && !e.key.repeat) screen_passes_toggle();  /* the screen passes: ours or the game's */
             /* the settings live in the panel only (F1); its keys are recorded like the F keys, so a replay

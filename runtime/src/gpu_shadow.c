@@ -13,6 +13,7 @@
 #include "gbuffer.h"
 #include "gpu_internal.h"
 #include "host.h"
+#include "lamp_shadow.h"
 #include "shadow.h"
 
 /* What our pass left out, for the log (shadow.c's report every 600 frames, the run's summary, a GPU crash): passes
@@ -635,4 +636,183 @@ void gpu_shadow_pass(void *vk_cb, void *gpu_state, const void *data, uint32_t si
     target_state_set(s, game);
     s->ncolor = ncolor;
     free(game), free(ours);
+}
+
+/* ---- lamp shadows (decision 0081, lamp_shadow.h): the characters drawn into a cube of depth images per chosen lamp,
+ * read by the lamp program (lamp_light.frag) through one 2D array with depth compare. Kept in the GENERAL layout,
+ * as the executor's other images. */
+
+static struct {
+    VkImage image;
+    VkDeviceMemory mem;
+    VkImageView array, layer[LAMP_SHADOW_LAYERS];
+    VkSampler sampler, raw;  /* depth compare (bilinear); the raw depths (nearest), for the blocker search */
+    int ready;
+} lm;
+
+/* The images (made once, cleared to "nothing in the way"), outside rendering. */
+static void lamp_maps_make(VkCommandBuffer cb) {
+    VkImageCreateInfo ici = {.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO, .imageType = VK_IMAGE_TYPE_2D,
+                             .format = VK_FORMAT_D32_SFLOAT, .extent = {lamp_shadow_size(), lamp_shadow_size(), 1},
+                             .mipLevels = 1, .arrayLayers = LAMP_SHADOW_LAYERS, .samples = VK_SAMPLE_COUNT_1_BIT,
+                             .tiling = VK_IMAGE_TILING_OPTIMAL,
+                             .usage = VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT |
+                                      VK_IMAGE_USAGE_TRANSFER_DST_BIT,
+                             .initialLayout = VK_IMAGE_LAYOUT_UNDEFINED};
+    CHECK(vkCreateImage(vk.device, &ici, NULL, &lm.image));
+    VkMemoryRequirements mr;
+    vkGetImageMemoryRequirements(vk.device, lm.image, &mr);
+    VkMemoryAllocateInfo mai = {.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO, .allocationSize = mr.size,
+                                .memoryTypeIndex = vk_memory_type(mr.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT)};
+    CHECK(vkAllocateMemory(vk.device, &mai, NULL, &lm.mem));
+    CHECK(vkBindImageMemory(vk.device, lm.image, lm.mem, 0));
+    VkImageViewCreateInfo vci = {.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO, .image = lm.image,
+                                 .viewType = VK_IMAGE_VIEW_TYPE_2D_ARRAY, .format = VK_FORMAT_D32_SFLOAT,
+                                 .subresourceRange = {VK_IMAGE_ASPECT_DEPTH_BIT, 0, 1, 0, LAMP_SHADOW_LAYERS}};
+    CHECK(vkCreateImageView(vk.device, &vci, NULL, &lm.array));
+    for (uint32_t i = 0; i < LAMP_SHADOW_LAYERS; i++) {
+        vci.viewType = VK_IMAGE_VIEW_TYPE_2D;
+        vci.subresourceRange = (VkImageSubresourceRange){VK_IMAGE_ASPECT_DEPTH_BIT, 0, 1, i, 1};
+        CHECK(vkCreateImageView(vk.device, &vci, NULL, &lm.layer[i]));
+    }
+    /* hardware compare with a bilinear blend of the four nearest results (the program adds its own taps) */
+    VkSamplerCreateInfo sci = {.sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO, .magFilter = VK_FILTER_LINEAR,
+                               .minFilter = VK_FILTER_LINEAR, .mipmapMode = VK_SAMPLER_MIPMAP_MODE_NEAREST,
+                               .addressModeU = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE,
+                               .addressModeV = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE,
+                               .addressModeW = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE, .compareEnable = VK_TRUE,
+                               .compareOp = VK_COMPARE_OP_LESS_OR_EQUAL, .maxLod = 0.0f};
+    CHECK(vkCreateSampler(vk.device, &sci, NULL, &lm.sampler));
+    sci.magFilter = sci.minFilter = VK_FILTER_NEAREST, sci.compareEnable = VK_FALSE;
+    CHECK(vkCreateSampler(vk.device, &sci, NULL, &lm.raw));
+    VkImageMemoryBarrier b = {.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER, .dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT,
+                              .oldLayout = VK_IMAGE_LAYOUT_UNDEFINED, .newLayout = VK_IMAGE_LAYOUT_GENERAL,
+                              .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED, .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+                              .image = lm.image,
+                              .subresourceRange = {VK_IMAGE_ASPECT_DEPTH_BIT, 0, 1, 0, LAMP_SHADOW_LAYERS}};
+    vkCmdPipelineBarrier(cb, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0, NULL, 0, NULL, 1, &b);
+    VkClearDepthStencilValue one = {1.0f, 0};
+    VkImageSubresourceRange all = {VK_IMAGE_ASPECT_DEPTH_BIT, 0, 1, 0, LAMP_SHADOW_LAYERS};
+    vkCmdClearDepthStencilImage(cb, lm.image, VK_IMAGE_LAYOUT_GENERAL, &one, 1, &all);
+    full_barrier(cb);
+    lm.ready = 1;
+    fprintf(stderr, "yw4: lamp shadows: %d depth images of %ux%u made\n", LAMP_SHADOW_LAYERS, lamp_shadow_size(),
+            lamp_shadow_size());
+}
+
+void gpu_lamp_maps_prepare(void *vk_cb, struct GpuState *s) {
+    if (lm.ready) return;
+    gpu_end_rendering(vk_cb, s);
+    lamp_maps_make(vk_cb);
+}
+
+int gpu_lamp_maps(void **view, void **sampler, void **raw) {
+    if (!lm.ready) return 0;
+    *view = (void *)lm.array, *sampler = (void *)lm.sampler, *raw = (void *)lm.raw;
+    return 1;
+}
+
+/* Our own state for the lamp views (all of the pipelines' dynamic state): no culling (a character is closed, and the
+ * views' handedness differs from the game's), depth test and write, nothing else. */
+static void lamp_dynamic_state(VkCommandBuffer cb) {
+    uint32_t n = lamp_shadow_size();
+    VkViewport vpt = {0, 0, (float)n, (float)n, 0, 1};
+    VkRect2D sc = {{0, 0}, {n, n}};
+    float blend[4] = {0, 0, 0, 0};
+    vkCmdSetViewport(cb, 0, 1, &vpt);
+    vkCmdSetScissor(cb, 0, 1, &sc);
+    vkCmdSetDepthBias(cb, 0, 0, 0);
+    vkCmdSetBlendConstants(cb, blend);
+    vkCmdSetStencilCompareMask(cb, VK_STENCIL_FACE_FRONT_AND_BACK, 0);
+    vkCmdSetStencilWriteMask(cb, VK_STENCIL_FACE_FRONT_AND_BACK, 0);
+    vkCmdSetStencilReference(cb, VK_STENCIL_FACE_FRONT_AND_BACK, 0);
+    vkCmdSetCullMode(cb, VK_CULL_MODE_NONE);
+    vkCmdSetFrontFace(cb, VK_FRONT_FACE_COUNTER_CLOCKWISE);
+    vkCmdSetDepthTestEnable(cb, VK_TRUE);
+    vkCmdSetDepthWriteEnable(cb, VK_TRUE);
+    vkCmdSetDepthCompareOp(cb, VK_COMPARE_OP_LESS_OR_EQUAL);
+    vkCmdSetDepthBoundsTestEnable(cb, VK_FALSE);
+    vkCmdSetStencilTestEnable(cb, VK_FALSE);
+    vkCmdSetStencilOp(cb, VK_STENCIL_FACE_FRONT_AND_BACK, VK_STENCIL_OP_KEEP, VK_STENCIL_OP_KEEP, VK_STENCIL_OP_KEEP,
+                      VK_COMPARE_OP_ALWAYS);
+    vkCmdSetRasterizerDiscardEnable(cb, VK_FALSE);
+    vkCmdSetDepthBiasEnable(cb, VK_FALSE);
+    vkCmdSetPrimitiveRestartEnable(cb, VK_FALSE);
+}
+
+/* One character draw (skinned, or static) into the bound lamp view; 0 if it can't be drawn. */
+static int lamp_draw(VkCommandBuffer cb, const ShadowDraw *d, VkPipeline *bound) {
+    if (d->texture || d->copies || d->wind_tex[0] || d->dither) return 0;  /* only what lamp_shadow_add is given */
+    VkBuffer vb[3], ib;
+    VkDeviceSize voff[3], ioff, stride[3] = {d->stride, d->stride, d->stride};
+    uint32_t isize = d->index_type == 2 ? 4 : 2;
+    if (!gpu_geometry_at(d->vertices, (uint64_t)d->vertex_count * d->stride, &vb[0], &voff[0])) return 0;
+    if (d->index_count && !gpu_geometry_at(d->indices, (uint64_t)d->index_count * isize, &ib, &ioff)) return 0;
+    VkFormat uv = d->skin4 ? gpu_format(d->uv_format) : VK_FORMAT_UNDEFINED;
+    VkFormat wind = d->skin4 ? gpu_format(d->wind_format) : VK_FORMAT_UNDEFINED;
+    if (d->skin4 && (uv == VK_FORMAT_UNDEFINED || wind == VK_FORMAT_UNDEFINED)) return 0;
+    int kind = d->palette_size ? (d->skin4 ? KIND_SKINNED4 : KIND_SKINNED) : KIND_STATIC;
+    if (kind_skinned(kind) && !pal.buf) return 0;
+    VkPipeline pipe = pipeline(VK_FORMAT_D32_SFLOAT, kind, uv, wind);
+    if (pipe != *bound) vkCmdBindPipeline(cb, VK_PIPELINE_BIND_POINT_GRAPHICS, pipe), *bound = pipe;
+    vb[1] = vb[2] = vb[0], voff[1] = voff[0] + d->uv_offset, voff[2] = voff[0] + d->wind_offset;
+    vkCmdBindVertexBuffers2(cb, 0, kind_three(kind) ? 3 : 1, vb, voff, NULL, stride);
+    if (kind_skinned(kind))
+        vkCmdBindDescriptorSets(cb, VK_PIPELINE_BIND_POINT_GRAPHICS, layout(kind), 0, 1, &pal.set, 1, &d->palette_offset);
+    vkCmdPushConstants(cb, layout(kind), VK_SHADER_STAGE_VERTEX_BIT, 0, push_size[kind], d->mvp);
+    if (d->index_count) {
+        vkCmdBindIndexBuffer(cb, ib, ioff, d->index_type == 2 ? VK_INDEX_TYPE_UINT32 : VK_INDEX_TYPE_UINT16);
+        vkCmdDrawIndexed(cb, d->index_count, 1, 0, 0, 0);
+    } else {
+        vkCmdDraw(cb, d->vertex_count, 1, 0, 0);
+    }
+    return 1;
+}
+
+void gpu_lamp_shadow_pass(void *vk_cb, void *gpu_state, const void *data, uint32_t size) {
+    VkCommandBuffer cb = vk_cb;
+    GpuState *s = gpu_state;
+    const LampShadowPass *p;
+    if (size < sizeof p) return;
+    memcpy(&p, data, sizeof p);
+    if (!p || !p->lamps) return;
+    gpu_end_rendering(cb, s);
+    if (!lm.ready) lamp_maps_make(cb);
+    /* the casters' geometry in video memory: copied first, outside rendering (as draw_pass) */
+    int copies = 0;
+    for (uint32_t i = 0; i < p->n && !copies; i++) {
+        const ShadowDraw *d = &p->d[i].d;
+        copies = gpu_geometry_needs_copy(d->vertices, (uint64_t)d->vertex_count * d->stride) ||
+                 (d->index_count && gpu_geometry_needs_copy(d->indices, (uint64_t)d->index_count * (d->index_type == 2 ? 4 : 2)));
+    }
+    if (copies)
+        for (uint32_t i = 0; i < p->n; i++) {
+            const ShadowDraw *d = &p->d[i].d;
+            gpu_geometry_copy(cb, d->vertices, (uint64_t)d->vertex_count * d->stride);
+            if (d->index_count) gpu_geometry_copy(cb, d->indices, (uint64_t)d->index_count * (d->index_type == 2 ? 4 : 2));
+        }
+    full_barrier(cb);  /* the copies, and the last frame's lamp draw done reading the images */
+    VkPipeline bound = VK_NULL_HANDLE;
+    long skipped = 0;
+    for (uint32_t layer = 0; layer < p->lamps * LAMP_SHADOW_FACES; layer++) {
+        VkRenderingAttachmentInfo da = {.sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO, .imageView = lm.layer[layer],
+                                        .imageLayout = VK_IMAGE_LAYOUT_GENERAL, .loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR,
+                                        .storeOp = VK_ATTACHMENT_STORE_OP_STORE,
+                                        .clearValue = {.depthStencil = {1.0f, 0}}};
+        VkRenderingInfo ri = {.sType = VK_STRUCTURE_TYPE_RENDERING_INFO,
+                              .renderArea = {{0, 0}, {lamp_shadow_size(), lamp_shadow_size()}}, .layerCount = 1,
+                              .pDepthAttachment = &da};
+        vkCmdBeginRendering(cb, &ri);
+        if (layer == 0) lamp_dynamic_state(cb);
+        for (uint32_t i = 0; i < p->n; i++)
+            if (p->d[i].layer == layer && !lamp_draw(cb, &p->d[i].d, &bound)) skipped++;
+        vkCmdEndRendering(cb);
+    }
+    full_barrier(cb);
+    gpu_dynamic_forget();  /* the game's next draw sets its own state again */
+    lamp_shadow_drawn(p);
+    static long logged;
+    if (skipped && logged++ < 3)
+        fprintf(stderr, "yw4: lamp shadows: %ld of %u draws left out at GPU frame %" PRIu64 " (geometry or layout)\n",
+                skipped, p->n, gpu_frames());
 }

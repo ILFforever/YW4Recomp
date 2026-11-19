@@ -114,6 +114,10 @@ static const char *mask_speedup_disabled(void) {
     return gpu_pcss_level() ? NULL : "NEEDS SOFT SHADOWS";
 }
 static const char *contact_disabled(void) { return shadow_mask_native() ? NULL : "NEEDS SHADOW MASK SET TO CUSTOM"; }
+static const char *lamp_shadows_disabled(void) {
+    if (!shadow_pass_ours()) return "NEEDS SHADOW PASS SET TO CUSTOM";  /* the characters' draws come from it */
+    return screen_passes_native() ? NULL : "NEEDS SCREEN PASSES SET TO CUSTOM";
+}
 /* Why a row is locked when AMD FSR and NVIDIA DLSS are not in the program. On Windows the builder left them out
  * (recomp.build --no-fsr / --no-dlss). On Linux what isn't there can't be built in yet, and "not in this build" read
  * like something had gone wrong (owner, 2026-11-12). Linux has DLSS and FSR upscaling and FSR frame generation (decision
@@ -294,6 +298,15 @@ static const Setting player[] = {
      {"OFF", "ON"},
      {"THE SWITCH'S DEFAULT", "MORE DEPTH IN LEAVES AND UNDER EDGES"}, 2, gpu_contact,
      gpu_contact_toggle, "YW4_CONTACT", {"0", "1"}, contact_disabled},
+    {"SHADOWS", "POINT LIGHT SHADOWS",
+     /* (the game's lamp lights cast none; shadow maps of the characters for the 6 lit lamps nearest them, decision
+      * 0081; the levels: how much of the lamp's light a shadow takes away, 0.25 / 0.4 / 0.6 / 1) */
+     "EXPERIMENTAL: AT NIGHT, PEOPLE AND YO-KAI CAST SHADOWS FROM THE LIGHTS NEAREST THEM: STREET LAMPS, PORCH "
+     "LIGHTS, LIT WINDOWS.",
+     {"OFF", "LOW", "MEDIUM", "HIGH", "MAX"},
+     {"THE SWITCH'S DEFAULT: LIGHTS CAST NO SHADOWS", "FAINT SHADOWS", "SOFT SHADOWS (RECOMMENDED)", "DARK SHADOWS",
+      "DARKEST SHADOWS"}, 5, gpu_lamp_shadow_level,
+     gpu_lamp_shadow_cycle, "YW4_LAMP_SHADOWS", {"0", "0.25", "0.4", "0.6", "1"}, lamp_shadows_disabled},
 };
 /* The developer page (DEVELOPER OPTIONS): behind-the-scenes switches for testing the port, which the picture
  * doesn't show: who draws each part of it, and speed-ups that look the same. The defaults are the recommended
@@ -717,7 +730,8 @@ int settings_first_run(int low) {
     const char *force = getenv("YW4_FIRST_RUN_LEVEL");
     if (force && *force) low = !strcmp(force, "low");
     static const char *const lowered[][2] = {
-        {"YW4_SHADOW_RES", "1024"}, {"YW4_PCSS", "0"}, {"YW4_CONTACT", "0"}, {"YW4_EFFECTS", "0"}};
+        {"YW4_SHADOW_RES", "1024"}, {"YW4_PCSS", "0"}, {"YW4_CONTACT", "0"}, {"YW4_LAMP_SHADOWS", "0"},
+        {"YW4_EFFECTS", "0"}};
     /* A dedicated GPU gets the owner's own settings (owner, 2026-11-13), but 1440p, not 4K, and 120 frames/s
      * (owner, 2026-11-13; others start at 60). DLSS and its frame generation and Reflex only where the GPU has them;
      * else FSR anti-aliasing and no frame generation. */
@@ -726,7 +740,7 @@ int settings_first_run(int low) {
     const char *const raised[][2] = {
         {"YW4_RES", "1440"}, {"YW4_FPS", "120"}, {"YW4_AA", aa}, {"YW4_UPSCALE", "0"}, {"YW4_FG", fg}, {"YW4_REFLEX", reflex},
         {"YW4_ANISO", "16"}, {"YW4_EFFECTS", "1"}, {"YW4_DOF", "2"}, {"YW4_SHADOW_RES", "4096"}, {"YW4_PCSS", "2"},
-        {"YW4_CONTACT", "1"}};
+        {"YW4_CONTACT", "1"}};  /* (point light shadows: experimental, off for everyone at first) */
     for (size_t i = 0; low && i < sizeof lowered / sizeof *lowered; i++)
         if (!getenv(lowered[i][0])) set_value(lowered[i][0], lowered[i][1], strlen(lowered[i][1]));
     for (size_t i = 0; !low && i < sizeof raised / sizeof *raised; i++)

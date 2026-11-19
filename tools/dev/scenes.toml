@@ -55,6 +55,18 @@ replay = "walk.txt"
 seconds = 175
 about = "A two-minute walk through the town: the only scene that moves"
 
+[busy_walk]
+save = "save_base_busy"
+replay = "walk.txt"
+seconds = 175
+about = "The walk's input on the busy save: moving through a night street under the lamps (lamp shadows)"
+
+[lamp]
+save = "save_base_lamp"
+replay = "load_save.txt"
+seconds = 115
+about = "The owner's night save in front of a lamp (lamp shadows)"
+
 [school]
 save = "save_school"
 replay = "load_save.txt"

@@ -24,6 +24,7 @@
 #include <string.h>
 
 #include "gbuffer.h"
+#include "lamp_shadow.h"
 #include "nvn.h"
 #include "shadow.h"
 #include "yw4rt.h"
@@ -321,6 +322,7 @@ typedef struct {
     /* YW4_SHADOW_RECHECK_LOG=1: the game's draws in this layer that were rechecks, a few of their objects */
     int nrecheck;
     uint64_t recheck_obj[4], recheck_sub[32];
+    int lamps;  /* this layer also makes the lamp shadows (decision 0081): the nearest cascade's first of the frame */
 } Layer;
 
 static _Thread_local Layer *lay;
@@ -354,11 +356,16 @@ static uint32_t learn_slot(uint64_t obj, uint64_t sub) {
 
 /* Was the submesh last drawn by the game with programs our pass mirrors, and did our draw
  * match it (and the object not reused since)? Its slot in `learned`, or UINT32_MAX. */
+/* For the lamp shadows (decision 0081): a learned caster counts even if its last check against the game's draw failed
+ * (`ok` 0: usually a skinned one's bone palette caught mid-update). That check keeps the sun's map equal to the game's;
+ * a soft lamp shadow doesn't need it, and a character left out until its next check (up to 32 frames) blinked. */
+static _Thread_local int lamp_any_ok;
+
 static uint32_t learned_ours(uint64_t obj, uint64_t sub) {
     uint32_t h = learn_slot(obj, sub);
     if (h == UINT32_MAX || learned[h].obj != obj) return UINT32_MAX;
     if (learned[h].model != U64(obj + 0x140) || learned[h].mat != U64(obj + 0x120)) return UINT32_MAX;  /* reused */
-    return mirrored(learned[h].vs, learned[h].fs) && learned[h].ok ? h : UINT32_MAX;
+    return mirrored(learned[h].vs, learned[h].fs) && (learned[h].ok || lamp_any_ok) ? h : UINT32_MAX;
 }
 
 /* ok: our draw of it would equal the game's (same buffers, same matrix: compare_draw) */
@@ -1075,7 +1082,9 @@ void shadow_before_targets(const CPUState *ctx, uint64_t cmd, uint64_t depth_add
 }
 
 /* The layer has been drawn by the game: queue our pass after it. */
-static void end_layer(Layer *k, const CPUState *ctx) {
+static void lamp_queue(const CPUState *ctx, uint64_t device);  /* below: the lamp shadows' pass queued */
+
+static void end_layer(Layer *k, const CPUState *ctx, int cascade_done) {
     if (!k->active) return;
     k->active = 0;
     static int recheck_log = -1;
@@ -1110,6 +1119,85 @@ static void end_layer(Layer *k, const CPUState *ctx) {
         nvn_record_native(ctx, U64(k->device + 0x10d0) + 0xd8, gpu_shadow_pass, &p, sizeof p);
     }
     k->pass = NULL;
+    /* the lamp shadows' pass, once the farthest cascade is drawn (decision 0081) */
+    if (k->lamps && cascade_done && k->cascade == 2 && ctx) lamp_queue(ctx, k->device);
+    k->lamps = 0;
+}
+
+/* The lamp shadows' pass queued (decision 0081). One a frame, holding the characters of all of the frame's shadow
+ * layers: the game can draw a cascade in two layers, and a character near a cascade's edge is drawn in the next one
+ * in some frames; a pass per layer or from the nearest cascade alone lost the characters now and then, and their
+ * shadows blinked while walking (2026-11-19, found by the EMPTY log lines). */
+static int lamp_cascade_max;  /* the farthest cascade that added to the open pass */
+
+static void lamp_queue(const CPUState *ctx, uint64_t device) {
+    LampShadowPass *lp = lamp_shadow_end();
+    if (lp) nvn_record_native(ctx, U64(device + 0x10d0) + 0xd8, gpu_lamp_shadow_pass, &lp, sizeof lp);
+}
+
+/* Lamp shadows (decision 0081): at the start of each layer of the nearest cascade, the lamps for the
+ * characters in it (the skinned casters we have learned), by their objects' positions. */
+static void lamp_layer_begin(Layer *k, const CPUState *ctx) {
+    k->lamps = 0;
+    if (mode != MODE_NATIVE || k->cascade < 0) return;
+    /* the nearest cascade after farther ones: a new frame, and the last one's pass was never queued (its farthest
+     * cascade's end didn't come): queued now, late but whole */
+    if (k->cascade == 0 && lamp_shadow_open() && lamp_cascade_max > 0) lamp_shadow_note_late(), lamp_queue(ctx, k->device);
+    if (lamp_shadow_open()) {  /* the frame's later layers add to it (not once per presented frame: the render thread
+                                * can be a frame ahead of the count, and a frame without a pass lost its shadows) */
+        k->lamps = 1;
+        if (k->cascade > lamp_cascade_max) lamp_cascade_max = k->cascade;
+        return;
+    }
+    if (k->cascade != 0) return;
+    lamp_cascade_max = 0;
+    enum { CHARACTERS = 64, PRESENT = 512 };
+    float at[3 * CHARACTERS];
+    uint64_t seen[CHARACTERS], present[PRESENT];
+    int n = 0, np = 0;
+    for (int i = 0; i < k->ours.n; i++) {  /* every object in the layer (lamp_shadow.c carries characters over) */
+        int dup = 0;
+        for (int j = 0; j < np && !dup; j++) dup = present[j] == k->ours.c[i].own;
+        if (!dup && np < PRESENT) present[np++] = k->ours.c[i].own;
+    }
+    for (int i = 0; i < k->ours.n && n < CHARACTERS; i++) {
+        const Caster *c = &k->ours.c[i];
+        lamp_any_ok = 1;
+        uint32_t h = learned_ours(c->object, c->submesh);
+        lamp_any_ok = 0;
+        if (h == UINT32_MAX || !is_skinned(learned[h].vs)) continue;
+        int dup = 0;
+        for (int j = 0; j < n && !dup; j++) dup = seen[j] == c->own;
+        if (dup) continue;
+        const float *w = (const float *)(uintptr_t)c->own;
+        seen[n] = c->own, at[3 * n] = w[3], at[3 * n + 1] = w[7], at[3 * n + 2] = w[11];
+        n++;
+    }
+    k->lamps = lamp_shadow_begin(at, n, present, np);
+}
+
+/* A character's submesh in that layer: its draw as our sun pass makes it (`d`, or made here when the game draws it this
+ * time), copied into the lamps' views. */
+static void lamp_add(Layer *k, const Caster *c, const ShadowDraw *d) {
+    ShadowDraw made;
+    if (!d) {
+        lamp_any_ok = 1;
+        uint32_t h = learned_ours(c->object, c->submesh);
+        int got = h != UINT32_MAX && is_skinned(learned[h].vs) ? ours(c, &k->vp, k->device, &made, 1) : -2;
+        lamp_any_ok = 0;
+        if (got == -2) return;
+        if (got != 1) {
+            lamp_shadow_note_skip(1);
+            return;
+        }
+        d = &made;
+    }
+    if (!d->palette_size) return;  /* characters only */
+    Mat4 world = world_of(c);
+    float lo[3], hi[3];
+    memcpy(lo, (const void *)(uintptr_t)(c->object + 0x80), 12);
+    memcpy(hi, (const void *)(uintptr_t)(c->object + 0x90), 12);
+    lamp_shadow_add(d, world.m, lo, hi, c->own, c->submesh);
 }
 
 /* ---- the mode: YW4_SHADOWS at start (default ours since 2026-10-29: about 10 frames/s more with everything else
@@ -1220,7 +1308,7 @@ int yw4_hook_model_renderer(CPUState *ctx) {
         uint64_t v = U64(ctx->x[0] + 0x2780);
         int c = v && U8(v) >= 1 && U8(v) <= 3 ? U8(v) - 1 : -1;
         int second = lay->device == ctx->x[0] && c >= 0 && c == lay->cascade;
-        end_layer(lay, second ? ctx : NULL);
+        end_layer(lay, second ? ctx : NULL, 0);
     }
     /* the G-buffer pass (decision 0026) shares these hooks. After the open shadow layer has queued its pass: the
      * same-frame A/B's range for that layer ends here, and must hold our pass (2026-11-04: in cutscenes the first
@@ -1259,6 +1347,7 @@ int yw4_hook_model_renderer(CPUState *ctx) {
     k->ndrawn = 0;
     k->pending = 0;
     if (mode == MODE_NATIVE) begin_pass(k);
+    lamp_layer_begin(k, ctx);
     k->active = 1;
     report();
     return 0;
@@ -1285,10 +1374,12 @@ int yw4_hook_submesh_draw(CPUState *ctx) {
     ShadowPass *p = k->pass;
     uint64_t frame = __atomic_load_n(&yw4_frames_presented, __ATOMIC_RELAXED);
     int refreshing = frame < __atomic_load_n(&game_draws_until, __ATOMIC_RELAXED);
+    int lamp_done = 0;  /* the lamp shadows have this submesh already (lamp_add) */
     if (mode == MODE_NATIVE && p && k->game_drew && ((frame + (obj >> 4)) & 31) != 0 &&
         !refreshing) {
         const Caster *c = caster_of(obj, sub);
         int n = c ? ours(c, &k->vp, k->device, &p->d[p->n], PASS_DRAWS - (int)p->n) : -1;
+        if (n == 1 && k->lamps) lamp_add(k, c, &p->d[p->n]), lamp_done = 1;  /* before the condition is set */
         if (n >= 0) {
             uint64_t cond_addr = 0;  /* the game's occlusion condition for this object goes with our draws */
             int cond_mode = nvn_record_condition(U64(k->device + 0x10d0) + 0xd8, &cond_addr);
@@ -1316,6 +1407,14 @@ int yw4_hook_submesh_draw(CPUState *ctx) {
         if (k->nrecheck < 32) k->recheck_sub[k->nrecheck] = sub;
         k->nrecheck++;
     }
+    if (k->lamps && !lamp_done) {  /* the game draws this one into the sun's map: the lamps' views still get ours */
+        const Caster *c = caster_of(obj, sub);
+        if (c) lamp_add(k, c, NULL);
+    } else if (!k->lamps && k->cascade > 0 && mode == MODE_NATIVE) {  /* debugging: a character only farther out? */
+        const Caster *c = caster_of(obj, sub);
+        uint32_t h = c ? learned_ours(c->object, c->submesh) : UINT32_MAX;
+        if (h != UINT32_MAX && is_skinned(learned[h].vs)) lamp_shadow_note_far(c->own);
+    }
     k->pending_copies_ok = pending_copies(k->device, &k->pending_copies, &k->pending_count);
     k->drawn[k->ndrawn][0] = obj;
     k->drawn[k->ndrawn][1] = sub;
@@ -1327,6 +1426,6 @@ int yw4_hook_submesh_draw(CPUState *ctx) {
 
 /* main+0x7ed350 (device, ...): the job that ends a cascade, right after its layer. */
 int yw4_hook_cascade_end(CPUState *ctx) {
-    if (lay && lay->active) end_layer(lay, ctx);
+    if (lay && lay->active) end_layer(lay, ctx, 1);
     return 0;
 }

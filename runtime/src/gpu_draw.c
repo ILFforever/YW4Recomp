@@ -22,6 +22,7 @@
  */
 #include <dirent.h>
 #include <inttypes.h>
+#include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -31,6 +32,7 @@
 #include "gpu_internal.h"
 #include "host.h"
 #include "kernel.h"
+#include "lamp_shadow.h"
 
 enum { ST_VERT, ST_FRAG, ST_GEOM, NSETS = 3, ST_COMP = 3 };  /* NSETS: the graphics stages; compute is separate */
 static const char *const stage_names[4] = {"vert", "frag", "geom", "comp"};
@@ -142,6 +144,11 @@ static VkImageViewType view_type(const char *dim, int *shadow) {
 
 /* The shadow mask's fragment program (docs/frame.md "Lighting stage"). */
 #define SHADOW_MASK_FS 0x06d03ad703b4bee5ull
+/* The lamp lights' (lamp_light.frag): ours reads the shadow settings too (lamp shadows), which the game's
+ * interface doesn't list, so load_shader adds the binding. */
+#define LAMP_LIGHT_FS 0x42759b97412ca8acull
+/* The shadow settings block (binding 95, pcss_settings_fill): soft shadows, contact shadows, lamp shadows. */
+#define PCSS_BLOCK 80
 
 /* The screen passes: the game's full-screen programs between the G-buffer and the UI that ours replace in
  * the engine's own draws (the shadow mask's way, decision 0044): same inputs, targets and state.
@@ -335,6 +342,18 @@ static Shader *load_shader(uint64_t key, int stage) {
         }
     }
     free(text);
+    if (key == LAMP_LIGHT_FS && stage == ST_FRAG) {
+        /* ours reads the shadow settings (95), the lamp shadows' table (94) and images (93 compared, 92 raw): 0081 */
+        static const struct { char kind; uint32_t binding; VkDescriptorType type; } add[4] = {
+            {'p', 95, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER}, {'L', 94, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER},
+            {'S', 93, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER}, {'R', 92, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER}};
+        for (int a = 0; a < 4; a++) {
+            if (s->nb == MAX_BINDINGS) gpu_stop("shader %016" PRIx64 " has too many bindings", key);
+            s->b[s->nb] = (Binding){.kind = add[a].kind};
+            lb[s->nb++] = (VkDescriptorSetLayoutBinding){.binding = add[a].binding, .descriptorCount = 1,
+                                                         .stageFlags = stage_bits[stage], .descriptorType = add[a].type};
+        }
+    }
     /* Two cbuf 8 (camera) values are in pixels of a target we may make larger (bind_stage_set scales
      * them in a copy):
      * - the shaders that sample a shadow map average 5 taps spread by a value the game sets (half a
@@ -1606,6 +1625,69 @@ static void contact_settings(float *f) {
     if (!gpu_contact() || (contact_alternate && !(gpu_frames() & 1))) f[0] = 0;
 }
 
+/* Lamp shadows (decision 0081, lamp_shadow.c): the characters' shadows from the lamps nearest them, from shadow maps
+ * drawn for those lamps. Experimental. The settings panel's POINT LIGHT SHADOWS row switches them while playing.
+ * YW4_LAMP_SHADOWS=<strength> at start (how much of the lamp's light a shadow takes away: 0 off, the default; the
+ * panel's levels 0.25 / 0.4 / 0.6 / 1), or YW4_LAMP_SHADOWS=<strength>,<softness>,<bias>[,<debug>] to try other
+ * values ( softness: the filter's reach in texels; bias in view units, about metres; debug 1 paints what each lamp
+ * reaches green and its shadow red, in place of its light). YW4_LAMP_SHADOWS_ALTERNATE=1: off on even GPU frames, to
+ * compare both in one run. Needs SCREEN PASSES = CUSTOM (the lamp program is one of them) and SHADOW PASS = CUSTOM
+ * (the characters' draws come from our sun shadow pass). */
+static float lamp_shadow[4] = {0.4f, 0.75f, 0.03f, 0};  /* strength (owner: 1, then 0.6 too dark), softness (owner: 0.75 of 1.5 / 0.75 / 0.5 / 0), bias, debug */
+static int lamp_shadow_on = -1, lamp_shadow_alternate;
+
+int gpu_lamp_shadows(void) {
+    int v = __atomic_load_n(&lamp_shadow_on, __ATOMIC_ACQUIRE);
+    if (v < 0) {
+        const char *e = getenv("YW4_LAMP_SHADOWS");
+        v = 0;  /* experimental: off until the player turns it on (owner, 2026-11-19) */
+        if (e && strchr(e, ',')) {
+            sscanf(e, "%f,%f,%f,%f", &lamp_shadow[0], &lamp_shadow[1], &lamp_shadow[2], &lamp_shadow[3]);
+            v = lamp_shadow[0] > 0;
+        } else if (e && *e) {
+            float f = (float)atof(e);
+            v = f > 0;
+            if (v) lamp_shadow[0] = f > 1 ? 1 : f;
+        }
+        lamp_shadow_alternate = (e = getenv("YW4_LAMP_SHADOWS_ALTERNATE")) != NULL && atoi(e);
+        fprintf(stderr, "yw4: gpu: lamp shadows %s: strength %g, softness %g texels, bias %g%s\n", v ? "on" : "off", lamp_shadow[0],
+                lamp_shadow[1], lamp_shadow[2], lamp_shadow[3] == 1 ? ", debug view" : "");
+        __atomic_store_n(&lamp_shadow_on, v, __ATOMIC_RELEASE);
+    }
+    return v;
+}
+
+/* off, or back on at the strength chosen last */
+void gpu_lamp_shadows_toggle(void) {
+    int v = !gpu_lamp_shadows();
+    __atomic_store_n(&lamp_shadow_on, v, __ATOMIC_RELEASE);
+    fprintf(stderr, "yw4: gpu: lamp shadows %s (F4)\n", v ? "on" : "off");
+}
+
+/* The settings panel's LAMP SHADOWS row (owner, 2026-11-19: "can you make shadow strength adjustable"): off, then
+ * four strengths. */
+static const float lamp_levels[5] = {0, 0.25f, 0.4f, 0.6f, 1.0f};
+
+int gpu_lamp_shadow_level(void) {
+    if (!gpu_lamp_shadows()) return 0;
+    int best = 1;
+    for (int i = 2; i < 5; i++)
+        if (fabsf(lamp_levels[i] - lamp_shadow[0]) < fabsf(lamp_levels[best] - lamp_shadow[0])) best = i;
+    return best;
+}
+
+void gpu_lamp_shadow_cycle(void) {
+    int l = (gpu_lamp_shadow_level() + 1) % 5;
+    if (l) lamp_shadow[0] = lamp_levels[l];
+    __atomic_store_n(&lamp_shadow_on, l != 0, __ATOMIC_RELEASE);
+    fprintf(stderr, "yw4: gpu: lamp shadows %s, strength %g (settings panel)\n", l ? "on" : "off", lamp_levels[l]);
+}
+
+static void lamp_shadow_settings(float *f) {
+    memcpy(f, lamp_shadow, sizeof lamp_shadow);
+    if (!gpu_lamp_shadows() || (lamp_shadow_alternate && !(gpu_frames() & 1))) f[0] = 0;
+}
+
 /* YW4_MASK_BREAKDOWN=1: what the shadow mask's parts cost, in one run. Frame by frame the mask takes turns
  * in four forms (as set: soft shadows and contact shadows as chosen; no contact shadows; no soft shadows;
  * neither), and the per-pass GPU timer (F5, YW4_GPU_PASSES) has a line for each (gpu.c marks around the
@@ -1628,7 +1710,7 @@ const char *gpu_mask_breakdown_label(const GpuState *s) {
 static void pcss_settings_fill(float *f);
 
 static int pcss_settings(VkBuffer *buf, VkDeviceSize *offset) {
-    float *f = (float *)ring_alloc(64, buf, offset);
+    float *f = (float *)ring_alloc(PCSS_BLOCK, buf, offset);
     if (!f) return 0;
     pcss_settings_fill(f);
     if (mask_breakdown()) {  /* this frame's form: bit 0 no contact shadows, bit 1 no soft shadows */
@@ -1651,6 +1733,7 @@ static void pcss_settings_fill(float *f) {
     if (pcss_alternate >= 0 && fr >= (uint64_t)pcss_alternate && fr < (uint64_t)pcss_alternate + 16) once = !(fr & 1);
     f[10] = (float)once, f[11] = pcss_block;
     contact_settings(f + 12);
+    lamp_shadow_settings(f + 16);
 }
 
 /* A draw of our G-buffer pass (gbuffer.h): its own vertex and index buffers and vertex constants 2
@@ -1721,7 +1804,7 @@ static int bind_stage_set(VkCommandBuffer cb, const GpuState *s, const Shader *s
             } else if (b->kind == 'p') {  /* the soft shadow settings */
                 if (!pcss_settings(&bi[i].buffer, &bi[i].offset))
                     bi[i].buffer = dummy_buffer(), bi[i].offset = 0;
-                bi[i].range = 64;
+                bi[i].range = PCSS_BLOCK;
                 w[i].dstBinding = 95;
                 w[i].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
                 w[i].pBufferInfo = &bi[i];
@@ -1747,6 +1830,24 @@ static int bind_stage_set(VkCommandBuffer cb, const GpuState *s, const Shader *s
                 gpu_sampler_scene = 0;
                 ii[i].imageLayout = VK_IMAGE_LAYOUT_GENERAL;
                 w[i].dstBinding = (b->kind == 'd' ? 96 : 16) + b->slot;
+                w[i].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+                w[i].pImageInfo = &ii[i];
+            } else if (b->kind == 'L') {  /* lamp shadows' table (decision 0081), with this draw's camera */
+                LampShadowTable *t = (LampShadowTable *)ring_alloc(sizeof *t, &bi[i].buffer, &bi[i].offset);
+                GpuRange c8 = s->ubo[0][8];
+                if (t) lamp_shadow_fill(t, c8.size >= 7 * 16 ? (const float *)(uintptr_t)c8.addr : NULL);
+                else bi[i].buffer = dummy_buffer(), bi[i].offset = 0;
+                bi[i].range = sizeof *t;
+                w[i].dstBinding = 94;
+                w[i].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+                w[i].pBufferInfo = &bi[i];
+            } else if (b->kind == 'S' || b->kind == 'R') {  /* lamp shadows' images, compared or raw (made before this
+                                                             * draw: gpu_lamp_maps_prepare) */
+                void *view, *sampler, *raw;
+                if (!gpu_lamp_maps(&view, &sampler, &raw)) return 0;
+                ii[i].imageView = (VkImageView)view, ii[i].sampler = (VkSampler)(b->kind == 'S' ? sampler : raw);
+                ii[i].imageLayout = VK_IMAGE_LAYOUT_GENERAL;
+                w[i].dstBinding = b->kind == 'S' ? 93 : 92;
                 w[i].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
                 w[i].pImageInfo = &ii[i];
             } else if (b->kind == 'i') {
@@ -2274,6 +2375,16 @@ static void draw(VkCommandBuffer cb, GpuState *s, const CmdRec *r) {
     if (s->color[2] != 8) {
         static int logged;
         if (!logged++) fprintf(stderr, "yw4: gpu: alpha test %u ignored for now\n", s->color[2]);
+    }
+    /* lamp shadows (decision 0081): this frame's lamps, from the draw's vertices (all of them: each lamp's volume is
+     * a run of vertices carrying its position, radius and colour), and the images the program reads made before the
+     * draw's rendering begins (also with the game's program, whose layout has the binding too) */
+    if (g->sh[ST_FRAG] && g->sh[ST_FRAG]->key == LAMP_LIGHT_FS) {
+        uint32_t a = s->nattribs > 2 ? s->attribs[2] : 0, st = a >> 8 & 0x1F;
+        if ((a & 0xFF) == 0x2e && a >> 13 == 32 && st < 16 && s->vbuf[st].addr && s->streams[st][0] >= 48)
+            lamp_shadow_collect((const uint8_t *)(uintptr_t)s->vbuf[st].addr,
+                                (uint32_t)(s->vbuf[st].size / s->streams[st][0]), s->streams[st][0]);
+        gpu_lamp_maps_prepare(cb, s);
     }
     if (gpu_watch_on()) {  /* the minimap watch (gpu_watch.c): before the uploads, to see which are this draw's */
         GpuWatchTex wt[16];
