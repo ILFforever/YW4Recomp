@@ -896,9 +896,10 @@ static void perf_page_action(int a) {
  * is passed over while its switch says Public, Discord status while it can't be used. */
 enum { ON_SERVER0, ON_SERVER1, ON_SWAP, ON_SWAP_CODE, ON_BLAST, ON_BLAST_CODE, ON_NAME, ON_DISCORD, ON_ITEMS };
 
-/* in Ark Swap or Blasters (ldn.c): the server, the room settings and the name are locked until the game leaves it
- * (owner, 2026-11-19: the code can't change while on the Ark page; a change would only reach the next connection) */
-static int online_locked(void) { return ldn_active(); }
+/* in a room of Ark Swap or Blasters (hosting or joined, ldn.c): the server, the room settings and the name are locked
+ * until the game leaves it. Before a room (the start screen, the room list) a change drops the relay's connection, so
+ * the next Update List uses it (relay_settings_changed; owner, 2026-11-20: F4's hint pointed at a locked tab there) */
+static int online_locked(void) { return ldn_in_room(); }
 
 static int online_enabled(int i) {
     if (i != ON_DISCORD && online_locked()) return 0;
@@ -947,8 +948,17 @@ static void online_page_action(int a) {
                 break;
             }
     } else if (a == GM_LEFT || a == GM_RIGHT) {
-        if (orow <= ON_SERVER1) orow = a == GM_LEFT ? ON_SERVER0 : ON_SERVER1, online_use(orow, 0);  /* across */
-        else online_use(orow, a == GM_LEFT ? -1 : 1);
+        /* the Profile row: Player name and Discord status sit side by side, so Right from the name goes to Discord and
+         * Left from Discord already Off comes back (owner, 2026-11-20: the D-pad's Right didn't reach Discord) */
+        if (orow == ON_NAME && a == GM_RIGHT) {
+            if (online_enabled(ON_DISCORD)) orow = ON_DISCORD;
+        } else if (orow == ON_DISCORD && a == GM_LEFT && (!discord_enabled() || !online_enabled(ON_DISCORD))) {
+            if (online_enabled(ON_NAME)) orow = ON_NAME;
+        } else if (orow <= ON_SERVER1) {
+            orow = a == GM_LEFT ? ON_SERVER0 : ON_SERVER1, online_use(orow, 0);  /* across */
+        } else {
+            online_use(orow, a == GM_LEFT ? -1 : 1);
+        }
     } else if (a == GM_ACCEPT) {
         online_use(orow, 0);
     }
@@ -3171,7 +3181,7 @@ static void draw_online_page(const UiCanvas *c, const GameMenuInfo *in) {
     float lh = 16 * 1.45f, x = 488, w = 1024, y = 76 + 34 * 1.25f + 6;
     int locked = online_locked();
     ui_text(c, locked ? UI_GOTHIC_700 : UI_GOTHIC_500, 15, x, y, 15 * 1.45f,
-            locked ? "You're in Ark Swap or Blasters now: leave it to change these."
+            locked ? "You're in a room now: leave it to change these."
                    : "The game's Online button plays through our servers. Local play stays local.",
             locked ? WINE : MUTED);
     y += 15 * 1.45f + 18;
@@ -3192,7 +3202,8 @@ static void draw_online_page(const UiCanvas *c, const GameMenuInfo *in) {
         if (ms >= 0 && (best < 0 || ms < relay_ping_ms(best))) best = i;
         if (ms == -1) changed();  /* still measuring: draw again until the numbers are in */
     }
-    float hs = 18 + lh + 10 + (float)n * 52 + (float)(n - 1) * 10 + 20;
+    /* under the rows, a note: players only meet on one server (owner, 2026-11-20) */
+    float hs = 18 + lh + 10 + (float)n * 52 + (float)(n - 1) * 10 + 12 + 15 * 1.45f + 18;
     online_card(c, x, y, w, hs, "Server", lh);
     float ry = y + 18 + lh + 10;
     for (int i = 0; i < n; i++, ry += 52 + 10) {
@@ -3216,6 +3227,8 @@ static void draw_online_page(const UiCanvas *c, const GameMenuInfo *in) {
         }
         if (!locked) hit_add(rx, ry, rw, 52, HIT_ON_ITEM, item, -1);
     }
+    ui_text(c, UI_GOTHIC_500, 14, x + 24, ry - 10 + 12, 15 * 1.45f,
+            "To play with a friend, both of you pick the same server.", MUTED);
     y += hs + 20;
 
     /* Ark Swap and Blasters: who sees your room, and the code for Private */

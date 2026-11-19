@@ -13,6 +13,7 @@
 #include "gaiji_create.h"
 #include "mousemenu.h"
 #include "pause.h"
+#include "relay.h"
 #include "run.h"
 #include "savefs.h"
 #include "settings.h"
@@ -923,6 +924,12 @@ static uint32_t gaiji_swap(uint32_t crc, int *sheet) {
         if (in_x == -2) in_x = input_by_id("X");
         if (row == in_x && savefs_diary_open() && scene_on_title())
             return *sheet = SHEET_KEY, gaiji_crc(key_gaiji(SDL_SCANCODE_X));
+        /* the room list (local play started, not in a room): its guide's R Network Settings (diaryrows.c) is F4 on a
+         * keyboard (window.c), so its icon shows F4 there (owner, 2026-11-20) */
+        static int in_rr = -2;
+        if (in_rr == -2) in_rr = input_by_id("R");
+        if (row == in_rr && ldn_active() && !ldn_in_room())
+            return *sheet = SHEET_KEY, gaiji_crc(key_gaiji(SDL_SCANCODE_F4));
         /* the row's first key that has an icon, else its mouse part (the keyboard first: owner, 2026-11-13); in
          * battles the mouse first (owner, 2026-11-13: you attack and aim with the mouse there, so the hint shows
          * the mouse button, not U or O). Groups (a stick, the whole D-pad) keep the Switch icon: the keyboard sheet

@@ -378,16 +378,35 @@ static uint8_t *hint_replace(const uint8_t *b, size_t n, size_t *out_n, uint32_t
     return NULL;
 }
 
-/* The in-game Save's hint and the title's Continue hint, each where it is the English line; NULL when neither is. */
+/* ---- the room list's guide (Ark Swap; the other line with the same text is likely Blasters' room list, both
+ * checked as 2026-11-20's candidates for it): R opens the network settings, the overlay's Online tab (window.c; F4
+ * on a keyboard, the icon then shows F4: bindings.c gaiji_swap). R does nothing else there (owner, 2026-11-20: "map
+ * it to any key on controller that is not used in that screen"; X is Update List, A Select, B Back). */
+#define ROOMS_HINT_ID1 0xce311390u
+#define ROOMS_HINT_ID2 0x114a0494u
+static const char ROOMS_HINT_EN[] = "<CMD_FUNC3>Update List   <CMD_ENTER>Select   <CMD_BACK>Back";
+static const char ROOMS_HINT_NEW[] =
+    "[$gaiji_bt07_s000]Network Settings   <CMD_FUNC3>Update List   <CMD_ENTER>Select   <CMD_BACK>Back";
+
+/* The in-game Save's hint, the title's Continue hint and the room lists' hints, each where it is the English line;
+ * NULL when none is. */
 uint8_t *diaryrows_save_hint(const uint8_t *b, size_t n, size_t *out_n) {
-    size_t n1 = 0, n2 = 0;
-    uint8_t *one = hint_replace(b, n, &n1, SAVE_HINT_ID, HINT_EN, HINT_NEW);
-    uint8_t *two = hint_replace(one ? one : b, one ? n1 : n, &n2, LOAD_HINT_ID, LOAD_HINT_EN, LOAD_HINT_NEW);
-    if (two) {
-        free(one);
-        *out_n = n2;
-        return two;
+    static const struct { uint32_t id; const char *en, *text; } lines[] = {
+        {SAVE_HINT_ID, HINT_EN, HINT_NEW},
+        {LOAD_HINT_ID, LOAD_HINT_EN, LOAD_HINT_NEW},
+        {ROOMS_HINT_ID1, ROOMS_HINT_EN, ROOMS_HINT_NEW},
+        {ROOMS_HINT_ID2, ROOMS_HINT_EN, ROOMS_HINT_NEW},
+    };
+    uint8_t *cur = NULL;
+    size_t cn = 0;
+    for (size_t i = 0; i < sizeof lines / sizeof lines[0]; i++) {
+        size_t nn = 0;
+        uint8_t *next = hint_replace(cur ? cur : b, cur ? cn : n, &nn, lines[i].id, lines[i].en, lines[i].text);
+        if (next) {
+            free(cur);
+            cur = next, cn = nn;
+        }
     }
-    if (one) *out_n = n1;
-    return one;
+    if (cur) *out_n = cn;
+    return cur;
 }

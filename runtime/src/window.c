@@ -1137,13 +1137,6 @@ static void note_render(float s) {
 
 static void note_draw(VkImage dst, uint32_t index, int32_t x0, int32_t y0, uint32_t bw, uint32_t bh) {
     (void)bw;
-    /* the Ark Swap / Blasters pages (local play, ldn.c): a card on the way in says where the network settings are
-     * (owner, 2026-11-19: "add an open network settings hint ... map it to F4"; the game's own hint bar can't take it) */
-    static int was_local;
-    int local = ldn_active();
-    if (local && !was_local && !gamemenu_open())
-        window_notice(0, "Press F4 for network settings", "Server, public or private, codes \xc2\xb7 the Online tab");
-    was_local = local;
     if (!note_on || index >= 8 || !swap_views[index]) return;
     if (hb_resources() || nb_resources()) {
         note_on = note_keys_wait = 0;
@@ -2618,6 +2611,7 @@ void window_vibration(float amp_low, float freq_low, float amp_high, float freq_
 /* The keyboard, mouse, and the gamepad through the controls (bindings.c; the settings panel's second page). */
 static void pad_back_hold(void);  /* below, with the gamepad */
 static void pad_shoulders_overlay(void);
+static void pad_r_online(void);
 static uint32_t pad_parts_held(void);
 int battle_active(void);  /* battle.c */
 /* The shortcut wheel's key (shortcutwheel.h): a key bound to L in the exploring set is held (1 to start). Only
@@ -2677,6 +2671,7 @@ static void update_input(void) {
 
     pad_back_hold();
     pad_shoulders_overlay();
+    pad_r_online();
     bindings_read(SDL_GetKeyboardState(NULL), mb, wup, wdwn, gamepad, &b, s);
     {   /* the map (owner, 2026-11-15): moving the mouse pans it, as the left stick, from the movement since the last
          * read, smoothed over a few reads. As a real stick (the owner: it only began to move after half the screen):
@@ -3044,6 +3039,22 @@ static void pad_shoulders_overlay(void) {
     if (all && !held && !bindings_capturing())
         gamemenu_toggle(), yw4_hid_note_key("MENU");
     held = all;
+}
+
+/* The room list (local play started, not in a room): R opens the overlay's Online tab, as F4 does on a keyboard;
+ * the room list's guide line says so (diaryrows.c; owner, 2026-11-20: a button that does nothing there). The pad's
+ * own R shoulder: a player who moved the game's R elsewhere sees that button's icon in the line but still uses R.
+ * R alone: with L, ZL and ZR it is the overlay's four-shoulder combo (pad_shoulders_overlay). */
+static void pad_r_online(void) {
+    static int held;
+    int r = gamepad && SDL_GetGamepadButton(gamepad, SDL_GAMEPAD_BUTTON_RIGHT_SHOULDER);
+    int others = gamepad && (SDL_GetGamepadButton(gamepad, SDL_GAMEPAD_BUTTON_LEFT_SHOULDER) ||
+                             SDL_GetGamepadAxis(gamepad, SDL_GAMEPAD_AXIS_LEFT_TRIGGER) > 16000 ||
+                             SDL_GetGamepadAxis(gamepad, SDL_GAMEPAD_AXIS_RIGHT_TRIGGER) > 16000);
+    if (r && !held && !others && ldn_active() && !ldn_in_room() && !gamemenu_open() && !settings_open() &&
+        !textin_active() && !bindings_capturing())
+        gamemenu_open_page(GM_ONLINE), yw4_hid_note_key("M_ONLINE");
+    held = r;
 }
 
 /* ---- the touchpad as a menu pointer (tp_game_click, tp_moved_ms: above). A PlayStation pad with a touchpad, while

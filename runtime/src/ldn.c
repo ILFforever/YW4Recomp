@@ -442,6 +442,10 @@ void yw4_ldn_GetDisconnectReason(CPUState *c) {
 }
 
 int ldn_active(void) { return __atomic_load_n(&state, __ATOMIC_ACQUIRE) != ST_NONE; }
+int ldn_in_room(void) {
+    int s = __atomic_load_n(&state, __ATOMIC_ACQUIRE);
+    return s == ST_ACCESS_POINT || s == ST_AP_CREATED || s == ST_STATION_CONNECTED;
+}
 
 int ldn_room(int *players, int *max_players, int *scene) {
     host_lock(&lock);

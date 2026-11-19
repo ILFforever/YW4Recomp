@@ -85,6 +85,24 @@ void relay_choose(int on, int what) {
             t ? t : "no relay (alone in the room; set YW4_RELAY for a home-network one)", room_code());
 }
 
+void relay_settings_changed(void) {
+    if (ldn_in_room()) return;
+    host_lock(&lock);
+    int was = sock != RBAD;
+    if (was) {  /* as relay_choose: its reader ends without reporting a lost room */
+        generation++;
+        rclose(sock);
+        sock = RBAD;
+        host_cond_broadcast(&answered);
+    }
+    host_unlock(&lock);
+    if (was) {
+        const char *t = target();
+        fprintf(stderr, "yw4: relay: settings changed, the next request connects to %s, room code \"%s\"\n",
+                t ? t : "no relay", room_code());
+    }
+}
+
 static int read_all(RSock s, uint8_t *p, size_t n) {
     while (n) {
         int r = recv(s, (char *)p, (int)(n > 1 << 20 ? 1 << 20 : n), 0);

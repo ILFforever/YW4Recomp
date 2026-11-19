@@ -25,6 +25,7 @@
 #include "theme.h"
 #include "shadow.h"
 #include "window.h"
+#include "relay.h"
 
 const char *shadow_mode_name(void);
 
@@ -196,6 +197,14 @@ static void put_env(const char *name, const char *value) {
     setenv(name, value, 1);
 #endif
 }
+/* an online setting (server, Public / Private, code): an open relay connection outside a room is dropped, so the
+ * next request uses it (relay.c) */
+static void online_env(const char *name, const char *value) {
+    const char *was = getenv(name);
+    int same = was && !strcmp(was, value);
+    put_env(name, value);
+    if (!same) relay_settings_changed();
+}
 static int env_on(const char *name) {
     const char *v = getenv(name);
     return v && !strcmp(v, "1");
@@ -220,20 +229,20 @@ static int server_index(void) {
         if (!strcmp(v, servers[i])) return i;
     return 0;
 }
-static void server_cycle(void) { put_env("YW4_ONLINE_SERVER", servers[(server_index() + 1) % 2]); }
+static void server_cycle(void) { online_env("YW4_ONLINE_SERVER", servers[(server_index() + 1) % 2]); }
 
 /* Public / Private and the code, per activity: private rooms are seen only by players with the same code */
 static int swap_private(void) { return env_on("YW4_SWAP_PRIVATE"); }
-static void swap_private_toggle(void) { put_env("YW4_SWAP_PRIVATE", swap_private() ? "0" : "1"); }
+static void swap_private_toggle(void) { online_env("YW4_SWAP_PRIVATE", swap_private() ? "0" : "1"); }
 static int blasters_private(void) { return env_on("YW4_BLASTERS_PRIVATE"); }
-static void blasters_private_toggle(void) { put_env("YW4_BLASTERS_PRIVATE", blasters_private() ? "0" : "1"); }
+static void blasters_private_toggle(void) { online_env("YW4_BLASTERS_PRIVATE", blasters_private() ? "0" : "1"); }
 static const char *code_of(const char *env) {
     const char *v = getenv(env);
     return v && *v ? v : "";
 }
-static void swap_code_set(const char *c) { put_env("YW4_SWAP_CODE", c ? c : ""), settings_save(); }
+static void swap_code_set(const char *c) { online_env("YW4_SWAP_CODE", c ? c : ""), settings_save(); }
 static void swap_code_edit(void) { gamemenu_name_edit("Ark Swap code", 16, "", code_of("YW4_SWAP_CODE"), swap_code_set); }
-static void blasters_code_set(const char *c) { put_env("YW4_BLASTERS_CODE", c ? c : ""), settings_save(); }
+static void blasters_code_set(const char *c) { online_env("YW4_BLASTERS_CODE", c ? c : ""), settings_save(); }
 static void blasters_code_edit(void) { gamemenu_name_edit("Blasters code", 16, "", code_of("YW4_BLASTERS_CODE"), blasters_code_set); }
 static const char *swap_code_off(void) { return swap_private() ? NULL : "SET ARK SWAP TO PRIVATE TO USE A CODE."; }
 static const char *blasters_code_off(void) { return blasters_private() ? NULL : "SET BLASTERS TO PRIVATE TO USE A CODE."; }
@@ -257,10 +266,10 @@ const char *settings_online_server_name(int i) { return server_names[i & 1]; }
 const char *settings_online_server_region(int i) { return server_regions[i & 1]; }
 const char *settings_online_server_address(int i) { return servers[i & 1]; }
 int settings_online_server(void) { return server_index(); }
-void settings_online_server_set(int i) { put_env("YW4_ONLINE_SERVER", servers[i & 1]), settings_save(); }
+void settings_online_server_set(int i) { online_env("YW4_ONLINE_SERVER", servers[i & 1]), settings_save(); }
 int settings_online_private(int blasters) { return blasters ? blasters_private() : swap_private(); }
 void settings_online_private_set(int blasters, int on) {
-    put_env(blasters ? "YW4_BLASTERS_PRIVATE" : "YW4_SWAP_PRIVATE", on ? "1" : "0");
+    online_env(blasters ? "YW4_BLASTERS_PRIVATE" : "YW4_SWAP_PRIVATE", on ? "1" : "0");
     settings_save();
 }
 const char *settings_online_code(int blasters) { return code_of(blasters ? "YW4_BLASTERS_CODE" : "YW4_SWAP_CODE"); }
