@@ -246,6 +246,7 @@ try { const t = localStorage.getItem('yw4-theme'); if (t === 'dark' || t === 'li
     <h2>Releases</h2>
     <ol>
       <li><a href="#download"><span class="n">↓</span>Download</a></li>
+      <li><a href="#v1.8.0"><span class="n">11/19</span>Game 1.8.0</a></li>
       <li><a href="#launcher-v1.4.0"><span class="n">11/18</span>Launcher 1.4.0</a></li>
       <li><a href="#v1.7.0"><span class="n">11/18</span>Game 1.7.0</a></li>
       <li><a href="#launcher-v1.3.0"><span class="n">11/18</span>Launcher 1.3.0</a></li>
@@ -288,6 +289,25 @@ try { const t = localStorage.getItem('yw4-theme'); if (t === 'dark' || t === 'li
           <p>Every file and its checksum: <a href="https://github.com/ILFforever/YW4Recomp/releases">all releases on
             GitHub</a>. The "Game update" releases there are for the launcher; don't download those.</p>
         </div>
+      </div>
+    </article>
+
+    <article id="v1.8.0">
+      <div class="bar"><h2>Game 1.8.0</h2><span class="cat">Game · 2026-11-19</span></div>
+      <div class="body prose notes">
+<p class="how">The launcher gets it for you: <b>Update</b> on the Play screen rebuilds the game in a few minutes, and the version before stays playable if anything goes wrong.</p>
+<h4>What's new</h4>
+<ul><li>
+<b>Point light shadows (experimental).</b> At night, street lamps, porch lights and lit windows now cast soft shadows of the people and Yo-kai standing near them, on walls, doors and the ground. Off by default while it's experimental: overlay → Settings → <b>Shadows</b> → <b>Point light shadows</b> (Medium recommended).
+</li><li>
+<b>DLSS model.</b> With anti-aliasing on DLSS, a new <b>DLSS model</b> setting: <b>Standard</b> (as before) or <b>High quality</b>, which removes the red trail behind characters in the rain when you swing the camera. High quality costs more GPU time: pair it with <b>Upscaling</b> on <b>Quality</b> for about the same frame rate as before.
+</li><li>
+<b>Mouse support in the map improved.</b> When you close the map, the mouse turns the camera again. The mouse pans the map again after you use Mirapo. Placing a pin: the wheel picks the pin, left click places it, right click goes back.
+</li></ul>
+<h4>Linux</h4>
+<ul><li>
+<b>No build tools needed.</b> If your system has no compiler or glslang, like Bazzite or SteamOS, the build now downloads its own. Systems that have them keep using them.
+</li></ul>
       </div>
     </article>
 
