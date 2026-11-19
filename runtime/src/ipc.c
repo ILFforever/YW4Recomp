@@ -115,7 +115,10 @@ static uint32_t session_new(Service *s, Domain *domain) {
 }
 
 static void service_release(Service *s) {
-    if (s && --s->refs == 0) free(s);
+    if (s && --s->refs == 0) {
+        if (s->close) s->close(s->state);
+        free(s);
+    }
 }
 
 uint32_t ipc_connect_named_port(const char *name, uint32_t *handle) {

@@ -53,6 +53,7 @@ struct Service {
     ServiceHandler handler;
     void *state;
     int refs;                      /* sessions and domain slots holding it */
+    void (*close)(void *state);    /* when the last of them closes (NULL: state is kept), e.g. a save file's FILE* */
 };
 
 /* Argument/output helpers for handlers. */

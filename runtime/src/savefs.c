@@ -4,9 +4,11 @@
  * Switch paths ("/data/save.bin", at most 0x300 bytes); ".." and backslashes are refused,
  * so nothing outside the save folder can be reached.
  *
- * Simplification: the Switch journals save data, so writes only become permanent at
- * Commit; here they go to the file at once and Commit does nothing. A crash in the middle
- * of a save can therefore leave a half-written file that the Switch would have discarded.
+ * The Switch journals save data, so writes only become permanent at Commit. Here they go to
+ * the file at once (the game reads them back through other handles), and savejournal.c keeps
+ * each changed file's last committed content beside it until Commit: a run that stops in the
+ * middle of a save (crash, window closed, power cut) gets its last whole save back at the next
+ * start, as on the Switch (review 2026-11-19; before, a half-written file stayed).
  */
 #include <errno.h>
 #include <inttypes.h>
@@ -35,6 +37,7 @@
 #include "kernel.h"
 #include "pause.h"
 #include "savefs.h"
+#include "savejournal.h"
 #include "host.h"
 #include "window.h"
 #include "yw4rt.h"
@@ -359,9 +362,50 @@ static int is_general_win_active(void) {
 
 static int ts_cmp(const uint8_t *a, const uint8_t *b);
 
-/* The Diary's one Autosave row (owner, 2026-11-17): the newest autosave of any slot. Each slot keeps its own on disk,
- * so playing another slot never throws one away; only the newest shows. -1: no slot has one. */
+/* Which slot's game made the one Autosave on disk, recorded when that autosave commits (review 2026-11-19). The
+ * newest timestamp in the slots' summaries was the only guess before: a clock set back (end of summer time, another
+ * time zone) made an older slot look newest, and loading the Autosave then made that slot the one the next manual
+ * save overwrote. Kept beside the save folder (<user folder>.autosave-slot), outside what the game lists. */
+static int autosave_owner = -2;  /* -2: not read yet; -1: none recorded (saves from before) */
+
+static void autosave_owner_path(char out[1100]) { snprintf(out, 1100, "%.1024s.autosave-slot", user_save_dir); }
+
+static int autosave_owner_locked(void) {
+    if (autosave_owner == -2 && user_save_dir[0]) {
+        char p[1100];
+        autosave_owner_path(p);
+        FILE *f = fopen(p, "r");
+        int s = -1;
+        if (f) {
+            if (fscanf(f, "slot=%d", &s) != 1 || s < 0 || s >= DIARY_SLOT_COUNT) s = -1;
+            fclose(f);
+        }
+        autosave_owner = s;
+    }
+    return autosave_owner < 0 ? -1 : autosave_owner;
+}
+
+static void set_autosave_owner_locked(int slot) {
+    if (!user_save_dir[0] || slot < 0 || slot >= DIARY_SLOT_COUNT) return;
+    char p[1100], tmp[1110];
+    autosave_owner_path(p);
+    snprintf(tmp, sizeof tmp, "%s.tmp", p);
+    FILE *f = fopen(tmp, "w");
+    int bad = !f || fprintf(f, "slot=%d\n", slot) < 0 || host_file_sync(f);
+    if (f && fclose(f)) bad = 1;
+    if (bad || host_replace_file(tmp, p)) {
+        remove(tmp);
+        fprintf(stderr, "yw4: diary: couldn't record the Autosave's slot (%s)\n", p);
+        return;
+    }
+    autosave_owner = slot;
+}
+
+/* The Diary's one Autosave row (owner, 2026-11-17): the slot whose game made the Autosave (recorded at its Commit),
+ * else, for saves from before that, the newest autosave in the slots' summaries. -1: no slot has one. */
 static int newest_auto_slot_locked(void) {
+    int owner = autosave_owner_locked();
+    if (owner >= 0 && slot_cache[owner][1].valid) return owner;
     int best = -1;
     for (int s = 0; s < DIARY_SLOT_COUNT; s++)
         if (slot_cache[s][1].valid &&
@@ -546,9 +590,36 @@ static int64_t file_tell(FILE *f) {
 
 /* ---- IFile */
 
-typedef struct {
+typedef struct SaveFile {
     FILE *f;
+    char path[1024];
+    int changed;                  /* written since the last Commit: synced at Commit or when closed */
+    struct SaveFile *prev, *next;  /* the open ones (open_files), for Commit */
 } SaveFile;
+
+static HostLock open_lock = HOST_LOCK_INIT;
+static SaveFile *open_files;
+
+/* Before a change through sf: the file's last committed content is kept until Commit (savejournal.h). */
+static void before_change(SaveFile *sf) {
+    if (__atomic_exchange_n(&sf->changed, 1, __ATOMIC_ACQ_REL)) return;
+    sj_before_change(sf->path);
+}
+
+/* The game closed it (its last session or domain slot): flushed to the disk if it was written, then closed. Before
+ * 2026-11-19 a save file was never closed: Windows' C runtime has 512 open files, and remove() fails on an open one
+ * (a Diary slot deleted came back). */
+static void save_file_close(void *state) {
+    SaveFile *sf = state;
+    host_lock(&open_lock);
+    if (sf->prev) sf->prev->next = sf->next;
+    else open_files = sf->next;
+    if (sf->next) sf->next->prev = sf->prev;
+    host_unlock(&open_lock);
+    if (sf->changed) host_file_sync(sf->f);
+    fclose(sf->f);
+    free(sf);
+}
 
 static void save_file(Service *s, IpcRequest *req, IpcResponse *resp) {
     SaveFile *sf = s->state;
@@ -566,7 +637,9 @@ static void save_file(Service *s, IpcRequest *req, IpcResponse *resp) {
     case 1: {  /* Write(u32 option, u64 offset, u64 size, A buffer) */
         uint64_t off = IPC_IN(uint64_t, 8), size = IPC_IN(uint64_t, 16);
         const IpcBuffer *in = req->na ? &req->a[0] : &req->x[0];
-        if (size > in->size || file_seek(sf->f, off) || fwrite(GPTR(in->addr), 1, (size_t)size, sf->f) != size)
+        if (size > in->size) { resp->result = FS_OUT_OF_RANGE; return; }
+        before_change(sf);
+        if (file_seek(sf->f, off) || fwrite(GPTR(in->addr), 1, (size_t)size, sf->f) != size)
             resp->result = FS_OUT_OF_RANGE;
         return;
     }
@@ -574,6 +647,7 @@ static void save_file(Service *s, IpcRequest *req, IpcResponse *resp) {
         fflush(sf->f);
         return;
     case 3:  /* SetSize(u64) */
+        before_change(sf);
         fflush(sf->f);
         if (truncate_file(sf->f, IPC_IN(uint64_t, 0))) resp->result = FS_OUT_OF_RANGE;
         return;
@@ -627,6 +701,12 @@ static void save_directory(Service *s, IpcRequest *req, IpcResponse *resp) {
     ipc_unimplemented(s, req, resp);
 }
 
+static void save_directory_close(void *state) {
+    SaveDir *d = state;
+    free(d->entries);
+    free(d);
+}
+
 /* mode: 1 directories, 2 files, 3 both. NULL if the path is no directory. */
 static SaveDir *read_directory(const char *path, uint32_t mode) {
     DIR *dir = opendir(path);
@@ -636,6 +716,8 @@ static SaveDir *read_directory(const char *path, uint32_t mode) {
     uint64_t cap = 0;
     for (struct dirent *e; (e = readdir(dir));) {
         if (!strcmp(e->d_name, ".") || !strcmp(e->d_name, "..") || strlen(e->d_name) > 0x300) continue;
+        /* savejournal.c's backups and marks, beside a file during a save: not the game's files */
+        if (strstr(e->d_name, ".yw4bak") || strstr(e->d_name, ".yw4new")) continue;
         char full[2048];
         struct stat st;
         snprintf(full, sizeof full, "%s/%s", path, e->d_name);
@@ -701,6 +783,12 @@ static void ensure_parent_dir(const char *path) {
     }
 }
 
+/* sj_commit's callback: was the Autosave among the files this Commit made whole? */
+static void note_autosave(const char *path, void *arg) {
+    size_t n = strlen(path), m = strlen("/AUTOSAVE/data.bin");
+    if (n >= m && !strcmp(path + n - m, "/AUTOSAVE/data.bin")) *(int *)arg = 1;
+}
+
 static void save_fs(Service *s, IpcRequest *req, IpcResponse *resp) {
     SaveFs *fs = s->state;
     char path[1024];
@@ -711,6 +799,7 @@ static void save_fs(Service *s, IpcRequest *req, IpcResponse *resp) {
         struct stat st;
         if (stat(path, &st) == 0) { resp->result = FS_PATH_ALREADY_EXISTS; return; }
         if (in_new_slot_folder(req, 0)) ensure_parent_dir(path);
+        sj_before_change(path);  /* new until Commit: a save that doesn't finish leaves no half file */
         FILE *f = fopen(path, "wb");
         if (!f) { resp->result = FS_PATH_NOT_FOUND; return; }
         if (truncate_file(f, IPC_IN(uint64_t, 8))) resp->result = FS_OUT_OF_RANGE;
@@ -719,6 +808,7 @@ static void save_fs(Service *s, IpcRequest *req, IpcResponse *resp) {
     }
     case 1:  /* DeleteFile(X path) */
         if (!host_path(fs, req, 0, path)) break;
+        if (path_is_file(path)) sj_before_change(path);  /* kept until Commit, like a change */
         if (remove(path)) resp->result = FS_PATH_NOT_FOUND;
         return;
     case 2: {  /* CreateDirectory(X path) */
@@ -748,6 +838,7 @@ static void save_fs(Service *s, IpcRequest *req, IpcResponse *resp) {
         if (missing || (st.st_mode & S_IFMT) == S_IFDIR) {
             if (missing && (mode & 6) && in_new_slot_folder(req, 0)) {  /* a write into a slot not saved yet */
                 ensure_parent_dir(path);
+                sj_before_change(path);
                 FILE *create_f = fopen(path, "wb");
                 if (create_f) fclose(create_f);
             } else {
@@ -759,8 +850,15 @@ static void save_fs(Service *s, IpcRequest *req, IpcResponse *resp) {
         if (!f) { resp->result = FS_PATH_NOT_FOUND; return; }
         SaveFile *sf = calloc(1, sizeof *sf);
         if (!sf) yw4_exit(3, __FILE__, __LINE__);
-        sf->f = f;  /* closed never: files of a save stay few, and the Switch's limit is the game's concern */
-        ipc_return_object(resp, ipc_service_new("fs:IFile (save)", save_file, sf));
+        sf->f = f;
+        snprintf(sf->path, sizeof sf->path, "%s", path);
+        host_lock(&open_lock);
+        if ((sf->next = open_files)) open_files->prev = sf;
+        open_files = sf;
+        host_unlock(&open_lock);
+        Service *file_svc = ipc_service_new("fs:IFile (save)", save_file, sf);
+        file_svc->close = save_file_close;  /* closed when the game closes it */
+        ipc_return_object(resp, file_svc);
         return;
     }
     case 9: {  /* OpenDirectory(u32 mode, X path) -> IDirectory */
@@ -768,20 +866,30 @@ static void save_fs(Service *s, IpcRequest *req, IpcResponse *resp) {
         if (!is_dir(path) && in_new_slot_folder(req, 0)) make_dirs(path);
         SaveDir *d = read_directory(path, IPC_IN(uint32_t, 0));
         if (!d) { resp->result = FS_PATH_NOT_FOUND; return; }
-        ipc_return_object(resp, ipc_service_new("fs:IDirectory (save)", save_directory, d));
+        Service *dir_svc = ipc_service_new("fs:IDirectory (save)", save_directory, d);
+        dir_svc->close = save_directory_close;
+        ipc_return_object(resp, dir_svc);
         return;
     }
-    case 10:  /* Commit: writes are already in the files; it marks the end of a save (the overlay says when) */
+    case 10: {  /* Commit: the save is whole. The changed files go to the disk, then their backups (savejournal.h) */
+        host_lock(&open_lock);
+        for (SaveFile *sf = open_files; sf; sf = sf->next)
+            if (__atomic_exchange_n(&sf->changed, 0, __ATOMIC_ACQ_REL)) host_file_sync(sf->f);
+        host_unlock(&open_lock);
+        int autosaved = 0;
+        sj_commit(note_autosave, &autosaved);
         __atomic_store_n(&last_save, (int64_t)time(NULL), __ATOMIC_RELEASE);
         if (diary_slots_enabled()) {
             host_lock(&slot_lock);
             if (!user_save_dir[0]) snprintf(user_save_dir, sizeof user_save_dir, "%s", fs->root);
             if (fresh_slot == active_slot) fresh_slot = -1;  /* the new game has saved: its files are the slot's now */
+            if (autosaved) set_autosave_owner_locked(__atomic_load_n(&active_slot, __ATOMIC_ACQUIRE));
             parse_slot_from_disk_locked(active_slot);
             host_unlock(&slot_lock);
         }
         fprintf(stderr, "yw4: fs: the game saved (Commit)\n");
         return;
+    }
     default:
         ipc_unimplemented(s, req, resp);
         return;
@@ -817,6 +925,9 @@ uint32_t savefs_open(uint64_t program_id, const uint8_t uid[16], int create, Ser
         fprintf(stderr, "yw4: fs: created save data in %s\n", dir);
         return 0;
     }
+    /* a save the last run didn't finish: its files as they were at its last Commit, before anything reads them */
+    int put_back = sj_recover(dir);
+    if (put_back) fprintf(stderr, "yw4: fs: %d save file(s) back to the last finished save\n", put_back);
     if (out) {
         SaveFs *fs = calloc(1, sizeof *fs);
         if (!fs) yw4_exit(3, __FILE__, __LINE__);
