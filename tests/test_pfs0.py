@@ -47,6 +47,11 @@ class Pfs0Test(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp, self.assertRaises(pfs0.Pfs0Error):
             pfs0.extract(f, entry, Path(tmp) / "a.nca")
 
+    def test_unsafe_names_refused(self):
+        for name in ("../a.nca", "sub/a.nca", "..\\a.nca", "C:a.nca", ".."):
+            with self.assertRaises(pfs0.Pfs0Error, msg=name):
+                pfs0.read_entries(io.BytesIO(make_pfs0({name: b"x"})))
+
 
 if __name__ == "__main__":
     unittest.main()

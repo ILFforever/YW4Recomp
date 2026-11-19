@@ -20,7 +20,7 @@ from __future__ import annotations
 import struct
 from typing import BinaryIO
 
-from .pfs0 import Entry
+from .pfs0 import Entry, unsafe_name
 
 
 class XciError(Exception):
@@ -55,7 +55,10 @@ def read_hfs0(f: BinaryIO, at: int) -> list[Entry]:
     for i in range(count):
         offset, size, name_off = struct.unpack_from("<QQI", raw, i * 0x40)
         end = strtab.find(b"\0", name_off)
-        entries.append(Entry(strtab[name_off:end if end >= 0 else None].decode("utf-8"), data_start + offset, size))
+        name = strtab[name_off:end if end >= 0 else None].decode("utf-8")
+        if unsafe_name(name):
+            raise XciError(f"HFS0 entry {i} at {at:#x} has an unsafe name {name!r}")
+        entries.append(Entry(name, data_start + offset, size))
     return entries
 
 

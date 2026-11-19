@@ -26,6 +26,12 @@ class Entry:
     size: int
 
 
+def unsafe_name(name: str) -> bool:
+    """PFS0/HFS0 names are flat file names ("<id>.nca", "<id>.tik"); callers join them onto an output folder, so a
+    name with a folder part, a drive or ".." could write outside it (review 2026-11-19)."""
+    return not name or name in (".", "..") or any(c in name for c in "/\\:\0")
+
+
 def read_entries(f: BinaryIO) -> list[Entry]:
     f.seek(0)
     head = f.read(0x10)
@@ -43,6 +49,8 @@ def read_entries(f: BinaryIO) -> list[Entry]:
         offset, size, name_off, _ = struct.unpack_from("<QQII", raw_entries, i * 0x18)
         end = strtab.find(b"\0", name_off)
         name = strtab[name_off:end if end >= 0 else None].decode("utf-8")
+        if unsafe_name(name):
+            raise Pfs0Error(f"entry {i} has an unsafe name {name!r}")
         entries.append(Entry(name, data_start + offset, size))
     return entries
 
