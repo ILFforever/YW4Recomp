@@ -1,0 +1,133 @@
+# The launcher's downloads, both platforms from one commit (CLAUDE.md "Releases", decision 0071): the NSIS installer
+# and the portable zip on Windows, the AppImage and its .sha256 on Linux, made by launcher/package.py exactly as on
+# the owner's PCs. Review 2026-11-19: 1.2.0 went out with the AppImage only, because each platform's files were made
+# by hand on a different machine; here one run makes all four, or the run fails and says which one is missing.
+#
+# It never publishes. The files are kept on the run's page (Artifacts) for 14 days. With "attach" ticked (a run by
+# hand), they are also added to that tag's GitHub release, which stays as it was (a draft stays a draft); a file of
+# the same name already on the release is kept, not replaced.
+#
+# Differences from the owner's builds: Windows uses GitHub's MSVC Rust (package.py ships no WebView2Loader.dll or
+# libunwind.dll then: MSVC links WebView2 in); Linux builds hactool and SDL3 against Ubuntu 24.04's glibc, as WSL does.
+name: Launcher downloads
+
+on:
+  push:
+    tags: ["launcher-v*"]
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: "Tag or commit to build (launcher-vX.Y.Z)"
+        required: true
+        default: master
+      attach:
+        description: "Also add the files to that tag's release (never publishes it)"
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: package-${{ inputs.ref || github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  windows:
+    name: Windows installer + portable zip
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref || github.ref }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: launcher/package-lock.json
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: launcher/src-tauri
+      - name: Tauri CLI (launcher/package.json's)
+        working-directory: launcher
+        run: npm ci
+      # --ref HEAD: the commit checked out above; package.py then also checks launcher/ matches it
+      - name: Package
+        run: python launcher/package.py launcher --ref HEAD
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows
+          path: work/package/dist/*
+          if-no-files-found: error
+
+  linux:
+    name: Linux AppImage
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref || github.ref }}
+      # WebKitGTK for Tauri; make for hactool; cmake, ninja and the headers SDL3 loads at run time (X11, Wayland,
+      # PulseAudio, PipeWire, ALSA: package.py prints which parts the build has); file for linuxdeploy
+      - name: Build tools and libraries
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq libwebkit2gtk-4.1-dev librsvg2-dev libxdo-dev libssl-dev file \
+            build-essential cmake ninja-build pkg-config \
+            libx11-dev libxext-dev libxrandr-dev libxcursor-dev libxi-dev libxss-dev libxfixes-dev libxkbcommon-dev \
+            libwayland-dev wayland-protocols libdecor-0-dev libegl1-mesa-dev libgl1-mesa-dev \
+            libpulse-dev libpipewire-0.3-dev libasound2-dev libudev-dev libdbus-1-dev
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: launcher/src-tauri
+          cache-bin: true
+      - name: Tauri CLI (cargo's, the version package.py checks)
+        run: cargo tauri --version 2>/dev/null | grep -q "2.12.4" || cargo install tauri-cli --version 2.12.4 --locked
+      - name: Package
+        run: |
+          export YW4_LINUX_TARGET="$RUNNER_TEMP/launcher-target"
+          python3 launcher/package.py launcher --ref HEAD
+          cd work/package/dist && for f in *.AppImage; do sha256sum "$f" > "$f.sha256"; done && ls -l
+      - uses: actions/upload-artifact@v4
+        with:
+          name: linux
+          path: work/package/dist/*
+          if-no-files-found: error
+
+  # all four files or nothing: a release must have both platforms (CLAUDE.md "Releases")
+  check:
+    name: All four files
+    needs: [windows, linux]
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write  # only for "attach"
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+      - name: Setup, portable, AppImage, .sha256
+        run: |
+          ls -l dist
+          for pat in '*-setup.exe' '*-portable.zip' '*-x86_64.AppImage' '*-x86_64.AppImage.sha256'; do
+            n=$(find dist -maxdepth 1 -name "$pat" | wc -l)
+            [ "$n" = 1 ] || { echo "::error::expected one $pat, found $n"; exit 1; }
+          done
+          v=$(ls dist/*-setup.exe | sed -E 's/.*Launcher-(.*)-setup\.exe/\1/')
+          for f in dist/*; do case "$f" in *"-$v-"*) ;; *) echo "::error::$f is not version $v"; exit 1;; esac; done
+          echo "version $v: all four files"
+      - name: Add them to the tag's release
+        if: ${{ inputs.attach }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ inputs.ref }}
+        run: |
+          have=$(gh release view "$TAG" -R "$GITHUB_REPOSITORY" --json assets --jq '.assets[].name')
+          for f in dist/*; do
+            if echo "$have" | grep -qx "$(basename "$f")"; then echo "kept: $(basename "$f") is already there"
+            else gh release upload "$TAG" "$f" -R "$GITHUB_REPOSITORY"; fi
+          done
+          gh release view "$TAG" -R "$GITHUB_REPOSITORY" --json isDraft,assets --jq '{draft: .isDraft, files: [.assets[].name]}'
