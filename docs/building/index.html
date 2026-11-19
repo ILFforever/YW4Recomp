@@ -329,7 +329,7 @@ python3 -m recomp.build --run</pre></span></li>
             </ol>
             <p class="note"><b>Bazzite, SteamOS</b> or any system where you can't or won't install these:
               <code>python3 -m tools.yw4.system</code> downloads the compiler and glslang into the build folder and
-              prints the two config lines to add. The launcher does this by itself.</p>
+              prints the two config lines to add.</p>
             <p class="note"><b>Ubuntu 24.04</b> has no SDL3 package and an older Clang: install <code>clang-19</code>,
               build <a href="https://github.com/libsdl-org/SDL/releases">SDL3</a> with CMake into a folder of your own,
               and build and run with <code>PKG_CONFIG_PATH=&lt;folder&gt;/lib/pkgconfig</code> and
