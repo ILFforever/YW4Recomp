@@ -3689,9 +3689,12 @@ void window_run(void (*guest)(void *), void *arg) {
                     if (k == SDLK_HOME) { textin_edit(TI_SHOME), yw4_hid_note_key("T_SHOME"); break; }
                     if (k == SDLK_END) { textin_edit(TI_SEND), yw4_hid_note_key("T_SEND"); break; }
                 }
-                if (k == SDLK_ESCAPE && !e.key.repeat && gamemenu_prompting()) {  /* the game's popup: Cancel where offered */
-                    gamemenu_prompt_cancel();
-                    if (!gamemenu_prompting()) break;
+                /* the game's popup: Esc is its Cancel where it has one, else nothing. Never "done": the hero's name
+                 * has no Cancel, and Esc meant as "back" confirmed the half-typed name (or "Nate") into the new save
+                 * (review 2026-11-19). Enter, Tab, the pad's A and the OK button still finish it. */
+                if (k == SDLK_ESCAPE && gamemenu_prompting()) {
+                    if (!e.key.repeat) gamemenu_prompt_cancel();
+                    break;
                 }
                 for (size_t i = 0; i < sizeof ek / sizeof *ek; i++)
                     if (k == ek[i].key && !(e.key.repeat && ek[i].op == TI_DONE)) {
