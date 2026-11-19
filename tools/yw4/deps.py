@@ -273,11 +273,26 @@ ZIG_WRAPPER = """#!/bin/sh
 # Written by tools/yw4/deps.py (decision 0083): `zig {mode}` as a plain compiler. Its caches (the C library's stubs,
 # LLVM's C++ runtime, built on first use) stay in this folder, which Free up space deletes.
 d=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
+# A backslash in the path stops zig: the dependency list it has Clang write for each file can't hold one ("failed to
+# parse 'tmp/...o.d'", every file; issue #22: launchers before 1.5.0 named a folder chosen on Linux "...\\YW4 Recomp").
+# The folder whose name has it (p) is reached through a link without one (l), made atomically (parallel jobs), and the
+# arguments, the working folder, zig's own folder and its library folder (zig finds its C headers from its real
+# path otherwise) all go through the link.
+p= l=
+case $d in *\\\\*)
+  h=${{d%%\\\\*}} t=${{d#*\\\\}}
+  p="$h\\\\${{t%%/*}}" l="${{XDG_RUNTIME_DIR:-/tmp}}/yw4-recomp-$(id -u)"
+  [ "$(readlink "$l" 2>/dev/null)" = "$p" ] || {{ ln -s "$p" "$l.$$" && mv -Tf "$l.$$" "$l"; }}
+  d="$l${{d#"$p"}}"
+  export ZIG_LIB_DIR="$d/lib"
+  case $PWD in "$p"*) cd "$l${{PWD#"$p"}}" ;; esac ;;
+esac
 export ZIG_GLOBAL_CACHE_DIR="$d/cache" ZIG_LOCAL_CACHE_DIR="$d/cache"
 # Zig names CPUs with _ where Clang has - (x86-64-v3 is x86_64_v3): -march=x86-64 stopped every file otherwise
 for a do
   shift
   case $a in -march=*) a="-march=$(printf %s "${{a#-march=}}" | tr - _)" ;; esac
+  if [ -n "$p" ]; then case $a in *"$p"*) a="${{a%%"$p"*}}$l${{a#*"$p"}}" ;; esac; fi
   set -- "$@" "$a"
 done
 # -g0: zig adds debug info unless told not to, unlike gcc and clang (yw4 was 883 MB, compiling ~25% slower)
