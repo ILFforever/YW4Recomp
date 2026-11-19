@@ -211,21 +211,52 @@ def run_hactool(hactool: Path, home: Path, args: list[str], watch: tuple[str, li
 
 def find_programs(hactool: Path, home: Path, ncas: list[Path], app_id: int) -> tuple[Path | None, Path | None]:
     """The game's base Program NCA and its update's (a Patch RomFS), each or None."""
-    found: dict[str, Path] = {}
+    found: list[tuple[str, Path]] = []
     for n in ncas:
         info = run_hactool(hactool, home, ["-i", str(n)])
         m = re.search(r"Title ID:\s+([0-9a-fA-F]{16})", info)
         if not re.search(r"Content Type:\s+Program", info) or not m or int(m.group(1), 16) != app_id:
             continue
         kind = "update" if re.search(r"Partition Type:\s+Patch RomFS", info) else "base"
-        if kind in found:  # the plain reason first (the launcher shows it); the NCAs after
-            raise ExtractError(
-                ("The file chosen as the base game is an update. Choose the base game ([v0]) there, and the 2.2.0 "
-                 "update in the update box." if kind == "update" else
-                 "Both files are the base game. Choose the 2.2.0 update in the update box.") +
-                f"\n(two {kind} Program NCAs: {found[kind].name}, {n.name})")
-        found[kind] = n
-    return found.get("base"), found.get("update")
+        print(f"program NCA: {n.name}: {kind}")
+        found.append((kind, n))
+    return pick_programs(found)
+
+
+def pick_programs(found: list[tuple[str, Path]]) -> tuple[Path | None, Path | None]:
+    """Of the Program NCAs found ("base" or "update", named base-* or upd-* by the box their file was in), the base
+    game's and the update's. Two of a kind: the one from the box meant for it wins. A merged dump (the base game with
+    an older update packed into the same NSP) in the base box, with 2.2.0 in the update box, gave two updates and
+    stopped with "the base game is an update" although the base game was there (2026-11-20, several players); the
+    update box's is the one to apply (the version check after extracting says if it isn't 2.2.0). No base game at
+    all, or no way to tell which to use: the plain reason first (the launcher shows it), the NCAs after."""
+    def pick(kind: str, box: str) -> Path | None:
+        of = [n for k, n in found if k == kind]
+        if len(of) <= 1:
+            return of[0] if of else None
+        mine = [n for n in of if n.name.startswith(box)]
+        if len(mine) == 1:
+            print(f"{kind} program NCA: {mine[0].name} (from the {kind} box; also found: "
+                  f"{', '.join(n.name for n in of if n is not mine[0])})")
+            return mine[0]
+        if kind == "update" and not any(k == "base" for k, _ in found):
+            raise ExtractError("The file chosen as the base game is an update. Choose the base game ([v0]) there, and "
+                               f"the 2.2.0 update in the update box.\n(two update Program NCAs, no base game: "
+                               f"{', '.join(n.name for n in of)})")
+        raise ExtractError(
+            ("Both files are the base game. Choose the 2.2.0 update in the update box." if kind == "base" else
+             "There is more than one update in the update box's file. Choose the 2.2.0 update on its own.") +
+            f"\n(several {kind} Program NCAs: {', '.join(n.name for n in of)})")
+    base = pick("base", "base-")
+    if base is None and sum(k == "update" for k, _ in found) >= 2:
+        raise ExtractError("The file chosen as the base game is an update. Choose the base game ([v0]) there, and the "
+                           "2.2.0 update in the update box.\n(two update Program NCAs, no base game: "
+                           f"{', '.join(n.name for k, n in found if k == 'update')})")
+    update = pick("update", "upd-")
+    if update is None and sum(k == "base" for k, _ in found) >= 2:
+        raise ExtractError("Both files are the base game. Choose the 2.2.0 update in the update box.\n(two base "
+                           f"Program NCAs, no update: {', '.join(n.name for k, n in found if k == 'base')})")
+    return base, update
 
 
 def extract_dlc(cfg: config.Config) -> int:
