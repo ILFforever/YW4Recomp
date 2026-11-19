@@ -54,6 +54,25 @@ class Room:
         self.members: dict[int, Client] = {}  # ip -> client
         self.session = bytes(self.info[0x10:0x20])
         self.lcid = struct.unpack_from("<Q", self.info, 0)[0]
+        # traffic, for sizing a server: game packets in from the players and out to them, in bytes as framed here
+        # (TCP/IP headers not counted); logged every minute while packets flow and in total when the room closes
+        self.started = self.reported = time.monotonic()
+        self.pk_in = self.by_in = self.pk_out = self.by_out = 0
+        self.last_in = self.last_out = 0
+        self.most = 1
+
+    def traffic(self, total: bool) -> str:
+        now = time.monotonic()
+        if total:
+            secs, b_out, b_in = now - self.started, self.by_out, self.by_in
+        else:
+            secs, b_out, b_in = now - self.reported, self.by_out - self.last_out, self.by_in - self.last_in
+            self.reported, self.last_out, self.last_in = now, self.by_out, self.by_in
+        rate = b_out / secs if secs > 0 else 0.0
+        what = (f"{secs:.0f} s, up to {self.most} players: {self.pk_in} packets in, {self.pk_out} out, "
+                f"{self.by_in / 1e6:.2f} MB in, {self.by_out / 1e6:.2f} MB out" if total else
+                f"last {secs:.0f} s: {b_in / 1e3:.1f} KB in, {b_out / 1e3:.1f} KB out")
+        return f"{what}; out {rate / 1e3:.1f} KB/s = {rate * 3600 / 1e6:.0f} MB per hour"
 
     def node_count(self) -> int:
         return sum(1 for i in range(8) if self.info[NODES + NODE * i + 0xB])
@@ -127,6 +146,8 @@ class Client:
         room.members.pop(self.ip, None)
         if room.host is self:
             self.log(f"closes the room ({len(room.members)} others in it)")
+            if room.pk_in:
+                self.log(f"room traffic: {room.traffic(total=True)}")
             self.relay.rooms.pop(room.session, None)
             for c in list(room.members.values()):
                 c.room = None
@@ -174,6 +195,7 @@ class Client:
             await self.leave()
             self.room, self.ip, self.node = room, ip, bytes(p[16:16 + NODE])
             room.members[ip] = self
+            room.most = max(room.most, len(room.members))
             room.rebuild_nodes()
             self.log(f"joins {room.host.name}'s room as {ip_str(ip)}")
             await self.send(JOIN, struct.pack("<BI", 1, ip) + bytes(room.info))
@@ -197,6 +219,13 @@ class Client:
             else:
                 c = self.room.members.get(dst)
                 targets = [c] if c and c is not self else []
+            room = self.room
+            room.pk_in += 1
+            room.by_in += len(p) + 5
+            room.pk_out += len(targets)
+            room.by_out += (len(frame) + 5) * len(targets)
+            if time.monotonic() - room.reported >= 60:
+                room.host.log(f"room traffic, {len(room.members)} players, {room.traffic(total=False)}")
             for c in targets:
                 await c.send(PACKET, frame)
 
