@@ -214,7 +214,7 @@ DEV_INI_HEADER = "# Written by recomp.build from config.local.toml"
 
 def dev_game_ini(cfg: config.Config) -> None:
     """<work_dir>/build/game.ini, so `yw4` with no arguments starts the game from this config's folders (decision
-    0050's file): the game files and both DLC folders, which a bare `yw4 <exefs> <romfs>` run doesn't know.
+    0050's file): the game files, both DLC folders and the manual, which a bare `yw4 <exefs> <romfs>` run doesn't know.
     A launcher install writes its own game.ini after the build (tools/yw4/build_install.py); that one is left alone."""
     ini = cfg.work_dir / "build" / "game.ini"
     if ini.is_file() and not ini.read_text(errors="replace").startswith(DEV_INI_HEADER):
@@ -223,6 +223,8 @@ def dev_game_ini(cfg: config.Config) -> None:
              f"YW4_EXEFS={(cfg.work_dir / 'exefs').resolve().as_posix()}",
              f"YW4_ROMFS={cfg.romfs_dir.resolve().as_posix()}"]
     lines += [f"{k}={Path(v).resolve().as_posix()}" for k, v in cfg.dlc_env().items()]
+    if (cfg.work_dir / "manual").is_dir():  # the title screen's Manual (python -m tools.yw4.manual)
+        lines.append(f"YW4_MANUAL_DIR={(cfg.work_dir / 'manual').resolve().as_posix()}")
     ini.write_text("\n".join(lines) + "\n")
 
 

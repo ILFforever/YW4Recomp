@@ -189,7 +189,8 @@ def game_ini(cfg: config.Config, saves: str) -> None:
         "# Written by the YW4 Recomp launcher: how yw4.exe runs on its own (decision 0050).\n"
         f"YW4_EXEFS=../exefs\nYW4_ROMFS=../../data/romfs\nYW4_SAVE={save}\nYW4_SETTINGS_FILE={settings}\n"
         "YW4_DLC_DIR=../../data/dlc\nYW4_DLCROMFS_DIR=../../data/dlc-romfs\nYW4_MODS=../../mods\n"
-        "YW4_SCREENSHOT_DIR=../../screenshots\nYW4_LOG_DIR=../../logs\nYW4_PERF_DIR=../../logs\nYW4_RECORD=0\n")
+        "YW4_SCREENSHOT_DIR=../../screenshots\nYW4_LOG_DIR=../../logs\nYW4_PERF_DIR=../../logs\nYW4_RECORD=0\n"
+        "YW4_MANUAL_DIR=../manual\n")
 
 
 class Previous:
@@ -245,6 +246,22 @@ def ensure_install_icon(cfg: config.Config) -> None:
         return
     try:
         run("tools.yw4.icon")
+    except Exception:
+        pass
+
+
+def ensure_install_manual(cfg: config.Config) -> None:
+    """The game's manual in the install's work/manual (the title screen's Manual button opens it; tools.yw4.manual),
+    for installs extracted before it was kept: copied from this checkout's, else taken from the player's NSP or XCI.
+    Not having one is no error (the button then says how to get it)."""
+    if (cfg.work_dir / "manual").is_dir():
+        return
+    src = config.REPO_ROOT / "work" / "manual"
+    if src.is_dir() and src.resolve() != (cfg.work_dir / "manual").resolve():
+        shutil.copytree(src, cfg.work_dir / "manual")
+        return
+    try:
+        run("tools.yw4.manual")
     except Exception:
         pass
 
@@ -329,7 +346,7 @@ def main() -> int:
         "version": lambda: run("tools.yw4.ingest"),
         "translate": lambda: run("recomp.translate"),
         "shaders": lambda: (prev.keep(["shaders/glsl"]), run("tools.yw4.shaders"), run("recomp.shader", "--check")),
-        "compile": lambda: (ensure_install_icon(cfg), ensure_wheel_icons(cfg), prev.keep(game_runtime_files(cfg.work_dir)),
+        "compile": lambda: (ensure_install_icon(cfg), ensure_install_manual(cfg), ensure_wheel_icons(cfg), prev.keep(game_runtime_files(cfg.work_dir)),
                             run("recomp.build", *build_args)),
         "finish": lambda: game_ini(cfg, args.saves),
     }

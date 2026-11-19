@@ -381,6 +381,12 @@ def main(argv: list[str] | None = None) -> int:
             except (icon.IconError, ExtractError) as e:
                 print(f"icon: none ({e})")
             progress.report("icon", 1, 1)
+            # the manual's pages, for the title screen's Manual button (tools.yw4.manual); none is no error
+            from . import manual
+            try:
+                print(f"manual: {manual.make(cfg, home, sorted(ncas, key=lambda n: not n.name.startswith('upd-')))}")
+            except (manual.ManualError, ExtractError) as e:
+                print(f"manual: none ({e})")
             extract_dlc(cfg)
     except (pfs0.Pfs0Error, xci.XciError) as e:  # the file itself: damaged, or not a Switch package
         print(f"extract failed: {DAMAGED}\n({e})", file=sys.stderr)

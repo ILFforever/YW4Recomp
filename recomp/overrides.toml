@@ -906,6 +906,13 @@ symbol = "_ZN2nn3err9ShowErrorERKNS0_18ErrorResultVariantE"
 native = "yw4_err_ShowErrorVariant"
 why = "launches the error applet: logged instead"
 
+# nn::web: the title screen's Manual button (runtime/src/web.c)
+[[override]]
+module = "sdk"
+symbol = "_ZN2nn3web19ShowOfflineHtmlPageEPNS0_26OfflineHtmlPageReturnValueERKNS0_22ShowOfflineHtmlPageArgE"
+native = "yw4_web_ShowOfflineHtmlPage"
+why = "starts the system's web applet on the game's own manual pages (an applet we don't have: the run stopped); here they open in the PC's browser from work/manual (tools/yw4/manual.py)"
+
 # nn::ssl: the game's internet (Online) menu starts it; no ssl service, no servers to reach (decision 0082)
 [[override]]
 module = "sdk"
