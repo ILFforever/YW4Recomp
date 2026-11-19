@@ -168,10 +168,10 @@ static int map_shown;
 static uint64_t map_event_ms;  /* the map's last focus, back or layer (SDL ticks) */
 int mousemenu_map(void) { return enabled() && __atomic_load_n(&map_shown, __ATOMIC_ACQUIRE); }
 
-/* Mirapo's small screen over the map (same class): its rows focus as 0xb730fbe9 (the visible row at +0x13e) and its
- * list view as 0xc037cb7f, which the plain map never focuses (its controls: 0xb05d3ff0, 0xc9818754, 0xde413e27,
- * 0xf56c6de4; owner's run, 2026-11-18). Up from one of those until another of the map's controls focuses or the map
- * is gone. While up the mouse is a menu's: moving it no longer pans (it moved the selection), the wheel steps the
+/* Mirapo's small screen over the map (same class): its rows focus as 0xb730fbe9 (the visible row at +0x13e); its
+ * list view 0xc037cb7f takes the focus as it closes (YW4_MOUSE_LOG, 2026-11-19). The plain map's controls: 0xb05d3ff0,
+ * 0xc9818754, 0xde413e27, 0xf56c6de4 (owner's run, 2026-11-18). Up from a row's focus until another of the map's
+ * controls focuses, it is backed out of, or the map is gone. While up the mouse is a menu's: moving it no longer pans (it moved the selection), the wheel steps the
  * rows (owner, 2026-11-18). */
 #define MIRAPO_ROWS_HASH 0xb730fbe9u
 #define MIRAPO_LIST_HASH 0xc037cb7fu
@@ -313,7 +313,9 @@ int yw4_hook_menu_focus(CPUState *ctx) {
     }
     talk_note(vt);
     if (vt == MAP_VTABLE) {
-        int m = hash == MIRAPO_ROWS_HASH || hash == MIRAPO_LIST_HASH;
+        /* only its rows: the list view takes the focus as Mirapo's list closes, back on the map (owner, 2026-11-19:
+         * after closing it the mouse didn't pan the map until the pin page had opened and closed) */
+        int m = hash == MIRAPO_ROWS_HASH;
         if (m != __atomic_exchange_n(&mirapo, m, __ATOMIC_ACQ_REL) && menu_log_on())
             fprintf(stderr, "yw4: menu: Mirapo's list %s\n", m ? "up" : "gone (the map's own controls)");
     } else if (vt == FIELD_HUD_VTABLE) {
@@ -385,9 +387,19 @@ int yw4_hook_menu_back(CPUState *ctx) {
     uint64_t vt = ld64(menu) - yw4_image_base;
     if (menu_log_on())
         fprintf(stderr, "yw4: menu_back: menu=%#llx vt=%#llx\n", (unsigned long long)menu, (unsigned long long)vt);
-    /* backing out: the next field HUD update ends it at once (the half second guards only the map's opening; a
-     * press right after closing it was still refused, owner 2026-11-16) */
-    if (vt == MAP_VTABLE) __atomic_store_n(&map_event_ms, 0, __ATOMIC_RELEASE);
+    /* backing out of the map closes it: the map is gone now. The field HUD's update (mousemenu_field_hud_seen) only
+     * comes when the shortcut cross changes, and after closing the map in a place where nothing changed it never
+     * came: the mouse kept panning a map that wasn't there and never went back to the camera (owner, 2026-11-19;
+     * YW4_MOUSE_LOG: the map's menu_back, then no field HUD focus or update for 1000 frames). Backing out of Mirapo's
+     * list (the same class) goes back to the map: the map stays, its next back closes it. */
+    if (vt == MAP_VTABLE) {
+        __atomic_store_n(&map_event_ms, 0, __ATOMIC_RELEASE);  /* and the next field HUD update ends it at once */
+        if (__atomic_exchange_n(&mirapo, 0, __ATOMIC_ACQ_REL)) {
+            if (menu_log_on()) fprintf(stderr, "yw4: menu: Mirapo's list backed out of: the map again\n");
+        } else if (__atomic_exchange_n(&map_shown, 0, __ATOMIC_ACQ_REL) && menu_log_on()) {
+            fprintf(stderr, "yw4: menu: map gone (backed out of)\n");
+        }
+    }
     if (vt == NAVIWOOF_VTABLE) __atomic_store_n(&naviwoof, 0, __ATOMIC_RELEASE);  /* backed out of: gone */
     if (vt == PAD_VTABLE) {
         __atomic_store_n(&pad_open, 0, __ATOMIC_RELEASE);
