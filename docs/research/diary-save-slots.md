@@ -63,7 +63,7 @@ Rough size, a guess: 2 to 4 weeks of work for option 2, if the list code is as s
 
 - `work/exefs/main.bin`, `work/recomp/main_144.c`, `work/recomp/main_123.c`, `work/recomp/funcs.h`
 - `runtime/src/savefs.c`, `runtime/src/cheats.c`, `docs/decisions/0074-cheats.md` (AUTOSAVE byte at 0x822)
-- Scratch scripts (not in the repo): `C:\Users\paeki\AppData\Local\Temp\claude\9519414f725d5b3e\20d99e8c-eb0a-4c0c-8989-0a45905ec844\scratchpad\diaryresearch\xref.py` (finds `ADRP`+`ADD` references to an address) and `fn.py` (maps an address to the nearest recomp function name; approximate, since `funcs.h` may not list every function).
+- Scratch scripts (not in the repo): `xref.py` in that session's scratchpad (deleted) (finds `ADRP`+`ADD` references to an address) and `fn.py` (maps an address to the nearest recomp function name; approximate, since `funcs.h` may not list every function).
 
 ## Session 2 (owner's questions)
 
@@ -129,7 +129,7 @@ which need traces.
 ### Budget used
 
 - Game runs: 2 of 3 (run 1 late-game title and Continue; run 2 row-builder probes). Both on the late-game save copy.
-- Scratch files: `C:\Users\paeki\AppData\Local\Temp\claude\9519414f725d5b3e\20d99e8c-eb0a-4c0c-8989-0a45905ec844\scratchpad\diaryresearch\` (replay `shots_title.txt`, `xref.py`, `fn.py`).
+- Scratch files: that session's scratchpad (deleted) (replay `shots_title.txt`, `xref.py`, `fn.py`).
 
 ## Session 3: New Game and the Diary (owner's questions)
 

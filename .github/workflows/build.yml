@@ -54,6 +54,10 @@ jobs:
         run: python3 -m unittest discover -s tests -t .
       - name: Decision records
         run: python3 -m tools.dev.decisions --check
+      # rule 1's second line of defence (game-data signatures, oversized files, user names in paths) on every tracked
+      # file: the pre-commit hook is optional, so a commit made without it is caught here
+      - name: No game data or user names in the repo
+        run: python3 -m tools.yw4.guard --all
 
   windows:
     name: Windows (llvm-mingw)
