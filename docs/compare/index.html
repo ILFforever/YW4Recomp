@@ -384,8 +384,34 @@ try { const t = localStorage.getItem('yw4-theme'); if (t === 'dark' || t === 'li
       </div>
     </article>
 
+    <article id="pointlight" data-cat="Graphics">
+      <div class="bar"><span class="q">6</span><h2>Point light shadows</h2><span class="cat">Graphics</span></div>
+      <div class="body">
+        <div class="top">
+          <div class="prose">
+            <p>At night the game's street lamps, porch lights and lit windows cast no shadows. Ours draw the characters
+              into a small shadow map for each of the six lights nearest them.</p>
+            <ul>
+              <li><b>A shadow from every nearby light</b>, not only the moon's.</li>
+              <li><b>Dark at the feet, fading further out</b>, as under a real lamp.</li>
+              <li><b>Experimental</b>: off until you turn it on.</li>
+            </ul>
+          </div>
+          <div class="spec"><dl>
+            <dt>Setting</dt><dd><kbd>F1</kbd> Shadows › Point light shadows</dd>
+            <dt>Levels</dt><dd>Off, Low, Medium, High, Max</dd>
+            <dt>Default</dt><dd>Off (experimental)</dd>
+            <dt>GPU cost, 4K</dt><dd>about +0.2 ms</dd>
+            <dt>Limit</dt><dd>only characters cast them</dd>
+            <dt>Record</dt><dd><a href="https://github.com/ILFforever/YW4Recomp/blob/master/docs/decisions/0081-lamp-shadows.md">decision 0081</a></dd>
+          </dl></div>
+        </div>
+        <div data-cmp="pointlight"></div>
+      </div>
+    </article>
+
     <article id="aa" data-cat="Graphics">
-      <div class="bar"><span class="q">6</span><h2>Anti-aliasing</h2><span class="cat">Graphics</span></div>
+      <div class="bar"><span class="q">7</span><h2>Anti-aliasing</h2><span class="cat">Graphics</span></div>
       <div class="body">
         <div class="top">
           <div class="prose"><p>Applied to the 3D scene before the menus are drawn, so text stays sharp. TAA also stops
@@ -403,7 +429,7 @@ try { const t = localStorage.getItem('yw4-theme'); if (t === 'dark' || t === 'li
     </article>
 
     <article id="filtering" data-cat="Graphics">
-      <div class="bar"><span class="q">7</span><h2>Texture filtering</h2><span class="cat">Graphics</span></div>
+      <div class="bar"><span class="q">8</span><h2>Texture filtering</h2><span class="cat">Graphics</span></div>
       <div class="body">
         <div class="top">
           <div class="prose"><p>Without it the ground blurs a short way ahead. Anisotropic filtering keeps the road,
@@ -420,7 +446,7 @@ try { const t = localStorage.getItem('yw4-theme'); if (t === 'dark' || t === 'li
     </article>
 
     <article id="upscaling" data-cat="Performance">
-      <div class="bar"><span class="q">8</span><h2>Upscaling: DLSS and FSR</h2><span class="cat">Performance</span></div>
+      <div class="bar"><span class="q">9</span><h2>Upscaling: DLSS and FSR</h2><span class="cat">Performance</span></div>
       <div class="body">
         <div class="top">
           <div class="prose"><p>The world is drawn smaller than the resolution and rebuilt at full size from the frames
@@ -481,6 +507,10 @@ const CMP = {
     { name: 'Awning', set: [[OFF, 'contact-awning-off.jpg'], ['On', 'contact-awning-on.jpg']] },
     { name: 'Hedges', set: [[OFF, 'contact-hedges-off.jpg'], ['On', 'contact-hedges-on.jpg']] },
     { name: 'Yo-kai World street: the railing, the cherry tree, the windowsills', set: [[OFF, 'contact-yokaiworld-off.jpg'], ['On', 'contact-yokaiworld-on.jpg']] }] },
+  pointlight: { rows: [
+    { name: 'Yo-kai Watch gate: the man on the wall', set: [[OFF, 'pointlight-gate-off.jpg'], ['On', 'pointlight-gate-on.jpg']] },
+    { name: 'Claw machines: the girl on the door', set: [[OFF, 'pointlight-claw-off.jpg'], ['On', 'pointlight-claw-on.jpg']] },
+    { name: "The Yo-kai detectives' base: the ceiling light", set: [[OFF, 'pointlight-base-off.jpg'], ['On', 'pointlight-base-on.jpg']] }] },
   shadows: { rows: [{ set: [["Switch (the game's)", '20-shadows-stock.jpg'], ['Ours', '21-shadows-improved.jpg']] }] },
   // the header: each scene at the Switch's settings (1600×900, scaled up) and at 3840×2160 with every setting at its highest
   hero: { rows: [['Bamboo forest', 'forest'], ['Yo-kai World', 'yokaiworld'], ['School front', 'schoolfront'],
