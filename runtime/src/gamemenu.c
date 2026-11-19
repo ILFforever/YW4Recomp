@@ -896,7 +896,12 @@ static void perf_page_action(int a) {
  * is passed over while its switch says Public, Discord status while it can't be used. */
 enum { ON_SERVER0, ON_SERVER1, ON_SWAP, ON_SWAP_CODE, ON_BLAST, ON_BLAST_CODE, ON_NAME, ON_DISCORD, ON_ITEMS };
 
+/* in Ark Swap or Blasters (ldn.c): the server, the room settings and the name are locked until the game leaves it
+ * (owner, 2026-11-19: the code can't change while on the Ark page; a change would only reach the next connection) */
+static int online_locked(void) { return ldn_active(); }
+
 static int online_enabled(int i) {
+    if (i != ON_DISCORD && online_locked()) return 0;
     if (i == ON_SWAP_CODE) return settings_online_private(0);
     if (i == ON_BLAST_CODE) return settings_online_private(1);
     if (i == ON_DISCORD) return discord_disabled() == NULL;
@@ -3164,8 +3169,11 @@ static void draw_online_page(const UiCanvas *c, const GameMenuInfo *in) {
     ui_box(c, 448, 40, 1104, 764, 20, PAPER, 0, 0);
     ui_text(c, UI_ROUNDED_800, 34, 488, 76, 34 * 1.25f, "Online", NIGHT);
     float lh = 16 * 1.45f, x = 488, w = 1024, y = 76 + 34 * 1.25f + 6;
-    ui_text(c, UI_GOTHIC_500, 15, x, y, 15 * 1.45f,
-            "The game's Online button plays through our servers. Local play stays local.", MUTED);
+    int locked = online_locked();
+    ui_text(c, locked ? UI_GOTHIC_700 : UI_GOTHIC_500, 15, x, y, 15 * 1.45f,
+            locked ? "You're in Ark Swap or Blasters now: leave it to change these."
+                   : "The game's Online button plays through our servers. Local play stays local.",
+            locked ? WINE : MUTED);
     y += 15 * 1.45f + 18;
 
     /* the servers, with their ping (measured when the page opens, again every 20 s while it shows) */
@@ -3188,13 +3196,13 @@ static void draw_online_page(const UiCanvas *c, const GameMenuInfo *in) {
     online_card(c, x, y, w, hs, "Server", lh);
     float ry = y + 18 + lh + 10;
     for (int i = 0; i < n; i++, ry += 52 + 10) {
-        int item = ON_SERVER0 + i, on = i == chosen, ring = focus && orow == item, ms = relay_ping_ms(i);
+        int item = ON_SERVER0 + i, on = i == chosen, ring = focus && orow == item && !locked, ms = relay_ping_ms(i);
         float rx = x + 24, rw = w - 48;
         ui_box(c, rx, ry, rw, 52, 12, WHITE, ring ? 3 : 2, ring ? RING : LINE);
-        ui_box(c, rx + 18, ry + 15, 22, 22, 11, WHITE, 2, on ? PLUM : EDGE);
-        if (on) ui_box(c, rx + 23, ry + 20, 12, 12, 6, PLUM, 0, 0);
+        ui_box(c, rx + 18, ry + 15, 22, 22, 11, WHITE, 2, on ? (locked ? MUTED : PLUM) : EDGE);
+        if (on) ui_box(c, rx + 23, ry + 20, 12, 12, 6, locked ? MUTED : PLUM, 0, 0);
         const char *name = settings_online_server_name(i);
-        ui_text_in(c, UI_GOTHIC_700, 17, rx + 54, ry, 0, 52, 0, name, PLUM);
+        ui_text_in(c, UI_GOTHIC_700, 17, rx + 54, ry, 0, 52, 0, name, locked ? MUTED : PLUM);
         ui_text_in(c, UI_GOTHIC_500, 15, rx + 54 + ui_text_w(UI_GOTHIC_700, 17, name) + 14, ry, 0, 52, 0,
                    settings_online_server_region(i), MUTED);
         char p[32];
@@ -3206,7 +3214,7 @@ static void draw_online_page(const UiCanvas *c, const GameMenuInfo *in) {
             float tw = tag(c, 0, 0, "Nearest", 0, 0, 1);
             tag(c, rx + rw - 20 - pw - 12 - tw, ry + 17, "Nearest", GOLD, ON_GOLD, 0);
         }
-        hit_add(rx, ry, rw, 52, HIT_ON_ITEM, item, -1);
+        if (!locked) hit_add(rx, ry, rw, 52, HIT_ON_ITEM, item, -1);
     }
     y += hs + 20;
 
@@ -3217,11 +3225,11 @@ static void draw_online_page(const UiCanvas *c, const GameMenuInfo *in) {
         int priv = settings_online_private(b);
         online_card(c, cx, y, cw, ha, b ? "Blasters" : "Ark Swap", lh);
         float iy = y + 18 + lh + 10;
-        online_switch(c, ix, iy, iw, "Public", "Private", priv, b ? ON_BLAST : ON_SWAP, 0);
+        online_switch(c, ix, iy, iw, "Public", "Private", priv, b ? ON_BLAST : ON_SWAP, locked);
         iy += 52 + 14;
         const char *code = settings_online_code(b);
-        ui_text_in(c, UI_GOTHIC_700, 15, ix, iy, 0, 48, 0, "Code", priv ? PLUM : MUTED);
-        online_edit_box(c, ix + 56, iy, iw - 56, 48, !priv ? "Not needed" : *code ? code : "Not set", !priv,
+        ui_text_in(c, UI_GOTHIC_700, 15, ix, iy, 0, 48, 0, "Code", priv && !locked ? PLUM : MUTED);
+        online_edit_box(c, ix + 56, iy, iw - 56, 48, !priv ? "Not needed" : *code ? code : "Not set", !priv || locked,
                         b ? ON_BLAST_CODE : ON_SWAP_CODE);
         iy += 48 + 12;
         const char *note = b ? "Coming soon: Blasters' Online button isn't connected yet."
@@ -3235,8 +3243,8 @@ static void draw_online_page(const UiCanvas *c, const GameMenuInfo *in) {
     float hp = 18 + lh + 10 + 52 + 20;
     online_card(c, x, y, w, hp, "Profile", lh);
     float py = y + 18 + lh + 10, px = x + 24;
-    ui_text_in(c, UI_GOTHIC_700, 15, px, py, 0, 52, 0, "Player name", PLUM);
-    online_edit_box(c, px + 120, py, 440, 52, settings_player_name(), 0, ON_NAME);
+    ui_text_in(c, UI_GOTHIC_700, 15, px, py, 0, 52, 0, "Player name", locked ? MUTED : PLUM);
+    online_edit_box(c, px + 120, py, 440, 52, settings_player_name(), locked, ON_NAME);
     int doff = discord_disabled() != NULL;
     float dx = x + w - 24 - 250;
     ui_text_in(c, UI_GOTHIC_700, 15, dx - 140, py, 0, 52, 0, "Discord status", doff ? MUTED : PLUM);

@@ -43,7 +43,10 @@
 
 enum { BTN_A = 1 << 0, BTN_B = 1 << 1, BTN_L = 1 << 6, BTN_R = 1 << 7, BTN_LEFT = 1 << 12, BTN_UP = 1 << 13, BTN_RIGHT = 1 << 14, BTN_DOWN = 1 << 15 };
 enum { PAGE_NONE, PAGE_OPENING, PAGE_OPEN };  /* a page over the active screen: none, chosen but not open yet, open */
-enum { SCR_HOVER = 1 << 0, SCR_CLICK = 1 << 1, SCR_WHEEL = 1 << 2 };
+/* SCR_COUNT: slots past the focus control's own item count (+0x138) are not slots (a message box with one button
+ * on the Yes / No row, a room list with fewer rooms than rows) */
+/* SCR_WHEEL_LR: the wheel steps left / right along a row (a message box's Yes / No), not up / down or the Pad's pages */
+enum { SCR_HOVER = 1 << 0, SCR_CLICK = 1 << 1, SCR_WHEEL = 1 << 2, SCR_COUNT = 1 << 3, SCR_WHEEL_LR = 1 << 4 };
 
 typedef struct {
     const char *name;
@@ -103,6 +106,25 @@ static const Screen screens[] = {
     {"watch_skills",     0x14c6b78u, 0x5b8ae332u, 0,           6, 1, 144.0f, 420.0f, 120.0f,   0.0f,  60.0f, 220.0f, SCR_HOVER | SCR_CLICK},
     /* Organize Members "What will you do?" 6-row action popup (yw::CMenuSubWindow) */
     {"members_action",   0x14c7b78u, 0xb2869aecu, 0,           1, 6, 519.6f, 268.0f,   0.0f,  48.0f, 103.6f,  20.0f, SCR_HOVER | SCR_CLICK},
+    /* Ark Swap (the trade menu, vt main+0x14c8de8; Online and Local are the same screens, decision 0082). Measured
+     * 2026-11-19 on the owner's F12 shots of a trade (work/screenshots frame_003228 .. 010759, 1280 x 720):
+     * the start: Swap Locally (270, 290), Swap Online (270, 376), rows about 536 x 64 */
+    {"trade_start",      0x14c8de8u, 0xb000c468u, 0,           1, 2, 270.0f, 290.0f,   0.0f,  86.0f, 268.0f,  32.0f, SCR_HOVER | SCR_CLICK | SCR_WHEEL | SCR_COUNT},
+    /* the room list: Recruit by myself (270, 192), the first host (270, 310); more hosts not measured yet (one only) */
+    {"trade_rooms",      0x14c8de8u, 0x2649a77au, 0,           1, 2, 270.0f, 192.0f,   0.0f, 118.0f, 200.0f,  30.0f, SCR_HOVER | SCR_CLICK | SCR_WHEEL | SCR_COUNT},
+    /* which Yo-kai to offer: 8 rows from (290, 192), step 58.65, about 450 wide (its list view: 0xd8deebe3) */
+    {"trade_yokai",      0x14c8de8u, 0xceb4579bu, 0xd8deebe3u, 1, 8, 290.0f, 192.0f,   0.0f, 58.65f, 225.0f,  27.5f, SCR_HOVER | SCR_CLICK | SCR_WHEEL},
+    /* the swap screen's Swap button (640, 385), about 240 x 52 (its focus hash: the last one-item control the screen
+     * focused before Swap was pressed; to confirm in a run) */
+    {"trade_swap",       0x14c8de8u, 0x887ea52eu, 0,           1, 1, 640.0f, 385.0f,   0.0f,   0.0f, 120.0f,  26.0f, SCR_HOVER | SCR_CLICK},
+    /* the game's message box (vt main+0x14bfa78): Yes (490, 450), No (790, 450), about 240 x 52, the same in every
+     * box of the trade; a box with one button takes the Yes spot (SCR_COUNT) */
+    {"message_yes_no",   0x14bfa78u, 0xf51efb06u, 0,           2, 1, 490.0f, 450.0f, 300.0f,   0.0f, 120.0f,  26.0f,
+     SCR_HOVER | SCR_CLICK | SCR_WHEEL | SCR_WHEEL_LR | SCR_COUNT},
+    /* the same box focused on its other one-item controls (seen in the trade's logs): the whole box goes on */
+    {"message_box_a",    0x14bfa78u, 0x31092732u, 0,           1, 1, 640.0f, 360.0f,   0.0f,   0.0f, 450.0f, 210.0f, SCR_HOVER | SCR_CLICK},
+    {"message_box_b",    0x14bfa78u, 0xbc012ac7u, 0,           1, 1, 640.0f, 360.0f,   0.0f,   0.0f, 450.0f, 210.0f, SCR_HOVER | SCR_CLICK},
+    {"message_box_c",    0x14bfa78u, 0x3fa820a4u, 0,           1, 1, 640.0f, 360.0f,   0.0f,   0.0f, 450.0f, 210.0f, SCR_HOVER | SCR_CLICK},
 };
 enum { NSCREENS = sizeof screens / sizeof *screens };
 
@@ -652,6 +674,18 @@ uint64_t mousemenu_update(float mx, float my, int w, int h, uint32_t mouse_butto
      * until the focus arrives (a still mouse then leaves the keys and the gamepad alone until it moves onto
      * another slot). A cursor resting on a slot when a screen comes to the front wants nothing until it moves. */
     int under = front ? slot_at(s, lv, mx, my, w, h) : -1;
+    if (under >= 0 && (s->flags & SCR_COUNT) && ctrl) {  /* fewer items than slots: the rest are not slots */
+        int16_t items = (int16_t)ld16(ctrl + 0x138);
+        if (items > 0 && under >= items) under = -1;
+    }
+    /* the game's message box with one item ("Connection will now begin", "Finished saving": no button drawn, or one
+     * OK): the whole box is it, so a click anywhere on the box goes on, as A (owner's F12, 2026-11-19). The box is
+     * about x 190 .. 1090, y 150 .. 570 in 1280 x 720 (measured on that shot). */
+    if (front && s && s->vtable == 0x14bfa78u && ctrl && (int16_t)ld16(ctrl + 0x138) == 1) {
+        static const Screen whole = {"message_box", 0x14bfa78u, 0, 0, 1, 1, 640.0f, 360.0f, 0.0f, 0.0f, 450.0f, 210.0f,
+                                     SCR_HOVER | SCR_CLICK};
+        under = slot_at(&whole, 0, mx, my, w, h);
+    }
     int under_sib = -1;
     if (front && is_members_screen(idx)) {
         int idx_watcher = find_screen(0x14c1948u, 0x180cb413u);
@@ -725,7 +759,8 @@ uint64_t mousemenu_update(float mx, float my, int w, int h, uint32_t mouse_butto
     if (back_wanted) back_wanted = 0, press = BTN_B;
     int wheel = __atomic_load_n(&wheel_steps, __ATOMIC_ACQUIRE);
     if (!press && front && wheel != 0 && (s->flags & SCR_WHEEL)) {
-        press = s->cols > 1 ? ((pad_page ^= 1) ? BTN_R : BTN_L) : (wheel > 0 ? BTN_UP : BTN_DOWN);
+        press = (s->flags & SCR_WHEEL_LR) ? (wheel > 0 ? BTN_LEFT : BTN_RIGHT)
+              : s->cols > 1 ? ((pad_page ^= 1) ? BTN_R : BTN_L) : (wheel > 0 ? BTN_UP : BTN_DOWN);
         __atomic_store_n(&wheel_steps, wheel > 0 ? wheel - 1 : wheel + 1, __ATOMIC_RELEASE);
         hover_target = click_target = -1;
     }

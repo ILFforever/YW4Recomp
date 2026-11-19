@@ -39,6 +39,7 @@
 #include "gpu.h"
 #include "hud.h"
 #include "gamemenu.h"
+#include "relay.h"
 #include "pause.h"
 #include "mousemenu.h"
 #include "settings.h"
@@ -1136,6 +1137,13 @@ static void note_render(float s) {
 
 static void note_draw(VkImage dst, uint32_t index, int32_t x0, int32_t y0, uint32_t bw, uint32_t bh) {
     (void)bw;
+    /* the Ark Swap / Blasters pages (local play, ldn.c): a card on the way in says where the network settings are
+     * (owner, 2026-11-19: "add an open network settings hint ... map it to F4"; the game's own hint bar can't take it) */
+    static int was_local;
+    int local = ldn_active();
+    if (local && !was_local && !gamemenu_open())
+        window_notice(0, "Press F4 for network settings", "Server, public or private, codes \xc2\xb7 the Online tab");
+    was_local = local;
     if (!note_on || index >= 8 || !swap_views[index]) return;
     if (hb_resources() || nb_resources()) {
         note_on = note_keys_wait = 0;
@@ -3641,8 +3649,14 @@ void window_run(void (*guest)(void *), void *arg) {
                 else gamemenu_open_page(GM_CONTROLS), yw4_hid_note_key("M_CTRL");
                 break;
             }
-            /* F4: nothing (owner, 2026-11-19; it was the overlay's pause test, still in replays as PAUSE, then lamp
-             * shadows for a while) */
+            /* F4: on the Ark Swap / Blasters pages (local play), the overlay's Online tab (owner, 2026-11-19); nothing
+             * elsewhere (it was the overlay's pause test, still in replays as PAUSE, then lamp shadows for a while) */
+            if (e.key.key == SDLK_F4 && !e.key.repeat && !textin_active() && !settings_open() && !gamemenu_open() &&
+                ldn_active()) {
+                if (window && SDL_GetWindowRelativeMouseMode(window)) SDL_SetWindowRelativeMouseMode(window, false);
+                gamemenu_open_page(GM_ONLINE), yw4_hid_note_key("M_ONLINE");
+                break;
+            }
             if (e.key.key == SDLK_F5) gpu_passes_toggle();  /* per-pass GPU timing in the log */
             if (e.key.key == SDLK_F7 && !e.key.repeat) screen_passes_toggle();  /* the screen passes: ours or the game's */
             /* the settings live in the panel only (F1); its keys are recorded like the F keys, so a replay

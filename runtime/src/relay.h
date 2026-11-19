@@ -29,6 +29,9 @@ uint32_t ldn_my_address(void);                         /* our address in the roo
 /* The room we host or joined, for Discord status (discord_game.c): 1 and its players now, its most players and
  * the game's scene number for it (a trade: scene 1, 2 players at most); 0 in none. Any thread. */
 int ldn_room(int *players, int *max_players, int *scene);
+/* The game is in local play (Ark Swap, Blasters): from its ldn Initialize to its Finalize. The overlay's Online tab
+ * locks its server and room settings meanwhile. Any thread. */
+int ldn_active(void);
 
 /* The menus' Online / Local choice (yw4_hook_net_mode, ldn.c): 1 Online (our server), 0 Local (YW4_RELAY or alone),
  * for which activity (its public / private room settings). An open connection that no longer fits is closed; the
