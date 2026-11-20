@@ -221,7 +221,13 @@ void discord_game_read(DiscordGame *out) {
     out->rank = rank;
     host_unlock(&lock);
     out->where = battle_active() ? DISCORD_AT_BATTLE : out->area[0] || out->rank >= 0 ? DISCORD_AT_FIELD : DISCORD_AT_START;
-    int scene = 0;  /* in a local play room (ldn.c): that first. A trade's room is scene 1 for 2 (measured 2026-11-19) */
-    if (ldn_room(&out->players, &out->max_players, &scene))
-        out->where = scene == 1 && out->max_players == 2 ? DISCORD_AT_TRADE : DISCORD_AT_TOGETHER;
+    /* in a local play room (ldn.c): that first. A trade's room is scene 1 for 2 (measured 2026-11-19), a Blasters
+     * team's scene 3 for 4 (2026-11-20) */
+    int scene = 0;
+    if (ldn_room(&out->players, &out->max_players, &scene)) {
+        out->where = scene == 1 && out->max_players == 2 ? DISCORD_AT_TRADE
+                     : scene == 3                        ? DISCORD_AT_BLASTERS
+                                                         : DISCORD_AT_TOGETHER;
+        out->mission = battle_busters();
+    }
 }

@@ -518,7 +518,7 @@ void ldn_relay_closed(uint8_t reason) {
 
 /* ---- the trade menu's Online / Local choice (main+0x78a260, the script command 0x1c105a8d that stores it in the
  * menu's byte +0x239c, which the "is Online?" command 0xbfba3718 reads back for the script, and the "ready?" command
- * 0x24b742bb reads too). Online would log in to Nintendo's servers, which are gone; so the choice is passed to the
+ * 0x24b742bb reads too). Online would log in to Nintendo's servers, which a PC can't; so the choice is passed to the
  * relay (Online: our server; Local: the home network) and the game stores Local, running local play either way.
  * Found 2026-11-19 from the Online path's call stack (YW4_NET_TRACE) and the menu script trade_menu_top. */
 int yw4_hook_net_mode(CPUState *c) {

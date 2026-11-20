@@ -111,6 +111,7 @@ static void drain(DiscordIpc *c) {
 #define E_WATCH "\xe2\x8c\x9a "                /* watch */
 #define E_TRADE "\xf0\x9f\x94\x84 "            /* counterclockwise arrows */
 #define E_FRIENDS "\xf0\x9f\x91\xa5 "          /* busts in silhouette */
+#define E_OGRE "\xf0\x9f\x91\xb9 "             /* ogre: Blasters fight Oni */
 
 void discord_presence_text(const DiscordGame *g, unsigned flavor, char *details, size_t dn, char *state, size_t sn) {
     static const char ranks[] = "EDCBAS";
@@ -140,6 +141,12 @@ void discord_presence_text(const DiscordGame *g, unsigned flavor, char *details,
         break;
     case DISCORD_AT_TRADE:  /* the room open, alone: the host waits for the other player */
         snprintf(details, dn, g->players >= 2 ? E_TRADE "Trading Yo-kai with a friend" : E_TRADE "Waiting for a trade");
+        break;
+    case DISCORD_AT_BLASTERS:  /* hosting alone: recruiting; then the team room, or a mission together */
+        if (g->players < 2) snprintf(details, dn, E_OGRE "Recruiting a Blasters team (1 of %d)", g->max_players);
+        else if (g->mission)
+            snprintf(details, dn, E_OGRE "On a Blasters mission (%d of %d)", g->players, g->max_players);
+        else snprintf(details, dn, E_OGRE "Blasters team (%d of %d)", g->players, g->max_players);
         break;
     case DISCORD_AT_TOGETHER:
         if (g->max_players > 1) snprintf(details, dn, E_FRIENDS "Playing together (%d of %d)", g->players, g->max_players);
