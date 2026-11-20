@@ -61,14 +61,20 @@ static int cond_open;
 /* YW4_OCCLUSION=0: the counts stay real, but the game's conditional draws are all made.
  * YW4_OCCLUSION=off: no queries at all, as before 2026-11-14: each SAMPLES_PASSED report writes 0 by hand and
  * every conditional draw is made. No query, result copy or conditional rendering reaches the GPU (issue #14: a
- * GPU hang on Intel HD 520 / Mesa, to tell whether this code is the cause). */
+ * GPU hang on Intel HD 520 / Mesa, to tell whether this code is the cause).
+ * Off by default on Intel's Mesa driver (anv, Linux): issue #14's Intel HD 520 hung the GPU ("preemption time out")
+ * as the 3D world loaded, every time, and played with YW4_OCCLUSION=off (2026-11-19). Which half (the result copies
+ * with WAIT_BIT, or the conditional rendering) wasn't found; off costs nothing measurable (decision 0072: 0.15-0.3 ms
+ * faster on the RTX 4070). YW4_OCCLUSION=1 turns it on there anyway. */
 static int occ_mode = -1;  /* 2 on, 1 counts only (=0), 0 off */
 static int occlusion_mode(void) {
     if (occ_mode < 0) {
         const char *e = getenv("YW4_OCCLUSION");
-        occ_mode = !e ? 2 : !strcmp(e, "off") ? 0 : *e == '0' ? 1 : 2;
+        int intel_mesa = vk.driver_id == VK_DRIVER_ID_INTEL_OPEN_SOURCE_MESA;
+        occ_mode = !e ? (intel_mesa ? 0 : 2) : !strcmp(e, "off") ? 0 : *e == '0' ? 1 : 2;
         if (!occ_mode)
-            fprintf(stderr, "yw4: gpu: occlusion queries: off (YW4_OCCLUSION=off), conditional draws always drawn\n");
+            fprintf(stderr, "yw4: gpu: occlusion queries: off (%s), conditional draws always drawn\n",
+                    e ? "YW4_OCCLUSION=off" : "Intel's Mesa driver, issue #14; YW4_OCCLUSION=1 turns them on");
         else
             fprintf(stderr, "yw4: gpu: occlusion queries: %s counts, conditional draws %s\n",
                     vk.occlusion_precise ? "exact" : "zero-or-not",

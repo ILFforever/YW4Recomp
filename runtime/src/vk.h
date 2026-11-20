@@ -68,6 +68,7 @@ typedef struct {
     int memory_budget;             /* VK_EXT_memory_budget is enabled: video memory use (gpu_vram) */
     int occlusion_precise;         /* the occlusionQueryPrecise feature is enabled: sample counts, not just 0 or not */
     int conditional_rendering;     /* VK_EXT_conditional_rendering is enabled (gpu_query.c) */
+    int driver_id;                 /* VkDriverId of the driver in use (gpu_query.c: occlusion off on Intel's Mesa driver) */
     int sampler_anisotropy;        /* the samplerAnisotropy feature is enabled */
     int push_descriptor;           /* VK_KHR_push_descriptor is enabled (gpu_draw.c; YW4_PUSH_DESC=0: not asked for) */
     uint32_t max_push_descriptors; /* ... and how many descriptors one pushed set may have */

@@ -375,6 +375,7 @@ static int vk_init(void) {
         VkPhysicalDeviceProperties2 p2 = {.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2, .pNext = &dp};
         vkGetPhysicalDeviceProperties2(vk.gpu, &p2);
         const char *wsys = SDL_GetCurrentVideoDriver();
+        vk.driver_id = (int)dp.driverID;
         fprintf(stderr, "yw4: window: driver %s, %s (id %d), window system %s\n", dp.driverName, dp.driverInfo,
                 (int)dp.driverID, wsys ? wsys : "?");
     }
