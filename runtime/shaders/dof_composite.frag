@@ -40,6 +40,7 @@ void main() {
     float x = fma(past.x, -scaled.x, past.x);
     float z = x + scaled.x;
     float keep = fma(past.y, scaled.y - z, z);
+    vec3 b = texture(blurred, t0.xy).rgb;  // before the discard: an implicit-LOD read after it is undefined on AMD
     if (-keep < -0.999000013) discard;
-    o_color = vec4(texture(blurred, t0.xy).rgb, 1.0 - keep);
+    o_color = vec4(b, 1.0 - keep);
 }

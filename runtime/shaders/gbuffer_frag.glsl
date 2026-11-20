@@ -37,12 +37,18 @@ layout(location = 1) out vec4 o_zero;
 layout(location = 2) out vec4 o_normal;
 
 void main() {
+#ifndef PLAIN
+    // Read before the alpha test's discard: a discarded pixel leaves its quad, so an implicit-LOD read
+    // after it takes its derivatives from a pixel that has stopped. NVIDIA keeps it running; AMD
+    // (RADV, RX 580, 2026-11-20) doesn't: some hedge leaves came out grey, from normal-map reads at
+    // a wrong mip. Same values as the game's order wherever both are defined.
+    vec4 tex = texture(normal_map, v_uv.xy);
+#endif
 #ifdef CUTOUT
     if (clamp(texture(colour_map, v_uv.xy), 0.0, 1.0).w < v_uv.z) discard;
 #endif
     vec3 n = v_normal.xyz * inversesqrt(dot(v_normal.xyz, v_normal.xyz));
 #ifdef NORMAL_MAP
-    vec4 tex = texture(normal_map, v_uv.xy);
     vec4 t = v_tangent * inversesqrt(dot(v_tangent, v_tangent));  // all four components, as the game does
     vec3 b = fma(n.yzx, t.zxy, -(n.zxy * t.yzx)) * t.w;  // cross(n, t) x the sign
 
@@ -65,9 +71,7 @@ void main() {
 #ifdef PLAIN
     o_normal = vec4(fma(nv, vec3(0.5), vec3(0.5)), 0.0);
 #else
-#ifndef NORMAL_MAP
-    vec4 tex = vec4(0.0, 0.0, 0.0, texture(normal_map, v_uv.xy).w);  // only the gloss
-#endif
+    // without a normal map only tex.w (the gloss) is used
     // view-dependent term from the eye direction (scene d0: the camera position) and the material
     vec3 eye = scene.d[0].xyz - v_world.xyz;
     eye *= inversesqrt(dot(eye, eye));
