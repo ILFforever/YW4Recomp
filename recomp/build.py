@@ -19,6 +19,7 @@ import platform
 import shutil
 import subprocess
 import sys
+import threading
 import time
 import tomllib
 from pathlib import Path
@@ -162,6 +163,33 @@ def generated_header(cfg: config.Config, src: Path) -> float:
 # code (recomp/compile_cost.json: generated files' names and seconds only, measured at translate.py's CHUNK), else
 # a guess from its size.
 COST_TABLE = Path(__file__).with_name("compile_cost.json")
+
+
+def free_memory() -> int | None:
+    """Bytes of memory free for new work now (Linux MemAvailable, Windows' available physical memory); None: unknown."""
+    try:
+        if sys.platform == "win32":
+            import ctypes
+
+            class Status(ctypes.Structure):
+                _fields_ = [("length", ctypes.c_ulong), ("load", ctypes.c_ulong), ("total", ctypes.c_ulonglong),
+                            ("avail", ctypes.c_ulonglong), ("page_total", ctypes.c_ulonglong),
+                            ("page_avail", ctypes.c_ulonglong), ("virt_total", ctypes.c_ulonglong),
+                            ("virt_avail", ctypes.c_ulonglong), ("ext", ctypes.c_ulonglong)]
+            s = Status(length=ctypes.sizeof(Status))
+            return int(s.avail) if ctypes.windll.kernel32.GlobalMemoryStatusEx(ctypes.byref(s)) else None
+        for line in Path("/proc/meminfo").read_text().splitlines():
+            if line.startswith("MemAvailable:"):
+                return int(line.split()[1]) * 1024
+    except (OSError, ValueError, AttributeError):
+        pass
+    return None
+
+
+def compile_memory(seconds: float) -> float:
+    """A compiler's peak memory (GB) for a file that takes `seconds`: it grows with the file. Measured 2026-11-20 with
+    zig and gcc: main_351 (194 s here) 0.8-1.0 GB, an ordinary generated file 0.15-0.22 GB."""
+    return 0.25 + 0.85 * min(1.0, seconds / 200)
 
 
 def load_times(path: Path) -> dict[str, float]:
@@ -378,9 +406,17 @@ def main(argv: list[str] | None = None) -> int:
 
     times_file = objdir / "compile_times.json"
     measured = {**load_times(COST_TABLE), **load_times(times_file)}
-    todo.sort(key=lambda t: measured.get(t[0].name, t[0].stat().st_size / 1e6 * 8), reverse=True)  # ~8 s per MB
+    cost = {src: measured.get(src.name, src.stat().st_size / 1e6 * 8) for src, _ in todo}  # ~8 s per MB
+    todo.sort(key=lambda t: cost[t[0]], reverse=True)
+    # Memory: started slowest first, a 12-thread PC compiled its 12 heaviest files at once (~1 GB each), and a 7.5 GB
+    # Linux PC without swap froze for 20 minutes (2026-11-20). A file starts only while the memory estimates of the files
+    # compiling fit in 80% of what was free at the start; one always runs. The light files still run args.jobs at once.
+    free = free_memory()
+    budget = free * 0.8 / 1e9 if free else float("inf")
+    mem_lock, in_use = threading.Condition(), [0.0]
     t0 = time.time()
-    print(f"compiling {len(todo)} of {len(objs)} files with {Path(cc).name} ({args.jobs} jobs)")
+    print(f"compiling {len(todo)} of {len(objs)} files with {Path(cc).name} ({args.jobs} jobs"
+          + (f", within {budget:.1f} GB of memory)" if free else ")"))
     errors = []
     # Progress counts source bytes, not files: the few biggest generated files take minutes each, so a file count
     # races to the end and then sits there. One log line per finished file, and while nothing finishes, a line every
@@ -391,10 +427,20 @@ def main(argv: list[str] | None = None) -> int:
     took_s: dict[str, float] = {}
 
     def compile_timed(src: Path, obj: Path) -> str | None:
-        started[src] = time.time()
-        r = compile_one(cc, src, obj, includes)
-        took_s[src.name] = round(time.time() - started[src], 1)
-        return r
+        need = compile_memory(cost[src])
+        with mem_lock:
+            while in_use[0] > 0 and in_use[0] + need > budget:
+                mem_lock.wait()
+            in_use[0] += need
+        try:
+            started[src] = time.time()
+            r = compile_one(cc, src, obj, includes)
+            took_s[src.name] = round(time.time() - started[src], 1)
+            return r
+        finally:
+            with mem_lock:
+                in_use[0] -= need
+                mem_lock.notify_all()
 
     def took(s: float) -> str:
         return f"{s:.0f} s" if s < 90 else f"{s / 60:.0f} min"
