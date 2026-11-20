@@ -25,7 +25,7 @@ Changes made bringing it over:
 ## Context
 
 Yo-kai Watch 4++ plays with others in two ways (docs/recon.md): over the internet through Nintendo's NEX servers,
-which are gone for good and can't be rebuilt, and **locally** (several Switches in one room) through `nn::ldn`, the
+which a PC can't log in to (a Nintendo account on a real Switch) and which can't be rebuilt, and **locally** (several Switches in one room) through `nn::ldn`, the
 Switch's local wireless. Both run through Pia 5.17, Nintendo's game networking library, linked into `main`.
 
 Local play needs no server of Nintendo's: the consoles find each other over Wi-Fi and then talk UDP. If the game
@@ -76,7 +76,7 @@ One small program (`tools/relay/`, Python, no dependencies) that one friend runs
 ### The game's Online button goes to our server (2026-11-19)
 
 The owner's model: **Online** means our server, **Local** means the home network. The game's own Online mode logs in
-to Nintendo's servers (an account check, then NEX), which are gone, so Online is turned into local play at the
+to Nintendo's servers (an account check, then NEX), which a PC can't do, so Online is turned into local play at the
 moment the player chooses it:
 
 - How it was found: the call stacks of `ssl`'s start (Online) and `ldn`'s start (Local), `YW4_NET_TRACE=1`, both

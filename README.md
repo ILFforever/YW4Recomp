@@ -427,6 +427,25 @@ FSR is AMD's, under the MIT licence.
 
 </details>
 
+**Online**
+
+<details>
+<summary><b>Playing online</b>: Ark Swap trades and Blasters missions with friends over the internet, through servers of our own</summary>
+
+Online play on a Switch logs in to Nintendo's network with a Nintendo account, which a PC can't do, so the game's
+**Online** button now plays through our own servers in the US East and Singapore, no account needed. **Ark Swap** trades Yo-kai between two players; **Blasters**
+teams of up to four play missions together. Use the overlay's **Online** tab to pick the
+server, with choices for Public or Private rooms, your player name and Discord status (<kbd>F4</kbd> opens it from the
+room list). First built by [Quandiy](https://github.com/Quandiy) in their fork. More on the
+[site's Online page](https://ilfforever.github.io/YW4Recomp/online/).
+
+![Two games side by side in the same Blasters team, ready for a mission](docs/screenshots/104-online-blasters-team.jpg)
+
+**Privacy:** the servers keep no player IP addresses. Their logs name each connection by a hash that changes at every
+restart, and are deleted after 7 days ([decision 0082](docs/decisions/0082-online-play-over-ldn.md)).
+
+</details>
+
 **Controls**
 
 <details>
@@ -726,11 +745,10 @@ On Ordinary Street with the performance HUD on (F3). The frame takes about 19 ms
 </details>
 
 <details>
-<summary><b>Ongoing</b> (8)</summary>
+<summary><b>Ongoing</b> (7)</summary>
 
 | Goal | Where it stands |
 |---|---|
-| **Playing together online** | Trading and Blasters with friends over the internet: the game's local wireless play, carried by small servers of ours in the US and Singapore. First built by [Quandiy](https://github.com/Quandiy) in their fork. Both work; an Online page in the launcher is next ([decision 0082](docs/decisions/0082-online-play-over-ldn.md)). **Privacy:** the servers keep no player IP addresses. Their logs name each connection by a hash that changes at every restart, and are deleted after 7 days |
 | **Performance (CPU)** | Less work per frame on the CPU, so busy places hold their frame rate on slower PCs: the renderer's GPU commands are being made cheaper to build (in testing) |
 | **Our own renderer** | Ours: shadows, surfaces, bloom, distance blur, lighting, sky, tone mapping. **Left:** choosing what to draw, two screen passes, the UI and menus |
 | **Steadier shadows** | Shadows still shimmer a little as the camera moves; steadier cascades next |
@@ -742,7 +760,7 @@ On Ordinary Street with the performance HUD on (F3). The frame takes about 19 ms
 </details>
 
 <details>
-<summary><b>Finished</b> (20)</summary>
+<summary><b>Finished</b> (21)</summary>
 
 | Goal | Where it stands |
 |---|---|
@@ -756,6 +774,7 @@ On Ordinary Street with the performance HUD on (F3). The frame takes about 19 ms
 | **Frame generation (NVIDIA DLSS, AMD FSR)** | A frame made between each two of the game's: about twice as many on screen, the menus kept still. **On RTX 40 and newer use DLSS**: more game frames left and cleaner moving characters. In a busy town at 4K 21:9 on an RTX 4070 laptop, instead of ~70 frames/s: DLSS ~150 shown (~75 game), FSR ~126 shown (~63 game, any GPU). NVIDIA Reflex in the panel too ([decision 0041](docs/decisions/0041-frame-generation.md)) |
 | **Keyboard, mouse and controllers** | Bindings on the panel's CONTROLS page, saved, with separate keys for battles and your controller's own button names; tested with a DualSense. Controller rumble and haptics, on by default, with an on/off switch on the overlay's Controls page ([decision 0058](docs/decisions/0058-controller-rumble.md)). On-screen button icons follow what you play with and your bindings (keyboard, Xbox, PlayStation or Nintendo, [decision 0042](docs/decisions/0042-button-icons-and-mouse.md)). The mouse turns the camera through the game's own unused mouse code |
 | **Mod support** | Mods in the Switch's layout are laid over your game files at start, as on a modded Switch, without touching your dump: the English translation patch runs (see [Features](#features), [decision 0043](docs/decisions/0043-mods-layeredfs.md)). The YKW Mod Merger™ makes mods that change the same file work together ([0067](docs/decisions/0067-mods-merge-cpk-list.md), [0068](docs/decisions/0068-mods-merge-data-files.md)) |
+| **Playing together online** | Ark Swap trades and Blasters missions with friends over the internet through two servers of ours (US East, Singapore), with Public or Private room codes; no IP addresses kept ([decision 0082](docs/decisions/0082-online-play-over-ldn.md), [the site](https://ilfforever.github.io/YW4Recomp/online/)) |
 | **In-game overlay** | Escape or a controller button pauses the game and opens a side panel: settings, controls, the performance HUD's options, screenshots and exit, drawn like its design ([decision 0053](docs/decisions/0053-in-game-overlay.md)); Preview shows graphics changes live, and themes match the launcher's ([decision 0055](docs/decisions/0055-overlay-themes.md)) |
 | **Launcher** | A Windows app that takes your game files, checks them, builds the game and starts it, with mods, DLC, saves and screenshots in one place. Installer and portable zip ([decision 0052](docs/decisions/0052-launcher-packaging.md)), tested on a second PC. Released with 1.0.0 (2026-11-13): [download](https://github.com/ILFforever/YW4Recomp/releases/latest) |
 | **Linux** | Tester [ouni666](https://github.com/ouni666) plays it on AOSC OS with an AMD RX 6600 XT at about 110-120 frames/s, sound and controls included (2026-11-13). DLSS and FSR upscaling and FSR frame generation are built on Linux too ([decision 0073](docs/decisions/0073-dlss-fsr-on-linux.md)); DLSS frame generation and Reflex are Windows only |
