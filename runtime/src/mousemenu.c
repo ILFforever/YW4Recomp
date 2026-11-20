@@ -307,6 +307,25 @@ static void talk_note(uint64_t vt) {
 static int sideways;
 int mousemenu_sideways(void) { return enabled() && __atomic_load_n(&sideways, __ATOMIC_ACQUIRE); }
 
+/* Blasters' chat (yw::CChatMenu, the X Chat button in the team room and in missions; its message list 0x7c7e7b58, 6
+ * rows): it moves on the D-pad only, so the keyboard's left stick keys press the D-pad too while it is open (owner,
+ * 2026-11-20: W / S didn't move through the messages; bindings.c). Open from its focus until another menu's focus or
+ * a back out of it. Sending a message (a pick) keeps it open and focuses yw::CChatIconMenu (the message's bubble)
+ * meanwhile: neither closes it (owner, 2026-11-20: it stopped after the first message). With the mouse off too. */
+#define CHAT_VTABLE 0x14b6308u
+#define CHAT_ICON_VTABLE 0x14b6138u
+static int chat_open;
+int mousemenu_chat(void) { return __atomic_load_n(&chat_open, __ATOMIC_ACQUIRE); }
+static void chat_note(CPUState *ctx, int focus) {
+    if (!ctx->x[0]) return;
+    uint64_t vt = ld64(ctx->x[0]) - yw4_image_base;
+    if (vt == CHAT_ICON_VTABLE) return;
+    int is_chat = vt == CHAT_VTABLE;
+    int now = focus ? is_chat : (is_chat ? 0 : __atomic_load_n(&chat_open, __ATOMIC_ACQUIRE));
+    if (now != __atomic_exchange_n(&chat_open, now, __ATOMIC_ACQ_REL) && menu_log_on())
+        fprintf(stderr, "yw4: menu: Blasters' chat %s\n", now ? "open: the left stick keys press the D-pad too" : "closed");
+}
+
 int mousemenu_log_on(void) {
     return menu_log_on();
 }
@@ -341,6 +360,7 @@ static uint64_t find_control(CPUState *ctx, uint64_t menu, uint32_t hash) {
 
 /* OnChangeFocus (main+0x6c68f0), before the game's own: a menu is open or its focus moved. */
 int yw4_hook_menu_focus(CPUState *ctx) {
+    chat_note(ctx, 1);
     if (!enabled() || !ctx->x[0] || !ctx->x[1]) return 0;
     uint64_t menu = ctx->x[0];
     uint64_t vt = ld64(menu) - yw4_image_base;
@@ -457,6 +477,7 @@ int yw4_hook_menu_focus(CPUState *ctx) {
 
 /* OnBack (main+0x6c59f0): B closed the whole Pad (or a sub-page). */
 int yw4_hook_menu_back(CPUState *ctx) {
+    chat_note(ctx, 0);
     if (!enabled() || !ctx->x[0]) return 0;
     uint64_t menu = ctx->x[0];
     uint64_t vt = ld64(menu) - yw4_image_base;

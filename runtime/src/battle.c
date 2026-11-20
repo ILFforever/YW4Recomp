@@ -3,7 +3,9 @@
  * The battle scene is a yw::CSceneBattle (vtable main+0x14cbcf0, 18 functions). Of its own functions, four run
  * once every frame of a battle and none outside one (counted 2026-11-01 in the owner's battle: 600 calls per 600
  * frames, 0 before and after; two others ran once at its start). The hook on one of them notes the time; a
- * battle is on while that was less than a quarter second ago. The game's own code then runs as usual. */
+ * battle is on while that was less than a quarter second ago. The game's own code then runs as usual.
+ * Blasters' missions are a yw::CSceneMultiPlay, a CSceneBattle with its own function in that slot (main+0x82ff80):
+ * hooked the same way (2026-11-20). */
 #include <stdint.h>
 
 #include "battle.h"

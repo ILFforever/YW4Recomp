@@ -351,6 +351,12 @@ why = "yw::CSceneBattle's own vtable function (main+0x14cbcf0 slot 8) that runs 
 
 [[hook]]
 module = "main"
+offset = "0x82ff80"
+native = "yw4_hook_battle_frame"
+why = "yw::CSceneMultiPlay (Blasters' missions, a CSceneBattle; vtable main+0x14cc728) replaces that per-frame function with this one, so a mission is a battle for the controls too (owner, 2026-11-20: Blasters didn't load the battle keys; runtime/src/battle.c)"
+
+[[hook]]
+module = "main"
 offset = "0x3bd260"
 native = "yw4_hook_time_changed"
 why = "the game's \"the console's time was changed\" check (clock moved by the user, time zone or device id differ from the save's): answered no, a PC has no console clock and imported saves differ through no doing of the player (runtime/src/svc_time.c)"

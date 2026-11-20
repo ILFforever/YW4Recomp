@@ -27,6 +27,8 @@ int mousemenu_naviwoof(void);
 int mousemenu_stopwatch(void);
 /* Returns 1 while a Yes / No box with its buttons side by side has the focus: the wheel steps left and right. */
 int mousemenu_sideways(void);
+/* Returns 1 while Blasters' chat (yw::CChatMenu) is open: it moves on the D-pad only (bindings.c). Mouse on or off. */
+int mousemenu_chat(void);
 
 /* Returns 1 when YW4_MOUSE_LOG=1 or YW4_MOUSE_SCRIPT is set. */
 int mousemenu_log_on(void);

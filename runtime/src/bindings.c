@@ -499,7 +499,9 @@ void bindings_read(const bool *keyboard, uint32_t mouse_buttons, int wheel_up, i
                    struct SDL_Gamepad *gamepad, uint64_t *buttons, int32_t sticks[4]) {
     sets_ready();
     int battle = battle_active();
-    const Bound *use = sets[battle ? SET_BATTLE : SET_FIELD];
+    /* Blasters' chat in a mission (mousemenu_chat): the field set's keys, a menu's (owner, 2026-11-20: its tabs are L /
+     * R, the field set's 1 / 3; the battle set has no L and its R is A's E). The mouse keeps the battle's. */
+    const Bound *use = sets[battle && !mousemenu_chat() ? SET_BATTLE : SET_FIELD];
     static int layout_env_read;
     if (!layout_env_read) {  /* YW4_NINTENDO_LAYOUT from the environment, with or without a settings file line */
         const char *e = getenv("YW4_NINTENDO_LAYOUT");
@@ -623,6 +625,17 @@ void bindings_read(const bool *keyboard, uint32_t mouse_buttons, int wheel_up, i
         int32_t k = key_stick[i] > 32767 ? 32767 : key_stick[i] < -32767 ? -32767 : key_stick[i];
         if (v > 4000 || v < -4000) any_pad = 1;
         sticks[i] = v > 4000 || v < -4000 ? v : k;  /* dead zone: the keyboard wins near the centre */
+    }
+    /* Blasters' chat moves on the D-pad only (mousemenu_chat): the keyboard's left stick keys press it too there
+     * (owner, 2026-11-20: W / S didn't move through the messages). A pad has its own D-pad. */
+    if (mousemenu_chat()) {
+        static int du = -2, dd, dl, dr;
+        if (du == -2) du = input_by_id("DPAD_UP"), dd = input_by_id("DPAD_DOWN"), dl = input_by_id("DPAD_LEFT"),
+                      dr = input_by_id("DPAD_RIGHT");
+        const int lx = key_stick[0], ly = key_stick[1];  /* left stick: x (+ right), y (+ up) */
+        const int dirs[4][2] = {{du, ly > 0}, {dd, ly < 0}, {dl, lx < 0}, {dr, lx > 0}};
+        for (int d = 0; d < 4; d++)
+            if (dirs[d][1] && dirs[d][0] >= 0 && inputs[dirs[d][0]].bit >= 0) b |= 1ull << inputs[dirs[d][0]].bit;
     }
     if (any_pad) using_pad = 1;
     else if (any_key) using_pad = 0;
@@ -916,7 +929,7 @@ static uint32_t gaiji_swap(uint32_t crc, int *sheet) {
     if (i == n_nx_names) return 0;  /* not a button: one of the game's own icons */
     int g = nx_names[i].glyph, style = nx_names[i].style, row = glyphs[g].row;
     sets_ready();
-    const Bound *use = sets[battle_active() ? SET_BATTLE : SET_FIELD];  /* the keys in use now */
+    const Bound *use = sets[battle_active() && !mousemenu_chat() ? SET_BATTLE : SET_FIELD];  /* the keys in use now */
     if (!using_pad) {
         /* the title's Continue: its hint's X Delete shows the X key, which deletes there (savefs.c; the X key is
          * the game's Minus elsewhere, so the X button's own key would be another; owner, 2026-11-17) */
