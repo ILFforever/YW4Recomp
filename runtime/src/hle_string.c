@@ -21,7 +21,12 @@ static int guest_errno;
 void hle_libc_errno_location(CPUState *ctx) { ctx->x[0] = GADDR(&guest_errno); }
 
 /* Memory */
-void hle_libc_memcpy(CPUState *ctx) { memcpy(GPTR(ctx->x[0]), GPTR(ctx->x[1]), ctx->x[2]); }
+/* The game's memcpy is done by memmove: the game copies between overlapping ranges with memcpy (its own libc, glibc and
+ * Windows' all tolerate that: their memcpy is memmove underneath), and a game linked by the downloaded compiler (zig,
+ * decision 0083) gets zig's own memcpy, a plain forward copy: every bit of the game's text and the title logo were
+ * missing on a Linux PC (2026-11-20; the same objects linked by clang showed them, by zig not, and this line alone
+ * brought them back). */
+void hle_libc_memcpy(CPUState *ctx) { memmove(GPTR(ctx->x[0]), GPTR(ctx->x[1]), ctx->x[2]); }
 void hle_libc_memmove(CPUState *ctx) { memmove(GPTR(ctx->x[0]), GPTR(ctx->x[1]), ctx->x[2]); }
 void hle_libc_memset(CPUState *ctx) { memset(GPTR(ctx->x[0]), ARG_INT(1), ctx->x[2]); }
 
