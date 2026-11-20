@@ -7,7 +7,7 @@
 <link rel="icon" href="../favicon.ico" sizes="any">
 <link rel="icon" type="image/png" href="../img/icon-192.png">
 <link rel="apple-touch-icon" href="../img/icon-192.png">
-<meta name="description" content="Before and after comparisons for YW4 Recomp, the fan PC port of Yo-kai Watch 4++: shadows, anti-aliasing, texture filtering, upscaling and ultrawide, with settings and costs.">
+<meta name="description" content="Before and after comparisons for YW4 Recomp, the fan PC port of Yo-kai Watch 4++: shadows, anti-aliasing, texture filtering, draw distance, upscaling and ultrawide, with settings and costs.">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=M+PLUS+Rounded+1c:wght@500;700;800;900&family=Zen+Kaku+Gothic+New:wght@400;500;700&display=swap" rel="stylesheet">
@@ -442,8 +442,33 @@ try { const t = localStorage.getItem('yw4-theme'); if (t === 'dark' || t === 'li
       </div>
     </article>
 
+    <article id="drawdistance" data-cat="Graphics">
+      <div class="bar"><span class="q">9</span><h2>Draw distance</h2><span class="cat">Graphics</span></div>
+      <div class="body">
+        <div class="top">
+          <div class="prose">
+            <p>The game only draws lamps, plants, signs and other small things close to you, so they pop in as you
+              walk up. Ours draws them four times as far by default.</p>
+            <ul>
+              <li><b>Lamps, plants, bus stops and signs</b> already there at the end of the street.</li>
+              <li><b>No noticeable cost</b>: within 1 frame/s on an RTX 4070 laptop and an RX 580.</li>
+              <li>Trees, buildings and people that pop in follow another rule, not changed yet.</li>
+            </ul>
+          </div>
+          <div class="spec"><dl>
+            <dt>Setting</dt><dd><kbd>F1</kbd> Detail › Draw distance</dd>
+            <dt>Levels</dt><dd>Default, Medium, Far, Very far</dd>
+            <dt>Default</dt><dd>Far (×4)</dd>
+            <dt>Cost</dt><dd>none measured</dd>
+            <dt>Record</dt><dd><a href="https://github.com/ILFforever/YW4Recomp/blob/master/docs/decisions/0085-draw-distance.md">decision 0085</a></dd>
+          </dl></div>
+        </div>
+        <div data-cmp="drawdistance"></div>
+      </div>
+    </article>
+
     <article id="upscaling" data-cat="Performance">
-      <div class="bar"><span class="q">9</span><h2>Upscaling: DLSS and FSR</h2><span class="cat">Performance</span></div>
+      <div class="bar"><span class="q">10</span><h2>Upscaling: DLSS and FSR</h2><span class="cat">Performance</span></div>
       <div class="body">
         <div class="top">
           <div class="prose"><p>The world is drawn smaller than the resolution and rebuilt at full size from the frames
@@ -518,6 +543,8 @@ const CMP = {
   pcss: { rows: [{ set: [['Off', '16-pcss-off.jpg'], ['×1', '17-pcss-x1.jpg'], ['×2', '18-pcss-x2.jpg'], ['×4', '19-pcss-x4.jpg']] }] },
   aa: { pixel: true, rows: ['rail', 'fence', 'road'].map((n, i) => ({ name: ['Railing', 'Fence', 'Road line'][i],
     set: [[OFF, `${30 + 3 * i}-aa-${n}-off.png`], ['SMAA', `${31 + 3 * i}-aa-${n}-smaa.png`], ['TAA', `${32 + 3 * i}-aa-${n}-taa.png`]] })) },
+  drawdistance: { pixel: true, rows: [
+    { name: 'Yo-kai World street, the far end, 1:1 at 4K', set: [["Default (the game's)", 'drawdist-street-off.png'], ['Far (×4)', 'drawdist-street-far.png']] }] },
   filtering: { pixel: true, rows: ['crosswalk', 'pavement', 'road'].map((n, i) => ({ name: ['Crosswalk', 'Pavement', 'Road'][i],
     set: ['off', 'x2', 'x4', 'x8', 'x16'].map((s, k) => [s === 'off' ? OFF : '×' + s.slice(1), `${40 + 5 * i + k}-filtering-${n}-${s}.png`]) })) },
 };
