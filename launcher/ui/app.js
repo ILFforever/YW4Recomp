@@ -24,7 +24,20 @@ document.addEventListener('keydown', () => document.body.classList.remove('point
 // ---- screens: one shown at a time; the setup ones light up their step in the top bar
 const STEPS = ['files', 'check', 'options', 'build', 'play'];
 
+// A build in progress keeps its page: no other page opens until it ends or Cancel stops it, and the top bar's Help and
+// Settings are off meanwhile. A player who opened Settings during an update and pressed Back found no way back to the
+// build's progress (2026-11-20).
+let buildRunning = false;
+function setBuildRunning(on) {
+  buildRunning = on;
+  for (const [id, name] of [['help-btn', 'Help'], ['top-settings', 'Settings']]) {
+    $(id).disabled = on;
+    $(id).title = on ? `${name} opens when the build ends` : name;
+  }
+}
+
 function show(name) {
+  if (buildRunning && name !== 'build') return;
   for (const s of document.querySelectorAll('.screen')) s.hidden = s.dataset.screen !== name;
   const step = STEPS.indexOf(name);
   $('steps-bar').hidden = step < 0;
@@ -58,8 +71,8 @@ document.querySelectorAll('[data-link]').forEach((b) => b.addEventListener('clic
 $('top-settings').addEventListener('click', () => showSettings());
 function syncSettingsButton() {  // inst is the built install's state, null before a build
   const gear = $('top-settings');
-  gear.disabled = false;
-  gear.title = 'Settings';
+  gear.disabled = buildRunning;
+  gear.title = buildRunning ? 'Settings opens when the build ends' : 'Settings';
 }
 // Locate an installed game (a folder built earlier, or moved): the folder picker, the folder checked and kept as this
 // launcher's install (locate_installed_game), then its Ready screen. Any button with data-locate does this.
@@ -582,6 +595,8 @@ function logLine(line) {
 // kind: 'first' (setup), 'update' (a game update's rebuild) or 'rebuild' (other downloads); "Build again" keeps it
 async function startBuild(kind = build ? build.kind : 'first') {
   build = { steps: [], started: Date.now(), kind };  // the list arrives with the build's first line
+  show('build');
+  setBuildRunning(true);
   $('build-title').textContent = kind === 'first' ? 'Building your game' : kind === 'rebuild' ? 'Rebuilding your game' : 'Updating your game';
   $('build-lead').textContent = kind === 'first' ? 'This happens once. You can minimise this window.'
     : 'Your saves stay as they are. You can minimise this window.';
@@ -630,6 +645,7 @@ async function newestGameCode() {
 }
 
 function buildFinished({ ok, message }) {
+  setBuildRunning(false);
   $('build-cancel').hidden = true;
   const next = $('build-next');
   next.hidden = false;
