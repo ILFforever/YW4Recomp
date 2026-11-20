@@ -64,6 +64,22 @@ python3 -m py_compile "$tmp"  # a broken download never replaces a working relay
 sudo install -m 0644 "$tmp" "$DIR/relay.py"
 rm -f "$tmp"
 
+# The relay in C (2026-11-20: about a tenth of the Python one's CPU per packet), built here from relay.c; relay.py
+# runs instead if no compiler can be had or the build fails
+echo "== relay.c ($REF), built on this server"
+command -v cc >/dev/null || sudo apt-get install -y gcc libc6-dev >/dev/null 2>&1 || true
+EXEC="/usr/bin/python3 -u $DIR/relay.py"
+src=$(mktemp --suffix=.c)
+if curl -fsSL "https://raw.githubusercontent.com/ILFforever/YW4Recomp/$REF/tools/relay/relay.c" -o "$src" &&
+   command -v cc >/dev/null && cc -O2 -o "$src.bin" "$src"; then
+    sudo install -m 0755 "$src.bin" "$DIR/yw4-relay"
+    EXEC="$DIR/yw4-relay"
+    echo "   built: $DIR/yw4-relay"
+else
+    echo "   (no compiler or the build failed: the Python relay runs)"
+fi
+rm -f "$src" "$src.bin"
+
 echo "== service yw4-relay on port $PORT"
 sudo tee "$UNIT" >/dev/null <<EOF
 [Unit]
@@ -72,7 +88,7 @@ After=network-online.target
 Wants=network-online.target
 
 [Service]
-ExecStart=/usr/bin/python3 -u $DIR/relay.py --port $PORT --host 0.0.0.0
+ExecStart=$EXEC --port $PORT --host 0.0.0.0
 Restart=always
 RestartSec=3
 DynamicUser=yes

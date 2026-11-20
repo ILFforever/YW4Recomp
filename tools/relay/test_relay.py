@@ -5,6 +5,7 @@ both ways and to everyone, the host updates its advertise data, the station leav
 """
 from __future__ import annotations
 
+import os
 import socket
 import struct
 import subprocess
@@ -71,8 +72,11 @@ def main() -> int:
     with socket.socket() as probe:
         probe.bind(("127.0.0.1", 0))
         port = probe.getsockname()[1]
-    relay = subprocess.Popen([sys.executable, str(Path(__file__).with_name("relay.py")), "--port", str(port),
-                              "--host", "127.0.0.1"], stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+    # YW4_RELAY_CMD: the relay to test (the C one: a path to yw4-relay); else relay.py
+    cmd = [os.environ["YW4_RELAY_CMD"]] if os.environ.get("YW4_RELAY_CMD") else \
+        [sys.executable, str(Path(__file__).with_name("relay.py"))]
+    relay = subprocess.Popen(cmd + ["--port", str(port), "--host", "127.0.0.1"], stdout=subprocess.PIPE,
+                             stderr=subprocess.STDOUT, text=True)
     try:
         for _ in range(50):
             try:
