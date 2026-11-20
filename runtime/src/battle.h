@@ -4,5 +4,7 @@
 
 /* 1 while a battle runs (its scene updated less than a quarter second ago). */
 int battle_active(void);
+/* 1 while the battle is a Blasters mission (yw::CSceneMultiPlay). */
+int battle_busters(void);
 
 #endif

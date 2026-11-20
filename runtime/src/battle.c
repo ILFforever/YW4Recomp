@@ -24,3 +24,20 @@ int battle_active(void) {
     int64_t t = __atomic_load_n(&last_frame_ns, __ATOMIC_ACQUIRE);
     return t && host_now_ns() - t < 250000000;
 }
+
+/* Blasters' missions (CSceneMultiPlay's frame, main+0x82ff80): a battle too, and noted apart (bindings.c: a button
+ * with no battle key takes the field set's there) */
+static int64_t busters_frame_ns;
+
+int yw4_hook_busters_frame(CPUState *ctx) {
+    int64_t now = host_now_ns();
+    __atomic_store_n(&busters_frame_ns, now, __ATOMIC_RELEASE);
+    __atomic_store_n(&last_frame_ns, now, __ATOMIC_RELEASE);
+    (void)ctx;
+    return 0;
+}
+
+int battle_busters(void) {
+    int64_t t = __atomic_load_n(&busters_frame_ns, __ATOMIC_ACQUIRE);
+    return t && host_now_ns() - t < 250000000;
+}

@@ -495,13 +495,38 @@ static int32_t pad_amount(SDL_Gamepad *g, int pad) {
 static int run_held;
 int bindings_run_held(void) { return __atomic_load_n(&run_held, __ATOMIC_ACQUIRE); }
 
+/* The keys in use now: the field set, or the battle set in battles (not under Blasters' chat: mousemenu_dpad_menu). In
+ * Blasters' missions (battle_busters) a button with no battle key takes the field set's, unless that key does
+ * something else in battle (owner, 2026-11-20: the mission map's bell showed N/A: L has no battle key; the field set's
+ * is the owner's 1). Its own copy per thread: the input's and the hint icons' threads both ask. */
+static const Bound *keys_now(int battle) {
+    if (!battle || mousemenu_dpad_menu()) return sets[SET_FIELD];
+    if (!battle_busters()) return sets[SET_BATTLE];
+    static _Thread_local Bound mix[NINPUTS];
+    memcpy(mix, sets[SET_BATTLE], sizeof mix);
+    for (int i = 0; i < NINPUTS; i++) {
+        if (inputs[i].bit < 0) continue;  /* the sticks and our own (Run) keep the battle's */
+        int none = 1;
+        for (int k = 0; k < BIND_KEYS; k++) none &= mix[i].keys[k] == 0;
+        if (!none) continue;
+        for (int k = 0; k < BIND_KEYS; k++) {
+            int key = sets[SET_FIELD][i].keys[k], used = 0;
+            for (int j = 0; key && !used && j < NINPUTS; j++)
+                for (int m = 0; m < BIND_KEYS; m++) used |= sets[SET_BATTLE][j].keys[m] == key;
+            mix[i].keys[k] = used ? 0 : key;
+        }
+    }
+    return mix;
+}
+
 void bindings_read(const bool *keyboard, uint32_t mouse_buttons, int wheel_up, int wheel_down,
                    struct SDL_Gamepad *gamepad, uint64_t *buttons, int32_t sticks[4]) {
     sets_ready();
     int battle = battle_active();
-    /* Blasters' chat in a mission (mousemenu_chat): the field set's keys, a menu's (owner, 2026-11-20: its tabs are L /
-     * R, the field set's 1 / 3; the battle set has no L and its R is A's E). The mouse keeps the battle's. */
-    const Bound *use = sets[battle && !mousemenu_chat() ? SET_BATTLE : SET_FIELD];
+    /* Blasters' chat in a mission (mousemenu_dpad_menu): the field set's keys, a menu's (owner, 2026-11-20:
+     * the chat's tabs are L / R, the field set's 1 / 3; the battle set has no L and its R is A's E). The mouse keeps
+     * the battle's. */
+    const Bound *use = keys_now(battle);
     static int layout_env_read;
     if (!layout_env_read) {  /* YW4_NINTENDO_LAYOUT from the environment, with or without a settings file line */
         const char *e = getenv("YW4_NINTENDO_LAYOUT");
@@ -626,9 +651,9 @@ void bindings_read(const bool *keyboard, uint32_t mouse_buttons, int wheel_up, i
         if (v > 4000 || v < -4000) any_pad = 1;
         sticks[i] = v > 4000 || v < -4000 ? v : k;  /* dead zone: the keyboard wins near the centre */
     }
-    /* Blasters' chat moves on the D-pad only (mousemenu_chat): the keyboard's left stick keys press it too there
-     * (owner, 2026-11-20: W / S didn't move through the messages). A pad has its own D-pad. */
-    if (mousemenu_chat()) {
+    /* Blasters' chat moves on the D-pad only (mousemenu_dpad_menu): the keyboard's left stick keys press it
+     * there (owner, 2026-11-20: W / S didn't move them). A pad has its own D-pad. */
+    if (mousemenu_dpad_menu()) {
         static int du = -2, dd, dl, dr;
         if (du == -2) du = input_by_id("DPAD_UP"), dd = input_by_id("DPAD_DOWN"), dl = input_by_id("DPAD_LEFT"),
                       dr = input_by_id("DPAD_RIGHT");
@@ -636,12 +661,25 @@ void bindings_read(const bool *keyboard, uint32_t mouse_buttons, int wheel_up, i
         const int dirs[4][2] = {{du, ly > 0}, {dd, ly < 0}, {dl, lx < 0}, {dr, lx > 0}};
         for (int d = 0; d < 4; d++)
             if (dirs[d][1] && dirs[d][0] >= 0 && inputs[dirs[d][0]].bit >= 0) b |= 1ull << inputs[dirs[d][0]].bit;
+        /* and only the D-pad: the keys' stick would walk the player in the mission behind the chat (owner,
+         * 2026-11-20). A pad's own stick stays the game's to handle. */
+        for (int i = 0; i < 2; i++)
+            if (!(pad_stick[i] > 4000 || pad_stick[i] < -4000)) sticks[i] = 0;
     }
     if (any_pad) using_pad = 1;
     else if (any_key) using_pad = 0;
     int hint_env = bindings_hints_forced();
     if (hint_env == 1) using_pad = 0;
     else if (hint_env >= 2) using_pad = 1, pad_style = hint_env - 2;
+    /* Blasters' R menu, Field Camera highlighted: it changes on Left / Right only and A does nothing, so A (the
+     * owner's E, or a pad's A) steps it right, cycling (owner, 2026-11-20) */
+    if (mousemenu_r_menu_camera_row()) {
+        static int in_a = -2, in_right;
+        if (in_a == -2) in_a = input_by_id("A"), in_right = input_by_id("DPAD_RIGHT");
+        if (in_a >= 0 && in_right >= 0 && inputs[in_a].bit >= 0 && inputs[in_right].bit >= 0 &&
+            (b >> inputs[in_a].bit & 1))
+            b = (b & ~(1ull << inputs[in_a].bit)) | 1ull << inputs[in_right].bit;
+    }
     *buttons = b;
 }
 
@@ -929,7 +967,7 @@ static uint32_t gaiji_swap(uint32_t crc, int *sheet) {
     if (i == n_nx_names) return 0;  /* not a button: one of the game's own icons */
     int g = nx_names[i].glyph, style = nx_names[i].style, row = glyphs[g].row;
     sets_ready();
-    const Bound *use = sets[battle_active() && !mousemenu_chat() ? SET_BATTLE : SET_FIELD];  /* the keys in use now */
+    const Bound *use = keys_now(battle_active());  /* the keys in use now */
     if (!using_pad) {
         /* the title's Continue: its hint's X Delete shows the X key, which deletes there (savefs.c; the X key is
          * the game's Minus elsewhere, so the X button's own key would be another; owner, 2026-11-17) */

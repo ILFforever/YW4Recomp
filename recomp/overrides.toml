@@ -352,8 +352,8 @@ why = "yw::CSceneBattle's own vtable function (main+0x14cbcf0 slot 8) that runs 
 [[hook]]
 module = "main"
 offset = "0x82ff80"
-native = "yw4_hook_battle_frame"
-why = "yw::CSceneMultiPlay (Blasters' missions, a CSceneBattle; vtable main+0x14cc728) replaces that per-frame function with this one, so a mission is a battle for the controls too (owner, 2026-11-20: Blasters didn't load the battle keys; runtime/src/battle.c)"
+native = "yw4_hook_busters_frame"
+why = "yw::CSceneMultiPlay (Blasters' missions, a CSceneBattle; vtable main+0x14cc728) replaces that per-frame function with this one, so a mission is a battle for the controls too, and noted as a mission (a button with no battle key takes the field set's) (owner, 2026-11-20: Blasters didn't load the battle keys; runtime/src/battle.c)"
 
 [[hook]]
 module = "main"

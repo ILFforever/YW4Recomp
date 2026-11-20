@@ -129,6 +129,11 @@ static const Screen screens[] = {
     /* the trade's result: the Yo-kai that came, talking (vt main+0x14c8598, one item; owner's F12 2026-11-20): a
      * click anywhere goes on, as A */
     {"trade_result",     0x14c8598u, 0x5015be9du, 0,           1, 1, 640.0f, 360.0f,   0.0f,   0.0f, 640.0f, 360.0f, SCR_CLICK},
+    /* Blasters' mission R menu (yw::CBustersSettingRetireMenu, opened without the Pad: see standalone): Retire
+     * Mission, Field Camera (< Far >: its arrows clicked step it), Return to Battle. Measured on the owner's F12s
+     * (2026-11-20, 1600 x 900): rows at y 592 / 662 / 735, x 296 .. 1240 */
+    {"busters_r_menu",   0x14b5bc8u, 0x9f07b5d8u, 0,           1, 3, 616.0f, 474.0f,   0.0f,  57.5f, 380.0f,  26.0f,
+     SCR_HOVER | SCR_CLICK | SCR_WHEEL},
     /* the game's message box (vt main+0x14bfa78): Yes (490, 450), No (790, 450), about 240 x 52, the same in every
      * box of the trade; a box with one button takes the Yes spot (SCR_COUNT) */
     {"message_yes_no",   0x14bfa78u, 0xf51efb06u, 0,           2, 1, 490.0f, 450.0f, 300.0f,   0.0f, 120.0f,  26.0f,
@@ -155,6 +160,13 @@ static int rooms_recruit;     /* the room list's focus is on Recruit by myself *
  * focuses nothing then (its focus never moved), so the mouse kept working the gone box (owner's F12, 2026-11-20:
  * the room list after a Yes / No: the wheel stepped left / right, clicks missed). Put back on the box's pick. */
 static int under_idx = -1, under_recruit;
+
+/* A game menu that opens without the Pad (whose focus otherwise turns the mouse on: pad_open): Blasters' mission R
+ * menu. The mouse is its from its focus; another menu's focus, but the Yes / No box over it, hands the mouse back to
+ * the battle at once (the battle's HUD takes the focus as it closes: owner's run, 2026-11-20). */
+#define RETIRE_MENU_VTABLE 0x14b5bc8u
+static int standalone;
+static void standalone_close(const char *why);  /* below, after the state it resets */
 static uint64_t under_menu, under_ctrl, under_lv;
 static int is_trade_rooms(const Screen *s) { return s && s->vtable == TRADE_VTABLE && s->hash == TRADE_ROOMS_HASH; }
 
@@ -307,23 +319,34 @@ static void talk_note(uint64_t vt) {
 static int sideways;
 int mousemenu_sideways(void) { return enabled() && __atomic_load_n(&sideways, __ATOMIC_ACQUIRE); }
 
-/* Blasters' chat (yw::CChatMenu, the X Chat button in the team room and in missions; its message list 0x7c7e7b58, 6
- * rows): it moves on the D-pad only, so the keyboard's left stick keys press the D-pad too while it is open (owner,
- * 2026-11-20: W / S didn't move through the messages; bindings.c). Open from its focus until another menu's focus or
- * a back out of it. Sending a message (a pick) keeps it open and focuses yw::CChatIconMenu (the message's bubble)
- * meanwhile: neither closes it (owner, 2026-11-20: it stopped after the first message). With the mouse off too. */
+/* Blasters' chat (yw::CChatMenu, X in the team room and in missions; its message list 0x7c7e7b58, 6 rows) moves on
+ * the D-pad only: while it is open the keyboard's left stick keys press the D-pad instead and the field set's keys are
+ * used (owner, 2026-11-20: W / S didn't move it, 1 / 3 didn't switch its tabs, W A S D walked the player behind it;
+ * bindings.c). Open from its focus until another menu's focus or a back out of it. Sending a message (a pick) focuses
+ * yw::CChatIconMenu (the message's bubble): that doesn't close it. With the mouse off too.
+ * Not the mission's R menu (yw::CBustersSettingRetireMenu, vtable 0x14b5bc8: Retire Mission, Field Camera, Return to
+ * Battle): half the screen, the game goes on behind it, so W A S D stay the player's (owner, 2026-11-20). */
 #define CHAT_VTABLE 0x14b6308u
 #define CHAT_ICON_VTABLE 0x14b6138u
-static int chat_open;
-int mousemenu_chat(void) { return __atomic_load_n(&chat_open, __ATOMIC_ACQUIRE); }
-static void chat_note(CPUState *ctx, int focus) {
+static int dpad_menu_open;
+int mousemenu_dpad_menu(void) { return __atomic_load_n(&dpad_menu_open, __ATOMIC_ACQUIRE); }
+
+/* Blasters' R menu with its Field Camera row highlighted (row 1 of list 0x9f07b5d8): A does nothing there, so the
+ * keys' A (the owner's E) steps it right instead (bindings.c; owner, 2026-11-20). Mouse on or off: the menu's
+ * focus hook notes it (r_menu_ctrl), the row is read live. */
+static uint64_t r_menu_ctrl;
+int mousemenu_r_menu_camera_row(void) {
+    uint64_t c = __atomic_load_n(&r_menu_ctrl, __ATOMIC_ACQUIRE);
+    return c && ld16(c + 0x13c) == 1;
+}
+static void dpad_menu_note(CPUState *ctx, int focus) {
     if (!ctx->x[0]) return;
     uint64_t vt = ld64(ctx->x[0]) - yw4_image_base;
     if (vt == CHAT_ICON_VTABLE) return;
-    int is_chat = vt == CHAT_VTABLE;
-    int now = focus ? is_chat : (is_chat ? 0 : __atomic_load_n(&chat_open, __ATOMIC_ACQUIRE));
-    if (now != __atomic_exchange_n(&chat_open, now, __ATOMIC_ACQ_REL) && menu_log_on())
-        fprintf(stderr, "yw4: menu: Blasters' chat %s\n", now ? "open: the left stick keys press the D-pad too" : "closed");
+    int is_menu = vt == CHAT_VTABLE;
+    int now = focus ? is_menu : (is_menu ? 0 : __atomic_load_n(&dpad_menu_open, __ATOMIC_ACQUIRE));
+    if (now != __atomic_exchange_n(&dpad_menu_open, now, __ATOMIC_ACQ_REL) && menu_log_on())
+        fprintf(stderr, "yw4: menu: Blasters' chat %s\n", now ? "open: the left stick keys press the D-pad" : "closed");
 }
 
 int mousemenu_log_on(void) {
@@ -360,7 +383,14 @@ static uint64_t find_control(CPUState *ctx, uint64_t menu, uint32_t hash) {
 
 /* OnChangeFocus (main+0x6c68f0), before the game's own: a menu is open or its focus moved. */
 int yw4_hook_menu_focus(CPUState *ctx) {
-    chat_note(ctx, 1);
+    dpad_menu_note(ctx, 1);
+    if (ctx->x[0] && ctx->x[1]) {  /* Blasters' R menu's list (mousemenu_r_menu_camera_row), mouse on or off */
+        uint64_t v = ld64(ctx->x[0]) - yw4_image_base;
+        if (v == 0x14b5bc8u && ld32(ctx->x[1]) == 0x9f07b5d8u)
+            __atomic_store_n(&r_menu_ctrl, find_control(ctx, ctx->x[0], 0x9f07b5d8u), __ATOMIC_RELEASE);
+        else if (v != 0x14b5bc8u && v != GENERAL_WINDOW_VTABLE)
+            __atomic_store_n(&r_menu_ctrl, 0, __ATOMIC_RELEASE);
+    }
     if (!enabled() || !ctx->x[0] || !ctx->x[1]) return 0;
     uint64_t menu = ctx->x[0];
     uint64_t vt = ld64(menu) - yw4_image_base;
@@ -420,6 +450,16 @@ int yw4_hook_menu_focus(CPUState *ctx) {
     }
     if (vt == PAD_VTABLE && hash == PAD_GRID_HASH)
         __atomic_store_n(&pad_open, 1, __ATOMIC_RELEASE);
+    if (vt == RETIRE_MENU_VTABLE) {  /* Blasters' R menu: the mouse is its, without the Pad (standalone) */
+        if (!__atomic_load_n(&pad_open, __ATOMIC_ACQUIRE)) {
+            standalone = 1;
+            __atomic_store_n(&pad_open, 1, __ATOMIC_RELEASE);
+            if (menu_log_on()) fprintf(stderr, "yw4: menu: Blasters' R menu: the mouse is the menu's\n");
+        }
+    } else if (standalone && vt != GENERAL_WINDOW_VTABLE) {  /* it closed: the mouse is the battle's again */
+        standalone_close("another menu's focus");
+        return 0;
+    }
     if (!__atomic_load_n(&pad_open, __ATOMIC_ACQUIRE)) return 0;
 
     /* the room list's Recruit row: the hosts' screen, its control (for the hosts' count), and slot 0 */
@@ -429,7 +469,7 @@ int yw4_hook_menu_focus(CPUState *ctx) {
     if (idx >= 0) {
         if (screens[idx].vtable == GENERAL_WINDOW_VTABLE) {  /* a box over an Ark Swap screen: remember that screen */
             int prev = __atomic_load_n(&active_idx, __ATOMIC_ACQUIRE);
-            if (prev >= 0 && screens[prev].vtable == TRADE_VTABLE) {
+            if (prev >= 0 && (screens[prev].vtable == TRADE_VTABLE || screens[prev].vtable == RETIRE_MENU_VTABLE)) {
                 under_idx = prev, under_recruit = __atomic_load_n(&rooms_recruit, __ATOMIC_ACQUIRE);
                 under_menu = __atomic_load_n(&active_menu, __ATOMIC_ACQUIRE);
                 under_ctrl = __atomic_load_n(&active_ctrl, __ATOMIC_ACQUIRE);
@@ -477,7 +517,7 @@ int yw4_hook_menu_focus(CPUState *ctx) {
 
 /* OnBack (main+0x6c59f0): B closed the whole Pad (or a sub-page). */
 int yw4_hook_menu_back(CPUState *ctx) {
-    chat_note(ctx, 0);
+    dpad_menu_note(ctx, 0);
     if (!enabled() || !ctx->x[0]) return 0;
     uint64_t menu = ctx->x[0];
     uint64_t vt = ld64(menu) - yw4_image_base;
@@ -571,12 +611,33 @@ int yw4_hook_menu_layer_opened(CPUState *ctx) {
     return 0;
 }
 
+/* Blasters' R menu closed (standalone): the mouse is the battle's again */
+static void standalone_close(const char *why) {
+    standalone = 0, under_idx = -1;
+    __atomic_store_n(&pad_open, 0, __ATOMIC_RELEASE);
+    __atomic_store_n(&active_idx, -1, __ATOMIC_RELEASE);
+    __atomic_store_n(&active_menu, 0, __ATOMIC_RELEASE);
+    __atomic_store_n(&active_ctrl, 0, __ATOMIC_RELEASE);
+    __atomic_store_n(&active_lv, 0, __ATOMIC_RELEASE);
+    __atomic_store_n(&wheel_steps, 0, __ATOMIC_RELEASE);
+    __atomic_store_n(&page, PAGE_NONE, __ATOMIC_RELEASE);
+    if (menu_log_on()) fprintf(stderr, "yw4: menu: Blasters' R menu closed (%s): the mouse is the battle's\n", why);
+}
+
 int yw4_hook_menu_layer_closed(CPUState *ctx) {
+    if (ctx->x[0] && ld64(ctx->x[0]) - yw4_image_base == 0x14b5bc8u)  /* the R menu going away */
+        __atomic_store_n(&r_menu_ctrl, 0, __ATOMIC_RELEASE);
     if (!enabled() || !ctx->x[0]) return 0;
     uint64_t menu = ctx->x[0];
     uint64_t vt = ld64(menu) - yw4_image_base;
     if (menu_log_on())
         fprintf(stderr, "yw4: menu_layer_closed: menu=%#llx vt=%#llx\n", (unsigned long long)menu, (unsigned long long)vt);
+    /* the R menu's own layer closing is it going away; the battle's HUD doesn't always take the focus after (owner,
+     * 2026-11-20: the mouse stayed the menu's) */
+    if (standalone && vt == RETIRE_MENU_VTABLE) {
+        standalone_close("its layer closed");
+        return 0;
+    }
     if (menu == __atomic_load_n(&active_menu, __ATOMIC_ACQUIRE)) {
         int n = __atomic_sub_fetch(&layers_open, 1, __ATOMIC_ACQ_REL);
         if (__atomic_load_n(&page, __ATOMIC_ACQUIRE) == PAGE_OPEN && n <= __atomic_load_n(&page_base, __ATOMIC_ACQUIRE))
@@ -907,6 +968,14 @@ uint64_t mousemenu_update(float mx, float my, int w, int h, uint32_t mouse_butto
                 float x = (mx - (w - uw) / 2) * 1280.0f / uw;
                 if (x >= 470.0f && x <= 530.0f) press = BTN_LEFT;
                 else if (x >= 730.0f && x <= 798.5f) press = BTN_RIGHT;
+            } else if (s->vtable == RETIRE_MENU_VTABLE && focus == 1) {
+                /* Field Camera changes on Left / Right only (A does nothing there): its < arrow (x 675: owner's F12,
+                 * 2026-11-20) steps left, the rest of the row right, cycling (owner: "make E on it cycle right") */
+                float uw = (float)w, uh = (float)h;
+                if (uw * 9.0f > uh * 16.0f) uw = uh * 16.0f / 9.0f;
+                else uh = uw * 9.0f / 16.0f;
+                float x = (mx - (w - uw) / 2) * 1280.0f / uw;
+                press = x >= 650.0f && x <= 705.0f ? BTN_LEFT : BTN_RIGHT;
             } else {
                 press = BTN_A;
             }
