@@ -94,6 +94,26 @@ static void log_user(const uint8_t *uc) {
     LOG("  user: \"%s\"\n", name);
 }
 
+/* A room's SessionId, which the relay keeps its rooms by: different in every room of every game. It was rand(), never
+ * seeded, so every game's first room had the same one: a second host on the server took the first's place, and an
+ * old connection leaving took a new room with it (owner, 2026-11-20: a private Blasters room nobody could find; the
+ * Singapore relay's log: a connection from a test 2 1/2 hours before closed "its" room the moment it left). Unique,
+ * not secret: the clock in ns, a stack address (laid out anew in each process) and a count, through splitmix64. */
+static uint64_t mix64(uint64_t z) {
+    z += 0x9E3779B97F4A7C15ull;
+    z = (z ^ (z >> 30)) * 0xBF58476D1CE4E5B9ull;
+    z = (z ^ (z >> 27)) * 0x94D049BB133111EBull;
+    return z ^ (z >> 31);
+}
+static void session_id(uint8_t out[16]) {
+    static uint64_t count;
+    uint8_t here;
+    uint64_t a = mix64((uint64_t)host_now_ns() ^ ((uint64_t)(uintptr_t)&here << 17) ^ ++count);
+    uint64_t b = mix64(a ^ (uint64_t)host_now_ns() ^ ((uint64_t)(uintptr_t)out << 7));
+    memcpy(out, &a, 8);
+    memcpy(out + 8, &b, 8);
+}
+
 /* our own node in the network info: 0x50 Ldn + 0x18 nodes, 0x40 each */
 static void put_node(int i, uint32_t addr, const uint8_t *user, uint16_t version) {
     uint8_t *n = network + 0x50 + 0x18 + 0x40 * i;
@@ -116,7 +136,7 @@ static void make_network(const uint8_t *nc, const uint8_t *sc, const uint8_t *uc
     memcpy(network + 0x50 + 0x21A, adv, sizeof adv);
     memcpy(net_config, nc, 0x20);
     memcpy(network, nc, 0x10);  /* IntentId */
-    for (int i = 0; i < 16; i++) network[0x10 + i] = (uint8_t)rand();  /* SessionId */
+    session_id(network + 0x10);  /* SessionId */
     uint8_t *common = network + 0x20;
     uint8_t bssid[6] = {0x02, 0x00, 0x59, 0x57, 0x34, 0x01};
     memcpy(common, bssid, 6);

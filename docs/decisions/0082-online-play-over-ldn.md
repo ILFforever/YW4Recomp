@@ -85,7 +85,13 @@ moment the player chooses it:
   `funcLuaMenuTradeCommand(0xbfba3718)` asks "Online?" and the script then runs either the login (network command
   `0xe7eb7a7d`, handler `f_7163f0`) or local play. The answer is one byte of the trade menu object (+0x239c), which
   the trade command `0x1c105a8d` (`f_78a260`) stores when the player picks Online or Local. The same hash appears in
-  `busters_top_*.lua.bin`: Blasters' menu asks the same way (its object and setter not hooked yet).
+  `busters_top_*.lua.bin`, but Blasters' script doesn't ask it: see below.
+- **Blasters (2026-11-20)** takes its path from the row picked in its top list (control `0x4e6f00fb`: 0 alone,
+  1 Online, 2 Local), not from that byte. The row reaches the script through `funcLuaMenuCommand(0x9b2aaf08)`
+  (`main+0x2ef9b0`, the control's `+0x13c` handed over at `0x2efa60`): there, once after a pick (`OnDecideFocus`),
+  Online becomes Local and the relay takes Online to our server with Blasters' room settings
+  (`yw4_hook_menu_row`). Its matching's own Online flag (`0x4a3223c4`, `main+0x66aa80`, the same byte store as the
+  trade's) is kept Local too. Owner-tested: host and join through both servers, a mission played together.
 - The hook (`recomp/overrides.toml`, `yw4_hook_net_mode` in `ldn.c`, at `main+0x78a2d0`, the store): the choice
   goes to the relay (`relay_choose`) and the game stores Local. Online then connects to `YW4_ONLINE_SERVER` with the
   room settings of that activity; Local to `YW4_RELAY` (or alone, until a home-network discovery exists).
@@ -99,6 +105,25 @@ moment the player chooses it:
 Two relays on Oracle Cloud's free tier (US East `129.153.179.140`, Singapore `161.118.234.155`, port 41230), each
 set up with `tools/relay/setup_server.sh` (a systemd service; `--keepalive N` a lowest-priority CPU load so the free
 machine isn't reclaimed as idle). The relay counts each room's traffic (a line a minute and a total), for sizing.
+
+Hardening (2026-11-20, owner: "what else should our server connection do to match industry standard"; the easy ones
+first; `python tools/relay/test_relay.py` tests each):
+
+- **Room ids:** a room's SessionId was `rand()`, never seeded: every game's first room had the same one, so a second
+  host took the first's place and an old connection leaving removed a newer room (a private Blasters room nobody
+  could find). Now unique per room (`session_id` in `ldn.c`), and a closing room removes only itself.
+- **Dead connections:** TCP keepalive from 10 s (every 5 s, 3 missed) and `TCP_USER_TIMEOUT` 20 s: about 25 s, where
+  one held a room for 2 1/2 hours. **Heartbeat** (protocol 2): the game sends PING every 3 s and the relay answers;
+  the relay drops a heartbeat client silent for 15 s (a frozen game), the game drops a relay silent for 12 s. Each
+  side only once it knows the other speaks protocol 2.
+- **Limits:** 16 connections and 4 rooms per address, 1000 and 300 in all, 400 game packets a second per client (a
+  Blasters mission: about 60; more are dropped, not the connection), the hello within 10 s.
+- **Status:** a summary line every 5 minutes; `python tools/relay/status.py` shows both servers.
+- **Privacy** (owner: "very important"): the logs name clients by a hash of their address, salted anew at each
+  start, never the address; the machine's logs (journal, and rsyslog's syslog / auth.log) are kept 7 days
+  (`setup_server.sh`); the logs from before were wiped on both servers. The README says so.
+- **Not yet:** game packets over UDP (TCP holds back every packet behind a lost one: stutters on long routes),
+  encryption, rejoining a room after a short drop, deploys that keep rooms.
 
 ### In the game: the overlay's Online tab
 

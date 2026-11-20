@@ -22,17 +22,26 @@ Protocol, both ways: frames of u32 length (little endian, the bytes after it), u
     8 PACKET  u32 dst ip, u16 dst port, u32 src ip,    8 PACKET   the same, from another member
               u16 src port, payload
     9 REJECT  u32 ip (the host sends a node away)
+   10 PING    - (protocol 2: every 3 s)               10 PONG     - (the answer: the game knows the relay is there)
 
 Addresses are u32 in host order (nn::ldn's). The host is 169.254.1.1, the others .2, .3, ... in join order.
+
+Protection (2026-11-20): connections and rooms per address and in all, game packets per second per client, hello
+within 10 s; a client that sends heartbeats and then goes silent for 15 s is dropped, any other one after about 25 s
+of a dead connection (TCP keepalive). Logs name clients by a hash of their address (a new salt each start), never the
+address, and a summary line every 5 minutes (tools/relay/status.py reads it from the servers).
 """
 from __future__ import annotations
 
 import argparse
 import asyncio
+import hashlib
+import os
+import socket
 import struct
 import time
 
-PROTOCOL = 1
+PROTOCOL = 2          # 2: PING / PONG heartbeats
 NETINFO = 0x480
 LDN = 0x50            # LdnNetworkInfo inside NetworkInfo
 NODES = LDN + 0x18    # 8 NodeInfo of 0x40
@@ -40,7 +49,26 @@ NODE = 0x40
 BASE_IP = 0xA9FE0100  # 169.254.1.0
 MAX_FRAME = 1 << 16
 
-HELLO, CREATE, UPDATE, SCAN, JOIN, NETINFO_MSG, LEAVE, PACKET, REJECT = 1, 2, 3, 4, 5, 6, 7, 8, 9
+# limits: generous for real play (a Blasters mission: about 60 packets a second per player, 4 players a room; two
+# games on one PC plus the overlay's pings: a handful of connections from one address)
+MAX_CLIENTS = 1000
+MAX_CLIENTS_PER_ADDR = 16
+MAX_ROOMS = 300
+MAX_ROOMS_PER_ADDR = 4
+PACKETS_PER_S = 400.0  # sustained, per client; more is dropped (not the connection)
+PACKETS_BURST = 800.0
+HELLO_WITHIN = 10.0    # s
+SILENT_DROP = 15.0     # s, for clients that send heartbeats (protocol 2)
+SUMMARY_EVERY = 300.0  # s
+
+SALT = os.urandom(16)  # the logs' client names: a hash of the address with this, new at each start
+
+
+def anon(addr: str) -> str:
+    return hashlib.sha256(SALT + addr.encode()).hexdigest()[:8]
+
+
+HELLO, CREATE, UPDATE, SCAN, JOIN, NETINFO_MSG, LEAVE, PACKET, REJECT, PING = 1, 2, 3, 4, 5, 6, 7, 8, 9, 10
 
 
 def ip_str(a: int) -> str:
@@ -112,6 +140,24 @@ class Relay:
     def __init__(self) -> None:
         self.rooms: dict[bytes, Room] = {}  # session id -> room
         self.clients: set[Client] = set()
+        self.frames_in = self.bytes_in = self.dropped = 0  # since the last summary
+        self.refused = 0
+
+    def clients_of(self, addr: str) -> int:
+        return sum(1 for c in self.clients if c.addr == addr)
+
+    def rooms_of(self, addr: str) -> int:
+        return sum(1 for r in self.rooms.values() if r.host.addr == addr)
+
+    def summary(self, secs: float) -> str:
+        addrs = len({c.addr for c in self.clients})
+        players = sum(len(r.members) for r in self.rooms.values())
+        line = (f"status: {len(self.clients)} connections from {addrs} addresses, {len(self.rooms)} rooms, "
+                f"{players} players in them; last {secs:.0f} s: {self.frames_in} frames, "
+                f"{self.bytes_in / 1e6:.2f} MB in, {self.dropped} packets over the rate dropped, "
+                f"{self.refused} connections or rooms refused")
+        self.frames_in = self.bytes_in = self.dropped = self.refused = 0
+        return line
 
     def rooms_for(self, code: bytes, lcid: int) -> list[Room]:
         return [r for r in self.rooms.values() if r.code == code and (lcid == 0 or r.lcid == lcid)]
@@ -125,8 +171,13 @@ class Client:
         self.ip = 0
         self.node = bytes(NODE)
         peer = writer.get_extra_info("peername")
-        self.name = f"{peer[0]}:{peer[1]}" if peer else "?"
+        self.addr = peer[0] if peer else "?"  # kept in memory for the limits, never logged
+        self.name = f"{anon(self.addr)}:{peer[1]}" if peer else "?"
         self.lock = asyncio.Lock()
+        self.last_rx = time.monotonic()
+        self.beats = False                    # sends heartbeats (protocol 2): silence drops it
+        self.tokens, self.tokens_at = PACKETS_BURST, time.monotonic()
+        self.warned = 0.0
 
     async def send(self, kind: int, payload: bytes = b"") -> None:
         async with self.lock:
@@ -148,7 +199,8 @@ class Client:
             self.log(f"closes the room ({len(room.members)} others in it)")
             if room.pk_in:
                 self.log(f"room traffic: {room.traffic(total=True)}")
-            self.relay.rooms.pop(room.session, None)
+            if self.relay.rooms.get(room.session) is room:  # not another room with the same session id
+                self.relay.rooms.pop(room.session, None)
             for c in list(room.members.values()):
                 c.room = None
                 await c.send(LEAVE, bytes([3]))  # DestroyedByUser
@@ -164,8 +216,16 @@ class Client:
             self.code = p[:64].rstrip(b"\0").strip().lower()  # "YW4 " and "yw4" are the same room
             self.log(f"hello, room code {self.code.decode(errors='replace')!r}")
             await self.send(HELLO, struct.pack("<I", PROTOCOL))
+        elif kind == PING:
+            self.beats = True
+            await self.send(PING)
         elif kind == CREATE and len(p) >= NETINFO:
             await self.leave()
+            if len(relay.rooms) >= MAX_ROOMS or relay.rooms_of(self.addr) >= MAX_ROOMS_PER_ADDR:
+                relay.refused += 1
+                self.log("room refused (too many rooms)")
+                await self.send(CREATE)  # short: the game keeps the room to itself
+                return
             room = Room(self.code, self, p[:NETINFO])
             self.room, self.ip = room, BASE_IP + 1
             self.node = bytes(p[NODES:NODES + NODE])  # the host's own node, as its game made it
@@ -211,6 +271,16 @@ class Client:
                 await c.leave()
                 await c.send(LEAVE, bytes([5]))  # Rejected
         elif kind == PACKET and len(p) >= 12 and self.room:
+            now = time.monotonic()  # the rate: a token bucket, PACKETS_PER_S refilled, PACKETS_BURST deep
+            self.tokens = min(PACKETS_BURST, self.tokens + (now - self.tokens_at) * PACKETS_PER_S)
+            self.tokens_at = now
+            if self.tokens < 1:
+                relay.dropped += 1
+                if now - self.warned >= 60:
+                    self.warned = now
+                    self.log(f"over {PACKETS_PER_S:.0f} packets a second: the rest dropped")
+                return
+            self.tokens -= 1
             dst = struct.unpack_from("<I", p)[0]
             src = struct.pack("<I", self.ip)  # the sender's address is the relay's word, not the sender's
             frame = p[:6] + src + p[10:]
@@ -231,15 +301,39 @@ class Client:
 
     async def run(self) -> None:
         self.log("connected")
+        # a game that vanished without closing (killed, its network gone) is noticed in about 25 s, not hours: one
+        # such connection held a room for 2 1/2 hours (2026-11-20; owner: 2 minutes too long). Idle: keepalive probes
+        # from 10 s, every 5 s, 3 missed; with data waiting for its acknowledgement (where keepalive doesn't run):
+        # TCP_USER_TIMEOUT 20 s (Linux). A player whose network stops for longer than that leaves the room.
+        sock = self.writer.get_extra_info("socket")
+        if sock is not None:
+            try:
+                sock.setsockopt(socket.SOL_SOCKET, socket.SO_KEEPALIVE, 1)
+                for opt, val in (("TCP_KEEPIDLE", 10), ("TCP_KEEPINTVL", 5), ("TCP_KEEPCNT", 3),
+                                 ("TCP_USER_TIMEOUT", 20000)):
+                    if hasattr(socket, opt):
+                        sock.setsockopt(socket.IPPROTO_TCP, getattr(socket, opt), val)
+            except OSError:
+                pass
         try:
+            first = True
             while True:
-                head = await self.reader.readexactly(4)
+                if first:  # the hello within HELLO_WITHIN, or the connection is closed (half-open floods)
+                    head = await asyncio.wait_for(self.reader.readexactly(4), HELLO_WITHIN)
+                else:
+                    head = await self.reader.readexactly(4)
                 n = struct.unpack("<I", head)[0]
                 if not 1 <= n <= MAX_FRAME:
                     break
                 body = await self.reader.readexactly(n)
+                if first and body[0] != HELLO:
+                    break
+                first = False
+                self.last_rx = time.monotonic()
+                self.relay.frames_in += 1
+                self.relay.bytes_in += n + 4
                 await self.handle(body[0], body[1:])
-        except (asyncio.IncompleteReadError, ConnectionError, OSError):
+        except (asyncio.IncompleteReadError, asyncio.TimeoutError, ConnectionError, OSError):
             pass
         finally:
             await self.leave()
@@ -258,16 +352,36 @@ async def main() -> None:
     async def accept(reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
         sock = writer.get_extra_info("socket")
         if sock is not None:
-            import socket
             sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
         c = Client(relay, reader, writer)
+        if len(relay.clients) >= MAX_CLIENTS or relay.clients_of(c.addr) >= MAX_CLIENTS_PER_ADDR:
+            relay.refused += 1
+            c.log("refused (too many connections)")
+            writer.transport.abort()
+            return
         relay.clients.add(c)
         await c.run()
 
+    async def watch() -> None:
+        """Heartbeat clients gone silent are dropped; a summary line every SUMMARY_EVERY s."""
+        last = time.monotonic()
+        while True:
+            await asyncio.sleep(5)
+            now = time.monotonic()
+            for c in list(relay.clients):
+                if c.beats and now - c.last_rx > SILENT_DROP:
+                    c.log(f"silent for {now - c.last_rx:.0f} s: dropped")
+                    c.writer.transport.abort()
+            if now - last >= SUMMARY_EVERY:
+                print(f"{time.strftime('%H:%M:%S')} {relay.summary(now - last)}", flush=True)
+                last = now
+
     server = await asyncio.start_server(accept, args.host, args.port)
     print(f"YW4 Recomp relay on port {args.port} (protocol {PROTOCOL}). Ctrl+C stops it.", flush=True)
+    watcher = asyncio.create_task(watch())
     async with server:
         await server.serve_forever()
+    watcher.cancel()
 
 
 if __name__ == "__main__":

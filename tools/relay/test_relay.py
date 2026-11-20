@@ -22,7 +22,7 @@ class Game:
         self.s = socket.create_connection(("127.0.0.1", port), timeout=3)
         self.send(1, room.ljust(64, b"\0"))
         kind, p = self.recv()
-        assert kind == 1 and struct.unpack("<I", p)[0] == 1, (kind, p)
+        assert kind == 1 and struct.unpack("<I", p)[0] == 2, (kind, p)  # protocol 2
 
     def send(self, kind: int, p: bytes = b"") -> None:
         self.s.sendall(struct.pack("<IB", len(p) + 1, kind) + p)
@@ -47,10 +47,10 @@ class Game:
         return b
 
 
-def network(lcid: int, name: bytes) -> bytes:
+def network(lcid: int, name: bytes, session: bytes = bytes(range(16))) -> bytes:
     info = bytearray(NETINFO)
     struct.pack_into("<Q", info, 0, lcid)
-    info[0x10:0x20] = bytes(range(16))  # session id
+    info[0x10:0x20] = session
     info[LDN + 0x16] = 4                # max nodes
     info[NODES + 0xC:NODES + 0xC + len(name)] = name
     return bytes(info)
@@ -126,13 +126,53 @@ def main() -> int:
         station.send(4, struct.pack("<Q", 0))
         assert struct.unpack_from("<I", station.recv_type(4))[0] == 0
         print("host: closes the room; the station is told (DestroyedByUser), the room is gone")
-        print("all relay tests passed")
-        return 0
+
+        host.send(10)
+        assert host.recv_type(10) == b""
+        print("heartbeat: PING gets a PONG")
+
+        # 2026-11-20: an old room's host leaving took a newer room with the same session id with it
+        lcid = 0x0100_86C0_0AF7_C000
+        old, new, finder = Game(port, b"same"), Game(port, b"same"), Game(port, b"same")
+        old.send(2, network(lcid, b"Old"))
+        old.recv_type(2)
+        new.send(2, network(lcid, b"New"))
+        new.recv_type(2)
+        old.s.close()
+        time.sleep(0.3)
+        finder.send(4, struct.pack("<Q", lcid))
+        p = finder.recv_type(4)
+        assert struct.unpack_from("<I", p)[0] == 1 and p[4 + NODES + 0xC:4 + NODES + 0xF] == b"New", p[:8]
+        print("same session id: the old host leaving keeps the newer room")
+        for g in (new, finder):
+            g.s.close()
+
+        # rooms per address: 4 (all these come from 127.0.0.1); the 5th is answered short
+        games = [Game(port, b"many") for _ in range(5)]
+        for i, g in enumerate(games):
+            g.send(2, network(lcid, b"R", bytes([i + 1]) * 16))
+        answers = [len(g.recv_type(2)) for g in games]
+        assert answers[:4] == [4 + NETINFO] * 4 and answers[4] == 0, answers
+        print("limits: a 5th room from one address is refused, short")
+        for g in games:
+            g.s.close()
+
+        # a first frame that isn't the hello closes the connection
+        s = socket.create_connection(("127.0.0.1", port), timeout=3)
+        s.sendall(struct.pack("<IB", 9, 4) + bytes(8))
+        assert s.recv(16) == b"", "the relay answered a client that never said hello"
+        s.close()
+        print("hello first: anything else first is closed")
+        ok = True
     finally:
         relay.terminate()
         out = relay.communicate(timeout=5)[0]
         if "--verbose" in sys.argv:
             print(out)
+    assert "127.0.0.1" not in out, "a client's address is in the relay's log"
+    print("privacy: no client address in the relay's log")
+    print("all relay tests passed")
+    return 0 if ok else 1
 
 
 if __name__ == "__main__":

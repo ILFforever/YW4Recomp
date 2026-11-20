@@ -36,6 +36,8 @@ static HostLock send_lock = HOST_LOCK_INIT; /* whole frames out */
 static HostCond answered = HOST_COND_INIT;
 static RSock sock = RBAD;
 static unsigned generation;                 /* +1 per connection: the reader of an old one stops */
+static int server_protocol;                 /* the relay's, from its hello's answer (0 until it comes) */
+static int64_t last_rx;                     /* when a frame last came from the relay (host_now_ns) */
 static uint8_t want;                        /* the answer type a request waits for, 0 for none */
 static uint8_t *answer;
 static size_t answer_cap;
@@ -143,6 +145,14 @@ static void reader(void *arg) {
         uint8_t type = buf[0];
         const uint8_t *p = buf + 1;
         size_t n = len - 1;
+        __atomic_store_n(&last_rx, host_now_ns(), __ATOMIC_RELEASE);
+        if (type == RELAY_PING) continue;  /* the heartbeat's answer: only that the relay is there */
+        if (type == RELAY_HELLO && n >= 4) {
+            uint32_t v;
+            memcpy(&v, p, 4);
+            __atomic_store_n(&server_protocol, (int)v, __ATOMIC_RELEASE);
+            continue;
+        }
         if (type == RELAY_NETINFO && n >= 0x480) {
             ldn_relay_netinfo(p);
         } else if (type == RELAY_LEAVE) {
@@ -176,6 +186,37 @@ static void reader(void *arg) {
     if (current) {
         fprintf(stderr, "yw4: relay: connection lost\n");
         ldn_relay_closed(6);  /* SignalLost */
+    }
+}
+
+/* The heartbeat (protocol 2, 2026-11-20): a PING every 3 s, which the relay answers; it drops a game silent for 15 s
+ * (a frozen or vanished one, which TCP alone can't see), and the game drops a relay silent for 12 s, so a dead server
+ * shows as a lost room in seconds, not minutes. Only once the relay's hello says protocol 2 (an older relay ignores
+ * PING and would look silent). One per connection; it ends with it. */
+static void heartbeat(void *arg) {
+    Reader r = *(Reader *)arg;
+    free(arg);
+    for (;;) {
+        host_sleep_ns(3000000000LL);
+        host_lock(&lock);
+        int current = r.gen == generation && sock == r.s;
+        if (current && __atomic_load_n(&server_protocol, __ATOMIC_ACQUIRE) >= 2) {
+            int64_t quiet = host_now_ns() - __atomic_load_n(&last_rx, __ATOMIC_ACQUIRE);
+            if (quiet > 12000000000LL) {
+                fprintf(stderr, "yw4: relay: nothing from the relay for %lld s: the connection is gone\n",
+                        (long long)(quiet / 1000000000));
+#ifdef _WIN32
+                shutdown(r.s, SD_BOTH);  /* the reader's recv fails: the usual "connection lost" */
+#else
+                shutdown(r.s, SHUT_RDWR);
+#endif
+                current = 0;
+            } else {
+                write_frame(r.s, RELAY_PING, NULL, 0);
+            }
+        }
+        host_unlock(&lock);
+        if (!current) return;
     }
 }
 
@@ -230,10 +271,17 @@ static int connect_locked(void) {
     }
     sock = s;
     generation++;
-    Reader *r = malloc(sizeof *r);
-    if (!r) return -1;
+    __atomic_store_n(&server_protocol, 0, __ATOMIC_RELEASE);
+    __atomic_store_n(&last_rx, host_now_ns(), __ATOMIC_RELEASE);
+    Reader *r = malloc(sizeof *r), *h = malloc(sizeof *h);  /* each thread frees its own */
+    if (!r || !h) {
+        free(r), free(h);
+        return -1;
+    }
     r->s = s, r->gen = generation;
+    *h = *r;
     host_thread_start(reader, r, 1 << 16);
+    host_thread_start(heartbeat, h, 1 << 15);
     fprintf(stderr, "yw4: relay: connected to %s:%s, room code \"%s\"\n", host, port, code ? code : "");
     return 0;
 }

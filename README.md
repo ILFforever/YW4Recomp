@@ -730,7 +730,7 @@ On Ordinary Street with the performance HUD on (F3). The frame takes about 19 ms
 
 | Goal | Where it stands |
 |---|---|
-| **Playing together online** | Trading and Blasters with friends over the internet: the game's local wireless play, carried by a small server of ours. First built by [Quandiy](https://github.com/Quandiy) in their fork. Trading works between two games; Blasters is next, then a server to join and an Online page in the launcher ([decision 0082](docs/decisions/0082-online-play-over-ldn.md)) |
+| **Playing together online** | Trading and Blasters with friends over the internet: the game's local wireless play, carried by small servers of ours in the US and Singapore. First built by [Quandiy](https://github.com/Quandiy) in their fork. Both work; an Online page in the launcher is next ([decision 0082](docs/decisions/0082-online-play-over-ldn.md)). **Privacy:** the servers keep no player IP addresses. Their logs name each connection by a hash that changes at every restart, and are deleted after 7 days |
 | **Performance (CPU)** | Less work per frame on the CPU, so busy places hold their frame rate on slower PCs: the renderer's GPU commands are being made cheaper to build (in testing) |
 | **Our own renderer** | Ours: shadows, surfaces, bloom, distance blur, lighting, sky, tone mapping. **Left:** choosing what to draw, two screen passes, the UI and menus |
 | **Steadier shadows** | Shadows still shimmer a little as the camera moves; steadier cascades next |

@@ -14,7 +14,9 @@
 #   - with --keepalive N: a second service, yw4-keepalive, keeps each CPU N% busy at the lowest priority, so the
 #     machine doesn't count as idle (Oracle reclaims idle Always Free machines; keepalive.py). --keepalive 0
 #     removes it.
+#   - keeps the machine's logs 7 days (the relay logs no player addresses: a hash of each, salted anew at each start)
 # Logs: journalctl -u yw4-relay -f    Stop: sudo systemctl stop yw4-relay    Remove: --remove
+# Status of our servers from a PC with the key: python tools/relay/status.py
 set -euo pipefail
 
 PORT=41230
@@ -87,6 +89,17 @@ EOF
 sudo systemctl daemon-reload
 sudo systemctl enable yw4-relay >/dev/null
 sudo systemctl restart yw4-relay
+
+# Privacy (owner, 2026-11-20): the relay logs no addresses (a salted hash), and the machine's log keeps 7 days, so the
+# addresses other services log (sshd's logins) go too
+echo "== logs kept 7 days"
+sudo mkdir -p /etc/systemd/journald.conf.d
+printf '[Journal]\nMaxRetentionSec=7day\n' | sudo tee /etc/systemd/journald.conf.d/yw4-retention.conf >/dev/null
+sudo systemctl restart systemd-journald
+# rsyslog copies the journal into /var/log/syslog and auth.log, rotated weekly and kept 4 weeks on Ubuntu: daily, 7
+if [ -f /etc/logrotate.d/rsyslog ]; then
+    sudo sed -i -e 's/^\(\s*\)weekly/\1daily/' -e 's/^\(\s*\)rotate [0-9]*/\1rotate 7/' /etc/logrotate.d/rsyslog
+fi
 
 echo "== firewall on this server (port $PORT/tcp)"
 if command -v iptables >/dev/null && ! sudo iptables -C INPUT -p tcp --dport "$PORT" -j ACCEPT 2>/dev/null; then

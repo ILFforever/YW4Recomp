@@ -9,7 +9,7 @@
 #include "yw4cpu.h"
 
 enum { RELAY_HELLO = 1, RELAY_CREATE, RELAY_UPDATE, RELAY_SCAN, RELAY_JOIN, RELAY_NETINFO, RELAY_LEAVE,
-       RELAY_PACKET, RELAY_REJECT };
+       RELAY_PACKET, RELAY_REJECT, RELAY_PING };
 
 /* YW4_RELAY (host:port) is set: local play goes through the relay; else a Switch alone in a room */
 int relay_enabled(void);
