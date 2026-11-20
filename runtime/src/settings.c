@@ -582,8 +582,9 @@ static int first_run;
  * and written back as they were, so the game's own saves don't drop them. YW4_PERF=1: the per-frame performance CSV
  * (perf.c; owner, 2026-11-16: "we are asking them", so a line in the file is enough). YW4_RELAY (host:port),
  * YW4_ROOM: local play through a home-network relay (relay.c, ldn.c; decision 0082; the Online button's server and
- * codes are Online play rows). */
-static const char *const by_hand[] = {"YW4_PERF", "YW4_RELAY", "YW4_ROOM"};
+ * codes are Online play rows). YW4_VRAM_GEOMETRY=0: vertices from the game's own memory, no copies in video memory
+ * (issue #25: the minimap drawn over the screen while biking, RX 9070 XT only). */
+static const char *const by_hand[] = {"YW4_PERF", "YW4_RELAY", "YW4_ROOM", "YW4_VRAM_GEOMETRY"};
 enum { BY_HAND = sizeof by_hand / sizeof *by_hand };
 static char by_hand_value[BY_HAND][64];
 
