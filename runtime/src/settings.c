@@ -583,8 +583,9 @@ static int first_run;
  * (perf.c; owner, 2026-11-16: "we are asking them", so a line in the file is enough). YW4_RELAY (host:port),
  * YW4_ROOM: local play through a home-network relay (relay.c, ldn.c; decision 0082; the Online button's server and
  * codes are Online play rows). YW4_VRAM_GEOMETRY=0: vertices from the game's own memory, no copies in video memory
- * (issue #25: the minimap drawn over the screen while biking, RX 9070 XT only). */
-static const char *const by_hand[] = {"YW4_PERF", "YW4_RELAY", "YW4_ROOM", "YW4_VRAM_GEOMETRY"};
+ * (issue #25: the minimap drawn over the screen while biking, RX 9070 XT only); YW4_IMAGE_BLOCKS=0: every image in
+ * memory of its own, none sharing a block (the same report: two images overlapping in memory). */
+static const char *const by_hand[] = {"YW4_PERF", "YW4_RELAY", "YW4_ROOM", "YW4_VRAM_GEOMETRY", "YW4_IMAGE_BLOCKS"};
 enum { BY_HAND = sizeof by_hand / sizeof *by_hand };
 static char by_hand_value[BY_HAND][64];
 
