@@ -1,6 +1,6 @@
 # Known issues
 
-What is known to be missing or wrong (checked 2026-11-13), roughly in the order it is likely to matter. Fixed items
+What is known to be missing or wrong (checked 2026-11-20), roughly in the order it is likely to matter. Fixed items
 move to [progress.md](progress.md).
 
 ## Graphics
@@ -58,6 +58,12 @@ move to [progress.md](progress.md).
   - **Slimey marks (Yo-kai Trophies)**: page not working.
   - **Treasure photos**: only up and down work.
   - **Organize Members → Switch moves**: not working.
+- **An empty Diary slot 1 can show a character** in the Diary's list (Continue, and saving in the game) when the save
+  is in another slot (owner, 2026-11-20: only slot 5 used). Row 1 is the game's own row; its row code puts the loaded
+  save's little character on it at every refresh. Hiding the row's parts (`_dmy_dot01`, its shadow, `_pos_dot_01`) does
+  not remove it: the character is a separate picture attached there (`runtime/src/savefs.c` diary_row_icons). Next:
+  clear row 1's character pointer (menu + 0x460, which f_75e810 hands to f_70f150) for an empty slot. Cosmetic only:
+  the row still reads "Empty Diary" and loads nothing.
 
 ## Tools
 

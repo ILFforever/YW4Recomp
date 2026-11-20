@@ -3811,7 +3811,7 @@ void window_run(void (*guest)(void *), void *arg) {
                      * keys bound to the game's A, B and up / down work on it too, whatever they are (owner,
                      * 2026-11-17: "E or whatever the user has it set as"), before the overlay's own keys */
                     int bound = 0;
-                    if (gamemenu_live()) {
+                    if (gamemenu_live() || gamemenu_diary_showing()) {  /* also the first game's, game held */
                         uint32_t m = bindings_key_inputs(0, (int)e.key.scancode);
                         for (int i = 0; i < 32 && m && !bound; i++) {
                             if (!(m & (1u << i))) continue;

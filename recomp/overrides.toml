@@ -508,6 +508,12 @@ why = "the Lua command that opens a Yes/No check window (OpenCheckWindow): on th
 
 [[hook]]
 module = "main"
+offset = "0x27f8a0"
+native = "yw4_hook_title_fade"
+why = "the Lua command that starts the title's fade out (4011714927): New Game with no save has no 'erase?' box, so the Diary slot list shows here first (runtime/src/savefs.c)"
+
+[[hook]]
+module = "main"
 offset = "0x29c060"
 native = "yw4_hook_check_window_result"
 why = "the Lua command polled for a check window's answer: after the slot list, 1 (a slot: New Game goes on) or 0 (back to the title) (runtime/src/savefs.c)"

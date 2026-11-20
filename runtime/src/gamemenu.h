@@ -77,8 +77,8 @@ int gamemenu_prompting(void);
 void gamemenu_choice_begin(const char *title, const char *body, const char *const *rows, int n, int sel);
 int gamemenu_choice_take(void);
 /* The same list in the Diary's look (New Game on the title, savefs.c): a slot per row as the game's Diary rows, the
- * chosen one's page on the right, and a last row `back` ("Back to the title"). Taken with gamemenu_choice_take: the
- * slot's row, or n for `back`. */
+ * chosen one's page on the right, and a last row `back` ("Back to the title"; NULL: no such row, Back does nothing).
+ * Taken with gamemenu_choice_take: the slot's row, or n for `back`. */
 typedef struct {
     char name[40];  /* the recorder, "" for an empty slot */
     char date[32];  /* "11/17/2026  7:35", "" for an empty slot */
@@ -91,6 +91,8 @@ void gamemenu_diary_confirm(const char *title, const char *body, const char *no,
 /* An answered Diary list or question stays on screen (no flicker before the next one): this closes it, when the
  * game goes on (a slot taken, or back to the title). */
 void gamemenu_diary_end(void);
+/* 1 while that Diary list or its question shows (the keys bound to the game's A, B, up and down work on it: window.c) */
+int gamemenu_diary_showing(void);
 /* The focused text field's box in design units (x, y, w, h) and the caret's x, for the system's IME
  * (SDL_SetTextInputArea); 0 when no field is focused. */
 int gamemenu_text_rect(float r[4], float *caret_x);

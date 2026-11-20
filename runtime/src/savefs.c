@@ -1236,6 +1236,24 @@ static int newest_row_locked(void) {
 
 /* The game's row data (menu + 0x210 / + 0x498) filled again from headersave_obj (f_761aa0, through the populate
  * hook). Its cached portrait and location pointers are cleared first, as diary_refresh_ui does. */
+/* A save row's icons from its slot (stacked rows, copy k = slot k). The pencil (_space_pencil01 / 02) only on an
+ * empty slot: on a save the character stands alone (owner, 2026-11-17); the game's row code never hides it on its
+ * save row. The character (_dmy_dot01, its material save00_dmy_minichr01) and its shadow (_dot_shadow_02) only on a
+ * save: the game's own row (copy 0) is drawn again by its row code from the LOADED save at every repopulate, which put
+ * that save's character, without the pencil, on an empty slot 1 (owner, 2026-11-20: a save in slot 5 only), so this
+ * runs after each repopulate too. f_9eaf10(copy, part, shown); a part's id is its name's CRC-32 (save00_05.g4pkm). */
+static void diary_row_icons(CPUState *ctx, uint64_t menu, int k) {
+    host_lock(&slot_lock);
+    uint64_t empty = !slot_cache[k][0].valid;
+    host_unlock(&slot_lock);
+    uint64_t obj = guest_call3(ctx, 0x9f3e90, menu, SLOT_LAYER, (uint64_t)k);
+    if (!obj) return;
+    guest_call3(ctx, 0x9eaf10, obj, 0xd11572feu, empty);
+    guest_call3(ctx, 0x9eaf10, obj, 0x481c2344u, empty);
+    guest_call3(ctx, 0x9eaf10, obj, 0xb74b3f36u, !empty);
+    guest_call3(ctx, 0x9eaf10, obj, 0xdb3381edu, !empty);
+}
+
 static void diary_repopulate(CPUState *ctx, uint64_t menu) {
     uint64_t zero64 = 0;
     memcpy((void *)(uintptr_t)(menu + 0x458), &zero64, sizeof zero64);
@@ -1243,6 +1261,8 @@ static void diary_repopulate(CPUState *ctx, uint64_t menu) {
     memcpy((void *)(uintptr_t)(menu + 0x6e0), &zero64, sizeof zero64);
     memcpy((void *)(uintptr_t)(menu + 0x6e8), &zero64, sizeof zero64);
     guest_call3(ctx, 0x761aa0, menu, 0, 0);
+    if (rows_on && __atomic_load_n(&paint_copy, __ATOMIC_ACQUIRE) < 0)  /* not inside a row's paint */
+        for (int k = 0; k < DIARY_SLOT_COUNT; k++) diary_row_icons(ctx, menu, k);
 }
 
 /* The card (members and notebook) for the row in the game's selection (menu + 0x720). */
@@ -1345,19 +1365,7 @@ static void diary_paint_rows(CPUState *ctx, uint64_t menu) {
         *ctx = saved;
         __atomic_store_n(&paint_copy, -1, __ATOMIC_RELEASE);
         diary_debug_row(ctx, menu, k);
-        if (!j) {
-            /* The pencil (the save row's icon, _space_pencil01 / 02) only on an empty slot: on a save the character
-             * stands alone (owner, 2026-11-17). The game's row code never hides it on its save row. f_9eaf10(copy,
-             * part, shown). */
-            host_lock(&slot_lock);
-            uint64_t empty = !slot_cache[k][0].valid;
-            host_unlock(&slot_lock);
-            uint64_t obj = guest_call3(ctx, 0x9f3e90, menu, SLOT_LAYER, (uint64_t)k);
-            if (obj) {
-                guest_call3(ctx, 0x9eaf10, obj, 0xd11572feu, empty);
-                guest_call3(ctx, 0x9eaf10, obj, 0x481c2344u, empty);
-            }
-        }
+        if (!j) diary_row_icons(ctx, menu, k);
     }
     host_lock(&slot_lock);
     paint_slot = -1;
@@ -1700,27 +1708,6 @@ int yw4_hook_diary_update(CPUState *ctx) {
     return 0;
 }
 
-/* A slot's line in the New Game picker: "3/10  Summer  (36:28 played)" or "3/10  Empty". */
-static void slot_choice_text(char *out, size_t n, int s) {
-    host_lock(&slot_lock);
-    const DiarySlotRow *r = slot_cache[s][0].valid   ? &slot_cache[s][0]
-                            : slot_cache[s][1].valid ? &slot_cache[s][1]
-                                                     : NULL;
-    if (!r) {
-        host_unlock(&slot_lock);
-        snprintf(out, n, "%d" DIARY_OF "  Empty", s + 1);
-        return;
-    }
-    char name[37];
-    memcpy(name, r->raw + 0x60, 36);
-    name[36] = 0;
-    uint32_t secs = 0;
-    memcpy(&secs, r->raw + 0x98, sizeof secs);
-    host_unlock(&slot_lock);
-    snprintf(out, n, "%d" DIARY_OF "  %s  (%u:%02u played)", s + 1, name[0] ? name : "Diary", secs / 3600,
-             secs / 60 % 60);
-}
-
 /* The replay (YW4_REPLAY) while it still gives the input, else NULL: once it hands over to the player (a replay
  * that only loads a save) New Game shows its slot list again (owner, 2026-11-17: the list stopped opening in a
  * session started from a save copy, after its replay had finished). */
@@ -1732,9 +1719,24 @@ static const char *replay_playing(void) {
 
 /* New Game on the title (owner, 2026-11-17: "choose on beginning which save slot to write to"): the overlay's
  * list popup (gamemenu_choice_begin) over the game's waiting picture, as the name entry does (swkbd.c); the game's
- * thread waits here. An occupied slot asks again before it is used. Replays and YW4_NEWGAME_SLOT=<1..10> answer at
+ * thread waits here. The title's own list (yw4_hook_check_window_open) needs the game's "erase?" box, which a first
+ * game ever doesn't show: this is that game's list, in the same Diary look (owner, 2026-11-20: "it should show this,
+ * not the other older one") but with no way back, as the title has closed. An occupied slot asks again before it is
+ * used. Replays and YW4_NEWGAME_SLOT=<1..10> answer at
  * once (a replay's clock counts frames, which stop while the game waits): the given slot, else the first empty one,
  * else slot 1. */
+static void ng_row(GameMenuDiaryRow *r, int s);
+
+/* The game's thread waits for the overlay's answer, the window kept drawn (the game draws nothing meanwhile). */
+static int wait_choice(void) {
+    int a;
+    while ((a = gamemenu_choice_take()) < 0) {
+        window_repaint(0);
+        host_sleep_ns(16 * 1000000LL);
+    }
+    return a;
+}
+
 static int choose_new_game_slot(int can_go_back) {
     host_lock(&slot_lock);
     int first_empty = find_first_empty_slot_locked();
@@ -1747,20 +1749,15 @@ static int choose_new_game_slot(int can_go_back) {
         return first_empty >= 0 ? first_empty : 0;
     }
     fprintf(stderr, "yw4: diary: New Game slot list shown\n");
-    char lines[DIARY_SLOT_COUNT][96];
-    const char *rows[DIARY_SLOT_COUNT + 1];
-    int n = DIARY_SLOT_COUNT + (can_go_back ? 1 : 0), sel = first_empty >= 0 ? first_empty : 0;
+    int sel = first_empty >= 0 ? first_empty : 0;
     for (;;) {
-        for (int s = 0; s < DIARY_SLOT_COUNT; s++) slot_choice_text(lines[s], sizeof lines[s], s), rows[s] = lines[s];
-        if (can_go_back) rows[DIARY_SLOT_COUNT] = "Back to the title";
-        gamemenu_choice_begin("New Game: choose a Diary slot",
-                              "Your new game is saved in this slot when you save it in the Diary.", rows, n, sel);
-        int s;
-        while ((s = gamemenu_choice_take()) < 0) {
-            window_repaint(0);
-            host_sleep_ns(16 * 1000000LL);
-        }
+        GameMenuDiaryRow rows[DIARY_SLOT_COUNT];
+        for (int s = 0; s < DIARY_SLOT_COUNT; s++) ng_row(&rows[s], s);
+        gamemenu_diary_begin("New Game: choose a slot for your new game", rows, DIARY_SLOT_COUNT, sel,
+                             can_go_back ? "Back to the title" : NULL);
+        int s = wait_choice();
         if (s >= DIARY_SLOT_COUNT) {  /* back to the title, as the game's own warning's No */
+            gamemenu_diary_end();
             window_repaint(0);
             return -1;
         }
@@ -1771,17 +1768,12 @@ static int choose_new_game_slot(int can_go_back) {
         if (!used) break;
         char title[64], body[200];
         snprintf(title, sizeof title, "Overwrite Diary %d" DIARY_OF "?", s + 1);
-        snprintf(body, sizeof body, "%s. It is only replaced when you save your new game over it in the Diary.",
-                 lines[s]);
-        const char *const yes_no[2] = {"No, choose another slot", "Yes, overwrite it"};
-        gamemenu_choice_begin(title, body, yes_no, 2, 0);
-        int yes;
-        while ((yes = gamemenu_choice_take()) < 0) {
-            window_repaint(0);
-            host_sleep_ns(16 * 1000000LL);
-        }
-        if (yes == 1) break;
+        snprintf(body, sizeof body,
+                 "%s's diary is only replaced when you save your new game over it in the Diary.", rows[s].name);
+        gamemenu_diary_confirm(title, body, "No, choose another slot", "Yes, overwrite it");
+        if (wait_choice() == 1) break;
     }
+    gamemenu_diary_end();
     window_repaint(0);  /* the popup gone before the game goes on */
     return sel;
 }
@@ -1806,8 +1798,12 @@ static void new_game_take_slot(int slot) {
  * warning: with five slots nothing is erased). The title script (title_main) asks that with OpenCheckWindow(text
  * 0x3f4180e1): funcLuaCommand 0xade8af16 opens the box (f_299910: its argument 3 the text), then 0x024a58f2 (f_29c060)
  * is polled until it gives the answer (-1 while open; 1 Yes, 0 No), and Yes starts the new game. For that text the
- * slot list shows instead of the box, and the poll answers from it: a slot (Yes) or Back to the title (No). */
+ * slot list shows instead of the box, and the poll answers from it: a slot (Yes) or Back to the title (No).
+ * Not text 0x3ac75285 (title_main state 8): that is the DLC promo box, shown before the menu on a first start.
+ * With no save the game asks nothing: New Game goes straight to the fade out (yw4_hook_title_fade). */
+#define TEXT_ERASE_SAVE 0x3f4180e1u
 static int newgame_answer = -1;
+static int ng_back = 1;  /* the list's "Back to the title" row: not for the first game's box */
 
 static double guest_number(CPUState *ctx, uint64_t L, uint32_t idx) {
     GuestFn fn = yw4_lookup(yw4_image_base + 0xd235c0ull);  /* the game's lua_tonumberx(L, idx, NULL) */
@@ -1849,7 +1845,8 @@ static void ng_row(GameMenuDiaryRow *r, int s) {
 static void ng_open_list(int sel) {
     GameMenuDiaryRow rows[DIARY_SLOT_COUNT];
     for (int s = 0; s < DIARY_SLOT_COUNT; s++) ng_row(&rows[s], s);
-    gamemenu_diary_begin("New Game: choose a slot for your new game", rows, DIARY_SLOT_COUNT, sel, "Back to the title");
+    gamemenu_diary_begin("New Game: choose a slot for your new game", rows, DIARY_SLOT_COUNT, sel,
+                         ng_back ? "Back to the title" : NULL);
     gamemenu_live_popup();  /* over the running title */
     ng_state = 1;
 }
@@ -1860,11 +1857,14 @@ int yw4_hook_check_window_open(CPUState *ctx) {
     uint32_t base;
     memcpy(&L, (const void *)(uintptr_t)args, sizeof L);
     memcpy(&base, (const void *)(uintptr_t)(args + 0xc), sizeof base);
-    if ((uint32_t)ctx->x[1] < 3 || guest_number(ctx, L, base + 3) != (double)0x3f4180e1u) return 0;
+    if ((uint32_t)ctx->x[1] < 3) return 0;
+    double text = guest_number(ctx, L, base + 3);
+    if (text != (double)TEXT_ERASE_SAVE) return 0;
     host_lock(&slot_lock);
     if (user_save_dir[0]) scan_all_slots_locked();
     int first_empty = find_first_empty_slot_locked();
     host_unlock(&slot_lock);
+    ng_back = 1;
     const char *given = getenv("YW4_NEWGAME_SLOT"), *replay = replay_playing();
     const char *show = getenv("YW4_NEWGAME_LIST");  /* tests: the list even in a replay (to see it; nothing answers) */
     if ((given && atoi(given) >= 1 && atoi(given) <= DIARY_SLOT_COUNT) || (replay && *replay && !(show && *show == '1'))) {
@@ -1961,6 +1961,24 @@ void savefs_new_game_naming(const char *token, int girl) {
     host_unlock(&slot_lock);
     if (done) return;
     new_game_take_slot(choose_new_game_slot(0) /* at the name: no way back */);
+}
+
+/* The title's fade out (title_main state 11, funcLuaCommand 4011714927 -> f_27f8a0). With no save, New Game starts
+ * it at once: no "erase?" box to wait on (run 2026-11-20, empty save folder: the call came on the frame after the
+ * press, nothing before it). So the slot list shows here, before the fade, the title held still under it as the
+ * name entry's backup list does (choose_new_game_slot); no way back, the game has already decided. Only when no slot
+ * holds a save: then Continue can't be what faded, and with saves the "erase?" box has chosen the slot already. */
+int yw4_hook_title_fade(CPUState *ctx) {
+    (void)ctx;
+    if (!diary_slots_enabled() || !scene_on_title()) return 0;
+    host_lock(&slot_lock);
+    if (user_save_dir[0]) scan_all_slots_locked();
+    int skip = new_game_slot_set || title_loaded_save;
+    for (int s = 0; s < DIARY_SLOT_COUNT && !skip; s++) skip = slot_any_data_locked(s);
+    host_unlock(&slot_lock);
+    if (skip) return 0;
+    new_game_take_slot(choose_new_game_slot(0));
+    return 0;  /* the fade goes on */
 }
 
 /* 1 while the Diary (title > Continue, or Save in the game) is on screen: its update runs every frame while it

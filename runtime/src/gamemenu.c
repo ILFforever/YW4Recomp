@@ -78,6 +78,7 @@ static int dy_slots, dy_list_sel, dy_confirm;
  * once when out"). */
 static int dy_hold;
 static char diary_back[64];
+static int dy_back;  /* 1: the list has the back row (gamemenu_diary_begin's `back` not NULL) */
 static void changed(void);
 
 int gamemenu_prompting(void) { return __atomic_load_n(&prompting, __ATOMIC_ACQUIRE); }
@@ -374,11 +375,16 @@ void gamemenu_diary_begin(const char *title, const GameMenuDiaryRow *rows, int n
     if (n < 1) return;
     const char *names[PICK_MAX];
     for (int i = 0; i < n; i++) diary_rows[i] = rows[i], names[i] = rows[i].name[0] ? rows[i].name : "Empty Diary";
-    snprintf(diary_back, sizeof diary_back, "%s", back ? back : "Back");
+    snprintf(diary_back, sizeof diary_back, "%s", back ? back : "");
     names[n] = diary_back;
+    dy_back = back != NULL;
     dy_slots = n;
     snprintf(dy_title, sizeof dy_title, "%s", title);
-    choice_setup(title, NULL, names, n + 1, sel, n, 0, 0);
+    choice_setup(title, NULL, names, n + dy_back, sel, n, 0, 0);
+}
+
+int gamemenu_diary_showing(void) {
+    return gamemenu_open() && (__atomic_load_n(&diary_n, __ATOMIC_ACQUIRE) || __atomic_load_n(&dy_confirm, __ATOMIC_ACQUIRE));
 }
 
 void gamemenu_diary_confirm(const char *title, const char *body, const char *no, const char *yes) {
@@ -473,7 +479,9 @@ void gamemenu_prompt_cancel(void) {
     if (__atomic_load_n(&pick_n, __ATOMIC_ACQUIRE)) {
         if (dy_hold) return;
         /* a list has no Cancel, one row must be chosen; the Diary's has its back row: Back chooses it */
-        if (diary_n) pick_sel = diary_n, pick_finish();
+        if (diary_n) {
+            if (dy_back) pick_sel = diary_n, pick_finish();  /* no back row (a new game past the title): nothing */
+        }
         else if (dy_confirm) pick_sel = 0, pick_finish();  /* the Diary's question: Back is its No */
         return;
     }
@@ -3674,7 +3682,7 @@ static void draw_diary_pick(const UiCanvas *real, const GameMenuInfo *in, float 
                             float by) {
     (void)by, (void)H;
     int conf = dy_confirm, slots = conf ? dy_slots : diary_n, live = gamemenu_live();
-    int n = conf ? slots + 1 : __atomic_load_n(&pick_n, __ATOMIC_ACQUIRE);
+    int n = conf ? slots + dy_back : __atomic_load_n(&pick_n, __ATOMIC_ACQUIRE);
     int sel = conf ? dy_list_sel : pick_sel;  /* the page's chosen row (under the question: the slot asked about) */
     float offx, offy;
     UiCanvas dc = dy_canvas(real, W, &offx, &offy);
@@ -3755,8 +3763,10 @@ static void draw_diary_pick(const UiCanvas *real, const GameMenuInfo *in, float 
             diary_pill(c, nx + 46, ly, 233, nx + 822, line[k].label, line[k].fill, line[k].ink, line[k].line);
             ui_text_in(c, UI_GOTHIC_700, 27, nx + 300, ly - 15, 500, 36, 1, line[k].value, DY_NAVY);
         }
+        /* the way to another slot later (owner, 2026-11-20: the first game's list has no way back) */
         note = r->name[0] ? "Your new game takes this slot. This diary is only replaced when you save over it in the Diary."
-                          : "Your new game starts in this empty slot.";
+                          : "Your new game starts in this empty slot. You can save it to another slot any time in "
+                            "the game, in the Diary.";
         note_y = 254 + 4 * 47 + 20;
     } else {
         note = "No new game: back to the title screen. Your diaries stay as they are.";
@@ -3804,10 +3814,12 @@ static void draw_diary_pick(const UiCanvas *real, const GameMenuInfo *in, float 
         }
     }
     float hy = 900 - DY_BAR_H + (DY_BAR_H - 56) / 2;
-    float hx = X + 1600 - 48 - hint_w(choose, "Choose") - 36 - hint_w(ok, "Select") - 36 - hint_w(back, "Back");
+    int show_back = conf || dy_back;  /* the question's Back is its No; a list with no back row has no Back */
+    float hx = X + 1600 - 48 - hint_w(choose, "Choose") - 36 - hint_w(ok, "Select") -
+               (show_back ? 36 + hint_w(back, "Back") : 0);
     hx += hint(c, hx, hy, choose, "Choose") + 36;
     hx += hint(c, hx, hy, ok, "Select") + 36;
-    hint(c, hx, hy, back, "Back");
+    if (show_back) hint(c, hx, hy, back, "Back");
 }
 
 /* The list popup (gamemenu_choice_begin): the name popup's frame (board N1), the question under the title, the rows
