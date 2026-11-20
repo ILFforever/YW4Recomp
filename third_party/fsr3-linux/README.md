@@ -35,6 +35,7 @@ No file of theirs is copied: their frame interpolation swapchain and its Win32 l
 |---|---|
 | `patches/yw4_ffx_api_linux.py` | The SDK's `ffx-api/` (the five functions the game calls) on Linux: the FSR 3 and frame generation providers (no FSR 2, no AMD swapchain), no DX12 driver hook, headers usable from C |
 | `yw4_ffx_host.cpp` | `yw4FfxHostSet`, the library's entry for the game to name its Vulkan loader and what it enabled |
+| `ffx_sc/glsl_compiler.cpp` (one change) | glslang's command line shell-quoted: glslang's own path was not quoted, so a downloaded glslang (decision 0083) under a work folder with a space ran nothing and every shader failed |
 
 Checked 2026-11-14 (decision 0073): the patches read against AMD's source, the descriptor limits against the generated
 shaders, xplane-fsr3's self-test reproduced on Lavapipe, and the game's FSR on Linux against AMD's own Windows library

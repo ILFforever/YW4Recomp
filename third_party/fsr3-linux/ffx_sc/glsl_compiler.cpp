@@ -176,7 +176,17 @@ bool GLSLCompiler::GLSLCompiler::Compile(Permutation& permutation, const std::ve
     // Assemble command line arguments
     // ------------------------------------------------------------------------------------------------
 
-    std::string cmdLine = m_GlslangExe + " ";
+    // Linux port: tiny-process-library runs this line through /bin/sh, so every path in it is shell-quoted. glslang's
+    // own path was not quoted at all, and the downloaded glslang (decision 0083) lives under the work folder, which
+    // can have a space ("/mnt/x/YW4 Recomp/work/..."): sh then ran "/mnt/x/YW4" and every shader failed.
+    const auto quote = [](const std::string& s) {
+        std::string q = "'";
+        for (char c : s)
+            q += (c == '\'') ? std::string("'\\''") : std::string(1, c);
+        return q + "'";
+    };
+
+    std::string cmdLine = quote(m_GlslangExe) + " ";
 
     if (m_DebugCompile)
     {
@@ -188,7 +198,7 @@ bool GLSLCompiler::GLSLCompiler::Compile(Permutation& permutation, const std::ve
     {
         if (arguments[i][0] == '-' && arguments[i][1] == 'I')
         {
-            cmdLine += "\"" + arguments[i] + "\"";
+            cmdLine += quote(arguments[i]);
             includeSearchPaths.push_back(&(arguments[i][2]));
         }
         else
@@ -216,7 +226,7 @@ bool GLSLCompiler::GLSLCompiler::Compile(Permutation& permutation, const std::ve
 
     std::string tempFilePath = m_OutputPath + "/" + m_ShaderName + "_temp/" + std::to_string(permutation.key) + ".spv";
 
-    cmdLine += "-o \"" + tempFilePath + "\" \"" + m_ShaderPath + "\"";
+    cmdLine += "-o " + quote(tempFilePath) + " " + quote(m_ShaderPath);
 
     // ------------------------------------------------------------------------------------------------
     // Launch process and compile SPIRV using glslangValidator
