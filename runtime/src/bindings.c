@@ -114,8 +114,8 @@ static const int battle_keys[NINPUTS][BIND_KEYS] = {
     {SDL_SCANCODE_SPACE, SDL_SCANCODE_LSHIFT},  /* B */
     {SDL_SCANCODE_Q},                           /* X */
     {0, SDL_SCANCODE_U},                        /* Y (and the left button: mouse_starting) */
-    {0},                                        /* L */
-    {SDL_SCANCODE_E},                           /* R */
+    {SDL_SCANCODE_1},                           /* L: the ally switch in battle's menus (1, 2026-11-20) */
+    {SDL_SCANCODE_E, SDL_SCANCODE_3},           /* R: the enemy switch; 3 (2026-11-20), E kept */
     {0, SDL_SCANCODE_O},                        /* ZL (and the right button) */
     {SDL_SCANCODE_F},                           /* ZR */
     {SDL_SCANCODE_R, SDL_SCANCODE_P},           /* PLUS */

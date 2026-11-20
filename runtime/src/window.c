@@ -814,6 +814,17 @@ float hud_scale_get(void) {
 
 void hud_scale_set(float v) { __atomic_store(&hud_scale, &v, __ATOMIC_RELEASE); }
 
+/* The corner cards (controls, update, graphics level): as overlay_scale, but below 1440 lines they shrink with the
+ * window (they stayed at 1.0 and were half a small window's width: owner, 2026-11-20). 1440 and up unchanged. */
+static float note_scale(uint32_t h) {
+    /* the cards' own size, from the window's height only: not the performance HUD's scale setting (YW4_HUD_SCALE),
+     * which is for the HUD. 1440 lines and up h / 720, at most 2.0; below, smaller with the window: 1800 lines 1.0,
+     * 755 lines 0.42, never under 0.4 */
+    if (h >= 1440) return (float)(h / 720) > 2.0f ? 2.0f : (float)(h / 720);  /* 4K: capped at 2.0, as 1440p */
+    float r = (float)h / 1800.0f;
+    return r < 0.4f ? 0.4f : r;
+}
+
 static float overlay_scale(uint32_t h) {
     float s = hud_scale_get();
     return s > 0 ? s : h >= 1440 ? (float)(h / 720) : 1.0f;
@@ -1145,7 +1156,7 @@ static void note_draw(VkImage dst, uint32_t index, int32_t x0, int32_t y0, uint3
     /* the other device was touched, or the controller turned out to be another make (it is read after the start) */
     if (note_keys && (note_keys_pad() != note_pad || (note_pad && bindings_pad_style() != note_style)))
         note_keys_words(note_keys_pad());
-    float s = overlay_scale(swap_extent.height);
+    float s = note_scale(swap_extent.height);
     if (s != nb.s) note_render(s), nb.s = s;
     /* faded: premultiplied, so every channel times the strength */
     uint32_t k = (uint32_t)(a * 256.0f);
