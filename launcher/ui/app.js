@@ -838,8 +838,8 @@ let inst = null;  // the launcher's state of the install (Rust: ready.rs, %AppDa
 
 // What's new: written for each release (the launcher ships with the notes of the version it builds)
 const NEWS = {
-  version: '1.5.0',
-  items: ['Settings before your first build: theme, updates, support', 'New launchers offered before your first build', 'Linux: the update offer names the AppImage', 'Happierre theme: the step numbers show again', 'Check spots the update chosen as the base game'],
+  version: '1.6.0',
+  items: ['The build page shows the files compiling now', 'No other page while a build runs', 'Linux: a game folder named with \\ is fixed for you', 'Linux: a found game\'s folders work'],
 };
 
 function showNews(version, items) {
