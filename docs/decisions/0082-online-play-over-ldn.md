@@ -130,7 +130,13 @@ first; `python tools/relay/test_relay.py` tests each):
   apart; both runs dropped about 2 1/2 minutes into a mission, by the joining game's own Disconnect, with the relay
   healthy (no limits hit, CPU steal not the cause: its round trips were the same with the keepalive off).
   Singapore (35 ms) held for 14 minutes. Local play wasn't made for that delay; players near a server are fine.
-- **Not yet:** encryption, rejoining a room after a short drop, deploys that keep rooms.
+- **The relay in C** (`tools/relay/relay.c`, 2026-11-20; `relay.py` stays as the reference and the fallback): the
+  same protocol and tests; per packet 30 us on Singapore's ARM core (Python: about 72) and 43 us on the US East
+  Micro (`tools/relay/loadtest.py`). Estimated: about 250 two-player mission rooms on one Singapore core, 20-25 on
+  the Micro (its 1/8 CPU). The keepalive pauses while the machine's traffic shows people playing. Singapore is
+  2 OCPU / 12 GB (the free maximum: 2 OCPU, 12 GB per account, home region only).
+- **Not yet:** encryption, rejoining a room after a short drop, deploys that keep rooms, server names instead of
+  IP addresses in the game (needed before moving a server), batched sends (`sendmmsg`).
 
 ### In the game: the overlay's Online tab
 
