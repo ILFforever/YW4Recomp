@@ -450,6 +450,38 @@ async function confirmNewFolder(next) {
     dlg.oncancel = () => done(false);  // Escape
   });
 }
+// Linux: a game folder whose name has a \ (launchers before 1.5.0 made "...\YW4 Recomp", issue #22) breaks the
+// build's tools one by one. Asked at the launcher's start and before each build: moved to the folders its name meant
+// (slashfix.rs). Returns the folder to use: the new one, or the same one after Not now or a move that can't be done
+// (the game code's own links around it then still try).
+async function fixSlashFolder(install) {
+  if (!LINUX || !invoke || !install) return install;
+  let to = null;
+  try { to = await invoke('install_slash_fix', { install }); } catch (e) { return install; }
+  if (!to) return install;
+  $('slashfix-to').textContent = to;
+  const dlg = $('slashfix-dlg');
+  dlg.showModal();
+  const yes = await new Promise((done) => {
+    const answer = (v) => () => { dlg.close(); done(v); };
+    $('slashfix-no').onclick = answer(false);
+    $('slashfix-yes').onclick = answer(true);
+    dlg.oncancel = () => done(false);  // Escape
+  });
+  if (!yes) return install;
+  let moved;
+  try { moved = await invoke('move_install_folder', { install }); } catch (e) {
+    popup('Could not move the folder', String(e));
+    return install;
+  }
+  if (options.install === install) options.install = moved;
+  if (inst && inst.install === install) {
+    // the launcher's state was pointed at the new folder on disk; the shortcuts take their icon from there
+    try { const s = await invoke('load_state'); if (s) inst = s; else inst.install = moved; } catch (e) { inst.install = moved; }
+    if (inst.desktop || inst.startMenu) { try { await invoke('make_shortcuts', { state: inst }); } catch (e) { /* kept as they were */ } }
+  }
+  return moved;
+}
 document.querySelectorAll('.radio[data-saves]').forEach((b) => b.addEventListener('click', () => {
   options.saves = b.dataset.saves;
   document.querySelectorAll('.radio[data-saves]').forEach((r) => r.setAttribute('aria-checked', String(r === b)));
@@ -564,6 +596,7 @@ async function startBuild(kind = build ? build.kind : 'first') {
   renderBuildSteps();
   renderBuildBar();
   if (kind === 'first') await newestGameCode();
+  options.install = await fixSlashFolder(options.install);
   const paths = foundFrom ? { exefs: `${foundFrom}\\data\\exefs`, romfs: `${foundFrom}\\data\\romfs`, dlc: `${foundFrom}\\data\\dlc` } : chosen[mode];
   const plan = { mode: foundFrom ? 'folders' : mode, paths, install: options.install, fsr: options.fsr, dlss: options.dlss && rtx, saves: options.saves, fresh: freshFiles };
   try {
@@ -1710,7 +1743,7 @@ $('welcome-close').addEventListener('click', closeWelcome);
   try { inst = invoke ? await invoke('load_state') : null; } catch (e) { inst = null; }
   syncSettingsButton();
   if (inst && inst.straightToGame) { await straightToGame(); return; }
-  if (inst) { showReady(); return; }
+  if (inst) { await fixSlashFolder(inst.install); showReady(); return; }
   show('home');
   // no game built yet: a newer launcher is asked for now (in the background, the welcome isn't held up) and offered
   // once the welcome is closed, not on top of it; not while a build runs (its Update would close the launcher)

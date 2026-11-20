@@ -53,7 +53,7 @@ pub struct State {
 fn default_on_play() -> String { "hide".into() }
 fn yes() -> bool { true }
 
-fn state_path() -> PathBuf {
+pub(crate) fn state_path() -> PathBuf {
     if let Ok(p) = std::env::var("YW4_LAUNCHER_STATE") {  // tests: keep their state out of the player's AppData
         return PathBuf::from(p);
     }
