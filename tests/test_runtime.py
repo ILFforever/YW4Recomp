@@ -779,6 +779,7 @@ class HidVibrationTest(unittest.TestCase):
 #include "window.h"
 
 int battle_active(void) { return 0; }
+int battle_busters(void) { return 0; }
 void settings_save(void) {}
 void window_mouse_motion(float *dx, float *dy) { *dx = 0; *dy = 0; }
 SDL_GamepadType SDL_GetGamepadType(SDL_Gamepad *gamepad) { return SDL_GAMEPAD_TYPE_STANDARD; }
@@ -812,6 +813,8 @@ int mousemenu_map(void) { return 0; }
 int mousemenu_naviwoof(void) { return 0; }
 int mousemenu_sideways(void) { return 0; }
 int mousemenu_stopwatch(void) { return 0; }
+int mousemenu_dpad_menu(void) { return 0; }
+int mousemenu_r_menu_camera_row(void) { return 0; }
 int savefs_diary_open(void) { return 0; }
 /* the running modes (run.c, issue #18): the Controls page's Run row; the game's own way here */
 #include "run.h"
@@ -920,6 +923,7 @@ class BattleScrollTest(unittest.TestCase):
 
 static int battle_state;
 int battle_active(void) { return battle_state; }
+int battle_busters(void) { return 0; }
 void settings_save(void) {}
 void window_mouse_motion(float *dx, float *dy) { *dx = 0; *dy = 0; }
 SDL_GamepadType SDL_GetGamepadType(SDL_Gamepad *gamepad) { return SDL_GAMEPAD_TYPE_STANDARD; }
@@ -946,6 +950,8 @@ int mousemenu_map(void) { return 0; }
 int mousemenu_naviwoof(void) { return 0; }
 int mousemenu_sideways(void) { return 0; }
 int mousemenu_stopwatch(void) { return 0; }
+int mousemenu_dpad_menu(void) { return 0; }
+int mousemenu_r_menu_camera_row(void) { return 0; }
 int savefs_diary_open(void) { return 0; }
 /* the running modes (run.c, issue #18): the Controls page's Run row; the game's own way here */
 #include "run.h"
