@@ -826,9 +826,16 @@ static float note_scale(uint32_t h) {
     return r < 0.4f ? 0.4f : r;
 }
 
+/* The performance HUD's scale: the setting, or on auto by the picture's height: whole steps from 1440 lines (2 at
+ * 1440, 3 at 2160), 1 from 1080, and below 1080 smaller with the window (0.67 at 720, at least 0.5): it is drawn
+ * for 1080 (owner, 2026-11-20). The corner cards have their own (note_scale). */
 static float overlay_scale(uint32_t h) {
     float s = hud_scale_get();
-    return s > 0 ? s : h >= 1440 ? (float)(h / 720) : 1.0f;
+    if (s > 0) return s;
+    if (h >= 1440) return (float)(h / 720);
+    if (h >= 1080) return 1.0f;
+    float f = (float)h / 1080.0f;
+    return f < 0.5f ? 0.5f : f;
 }
 
 /* where the HUD (w x h) goes in a picture bw x bh at the HUD's scale s: its corner, 6 units in */
