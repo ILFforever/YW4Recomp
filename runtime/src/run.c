@@ -18,7 +18,7 @@
  *   DEFAULT  the game's: B holds to run, taps to jump. The Run input does nothing.
  *   ALWAYS   always run; hold Run to walk.
  *   TOGGLE   Run switches running on and off. Off again when a battle starts.
- *   HOLD     hold Run to run. */
+ *   HOLD     hold Run to run (B still holds to run too). The mode a new player starts in (2026-11-20). */
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -44,7 +44,8 @@ int run_mode(void) {
     int m = __atomic_load_n(&mode, __ATOMIC_ACQUIRE);
     if (m < 0) {
         const char *e = getenv("YW4_RUN_MODE");
-        m = e && *e ? atoi(e) : RUN_DEFAULT;
+        /* a player who never picked one: HOLD, Left Shift held runs (owner, 2026-11-20); B holds to run as before */
+        m = e && *e ? atoi(e) : RUN_HOLD;
         if (m < 0 || m >= RUN_MODES) m = RUN_DEFAULT;
         __atomic_store_n(&mode, m, __ATOMIC_RELEASE);
     }
