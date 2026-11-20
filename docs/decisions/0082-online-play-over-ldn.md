@@ -122,8 +122,15 @@ first; `python tools/relay/test_relay.py` tests each):
 - **Privacy** (owner: "very important"): the logs name clients by a hash of their address, salted anew at each
   start, never the address; the machine's logs (journal, and rsyslog's syslog / auth.log) are kept 7 days
   (`setup_server.sh`); the logs from before were wiped on both servers. The README says so.
-- **Not yet:** game packets over UDP (TCP holds back every packet behind a lost one: stutters on long routes),
-  encryption, rejoining a room after a short drop, deploys that keep rooms.
+- **UDP** (protocol 3): game packets go by UDP on the same port, each datagram led by a token from the welcome; a
+  BIND with the heartbeat keeps the player's home router open and proves UDP gets through, else TCP as before
+  (no UDP answer for 10 s, a failed send, more than 1400 bytes). In a 14-minute Singapore session 35 of 47,912
+  packets went by TCP. Room codes count case ("KEY" and "key" differ); spaces around them don't.
+- **The US East drops** (2026-11-20): two games on the owner's PC in Thailand meet through Virginia, about 530 ms
+  apart; both runs dropped about 2 1/2 minutes into a mission, by the joining game's own Disconnect, with the relay
+  healthy (no limits hit, CPU steal not the cause: its round trips were the same with the keepalive off).
+  Singapore (35 ms) held for 14 minutes. Local play wasn't made for that delay; players near a server are fine.
+- **Not yet:** encryption, rejoining a room after a short drop, deploys that keep rooms.
 
 ### In the game: the overlay's Online tab
 
