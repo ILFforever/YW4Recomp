@@ -23,6 +23,8 @@ int relay_send_packet(uint32_t dst, uint16_t dport, uint32_t src, uint16_t sport
 /* what the relay tells, called on its reader thread */
 void ldn_relay_netinfo(const uint8_t *info);           /* the room changed: its NetworkInfo (0x480) */
 void ldn_relay_closed(uint8_t reason);                 /* the room is gone for us: a DisconnectReason */
+/* Logs a gap of more than 0.7 s since *last (packets of a room), and sets *last to now (socket.c) */
+void socket_note_gap(const char *what, int64_t *last);
 void socket_relay_packet(uint32_t dst, uint16_t dport, uint32_t src, uint16_t sport, const uint8_t *data, size_t n);
 uint32_t ldn_my_address(void);                         /* our address in the room, 0 when in none */
 

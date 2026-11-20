@@ -200,8 +200,24 @@ static uint16_t bell_port(void) {
 
 /* a packet for the game (relay.c's reader, or our own to ourselves): rung into the socket bound to its port,
  * its sender in front. Addresses and ports in host order. */
+/* A gap of more than 0.7 s in the packets from a player of the room (169.254.1.x), logged: in a room they come many
+ * times a second, so a gap says that side went quiet (or its packets were lost) before a drop (2026-11-20). The
+ * game's own sending: relay.c. */
+void socket_note_gap(const char *what, int64_t *last) {
+    int64_t now = host_now_ns(), was = *last;
+    *last = now;
+    if (was && now - was > 700000000LL && now - was < 60000000000LL)
+        LOG("%s: nothing for %.1f s\n", what, (double)(now - was) / 1e9);
+}
+
 void socket_relay_packet(uint32_t dst, uint16_t dport, uint32_t src, uint16_t sport, const uint8_t *data, size_t n) {
     (void)dst;
+    {
+        static int64_t last_from[8];
+        char what[48];
+        snprintf(what, sizeof what, "packets from 169.254.1.%u", (unsigned)(src & 0xFF));
+        socket_note_gap(what, &last_from[(src & 0xFF) & 7]);
+    }
     struct sockaddr_in to = {0};
     to.sin_family = AF_INET;
     to.sin_addr.s_addr = htonl(0x7F000001);
@@ -280,11 +296,26 @@ void yw4_socket_Socket(CPUState *c) {
     if (nb) set_nonblock(&fds[fd], 1);
     host_unlock(&fd_lock);
     LOG("Socket(%d, %s, %d) -> %d\n", fam, type == 2 ? "udp" : type == 1 ? "tcp" : "?", proto, fd);
+    if (type == 2) {
+        /* The other players' packets come in through this socket (socket_relay_packet sends them here on 127.0.0.1).
+         * The system's default receive buffer is small: a Blasters mission sends bursts of 1400-byte packets at
+         * 100 KB/s, and while the game's thread is slow for a frame the rest doesn't fit and is dropped without a
+         * word; enough of that and the game decides the others are gone (2026-11-20: the joining game left 1 1/2 to
+         * 2 1/2 minutes into missions, the relay healthy). 4 MB: seconds of a mission's traffic. */
+        int was = 0, want = 4 << 20, now = 0;
+        socklen_t wl = sizeof was;
+        getsockopt(h, SOL_SOCKET, SO_RCVBUF, (char *)&was, &wl);
+        setsockopt(h, SOL_SOCKET, SO_RCVBUF, (const char *)&want, sizeof want);
+        wl = sizeof now;
+        getsockopt(h, SOL_SOCKET, SO_RCVBUF, (char *)&now, &wl);
+        LOG("  receive buffer %d -> %d bytes\n", was, now);
+    }
     c->x[0] = (uint64_t)fd;
 }
 
 void yw4_socket_Close(CPUState *c) {
     int fd = (int)c->x[0];
+    if (ldn_my_address()) yw4_net_trace(c, "socket Close in a room (the game's network shutting down)");
     host_lock(&fd_lock);
     Fd *f = get(fd);
     if (f) {

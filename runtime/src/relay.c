@@ -421,6 +421,8 @@ int relay_send(uint8_t type, const void *p, size_t n) {
 }
 
 int relay_send_packet(uint32_t dst, uint16_t dport, uint32_t src, uint16_t sport, const void *data, size_t n) {
+    static int64_t last_tx;
+    socket_note_gap("our packets out", &last_tx);  /* a gap: this game went quiet (socket.c) */
     if (n > MAX_FRAME - 64) return -1;
     uint8_t head[12];
     memcpy(head, &dst, 4), memcpy(head + 4, &dport, 2), memcpy(head + 6, &src, 4), memcpy(head + 10, &sport, 2);

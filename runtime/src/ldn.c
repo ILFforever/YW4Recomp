@@ -254,11 +254,23 @@ void yw4_ldn_OpenAccessPoint(CPUState *c) {
     host_unlock(&lock);
     transition(c, "OpenAccessPoint", ST_INITIALIZED, ST_INITIALIZED, ST_ACCESS_POINT);
 }
-void yw4_ldn_CloseAccessPoint(CPUState *c) { transition(c, "CloseAccessPoint", ST_ACCESS_POINT, ST_AP_CREATED, ST_INITIALIZED); }
-void yw4_ldn_DestroyNetwork(CPUState *c) { transition(c, "DestroyNetwork", ST_AP_CREATED, ST_AP_CREATED, ST_ACCESS_POINT); }
+/* Leaving a room: with YW4_NET_TRACE=1 the game's call stack, to see which part of it decided (2026-11-20: the
+ * joining game left Blasters missions with packets still flowing both ways, no gap over 0.7 s) */
+void yw4_ldn_CloseAccessPoint(CPUState *c) {
+    yw4_net_trace(c, "ldn CloseAccessPoint (the host leaves)");
+    transition(c, "CloseAccessPoint", ST_ACCESS_POINT, ST_AP_CREATED, ST_INITIALIZED);
+}
+void yw4_ldn_DestroyNetwork(CPUState *c) {
+    yw4_net_trace(c, "ldn DestroyNetwork (the host closes the room)");
+    transition(c, "DestroyNetwork", ST_AP_CREATED, ST_AP_CREATED, ST_ACCESS_POINT);
+}
 void yw4_ldn_OpenStation(CPUState *c) { transition(c, "OpenStation", ST_INITIALIZED, ST_INITIALIZED, ST_STATION); }
 void yw4_ldn_CloseStation(CPUState *c) { transition(c, "CloseStation", ST_STATION, ST_STATION_CONNECTED, ST_INITIALIZED); }
-void yw4_ldn_Disconnect(CPUState *c) { transition(c, "Disconnect", ST_STATION_CONNECTED, ST_STATION_CONNECTED, ST_STATION); }
+void yw4_ldn_Disconnect(CPUState *c) {
+    if (__atomic_load_n(&state, __ATOMIC_ACQUIRE) == ST_STATION_CONNECTED)
+        yw4_net_trace(c, "ldn Disconnect (a joined game leaves its room)");
+    transition(c, "Disconnect", ST_STATION_CONNECTED, ST_STATION_CONNECTED, ST_STATION);
+}
 
 /* CreateNetwork(const NetworkConfig&, const SecurityConfig&, const UserConfig&) */
 void yw4_ldn_CreateNetwork(CPUState *c) {
