@@ -815,17 +815,6 @@ float hud_scale_get(void) {
 
 void hud_scale_set(float v) { __atomic_store(&hud_scale, &v, __ATOMIC_RELEASE); }
 
-/* The corner cards (controls, update, graphics level): as overlay_scale, but below 1440 lines they shrink with the
- * window (they stayed at 1.0 and were half a small window's width: owner, 2026-11-20). 1440 and up unchanged. */
-static float note_scale(uint32_t h) {
-    /* the cards' own size, from the window's height only: not the performance HUD's scale setting (YW4_HUD_SCALE),
-     * which is for the HUD. 1440 lines and up h / 720, at most 2.0; below, smaller with the window: 1800 lines 1.0,
-     * 755 lines 0.42, never under 0.4 */
-    if (h >= 1440) return (float)(h / 720) > 2.0f ? 2.0f : (float)(h / 720);  /* 4K: capped at 2.0, as 1440p */
-    float r = (float)h / 1800.0f;
-    return r < 0.4f ? 0.4f : r;
-}
-
 /* The performance HUD's scale: the setting, or on auto by the picture's height: whole steps from 1440 lines (2 at
  * 1440, 3 at 2160), 1 from 1080, and below 1080 smaller with the window (0.67 at 720, at least 0.5): it is drawn
  * for 1080 (owner, 2026-11-20). The corner cards have their own (note_scale). */
@@ -836,6 +825,16 @@ static float overlay_scale(uint32_t h) {
     if (h >= 1080) return 1.0f;
     float f = (float)h / 1080.0f;
     return f < 0.5f ? 0.5f : f;
+}
+
+/* The corner cards (controls, update, graphics level): from 1080 lines as before 2026-11-20, the HUD's scale (its
+ * setting, or auto); below 1080 smaller with the window, 755 lines 0.7, never under 0.4 (they were half a small
+ * window's width: owner, 2026-11-20). The window's own height only below 1080 made them too small in the owner's
+ * 1112-line window (h / 1800, then 1.0 under his HUD SCALE 1.20). note_render keeps the card inside its buffer. */
+static float note_scale(uint32_t h) {
+    if (h >= 1080) return overlay_scale(h);
+    float r = (float)h / 1080.0f;
+    return r < 0.4f ? 0.4f : r;
 }
 
 /* where the HUD (w x h) goes in a picture bw x bh at the HUD's scale s: its corner, 6 units in */
