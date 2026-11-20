@@ -508,6 +508,18 @@ why = "the Lua command that opens a Yes/No check window (OpenCheckWindow): on th
 
 [[hook]]
 module = "main"
+offset = "0x6082e0"
+native = "yw4_hook_map_update"
+why = "the map object's per-frame update: draw distance tests read and set its build radius (YW4_MAP_BUILD_RADIUS; runtime/src/drawdist.c)"
+
+[[hook]]
+module = "main"
+offset = "0x5f3ec0"
+native = "yw4_hook_map_clip"
+why = "a map part's object cull: objects past its far clip (100 in the town) are not drawn; draw distance tests set it (YW4_MAP_FAR_CLIP; runtime/src/drawdist.c)"
+
+[[hook]]
+module = "main"
 offset = "0x27f8a0"
 native = "yw4_hook_title_fade"
 why = "the Lua command that starts the title's fade out (4011714927): New Game with no save has no 'erase?' box, so the Diary slot list shows here first (runtime/src/savefs.c)"

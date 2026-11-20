@@ -75,6 +75,9 @@ static VkCommandPool pool;
 static VkCommandBuffer cmd;
 static void window_notice(int high, const char *title, const char *fmt, ...);  /* a fading card (below, with the HUD) */
 static void window_notice_keys(void);  /* the same card for the controls, after the one showing (if any) */
+void drawdist_cycle(void);  /* drawdist.c: DRAW DISTANCE; F6 with YW4_DRAW_DISTANCE_KEY=1 */
+float drawdist_factor(void);
+int drawdist_key(void);
 static void window_notice_update(void);  /* an update the launcher found, before the controls card */
 static VkFence fence;
 static VkSemaphore acquired;
@@ -3704,6 +3707,13 @@ void window_run(void (*guest)(void *), void *arg) {
             }
             if (e.key.key == SDLK_F5) gpu_passes_toggle();  /* per-pass GPU timing in the log */
             if (e.key.key == SDLK_F7 && !e.key.repeat) screen_passes_toggle();  /* the screen passes: ours or the game's */
+            if (e.key.key == SDLK_F6 && !e.key.repeat && drawdist_key()) {  /* tests: DRAW DISTANCE's next step */
+                drawdist_cycle();
+                float f = drawdist_factor();
+                window_notice(f > 1, "Draw distance",
+                              f > 1 ? "x%g \xc2\xb7 F6 changes it" : "Off: the game's own \xc2\xb7 F6 changes it", f);
+                yw4_hid_note_key("F6");
+            }
             /* the settings live in the panel only (F1); its keys are recorded like the F keys, so a replay
              * of a recording changes the same settings at the same ticks. While the controls page waits for
              * a key, any key but F1..F12 is the new binding. LEGACY MENUS off: F1 and F2 only still close a panel
