@@ -935,8 +935,32 @@ int settings_first_run(int low) {
     return 1;
 }
 
-/* YW4_SET_AT=<frame>:<NAME>=<value>,... (tests): at those presented frames a setting changes as the panel would change
- * it, one step at a time until it shows that value (not saved), e.g. YW4_SET_AT=3000:YW4_ASPECT=32:9,3300:YW4_UPSCALE=1. */
+/* One setting changed live as the panel would change it, one step at a time until it shows that value (not saved);
+ * a slider (SHARPENING) set straight to the value, as the file has it. Returns the value it shows now in buf, or NULL
+ * for a name that is no setting. */
+static const char *settings_apply_live(const char *name, size_t nlen, const char *val, size_t vlen, char *buf,
+                                       size_t bn) {
+    for (int i = 0; i < NSETTINGS; i++) {
+        const Setting *s = setting(i);
+        if (!s->env || strlen(s->env) != nlen || strncmp(s->env, name, nlen)) continue;
+        if (!s->noptions) {
+            set_value(s->env, val, vlen);
+            slider_text(s, NULL, 0, buf, bn);
+        } else {
+            for (int k = 0; k < s->noptions; k++) {
+                const char *v = s->values[s->current()];
+                if (v && strlen(v) == vlen && !strncmp(v, val, vlen)) break;
+                setting_step(s, 1);
+            }
+            snprintf(buf, bn, "%s", s->values[s->current()] ? s->values[s->current()] : "");
+        }
+        return buf;
+    }
+    return NULL;
+}
+
+/* YW4_SET_AT=<frame>:<NAME>=<value>,... (tests): at those presented frames a setting changes live (settings_apply_live),
+ * e.g. YW4_SET_AT=3000:YW4_ASPECT=32:9,3300:YW4_UPSCALE=1. */
 void settings_test_at(uint64_t frame) {
     static const char *e = (const char *)1;
     if (e == (const char *)1) e = getenv("YW4_SET_AT");
@@ -947,29 +971,73 @@ void settings_test_at(uint64_t frame) {
         const char *name = end + 1, *eq = strchr(name, '='), *next = strchr(name, ',');
         if (!eq || (next && next < eq)) return;
         size_t vlen = next ? (size_t)(next - eq - 1) : strlen(eq + 1);
-        if (f == frame)
-            for (int i = 0; i < NSETTINGS; i++) {
-                const Setting *s = setting(i);
-                if (!s->env || strlen(s->env) != (size_t)(eq - name) || strncmp(s->env, name, (size_t)(eq - name))) continue;
-                const char *now;
-                char saved[16];
-                if (!s->noptions) {  /* a slider (SHARPENING): set straight to the value, as the file has it */
-                    set_value(s->env, eq + 1, vlen);
-                    slider_text(s, NULL, 0, saved, sizeof saved);
-                    now = saved;
-                } else {
-                    for (int k = 0; k < s->noptions; k++) {
-                        const char *v = s->values[s->current()];
-                        if (v && strlen(v) == vlen && !strncmp(v, eq + 1, vlen)) break;
-                        setting_step(s, 1);
-                    }
-                    now = s->values[s->current()];
-                }
-                fprintf(stderr, "yw4: settings: %s is %s at frame %llu (YW4_SET_AT)\n", s->env, now, f);
-                yw4_event("set", f, "\"name\":\"%s\",\"value\":\"%s\"", s->env, now);
-            }
+        char now[64];
+        if (f == frame && settings_apply_live(name, (size_t)(eq - name), eq + 1, vlen, now, sizeof now)) {
+            fprintf(stderr, "yw4: settings: %.*s is %s at frame %llu (YW4_SET_AT)\n", (int)(eq - name), name, now, f);
+            yw4_event("set", f, "\"name\":\"%.*s\",\"value\":\"%s\"", (int)(eq - name), name, now);
+        }
         p = next ? next + 1 : NULL;
     }
+}
+
+/* The control file (owner, 2026-11-20: "a direct way for you to control live game settings without restarting"):
+ * yw4_control.txt next to the game (YW4_CONTROL_FILE: elsewhere), looked at every 15 presented frames. Each line is
+ * NAME=value (a settings.ini name: changed live, as YW4_SET_AT does, not saved) or "list" (every setting's value now);
+ * # starts a comment. The file is read and deleted, and the answers go to the log and to yw4_control.out.txt beside
+ * it (replaced each time). Write it whole: to a temporary name, then rename. Local files only: no network. */
+static char control_path[1024];
+void settings_control_poll(uint64_t frame) {
+    if (frame % 15) return;
+    if (!control_path[0]) {
+        const char *e = getenv("YW4_CONTROL_FILE");
+        const char *base = e && *e ? "" : SDL_GetBasePath();
+        snprintf(control_path, sizeof control_path, "%s%s", base ? base : "", e && *e ? e : "yw4_control.txt");
+    }
+    FILE *f = fopen(control_path, "rb");
+    if (!f) return;
+    char text[8192];
+    size_t n = fread(text, 1, sizeof text - 1, f);
+    fclose(f);
+    text[n] = 0;
+    remove(control_path);
+    char out_path[1040];
+    snprintf(out_path, sizeof out_path, "%.*s.out.txt", (int)(strlen(control_path) > 4 && !strcmp(control_path +
+             strlen(control_path) - 4, ".txt") ? strlen(control_path) - 4 : strlen(control_path)), control_path);
+    FILE *o = fopen(out_path, "wb");
+    if (o) fprintf(o, "frame %llu\n", (unsigned long long)frame);
+    for (char *line = text, *next; line && *line; line = next) {
+        next = strchr(line, '\n');
+        if (next) *next++ = 0;
+        size_t len = strlen(line);
+        while (len && (line[len - 1] == '\r' || line[len - 1] == ' ')) line[--len] = 0;
+        while (*line == ' ') line++;
+        if (!*line || *line == '#') continue;
+        if (!strcmp(line, "list")) {
+            for (int i = 0; i < NSETTINGS; i++) {
+                const Setting *s = setting(i);
+                if (!s->env) continue;
+                char v[64];
+                if (!s->noptions) slider_text(s, NULL, 0, v, sizeof v);
+                else snprintf(v, sizeof v, "%s", s->values[s->current()] ? s->values[s->current()] : "");
+                if (o) fprintf(o, "%s=%s\n", s->env, v);
+            }
+            fprintf(stderr, "yw4: control: list (%s)\n", out_path);
+            continue;
+        }
+        char *eq = strchr(line, '='), now[64];
+        const char *r = eq ? settings_apply_live(line, (size_t)(eq - line), eq + 1, strlen(eq + 1), now, sizeof now)
+                           : NULL;
+        if (r) {
+            fprintf(stderr, "yw4: control: %.*s is %s at frame %llu\n", (int)(eq - line), line, r,
+                    (unsigned long long)frame);
+            yw4_event("set", frame, "\"name\":\"%.*s\",\"value\":\"%s\"", (int)(eq - line), line, r);
+            if (o) fprintf(o, "%.*s=%s ok\n", (int)(eq - line), line, r);
+        } else {
+            fprintf(stderr, "yw4: control: not a setting: %s\n", line);
+            if (o) fprintf(o, "%s: not a setting\n", line);
+        }
+    }
+    if (o) fclose(o);
 }
 
 /* The setting behind an overlay row (settings_player_rows' order, the theme row taken out); NULL for none. */

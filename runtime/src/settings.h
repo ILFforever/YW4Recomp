@@ -79,6 +79,9 @@ int settings_cheat_rows(SettingRow *rows, int max);
 void settings_cheat_change(int row, int dir);
 /* YW4_SET_AT=<frame>:<NAME>=<value>,...: tests change settings at those presented frames (gpu.c calls it). */
 void settings_test_at(uint64_t frame);
+/* yw4_control.txt next to the game (YW4_CONTROL_FILE): NAME=value lines change settings live, "list" writes them all
+ * (answers in yw4_control.out.txt); looked at every 15 presented frames (gpu.c calls it). */
+void settings_control_poll(uint64_t frame);
 /* A new install's first start (no settings file yet): picks the graphics for the GPU once (low: an integrated GPU
  * or under 4 GB of video memory) and writes the file. 1 when it ran. */
 int settings_first_run(int low);

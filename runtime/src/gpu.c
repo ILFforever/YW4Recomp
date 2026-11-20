@@ -2921,6 +2921,7 @@ void gpu_present(NvnTexture *t, uint64_t frame, const int crop[4]) {
     gpu_fg_test_switch(present_count);
     yw4_memscan_frame(present_count);  /* YW4_MEMSCAN (memscan.c, tests) */
     settings_test_at(present_count);
+    settings_control_poll(present_count);  /* yw4_control.txt: settings changed live from outside (settings.c) */
     int fg_slot = -1;  /* frame generation (gpu_fg.c): the frames go to its pacing thread */
     if (gpu_fg()) {
         VkCommandBuffer cb = begin();
