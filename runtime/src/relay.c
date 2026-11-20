@@ -38,6 +38,19 @@ static RSock sock = RBAD;
 static unsigned generation;                 /* +1 per connection: the reader of an old one stops */
 static int server_protocol;                 /* the relay's, from its hello's answer (0 until it comes) */
 static int64_t last_rx;                     /* when a frame last came from the relay (host_now_ns) */
+
+/* Game packets over UDP (protocol 3, 2026-11-20; tools/relay/relay.py says the format): over TCP one lost packet holds
+ * back every packet behind it until it is sent again (stutters on long routes, owner's US East drop). The relay's
+ * welcome brings a token; the game's datagrams start with it. BIND (with the heartbeat, every 3 s) tells the relay
+ * where the game is through its home router and keeps that open; the relay's answer says UDP gets through, and only
+ * then do packets go that way. No UDP from the relay for 10 s: TCP again. Control (rooms, joining) stays on TCP. */
+enum { UDP_BIND = 1, UDP_PACKET = 8, UDP_MAX = 1200 };
+static RSock usock = RBAD;                  /* the UDP side, connected to the relay (lock) */
+static uint8_t udp_token[8];
+static int udp_ok;                          /* the relay answered over UDP lately: packets go that way */
+static int64_t udp_rx;                      /* when a datagram last came */
+static struct sockaddr_storage peer;        /* the relay's address, from the TCP connection (lock) */
+static int peer_len;
 static uint8_t want;                        /* the answer type a request waits for, 0 for none */
 static uint8_t *answer;
 static size_t answer_cap;
@@ -135,6 +148,91 @@ static int write_frame(RSock s, uint8_t type, const void *p, size_t n) { return 
 
 typedef struct { RSock s; unsigned gen; } Reader;
 
+/* BIND to the relay over UDP (lock held) */
+static void udp_bind_locked(void) {
+    if (usock == RBAD) return;
+    uint8_t d[9];
+    memcpy(d, udp_token, 8);
+    d[8] = UDP_BIND;
+    send(usock, (const char *)d, sizeof d, 0);
+}
+
+/* The UDP side's reader: BIND answers (UDP works) and packets from the other players. Ends with its connection. */
+static void udp_reader(void *arg) {
+    Reader r = *(Reader *)arg;
+    free(arg);
+    uint8_t *buf = malloc(2048);
+    for (;;) {
+        int n = buf ? recv(r.s, (char *)buf, 2048, 0) : -1;  /* 1 s at most (SO_RCVTIMEO) */
+        host_lock(&lock);
+        int current = r.gen == generation && usock == r.s && sock != RBAD;
+        host_unlock(&lock);
+        if (!current || !buf) break;
+        if (n <= 0) {  /* the timeout, or the network said the port is closed: wait, the heartbeat binds again */
+            host_sleep_ns(50000000);
+            continue;
+        }
+        __atomic_store_n(&udp_rx, host_now_ns(), __ATOMIC_RELEASE);
+        __atomic_store_n(&last_rx, host_now_ns(), __ATOMIC_RELEASE);
+        if (buf[0] == UDP_BIND) {
+            if (!__atomic_exchange_n(&udp_ok, 1, __ATOMIC_ACQ_REL))
+                fprintf(stderr, "yw4: relay: game packets over UDP\n");
+        } else if (buf[0] == UDP_PACKET && n >= 13) {
+            uint32_t dst, src;
+            uint16_t dport, sport;
+            const uint8_t *p = buf + 1;
+            memcpy(&dst, p, 4), memcpy(&dport, p + 4, 2), memcpy(&src, p + 6, 4), memcpy(&sport, p + 10, 2);
+            socket_relay_packet(dst, dport, src, sport, p + 12, (size_t)n - 13);
+        }
+    }
+    free(buf);
+    host_lock(&lock);
+    if (usock == r.s) usock = RBAD, __atomic_store_n(&udp_ok, 0, __ATOMIC_RELEASE);
+    host_unlock(&lock);
+    rclose(r.s);
+}
+
+/* The welcome's token came (protocol 3): the UDP side, to the relay's address, and its first BIND. If UDP can't get
+ * through, nothing answers and everything stays on TCP. */
+static void udp_start(unsigned gen, const uint8_t *token) {
+    host_lock(&lock);
+    if (gen != generation || usock != RBAD || !peer_len) {
+        host_unlock(&lock);
+        return;
+    }
+    RSock u = socket(peer.ss_family, SOCK_DGRAM, IPPROTO_UDP);
+    if (u == RBAD || connect(u, (struct sockaddr *)&peer, peer_len)) {
+        if (u != RBAD) rclose(u);
+        host_unlock(&lock);
+        return;
+    }
+#ifdef _WIN32
+    DWORD to = 1000;
+    BOOL no = FALSE;  /* a "port unreachable" reply must not end the socket on Windows */
+    DWORD got = 0;
+#ifndef SIO_UDP_CONNRESET
+#define SIO_UDP_CONNRESET _WSAIOW(IOC_VENDOR, 12)
+#endif
+    WSAIoctl(u, SIO_UDP_CONNRESET, &no, sizeof no, NULL, 0, &got, NULL, NULL);
+#else
+    struct timeval to = {1, 0};
+#endif
+    setsockopt(u, SOL_SOCKET, SO_RCVTIMEO, (const char *)&to, sizeof to);
+    Reader *a = malloc(sizeof *a);
+    if (!a) {
+        rclose(u);
+        host_unlock(&lock);
+        return;
+    }
+    memcpy(udp_token, token, 8);
+    usock = u;
+    __atomic_store_n(&udp_ok, 0, __ATOMIC_RELEASE);
+    a->s = u, a->gen = gen;
+    host_thread_start(udp_reader, a, 1 << 16);
+    udp_bind_locked();
+    host_unlock(&lock);
+}
+
 static void reader(void *arg) {
     Reader r = *(Reader *)arg;
     free(arg);
@@ -151,6 +249,7 @@ static void reader(void *arg) {
             uint32_t v;
             memcpy(&v, p, 4);
             __atomic_store_n(&server_protocol, (int)v, __ATOMIC_RELEASE);
+            if (v >= 3 && n >= 12) udp_start(r.gen, p + 4);
             continue;
         }
         if (type == RELAY_NETINFO && n >= 0x480) {
@@ -213,6 +312,12 @@ static void heartbeat(void *arg) {
                 current = 0;
             } else {
                 write_frame(r.s, RELAY_PING, NULL, 0);
+                udp_bind_locked();  /* keeps the home router's UDP mapping open; the answer says UDP still works */
+                if (__atomic_load_n(&udp_ok, __ATOMIC_ACQUIRE) &&
+                    host_now_ns() - __atomic_load_n(&udp_rx, __ATOMIC_ACQUIRE) > 10000000000LL) {
+                    __atomic_store_n(&udp_ok, 0, __ATOMIC_RELEASE);
+                    fprintf(stderr, "yw4: relay: no UDP from the relay for 10 s: game packets by TCP\n");
+                }
             }
         }
         host_unlock(&lock);
@@ -253,6 +358,9 @@ static int connect_locked(void) {
         if (s != RBAD && connect(s, a->ai_addr, (int)a->ai_addrlen)) {
             rclose(s);
             s = RBAD;
+        } else if (s != RBAD && a->ai_addrlen <= sizeof peer) {
+            memcpy(&peer, a->ai_addr, a->ai_addrlen);  /* the UDP side goes to the same address */
+            peer_len = (int)a->ai_addrlen;
         }
     }
     freeaddrinfo(res);
@@ -317,6 +425,18 @@ int relay_send_packet(uint32_t dst, uint16_t dport, uint32_t src, uint16_t sport
     uint8_t head[12];
     memcpy(head, &dst, 4), memcpy(head + 4, &dport, 2), memcpy(head + 6, &src, 4), memcpy(head + 10, &sport, 2);
     host_lock(&lock);
+    if (__atomic_load_n(&udp_ok, __ATOMIC_ACQUIRE) && usock != RBAD && n <= UDP_MAX) {
+        uint8_t d[8 + 1 + 12 + UDP_MAX];
+        memcpy(d, udp_token, 8);
+        d[8] = UDP_PACKET;
+        memcpy(d + 9, head, 12);
+        memcpy(d + 21, data, n);
+        int sent = (int)send(usock, (const char *)d, (int)(21 + n), 0);
+        if (sent == (int)(21 + n)) {
+            host_unlock(&lock);
+            return 0;
+        }  /* else by TCP */
+    }
     RSock s = sock;
     host_unlock(&lock);
     return s == RBAD ? -1 : write_frame2(s, RELAY_PACKET, head, 12, data, n);

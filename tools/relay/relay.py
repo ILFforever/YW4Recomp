@@ -6,7 +6,8 @@ NetworkInfo blobs (0x480 bytes, Switchbrew "LDN services"), packets are opaque.
 
     python tools/relay/relay.py [--port 41230]
 
-Players see each other only with the same room code (YW4_ROOM, empty is a room code too; case and spaces do not count).
+Players see each other only with the same room code (YW4_ROOM, empty is a room code too). Case counts ("KEY123" and
+"key123" are different rooms: owner, 2026-11-20); spaces before and after don't.
 Standard library only.
 
 Protocol, both ways: frames of u32 length (little endian, the bytes after it), u8 type, payload.
@@ -41,7 +42,15 @@ import socket
 import struct
 import time
 
-PROTOCOL = 2          # 2: PING / PONG heartbeats
+PROTOCOL = 3          # 2: PING / PONG heartbeats; 3: game packets over UDP (a token in the welcome)
+
+# UDP (protocol 3), on the same port: datagrams of token (8 bytes, from the welcome) + kind + payload from the game,
+# kind + payload to it. BIND (empty) says where the game is (its home router's address and port) and keeps that
+# open, every 3 s with the heartbeat; the relay answers it, so the game knows UDP gets through, else it stays on TCP.
+# PACKET: the TCP PACKET's payload. A player's packets go to it by UDP while it has been heard from that way lately.
+UDP_BIND, UDP_PACKET = 1, 8
+UDP_STALE = 10.0      # s without a datagram from a game: its packets go by TCP again
+UDP_MAX = 1200        # payload bytes at most by UDP (no IP fragments); bigger go by TCP
 NETINFO = 0x480
 LDN = 0x50            # LdnNetworkInfo inside NetworkInfo
 NODES = LDN + 0x18    # 8 NodeInfo of 0x40
@@ -88,6 +97,7 @@ class Room:
         self.pk_in = self.by_in = self.pk_out = self.by_out = 0
         self.last_in = self.last_out = 0
         self.most = 1
+        self.in_udp = self.out_udp = 0  # of pk_in / pk_out, by UDP (protocol 3); the rest by TCP
 
     def traffic(self, total: bool) -> str:
         now = time.monotonic()
@@ -100,7 +110,8 @@ class Room:
         what = (f"{secs:.0f} s, up to {self.most} players: {self.pk_in} packets in, {self.pk_out} out, "
                 f"{self.by_in / 1e6:.2f} MB in, {self.by_out / 1e6:.2f} MB out" if total else
                 f"last {secs:.0f} s: {b_in / 1e3:.1f} KB in, {b_out / 1e3:.1f} KB out")
-        return f"{what}; out {rate / 1e3:.1f} KB/s = {rate * 3600 / 1e6:.0f} MB per hour"
+        return (f"{what}; out {rate / 1e3:.1f} KB/s = {rate * 3600 / 1e6:.0f} MB per hour; UDP: {self.in_udp} of "
+                f"{self.pk_in} in, {self.out_udp} of {self.pk_out} out")
 
     def node_count(self) -> int:
         return sum(1 for i in range(8) if self.info[NODES + NODE * i + 0xB])
@@ -142,6 +153,9 @@ class Relay:
         self.clients: set[Client] = set()
         self.frames_in = self.bytes_in = self.dropped = 0  # since the last summary
         self.refused = 0
+        self.tokens: dict[bytes, Client] = {}   # UDP token -> its client (protocol 3)
+        self.udp: asyncio.DatagramTransport | None = None
+
 
     def clients_of(self, addr: str) -> int:
         return sum(1 for c in self.clients if c.addr == addr)
@@ -163,6 +177,35 @@ class Relay:
         return [r for r in self.rooms.values() if r.code == code and (lcid == 0 or r.lcid == lcid)]
 
 
+class UdpSide(asyncio.DatagramProtocol):
+    """The relay's UDP port (protocol 3): BIND and PACKET datagrams from the games, each with its client's token."""
+
+    def __init__(self, relay: Relay) -> None:
+        self.relay = relay
+
+    def connection_made(self, transport: asyncio.BaseTransport) -> None:
+        self.relay.udp = transport  # type: ignore[assignment]
+
+    def datagram_received(self, data: bytes, addr: tuple) -> None:
+        relay = self.relay
+        c = relay.tokens.get(data[:8]) if len(data) >= 9 else None
+        if c is None:
+            return  # not one of ours: no answer at all
+        first = c.udp_addr is None
+        c.udp_addr, c.udp_seen = addr, time.monotonic()
+        c.last_rx = c.udp_seen
+        relay.frames_in += 1
+        relay.bytes_in += len(data)
+        if first:
+            c.log("game packets over UDP")
+        kind = data[8]
+        if kind == UDP_BIND:
+            if relay.udp is not None:
+                relay.udp.sendto(bytes([UDP_BIND]), addr)
+        elif kind == UDP_PACKET:
+            asyncio.ensure_future(c.packet(data[9:], via_udp=True))
+
+
 class Client:
     def __init__(self, relay: Relay, reader: asyncio.StreamReader, writer: asyncio.StreamWriter):
         self.relay, self.reader, self.writer = relay, reader, writer
@@ -178,6 +221,54 @@ class Client:
         self.beats = False                    # sends heartbeats (protocol 2): silence drops it
         self.tokens, self.tokens_at = PACKETS_BURST, time.monotonic()
         self.warned = 0.0
+        self.token = os.urandom(8)            # its UDP datagrams start with this (protocol 3)
+        self.udp_addr: tuple | None = None    # where its datagrams come from, never logged
+        self.udp_seen = 0.0
+
+    def udp_live(self) -> bool:
+        return self.udp_addr is not None and time.monotonic() - self.udp_seen < UDP_STALE
+
+    async def deliver(self, frame: bytes, room: "Room") -> None:
+        """A game packet to this player: by UDP while that works for it, else by TCP."""
+        udp = self.relay.udp
+        if udp is not None and self.udp_live() and len(frame) - 12 <= UDP_MAX:
+            udp.sendto(bytes([UDP_PACKET]) + frame, self.udp_addr)
+            room.out_udp += 1
+        else:
+            await self.send(PACKET, frame)
+
+    async def packet(self, p: bytes, via_udp: bool) -> None:
+        """A game packet from this player (u32 dst, u16 dport, u32 src, u16 sport, payload), by TCP or UDP."""
+        relay, room = self.relay, self.room
+        if room is None or len(p) < 12:
+            return
+        now = time.monotonic()  # the rate: a token bucket, PACKETS_PER_S refilled, PACKETS_BURST deep
+        self.tokens = min(PACKETS_BURST, self.tokens + (now - self.tokens_at) * PACKETS_PER_S)
+        self.tokens_at = now
+        if self.tokens < 1:
+            relay.dropped += 1
+            if now - self.warned >= 60:
+                self.warned = now
+                self.log(f"over {PACKETS_PER_S:.0f} packets a second: the rest dropped")
+            return
+        self.tokens -= 1
+        dst = struct.unpack_from("<I", p)[0]
+        src = struct.pack("<I", self.ip)  # the sender's address is the relay's word, not the sender's
+        frame = p[:6] + src + p[10:]
+        if dst == 0xFFFFFFFF or dst & 0xFF == 0xFF:
+            targets = [c for ip, c in room.members.items() if ip != self.ip]
+        else:
+            c = room.members.get(dst)
+            targets = [c] if c and c is not self else []
+        room.pk_in += 1
+        room.in_udp += via_udp
+        room.by_in += len(p) + 5
+        room.pk_out += len(targets)
+        room.by_out += (len(frame) + 5) * len(targets)
+        if now - room.reported >= 60:
+            room.host.log(f"room traffic, {len(room.members)} players, {room.traffic(total=False)}")
+        for c in targets:
+            await c.deliver(frame, room)
 
     async def send(self, kind: int, payload: bytes = b"") -> None:
         async with self.lock:
@@ -213,9 +304,10 @@ class Client:
     async def handle(self, kind: int, p: bytes) -> None:
         relay = self.relay
         if kind == HELLO:
-            self.code = p[:64].rstrip(b"\0").strip().lower()  # "YW4 " and "yw4" are the same room
+            self.code = p[:64].rstrip(b"\0").strip()  # case counts; "KEY " and "KEY" are the same room
             self.log(f"hello, room code {self.code.decode(errors='replace')!r}")
-            await self.send(HELLO, struct.pack("<I", PROTOCOL))
+            relay.tokens[self.token] = self
+            await self.send(HELLO, struct.pack("<I", PROTOCOL) + self.token)  # older games read the version only
         elif kind == PING:
             self.beats = True
             await self.send(PING)
@@ -270,34 +362,8 @@ class Client:
             if c and c is not self:
                 await c.leave()
                 await c.send(LEAVE, bytes([5]))  # Rejected
-        elif kind == PACKET and len(p) >= 12 and self.room:
-            now = time.monotonic()  # the rate: a token bucket, PACKETS_PER_S refilled, PACKETS_BURST deep
-            self.tokens = min(PACKETS_BURST, self.tokens + (now - self.tokens_at) * PACKETS_PER_S)
-            self.tokens_at = now
-            if self.tokens < 1:
-                relay.dropped += 1
-                if now - self.warned >= 60:
-                    self.warned = now
-                    self.log(f"over {PACKETS_PER_S:.0f} packets a second: the rest dropped")
-                return
-            self.tokens -= 1
-            dst = struct.unpack_from("<I", p)[0]
-            src = struct.pack("<I", self.ip)  # the sender's address is the relay's word, not the sender's
-            frame = p[:6] + src + p[10:]
-            if dst == 0xFFFFFFFF or dst & 0xFF == 0xFF:
-                targets = [c for ip, c in self.room.members.items() if ip != self.ip]
-            else:
-                c = self.room.members.get(dst)
-                targets = [c] if c and c is not self else []
-            room = self.room
-            room.pk_in += 1
-            room.by_in += len(p) + 5
-            room.pk_out += len(targets)
-            room.by_out += (len(frame) + 5) * len(targets)
-            if time.monotonic() - room.reported >= 60:
-                room.host.log(f"room traffic, {len(room.members)} players, {room.traffic(total=False)}")
-            for c in targets:
-                await c.send(PACKET, frame)
+        elif kind == PACKET:
+            await self.packet(p, via_udp=False)
 
     async def run(self) -> None:
         self.log("connected")
@@ -338,6 +404,7 @@ class Client:
         finally:
             await self.leave()
             self.relay.clients.discard(self)
+            self.relay.tokens.pop(self.token, None)
             self.log("gone")
             self.writer.close()
 
@@ -377,7 +444,9 @@ async def main() -> None:
                 last = now
 
     server = await asyncio.start_server(accept, args.host, args.port)
-    print(f"YW4 Recomp relay on port {args.port} (protocol {PROTOCOL}). Ctrl+C stops it.", flush=True)
+    await asyncio.get_running_loop().create_datagram_endpoint(lambda: UdpSide(relay),
+                                                              local_addr=(args.host, args.port))
+    print(f"YW4 Recomp relay on port {args.port}, TCP and UDP (protocol {PROTOCOL}). Ctrl+C stops it.", flush=True)
     watcher = asyncio.create_task(watch())
     async with server:
         await server.serve_forever()

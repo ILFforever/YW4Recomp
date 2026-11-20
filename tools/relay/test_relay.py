@@ -22,7 +22,18 @@ class Game:
         self.s = socket.create_connection(("127.0.0.1", port), timeout=3)
         self.send(1, room.ljust(64, b"\0"))
         kind, p = self.recv()
-        assert kind == 1 and struct.unpack("<I", p)[0] == 2, (kind, p)  # protocol 2
+        assert kind == 1 and struct.unpack_from("<I", p)[0] == 3 and len(p) == 12, (kind, p)  # protocol 3, token
+        self.token = p[4:12]
+        self.port = port
+
+    def udp(self) -> socket.socket:
+        """This game's UDP side (protocol 3): bound to the relay, answered BIND."""
+        u = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        u.settimeout(3)
+        u.connect(("127.0.0.1", self.port))
+        u.send(self.token + bytes([1]))
+        assert u.recv(64) == bytes([1]), "no UDP BIND answer"
+        return u
 
     def send(self, kind: int, p: bytes = b"") -> None:
         self.s.sendall(struct.pack("<IB", len(p) + 1, kind) + p)
@@ -84,7 +95,11 @@ def main() -> int:
         assert found[NODES + 0xC:NODES + 0xC + 6] == b"Lennox"
         stranger.send(4, struct.pack("<Q", 0))
         assert struct.unpack_from("<I", stranger.recv_type(4))[0] == 0
-        print("station: finds the room; another room code finds nothing")
+        upper = Game(port, b"TEST")  # case counts (owner, 2026-11-20)
+        upper.send(4, struct.pack("<Q", 0))
+        assert struct.unpack_from("<I", upper.recv_type(4))[0] == 0
+        upper.s.close()
+        print("station: finds the room; another room code, or the same in other case, finds nothing")
 
         node = bytearray(0x40)
         node[0xC:0xC + 6] = b"Friend"
@@ -105,6 +120,23 @@ def main() -> int:
         p = station.recv_type(8)
         assert struct.unpack_from("<I", p, 6)[0] == 0xA9FE0101 and p[12:] == b"to all"
         print("packets: station -> host and host -> everyone arrive with the right sender")
+
+        # UDP (protocol 3): once both are bound, packets go and come by UDP; a datagram with a wrong token is ignored
+        hu, su = host.udp(), station.udp()
+        su.send(station.token + bytes([8]) + struct.pack("<IHIH", 0xA9FE0101, 49152, 0, 50000) + b"by udp")
+        p = hu.recv(2048)
+        assert p[0] == 8 and struct.unpack_from("<I", p, 7)[0] == 0xA9FE0102 and p[13:] == b"by udp", p
+        hu.send(host.token + bytes([8]) + struct.pack("<IHIH", 0xA9FE01FF, 49152, 0, 49152) + b"udp to all")
+        p = su.recv(2048)
+        assert p[0] == 8 and p[13:] == b"udp to all", p
+        su.send(bytes(8) + bytes([1]))  # not a token the relay gave
+        su.settimeout(0.5)
+        try:
+            extra = su.recv(64)
+        except socket.timeout:
+            extra = b""
+        assert extra == b"", "the relay answered a datagram without a valid token"
+        print("UDP: bound, packets both ways by UDP, a wrong token gets no answer")
 
         upd = bytearray(info)
         upd[LDN + 0x21C:LDN + 0x21C + 4] = b"ADV!"

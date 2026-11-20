@@ -101,16 +101,18 @@ if [ -f /etc/logrotate.d/rsyslog ]; then
     sudo sed -i -e 's/^\(\s*\)weekly/\1daily/' -e 's/^\(\s*\)rotate [0-9]*/\1rotate 7/' /etc/logrotate.d/rsyslog
 fi
 
-echo "== firewall on this server (port $PORT/tcp)"
-if command -v iptables >/dev/null && ! sudo iptables -C INPUT -p tcp --dport "$PORT" -j ACCEPT 2>/dev/null; then
-    # before the image's catch-all REJECT, if it has one (Oracle's do), else at the end
-    n=$(sudo iptables -L INPUT --line-numbers -n | awk '$2 == "REJECT" {print $1; exit}')
-    if [ -n "$n" ]; then sudo iptables -I INPUT "$n" -p tcp --dport "$PORT" -j ACCEPT
-    else sudo iptables -A INPUT -p tcp --dport "$PORT" -j ACCEPT; fi
-    if command -v netfilter-persistent >/dev/null; then sudo netfilter-persistent save >/dev/null 2>&1
-    else echo "   (no netfilter-persistent: the rule lasts until a reboot; sudo apt-get install -y iptables-persistent)"; fi
-fi
-if command -v ufw >/dev/null && sudo ufw status | grep -q "Status: active"; then sudo ufw allow "$PORT/tcp" >/dev/null; fi
+echo "== firewall on this server (port $PORT, TCP and UDP: game packets go by UDP, protocol 3)"
+for proto in tcp udp; do
+    if command -v iptables >/dev/null && ! sudo iptables -C INPUT -p "$proto" --dport "$PORT" -j ACCEPT 2>/dev/null; then
+        # before the image's catch-all REJECT, if it has one (Oracle's do), else at the end
+        n=$(sudo iptables -L INPUT --line-numbers -n | awk '$2 == "REJECT" {print $1; exit}')
+        if [ -n "$n" ]; then sudo iptables -I INPUT "$n" -p "$proto" --dport "$PORT" -j ACCEPT
+        else sudo iptables -A INPUT -p "$proto" --dport "$PORT" -j ACCEPT; fi
+    fi
+    if command -v ufw >/dev/null && sudo ufw status | grep -q "Status: active"; then sudo ufw allow "$PORT/$proto" >/dev/null; fi
+done
+if command -v netfilter-persistent >/dev/null; then sudo netfilter-persistent save >/dev/null 2>&1
+else echo "   (no netfilter-persistent: the rules last until a reboot; sudo apt-get install -y iptables-persistent)"; fi
 
 if [ "$KEEPALIVE" = 0 ]; then
     remove_keepalive
@@ -160,7 +162,7 @@ if systemctl is-active --quiet yw4-relay; then
     echo "The relay runs. Players put these two lines in their settings.ini (one room code per group of friends):"
     echo "    YW4_RELAY=<this server's public IP, from the cloud's console>:$PORT"
     echo "    YW4_ROOM=<a room code your group agrees on>"
-    echo "Still needed on Oracle: an ingress rule for TCP $PORT in the subnet's security list (web console)."
+    echo "Still needed on Oracle: ingress rules for TCP and UDP $PORT in the subnet's security list (web console)."
 else
     echo "the service didn't start:" >&2
     sudo journalctl -u yw4-relay -n 20 --no-pager >&2
