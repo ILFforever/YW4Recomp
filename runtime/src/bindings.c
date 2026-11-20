@@ -115,8 +115,8 @@ static const int battle_keys[NINPUTS][BIND_KEYS] = {
     {SDL_SCANCODE_SPACE, SDL_SCANCODE_LSHIFT},  /* B */
     {SDL_SCANCODE_Q},                           /* X */
     {0, SDL_SCANCODE_U},                        /* Y (and the left button: mouse_starting) */
-    {SDL_SCANCODE_1},                           /* L: the ally switch in battle's menus (1, 2026-11-20) */
-    {SDL_SCANCODE_E, SDL_SCANCODE_3},           /* R: the enemy switch; 3 (2026-11-20), E kept */
+    {0},                                        /* L (Blasters' missions: 2, keys_now) */
+    {SDL_SCANCODE_E},                           /* R */
     {0, SDL_SCANCODE_O},                        /* ZL (and the right button) */
     {SDL_SCANCODE_F},                           /* ZR */
     {SDL_SCANCODE_R, SDL_SCANCODE_P},           /* PLUS */
@@ -125,7 +125,9 @@ static const int battle_keys[NINPUTS][BIND_KEYS] = {
     {0},                                        /* RS_PRESS (the wheel press) */
     {SDL_SCANCODE_UP},                          /* DPAD_UP (and wheel up) */
     {SDL_SCANCODE_DOWN},                        /* DPAD_DOWN (and wheel down) */
-    {SDL_SCANCODE_LEFT},  {SDL_SCANCODE_RIGHT}, /* DPAD_LEFT, DPAD_RIGHT */
+    /* DPAD_LEFT, DPAD_RIGHT: the target switch through everyone, also on 1 and 3 (owner, 2026-11-20: "this is what I
+     * wanted", replacing 1 / 3 on L / R from earlier that day) */
+    {SDL_SCANCODE_LEFT, SDL_SCANCODE_1}, {SDL_SCANCODE_RIGHT, SDL_SCANCODE_3},
     {SDL_SCANCODE_W}, {SDL_SCANCODE_S}, {SDL_SCANCODE_A}, {SDL_SCANCODE_D},  /* LS */
     {SDL_SCANCODE_I}, {SDL_SCANCODE_K}, {SDL_SCANCODE_J}, {SDL_SCANCODE_L},  /* RS */
     {0},                                                                     /* RUN: the field's only */
@@ -495,26 +497,38 @@ static int32_t pad_amount(SDL_Gamepad *g, int pad) {
 static int run_held;
 int bindings_run_held(void) { return __atomic_load_n(&run_held, __ATOMIC_ACQUIRE); }
 
+static int battle_key_used(int key) {  /* the key does something in the battle set */
+    for (int j = 0; key && j < NINPUTS; j++)
+        for (int m = 0; m < BIND_KEYS; m++)
+            if (sets[SET_BATTLE][j].keys[m] == key) return 1;
+    return 0;
+}
+
 /* The keys in use now: the field set, or the battle set in battles (not under Blasters' chat: mousemenu_dpad_menu). In
  * Blasters' missions (battle_busters) a button with no battle key takes the field set's, unless that key does
  * something else in battle (owner, 2026-11-20: the mission map's bell showed N/A: L has no battle key; the field set's
- * is the owner's 1). Its own copy per thread: the input's and the hint icons' threads both ask. */
+ * is the owner's 1). L still without one there (the field's 1 is the D-pad's left in battle) takes 2: the bell, in
+ * missions only (owner, 2026-11-20: "make it a blaster specific"). Its own copy per thread: the input's and the hint
+ * icons' threads both ask. */
 static const Bound *keys_now(int battle) {
     if (!battle || mousemenu_dpad_menu()) return sets[SET_FIELD];
     if (!battle_busters()) return sets[SET_BATTLE];
     static _Thread_local Bound mix[NINPUTS];
     memcpy(mix, sets[SET_BATTLE], sizeof mix);
+    static int in_l = -2;
+    if (in_l == -2) in_l = input_by_id("L");
     for (int i = 0; i < NINPUTS; i++) {
         if (inputs[i].bit < 0) continue;  /* the sticks and our own (Run) keep the battle's */
         int none = 1;
         for (int k = 0; k < BIND_KEYS; k++) none &= mix[i].keys[k] == 0;
         if (!none) continue;
+        int any = 0;
         for (int k = 0; k < BIND_KEYS; k++) {
-            int key = sets[SET_FIELD][i].keys[k], used = 0;
-            for (int j = 0; key && !used && j < NINPUTS; j++)
-                for (int m = 0; m < BIND_KEYS; m++) used |= sets[SET_BATTLE][j].keys[m] == key;
-            mix[i].keys[k] = used ? 0 : key;
+            int key = sets[SET_FIELD][i].keys[k];
+            mix[i].keys[k] = battle_key_used(key) ? 0 : key;
+            any |= mix[i].keys[k] != 0;
         }
+        if (!any && i == in_l && !battle_key_used(SDL_SCANCODE_2)) mix[i].keys[0] = SDL_SCANCODE_2;
     }
     return mix;
 }
