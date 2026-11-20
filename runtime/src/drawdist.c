@@ -1,5 +1,5 @@
 /* DRAW DISTANCE (decision 0085; owner, 2026-11-20: "notoriously bad draw distance and model pop-in without fading:
- * trees, buildings, people just pop in"): two of the map's limits times 1, 4 or 10, live. It brings in lamps, plants
+ * trees, buildings, people just pop in"): the map parts' far clip times 1, 2, 4 or 10, live. It brings in lamps, plants
  * and signs from farther away; trees, buildings and people are on another rule, not found yet.
  *
  * 1. The map is built in pieces around the player. Its parameters (registered in f_5fe120 with the property system):
@@ -89,6 +89,11 @@ int yw4_hook_map_update(CPUState *ctx) {
                 (unsigned long long)map, r, h, d);
         logged = 1;
     }
+    /* Not scaled for players: a bigger build radius built a map piece that doesn't belong there (owner, 2026-11-20:
+     * a tall building in the middle of a Yo-kai World street at x2, "that building SHOULD NOT BE THERE"), and in the
+     * walk test it showed nothing farther. YW4_DRAW_DISTANCE_RADIUS=1 scales it too (tests). */
+    const char *er = getenv("YW4_DRAW_DISTANCE_RADIUS");
+    if (!er || *er != '1') return 0;
     float want = scaled(map, 0x278, r);
     if (want != r) memcpy((void *)(uintptr_t)(map + 0x278), &want, sizeof want);
     return 0;
