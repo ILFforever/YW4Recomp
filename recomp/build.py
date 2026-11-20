@@ -430,6 +430,10 @@ def main(argv: list[str] | None = None) -> int:
     total_bytes = sum(sizes.values()) or 1
     started: dict[Path, float] = {}
     took_s: dict[str, float] = {}
+    # the launcher's files panel (tools/yw4/progress.py, YW4_PROGRESS_FILES): each file's start and end, and how many
+    # wait for memory
+    progress.file_event("count", len(todo))
+    waiting = [0]
 
     def compile_timed(src: Path, obj: Path) -> str | None:
         need = compile_memory(cost[src])
@@ -439,16 +443,24 @@ def main(argv: list[str] | None = None) -> int:
                 now = free_memory()
                 if in_use[0] + need <= budget and (now is None or need <= now / 1e9 - RESERVE_GB):
                     break
-                waited = True
+                if not waited:
+                    waited = True
+                    waiting[0] += 1
+                    progress.file_event("wait", waiting[0])
                 mem_lock.wait(timeout=2)
+            if waited:
+                waiting[0] -= 1
+                progress.file_event("wait", waiting[0])
             held[0] += waited
             in_use[0] += need
         try:
             started[src] = time.time()
+            progress.file_event("start", obj.stem, round(cost[src]), src.name)
             r = compile_one(cc, src, obj, includes)
             took_s[src.name] = round(time.time() - started[src], 1)
             return r
         finally:
+            progress.file_event("done", obj.stem)
             with mem_lock:
                 in_use[0] -= need
                 mem_lock.notify_all()

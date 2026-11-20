@@ -11,10 +11,30 @@ from __future__ import annotations
 
 import os
 import sys
+import threading
 import time
 
 _on = os.environ.get("YW4_PROGRESS") == "1"
 _last: dict[str, float] = {}
+# YW4_PROGRESS_FILES=1 (a launcher that shows the files compiling, 1.6 and later): recomp/build.py also prints
+#     @file count <n>                        the files it will compile
+#     @file start <key> <seconds> <name>     one starts: <key> its object (unique), <seconds> its usual time, <name> the source
+#     @file done <key>
+#     @file wait <n>                         how many wait for free memory now (when that changes)
+# A separate switch, not YW4_PROGRESS=2: a launcher before it would show these lines in its log, and game code before
+# it would read "2" as no progress at all.
+_files_on = _on and os.environ.get("YW4_PROGRESS_FILES") == "1"
+_write = threading.Lock()  # one line at a time: the compile threads report together
+
+
+def file_event(*parts: object) -> None:
+    """One @file line (only with YW4_PROGRESS_FILES=1), written whole."""
+    if not _files_on:
+        return
+    line = "@file " + " ".join(str(p) for p in parts) + "\n"
+    with _write:
+        sys.stdout.write(line)
+        sys.stdout.flush()
 
 
 def report(step: str, done: int, total: int, what: str = "", every: float = 0.0) -> None:
@@ -26,4 +46,6 @@ def report(step: str, done: int, total: int, what: str = "", every: float = 0.0)
     if every and done < total and now - _last.get(step, 0.0) < every:
         return
     _last[step] = now
-    print(f"@progress {step} {done} {total} {what}".rstrip(), flush=True, file=sys.stdout)
+    with _write:
+        sys.stdout.write(f"@progress {step} {done} {total} {what}".rstrip() + "\n")
+        sys.stdout.flush()
