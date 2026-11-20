@@ -1735,14 +1735,37 @@ static int pk_draw(VkImage dst, uint32_t index, const uint8_t *px, uint32_t bw, 
     return 0;
 }
 
-/* F2's quick look: the running picture behind its card blurred, cheaply: copied down to an eighth of its size and
- * back up with linear filtering, two image copies a frame. dst is in TRANSFER_DST and stays so. */
+/* F2's quick look: the running picture behind its card blurred. It is shrunk in steps (a half, a quarter, an eighth)
+ * and grown back the same way. Each step is one linear blit, which averages a 2x2 block of texels; three steps blur
+ * more evenly than one jump to an eighth, which left blocks along the card's edges. The images are small after the
+ * first step, so the cost stays low. dst is in TRANSFER_DST and stays so. */
+#define PB_LEVELS 3
 static struct {
     VkImage img;
     VkDeviceMemory mem;
     uint32_t w, h;
-    VkFormat format;
-} pb;
+} pb[PB_LEVELS];
+static VkFormat pb_format;
+
+static void pb_reset(void) {
+    vkDeviceWaitIdle(vk.device);
+    for (int i = 0; i < PB_LEVELS; i++) {  /* destroying or freeing a null handle does nothing */
+        vkDestroyImage(vk.device, pb[i].img, NULL);
+        vkFreeMemory(vk.device, pb[i].mem, NULL);
+    }
+    memset(pb, 0, sizeof pb);
+}
+
+/* One linear blit: a region of src (in TRANSFER_SRC) onto a region of to (in TRANSFER_DST). */
+static void pb_blit(VkImage src, int32_t sx, int32_t sy, uint32_t sw, uint32_t sh, VkImage to, int32_t tx, int32_t ty,
+                    uint32_t tw, uint32_t th) {
+    VkImageBlit b = {.srcSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1},
+                     .srcOffsets = {{sx, sy, 0}, {sx + (int32_t)sw, sy + (int32_t)sh, 1}},
+                     .dstSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1},
+                     .dstOffsets = {{tx, ty, 0}, {tx + (int32_t)tw, ty + (int32_t)th, 1}}};
+    vkCmdBlitImage(cmd, src, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, to, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &b,
+                   VK_FILTER_LINEAR);
+}
 
 static void peek_blur(VkImage dst, int32_t x0, int32_t y0, uint32_t bw, uint32_t bh) {
     static int told;
@@ -1750,48 +1773,53 @@ static void peek_blur(VkImage dst, int32_t x0, int32_t y0, uint32_t bw, uint32_t
         fprintf(stderr, "yw4: window: quick look: %s\n",
                 swap_readable ? "blurring the picture behind it" : "no blur: the window's images can't be read");
     if (!swap_readable || bw < 64 || bh < 64) return;
-    uint32_t w = bw / 8, h = bh / 8;
-    if (pb.img && (pb.w != w || pb.h != h || pb.format != swap_format)) {
-        vkDeviceWaitIdle(vk.device);
-        vkDestroyImage(vk.device, pb.img, NULL), vkFreeMemory(vk.device, pb.mem, NULL);
-        memset(&pb, 0, sizeof pb);
-    }
-    if (!pb.img) {
+    uint32_t lw[PB_LEVELS], lh[PB_LEVELS];  /* half, quarter, eighth */
+    for (int i = 0; i < PB_LEVELS; i++) lw[i] = bw >> (i + 1), lh[i] = bh >> (i + 1);
+    if (pb[0].img && (pb[0].w != lw[0] || pb[0].h != lh[0] || pb_format != swap_format)) pb_reset();
+    for (int i = 0; i < PB_LEVELS; i++) {
+        if (pb[i].img) continue;
         VkImageCreateInfo ici = {.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO, .imageType = VK_IMAGE_TYPE_2D,
-                                 .format = swap_format, .extent = {w, h, 1}, .mipLevels = 1, .arrayLayers = 1,
+                                 .format = swap_format, .extent = {lw[i], lh[i], 1}, .mipLevels = 1, .arrayLayers = 1,
                                  .samples = VK_SAMPLE_COUNT_1_BIT, .tiling = VK_IMAGE_TILING_OPTIMAL,
                                  .usage = VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT};
-        if (vkCreateImage(vk.device, &ici, NULL, &pb.img) != VK_SUCCESS) return;
+        if (vkCreateImage(vk.device, &ici, NULL, &pb[i].img) != VK_SUCCESS) return;
         VkMemoryRequirements mr;
-        vkGetImageMemoryRequirements(vk.device, pb.img, &mr);
+        vkGetImageMemoryRequirements(vk.device, pb[i].img, &mr);
         VkMemoryAllocateInfo mai = {.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO, .allocationSize = mr.size,
                                     .memoryTypeIndex = vk_memory_type(mr.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT)};
-        if (vkAllocateMemory(vk.device, &mai, NULL, &pb.mem) != VK_SUCCESS) {
-            vkDestroyImage(vk.device, pb.img, NULL), pb.img = VK_NULL_HANDLE;
+        if (vkAllocateMemory(vk.device, &mai, NULL, &pb[i].mem) != VK_SUCCESS) {
+            vkDestroyImage(vk.device, pb[i].img, NULL), pb[i].img = VK_NULL_HANDLE;
             return;
         }
-        vkBindImageMemory(vk.device, pb.img, pb.mem, 0);
-        pb.w = w, pb.h = h, pb.format = swap_format;
+        vkBindImageMemory(vk.device, pb[i].img, pb[i].mem, 0);
+        pb[i].w = lw[i], pb[i].h = lh[i];
+        pb_format = swap_format;
     }
     barrier(dst, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, VK_ACCESS_TRANSFER_WRITE_BIT,
             VK_ACCESS_TRANSFER_READ_BIT);
-    barrier(pb.img, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 0, VK_ACCESS_TRANSFER_WRITE_BIT);
-    VkImageBlit down = {.srcSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1},
-                        .srcOffsets = {{x0, y0, 0}, {x0 + (int32_t)bw, y0 + (int32_t)bh, 1}},
-                        .dstSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1},
-                        .dstOffsets = {{0, 0, 0}, {(int32_t)w, (int32_t)h, 1}}};
-    vkCmdBlitImage(cmd, dst, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, pb.img, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &down,
-                   VK_FILTER_LINEAR);
-    barrier(pb.img, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
-            VK_ACCESS_TRANSFER_WRITE_BIT, VK_ACCESS_TRANSFER_READ_BIT);
+    VkImage prev = dst;  /* shrink: each level from the one before (the first from the picture) */
+    int32_t px = x0, py = y0;
+    uint32_t pw = bw, ph = bh;
+    for (int i = 0; i < PB_LEVELS; i++) {
+        barrier(pb[i].img, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 0, VK_ACCESS_TRANSFER_WRITE_BIT);
+        pb_blit(prev, px, py, pw, ph, pb[i].img, 0, 0, lw[i], lh[i]);
+        barrier(pb[i].img, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+                VK_ACCESS_TRANSFER_WRITE_BIT, VK_ACCESS_TRANSFER_READ_BIT);
+        prev = pb[i].img, px = py = 0, pw = lw[i], ph = lh[i];
+    }
     barrier(dst, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_ACCESS_TRANSFER_READ_BIT,
             VK_ACCESS_TRANSFER_WRITE_BIT);
-    VkImageBlit up = {.srcSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1},
-                      .srcOffsets = {{0, 0, 0}, {(int32_t)w, (int32_t)h, 1}},
-                      .dstSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1},
-                      .dstOffsets = {{x0, y0, 0}, {x0 + (int32_t)bw, y0 + (int32_t)bh, 1}}};
-    vkCmdBlitImage(cmd, pb.img, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, dst, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &up,
-                   VK_FILTER_LINEAR);
+    for (int i = PB_LEVELS - 1; i >= 0; i--) {  /* grow back: the eighth into the quarter, the quarter into the half, the half onto the picture */
+        if (i) {
+            barrier(pb[i - 1].img, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+                    VK_ACCESS_TRANSFER_READ_BIT, VK_ACCESS_TRANSFER_WRITE_BIT);
+            pb_blit(pb[i].img, 0, 0, lw[i], lh[i], pb[i - 1].img, 0, 0, lw[i - 1], lh[i - 1]);
+            barrier(pb[i - 1].img, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+                    VK_ACCESS_TRANSFER_WRITE_BIT, VK_ACCESS_TRANSFER_READ_BIT);
+        } else {
+            pb_blit(pb[i].img, 0, 0, lw[i], lh[i], dst, x0, y0, bw, bh);
+        }
+    }
     barrier(dst, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_ACCESS_TRANSFER_WRITE_BIT,
             VK_ACCESS_TRANSFER_WRITE_BIT);
 }
