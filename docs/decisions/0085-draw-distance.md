@@ -35,9 +35,9 @@ Ruled out on the way: `m_fDrawableAreaRange` (map icons), `popupFarDist` (UI nam
 
 ## Decision
 
-DRAW DISTANCE (Detail): DEFAULT (the game's), FAR (x4, the default, owner's pick: "x4 is a good mix, x10 is
+DRAW DISTANCE (Detail): DEFAULT (the game's), MEDIUM (x2), FAR (x4, the default, owner's pick: "x4 is a good mix, x10 is
 overkill"), VERY FAR (x10). drawdist.c's hooks multiply both limits, remembering each object's own value so a change
-applies to it and a new map's values are taken as they come; live. `YW4_DRAW_DISTANCE` = 1 / 4 / 10.
+applies to it and a new map's values are taken as they come; live. `YW4_DRAW_DISTANCE` = 1 / 2 / 4 / 10.
 
 At FAR, in the owner's Yo-kai World street, a potted plant on the temple steps, two street lamps and small details at
 the end of the street show that the game drew only from close by (owner's F12 shots, 2026-11-20).

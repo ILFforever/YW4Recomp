@@ -23,9 +23,9 @@
 
 #include "yw4rt.h"
 
-/* DRAW DISTANCE (Detail): DEFAULT, FAR (the default, owner's pick 2026-11-20: "x4 is a good mix, x10 is overkill"),
- * VERY FAR. A saved 2 (the test row's x2) reads as DEFAULT. */
-static const float factors[] = {1, 4, 10};
+/* DRAW DISTANCE (Detail): DEFAULT, MEDIUM (x2, owner: "where is my 2x"), FAR (x4, the default, owner's pick
+ * 2026-11-20: "x4 is a good mix, x10 is overkill"), VERY FAR (x10). */
+static const float factors[] = {1, 2, 4, 10};
 enum { NLEVELS = sizeof factors / sizeof *factors };
 static int level = -1;
 

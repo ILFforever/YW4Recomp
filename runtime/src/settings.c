@@ -422,10 +422,11 @@ static const Setting player[] = {
      /* (drawdist.c: the map parts' far clip and the map's build radius, times this; the owner's walk on an RTX 4070
       * laptop, 2026-11-20: 52.7 / 51.7 / 52.9 fps, no slow frames: free) */
      "HOW FAR AWAY LAMPS, PLANTS, SIGNS AND OTHER SMALL THINGS ARE DRAWN. THE SWITCH STOPS AT A SHORT DISTANCE, SO THEY "
-     "POP IN AS YOU WALK UP.",
-     {"DEFAULT", "FAR", "VERY FAR"},
-     {"THE SWITCH'S DEFAULT: THEY POP IN CLOSE BY", "FOUR TIMES AS FAR (RECOMMENDED)", "TEN TIMES AS FAR"}, 3,
-     drawdist_index, drawdist_cycle, "YW4_DRAW_DISTANCE", {"1", "4", "10"}},
+     "POP IN AS YOU WALK UP. NO NOTICEABLE COST.",
+     {"DEFAULT", "MEDIUM", "FAR", "VERY FAR"},
+     {"THE SWITCH'S DEFAULT: THEY POP IN CLOSE BY", "TWICE AS FAR", "FOUR TIMES AS FAR (RECOMMENDED)",
+      "TEN TIMES AS FAR"}, 4,
+     drawdist_index, drawdist_cycle, "YW4_DRAW_DISTANCE", {"1", "2", "4", "10"}},
     {"SHADOWS", "SHADOW MAP",
      "HOW DETAILED SHADOWS ARE. BIGGER IS SHARPER, MOST OF ALL FAR FROM THE CAMERA.",
      {"1024", "2048", "4096"},
