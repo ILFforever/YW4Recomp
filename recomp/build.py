@@ -186,6 +186,9 @@ def free_memory() -> int | None:
     return None
 
 
+RESERVE_GB = 1.0  # memory a compile never starts into: left for the rest of the PC
+
+
 def compile_memory(seconds: float) -> float:
     """A compiler's peak memory (GB) for a file that takes `seconds`: it grows with the file. Measured 2026-11-20 with
     zig and gcc: main_351 (194 s here) 0.8-1.0 GB, an ordinary generated file 0.15-0.22 GB."""
@@ -410,10 +413,12 @@ def main(argv: list[str] | None = None) -> int:
     todo.sort(key=lambda t: cost[t[0]], reverse=True)
     # Memory: started slowest first, a 12-thread PC compiled its 12 heaviest files at once (~1 GB each), and a 7.5 GB
     # Linux PC without swap froze for 20 minutes (2026-11-20). A file starts only while the memory estimates of the files
-    # compiling fit in 80% of what was free at the start; one always runs. The light files still run args.jobs at once.
+    # compiling fit in 80% of what was free at the start, and its own estimate in what is free now less RESERVE_GB (the
+    # player opened something big meanwhile: the browser, the game); one always runs. A file held back looks again every
+    # 2 s (memory others free comes with no signal). The light files still run args.jobs at once.
     free = free_memory()
     budget = free * 0.8 / 1e9 if free else float("inf")
-    mem_lock, in_use = threading.Condition(), [0.0]
+    mem_lock, in_use, held = threading.Condition(), [0.0], [0]
     t0 = time.time()
     print(f"compiling {len(todo)} of {len(objs)} files with {Path(cc).name} ({args.jobs} jobs"
           + (f", within {budget:.1f} GB of memory)" if free else ")"))
@@ -429,8 +434,14 @@ def main(argv: list[str] | None = None) -> int:
     def compile_timed(src: Path, obj: Path) -> str | None:
         need = compile_memory(cost[src])
         with mem_lock:
-            while in_use[0] > 0 and in_use[0] + need > budget:
-                mem_lock.wait()
+            waited = False
+            while in_use[0] > 0:
+                now = free_memory()
+                if in_use[0] + need <= budget and (now is None or need <= now / 1e9 - RESERVE_GB):
+                    break
+                waited = True
+                mem_lock.wait(timeout=2)
+            held[0] += waited
             in_use[0] += need
         try:
             started[src] = time.time()
@@ -467,7 +478,8 @@ def main(argv: list[str] | None = None) -> int:
                 print("still compiling: " + ", ".join(f"{n} ({took(s)})" for s, n in running[:6]), flush=True)
                 quiet_since = now
     times_file.write_text(json.dumps({**load_times(times_file), **took_s}, indent=0, sort_keys=True) + "\n")
-    print(f"compiled in {time.time() - t0:.0f} s", flush=True)
+    print(f"compiled in {time.time() - t0:.0f} s"
+          + (f" ({held[0]} files waited for memory)" if held[0] else ""), flush=True)
     if errors:
         print("\n".join(errors), file=sys.stderr)
         print(f"{len(errors)} file(s) failed", file=sys.stderr)
