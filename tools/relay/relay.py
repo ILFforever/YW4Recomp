@@ -50,7 +50,7 @@ PROTOCOL = 3          # 2: PING / PONG heartbeats; 3: game packets over UDP (a t
 # PACKET: the TCP PACKET's payload. A player's packets go to it by UDP while it has been heard from that way lately.
 UDP_BIND, UDP_PACKET = 1, 8
 UDP_STALE = 10.0      # s without a datagram from a game: its packets go by TCP again
-UDP_MAX = 1200        # payload bytes at most by UDP (no IP fragments); bigger go by TCP
+UDP_MAX = 1400        # payload bytes at most by UDP: + 21 of ours + 28 of IP and UDP = 1449, under a home line's 1492 (no IP fragments); bigger go by TCP. Was 1200: a third of a mission's packets went by TCP (2026-11-20)
 NETINFO = 0x480
 LDN = 0x50            # LdnNetworkInfo inside NetworkInfo
 NODES = LDN + 0x18    # 8 NodeInfo of 0x40

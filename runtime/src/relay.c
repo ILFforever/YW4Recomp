@@ -44,7 +44,7 @@ static int64_t last_rx;                     /* when a frame last came from the r
  * welcome brings a token; the game's datagrams start with it. BIND (with the heartbeat, every 3 s) tells the relay
  * where the game is through its home router and keeps that open; the relay's answer says UDP gets through, and only
  * then do packets go that way. No UDP from the relay for 10 s: TCP again. Control (rooms, joining) stays on TCP. */
-enum { UDP_BIND = 1, UDP_PACKET = 8, UDP_MAX = 1200 };
+enum { UDP_BIND = 1, UDP_PACKET = 8, UDP_MAX = 1400 };  /* 1400 + 21 + 28 = 1449 bytes: under 1492, no fragments */
 static RSock usock = RBAD;                  /* the UDP side, connected to the relay (lock) */
 static uint8_t udp_token[8];
 static int udp_ok;                          /* the relay answered over UDP lately: packets go that way */
