@@ -63,13 +63,47 @@ static long answer_len;
  *           activity: Ark Swap / Blasters public (empty: the public lobby) or private (YW4_SWAP_CODE /
  *           YW4_BLASTERS_CODE when YW4_SWAP_PRIVATE / YW4_BLASTERS_PRIVATE is 1)
  *   Local:  YW4_RELAY (a relay on the home network, or none: a Switch alone in its room), room code YW4_ROOM */
-#define DEFAULT_ONLINE_SERVER "129.153.179.140:41230" /* Oracle Cloud, US East (memory: online-play-2026-11-19) */
+#define DEFAULT_ONLINE_SERVER "yw4-us.duckdns.org:41230" /* Oracle Cloud, US East (memory: online-play-2026-11-19) */
 static int online = -1;                               /* the menus' last choice: 1 Online, 0 Local, -1 none yet */
 static int activity;                                  /* RELAY_SWAP or RELAY_BLASTERS: whose room settings */
 
+/* Our servers by name (DuckDNS, 2026-11-20, owner: so a server can move to another machine without a game update),
+ * each with the address it had when this build was made: a name that can't be looked up (the DNS service down, no
+ * DNS at all) is tried at that address. Settings saved before the names hold the address: it means the name. */
+static const struct { const char *host, *ip; } known[] = {
+    {"yw4-us.duckdns.org", "129.153.179.140"},  /* US East (Ashburn) */
+    {"yw4-sg.duckdns.org", "161.118.234.155"},  /* Singapore */
+};
+
+/* host:port's address for a socket of this type: the name looked up, else its built-in address (0, or -1) */
+static int lookup(const char *host, const char *port, int socktype, struct addrinfo **res) {
+    struct addrinfo hints = {0};
+    hints.ai_family = AF_UNSPEC, hints.ai_socktype = socktype;
+    *res = NULL;
+    if (!getaddrinfo(host, port, &hints, res) && *res) return 0;
+    for (size_t i = 0; i < sizeof known / sizeof known[0]; i++)
+        if (!strcmp(host, known[i].host) && !getaddrinfo(known[i].ip, port, &hints, res) && *res) {
+            fprintf(stderr, "yw4: relay: %s can't be looked up: its built-in address %s\n", host, known[i].ip);
+            return 0;
+        }
+    return -1;
+}
+
 static const char *target(void) {
     const char *e;
-    if (online == 1) return (e = getenv("YW4_ONLINE_SERVER")) && *e ? e : DEFAULT_ONLINE_SERVER;
+    if (online == 1) {
+        e = getenv("YW4_ONLINE_SERVER");
+        if (!e || !*e) return DEFAULT_ONLINE_SERVER;
+        static char named[96];  /* an address saved before the names: its name */
+        for (size_t i = 0; i < sizeof known / sizeof known[0]; i++) {
+            size_t n = strlen(known[i].ip);
+            if (!strncmp(e, known[i].ip, n) && (e[n] == ':' || !e[n])) {
+                snprintf(named, sizeof named, "%s%s", known[i].host, e + n);
+                return named;
+            }
+        }
+        return e;
+    }
     return (e = getenv("YW4_RELAY")) && *e ? e : NULL;
 }
 
@@ -345,10 +379,8 @@ static int connect_locked(void) {
     const char *port = "41230";
     char *colon = strrchr(host, ':');
     if (colon) *colon = 0, port = colon + 1;
-    struct addrinfo hints = {0}, *res = NULL;
-    hints.ai_family = AF_UNSPEC;
-    hints.ai_socktype = SOCK_STREAM;
-    if (getaddrinfo(host, port, &hints, &res) || !res) {
+    struct addrinfo *res = NULL;
+    if (lookup(host, port, SOCK_STREAM, &res)) {
         fprintf(stderr, "yw4: relay: can't find %s\n", host);
         return -1;
     }
@@ -458,9 +490,8 @@ static int ping_once(const char *addr) {
     const char *port = "41230";
     char *colon = strrchr(host, ':');
     if (colon) *colon = 0, port = colon + 1;
-    struct addrinfo hints = {0}, *res = NULL;
-    hints.ai_family = AF_UNSPEC, hints.ai_socktype = SOCK_STREAM;
-    if (getaddrinfo(host, port, &hints, &res) || !res) return -2;
+    struct addrinfo *res = NULL;
+    if (lookup(host, port, SOCK_STREAM, &res)) return -2;
     RSock s = socket(res->ai_family, res->ai_socktype, res->ai_protocol);
     int ms = -2;
     if (s != RBAD && !connect(s, res->ai_addr, (int)res->ai_addrlen)) {

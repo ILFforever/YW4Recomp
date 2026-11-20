@@ -221,12 +221,14 @@ static void player_name_set(const char *name) {
 }
 static void player_name_edit(void) { gamemenu_name_edit("Your name when playing together", 10, "Player", player_name(), player_name_set); }
 
-/* the server: ours, by region (the relay's address; tools/relay/setup_server.sh) */
-static const char *const servers[] = {"129.153.179.140:41230", "161.118.234.155:41230"};
+/* the server: ours, by region, by name (relay.c: each name falls back to its built-in address; the names so a server
+ * can move without a game update, 2026-11-20). Settings saved before the names hold the address: the same server. */
+static const char *const servers[] = {"yw4-us.duckdns.org:41230", "yw4-sg.duckdns.org:41230"};
+static const char *const servers_before[] = {"129.153.179.140:41230", "161.118.234.155:41230"};
 static int server_index(void) {
     const char *v = getenv("YW4_ONLINE_SERVER");
     for (int i = 0; v && i < 2; i++)
-        if (!strcmp(v, servers[i])) return i;
+        if (!strcmp(v, servers[i]) || !strcmp(v, servers_before[i])) return i;
     return 0;
 }
 static void server_cycle(void) { online_env("YW4_ONLINE_SERVER", servers[(server_index() + 1) % 2]); }
@@ -288,7 +290,7 @@ static const Setting player[] = {
      "OUR SERVER FOR THE GAME'S ONLINE BUTTON (ARK SWAP AND BLASTERS). PICK THE ONE NEAREST YOU: PLAYERS ONLY MEET "
      "OTHERS ON THE SAME SERVER.",
      {"US EAST", "SINGAPORE"}, {"NORTH AMERICA AND EUROPE", "ASIA AND OCEANIA"}, 2, server_index, server_cycle,
-     "YW4_ONLINE_SERVER", {"129.153.179.140:41230", "161.118.234.155:41230"}},
+     "YW4_ONLINE_SERVER", {"yw4-us.duckdns.org:41230", "yw4-sg.duckdns.org:41230"}},
     {"ONLINE PLAY", "ARK SWAP",
      "WHO SEES YOUR ARK SWAP ROOM WHEN YOU PRESS ONLINE. PUBLIC: EVERYONE ON THE SERVER. PRIVATE: ONLY PLAYERS WITH "
      "THE SAME ARK SWAP CODE.",

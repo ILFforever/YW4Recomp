@@ -12,7 +12,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-SERVERS = {"US East": "129.153.179.140", "Singapore": "161.118.234.155"}
+SERVERS = {"US East": "yw4-us.duckdns.org", "Singapore": "yw4-sg.duckdns.org"}  # names (runtime/src/relay.c)
 REMOTE = ("systemctl is-active yw4-relay; systemctl show yw4-relay -p ActiveEnterTimestamp --value; "
           "journalctl -u yw4-relay --since -15min --no-pager -o cat | grep -E 'status:|refused|dropped' | tail -3")
 

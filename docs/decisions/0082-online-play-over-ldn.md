@@ -135,8 +135,11 @@ first; `python tools/relay/test_relay.py` tests each):
   Micro (`tools/relay/loadtest.py`). Estimated: about 250 two-player mission rooms on one Singapore core, 20-25 on
   the Micro (its 1/8 CPU). The keepalive pauses while the machine's traffic shows people playing. Singapore is
   2 OCPU / 12 GB (the free maximum: 2 OCPU, 12 GB per account, home region only).
-- **Not yet:** encryption, rejoining a room after a short drop, deploys that keep rooms, server names instead of
-  IP addresses in the game (needed before moving a server), batched sends (`sendmmsg`).
+- **Server names** (2026-11-20): the game looks up `yw4-us.duckdns.org` and `yw4-sg.duckdns.org` (DuckDNS, the
+  owner's account; repointed with its update link and the account's token), so a server can move to another machine
+  without a game update. A name that can't be looked up falls back to the address built into the game (`known[]` in
+  `relay.c`), and settings saved with an address before the names mean the same server.
+- **Not yet:** encryption, rejoining a room after a short drop, deploys that keep rooms, batched sends (`sendmmsg`).
 
 ### In the game: the overlay's Online tab
 
