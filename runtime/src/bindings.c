@@ -220,10 +220,36 @@ static void migrate_hints(void) {
         }
 }
 
+/* Keys added to the starting keys after players have saved theirs (YW4_KEYS_VERSION in the settings file): version 2
+ * (2026-11-20) gives battles' D-pad left and right the keys 1 and 3 (the target switch through everyone). A battle
+ * set from an older file gets each in an empty slot, only where that key does nothing else in battles; once, so a
+ * player who takes it away later keeps it away. A battle set not in the file has the starting keys already. */
+static int keys_version, battle_from_file;
+static void migrate_target_keys(void) {
+    if (keys_version >= 2) return;
+    keys_version = 2;
+    if (!battle_from_file) return;
+    static const struct { const char *id; int key; } add[] = {{"DPAD_LEFT", SDL_SCANCODE_1}, {"DPAD_RIGHT", SDL_SCANCODE_3}};
+    for (size_t a = 0; a < sizeof add / sizeof add[0]; a++) {
+        int i = input_by_id(add[a].id), used = 0;
+        for (int j = 0; i >= 0 && j < NINPUTS; j++)
+            for (int m = 0; m < BIND_KEYS; m++) used |= sets[SET_BATTLE][j].keys[m] == add[a].key;
+        if (i < 0 || used) continue;
+        for (int k = 0; k < BIND_KEYS; k++)
+            if (!sets[SET_BATTLE][i].keys[k]) {
+                sets[SET_BATTLE][i].keys[k] = add[a].key;
+                fprintf(stderr, "yw4: controls: battles: %s gets the key %s too (the new starting keys)\n", add[a].id,
+                        add[a].key == SDL_SCANCODE_1 ? "1" : "3");
+                break;
+            }
+    }
+}
+
 /* After the settings file: a battle set it didn't have gets the battle set's starting keys. */
 static void sets_ready(void) {
     ready();
     migrate_hints();
+    migrate_target_keys();
     if (!battle_set_known) {
         battle_starting_set();
         battle_set_known = 1;
@@ -1677,6 +1703,10 @@ int bindings_load_line(const char *name, const char *value) {
         swheel_set_enabled(!strcmp(v, "1") || !strcmp(v, "ON") || !strcmp(v, "on"));
         return 1;
     }
+    if (!strcmp(name, "YW4_KEYS_VERSION")) {  /* migrate_target_keys */
+        keys_version = atoi(value);
+        return 1;
+    }
     if (!strcmp(name, "YW4_RUN_MODE")) {  /* run.c reads the environment itself, so it wins */
         if (!getenv(name)) run_mode_set(atoi(value));
         return 1;
@@ -1695,6 +1725,7 @@ int bindings_load_line(const char *name, const char *value) {
             battle_set_known = 1;
         }
         set = SET_BATTLE, name += 7;
+        battle_from_file = 1;  /* migrate_target_keys */
     }
     Bound *b = sets[set];
     for (int p = 0; p < BMOUSE_PARTS; p++)  /* the mouse's own lines: MOUSE_LEFT=Y, - for none */
@@ -1750,4 +1781,5 @@ void bindings_save(FILE *f) {
     fprintf(f, "YW4_SHORTCUT_WHEEL=%d\n", swheel_enabled());
     fprintf(f, "YW4_NINTENDO_LAYOUT=%d\n", nintendo_layout);
     fprintf(f, "YW4_RUN_MODE=%s\n", run_mode_save(run_mode()));
+    fprintf(f, "YW4_KEYS_VERSION=%d\n", keys_version);  /* migrate_target_keys: done for this file */
 }
