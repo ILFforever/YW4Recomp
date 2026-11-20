@@ -12,7 +12,7 @@
   <img alt="Phase 4: renderer" src="https://img.shields.io/badge/phase-4%20·%20renderer-6f42c1">
   <img alt="Platform: Windows, Linux" src="https://img.shields.io/badge/platform-Windows%20%7C%20Linux-informational">
   <img alt="Graphics" src="https://img.shields.io/badge/graphics-Vulkan-ac162c">
-  <img alt="Version: 2.0.0" src="https://img.shields.io/badge/version-2.0.0-blue">
+  <img alt="Version: 2.0.1" src="https://img.shields.io/badge/version-2.0.1-blue">
   <a href="https://buymeacoffee.com/ilfforever"><img alt="Buy Me a Coffee" src="https://img.shields.io/badge/Buy%20Me%20a%20Coffee-ilfforever-FFDD00?style=flat&logo=buy-me-a-coffee&logoColor=black"></a>
 </p>
 
@@ -48,7 +48,7 @@
 ## Status
 
 > [!TIP]
-> **2.0.0 is out (beta):** get the launcher, it installs the game and keeps it up to date.
+> **2.0.1 is out (beta):** get the launcher, it installs the game and keeps it up to date.
 > [**Download it here**](https://github.com/ILFforever/YW4Recomp/releases/latest), then see [How to play](#how-to-play).
 
 **Playable, but not finished.** Nobody has played the game from start to finish yet.

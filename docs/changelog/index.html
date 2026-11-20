@@ -243,6 +243,7 @@ try { const t = localStorage.getItem('yw4-theme'); if (t === 'dark' || t === 'li
     <h2>Releases</h2>
     <ol>
       <li><a href="#download"><span class="n">↓</span>Download</a></li>
+      <li><a href="#v2.0.1"><span class="n">11/20</span>Game 2.0.1</a></li>
       <li><a href="#launcher-v1.5.0"><span class="n">11/20</span>Launcher 1.5.0</a></li>
       <li><a href="#v2.0.0"><span class="n">11/20</span>Game 2.0.0</a></li>
       <li><a href="#v1.8.0"><span class="n">11/19</span>Game 1.8.0</a></li>
@@ -288,6 +289,23 @@ try { const t = localStorage.getItem('yw4-theme'); if (t === 'dark' || t === 'li
           <p>Every file and its checksum: <a href="https://github.com/ILFforever/YW4Recomp/releases">all releases on
             GitHub</a>. The "Game update" releases there are for the launcher; don't download those.</p>
         </div>
+      </div>
+    </article>
+
+    <article id="v2.0.1">
+      <div class="bar"><h2>Game 2.0.1</h2><span class="cat">Game · 2026-11-20</span></div>
+      <div class="body prose notes">
+<p class="how">The launcher gets it for you: <b>Update</b> on the Play screen rebuilds the game in a few minutes, and the version before stays playable if anything goes wrong.</p>
+<h4>Fixes</h4>
+<ul><li>
+<b>Linux: Fixed missing text on Zig install.</b> On PCs where the launcher downloads its own compiler (SteamOS, Bazzite, Ubuntu 24.04 and others), potentially no menus, dialogue or title logo showed.
+</li><li>
+<b>Linux: install folders with a space</b> no longer fail the AMD FSR step.
+</li><li>
+<b>Builds stay within the PC's memory,</b> build now compiles as many files at once as the free memory allows, so PCs with little memory no longer freeze while building, and PCs with plenty build as fast as before.
+</li><li>
+<b>Linux: faster maths with the downloaded compiler.</b> Games built with it thought the CPU had no FMA3 and ran those calculations the slow way.
+</li></ul>
       </div>
     </article>
 
