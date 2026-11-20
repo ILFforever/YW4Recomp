@@ -79,6 +79,11 @@ Goal: understand what we're dealing with before writing a recompiler.
 - Check before and after publishing: `gh release view launcher-vX.Y.Z --json assets --jq '.assets[].name'`.
 - Both platforms' files are built from the same commit (the tag's): `python launcher/package.py launcher --ref
   launcher-vX.Y.Z` on Windows, and the same on Linux/WSL for the AppImage (decision 0071).
+- **A launcher carries the game code of its commit** (`VERSION`). When that is a new game version, publish the game
+  release `vX.Y.Z` (with its notes) **before** the launcher: the launcher's "Game update X.Y.Z is ready" popup and
+  its Play screen "What's new" show that release's text from GitHub, since code that came with the launcher has no
+  notes.md (update.rs `release_notes`). Launcher 1.5.0 carried game 2.0.0 and showed no change log (2026-11-20).
+  After installing a new launcher, check the rebuild popup shows the game's change log.
 
 ## Disk space (C: filled up on 2026-11-07: 55 GB of test captures + 42 GB of Claude temp files)
 - Test captures (screenshots, frame dumps, A/B images, perf CSVs, logs) go in **one** folder per task under

@@ -74,15 +74,33 @@ pub fn game_code(own: &Path, install: &Path) -> GameCode {
     best
 }
 
-/// The Play screen's "What's new": the version and change log of the game code builds use, when it is a downloaded
-/// game update (its release's text, kept as notes.md). None for the launcher's own code: the launcher's list is
-/// about that one.
+/// The Play screen's "What's new": the version and change log of the game code builds use: a downloaded game
+/// update's notes.md, or for the launcher's own code its game release's text in the cached list. None without
+/// either: the launcher's own list then.
 #[tauri::command]
 pub fn game_news(app: tauri::AppHandle, install: String) -> Option<(String, String)> {
     let own = crate::buildrun::bundled_src(&app)?;
     let code = game_code(&own, Path::new(&install));
-    let notes = std::fs::read_to_string(code.dir.join("notes.md")).ok().filter(|n| !n.trim().is_empty())?;
+    let notes = std::fs::read_to_string(code.dir.join("notes.md")).ok().filter(|n| !n.trim().is_empty())
+        // the launcher's own code (it came with the launcher, never downloaded): its game release's text from the
+        // cached list, whatever its age; no request here, this command runs on the UI thread
+        .or_else(|| {
+            let c: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(cache_path()).ok()?).ok()?;
+            release_notes(&c["releases"], &code.version)
+        })?;
     Some((code.version, notes))
+}
+
+/// The text of game release v<version> in GitHub's list; None when it isn't there or is empty. For game code that
+/// came with the launcher: it has no notes.md (2026-11-20: launcher 1.5.0 carried 2.0.0, and the rebuild question
+/// showed no change log).
+fn release_notes(list: &serde_json::Value, version: &str) -> Option<String> {
+    let tag = format!("v{version}");
+    list.as_array()?.iter()
+        .find(|r| r["tag_name"].as_str() == Some(tag.as_str()) && !r["draft"].as_bool().unwrap_or(false))
+        .and_then(|r| r["body"].as_str())
+        .filter(|b| !b.trim().is_empty())
+        .map(str::to_string)
 }
 
 /// After a build: downloaded game code other than the one just used is no longer needed.
@@ -118,7 +136,7 @@ pub struct Updates {
     game: Option<GameOffer>,          // newer game code on GitHub
     launcher: Option<LauncherOffer>,  // a newer launcher on GitHub
     rebuild: Option<String>,          // game code on this PC newer than the game built from it: its version
-    rebuild_notes: String,            // its change log, kept from its release when it was downloaded
+    rebuild_notes: String,            // its change log: kept from its release when it was downloaded, else that release's text on GitHub
     offline: bool,                    // GitHub couldn't be asked (Settings' "Check now" says so)
 }
 
@@ -178,6 +196,9 @@ pub async fn check_updates(app: tauri::AppHandle, install: String, built: String
             }
         }
         let Some(list) = releases(fresh.unwrap_or(false)) else { u.offline = true; return u };
+        if let Some(v) = u.rebuild.as_deref().filter(|_| u.rebuild_notes.trim().is_empty()) {
+            u.rebuild_notes = release_notes(&list, v).unwrap_or_default();  // code that came with the launcher
+        }
         let (mut game, mut launcher): (Option<(Ver, GameOffer)>, Option<(Ver, LauncherOffer)>) = (None, None);
         for r in list.as_array().into_iter().flatten() {
             if r["draft"].as_bool().unwrap_or(false) || r["prerelease"].as_bool().unwrap_or(false) { continue; }
@@ -338,6 +359,19 @@ pub fn run_launcher_update(app: tauri::AppHandle) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn game_notes_for_code_that_came_with_the_launcher() {
+        let list = serde_json::json!([
+            { "tag_name": "launcher-v1.5.0", "body": "launcher text" },
+            { "tag_name": "v2.0.0", "draft": true, "body": "draft text" },
+            { "tag_name": "v2.0.0", "body": "### Playing online\n- **Ark Swap.**" },
+            { "tag_name": "v1.8.0", "body": "  " },
+        ]);
+        assert_eq!(release_notes(&list, "2.0.0").as_deref(), Some("### Playing online\n- **Ark Swap.**"));
+        assert_eq!(release_notes(&list, "1.8.0"), None);  // empty text: no notes box
+        assert_eq!(release_notes(&list, "1.5.0"), None);  // the launcher's own release isn't the game's
+    }
 
     #[test]
     fn launcher_installer_from_a_release() {
