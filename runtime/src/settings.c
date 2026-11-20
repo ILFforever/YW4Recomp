@@ -584,8 +584,10 @@ static int first_run;
  * YW4_ROOM: local play through a home-network relay (relay.c, ldn.c; decision 0082; the Online button's server and
  * codes are Online play rows). YW4_VRAM_GEOMETRY=0: vertices from the game's own memory, no copies in video memory
  * (issue #25: the minimap drawn over the screen while biking, RX 9070 XT only); YW4_IMAGE_BLOCKS=0: every image in
- * memory of its own, none sharing a block (the same report: two images overlapping in memory). */
-static const char *const by_hand[] = {"YW4_PERF", "YW4_RELAY", "YW4_ROOM", "YW4_VRAM_GEOMETRY", "YW4_IMAGE_BLOCKS"};
+ * memory of its own, none sharing a block (the same report: two images overlapping in memory). YW4_POOL_CACHED=0:
+ * the game's memory imported as before decision 0086 (the uncached type on AMD), to test that fix both ways. */
+static const char *const by_hand[] = {"YW4_PERF", "YW4_RELAY", "YW4_ROOM", "YW4_VRAM_GEOMETRY", "YW4_IMAGE_BLOCKS",
+                                      "YW4_POOL_CACHED"};
 enum { BY_HAND = sizeof by_hand / sizeof *by_hand };
 static char by_hand_value[BY_HAND][64];
 

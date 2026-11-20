@@ -94,3 +94,4 @@ lists later records that replace a record, or part of it.
 | 0083 | [Linux: our own compiler and glslang where the system has none](0083-linux-own-build-tools.md) | accepted | 2026-11-19 |  | `tools/yw4/system.py`, `tools/yw4/deps.py`, `tools/yw4/build_install.py`, `tools/yw4/fsr_linux.py`, `recomp/build.py` |
 | 0084 | [Saves: all or nothing, as on the Switch](0084-save-journal.md) | accepted | 2026-11-20 |  | `runtime/src/savejournal.c`, `runtime/src/savefs.c`, `runtime/src/ipc.c` |
 | 0085 | [Draw distance: the map's far clip, four times as far](0085-draw-distance.md) | accepted | 2026-11-20 |  | `runtime/src/drawdist.c`, `runtime/src/settings.c`, `recomp/overrides.toml` |
+| 0086 | [The game's memory pools imported as a cached memory type](0086-pool-memory-type.md) | accepted | 2026-11-21 |  | `runtime/src/gpu.c` |

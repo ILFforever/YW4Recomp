@@ -556,8 +556,26 @@ static void pool_import(NvnPool *p) {
     CHECK(vkCreateBuffer(vk.device, &bci, NULL, &g->buf));
     VkMemoryRequirements mr;
     vkGetBufferMemoryRequirements(vk.device, g->buf, &mr);
-    uint32_t type = vk_memory_type(mr.memoryTypeBits & hp.memoryTypeBits, 0);
+    /* A HOST_CACHED type first (issue #25). The game's memory is ordinary cached CPU memory, written through the
+     * CPU's caches. AMD's Windows driver lists an uncached system type (HOST_VISIBLE | HOST_COHERENT, write-combined)
+     * before its cached one, and allows both for an imported pointer; the GPU's reads of the uncached one don't look
+     * in the CPU's caches, so data the game had just written could be read stale: the minimap's quads, rewritten
+     * every frame, went blank while riding the bike on an RX 9070 XT. NVIDIA lists one coherent system type and RADV
+     * allows only its cached one, so neither changes. YW4_POOL_CACHED=0: the first allowed type, as before. */
+    uint32_t bits = mr.memoryTypeBits & hp.memoryTypeBits, type = UINT32_MAX;
+    static int cached = -1;
+    if (cached < 0) cached = !getenv("YW4_POOL_CACHED") || atoi(getenv("YW4_POOL_CACHED"));
+    if (cached) type = vk_memory_type(bits, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_CACHED_BIT);
+    if (type == UINT32_MAX) type = vk_memory_type(bits, 0);
     if (type == UINT32_MAX) gpu_stop("no memory type to import pool %#" PRIx64, p->storage);
+    static int logged;
+    if (!logged) {
+        VkPhysicalDeviceMemoryProperties mp;
+        vkGetPhysicalDeviceMemoryProperties(vk.gpu, &mp);
+        fprintf(stderr, "yw4: gpu: the game's memory imported as memory type %u (flags %#x; allowed types %#x)%s\n", type,
+                (unsigned)mp.memoryTypes[type].propertyFlags, bits, cached ? "" : " (YW4_POOL_CACHED=0)");
+        logged = 1;
+    }
     VkImportMemoryHostPointerInfoEXT imp = {.sType = VK_STRUCTURE_TYPE_IMPORT_MEMORY_HOST_POINTER_INFO_EXT,
                                             .handleType = VK_EXTERNAL_MEMORY_HANDLE_TYPE_HOST_ALLOCATION_BIT_EXT,
                                             .pHostPointer = host};
