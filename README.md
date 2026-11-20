@@ -50,21 +50,6 @@ to date. [The launcher, step by step →](https://ilfforever.github.io/YW4Recomp
 forest, the Yo-kai World, battles); most of the story in between hasn't been played through yet. Found a bug? Use
 **Report a bug** in the launcher or the game's overlay. [Known issues](docs/known-issues.md)
 
-## Online play
-
-The Switch plays online through Nintendo's servers, which a PC can't log in to. So the game's **Online** button
-plays through **our own servers** in the US East and Singapore instead, with no account needed:
-
-- **Ark Swap**: trade Yo-kai with a friend.
-- **Blasters**: teams of up to four play missions together.
-- Public rooms, or a private room code for friends only. The servers keep no IP addresses.
-
-<p align="center">
-  <img src="docs/screenshots/104-online-blasters-team.jpg" alt="Two games side by side in the same Blasters team, ready for a mission" width="820">
-</p>
-
-First built by [Quandiy](https://github.com/Quandiy) in their fork. [How to play online →](https://ilfforever.github.io/YW4Recomp/online/)
-
 ## Better than the Switch
 
 An emulator plays the game's own graphics commands, so the game still decides its resolution, its shadows, its
@@ -106,6 +91,21 @@ same work ([docs/baseline.md](docs/baseline.md)):
 
 On Linux, a tester plays at about 110-120 frames a second on an AMD RX 6600 XT.
 [More showcases and videos →](https://ilfforever.github.io/YW4Recomp/showcases/)
+
+## Online play
+
+The Switch plays online through Nintendo's servers, which a PC can't log in to. So the game's **Online** button
+plays through **our own servers** in the US East and Singapore instead, with no account needed:
+
+- **Ark Swap**: trade Yo-kai with a friend.
+- **Blasters**: teams of up to four play missions together.
+- Public rooms, or a private room code for friends only. The servers keep no IP addresses.
+
+<p align="center">
+  <img src="docs/screenshots/104-online-blasters-team.jpg" alt="Two games side by side in the same Blasters team, ready for a mission" width="820">
+</p>
+
+First built by [Quandiy](https://github.com/Quandiy) in their fork. [How to play online →](https://ilfforever.github.io/YW4Recomp/online/)
 
 ## Made for PC
 
