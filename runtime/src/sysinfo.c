@@ -8,6 +8,7 @@
 #include <string.h>
 
 #include "host.h"
+#include "yw4fp.h"  /* yw4_cpu_fma */
 
 #ifdef _WIN32
 #include <windows.h>
@@ -110,8 +111,7 @@ void yw4_sysinfo_dump(void) {
 #if defined(__x86_64__)
     /* The game's double-precision fused multiply-add is the CPU's FMA3 instruction where it has one, else musl's exact
      * software fma (yw4fp.h yw4_fma). CPUs before ~2013 and older Pentium/Celeron have none: the log says which. */
-    __builtin_cpu_init();
-    if (!__builtin_cpu_supports("fma"))
+    if (!yw4_cpu_fma())
         fprintf(stderr, "yw4: system: this CPU has no FMA3 (Intel before 2013, older Pentium and Celeron): the game's "
                         "fused multiply-add runs in software (exact, slower)\n");
 #endif

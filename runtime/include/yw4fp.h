@@ -33,13 +33,27 @@ __attribute__((target("fma"))) static inline double yw4_fma_hw(double a, double 
  * (third_party/musl/src/math/fma.c) instead of an illegal-instruction crash (review 2026-11-19).
  * YW4_FMA=soft forces it, so the instruction checks test it on any PC. Asked once per file. */
 double musl_fma(double, double, double);
+/* FMA3 straight from the CPU: CPUID leaf 1 (ECX bit 12 FMA, 27 OSXSAVE, 28 AVX) and the system saving the YMM
+ * registers (XGETBV 0: bits 1 and 2). Not __builtin_cpu_supports("fma"): the compiler's runtime answers that, and the
+ * one the downloaded compiler brings (zig, decision 0083) said no on an i5-11400, so the game ran the software fma
+ * there (2026-11-20). */
+static inline int yw4_cpu_fma(void) {
+    unsigned a, b, c, d;
+    __asm__ volatile("cpuid" : "=a"(a), "=b"(b), "=c"(c), "=d"(d) : "a"(0), "c"(0));
+    if (a < 1) return 0;
+    __asm__ volatile("cpuid" : "=a"(a), "=b"(b), "=c"(c), "=d"(d) : "a"(1), "c"(0));
+    if (!(c & 1u << 12) || !(c & 1u << 27) || !(c & 1u << 28)) return 0;
+    unsigned lo, hi;
+    __asm__ volatile("xgetbv" : "=a"(lo), "=d"(hi) : "c"(0));
+    (void)hi;
+    return (lo & 6) == 6;
+}
 static inline int yw4_fma_hw_ok(void) {
     static int ok = -1;
     int v = __atomic_load_n(&ok, __ATOMIC_RELAXED);
     if (__builtin_expect(v < 0, 0)) {
         const char *e = getenv("YW4_FMA");
-        __builtin_cpu_init();
-        v = !(e && !strcmp(e, "soft")) && __builtin_cpu_supports("fma");
+        v = !(e && !strcmp(e, "soft")) && yw4_cpu_fma();
         __atomic_store_n(&ok, v, __ATOMIC_RELAXED);
     }
     return v;
