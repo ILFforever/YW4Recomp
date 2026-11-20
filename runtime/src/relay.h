@@ -35,6 +35,8 @@ int ldn_active(void);
 /* Hosting (from OpenAccessPoint) or joined a room: the overlay's Online tab locks its server and room settings only
  * then (owner, 2026-11-20: the F4 hint pointed at a locked tab on the start screen and the room list). Any thread. */
 int ldn_in_room(void);
+/* A menu item was picked (OnDecideFocus, mousemenu.c): Blasters' top list's next row read may be Online (ldn.c) */
+void ldn_menu_decided(void);
 /* The Online tab's server or room settings changed: an open connection is closed, so the next request (the room
  * list's Update List) connects with them. Nothing while in a room (ldn_in_room): they reach the next connection. */
 void relay_settings_changed(void);

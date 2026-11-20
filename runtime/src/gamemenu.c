@@ -3245,8 +3245,7 @@ static void draw_online_page(const UiCanvas *c, const GameMenuInfo *in) {
         online_edit_box(c, ix + 56, iy, iw - 56, 48, !priv ? "Not needed" : *code ? code : "Not set", !priv || locked,
                         b ? ON_BLAST_CODE : ON_SWAP_CODE);
         iy += 48 + 12;
-        const char *note = b ? "Coming soon: Blasters' Online button isn't connected yet."
-                         : priv ? "Only players with the same code see your room."
+        const char *note = priv ? "Only players with the same code see your room."
                                 : "Everyone on the server sees your room.";
         ui_text(c, UI_GOTHIC_500, 14, ix, iy, 15 * 1.45f, note, MUTED);
     }

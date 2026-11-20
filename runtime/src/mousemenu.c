@@ -36,6 +36,7 @@
 
 #include "kernel.h"
 #include "mousemenu.h"
+#include "relay.h"
 #include "window.h"
 #include "yw4rt.h"
 
@@ -506,6 +507,7 @@ static void box_gone(const char *why) {
 
 /* OnDecideFocus (main+0x6c6ba0): an item or icon was chosen; a page or dialog may open over the screen. */
 int yw4_hook_menu_decide(CPUState *ctx) {
+    ldn_menu_decided();  /* with the mouse off too: Blasters' Online row (ldn.c yw4_hook_menu_row) */
     if (!enabled() || !ctx->x[0]) return 0;
     uint64_t menu = ctx->x[0];
     uint64_t vt = ld64(menu) - yw4_image_base;

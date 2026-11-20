@@ -492,7 +492,44 @@ void ldn_relay_closed(uint8_t reason) {
 int yw4_hook_net_mode(CPUState *c) {
     int on = (int)(c->x[8] & 1);  /* the byte about to be stored: 1 Online, 0 Local */
     LOG("the menu chose %s%s\n", on ? "Online" : "Local", on ? ": the game is told Local, our server instead" : "");
-    relay_choose(on, RELAY_SWAP);  /* the trade menu: Ark Swap (Blasters' menu: not hooked yet) */
+    relay_choose(on, RELAY_SWAP);  /* the trade menu: Ark Swap */
+    c->x[8] = 0;
+    return 0;
+}
+
+/* ---- Blasters' Online / Local choice. Unlike the trade's, busters_top takes its path from the row picked in its top
+ * list (control 0x4e6f00fb: 0 alone, 1 Online, 2 Local): Online logs in to Nintendo's servers from the script itself
+ * (funcLuaMenuNetworkCommand 0xe7eb7a7d, main+0x7163f0: ssl, then nifm asks for the internet), Local starts local
+ * play (0x8f9e9705). So the picked row is read where the script gets it (funcLuaMenuCommand 0x9b2aaf08, main+0x2ef9b0,
+ * the control's +0x13c handed over at main+0x2efa60): Online becomes Local there, the whole flow (its next menu, its
+ * boxes) is Blasters' Local, and the relay takes Online to our server with Blasters' room settings. Only the first
+ * read after a pick (OnDecideFocus: ldn_menu_decided): the others show the focused row's description.
+ * Found 2026-11-20 (YW4_NET_TRACE's stack of the failed Online, the script busters_top_7.00.19). */
+#define BLASTERS_TOP_LIST 0x4e6f00fbu
+static int decided;
+
+void ldn_menu_decided(void) { __atomic_store_n(&decided, 1, __ATOMIC_RELEASE); }
+
+int yw4_hook_menu_row(CPUState *c) {
+    if (!__atomic_exchange_n(&decided, 0, __ATOMIC_ACQ_REL)) return 0;
+    if ((uint32_t)c->x[21] != BLASTERS_TOP_LIST) return 0;
+    int64_t row = (int64_t)c->x[1];
+    if (row == 1) {
+        LOG("Blasters: the menu chose Online: the game is told Local, our server instead\n");
+        relay_choose(1, RELAY_BLASTERS);
+        c->x[1] = 2;
+    } else if (row == 2) {
+        LOG("Blasters: the menu chose Local\n");
+        relay_choose(0, RELAY_BLASTERS);
+    }
+    return 0;
+}
+
+/* ... and the matching's own Online flag (main+0x66aa80, script command 0x4a3223c4 through
+ * funcLuaMenuMatchingCommand, a byte to +0x239c as the trade's, strb at main+0x66aaf0): Local always. Found from the
+ * command table at main+0x14b4e68 ({function, id} pairs, the functions filled by relocations). */
+int yw4_hook_net_mode_blasters(CPUState *c) {
+    if (c->x[8] & 1) LOG("Blasters: the matching's Online flag: Local\n");
     c->x[8] = 0;
     return 0;
 }

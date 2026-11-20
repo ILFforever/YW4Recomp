@@ -403,6 +403,20 @@ why = "the trade menu storing the player's Online / Local choice (w8: 1 Online; 
 
 [[hook]]
 module = "main"
+offset = "0x66aa80"
+at = "0x66aaf0"
+native = "yw4_hook_net_mode_blasters"
+why = "Blasters' matching storing its Online flag (script command 0x4a3223c4 of funcLuaMenuMatchingCommand, busters_top; the same strb w8 to +0x239c as the trade's): always Local (runtime/src/ldn.c, decision 0082)"
+
+[[hook]]
+module = "main"
+offset = "0x2ef9b0"
+at = "0x2efa60"
+native = "yw4_hook_menu_row"
+why = "the menu script reading a control's picked row (funcLuaMenuCommand 0x9b2aaf08; w21 the control, x1 its +0x13c about to be handed to Lua): Blasters' top list's Online row is handed over as Local, once after a pick, and the relay takes Online to our server (runtime/src/ldn.c, decision 0082)"
+
+[[hook]]
+module = "main"
 offset = "0x8a7dc0"
 native = "yw4_hook_save_load"
 why = "save load job starter (x0 req: +0 u8 kind, +2 u16 slot): switches active slot to selected Diary slot; YW4_SAVE_SLOT_TEST=1 redirects manual slot 0 to slot 1 when YW4_DIARY_SLOTS=0 (runtime/src/savefs.c)"
