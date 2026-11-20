@@ -247,6 +247,7 @@ try { const t = localStorage.getItem('yw4-theme'); if (t === 'dark' || t === 'li
     <h2>Releases</h2>
     <ol>
       <li><a href="#download"><span class="n">↓</span>Download</a></li>
+      <li><a href="#v2.0.0"><span class="n">11/20</span>Game 2.0.0</a></li>
       <li><a href="#v1.8.0"><span class="n">11/19</span>Game 1.8.0</a></li>
       <li><a href="#launcher-v1.4.0"><span class="n">11/18</span>Launcher 1.4.0</a></li>
       <li><a href="#v1.7.0"><span class="n">11/18</span>Game 1.7.0</a></li>
@@ -290,6 +291,55 @@ try { const t = localStorage.getItem('yw4-theme'); if (t === 'dark' || t === 'li
           <p>Every file and its checksum: <a href="https://github.com/ILFforever/YW4Recomp/releases">all releases on
             GitHub</a>. The "Game update" releases there are for the launcher; don't download those.</p>
         </div>
+      </div>
+    </article>
+
+    <article id="v2.0.0">
+      <div class="bar"><h2>Game 2.0.0</h2><span class="cat">Game · 2026-11-20</span></div>
+      <div class="body prose notes">
+<p class="how">The launcher gets it for you: <b>Update</b> on the Play screen rebuilds the game in a few minutes, and the version before stays playable if anything goes wrong.</p>
+<h4>Playing online</h4>
+<ul><li>
+<b>Ark Swap and Blasters online.</b> The game's <b>Online</b> button now plays through servers of our own, in the US East and in Singapore, with no account to make. Trade Yo-kai with a friend in Ark Swap, or team up to four in Blasters and play missions together. More on the <a href="https://ilfforever.github.io/YW4Recomp/online/">site's Online page</a>.
+</li><li>
+<b>The Online tab.</b> A new tab in the overlay: pick the server you'd like to use, make Ark Swap and Blasters rooms <b>Public</b> or <b>Private</b> with a code, set your player name and Discord status. To play with a friend, both of you pick the same server. Codes are case-sensitive.
+</li><li>
+<b>Network settings from the room list.</b> The room list's hint bar shows <b>F4 Network Settings</b> (<b>R</b> on a controller) to change the server or the code without leaving.
+</li><li>
+<b>Mouse in Ark Swap.</b> Every screen of the trade works with the mouse: the room list, the Yo-kai list, the boxes and the result.
+</li><li>
+<b>Blasters on PC.</b> Your battle keys work in blaster missions, all menus are updated to support mouse and keyboard.
+</li><li>
+<b>Discord Rich Presence</b> shows your trade or your Blasters team and mission.
+</li><li>
+<b>Privacy:</b> our servers keep no player IP addresses, and their logs are deleted after 7 days.
+</li></ul>
+<h4>Also new</h4>
+<ul><li>
+<b>The game's manual.</b> The title screen's <b>Manual</b> button opens the game's original manual in your browser with some of our YW4Recomp theming.
+</li><li>
+<b>Battle keys.</b> by default <b>1</b> and <b>3</b> cycle the target through everyone in a fight, allies and enemies, the same as D-pad left and right; they're added to your keys if they're free. In Blasters missions, the map's bell is on <b>2</b>.
+</li><li>
+<b>Smaller corner cards in small windows.</b> The start-up cards shrink in windows under 1440 lines, and with HUD scale on auto, so does the performance HUD under 1080.
+</li><li>
+<b>Smoother blur behind the F2 quick look.</b> blur behind the controls card is rendered more evenly now, without the blocky edges along the card.
+</li></ul>
+<h4>Fixes</h4>
+<ul><li>
+<b>Safer saves.</b> A save is written whole or not at all, as on the Switch, so a crash or power cut mid-save can't leave a broken one.
+</li><li>
+<b>Older CPUs.</b> Processors without FMA3 no longer crash.
+</li><li>
+<b>Names.</b> Emoji in a name no longer turn into other characters in the save; Esc cancels the name popup where it has a Cancel.
+</li><li>
+<b>Windows:</b> folders with non-English names work, and settings are saved safely.
+</li><li>
+<b>Extract:</b> a base game that already contains an older update now builds.
+</li></ul>
+<h4>Linux</h4>
+<ul><li>
+<b>Install paths with a backslash</b> no longer stop the build (<a href="https://github.com/ILFforever/YW4Recomp/issues/22">#22</a>).
+</li></ul>
       </div>
     </article>
 
