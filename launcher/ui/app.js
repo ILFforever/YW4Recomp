@@ -613,7 +613,8 @@ async function startBuild(kind = build ? build.kind : 'first') {
   renderBuildBar();
   if (kind === 'first') await newestGameCode();
   options.install = await fixSlashFolder(options.install);
-  const paths = foundFrom ? { exefs: `${foundFrom}\\data\\exefs`, romfs: `${foundFrom}\\data\\romfs`, dlc: `${foundFrom}\\data\\dlc` } : chosen[mode];
+  const S = LINUX ? '/' : '\\';  // the system's separator (a \ on Linux is part of a folder's name)
+  const paths = foundFrom ? { exefs: `${foundFrom}${S}data${S}exefs`, romfs: `${foundFrom}${S}data${S}romfs`, dlc: `${foundFrom}${S}data${S}dlc` } : chosen[mode];
   const plan = { mode: foundFrom ? 'folders' : mode, paths, install: options.install, fsr: options.fsr, dlss: options.dlss && rtx, saves: options.saves, fresh: freshFiles };
   try {
     await invoke('start_build', { plan });
