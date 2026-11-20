@@ -202,11 +202,7 @@ try { const t = localStorage.getItem('yw4-theme'); if (t === 'dark' || t === 'li
     <nav class="nav" aria-label="Pages">
       <a href="../changelog/" aria-current="page">What's new</a>
       <a href="../compare/">Comparisons</a>
-      <a href="../showcases/">Showcases</a>
-      <a href="../launcher/">Launcher</a>
-      <a href="../overlay/">Overlay</a>
       <a href="../online/">Online</a>
-      <a href="../building/">Build it</a>
       <a href="../advanced/">Advanced</a>
     </nav>
     <div class="tools">
@@ -247,6 +243,7 @@ try { const t = localStorage.getItem('yw4-theme'); if (t === 'dark' || t === 'li
     <h2>Releases</h2>
     <ol>
       <li><a href="#download"><span class="n">↓</span>Download</a></li>
+      <li><a href="#launcher-v1.5.0"><span class="n">11/20</span>Launcher 1.5.0</a></li>
       <li><a href="#v2.0.0"><span class="n">11/20</span>Game 2.0.0</a></li>
       <li><a href="#v1.8.0"><span class="n">11/19</span>Game 1.8.0</a></li>
       <li><a href="#launcher-v1.4.0"><span class="n">11/18</span>Launcher 1.4.0</a></li>
@@ -271,18 +268,18 @@ try { const t = localStorage.getItem('yw4-theme'); if (t === 'dark' || t === 'li
 
   <main>
     <article id="download">
-      <div class="bar"><h2>Download</h2><span class="cat">Launcher <span data-ver>1.4.0</span></span></div>
+      <div class="bar"><h2>Download</h2><span class="cat">Launcher <span data-ver>1.5.0</span></span></div>
       <div class="body">
         <div class="dl">
-          <a data-asset="-setup.exe" href="https://github.com/ILFforever/YW4Recomp/releases/download/launcher-v1.4.0/YW4-Recomp-Launcher-1.4.0-setup.exe"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path fill="#0078d4" d="M2 4.6 10 3.5v7.8H2zM11 3.4 22 2v9.3H11zM2 12.4h8v7.8l-8-1.1zM11 12.4h11V22l-11-1.5z"/></svg><span class="os">Windows</span><b>Installer</b>
+          <a data-asset="-setup.exe" href="https://github.com/ILFforever/YW4Recomp/releases/download/launcher-v1.5.0/YW4-Recomp-Launcher-1.5.0-setup.exe"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path fill="#0078d4" d="M2 4.6 10 3.5v7.8H2zM11 3.4 22 2v9.3H11zM2 12.4h8v7.8l-8-1.1zM11 12.4h11V22l-11-1.5z"/></svg><span class="os">Windows</span><b>Installer</b>
             <span class="what">Installs the launcher, with Start menu and desktop shortcuts.</span>
-            <span class="file">YW4-Recomp-Launcher-<span data-ver>1.4.0</span>-setup.exe</span></a>
-          <a data-asset="-portable.zip" href="https://github.com/ILFforever/YW4Recomp/releases/download/launcher-v1.4.0/YW4-Recomp-Launcher-1.4.0-portable.zip"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path fill="#0078d4" d="M2 4.6 10 3.5v7.8H2zM11 3.4 22 2v9.3H11zM2 12.4h8v7.8l-8-1.1zM11 12.4h11V22l-11-1.5z"/></svg><span class="os">Windows</span><b>Portable zip</b>
+            <span class="file">YW4-Recomp-Launcher-<span data-ver>1.5.0</span>-setup.exe</span></a>
+          <a data-asset="-portable.zip" href="https://github.com/ILFforever/YW4Recomp/releases/download/launcher-v1.5.0/YW4-Recomp-Launcher-1.5.0-portable.zip"><svg class="ico" viewBox="0 0 24 24" aria-hidden="true"><path fill="#0078d4" d="M2 4.6 10 3.5v7.8H2zM11 3.4 22 2v9.3H11zM2 12.4h8v7.8l-8-1.1zM11 12.4h11V22l-11-1.5z"/></svg><span class="os">Windows</span><b>Portable zip</b>
             <span class="what">The same launcher with no installer: unpack it anywhere and run it.</span>
-            <span class="file">YW4-Recomp-Launcher-<span data-ver>1.4.0</span>-portable.zip</span></a>
-          <a class="linux" data-asset=".AppImage" href="https://github.com/ILFforever/YW4Recomp/releases/download/launcher-v1.4.0/YW4-Recomp-Launcher-1.4.0-x86_64.AppImage"><img class="ico tux" src="../img/tux.svg" alt="" width="24" height="28"><span class="os">Linux</span><b>AppImage</b>
+            <span class="file">YW4-Recomp-Launcher-<span data-ver>1.5.0</span>-portable.zip</span></a>
+          <a class="linux" data-asset=".AppImage" href="https://github.com/ILFforever/YW4Recomp/releases/download/launcher-v1.5.0/YW4-Recomp-Launcher-1.5.0-x86_64.AppImage"><img class="ico tux" src="../img/tux.svg" alt="" width="24" height="28"><span class="os">Linux</span><b>AppImage</b>
             <span class="what">Make it executable (<code>chmod +x</code>) and run it.</span>
-            <span class="file">YW4-Recomp-Launcher-<span data-ver>1.4.0</span>-x86_64.AppImage</span></a>
+            <span class="file">YW4-Recomp-Launcher-<span data-ver>1.5.0</span>-x86_64.AppImage</span></a>
         </div>
         <div class="prose">
           <p><b>Bring your own game:</b> nothing from the game comes with it. You need your own copy of
@@ -291,6 +288,38 @@ try { const t = localStorage.getItem('yw4-theme'); if (t === 'dark' || t === 'li
           <p>Every file and its checksum: <a href="https://github.com/ILFforever/YW4Recomp/releases">all releases on
             GitHub</a>. The "Game update" releases there are for the launcher; don't download those.</p>
         </div>
+      </div>
+    </article>
+
+    <article id="launcher-v1.5.0">
+      <div class="bar"><h2>Launcher 1.5.0</h2><span class="cat">Launcher · 2026-11-20</span></div>
+      <div class="body prose notes">
+<p class="how">The launcher offers its own updates; with the portable zip, download the new zip and unpack it over your folder.</p>
+<p>A launcher update: Settings can open before the first build, the launcher offers updates on the home screen before a game is built, and Check catches mixed-up game files before a build starts. It comes with game 2.0.0; if you already have an older launcher, press <b>Update</b> on the Play screen.</p>
+<h4>What's new</h4>
+<ul><li>
+<b>Settings before the first build.</b> Settings open right away, as one page with Look, Support, Updates and Find my game. Before, the gear was greyed out until the first build.
+</li><li>
+<b>The launcher's own update, offered early.</b> A newer launcher is offered on the home screen, so you can update before you build.
+</li><li>
+<b>Clearer Linux update.</b> The Linux offer names the AppImage.
+</li></ul>
+<h4>Fixes</h4>
+<ul><li>
+<b>Check catches mixed-up files.</b> Launcher checks if the same file is in both the base box and the update box, or update in the base box, or the base game in the update box.
+</li><li>
+<b>The game's change log.</b> The game update that comes with the launcher now shows its change log when it offers the rebuild.
+</li><li>
+<b>Delete originals is safer.</b> Only the ExeFS files are removed after unpacking, never anything else in your install.
+</li><li>
+<b>Install folder on Linux.</b> The folder picker adds <code>/YW4 Recomp</code>, not <code>\YW4 Recomp</code>.
+</li><li>
+<b>Paths with an apostrophe.</b> Paths with <code>'</code> in them now save correctly in the config file, and Locate keeps your keys folder.
+</li><li>
+<b>Step numbers in Happierre.</b> Minor css changes to improve readability.
+</li><li>
+<b>Windows.</b> Folders with non-English names work.
+</li></ul>
       </div>
     </article>
 
