@@ -470,6 +470,13 @@
           </div>
           <p class="now-line" id="build-now"></p>
         </div>
+        <!-- while compiling: the files compiling now (game code's @file lines; app.js filesPanel) -->
+        <div class="files-now" id="files-now" hidden>
+          <div class="files-head"><span><b>Compiling now</b> · <span class="count" id="files-at-once"></span></span>
+            <span class="count" id="files-done"></span></div>
+          <div id="files-slots"></div>
+          <div class="files-foot"><span id="files-more"></span><span class="wait" id="files-wait"></span></div>
+        </div>
         <button class="btn small" type="button" id="log-toggle" aria-expanded="false">Show details</button>
         <pre class="log" id="build-log" hidden></pre>
       </div>

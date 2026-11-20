@@ -606,6 +606,7 @@ async function startBuild(kind = build ? build.kind : 'first') {
   $('build-next').hidden = true;
   $('build-cancel').hidden = false;
   $('build-log').textContent = '';
+  filesStop();
   $('log-toggle').hidden = false;
   $('build-back').hidden = true;
   renderBuildSteps();
@@ -644,8 +645,80 @@ async function newestGameCode() {
   cancel.hidden = false;
 }
 
+// ---- The files compiling now (owner's design A2, 2026-11-20): the game code's @file lines (tools/yw4/progress.py)
+// while the build compiles. Four rows that keep their place: a file keeps its row until it is done, shows a check for
+// a moment, and the longest-running file not shown takes the row. Each row: the file, its bar, the time so far and the
+// estimated % (time over its usual time, 99% until it is done; gold past its usual time). The head: how many compile
+// at once and files done; the foot: how many more compile and how many wait for free memory (recomp/build.py's
+// budget). Game code before 2.0.2 sends no such lines: the panel never shows.
+const FILE_ROWS = 4, DONE_MS = 600;
+const compiling = { running: new Map(), slots: [], total: 0, done: 0, wait: 0, timer: 0 };
+function filesStop() {
+  clearInterval(compiling.timer);
+  compiling.timer = 0;
+  compiling.running.clear();
+  compiling.slots = [];
+  $('files-now').hidden = true;
+}
+function filesEvent(p) {
+  const now = Date.now();
+  if (p.kind === 'count') {
+    filesStop();
+    compiling.total = p.n, compiling.done = 0, compiling.wait = 0;
+    compiling.slots = Array.from({ length: FILE_ROWS }, () => null);
+    compiling.timer = setInterval(filesDraw, 250);
+    $('files-now').hidden = false;
+  } else if (p.kind === 'start') {
+    compiling.running.set(p.key, { name: p.name, usual: p.seconds, began: now });
+  } else if (p.kind === 'done') {
+    const f = compiling.running.get(p.key);
+    compiling.running.delete(p.key);
+    compiling.done += 1;
+    const s = compiling.slots.find((x) => x && x.file === f);
+    if (s) s.doneAt = now;
+  } else if (p.kind === 'wait') {
+    compiling.wait = p.n;
+  }
+}
+function mmss(s) { return `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, '0')}`; }
+function filesDraw() {
+  const now = Date.now();
+  compiling.slots = compiling.slots.map((s) => (s && s.doneAt && now - s.doneAt > DONE_MS ? null : s));
+  const shown = new Set(compiling.slots.filter(Boolean).map((s) => s.file));
+  const waiting = [...compiling.running.values()].filter((f) => !shown.has(f)).sort((a, b) => a.began - b.began);
+  compiling.slots = compiling.slots.map((s) => s || (waiting.length ? { file: waiting.shift() } : null));
+  const rows = compiling.slots.map((s) => {
+    const row = document.createElement('div');
+    row.className = 'file-slot';
+    const name = document.createElement('span'), track = document.createElement('span'), fill = document.createElement('span');
+    const time = document.createElement('span'), pc = document.createElement('span');
+    name.className = 'name', track.className = 'track', fill.className = 'fill', time.className = 'time', pc.className = 'pc';
+    track.append(fill);
+    row.append(name, track, time, pc);
+    if (!s) { row.classList.add('empty'); return row; }
+    const t = ((s.doneAt || now) - s.file.began) / 1000;
+    const p = s.doneAt ? 100 : s.file.usual > 0 ? Math.min(99, Math.floor((100 * t) / s.file.usual)) : 0;
+    if (s.doneAt) row.classList.add('done');
+    else if (s.file.usual > 0 && t > s.file.usual) row.classList.add('slow');
+    name.textContent = s.file.name;
+    fill.style.width = p + '%';
+    time.textContent = mmss(t);
+    pc.textContent = s.doneAt ? '✓' : p + '%';
+    row.title = s.doneAt ? `${s.file.name}: done in ${mmss(t)}`
+      : row.classList.contains('slow') ? `${s.file.name}: taking longer than usual` : `${s.file.name}: usually about ${mmss(s.file.usual)}`;
+    return row;
+  });
+  $('files-slots').replaceChildren(...rows);
+  $('files-at-once').textContent = `${compiling.running.size} at once`;
+  $('files-done').textContent = `${compiling.done.toLocaleString()} of ${compiling.total.toLocaleString()} files`;
+  const more = compiling.running.size - compiling.slots.filter((s) => s && !s.doneAt).length;
+  $('files-more').textContent = more > 0 ? `+ ${more} more compiling` : '';
+  $('files-wait').textContent = compiling.wait ? `${compiling.wait} waiting for free memory` : '';
+}
+
 function buildFinished({ ok, message }) {
   setBuildRunning(false);
+  filesStop();
   $('build-cancel').hidden = true;
   const next = $('build-next');
   next.hidden = false;
@@ -693,6 +766,7 @@ if (T && T.event) {
     if (!s) return;
     s.state = payload.state;
     if (payload.state === 'done') s.frac = 1;
+    if (payload.id === 'compile' && payload.state !== 'start') filesStop();  // the files panel is the compile step's
     renderBuildSteps();
     renderBuildBar();
   });
@@ -708,6 +782,7 @@ if (T && T.event) {
     $('build-now').textContent = nowText(payload, part);
     renderBuildBar();
   });
+  T.event.listen('build-file', ({ payload }) => filesEvent(payload));
   T.event.listen('build-log', ({ payload }) => logLine(payload));
   T.event.listen('build-done', ({ payload }) => buildFinished(payload));
 }
@@ -715,6 +790,8 @@ if (T && T.event) {
 $('log-toggle').addEventListener('click', () => {
   const log = $('build-log');
   log.hidden = !log.hidden;
+  // the details open: the files panel folds to its head and foot (style.css .build-left.details), the log has the files
+  document.querySelector('.build-left').classList.toggle('details', !log.hidden);
   $('log-toggle').textContent = log.hidden ? 'Show details' : 'Hide details';
   $('log-toggle').setAttribute('aria-expanded', String(!log.hidden));
 });

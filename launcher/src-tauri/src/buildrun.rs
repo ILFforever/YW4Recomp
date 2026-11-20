@@ -51,6 +51,25 @@ struct StepEvent { id: String, state: String }
 struct ProgressEvent { step: String, done: u64, total: u64, what: String }
 #[derive(Serialize, Clone)]
 struct DoneEvent { ok: bool, message: String }
+/// The game code's `@file` lines (tools/yw4/progress.py, YW4_PROGRESS_FILES): `kind` count / wait (`n`), start (`key`,
+/// its usual `seconds`, the source's `name`) or done (`key`). The build page's files panel draws from them.
+#[derive(Serialize, Clone)]
+struct FileEvent { kind: String, key: String, seconds: u64, name: String, n: u64 }
+
+fn file_event(rest: &str) -> FileEvent {
+    let mut it = rest.splitn(4, ' ');
+    let kind = it.next().unwrap_or("").to_string();
+    let a = it.next().unwrap_or("").to_string();
+    match kind.as_str() {
+        "count" | "wait" => FileEvent { n: a.parse().unwrap_or(0), kind, key: String::new(), seconds: 0, name: String::new() },
+        "start" => {
+            let seconds = it.next().and_then(|s| s.parse().ok()).unwrap_or(0);
+            let name = it.next().map(str::to_string).unwrap_or_else(|| a.clone());
+            FileEvent { kind, key: a, seconds, name, n: 0 }
+        }
+        _ => FileEvent { kind, key: a, seconds: 0, name: String::new(), n: 0 },
+    }
+}
 
 /// What runs the build (decision 0052). A download has builder\ next to the launcher (launcher/package.py): its own
 /// Python, the build code and tools, nothing taken from the PC. A launcher built with plain `cargo build` has no
@@ -189,7 +208,7 @@ fn python(app: &AppHandle, run: &Running, b: &Builder, cfg: &Path, module: &str,
     // step it starts): the bundled Python's ._pth file names no code folder, and a game update lives in its own.
     let mut cmd = crate::platform::command(&b.python);
     cmd.arg("-u").arg("-c").arg(BOOT).arg(&b.src).arg(module).args(args).current_dir(&b.src)
-        .env("YW4_CONFIG", cfg).env("YW4_PROGRESS", "1").env("PYTHONIOENCODING", "utf-8")
+        .env("YW4_CONFIG", cfg).env("YW4_PROGRESS", "1").env("YW4_PROGRESS_FILES", "1").env("PYTHONIOENCODING", "utf-8")
         .stdout(Stdio::piped()).stderr(Stdio::piped());
     platform::own_group(&mut cmd);  // Cancel ends the step and everything it started
     if b.tools.is_some() {
@@ -225,6 +244,10 @@ fn python(app: &AppHandle, run: &Running, b: &Builder, cfg: &Path, module: &str,
                 }
                 let _ = app.emit("build-steps", list);
             }
+            continue;
+        }
+        if let Some(rest) = line.strip_prefix("@file ") {
+            let _ = app.emit("build-file", file_event(rest));
             continue;
         }
         if let Some((id, state)) = line.strip_prefix("@step ").and_then(|r| r.split_once(' ')) {
@@ -400,8 +423,20 @@ pub fn cancel_build(app: AppHandle) {
 
 #[cfg(test)]
 mod tests {
-    use super::lit;
+    use super::{file_event, lit};
     use std::path::Path;
+
+    #[test]
+    fn file_lines_read() {
+        let s = file_event("start main_351 194 main_351.c");
+        assert_eq!((s.kind.as_str(), s.key.as_str(), s.seconds, s.name.as_str()), ("start", "main_351", 194, "main_351.c"));
+        let d = file_event("done rt_log");
+        assert_eq!((d.kind.as_str(), d.key.as_str()), ("done", "rt_log"));
+        assert_eq!(file_event("wait 3").n, 3);
+        assert_eq!(file_event("count 842").n, 842);
+        let odd = file_event("start musl_log 0 log file.c");  // a name with a space stays whole
+        assert_eq!(odd.name, "log file.c");
+    }
 
     #[test]
     fn lit_paths_read_back_as_written() {
