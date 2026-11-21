@@ -2510,6 +2510,7 @@ static void draw(VkCommandBuffer cb, GpuState *s, const CmdRec *r) {
         uint32_t stream = a >> 8 & 0x1F;
         k.attr[k.nattr++] = (VkVertexInputAttributeDescription){loc, stream, input_format(f, vs->inputs[loc], loc),
                                                                 a >> 13};
+        gpu_vertex_format_ok(k.attr[k.nattr - 1].format, "a game draw", loc);
         streams_used |= 1u << stream;
     }
     for (uint32_t i = 0; i < 16; i++) {

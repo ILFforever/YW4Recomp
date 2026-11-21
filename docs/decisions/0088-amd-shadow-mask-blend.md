@@ -56,4 +56,8 @@ What remains is run-to-run noise (idle animations). The 4070's result doesn't ch
 
 AMD's Windows driver supports no 3-component 8- or 16-bit vertex format (R8G8B8_*, R16G16B16_*), which NVIDIA
 supports and Mesa emulates; the game's formats are passed to Vulkan unchecked (gpu_draw.c `vertex_format`). Not
-this bug (the shadow maps were right), but undefined on AMD wherever the game uses one.
+this bug (the shadow maps were right), but undefined on AMD wherever the game uses one. Measured the same day with
+a check that logs each unsupported format once (`gpu_vertex_format_ok`, `yw4: gpu: vertex format N not supported
+for vertex input`), on the 780M: the town walk, the bamboo forest, the Yo-kai World, a battle and the opening hedge
+cutscene use none. Left as the check: a fix (the 4-component format and the fourth value ignored) only if a log
+ever shows one.

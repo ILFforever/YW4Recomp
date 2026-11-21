@@ -310,6 +310,24 @@ static void submit(VkCommandBuffer cb) {
     cur = NULL;
 }
 
+int gpu_vertex_format_ok(VkFormat f, const char *where, uint32_t loc) {
+    enum { KNOWN = 256 };
+    static int8_t ok[KNOWN];  /* 0 not asked yet, 1 supported, -1 not (logged) */
+    if (f == VK_FORMAT_UNDEFINED) return 1;
+    if ((unsigned)f >= KNOWN) return 1;  /* the extension formats: none of the game's */
+    int8_t v = __atomic_load_n(&ok[f], __ATOMIC_ACQUIRE);
+    if (!v) {
+        VkFormatProperties fp;
+        vkGetPhysicalDeviceFormatProperties(vk.gpu, f, &fp);
+        v = fp.bufferFeatures & VK_FORMAT_FEATURE_VERTEX_BUFFER_BIT ? 1 : -1;
+        int8_t unset = 0;
+        if (__atomic_compare_exchange_n(&ok[f], &unset, v, 0, __ATOMIC_ACQ_REL, __ATOMIC_ACQUIRE) && v < 0)
+            fprintf(stderr, "yw4: gpu: vertex format %d not supported for vertex input on this GPU (%s, location %u): "
+                    "undefined values there\n", (int)f, where, loc);
+    }
+    return v > 0;
+}
+
 void full_barrier(VkCommandBuffer cb) {
     VkMemoryBarrier mb = {.sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER,
                           .srcAccessMask = VK_ACCESS_MEMORY_WRITE_BIT,

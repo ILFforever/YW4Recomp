@@ -71,6 +71,10 @@ void gpu_passes_note(int what);  /* 1 rendering ended, 2 a texture uploaded */
 /* ---- gpu.c */
 
 void full_barrier(VkCommandBuffer cb);
+/* Is f usable as a vertex input on this GPU? Logs each one that isn't, once, with `where` and the location: AMD's
+ * Windows driver supports no 3-component 8- or 16-bit format for vertex input (NVIDIA all, Mesa emulates them),
+ * and the game's formats reach Vulkan as they are (decision 0088's "also found"). Any thread. */
+int gpu_vertex_format_ok(VkFormat f, const char *where, uint32_t loc);
 uint64_t gpu_frames(void);  /* frames presented so far */
 
 /* The imported pool buffer holding [addr, addr + size); 0 if no pool does. */

@@ -321,6 +321,7 @@ static VkPipeline pipeline(VkFormat depth, int kind, VkFormat uv, VkFormat wind)
         attr[2] = (VkVertexInputAttributeDescription){2, 0, VK_FORMAT_R16G16B16A16_UINT, 44};
     }
     uint32_t nattr = kind == KIND_SKINNED || kind_three(kind) ? 3 : kind_has_uv(kind) ? 2 : 1;
+    for (uint32_t i = 0; i < nattr; i++) gpu_vertex_format_ok(attr[i].format, vs_name[kind], i);
     VkPipelineVertexInputStateCreateInfo vi = {.sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO,
                                                .vertexBindingDescriptionCount = kind_three(kind) ? 3 : kind_has_uv(kind) ? 2 : 1,
                                                .pVertexBindingDescriptions = bind,
