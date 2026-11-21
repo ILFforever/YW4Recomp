@@ -281,6 +281,75 @@ void settings_online_code_edit(int blasters) { (blasters ? blasters_code_edit : 
 const char *settings_player_name(void) { return player_name(); }
 void settings_player_name_edit(void) { player_name_edit(); }
 
+/* ---- Display > Graphics card (window.h): Auto, then each card that can draw to the window. Kept in YW4_GPU ("auto"
+ * or the card's full name; any part of a name works by hand); the game picks its card when Vulkan starts, so a change
+ * applies at the next start. The row shows short names ("RTX 4070 Laptop GPU", "Radeon 780M"), the file the full one. */
+enum { VK_NAME_MAX = 256 };  /* VK_MAX_PHYSICAL_DEVICE_NAME_SIZE */
+static char gpu_shown[SETTINGS_MAX_OPTIONS][64], gpu_saved[SETTINGS_MAX_OPTIONS][VK_NAME_MAX];
+
+static const char *gpu_choice(void) {
+    const char *e = getenv("YW4_GPU");
+    return e && *e ? e : "auto";
+}
+
+static int gpu_card_index(void) {
+    const char *c = gpu_choice();
+    if (window_gpu_is_auto(c)) return 0;
+    int i = window_gpu_find(c);
+    return i < 0 || i + 1 >= SETTINGS_MAX_OPTIONS ? 0 : i + 1;
+}
+
+static int gpu_card_options(void) {
+    int n = window_gpu_count() + 1;
+    return n > SETTINGS_MAX_OPTIONS ? SETTINGS_MAX_OPTIONS : n;
+}
+
+/* A card's name without its maker's words: "NVIDIA GeForce RTX 4070 Laptop GPU" -> "RTX 4070 Laptop GPU",
+ * "AMD Radeon 780M Graphics" -> "Radeon 780M", "Intel(R) Arc(TM) Graphics" -> "Arc Graphics". */
+static void gpu_short_name(const char *full, char *out, size_t n) {
+    static const char *const drop[] = {"NVIDIA ", "GeForce ", "AMD ", "Intel(R) ", "(TM)", "(R)", " Graphics"};
+    char s[VK_NAME_MAX];
+    snprintf(s, sizeof s, "%s", full);
+    for (size_t d = 0; d < sizeof drop / sizeof *drop; d++) {
+        if (!strcmp(drop[d], " Graphics") && strstr(s, "Arc")) continue;  /* "Arc Graphics" is the name */
+        char *p;
+        while ((p = strstr(s, drop[d]))) memmove(p, p + strlen(drop[d]), strlen(p + strlen(drop[d])) + 1);
+    }
+    snprintf(out, n, "%s", *s ? s : full);
+}
+
+static void gpu_card_set(int k) {
+    int n = gpu_card_options();
+    k = ((k % n) + n) % n;
+    const char *v = k ? window_gpu_name(k - 1) : "auto";
+#ifdef _WIN32
+    _putenv_s("YW4_GPU", v);
+#else
+    setenv("YW4_GPU", v, 1);
+#endif
+    fprintf(stderr, "yw4: settings: graphics card %s (from the next start)\n", v);
+}
+static void gpu_card_cycle(void) { gpu_card_set(gpu_card_index() + 1); }
+static void gpu_card_step(int dir) { gpu_card_set(gpu_card_index() + dir); }
+static const char *gpu_card_disabled(void) { return window_gpu_count() < 2 ? "THIS PC HAS ONE GRAPHICS CARD" : NULL; }
+
+/* The row's names and notes from the cards found (fill_rows): Auto says which card it picks. */
+static void gpu_card_fill(SettingRow *r) {
+    int n = gpu_card_options(), used = window_gpu_used(), autopick = window_gpu_auto();
+    char name[64];
+    for (int k = 0; k < n; k++) {
+        int card = k ? k - 1 : autopick;
+        gpu_short_name(window_gpu_name(card), name, sizeof name);
+        if (k) snprintf(gpu_shown[k], sizeof gpu_shown[k], "%s", name);
+        else if (autopick >= 0) snprintf(gpu_shown[0], sizeof gpu_shown[0], "Auto (%s)", name);
+        else snprintf(gpu_shown[0], sizeof gpu_shown[0], "Auto");
+        snprintf(gpu_saved[k], sizeof gpu_saved[k], "%s", k ? window_gpu_name(k - 1) : "auto");
+        r->options[k] = gpu_shown[k];
+        r->notes[k] = card == used ? "THE ONE IN USE" : "TAKES EFFECT AFTER A RESTART";
+    }
+    r->noptions = n, r->current = gpu_card_index(), r->verbatim = 1;
+}
+
 /* The player's settings, in the order shown; a row starts a new group when its category differs from the row
  * before. The last row opens the developer page. The texts use the HUD font's characters (hud.c): upper case,
  * digits, . , : % / - ( ) ' ! ? */
@@ -321,6 +390,12 @@ static const Setting player[] = {
      {"OFF", "ON"},
      {"NOTHING SHOWN ON DISCORD", "SHOWN ON YOUR DISCORD PROFILE"}, 2,
      discord_enabled, discord_toggle, "YW4_DISCORD", {"0", "1"}, discord_disabled},
+    {"DISPLAY", "GRAPHICS CARD",
+     "THE GRAPHICS CARD THE GAME RUNS ON, FOR PCS WITH TWO (MOST GAMING LAPTOPS). AUTO PICKS THE FASTER ONE. THE "
+     "GAME CHOOSES IT WHEN IT STARTS, SO A CHANGE TAKES EFFECT AFTER A RESTART.",
+     {gpu_shown[0], gpu_shown[1], gpu_shown[2], gpu_shown[3], gpu_shown[4], gpu_shown[5]}, {NULL},
+     SETTINGS_MAX_OPTIONS, gpu_card_index, gpu_card_cycle, "YW4_GPU",
+     {gpu_saved[0], gpu_saved[1], gpu_saved[2], gpu_saved[3], gpu_saved[4], gpu_saved[5]}, gpu_card_disabled},
     {"DISPLAY", "WINDOW MODE",
      "A WINDOW, OR THE WHOLE SCREEN WITHOUT BORDERS. THE MONITOR'S OWN MODE NEVER CHANGES, SO ALT+TAB IS INSTANT. "
      "F11 SWITCHES TOO.",
@@ -669,6 +744,10 @@ static void write_settings(FILE *f) {
             if (v && *v) fprintf(f, "%s=%s\n", typed_env(t), v);
             continue;
         }
+        if (t->next == gpu_card_cycle) {  /* Graphics card: the choice as kept, even before the cards are known */
+            fprintf(f, "YW4_GPU=%s\n", gpu_choice());
+            continue;
+        }
         if (!t->noptions) {
             char v[16];
             slider_text(t, NULL, 0, v, sizeof v);
@@ -722,6 +801,7 @@ static void setting_step(const Setting *s, int dir) {
      * switch (frame generation's safe frames): they step back themselves, so a step back is one switch */
     if (s->next == gpu_aa_cycle) { gpu_aa_step(dir > 0 ? 1 : -1); return; }
     if (s->next == gpu_fg_cycle) { gpu_fg_step(dir > 0 ? 1 : -1); return; }
+    if (s->next == gpu_card_cycle) { gpu_card_step(dir > 0 ? 1 : -1); return; }
     if (dir > 0) { s->next(); return; }
     for (int i = 0; i < s->noptions - 1; i++) s->next();  /* one step back: the other cycles go forward only */
 }
@@ -786,6 +866,7 @@ static int fill_rows(SettingRow *rows, int max, const Setting *list, int count) 
                 if (!gpu_fsr_built()) rows[i].noptions = aa ? 4 : 1;  /* and FSR before it */
             }
         }
+        if (list[i].next == gpu_card_cycle) gpu_card_fill(&rows[i]);  /* the cards found (window.c) */
         if (!list[i].noptions) {  /* a slider: its text, its position, and one note for the description */
             float v = list[i].get();
             rows[i].slider = 1;

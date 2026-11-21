@@ -288,6 +288,44 @@ void window_prestart(void) {
     if (host_thread_start(sl_thread, NULL, 4 << 20)) sl_state = 0;
 }
 
+/* ---- the graphics cards (window.h; Settings > Display > Graphics card): filled once by vk_init, read after */
+static char gpu_names[WINDOW_GPUS][VK_MAX_PHYSICAL_DEVICE_NAME_SIZE];
+static int gpu_n, gpu_auto = -1, gpu_used = -1;
+
+int window_gpu_count(void) { return gpu_n; }
+const char *window_gpu_name(int i) { return i >= 0 && i < gpu_n ? gpu_names[i] : ""; }
+int window_gpu_auto(void) { return gpu_auto; }
+int window_gpu_used(void) { return gpu_used; }
+
+int window_gpu_is_auto(const char *choice) {
+    if (!choice || !*choice) return 1;
+    static const char a[] = "auto";
+    for (int i = 0; i < 5; i++) {
+        char c = choice[i];
+        if (c >= 'A' && c <= 'Z') c = (char)(c - 'A' + 'a');
+        if (c != a[i]) return 0;
+    }
+    return 1;
+}
+
+/* the first card whose name holds choice, ignoring case ("780m", "RTX 4070" and the full name all work) */
+int window_gpu_find(const char *choice) {
+    size_t n = choice ? strlen(choice) : 0;
+    if (!n) return -1;
+    for (int i = 0; i < gpu_n; i++)
+        for (const char *s = gpu_names[i]; *s; s++) {
+            size_t k = 0;
+            for (; k < n && s[k]; k++) {
+                char a = s[k], b = choice[k];
+                if (a >= 'A' && a <= 'Z') a = (char)(a - 'A' + 'a');
+                if (b >= 'A' && b <= 'Z') b = (char)(b - 'A' + 'a');
+                if (a != b) break;
+            }
+            if (k == n) return i;
+        }
+    return -1;
+}
+
 static int vk_init(void) {
     /* DLSS frame generation (gpu_dlssg.cpp): Vulkan through Streamline, which adds what it needs */
     yw4_boot_mark("SDL and the window ready");
@@ -337,12 +375,16 @@ static int vk_init(void) {
         return -1;
     }
 
-    /* A GPU with a queue that draws and presents to this window; a discrete one if there is one. */
+    /* A GPU with a queue that draws and presents to this window: the one Settings > Display > Graphics card names
+     * (YW4_GPU, part of its name), else a discrete one if there is one (Auto). The list is kept for that row. */
     uint32_t ngpu = 16;
     VkPhysicalDevice gpus[16];
     vkEnumeratePhysicalDevices(vk.instance, &ngpu, gpus);
+    VkPhysicalDevice cand[WINDOW_GPUS];
+    uint32_t cand_q[WINDOW_GPUS];
     int best = -1;
-    for (uint32_t i = 0; i < ngpu; i++) {
+    gpu_n = 0, gpu_auto = -1;
+    for (uint32_t i = 0; i < ngpu && gpu_n < WINDOW_GPUS; i++) {
         uint32_t nq = 32;
         VkQueueFamilyProperties qs[32];
         vkGetPhysicalDeviceQueueFamilyProperties(gpus[i], &nq, qs);
@@ -353,7 +395,10 @@ static int vk_init(void) {
             VkPhysicalDeviceProperties p;
             vkGetPhysicalDeviceProperties(gpus[i], &p);
             int score = p.deviceType == VK_PHYSICAL_DEVICE_TYPE_DISCRETE_GPU ? 2 : 1;
-            if (score > best) best = score, vk.gpu = gpus[i], vk.queue_family = q;
+            snprintf(gpu_names[gpu_n], sizeof gpu_names[gpu_n], "%s", p.deviceName);
+            cand[gpu_n] = gpus[i], cand_q[gpu_n] = q;
+            if (score > best) best = score, gpu_auto = gpu_n;
+            gpu_n++;
             break;
         }
     }
@@ -361,6 +406,17 @@ static int vk_init(void) {
         fprintf(stderr, "yw4: window: no Vulkan GPU can draw to this window\n");
         return -1;
     }
+    gpu_used = gpu_auto;
+    const char *want = getenv("YW4_GPU");
+    if (want && *want && !window_gpu_is_auto(want)) {
+        int found = window_gpu_find(want);
+        if (found >= 0) gpu_used = found;
+        else fprintf(stderr, "yw4: window: no graphics card named like \"%s\" (YW4_GPU): Auto\n", want);
+    }
+    vk.gpu = cand[gpu_used], vk.queue_family = cand_q[gpu_used];
+    for (int i = 0; i < gpu_n; i++)
+        fprintf(stderr, "yw4: window: graphics card %d: %s%s%s\n", i, gpu_names[i], i == gpu_auto ? " (Auto's pick)" : "",
+                i == gpu_used ? ", in use" : "");
     VkPhysicalDeviceProperties props;
     vkGetPhysicalDeviceProperties(vk.gpu, &props);
     vk.props = props;

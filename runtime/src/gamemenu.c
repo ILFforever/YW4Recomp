@@ -1647,7 +1647,7 @@ static void prose_case(const char *in, char *out, size_t n) {
         {"RTX", "RTX"}, {"AI", "AI"}, {"HD", "HD"}, {"PCSS", "PCSS"}, {"VSYNC", "VSync"}, {"F1", "F1"}, {"F2", "F2"},
         {"F3", "F3"}, {"F11", "F11"}, {"ZL", "ZL"}, {"ZR", "ZR"}, {"LB", "LB"}, {"RB", "RB"}, {"OK", "OK"},
         /* names in Discord status's text: "Yo-kai Watch 4" ("KAI" stays lower case), "Watch rank", "this PC" */
-        {"DISCORD", "Discord"}, {"PC", "PC"}, {"YO", "Yo"}, {"WATCH", "Watch"},
+        {"DISCORD", "Discord"}, {"PC", "PC"}, {"PCS", "PCs"}, {"YO", "Yo"}, {"WATCH", "Watch"},
         {"BLASTERS", "Blasters"},  /* the game mode, in Player name's text */
     };
     size_t o = 0;

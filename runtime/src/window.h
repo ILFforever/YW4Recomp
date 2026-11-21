@@ -88,4 +88,15 @@ void window_fullscreen_cycle(void);
  * 0x0 when there is none yet. Any thread. */
 void window_size_kept(int *w, int *h);
 
+/* The graphics cards that can draw to the window (Settings > Display > Graphics card; YW4_GPU: part of a card's
+ * name, or auto), known once Vulkan is up: how many, each one's name, which Auto picks (the first discrete one, else
+ * the first) and which the game runs on (-1 before Vulkan). The game picks its card at start only. */
+enum { WINDOW_GPUS = 5 };
+int window_gpu_count(void);
+const char *window_gpu_name(int i);
+int window_gpu_auto(void);
+int window_gpu_used(void);
+int window_gpu_is_auto(const char *choice);    /* NULL, "", "auto": Auto */
+int window_gpu_find(const char *choice);       /* the card whose name holds choice (any case), or -1 */
+
 #endif

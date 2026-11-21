@@ -82,23 +82,48 @@ static void log_message(sl::LogType type, const char *msg) {
 
 /* An NVIDIA GPU in this PC, asked through DXGI: Streamline must start before any Vulkan call, so Vulkan can't be
  * asked. dxgi.dll is loaded here, not linked. */
+/* Does the adapter's name hold `want` (any case)? */
+static int name_holds(const WCHAR *name, const char *want) {
+    for (const WCHAR *s = name; *s; s++) {
+        size_t k = 0;
+        for (; want[k] && s[k]; k++) {
+            WCHAR a = s[k], b = (WCHAR)(unsigned char)want[k];
+            if (a >= L'A' && a <= L'Z') a = (WCHAR)(a - L'A' + L'a');
+            if (b >= L'A' && b <= L'Z') b = (WCHAR)(b - L'A' + L'a');
+            if (a != b) break;
+        }
+        if (!want[k]) return 1;
+    }
+    return 0;
+}
+
+/* An NVIDIA GPU for the game: with Settings > Display > Graphics card on Auto, any NVIDIA adapter (Auto picks the
+ * discrete card, and that is NVIDIA's whenever there is one); with a card chosen (YW4_GPU), that card's maker. On a
+ * laptop with an AMD and an NVIDIA GPU, Streamline asks the AMD device for NVIDIA's extensions and Vulkan doesn't start
+ * on it (2026-11-21, the 780M), so it is left out when the chosen card isn't NVIDIA's. */
 static int nvidia_gpu(void) {
+    const char *want = getenv("YW4_GPU");
+    if (want && (!*want || !_stricmp(want, "auto"))) want = NULL;
     HMODULE d = LoadLibraryW(L"dxgi.dll");
     if (!d) return 0;
     auto create = (HRESULT(WINAPI *)(REFIID, void **))(void *)GetProcAddress(d, "CreateDXGIFactory1");
     IDXGIFactory1 *f = NULL;
-    int found = 0;
+    int any_nvidia = 0, named = 0, named_nvidia = 0;
     if (create && SUCCEEDED(create(__uuidof(IDXGIFactory1), (void **)&f)) && f) {
         IDXGIAdapter1 *a = NULL;
-        for (UINT i = 0; !found && f->EnumAdapters1(i, &a) != DXGI_ERROR_NOT_FOUND; i++) {
+        for (UINT i = 0; f->EnumAdapters1(i, &a) != DXGI_ERROR_NOT_FOUND; i++) {
             DXGI_ADAPTER_DESC1 desc;
-            if (SUCCEEDED(a->GetDesc1(&desc)) && desc.VendorId == 0x10de) found = 1;
+            if (SUCCEEDED(a->GetDesc1(&desc))) {
+                if (desc.VendorId == 0x10de) any_nvidia = 1;
+                if (want && !named && name_holds(desc.Description, want)) named = 1, named_nvidia = desc.VendorId == 0x10de;
+            }
             a->Release();
         }
         f->Release();
     }
     FreeLibrary(d);
-    return found;
+    /* a chosen card that isn't there (an external GPU unplugged): the game falls back to Auto (window.c), so this does */
+    return named ? named_nvidia : any_nvidia;
 }
 
 extern "C" int dlssg_start(void) {
