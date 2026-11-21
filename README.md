@@ -82,6 +82,7 @@ to change.
 | Frame generation | none | NVIDIA DLSS, AMD FSR |
 | Texture filtering | none | anisotropic, up to ×16 |
 | Draw distance | lamps and signs pop in close | up to 10 times farther |
+| Mouse and keyboard | none | keyboard and mouse in every menu with rebindable keys |
 
 The same street, the game's shadows against ours:
 
@@ -165,7 +166,6 @@ First built by [Quandiy](https://github.com/Quandiy) in their fork. [How to play
 |---|---|
 | **More cheats** | More switches on the overlay's Cheats page, next to unlimited Crank-a-kai and unlimited coins |
 | **Easier Soultimates on the keyboard** | A little leeway for the two keys pressed together (Q + E by default), so it works whichever of them goes down first |
-| **Enemy-only target switch** | A key that cycles through the enemies alone in battles; the game has Tab for allies and Left / Right for everyone ([#18](https://github.com/ILFforever/YW4Recomp/issues/18)) |
 | **Yo-kai Arks** | Ark Scan on PC: the Switch reads the Ark toys over NFC, so the game gets a virtual Ark instead (or a USB NFC reader for real ones) |
 
 </details>
