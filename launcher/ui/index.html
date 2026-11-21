@@ -186,7 +186,7 @@
     <div class="setup-body settings-body">
       <div class="settings-head">
         <h1>Settings</h1>
-        <!-- two pages (no scrolling): the arrows switch, the middle says which one is shown -->
+        <!-- three pages (no scrolling): the arrows switch, the middle says which one is shown -->
         <div class="pager" role="group" aria-label="Settings page" id="settings-pager">
           <button class="pager-btn" type="button" id="page-prev" aria-label="Previous page">&lsaquo;</button>
           <span id="page-num">1 / 2</span>
@@ -308,9 +308,15 @@
             <span><b id="set-versions"></b><small id="set-update-line">Checked when the launcher starts</small></span>
             <button class="btn small" type="button" id="set-check">Check now</button>
           </div>
-          <!-- moved here from Shortcuts, which ran off the bottom of the window (owner, 2026-11-21). Hidden while this
-               card is on the short page before a build (style.css #lite-col2), where there is no game to open into -->
-          <div class="switch-row" id="set-straight-row">
+        </section>
+        </div>
+      </div>
+      <!-- page 3: moved off page 2, which ran off the bottom of the window (owner, 2026-11-21) -->
+      <div class="settings-grid two" data-page="3" hidden>
+        <div class="settings-col">
+        <section class="card">
+          <h2>Launcher</h2>
+          <div class="switch-row">
             <span><b>Open straight into the game</b><small>The launcher shows when the game closes</small></span>
             <button class="toggle" type="button" role="switch" aria-label="Open straight into the game" id="set-straight"></button>
           </div>

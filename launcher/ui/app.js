@@ -1431,17 +1431,22 @@ async function showSettings() {
   $('set-free-size').textContent = reclaimable > 0.05 * GB ? `${gb(reclaimable)} the game doesn't need to run` : 'Already freed up';
   $('set-free').disabled = reclaimable <= 0.05 * GB;
 }
-// Settings has two pages (no scrolling): Playing, then Files; the arrows on the heading row switch
+// Settings has three pages (no scrolling): Playing, Files, Launcher; the arrows on the heading row switch. Page 3
+// came from page 2 running off the bottom of the window (owner, 2026-11-21)
+const SETTINGS_PAGES = ['playing', 'where things are kept', 'launcher'];
+let settingsAt = 1;
 function settingsPage(n) {
+  settingsAt = n;
+  const last = SETTINGS_PAGES.length;
   document.querySelectorAll('.settings-grid[data-page]').forEach((g) => { g.hidden = g.dataset.page !== String(n); });
-  $('page-num').textContent = `${n} / 2`;
+  $('page-num').textContent = `${n} / ${last}`;
   $('page-prev').disabled = n === 1;
-  $('page-next').disabled = n === 2;
-  $('page-prev').title = n === 1 ? '' : 'Back: playing';
-  $('page-next').title = n === 2 ? '' : 'Next: where things are kept';
+  $('page-next').disabled = n === last;
+  $('page-prev').title = n === 1 ? '' : `Back: ${SETTINGS_PAGES[n - 2]}`;
+  $('page-next').title = n === last ? '' : `Next: ${SETTINGS_PAGES[n]}`;
 }
-$('page-prev').addEventListener('click', () => settingsPage(1));
-$('page-next').addEventListener('click', () => settingsPage(2));
+$('page-prev').addEventListener('click', () => settingsPage(Math.max(1, settingsAt - 1)));
+$('page-next').addEventListener('click', () => settingsPage(Math.min(SETTINGS_PAGES.length, settingsAt + 1)));
 $('settings-back').addEventListener('click', () => { if (inst) showReady(); else show(liteFrom); });
 
 // Settings › Cheats › Manage: the game's own cheat lines in its settings.ini (ready.rs game_cheats), so the launcher

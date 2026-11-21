@@ -574,7 +574,7 @@ dialog p { margin: 0 0 10px; font-size: 14px; overflow-wrap: anywhere; }
 .changelog li { margin: 2px 0; }
 
 /* Settings (the top bar's gear): three columns of cards, each column stacked, so the page fits without scrolling */
-.settings-body { gap: 14px; padding-top: 12px; }  /* 12: page 2 fits the window with room for taller Linux fonts (owner, 2026-11-21) */
+.settings-body { gap: 14px; padding-top: 24px; }
 .settings-body h1 { margin: 0; }
 .settings-grid[hidden] { display: none; }
 .settings-grid.two { grid-template-columns: repeat(2, minmax(0, 1fr)); }
@@ -626,8 +626,6 @@ dialog p { margin: 0 0 10px; font-size: 14px; overflow-wrap: anywhere; }
 .radios.compact { gap: 4px; }
 .radios.compact .radio { padding: 6px 10px; }
 .radios.compact .radio b { font-size: 13px; }
-#lite-col2 #set-straight-row { display: none; }  /* before a build there is no game to open into (index.html) */
-#lite-col2 #set-updates-card .set-row { border-bottom: 0; }  /* its last row while the one above is hidden */
 /* the Uninstall popup's choices, and its red button (as the in-game "Quit game") */
 .check-list { display: flex; flex-direction: column; gap: 8px; margin-bottom: 4px; }
 .check-list .check { margin: 0; color: var(--ink); font-size: 14px; }
