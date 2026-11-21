@@ -53,9 +53,12 @@
 #define BASE_IP 0xA9FE0100u
 #define MAX_FRAME (1 << 16)
 
-#define MAX_CLIENTS 1000
+/* How many games and rooms at once: --max-clients / --max-rooms, per server (the 1-GB US East machine keeps the
+ * defaults; Singapore, 4 CPUs and 24 GB since 2026-11-21, runs with more). Each connected game holds its 64 KiB
+ * input buffer and an output buffer, so memory, the systemd MemoryMax and the open-file limit go with --max-clients. */
+static int MAX_CLIENTS = 1000;
 static int max_clients_per_addr = 16;  /* --per-addr-clients: raised for a load test from one PC */
-#define MAX_ROOMS 300
+static int MAX_ROOMS = 300;
 static int max_rooms_per_addr = 4;     /* --per-addr-rooms */
 #define PACKETS_PER_S 400.0
 #define PACKETS_BURST 800.0
@@ -100,8 +103,8 @@ struct Room {
     int most;
 };
 
-static Client clients[MAX_CLIENTS];
-static Room rooms[MAX_ROOMS];
+static Client *clients;  /* MAX_CLIENTS of them, made at start */
+static Room *rooms;      /* MAX_ROOMS */
 static int ep, tcp_fd, udp_fd;
 static uint64_t frames_in, bytes_in, dropped, refused;
 static uint8_t salt[16];
@@ -680,11 +683,23 @@ int main(int argc, char **argv) {
         else if (!strcmp(argv[i], "--host") && i + 1 < argc) host = argv[++i];
         else if (!strcmp(argv[i], "--per-addr-clients") && i + 1 < argc) max_clients_per_addr = atoi(argv[++i]);
         else if (!strcmp(argv[i], "--per-addr-rooms") && i + 1 < argc) max_rooms_per_addr = atoi(argv[++i]);
+        else if (!strcmp(argv[i], "--max-clients") && i + 1 < argc) MAX_CLIENTS = atoi(argv[++i]);
+        else if (!strcmp(argv[i], "--max-rooms") && i + 1 < argc) MAX_ROOMS = atoi(argv[++i]);
         else {
-            fprintf(stderr, "usage: %s [--port 41230] [--host 0.0.0.0] [--per-addr-clients 16] [--per-addr-rooms 4]\n",
-                    argv[0]);
+            fprintf(stderr, "usage: %s [--port 41230] [--host 0.0.0.0] [--per-addr-clients 16] [--per-addr-rooms 4] "
+                            "[--max-clients 1000] [--max-rooms 300]\n", argv[0]);
             return 2;
         }
+    }
+    if (MAX_CLIENTS < 1 || MAX_ROOMS < 1) {
+        fprintf(stderr, "--max-clients and --max-rooms must be at least 1\n");
+        return 2;
+    }
+    clients = calloc((size_t)MAX_CLIENTS, sizeof *clients);
+    rooms = calloc((size_t)MAX_ROOMS, sizeof *rooms);
+    if (!clients || !rooms) {
+        fprintf(stderr, "no memory for %d clients and %d rooms\n", MAX_CLIENTS, MAX_ROOMS);
+        return 1;
     }
     signal(SIGPIPE, SIG_IGN);
     random_bytes(salt, sizeof salt);
@@ -699,7 +714,8 @@ int main(int argc, char **argv) {
     epoll_ctl(ep, EPOLL_CTL_ADD, tcp_fd, &e);
     e.data.u64 = UINT64_MAX;
     epoll_ctl(ep, EPOLL_CTL_ADD, udp_fd, &e);
-    printf("YW4 Recomp relay on port %d, TCP and UDP (protocol %d, in C). Ctrl+C stops it.\n", port, PROTOCOL);
+    printf("YW4 Recomp relay on port %d, TCP and UDP (protocol %d, in C), up to %d games and %d rooms. Ctrl+C stops "
+           "it.\n", port, PROTOCOL, MAX_CLIENTS, MAX_ROOMS);
     fflush(stdout);
     double last_watch = now_s(), last_summary = last_watch;
     struct epoll_event ev[256];
