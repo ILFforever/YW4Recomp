@@ -243,6 +243,7 @@ try { const t = localStorage.getItem('yw4-theme'); if (t === 'dark' || t === 'li
     <h2>Releases</h2>
     <ol>
       <li><a href="#download"><span class="n">↓</span>Download</a></li>
+      <li><a href="#v2.2.0"><span class="n">11/21</span>Game 2.2.0</a></li>
       <li><a href="#launcher-v1.6.0"><span class="n">11/21</span>Launcher 1.6.0</a></li>
       <li><a href="#v2.1.0"><span class="n">11/21</span>Game 2.1.0</a></li>
       <li><a href="#v2.0.1"><span class="n">11/20</span>Game 2.0.1</a></li>
@@ -291,6 +292,27 @@ try { const t = localStorage.getItem('yw4-theme'); if (t === 'dark' || t === 'li
           <p>Every file and its checksum: <a href="https://github.com/ILFforever/YW4Recomp/releases">all releases on
             GitHub</a>. The "Game update" releases there are for the launcher; don't download those.</p>
         </div>
+      </div>
+    </article>
+
+    <article id="v2.2.0">
+      <div class="bar"><h2>Game 2.2.0</h2><span class="cat">Game · 2026-11-21</span></div>
+      <div class="body prose notes">
+<p class="how">The launcher gets it for you: <b>Update</b> on the Play screen rebuilds the game in a few minutes, and the version before stays playable if anything goes wrong.</p>
+<h4>Shadows on AMD graphics cards, fixed</h4>
+<p>On AMD graphics cards under Windows, long dark bars could cover the ground, shadows now look the same as on NVIDIA. (<a href="https://github.com/ILFforever/YW4Recomp/issues/8">#8</a>, <a href="https://github.com/ILFforever/YW4Recomp/issues/19">#19</a>)</p>
+<h4>New</h4>
+<ul><li>
+<b>Choose your graphics card.</b> On PCs with two (most gaming laptops), Settings › Display › Graphics card picks which one the game runs on. Auto picks the faster one, as before. Takes effect after a restart.
+</li></ul>
+<h4>Bug fixes</h4>
+<ul><li>
+<b>AMD: a potential fix for the minimap flickering blank while riding the bike.</b> On AMD graphics cards under Windows, the minimap could flicker to an empty purple box while cycling. Not confirmed yet: please tell us if you still see it. (<a href="https://github.com/ILFforever/YW4Recomp/issues/25">#25</a>)
+</li><li>
+<b>Linux, AMD: leaves in cutscene flickering grey.</b> The tops of hedges and bushes no longer flicker grey in places like the schoolyard.
+</li><li>
+<b>Linux, Intel graphics: crash when the 3D world loads.</b> Older Intel graphics (such as HD 520) could stop the game as soon as a town or cutscene appeared. (<a href="https://github.com/ILFforever/YW4Recomp/issues/14">#14</a>)
+</li></ul>
       </div>
     </article>
 

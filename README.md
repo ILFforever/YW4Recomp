@@ -11,7 +11,7 @@
 <p align="center">
   <img alt="Platform: Windows, Linux" src="https://img.shields.io/badge/platform-Windows%20%7C%20Linux-informational">
   <img alt="Graphics" src="https://img.shields.io/badge/graphics-Vulkan-ac162c">
-  <img alt="Version: 2.1.0" src="https://img.shields.io/badge/version-2.1.0-blue">
+  <img alt="Version: 2.2.0" src="https://img.shields.io/badge/version-2.2.0-blue">
   <a href="https://buymeacoffee.com/ilfforever"><img alt="Buy Me a Coffee" src="https://img.shields.io/badge/Buy%20Me%20a%20Coffee-ilfforever-FFDD00?style=flat&logo=buy-me-a-coffee&logoColor=black"></a>
 </p>
 
