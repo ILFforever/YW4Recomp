@@ -105,8 +105,8 @@ try { const t = localStorage.getItem('yw4-theme'); if (t === 'dark' || t === 'li
     <p>The graphics cards the PC version of <i>Yo-kai Watch 4++</i> has been played on, how fast it ran, and what is
       still wrong there.</p>
     <div class="stats">
-      <div class="stat"><b>9</b><span>graphics cards played on</span></div>
-      <div class="stat"><b>Windows, Linux</b><span>both x86-64, Vulkan</span></div>
+      <div class="stat"><b>Vulkan 1.3</b><span>all your graphics card needs</span></div>
+      <div class="stat"><b>Windows, Linux</b><span>both x86-64</span></div>
       <div class="stat"><b>NVIDIA, AMD, Intel</b><span>separate cards and built-in graphics</span></div>
     </div>
     <div class="links">
@@ -129,14 +129,14 @@ try { const t = localStorage.getItem('yw4-theme'); if (t === 'dark' || t === 'li
               <td class="fps">~81 at 4K 21:9 (TAA)<small>~118 with FSR, ~150 shown with DLSS frame generation</small></td>
               <td><span class="chip ok">Works</span></td><td>None known. The main test PC: every feature is tried here first.</td></tr>
             <tr><th scope="row">Radeon 780M<span>integrated, Ryzen 9 7940HS, ASUS TUF A15</span></th><td>Windows 11, AMD driver</td>
-              <td class="fps">~22<small>high settings</small></td>
+              <td class="fps">40–62 at 1080p<small>1024 shadows, soft off, SMAA</small></td>
               <td><span class="chip open">Issue open</span></td><td>With TAA or FSR the picture shakes and the screen's sides glitch.</td></tr>
             <tr><th scope="row">Ryzen 5 7530U<span>integrated Radeon, ASUS Zenbook</span></th><td>Windows 11, AMD driver</td>
               <td class="fps">35–40 at native res.<small>Eden emulator: 22–30</small></td>
               <td><span class="chip ok">Works</span></td><td>None known.</td></tr>
             <tr><th scope="row">Intel Arc<span>integrated, Core Ultra laptop</span></th><td>Windows 11, Intel driver</td>
               <td class="fps">35–55 at 1440p<small>4096 shadows, soft ×2</small></td>
-              <td><span class="chip open">Issue open</span></td><td>A 1-pixel white line at the screen's edge with TAA or FSR
+              <td><span class="chip open">Issue open</span></td><td>A 1-pixel white line at the screen's edge with TAA or FSR in stores
                 (<a href="https://github.com/ILFforever/YW4Recomp/issues/20">#20</a>).</td></tr>
             <tr><th scope="row">RX 9070 XT</th><td>Windows, AMD driver</td>
               <td class="fps">–</td>
@@ -162,10 +162,9 @@ try { const t = localStorage.getItem('yw4-theme'); if (t === 'dark' || t === 'li
             <tr><th scope="row">Intel UHD 730<span>integrated</span></th><td>AOSC OS (X11), Mesa</td>
               <td class="fps">30<small>light scenes</small></td>
               <td><span class="chip ok">Works</span></td><td>None known.</td></tr>
-            <tr><th scope="row">Intel HD 520<span>integrated</span></th><td>Linux, Mesa</td>
-              <td class="fps">–</td>
-              <td><span class="chip wait">Fix out, unconfirmed</span></td><td>The game stopped when the 3D world loaded
-                (<a href="https://github.com/ILFforever/YW4Recomp/issues/14">#14</a>): fixed in 2.2.0, waiting for the tester.</td></tr>
+            <tr><th scope="row">Intel HD 520<span>integrated</span></th><td>Arch Linux (Wayland), Mesa</td>
+              <td class="fps">16–25 at 900p<small>1024 shadows, soft off</small></td>
+              <td><span class="chip ok">Works</span></td><td>None known.</td></tr>
           </tbody>
         </table>
       </div>
