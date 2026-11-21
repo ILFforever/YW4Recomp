@@ -41,15 +41,8 @@
 > *Yo-kai Watch 4++* with the last update, **2.2.0**. Getting those files is up to you and is not covered here.
 
 > [!NOTE]
-> Platforms:
-> - Windows - x86-64, Vulkan graphics backend (this is what is built and tested): NVIDIA RTX, and AMD Radeon
->   ([decision 0059](docs/decisions/0059-amd-depth-format-fallback.md)): a Ryzen 5 7530U laptop's integrated graphics
->   runs it at about 35-40 frames/s at native resolution, where the Eden emulator gets 22-30
-> - Linux - x86-64, Vulkan: works. Tester [ouni666](https://github.com/ouni666) plays it on AOSC OS (KDE Plasma, Wayland) with an AMD RX 6600 XT at
->   about 110-120 frames/s, the GPU at full load, with sound and controls working. The launcher runs on Linux too, as
->   an AppImage ([decision 0071](docs/decisions/0071-linux-launcher.md)). FSR and DLSS upscaling and FSR frame
->   generation are built for Linux ([decision 0073](docs/decisions/0073-dlss-fsr-on-linux.md)), not yet tried on a real
->   Linux GPU; DLSS frame generation and Reflex are Windows only
+> **Windows and Linux**, x86-64, with a Vulkan 1.3 graphics card (NVIDIA, AMD or Intel). DLSS frame generation and
+> NVIDIA Reflex are Windows only. See [Tested devices](#tested-devices).
 
 ## Play it
 
@@ -118,6 +111,16 @@ same work ([docs/baseline.md](docs/baseline.md)):
 </p>
 
 [More showcases and videos →](https://ilfforever.github.io/YW4Recomp/showcases/)
+
+## Tested devices
+
+Played on NVIDIA, AMD and Intel graphics, on Windows and Linux. A few of them:
+
+- **RTX 4070 laptop** (Windows): ~118 frames/s at 4K 21:9 with FSR
+- **RX 6600 XT** (Linux, AOSC OS): ~110-120 frames/s, played by tester [ouni666](https://github.com/ouni666)
+- **Ryzen 5 7530U, integrated graphics** (Windows): 35-40 frames/s
+
+**[Every tested device, with frame rates and known issues →](https://ilfforever.github.io/YW4Recomp/devices/)**
 
 ## Online play
 

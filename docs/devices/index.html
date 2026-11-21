@@ -1,0 +1,210 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>YW4 Recomp · Tested devices</title>
+<link rel="icon" href="../favicon.ico" sizes="any">
+<link rel="icon" type="image/png" href="../img/icon-192.png">
+<link rel="apple-touch-icon" href="../img/icon-192.png">
+<meta name="description" content="Graphics cards YW4 Recomp, the fan PC port of Yo-kai Watch 4++, has been played on, on Windows and Linux: frame rates and known issues.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=M+PLUS+Rounded+1c:wght@500;700;800;900&family=Zen+Kaku+Gothic+New:wght@400;500;700&display=swap" rel="stylesheet">
+<style>
+/* The same frame as the other sub pages (../showcases/): site.css, linked after this, gives the colours. One column:
+ * a table per system, no contents list. */
+:root {
+  --r: 14px;
+  --step--1: clamp(.8rem, .78rem + .1vw, .88rem);
+  --step-0: clamp(.98rem, .95rem + .15vw, 1.05rem);
+  --step-1: clamp(1.15rem, 1.08rem + .35vw, 1.35rem);
+  --step-2: clamp(1.3rem, 1.18rem + .6vw, 1.7rem);
+  --step-3: clamp(2rem, 1.5rem + 2.4vw, 3.3rem);
+  --ok-bg: #e3f6e8; --ok-ink: #1d6b36;
+}
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) { --ok-bg: #16301f; --ok-ink: #7fdc9a; } }
+:root[data-theme="dark"] { --ok-bg: #16301f; --ok-ink: #7fdc9a; }
+* { box-sizing: border-box; }
+html { scroll-behavior: smooth; }
+body { margin: 0; overflow-x: hidden; font: 400 var(--step-0)/1.7 var(--body); font-variant-numeric: tabular-nums; }
+
+.hero { position: relative; }
+.hero-inner { position: relative; max-width: 1280px; margin: 0 auto; padding: 48px 20px 28px; }
+.eyebrow { font: 700 var(--step--1)/1 var(--display); letter-spacing: .16em; text-transform: uppercase; }
+.hero h1 { font: 800 var(--step-3)/1.08 var(--display); margin: 12px 0 14px; letter-spacing: -.01em; }
+.hero p { margin: 0 0 22px; max-width: 60ch; }
+.stats { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); border: 1px solid; border-radius: 12px; overflow: hidden;
+  margin: 0 0 22px; max-width: 720px; }
+.stat { padding: 12px 14px; }
+.stat + .stat { border-left: 1px solid; }
+.stat b { display: block; font: 800 var(--step-1)/1.1 var(--display); }
+.stat span { font-size: .78rem; line-height: 1.35; display: block; margin-top: 4px; }
+.links { display: flex; flex-wrap: wrap; gap: 10px; }
+.btn { font: 700 .92rem/1 var(--display); text-decoration: none; padding: 11px 18px; }
+
+.shell { max-width: 1280px; margin: 0 auto; padding: 24px 20px 72px; }
+main { display: grid; grid-template-columns: minmax(0, 1fr); gap: 28px; }
+article { background: var(--card); border-radius: var(--r); border: 1px solid var(--line); overflow: hidden; }
+.bar { display: flex; align-items: center; gap: 12px; padding: 12px 20px; }
+.bar h2 { margin: 0; font: 800 var(--step-2)/1.2 var(--display); flex: 1; }
+.bar .cat { font: 700 .7rem/1 var(--display); letter-spacing: .14em; text-transform: uppercase; color: #fff; opacity: .8; }
+
+/* the tables scroll sideways on a phone instead of the page */
+.scroll { overflow-x: auto; }
+table { width: 100%; min-width: 760px; border-collapse: collapse; font-size: .9rem; }
+th, td { padding: 12px 18px; text-align: left; vertical-align: top; border-top: 1px solid var(--line); }
+thead th { border-top: 0; font: 800 .72rem/1.2 var(--display); text-transform: uppercase; letter-spacing: .07em; color: var(--ink-2);
+  background: var(--soft); }
+tbody th { font: 800 .95rem/1.35 var(--display); color: var(--ink); width: 21%; }
+tbody th span { display: block; font: 400 .8rem/1.4 var(--body); color: var(--ink-2); margin-top: 2px; }
+td.fps { white-space: nowrap; }
+td.fps small { display: block; color: var(--ink-2); font-size: .8rem; white-space: normal; max-width: 24ch; }
+.chip { display: inline-block; font: 700 .76rem/1 var(--display); border-radius: 6px; padding: 5px 8px; white-space: nowrap; }
+.chip.ok { background: var(--ok-bg); color: var(--ok-ink); }
+.chip.open { background: var(--warn-bg); color: var(--warn-ink); }
+.chip.wait { background: var(--soft); color: var(--violet); border: 1px solid var(--line); }
+.note { padding: 18px 20px; }
+.note p { margin: 0 0 8px; max-width: 80ch; }
+.note p:last-child { margin: 0; }
+
+footer .in { max-width: 1280px; margin: 0 auto; padding: 24px 20px 32px; font-size: var(--step--1); display: grid; gap: 6px; }
+
+@media (max-width: 560px) { .stats { grid-template-columns: minmax(0, 1fr); } .stat + .stat { border-left: 0; border-top: 1px solid; } .bar .cat { display: none; } }
+@media (prefers-reduced-motion: reduce) { html { scroll-behavior: auto; } }
+</style>
+<link rel="stylesheet" href="../site.css">
+<script>
+/* the theme before the page draws: the reader's choice if kept, else the system's (no flash of the wrong one) */
+try { const t = localStorage.getItem('yw4-theme'); if (t === 'dark' || t === 'light') document.documentElement.dataset.theme = t; } catch (e) {}
+</script>
+</head>
+<body class="sub">
+
+<header class="site-top">
+  <div class="wrap">
+    <a class="brand" href="../"><img src="../img/icon-192.png" alt="" width="34" height="34">YW4 Recomp</a>
+    <nav class="nav" aria-label="Pages">
+      <a href="../changelog/">What's new</a>
+      <a href="../compare/">Comparisons</a>
+      <a href="../online/">Online</a>
+      <a href="../advanced/">Advanced</a>
+    </nav>
+    <div class="tools">
+      <button class="iconbtn" id="theme" type="button" aria-label="Dark mode"><svg class="moon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M20 14.5A8 8 0 0 1 9.5 4a8 8 0 1 0 10.5 10.5z"/></svg><svg class="sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="12" r="4.2"/><path d="M12 2.5v2.2M12 19.3v2.2M2.5 12h2.2M19.3 12h2.2M5.3 5.3l1.6 1.6M17.1 17.1l1.6 1.6M5.3 18.7l1.6-1.6M17.1 6.9l1.6-1.6"/></svg></button>
+      <a class="iconbtn" href="https://github.com/ILFforever/YW4Recomp" aria-label="The project on GitHub"><svg viewBox="0 0 16 16" fill="currentColor"><path d="M8 0c4.42 0 8 3.58 8 8a8.013 8.013 0 0 1-5.45 7.59c-.4.08-.55-.17-.55-.38 0-.27.01-1.13.01-2.2 0-.75-.25-1.23-.54-1.48 1.78-.2 3.65-.88 3.65-3.95 0-.88-.31-1.59-.82-2.15.08-.2.36-1.02-.08-2.12 0 0-.67-.22-2.2.82-.64-.18-1.32-.27-2-.27-.68 0-1.36.09-2 .27-1.53-1.03-2.2-.82-2.2-.82-.44 1.1-.16 1.92-.08 2.12-.51.56-.82 1.28-.82 2.15 0 3.06 1.86 3.75 3.64 3.95-.23.2-.44.55-.51 1.07-.46.21-1.61.55-2.33-.66-.15-.24-.6-.83-1.23-.82-.67.01-.27.38.01.53.34.19.73.9.82 1.13.16.45.68 1.31 2.69.94 0 .67.01 1.3.01 1.49 0 .21-.15.45-.55.38A7.995 7.995 0 0 1 0 8c0-4.42 3.58-8 8-8Z"/></svg></a>
+      <a class="coffee" href="https://buymeacoffee.com/ilfforever" aria-label="Buy me a coffee"><svg viewBox="0 0 16 16" aria-hidden="true"><path d="M2.5 5.5h8.5v4.5a3.5 3.5 0 0 1-3.5 3.5h-1.5a3.5 3.5 0 0 1-3.5-3.5Z"/><path d="M11 6.5h1a2 2 0 0 1 0 4h-1"/><path d="M5 1.5c-.6.8.6 1.4 0 2.2M8 1.5c-.6.8.6 1.4 0 2.2"/></svg><span class="lbl">Buy me a coffee</span></a>
+    </div>
+  </div>
+</header>
+
+<section class="hero">
+  <div class="hero-inner">
+    <span class="eyebrow">YW4 Recomp · fan PC port</span>
+    <h1>Tested devices</h1>
+    <p>The graphics cards the PC version of <i>Yo-kai Watch 4++</i> has been played on, how fast it ran, and what is
+      still wrong there.</p>
+    <div class="stats">
+      <div class="stat"><b>9</b><span>graphics cards played on</span></div>
+      <div class="stat"><b>Windows, Linux</b><span>both x86-64, Vulkan</span></div>
+      <div class="stat"><b>NVIDIA, AMD, Intel</b><span>separate cards and built-in graphics</span></div>
+    </div>
+    <div class="links">
+      <a class="btn" href="../">Home</a>
+      <a class="btn ghost" href="../showcases/">Showcases</a>
+      <a class="btn ghost" href="https://github.com/ILFforever/YW4Recomp/blob/master/docs/known-issues.md">Known issues</a>
+    </div>
+  </div>
+</section>
+
+<div class="shell">
+  <main>
+    <article id="windows">
+      <div class="bar"><h2>Windows</h2><span class="cat">5 devices</span></div>
+      <div class="scroll">
+        <table>
+          <thead><tr><th scope="col">Graphics</th><th scope="col">System</th><th scope="col">Frame rate</th><th scope="col">Status</th><th scope="col">Known issues</th></tr></thead>
+          <tbody>
+            <tr><th scope="row">RTX 4070 Laptop<span>Ryzen 9 7940HS, ASUS TUF A15</span></th><td>Windows 11, NVIDIA</td>
+              <td class="fps">~81 at 4K 21:9 (TAA)<small>~118 with FSR, ~150 shown with DLSS frame generation</small></td>
+              <td><span class="chip ok">Works</span></td><td>None known. The main test PC: every feature is tried here first.</td></tr>
+            <tr><th scope="row">Radeon 780M<span>integrated, Ryzen 9 7940HS, ASUS TUF A15</span></th><td>Windows 11, AMD driver</td>
+              <td class="fps">~22<small>high settings</small></td>
+              <td><span class="chip open">Issue open</span></td><td>With TAA or FSR the picture shakes and the screen's sides glitch.</td></tr>
+            <tr><th scope="row">Ryzen 5 7530U<span>integrated Radeon, ASUS Zenbook</span></th><td>Windows 11, AMD driver</td>
+              <td class="fps">35–40 at native res.<small>Eden emulator: 22–30</small></td>
+              <td><span class="chip ok">Works</span></td><td>None known.</td></tr>
+            <tr><th scope="row">Intel Arc<span>integrated, Core Ultra laptop</span></th><td>Windows 11, Intel driver</td>
+              <td class="fps">35–55 at 1440p<small>4096 shadows, soft ×2</small></td>
+              <td><span class="chip open">Issue open</span></td><td>A 1-pixel white line at the screen's edge with TAA or FSR
+                (<a href="https://github.com/ILFforever/YW4Recomp/issues/20">#20</a>).</td></tr>
+            <tr><th scope="row">RX 9070 XT</th><td>Windows, AMD driver</td>
+              <td class="fps">–</td>
+              <td><span class="chip wait">Fix out, unconfirmed</span></td><td>The minimap flickers while riding the bike
+                (<a href="https://github.com/ILFforever/YW4Recomp/issues/25">#25</a>): a possible fix is in 2.2.0.</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </article>
+
+    <article id="linux">
+      <div class="bar"><h2>Linux</h2><span class="cat">4 devices</span></div>
+      <div class="scroll">
+        <table>
+          <thead><tr><th scope="col">Graphics</th><th scope="col">System</th><th scope="col">Frame rate</th><th scope="col">Status</th><th scope="col">Known issues</th></tr></thead>
+          <tbody>
+            <tr><th scope="row">RX 6600 XT<span>played by <a href="https://github.com/ouni666">ouni666</a></span></th><td>AOSC OS, KDE Plasma (Wayland), Mesa</td>
+              <td class="fps">110–120<small>GPU at full load</small></td>
+              <td><span class="chip ok">Works</span></td><td>None known. Sound and controls work.</td></tr>
+            <tr><th scope="row">RX 580<span>Core i5-11400</span></th><td>Ubuntu 24.04, Mesa</td>
+              <td class="fps">40–54 at 1440p<small>4096 shadows, soft ×2, TAA</small></td>
+              <td><span class="chip ok">Works</span></td><td>None known.</td></tr>
+            <tr><th scope="row">Intel UHD 730<span>integrated</span></th><td>AOSC OS (X11), Mesa</td>
+              <td class="fps">30<small>light scenes</small></td>
+              <td><span class="chip ok">Works</span></td><td>None known.</td></tr>
+            <tr><th scope="row">Intel HD 520<span>integrated</span></th><td>Linux, Mesa</td>
+              <td class="fps">–</td>
+              <td><span class="chip wait">Fix out, unconfirmed</span></td><td>The game stopped when the 3D world loaded
+                (<a href="https://github.com/ILFforever/YW4Recomp/issues/14">#14</a>): fixed in 2.2.0, waiting for the tester.</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </article>
+
+    <article>
+      <div class="note">
+        <p>Frame rates are what testers saw while playing, with their own settings, not one fixed benchmark. Checked
+          2026-11-21.</p>
+        <p>Played it on something else? Tell us with <b>Report a bug</b> in the launcher or the in-game overlay.</p>
+      </div>
+    </article>
+  </main>
+</div>
+
+<footer>
+  <div class="in">
+    <span>A fan project. Not affiliated with or endorsed by LEVEL-5 or Nintendo; <i>Yo-kai Watch</i> belongs to its owners.</span>
+    <span><a href="https://github.com/ILFforever/YW4Recomp">github.com/ILFforever/YW4Recomp</a></span>
+  </div>
+</footer>
+
+<script>
+/* the theme switch: the other theme than the one showing, kept for next time */
+(() => {
+  const btn = document.getElementById('theme'), root = document.documentElement;
+  const dark = () => root.dataset.theme ? root.dataset.theme === 'dark' : matchMedia('(prefers-color-scheme: dark)').matches;
+  const label = () => btn.setAttribute('aria-label', dark() ? 'Light mode' : 'Dark mode');
+  label();
+  const flip = () => {
+    root.dataset.theme = dark() ? 'light' : 'dark';
+    try { localStorage.setItem('yw4-theme', root.dataset.theme); } catch (e) {}
+    label();
+  };
+  btn.addEventListener('click', () => {
+    if (document.startViewTransition && !matchMedia('(prefers-reduced-motion: reduce)').matches) document.startViewTransition(flip);
+    else flip();
+  });
+})();
+</script>
+</body>
+</html>
