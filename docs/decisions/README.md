@@ -96,3 +96,4 @@ lists later records that replace a record, or part of it.
 | 0085 | [Draw distance: the map's far clip, four times as far](0085-draw-distance.md) | accepted | 2026-11-20 |  | `runtime/src/drawdist.c`, `runtime/src/settings.c`, `recomp/overrides.toml` |
 | 0086 | [The game's memory pools imported as a cached memory type](0086-pool-memory-type.md) | accepted | 2026-11-21 |  | `runtime/src/gpu.c` |
 | 0087 | [Vertex positions marked invariant](0087-invariant-positions.md) | accepted | 2026-11-21 |  | `recomp/shader.py`, `runtime/shaders/gbuffer_main.vert`, `runtime/shaders/material_main.vert` |
+| 0088 | [AMD: no cascade blend where the cascades don't overlap](0088-amd-shadow-mask-blend.md) | accepted | 2026-11-21 |  | `runtime/shaders/shadow_mask.frag` |

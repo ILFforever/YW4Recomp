@@ -258,7 +258,13 @@ void main() {
         if (far_end >= -pos.z) {
             if (c < 2) {
                 float next_start = sun.d[8 + c].x;
-                blend = clamp((-pos.z + -next_start) / (-next_start + far_end), 0.0, 1.0);
+                // No overlap (the game sets the next cascade's start to this one's far end, 19.92 and 19.92 in the
+                // bamboo forest): no blend. The division was -x / +0 = -infinity -> 0 on NVIDIA and the Switch, but
+                // AMD's Windows driver may build -start + far as -(start - far) = -0, and -x / -0 = +infinity -> 1:
+                // every pixel took the next, coarser cascade, long dark bars on the ground (issues #8, #19; captured
+                // on a Radeon 780M, 2026-11-21). Same result as before wherever the region has a width.
+                float span = -next_start + far_end;
+                blend = span > 0.0 ? clamp((-pos.z + -next_start) / span, 0.0, 1.0) : 0.0;
                 next = c + 1;
             }
             cascade = c;
