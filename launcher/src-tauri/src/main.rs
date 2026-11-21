@@ -72,10 +72,26 @@ pub fn quiet_errors() {
     }
 }
 
+/// The system the screens show (app.js LINUX): the one this launcher was built for. `YW4_LAUNCHER_OS=linux` or
+/// `=windows` overrides it, as a way out should a system ever be taken wrongly, and for testing the other system's
+/// screens. Only the screens follow it: the Rust side keeps its own system (folder rules, shortcuts, builds).
+fn screens_os() -> &'static str {
+    match std::env::var("YW4_LAUNCHER_OS").as_deref() {
+        Ok("linux") => "linux",
+        Ok("windows") => "windows",
+        _ => std::env::consts::OS,
+    }
+}
+
 fn main() {
     quiet_errors();
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())  // the file and folder pickers (Browse…)
+        // The screens' LINUX (app.js) is the system this launcher was built for, set before any of their code runs.
+        // It used to be read from the user agent, which on a Steam Deck had no "Linux" in it (issue #22).
+        .plugin(tauri::plugin::Builder::<tauri::Wry>::new("yw4-os")
+            .js_init_script(format!("window.__YW4_OS = '{}';", screens_os()))
+            .build())
         .manage(std::sync::Arc::new(buildrun::Running::default()))  // the build in progress (screen 4)
         // The launcher never fills the screen (owner, 2026-11-05). tauri.conf.json makes it a fixed size, maximising off;
         // Windows can still maximise a window itself (Win+Up, dragging it to the top edge): undo that.

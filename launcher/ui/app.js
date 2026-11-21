@@ -2,10 +2,15 @@
 const T = window.__TAURI__ || null;
 const invoke = T ? T.core.invoke : null;
 const $ = (id) => document.getElementById(id);
-// Linux (decision 0071): WebKitGTK names it in its user agent. DLSS upscaling and FSR with its frame generation work
-// there too (decision 0073); what is still Windows only is marked .win-only (style.css). Shortcut, saves and folder
-// words follow the system. Nothing changes on Windows.
-const LINUX = /Linux/.test(navigator.userAgent) && !/Windows|Android/.test(navigator.userAgent);
+// Linux (decision 0071): DLSS upscaling and FSR with its frame generation work there too (decision 0073); what is
+// still Windows only is marked .win-only (style.css). Shortcut, saves and folder words follow the system. Nothing
+// changes on Windows.
+// The system comes from the Rust side (main.rs, window.__YW4_OS = the system it was built for): a Linux launcher is
+// on Linux. The user agent is only a fallback for the screens opened in a plain browser (npm run dev): on a Steam
+// Deck the 1.6.0 launcher's user agent had no "Linux" in it, so it took itself for Windows and kept naming folders
+// "...\YW4 Recomp" (issue #22).
+const LINUX = window.__YW4_OS ? window.__YW4_OS === 'linux'
+  : /Linux/.test(navigator.userAgent) && !/Windows|Android/.test(navigator.userAgent);
 if (LINUX) document.documentElement.classList.add('os-linux');
 const SAVES_PLACE = LINUX ? 'your home folder' : 'AppData';
 if (LINUX) {
@@ -466,9 +471,10 @@ async function confirmNewFolder(next) {
 // Linux: a game folder whose name has a \ (launchers before 1.5.0 made "...\YW4 Recomp", issue #22) breaks the
 // build's tools one by one. Asked at the launcher's start and before each build: moved to the folders its name meant
 // (slashfix.rs). Returns the folder to use: the new one, or the same one after Not now or a move that can't be done
-// (the game code's own links around it then still try).
+// (the game code's own links around it then still try). Asked on every system: the Rust side knows the real one and
+// answers nothing on Windows, so a wrong guess here can't hide the fix (issue #22).
 async function fixSlashFolder(install) {
-  if (!LINUX || !invoke || !install) return install;
+  if (!invoke || !install) return install;
   let to = null;
   try { to = await invoke('install_slash_fix', { install }); } catch (e) { return install; }
   if (!to) return install;
