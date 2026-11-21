@@ -281,10 +281,6 @@
             <span><b class="startmenu-name">Start menu entry</b></span>
             <button class="toggle" type="button" role="switch" aria-label="Start menu entry" id="set-startmenu"></button>
           </div>
-          <div class="switch-row">
-            <span><b>Open straight into the game</b><small>The launcher shows when the game closes</small></span>
-            <button class="toggle" type="button" role="switch" aria-label="Open straight into the game" id="set-straight"></button>
-          </div>
         </section>
         </div>
         <div class="settings-col">
@@ -311,6 +307,12 @@
           <div class="set-row">
             <span><b id="set-versions"></b><small id="set-update-line">Checked when the launcher starts</small></span>
             <button class="btn small" type="button" id="set-check">Check now</button>
+          </div>
+          <!-- moved here from Shortcuts, which ran off the bottom of the window (owner, 2026-11-21). Hidden while this
+               card is on the short page before a build (style.css #lite-col2), where there is no game to open into -->
+          <div class="switch-row" id="set-straight-row">
+            <span><b>Open straight into the game</b><small>The launcher shows when the game closes</small></span>
+            <button class="toggle" type="button" role="switch" aria-label="Open straight into the game" id="set-straight"></button>
           </div>
         </section>
         </div>
