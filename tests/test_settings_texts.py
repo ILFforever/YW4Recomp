@@ -48,10 +48,17 @@ def settings() -> list[dict]:
         lists = re.findall(r"\{([^{}]*)\}", e)
         head = e[:e.index("{")]
         category, name, *help_parts = c_strings(head)
-        count = int(re.search(r"\}\s*,\s*(\d+)\s*,", e).group(1))  # the number after the notes
-        out.append({"category": category, "name": name, "help": "".join(help_parts),
-                    "options": c_strings(lists[0]), "notes": c_strings(lists[1]), "count": count,
-                    "values": c_strings(lists[2]) if len(lists) > 2 else [],
+        # choices made at run time (Display > Graphics card: the cards found; settings.c gpu_card_fill): no
+        # literals to check, and the count is the table's maximum
+        dynamic = "gpu_card_cycle" in e
+        m = re.search(r"\}\s*,\s*(\d+)\s*,", e)  # the number after the notes
+        count = int(m.group(1)) if m else None
+        if count is None and not dynamic:
+            raise AssertionError(f"no option count in the setting {name}")
+        out.append({"category": category, "name": name, "help": "".join(help_parts), "dynamic": dynamic,
+                    "options": [] if dynamic else c_strings(lists[0]), "notes": [] if dynamic else c_strings(lists[1]),
+                    "count": count,
+                    "values": [] if dynamic else c_strings(lists[2]) if len(lists) > 2 else [],
                     # a typed text, not choices (Profile > Player name, Online play's codes: a box and an Edit button, no note under it)
                     "typed": "player_name_edit" in e or "_code_edit" in e})
     return out
@@ -73,6 +80,8 @@ class SettingsTexts(unittest.TestCase):
         for r in rows:
             with self.subTest(setting=r["name"]):
                 self.assertGreater(len(r["help"]), 20, "no description")
+                if r["dynamic"]:
+                    continue  # its choices come from this PC (checked in test_graphics_card_row)
                 self.assertEqual(len(r["options"]), r["count"], "option count")
                 self.assertEqual(len(r["notes"]), len(r["options"]), "a note per option")
                 self.assertEqual(len(r["values"]), len(r["options"]), "a settings-file value per option")
@@ -88,6 +97,20 @@ class SettingsTexts(unittest.TestCase):
                 with self.subTest(text=text):
                     missing = {c for c in text.upper() if c not in glyphs}
                     self.assertFalse(missing, f"characters without a glyph: {sorted(missing)}")
+
+    def test_graphics_card_row(self):
+        """Display > Graphics card: first in Display, its fixed texts in the panel's font (the cards' names are shown
+        as they are, in the overlay only), saved as YW4_GPU."""
+        rows = settings()
+        display = [r for r in rows if r["category"] == "DISPLAY"]
+        self.assertEqual(display[0]["name"], "GRAPHICS CARD")
+        self.assertTrue(display[0]["dynamic"])
+        src = (ROOT / "runtime/src/settings.c").read_text(encoding="utf-8")
+        glyphs = font()
+        for text in ("THE ONE IN USE", "TAKES EFFECT AFTER A RESTART", "THIS PC HAS ONE GRAPHICS CARD"):
+            self.assertIn(f'"{text}"', src)
+            self.assertFalse({c for c in text if c not in glyphs}, text)
+        self.assertIn('"YW4_GPU=%s\\n", gpu_choice()', src)
 
     def test_sharpening_row(self):
         """SHARPENING (decision 0076, a slider since issue #11): 0..1 stopping at its five levels (steps of 0.25),
