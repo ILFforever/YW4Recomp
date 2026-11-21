@@ -9,16 +9,28 @@ const $ = (id) => document.getElementById(id);
 // on Linux. The user agent is only a fallback for the screens opened in a plain browser (npm run dev): on a Steam
 // Deck the 1.6.0 launcher's user agent had no "Linux" in it, so it took itself for Windows and kept naming folders
 // "...\YW4 Recomp" (issue #22).
-const LINUX = window.__YW4_OS ? window.__YW4_OS === 'linux'
+const DETECTED_LINUX = window.__YW4_OS ? window.__YW4_OS === 'linux'
   : /Linux/.test(navigator.userAgent) && !/Windows|Android/.test(navigator.userAgent);
-if (LINUX) document.documentElement.classList.add('os-linux');
-const SAVES_PLACE = LINUX ? 'your home folder' : 'AppData';
-if (LINUX) {
-  document.querySelectorAll('.saves-place').forEach((b) => { b.textContent = 'In your home folder'; });
-  document.querySelectorAll('.startmenu-name').forEach((b) => { b.textContent = 'App menu entry'; });
-  $('set-startmenu').setAttribute('aria-label', 'App menu entry');
-  document.querySelectorAll('#hero .slide.win-only').forEach((img) => img.remove());  // the slideshow counts what's left
+// The player's override (Options, Install to: "Override"), kept in this launcher's own storage: 'linux' or
+// 'windows', none = the detected system (owner, 2026-11-21: a way out should the detection ever be wrong)
+const OS_KEY = 'yw4-os-override';
+function storedOs() {
+  try { const v = localStorage.getItem(OS_KEY); return v === 'linux' || v === 'windows' ? v : null; } catch (e) { return null; }
 }
+let LINUX = storedOs() ? storedOs() === 'linux' : DETECTED_LINUX;
+let SAVES_PLACE = 'AppData';
+// the words and looks that follow the system: at start, and again when the override changes
+function applyOs() {
+  document.documentElement.classList.toggle('os-linux', LINUX);
+  SAVES_PLACE = LINUX ? 'your home folder' : 'AppData';
+  document.querySelectorAll('.saves-place').forEach((b) => { b.textContent = LINUX ? 'In your home folder' : 'In AppData'; });
+  const menu = LINUX ? 'App menu entry' : 'Start menu entry';
+  document.querySelectorAll('.startmenu-name').forEach((b) => { b.textContent = menu; });
+  $('set-startmenu').setAttribute('aria-label', menu);
+}
+applyOs();
+// the slideshow counts what's left: only at start (a later switch to Windows shows them again after a restart)
+if (LINUX) document.querySelectorAll('#hero .slide.win-only').forEach((img) => img.remove());
 // the focus ring only after keyboard use (style.css body.pointer): a click hides it, a key brings it back. It starts
 // hidden: a popup open at start (the welcome) focuses its first control, which drew a box round its checkbox before
 // anything was pressed (owner, 2026-11-19)
@@ -328,13 +340,16 @@ $('continue').addEventListener('click', () => {
 
 // ---- 3 · Options: downloads (by the graphics card), where the game goes, saves, shortcuts
 const GB = 1024 ** 3;
+// the folder offered first: C:\Games\YW4 Recomp, or on Linux ~/Games/YW4 Recomp once the home folder is known
+let homeDir = null;
+const defaultInstall = () => LINUX ? (homeDir ? homeDir.replace(/\/$/, '') + '/Games/YW4 Recomp' : '') : 'C:\\Games\\YW4 Recomp';
 const options = {
   fsr: true, dlss: false, freeUp: false, desktop: true, startMenu: false,
-  install: LINUX ? '' : 'C:\\Games\\YW4 Recomp', saves: 'install',
+  install: defaultInstall(), saves: 'install',
 };
-// Linux: ~/Games/YW4 Recomp, once the home folder is known
-if (LINUX && T && T.path) T.path.homeDir().then((h) => {
-  if (!options.install) { options.install = h.replace(/\/$/, '') + '/Games/YW4 Recomp'; renderSummary(); }
+if (T && T.path) T.path.homeDir().then((h) => {
+  homeDir = h;
+  if (!options.install) { options.install = defaultInstall(); renderSummary(); }
 }).catch(() => {});
 let rtx = false;
 let spaceFree = null;
@@ -356,8 +371,33 @@ const SWITCHES = [
     : LINUX ? 'Upscaling · about 60 MB' : 'Upscaling, frame generation, Reflex · about 325 MB', needsRtx: true },
   { key: 'freeUp', title: 'Free up space after building', note: () => `Deletes the tools and build files (${bundled ? '2 GB' : '1.3 GB'}). Updates then download them and rebuild` },
   { key: 'desktop', title: 'Desktop shortcut', note: () => 'Opens the launcher' },
-  { key: 'startMenu', title: LINUX ? 'App menu entry' : 'Start menu entry', note: () => 'Opens the launcher' },
+  { key: 'startMenu', get title() { return LINUX ? 'App menu entry' : 'Start menu entry'; }, note: () => 'Opens the launcher' },
 ];
+
+// Install to: the system the launcher detected, and Override for when it is wrong (issue #22: a Steam Deck taken for
+// Windows got "...\YW4 Recomp"). The other system's folder rules and words apply at once, no restart: the folder is
+// joined again with its separator ("/home/deck/Downloads\YW4 Recomp" becomes ".../Downloads/YW4 Recomp").
+const osName = (linux) => linux ? 'Linux' : 'Windows';
+function renderOsLine() {
+  const set = storedOs() !== null;
+  $('os-line-text').innerHTML = `System: <b>${osName(LINUX)}</b> · ${set ? 'set by you' : 'detected'}`;
+  $('os-override').textContent = set ? 'Use detected' : 'Override';
+  $('os-override').title = set ? `Back to ${osName(DETECTED_LINUX)}, the detected system` : `Use ${osName(!LINUX)} folder names instead`;
+}
+$('os-override').addEventListener('click', () => {
+  const wasDefault = !options.install || options.install === defaultInstall();
+  const to = storedOs() !== null ? null : (LINUX ? 'windows' : 'linux');
+  try { if (to) localStorage.setItem(OS_KEY, to); else localStorage.removeItem(OS_KEY); } catch (e) { /* this run only */ }
+  LINUX = to ? to === 'linux' : DETECTED_LINUX;
+  applyOs();
+  if (wasDefault) options.install = defaultInstall();
+  else if (/[\\/]+YW4 Recomp$/i.test(options.install)) {
+    options.install = options.install.replace(/[\\/]+YW4 Recomp$/i, '') + (LINUX ? '/' : '\\') + 'YW4 Recomp';
+  }
+  renderOsLine();
+  renderSwitches();
+  refreshSpace();
+});
 
 function renderSwitches() {
   const box = $('switches');
@@ -411,6 +451,7 @@ async function refreshSpace() {
 
 let optionsLoaded = false;
 async function loadOptions() {
+  renderOsLine();
   renderSwitches();
   refreshSpace();
   if (optionsLoaded) return;
@@ -844,8 +885,8 @@ let inst = null;  // the launcher's state of the install (Rust: ready.rs, %AppDa
 
 // What's new: written for each release (the launcher ships with the notes of the version it builds)
 const NEWS = {
-  version: '1.6.0',
-  items: ['The build page shows the files compiling now', 'No other page while a build runs', 'Linux: a game folder named with \\ is fixed for you'],
+  version: '1.6.1',
+  items: ['Steam Deck and Linux: the launcher knows it is on Linux, so folders get the right name', 'Settings: Open straight into the game has a page of its own'],
 };
 
 function showNews(version, items) {

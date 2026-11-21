@@ -20,10 +20,12 @@ def test_rust_sets_the_system_before_the_screens_run():
 
 
 def test_linux_comes_from_rust_first():
-    m = re.search(r"const LINUX = (.+?);\n", APP_JS, re.S)
-    assert m, "app.js has no LINUX"
+    m = re.search(r"const DETECTED_LINUX = (.+?);\n", APP_JS, re.S)
+    assert m, "app.js has no DETECTED_LINUX"
     first = m.group(1).strip()
     assert first.startswith("window.__YW4_OS ? window.__YW4_OS === 'linux'"), first
+    # LINUX: the player's override (Options, Install to) or else the detected system
+    assert re.search(r"let LINUX = storedOs\(\) \? storedOs\(\) === 'linux' : DETECTED_LINUX;", APP_JS)
 
 
 def test_slash_fix_not_gated_by_the_guess():
