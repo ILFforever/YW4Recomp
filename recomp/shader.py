@@ -770,9 +770,15 @@ class Translator:
             # Only the position: undeclared, glslang's block also holds gl_PointSize and one clip and one cull
             # distance, which no game shader writes. Those 7 built-in components on top of an output at location 30
             # (components up to 124) went over desktop Vulkan's 128 (VUID-RuntimeSpirv-Location-06272, 19 shaders).
-            o.append("out gl_PerVertex { vec4 gl_Position; };")
+            # invariant: the same position, to the last bit, from every pipeline a program is built into. The game
+            # draws its scene twice, the second pass (the materials) only where the depth is EQUAL to the first's;
+            # without it a driver may fuse the position maths differently per pipeline (RADV did), and pixels that
+            # missed by a bit kept the first pass's colour: leaves flickering grey on the RX 580 (2026-11-21).
+            o.append("out gl_PerVertex { invariant vec4 gl_Position; };")
         elif p.stage == "geom":  # the same block on both sides, or it doesn't match the vertex shader's (08746)
-            o += ["in gl_PerVertex { vec4 gl_Position; } gl_in[];", "out gl_PerVertex { vec4 gl_Position; };"]
+            # (invariant only on the output: glslang refuses it on an input block, and invariance needn't match)
+            o += ["in gl_PerVertex { vec4 gl_Position; } gl_in[];",
+                  "out gl_PerVertex { invariant vec4 gl_Position; };"]
         for loc in sorted(p.colors):
             o.append(f"layout(location = {loc}) out vec4 o_color{loc};")
         if p.stage in ("vert", "geom"):

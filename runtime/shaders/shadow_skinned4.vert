@@ -17,6 +17,10 @@ layout(push_constant) uniform Draw {
     vec4 row[4];  // projection x view x world, row-major
 } draw;
 
+// The same position to the last bit as the game's own pass over this geometry (an EQUAL depth test follows):
+// see recomp/shader.py, gl_PerVertex (leaves flickering grey on RADV, 2026-11-21).
+invariant gl_Position;
+
 void main() {
     uvec4 b = bones * 3u;
     vec4 m[3];

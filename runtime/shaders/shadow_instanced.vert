@@ -16,6 +16,10 @@ layout(set = 1, binding = 0, std430) readonly buffer Copies {
 
 layout(location = 4) flat out float fade;
 
+// The same position to the last bit as the game's own pass over this geometry (an EQUAL depth test follows):
+// see recomp/shader.py, gl_PerVertex (leaves flickering grey on RADV, 2026-11-21).
+invariant gl_Position;
+
 void main() {
     Copy c = copies.copy[gl_InstanceIndex];
     vec4 v = vec4(position, 1.0);

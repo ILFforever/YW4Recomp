@@ -38,6 +38,10 @@ const float unit = 1.525902190e-05;  // 1 / 65535: the weights sum to 65535
 // Bone b's row r in a palette, by vec4 index (3 rows a bone)
 #define ROW(pal, b, r) pal.d[(b) * 3u + uint(r)]
 
+// The same position to the last bit as the game's own pass over this geometry (an EQUAL depth test follows):
+// see recomp/shader.py, gl_PerVertex (leaves flickering grey on RADV, 2026-11-21).
+invariant gl_Position;
+
 void main() {
     float mirror = material.d[0].x;  // -1 mirrors the mesh in x
     vec4 p = vec4(a_position.x * mirror, a_position.yzw);

@@ -25,6 +25,10 @@ layout(location = 25) out vec4 v_flag;
 
 layout(push_constant) uniform YW4 { uint pos_fix; } yw4;
 
+// The same position to the last bit as the game's own pass over this geometry (an EQUAL depth test follows):
+// see recomp/shader.py, gl_PerVertex (leaves flickering grey on RADV, 2026-11-21).
+invariant gl_Position;
+
 void main() {
     // object rows: 0-2 world, 8-11 projection x view x world, 12-15 last frame's world;
     // view rows 32-35: last frame's projection x view

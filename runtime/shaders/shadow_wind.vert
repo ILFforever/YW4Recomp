@@ -34,6 +34,10 @@ layout(push_constant) uniform Draw {
 
 layout(location = 3) out vec4 cut;
 
+// The same position to the last bit as the game's own pass over this geometry (an EQUAL depth test follows):
+// see recomp/shader.py, gl_PerVertex (leaves flickering grey on RADV, 2026-11-21).
+invariant gl_Position;
+
 void main() {
     Copy hd = copies.copy[draw.header];
     vec4 c36 = hd.row[0], c47 = hd.row[1], c70 = hd.row[2], c73 = hd.row[3];
