@@ -11,6 +11,12 @@
 
 #include "host.h"
 
+#ifndef _WIN32
+#include <dlfcn.h>
+#include <signal.h>
+#include <ucontext.h>
+#endif
+
 #ifdef _WIN32
 #include <windows.h>
 #endif
@@ -472,9 +478,28 @@ void host_yield(void) { sched_yield(); }
 
 static void (*crash_report)(const char *, uint64_t, uint64_t);
 
-static void crash_signal(int sig, siginfo_t *info, void *uc) {
-    (void)uc;
-    crash_report(sig == SIGSEGV ? "segmentation fault" : sig == SIGBUS ? "bus error" : "illegal instruction", 0,
+static void crash_signal(int sig, siginfo_t *info, void *uc_) {
+    /* The faulting instruction's address comes from the saved registers (the Windows handler gets it the same way).
+     * Without it the report said "host pc 0" and the log could not name the code that crashed (2026-11-22). */
+    const ucontext_t *uc = uc_;
+    uint64_t pc = 0;
+    if (uc) {
+#if defined(__x86_64__)
+        pc = (uint64_t)uc->uc_mcontext.gregs[REG_RIP];
+#elif defined(__aarch64__)
+        pc = (uint64_t)uc->uc_mcontext.pc;
+#endif
+    }
+    /* Where that is in the binary: the offset from the module's base, and the nearest exported symbol if any. */
+    Dl_info di;
+    if (pc && dladdr((const void *)(uintptr_t)pc, &di) && di.dli_fbase) {
+        const char *name = di.dli_fname ? strrchr(di.dli_fname, '/') : NULL;
+        name = name ? name + 1 : (di.dli_fname ? di.dli_fname : "?");
+        fprintf(stderr, "yw4: crash in %s+%#" PRIx64 "%s%s%s\n", name,
+                (uint64_t)((uintptr_t)pc - (uintptr_t)di.dli_fbase), di.dli_sname ? " (" : "",
+                di.dli_sname ? di.dli_sname : "", di.dli_sname ? ")" : "");
+    }
+    crash_report(sig == SIGSEGV ? "segmentation fault" : sig == SIGBUS ? "bus error" : "illegal instruction", pc,
                  (uint64_t)(uintptr_t)info->si_addr);
 }
 
