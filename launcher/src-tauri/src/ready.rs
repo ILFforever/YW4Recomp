@@ -254,6 +254,7 @@ pub struct Info {
     #[serde(rename = "shotCount")]
     shot_count: usize,        // all of them
     reclaimable: u64,         // what Free up space would delete
+    used: u64,                // the whole install folder now (shown when there is nothing left to free)
     #[serde(rename = "lastPlayed")]
     last_played: Option<u64>, // Unix seconds of the last start from the launcher
     #[serde(rename = "playSecs")]
@@ -532,12 +533,13 @@ pub async fn install_info(app: tauri::AppHandle, install: String) -> Info {
         let dir = inst.join("work").join("icon");
         let icon = ensure_icon_image(&dir).map(|p| p.display().to_string());
         let reclaimable = reclaim_dirs(&inst).iter().map(|d| dir_size(d)).sum();
+        let used = dir_size(&inst);
         let played = load_played(&install);
         let disabled_mods = current_state().map(|s| s.disabled_mods).unwrap_or_default();
         let roots = mod_roots(&inst.join("mods"));
         let mod_overlaps = game_clashes(&exe(&install), &version).unwrap_or_else(|| mod_overlaps(&roots));
         Info { version, dlc, dlc_list, mods: roots.into_iter().map(|(name, _)| name).collect(), disabled_mods, mod_overlaps,
-               icon, shots, shot_count, reclaimable,
+               icon, shots, shot_count, reclaimable, used,
                last_played: played.last_played, play_secs: played.seconds }
     })
     .await

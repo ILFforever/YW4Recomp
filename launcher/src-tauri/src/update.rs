@@ -298,6 +298,76 @@ pub async fn download_game_update(install: String, version: String, url: String,
     }).await.map_err(|e| e.to_string())?
 }
 
+/// Installs game code the player already has, with no GitHub: a yw4recomp-game-X.Y.Z.zip, or the folder it unpacks to.
+/// It goes into <install>\builder\game\<version>\ like a download, after the same usable() check, so the build takes
+/// the newest game code there as usual. A file from someone else has no GitHub SHA-256 to check: install only one
+/// you trust. Returns the version.
+#[tauri::command]
+pub async fn install_game_file(app: tauri::AppHandle, install: String, path: String) -> Result<String, String> {
+    if crate::buildrun::building(&app) {
+        return Err("A build is running. Install the game file when it has finished.".into());
+    }
+    // an empty folder would mean a relative "builder" folder beside the launcher
+    if install.trim().is_empty() { return Err("No install folder.".into()); }
+    tauri::async_runtime::spawn_blocking(move || {
+        let dir = PathBuf::from(&install).join("builder").join("game");
+        std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+        install_game_source(Path::new(&path), &dir)
+    }).await.map_err(|e| e.to_string())?
+}
+
+/// The work behind install_game_file: unpack (a zip) or read (a folder) the source, check it, copy it into
+/// <dir>\<version>\ (the old copy of that version is replaced). The temporary unpack folder is always removed.
+fn install_game_source(src: &Path, dir: &Path) -> Result<String, String> {
+    let tmp = dir.join("file.unpack");
+    let _ = std::fs::remove_dir_all(&tmp);
+    let result: Result<String, String> = (|| {
+        let is_zip = src.is_file() && src.extension().map_or(false, |e| e.eq_ignore_ascii_case("zip"));
+        let base = if src.is_dir() {
+            src.to_path_buf()
+        } else if is_zip {
+            std::fs::create_dir_all(&tmp).map_err(|e| e.to_string())?;
+            // Windows' bsdtar and Python's zipfile both refuse absolute paths and ".." in an archive
+            if !crate::platform::unzip(src, &tmp) { return Err("couldn't unpack that zip".into()); }
+            tmp.clone()
+        } else {
+            return Err("Choose a game zip file or the folder it unpacks to.".into());
+        };
+        let root = find_game_root(&base).ok_or("No game code there: no release.toml in it or one folder down.")?;
+        let version = usable(&root)?;
+        // the version names a folder that is deleted and replaced below: exactly "X.Y.Z", as for a download
+        let plain = version.split('.').count() == 3 && version.chars().all(|c| c.is_ascii_digit() || c == '.');
+        if !plain || ver(&version).is_none() { return Err(format!("the game code's version \"{version}\" isn't a version number")); }
+        let staged = dir.join(format!("{version}.copy"));
+        let _ = std::fs::remove_dir_all(&staged);
+        copy_tree(&root, &staged).map_err(|e| e.to_string())?;
+        let dst = dir.join(&version);
+        let _ = std::fs::remove_dir_all(&dst);
+        std::fs::rename(&staged, &dst).map_err(|e| e.to_string())?;
+        Ok(version)
+    })();
+    let _ = std::fs::remove_dir_all(&tmp);
+    result
+}
+
+/// The folder that holds release.toml: the folder itself, or the one folder inside it (a zip with a top folder).
+fn find_game_root(dir: &Path) -> Option<PathBuf> {
+    if dir.join("release.toml").is_file() { return Some(dir.to_path_buf()); }
+    std::fs::read_dir(dir).ok()?.flatten().map(|e| e.path())
+        .find(|p| p.is_dir() && p.join("release.toml").is_file())
+}
+
+/// Copies a folder tree. Symbolic links are skipped: only the files and folders themselves are game code.
+fn copy_tree(src: &Path, dst: &Path) -> std::io::Result<()> {
+    std::fs::create_dir_all(dst)?;
+    for e in std::fs::read_dir(src)?.flatten() {
+        let (from, to, ft) = (e.path(), dst.join(e.file_name()), e.file_type()?);
+        if ft.is_symlink() { continue; }
+        if ft.is_dir() { copy_tree(&from, &to)?; } else { std::fs::copy(&from, &to)?; }
+    }
+    Ok(())
+}
+
 /// The launcher installer download_launcher_update checked; run_launcher_update starts only this file, so the page
 /// can't hand it any other.
 static CHECKED_INSTALLER: std::sync::Mutex<Option<PathBuf>> = std::sync::Mutex::new(None);
@@ -390,5 +460,29 @@ mod tests {
             "browser_download_url": "x" }] });
         assert!(launcher_installer(&no_digest, (1, 2, 3)).is_none());
         assert!(launcher_installer(&r, (1, 2, 4)).is_none());
+    }
+
+    #[test]
+    fn game_code_installed_from_a_folder_without_github() {
+        let base = std::env::temp_dir().join(format!("yw4-local-game-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&base);
+        let src = base.join("yw4recomp-game");
+        std::fs::create_dir_all(src.join("recomp")).unwrap();
+        std::fs::write(src.join("release.toml"), "version = \"9.8.7\"\n").unwrap();
+        std::fs::write(src.join("recomp").join("a.py"), "x").unwrap();
+        let dir = base.join("install").join("builder").join("game");
+        std::fs::create_dir_all(&dir).unwrap();
+        assert_eq!(install_game_source(&src, &dir).as_deref(), Ok("9.8.7"));
+        assert!(dir.join("9.8.7").join("recomp").join("a.py").is_file());
+        // the folder the player picked is left as it was
+        assert!(src.join("release.toml").is_file());
+        // a version that is not X.Y.Z is refused (it names a folder), and no temporary folder is left behind
+        std::fs::write(src.join("release.toml"), "version = \"1.2.3/../../x\"\n").unwrap();
+        assert!(install_game_source(&src, &dir).is_err());
+        assert!(!dir.join("file.unpack").exists());
+        assert!(!dir.join("1.2.3").exists());
+        // a file that is not a zip: refused with the reason
+        assert!(install_game_source(&src.join("release.toml"), &dir).is_err());
+        let _ = std::fs::remove_dir_all(&base);
     }
 }

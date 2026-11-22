@@ -219,7 +219,7 @@
           </div>
         </section>
         <section class="card">
-          <div class="card-head"><h2>Cheats</h2><button class="btn small" type="button" id="set-cheats-manage">Manage &rsaquo;</button></div>
+          <div class="card-head"><h2>Cheats</h2><button class="link" type="button" id="set-cheats-manage">Manage &rsaquo;</button></div>
           <div class="switch-row">
             <span><b>Cheats page</b><small>In the game's menu. Off hides it and turns every cheat off</small></span>
             <button class="toggle" type="button" role="switch" aria-label="Cheats page" id="set-cheats"></button>
@@ -309,6 +309,10 @@
           <div class="set-row">
             <span><b id="set-versions"></b><small id="set-update-line">Checked when the launcher starts</small></span>
             <button class="btn small" type="button" id="set-check">Check now</button>
+          </div>
+          <div class="set-row">
+            <span><b>Update game from file</b><small>Choose game update zip</small></span>
+            <button class="btn small" type="button" id="set-file-zip">Select zip</button>
           </div>
         </section>
         </div>
@@ -523,7 +527,7 @@
         <button class="side-row" type="button" data-tab="dlc"><b>DLC</b><span id="row-dlc"></span></button>
         <button class="side-row" type="button" data-open="save"><b>Saves</b><span>Open folder</span></button>
         <button class="side-row" type="button" data-open="logs"><b>Logs</b><span>Open folder</span></button>
-        <button class="side-row" type="button" id="free-btn"><b>Free up space</b><span id="row-free"></span></button>      </div>
+        <button class="side-row" type="button" id="free-btn"><b id="row-free-label">Free up space</b><span id="row-free"></span></button>      </div>
     </aside>
 
     <section class="game-main">

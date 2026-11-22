@@ -885,8 +885,8 @@ let inst = null;  // the launcher's state of the install (Rust: ready.rs, %AppDa
 
 // What's new: written for each release (the launcher ships with the notes of the version it builds)
 const NEWS = {
-  version: '1.6.1',
-  items: ['Steam Deck and Linux: the launcher knows it is on Linux, so folders get the right name', 'Settings: Open straight into the game has a page of its own'],
+  version: '1.6.2',
+  items: ['Settings > Updates: Update game from file takes a game update zip you already have', 'Free up space shows the space used once there is nothing left to free', 'Settings > Cheats: Manage is a link'],
 };
 
 function showNews(version, items) {
@@ -1245,7 +1245,9 @@ async function showReady() {
   renderModsDlc(info);
 
   reclaimable = info.reclaimable;
-  $('row-free').textContent = reclaimable > 0.05 * GB ? gb(reclaimable) : 'Done';
+  const nothingToFree = reclaimable <= 0.05 * GB;  // nothing left to free: the row shows the space used instead
+  $('row-free').textContent = nothingToFree ? gb(info.used) : gb(reclaimable);
+  $('row-free-label').textContent = nothingToFree ? 'Space used' : 'Free up space';
   $('free-btn').disabled = reclaimable <= 0.05 * GB;
   $('offer').hidden = !!inst.originalsOffered;
 }
@@ -1643,6 +1645,31 @@ $('set-check').addEventListener('click', async () => {
   if (u.rebuild || u.game || u.launcher) { showUpdates(info); return; }
   $('set-update-line').textContent = u.offline ? "Couldn't reach GitHub. Try again later." : 'Everything is up to date';
 });
+// Game from a file (no GitHub): a game zip, or the folder it unpacks to. Installed like a download; a built install
+// then gets the rebuild question (showUpdates), a new one the first build takes the code from.
+async function gameFromFile(folder) {
+  if (!T || !T.dialog) return;
+  const path = await T.dialog.open(folder ? { title: 'Game folder', directory: true }
+    : { title: 'Game update zip', multiple: false, filters: [{ name: 'Game update zip', extensions: ['zip'] }] });
+  if (typeof path !== 'string' || !path) return;
+  const install = inst ? inst.install : options.install;
+  if (!install) { popup('Update game from file', 'Choose the install folder first.'); return; }
+  const line = $('set-update-line');
+  line.textContent = 'Installing the game file…';
+  try {
+    const version = await invoke('install_game_file', { install, path });
+    line.textContent = `Game ${version} is installed from a file`;
+    if (inst) {
+      showUpdates(await invoke('install_info', { install: inst.install }));
+    } else {
+      popup('Game installed', `Game ${version} is installed. The first build uses it.`);
+    }
+  } catch (e) {
+    line.textContent = 'The game file was not installed';
+    popup("Game file wasn't installed", String(e));
+  }
+}
+$('set-file-zip').addEventListener('click', () => gameFromFile(false));
 // Options is reached from setup (after Check) or, to rebuild with other downloads, from the Play screen (the
 // Settings page will open it): Back returns where it came from
 let optionsFromPlay = false;

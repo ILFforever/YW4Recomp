@@ -281,6 +281,12 @@ body.pointer :focus-visible { outline: none; }
   font: 12px/1.55 ui-monospace, Consolas, monospace; white-space: pre-wrap; overflow-wrap: anywhere; user-select: text;
   scrollbar-width: none; }
 .log::-webkit-scrollbar { display: none; }
+/* the card's own parts keep their height (the Hide details button was squeezed); the log takes what is left, with no
+   minimum: its 170 px minimum ran over the card's bottom edge */
+.build-left > * { flex-shrink: 0; }
+.build-left > .log { flex: 1 1 0; min-height: 0; }
+/* details open: the "+ 8 more compiling" and "waiting for free memory" line goes, the log has its room */
+.build-left.details .files-foot { display: none; }
 .build-steps { width: 340px; flex-shrink: 0; margin: 0; padding: 14px 18px; list-style: none; border-radius: 14px;
   background: var(--white); border: 1px solid var(--lilac-3); }
 .build-steps li { display: grid; grid-template-columns: 28px minmax(0, 1fr); align-items: center; gap: 12px; padding: 9px 0;
@@ -369,6 +375,7 @@ body.pointer :focus-visible { outline: none; }
   font: 700 13px/1 var(--display); color: var(--violet); text-decoration: underline; }
 .recent { display: flex; flex-direction: column; min-height: 0; border-color: var(--lilac-2); padding: 14px; }
 .recent .link { margin: 0; }
+.card-head .link { align-self: center; margin: 0; }  /* the Cheats card's Manage: a link in the heading row */
 /* 16:9 tiles: 4 in a normal window (2 x 2), 8 in a wide one (4 x 2) */
 .recent-grid { display: grid; grid-template-columns: 1fr 1fr; align-content: start; gap: 8px; }
 .recent-grid .shot { aspect-ratio: 16 / 9; }
@@ -577,7 +584,7 @@ dialog p { margin: 0 0 10px; font-size: 14px; overflow-wrap: anywhere; }
 .changelog li { margin: 2px 0; }
 
 /* Settings (the top bar's gear): three columns of cards, each column stacked, so the page fits without scrolling */
-.settings-body { gap: 14px; padding-top: 24px; }
+.settings-body { gap: 14px; padding-top: 24px; padding-bottom: 0; }
 .settings-body h1 { margin: 0; }
 .settings-grid[hidden] { display: none; }
 .settings-grid.two { grid-template-columns: repeat(2, minmax(0, 1fr)); }
@@ -590,8 +597,7 @@ dialog p { margin: 0 0 10px; font-size: 14px; overflow-wrap: anywhere; }
 .settings-grid .card-head h2 { border-bottom: 0; background: none; }
 .settings-grid .card-head .btn.small { height: 28px; padding: 0 12px; font-size: 12px; }
 .set-row { display: flex; align-items: center; gap: 14px; padding: 11px 16px; border-bottom: 1px solid var(--lilac-2); }
-.set-row:last-child { border-bottom: 0; }
-.set-row > span { flex: 1; min-width: 0; }
+.set-row:last-child { border-bottom: 0; }.set-row > span { flex: 1; min-width: 0; }
 .set-row b { display: block; font: 700 15px/1.3 var(--display); color: var(--violet); }
 .set-row small { display: block; font-size: 12px; color: var(--ink-2); overflow-wrap: anywhere; }
 .settings-head { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
