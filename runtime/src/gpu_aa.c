@@ -667,7 +667,13 @@ static AaImage fsr_depth;
 static void fsr_depth_of(VkCommandBuffer cb, GpuImage *d, VkImageView src, uint32_t w, uint32_t h, VkImage *image,
                          VkFormat *format) {
     *image = d->image, *format = d->format;
-    if (!src || d->format != VK_FORMAT_D32_SFLOAT_S8_UINT) return;
+    /* D24S8 (NVIDIA): FSR's own X8_D24 view of it is invalid too, and it is the depth FSR's frame generation reads
+     * as R32_UINT raw bits (ffx_api_vk.h): the copy makes it a plain float depth like on AMD. 2026-11-22.
+     * YW4_FSR_D24_COPY=0: the old way (A/B). */
+    static int d24_copy = -1;
+    if (d24_copy < 0) d24_copy = !(getenv("YW4_FSR_D24_COPY") && *getenv("YW4_FSR_D24_COPY") == '0');
+    int copy = d->format == VK_FORMAT_D32_SFLOAT_S8_UINT || (d24_copy && d->format == VK_FORMAT_D24_UNORM_S8_UINT);
+    if (!src || !copy) return;
     static uint64_t copied_frame = ~0ull;
     static VkImage copied_from;
     if (!fsr_depth.image || fsr_depth.w != w || fsr_depth.h != h) {
@@ -866,8 +872,14 @@ static void fg_prepare(VkCommandBuffer cb, GpuImage *d, VkImageView dv, uint32_t
     int dlssg = gpu_fg() == 2 && dlssg_available();  /* DLSS's: tagged for Streamline instead */
     if (!gpu_fg_active() && !dlssg) return;
     uint64_t now = gpu_frames();
-    if (!motion.image || motion_frame + 1 < now || motion_frame > now + 1) return;
-    if (!d || d->width != w || d->height != h || motion.w != w || motion.h != h) return;
+    if (!motion.image || motion_frame + 1 < now || motion_frame > now + 1) {
+        gpu_fg_skip(FG_SKIP_MOTION);
+        return;
+    }
+    if (!d || d->width != w || d->height != h || motion.w != w || motion.h != h) {
+        gpu_fg_skip(FG_SKIP_SIZE);
+        return;
+    }
     static int64_t last_ns;
     int64_t t = host_now_ns();
     GpuFgPrepare p = {.depth = d->image, .motion = motion.image, .depth_view = dv, .motion_view = motion.view,

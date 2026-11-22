@@ -17,6 +17,10 @@ void gpu_fg_test_switch(uint64_t frame);  /* YW4_FG_AT=<frame>:<mode>,... (tests
 int gpu_fg_switching(void);
 /* 1 while FSR's frame generation shows frames: the window then doesn't wait for the monitor (window.c). */
 int gpu_fg_active(void);
+/* Why a presented frame got no generated frame: counted by these reasons, printed with the every-600 line. */
+enum { FG_SKIP_MOTION, FG_SKIP_SIZE, FG_SKIP_INACTIVE, FG_SKIP_CONTEXT, FG_SKIP_CONFIGURE, FG_SKIP_DISPATCH,
+       FG_SKIP_NO_PREPARE, FG_SKIP_NO_CONTEXT, FG_SKIP_N };
+void gpu_fg_skip(int reason);
 /* Frames on screen per game frame while frame generation runs (about 2), else 0 (the HUD's SHOWN line). */
 float gpu_fg_shown_per_frame(void);
 

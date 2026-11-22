@@ -133,3 +133,21 @@ outline around the characters (both DLSS and FSR frame generation; gone with fra
 show it, as it saves only the game's own frames). Still open. Next suspects: the characters' black outline drawn
 without motion or depth (compare a motion view and a normal picture while orbiting, by hand: replays don't frame
 it), and the base frame rate (~50-57 here, under NVIDIA's suggested 60).
+
+## Change 2026-11-22: FSR frame generation on the game's rectangle only
+
+FSR frame generation warped and banded while the camera turned (characters doubled, bamboo smeared in the
+generated frame); a still camera was clean, DLSS's was clean. Cause: FSR's context had the whole window image as
+its display size (1920x1080) while the game's picture is only a part of it (1600x900 at 0,0, the window's crop).
+FSR maps the 3D's motion and depth from render size onto display size by plain scaling, so every motion vector was
+1.2x too long and taken from the wrong place. DLSS's never had it: Streamline gets that rectangle as the
+backbuffer's subrect.
+
+Now `gpu_fg.c` (`fsr_rect`) gives FSR the shown rectangle alone: the slots and the HUD-less copy hold just that
+part at 0,0, the context's display size is its size, and the pacing thread presents the slot with the rectangle
+moved to 0,0. Test (`tools.dev.scene lategame_cam`, AA FSR, frames 4000/4001 real and generated): with the crop
+the generated frames are sharp and only shifted; with `YW4_FG_CROP=0` (the old way) the characters are doubled.
+
+With it, two changes of the same day, correct by FSR's API but with no visible effect in that test: FSR gets the
+camera's position and axes (`YW4_FG_CAM_VEC=0`: origin and identity axes, as before), and an NVIDIA D24S8 depth
+goes to FSR as a D32 copy like AMD's D32S8 (`YW4_FSR_D24_COPY=0`: as it is, through FSR's own invalid view).

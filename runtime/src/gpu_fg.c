@@ -38,6 +38,25 @@ int gpu_fg_switching(void) {
     return !off && gpu_frames() < __atomic_load_n(&switch_until, __ATOMIC_ACQUIRE);
 }
 
+/* Frames with no generated one, by reason (gpu_fg.h): counted where it happens, printed and reset with the
+ * every-600 line (print_skips). */
+static const char *const skip_names[FG_SKIP_N] = {"no motion", "size", "not active", "context", "configure",
+                                                  "dispatch", "no prepare", "no context"};
+static uint32_t skips[FG_SKIP_N];
+void gpu_fg_skip(int reason) {
+    if (reason >= 0 && reason < FG_SKIP_N) skips[reason]++;
+}
+static void print_skips(void) {
+    int any = 0;
+    for (int i = 0; i < FG_SKIP_N; i++) any |= skips[i] != 0;
+    if (!any) return;
+    fprintf(stderr, "yw4: fg: frames without one, by reason:");
+    for (int i = 0; i < FG_SKIP_N; i++)
+        if (skips[i]) fprintf(stderr, " %s %u,", skip_names[i], (unsigned)skips[i]);
+    fprintf(stderr, "\n");
+    memset(skips, 0, sizeof skips);
+}
+
 int gpu_fg(void) {
     int m = __atomic_load_n(&fg_mode, __ATOMIC_ACQUIRE);
     if (m < 0) {
@@ -287,6 +306,26 @@ void gpu_fg_note_present(VkFormat format, uint32_t w, uint32_t h, VkRect2D rect)
     }
 }
 
+/* FSR frame generation works on the game's rectangle only (the part of the window image the window shows), not the
+ * whole window image: FSR maps the 3D's motion and depth (render size) onto its display size by plain scaling, so a
+ * 1600x900 picture in a 1920x1080 window image got motion 1.2x too long and from the wrong place (warping and double
+ * images while the camera turns; DLSS's tags the same rectangle as the backbuffer's subrect). 2026-11-22.
+ * YW4_FG_CROP=0: the whole window image again (A/B). */
+static int crop_on(void) {
+    static int on = -1;
+    if (on < 0) on = !(getenv("YW4_FG_CROP") && *getenv("YW4_FG_CROP") == '0');
+    return on;
+}
+
+/* The part of a w x h window image FSR works on */
+static VkRect2D fsr_rect(uint32_t w, uint32_t h) {
+    VkRect2D r = shown_rect;
+    if (crop_on() && gpu_fg() == 1 && r.extent.width && r.extent.height && r.offset.x >= 0 && r.offset.y >= 0 &&
+        r.offset.x + r.extent.width <= w && r.offset.y + r.extent.height <= h)
+        return r;
+    return (VkRect2D){{0, 0}, {w, h}};
+}
+
 VkImage gpu_fg_hudless(void) {
     return hudless_ok && hudless_frame + 1 == gpu_frames() ? hudless.image : VK_NULL_HANDLE;
 }
@@ -296,6 +335,9 @@ void gpu_fg_hudless_copy(VkCommandBuffer cb, const GpuFgPrepare *p) {
     /* the presented image is the window texture: the picture sits in it where the crop takes it from */
     VkRect2D r = shown_rect;
     uint32_t pw = presented_w, ph = presented_h;
+    VkRect2D fr = fsr_rect(pw, ph);
+    if (fr.extent.width != pw || fr.extent.height != ph)  /* FSR's crop: the picture alone, at 0,0 */
+        r.offset.x = r.offset.y = 0, pw = fr.extent.width, ph = fr.extent.height;
     if (!p->scene || !presented_fmt || p->scene_w != r.extent.width || p->scene_h != r.extent.height ||
         r.offset.x < 0 || r.offset.y < 0 || r.offset.x + r.extent.width > pw || r.offset.y + r.extent.height > ph)
         return;
@@ -330,14 +372,32 @@ static int configure(uint64_t id, uint32_t w, uint32_t h) {
     return fx.Configure(&ctx, &c.header) == FFX_API_RETURN_OK;
 }
 
+/* The game's camera position and axes go to FSR (gpu_aa.c fg_camera), not only the field of view and the planes.
+ * Until 2026-11-22 FSR got placeholders (origin, identity axes) while the game's motion vectors do move with the
+ * camera. YW4_FG_CAM_VEC=0: the placeholders again (A/B). */
+static int cam_vectors_on(void) {
+    static int on = -1;
+    if (on < 0) on = !(getenv("YW4_FG_CAM_VEC") && *getenv("YW4_FG_CAM_VEC") == '0');
+    return on;
+}
+
 void gpu_fg_prepare(VkCommandBuffer cb, const GpuFgPrepare *p) {
     prepared_id = 0;
-    if (!gpu_fg_active()) return;
+    if (!gpu_fg_active()) {
+        gpu_fg_skip(FG_SKIP_INACTIVE);
+        return;
+    }
     want_rw = p->render_w, want_rh = p->render_h;
-    if (!ctx || ctx_rw != p->render_w || ctx_rh != p->render_h) return;  /* made at the next present */
+    if (!ctx || ctx_rw != p->render_w || ctx_rh != p->render_h) {  /* made at the next present */
+        gpu_fg_skip(FG_SKIP_CONTEXT);
+        return;
+    }
     uint64_t id = next_id;
     gpu_fg_hudless_copy(cb, p);
-    if (!configure(id, ctx_dw, ctx_dh)) return;
+    if (!configure(id, ctx_dw, ctx_dh)) {
+        gpu_fg_skip(FG_SKIP_CONFIGURE);
+        return;
+    }
 #ifdef _WIN32
     struct ffxDispatchDescFrameGenerationPrepareV2 d = {.header = {.type = FFX_API_DISPATCH_DESC_TYPE_FRAMEGENERATION_PREPARE_V2}};
     d.reset = prepared_reset;
@@ -361,7 +421,14 @@ void gpu_fg_prepare(VkCommandBuffer cb, const GpuFgPrepare *p) {
     d.viewSpaceToMetersFactor = 1.0f;
     d.depth = resource(p->depth, p->depth_format, p->render_w, p->render_h, FFX_API_RESOURCE_USAGE_DEPTHTARGET);
     d.motionVectors = resource(p->motion, VK_FORMAT_R16G16_SFLOAT, p->render_w, p->render_h, FFX_API_RESOURCE_USAGE_READ_ONLY);
-    CAM.cameraForward[2] = 1.0f, CAM.cameraUp[1] = 1.0f, CAM.cameraRight[0] = 1.0f;  /* not known: a plain frame */
+    if (p->has_cam && cam_vectors_on()) {  /* world space: the position and the view's axes (gpu_aa.c fg_camera) */
+        memcpy(CAM.cameraPosition, p->cam_pos, sizeof CAM.cameraPosition);
+        memcpy(CAM.cameraRight, p->cam_right, sizeof CAM.cameraRight);
+        memcpy(CAM.cameraUp, p->cam_up, sizeof CAM.cameraUp);
+        memcpy(CAM.cameraForward, p->cam_fwd, sizeof CAM.cameraForward);
+    } else {  /* not known: a plain frame */
+        CAM.cameraForward[2] = 1.0f, CAM.cameraUp[1] = 1.0f, CAM.cameraRight[0] = 1.0f;
+    }
 #undef CAM
     full_barrier(cb);
     ffxReturnCode_t r = fx.Dispatch(&ctx, &d.header);
@@ -369,6 +436,7 @@ void gpu_fg_prepare(VkCommandBuffer cb, const GpuFgPrepare *p) {
     if (r != FFX_API_RETURN_OK) {
         static int logged;
         if (logged++ < 4) fprintf(stderr, "yw4: fg: prepare failed (%u)\n", (unsigned)r);
+        gpu_fg_skip(FG_SKIP_DISPATCH);
         return;
     }
     prepared_id = id;
@@ -381,6 +449,7 @@ typedef struct {
     VkFormat fmt;
     uint32_t w, h;
     int busy, has_gen;
+    int32_t ox, oy;  /* where the slot's images sit in the window image (fsr_rect) */
 } Slot;
 
 static Slot slots[2];
@@ -476,6 +545,10 @@ static void pacer(void *arg) {
         host_cond_broadcast(&pcond);
         host_unlock(&plock);
         Slot *s = &slots[k];
+        rect.offset.x -= s->ox, rect.offset.y -= s->oy;  /* the slot holds only FSR's part of the window image */
+        if (rect.offset.x < 0 || rect.offset.y < 0 || rect.offset.x + rect.extent.width > s->w ||
+            rect.offset.y + rect.extent.height > s->h)  /* the crop changed this frame: all of the slot */
+            rect = (VkRect2D){{0, 0}, {s->w, s->h}};
         if (last_ns) {  /* the game's frame time, smoothed over ~10 frames */
             double d = (double)(t - last_ns) / 1e6;
             if (d > 0.0 && d < 100.0) interval_ms += (d - interval_ms) * 0.1;
@@ -500,6 +573,7 @@ static void pacer(void *arg) {
         if (++shown == 600) {
             fprintf(stderr, "yw4: fg: %d of the last 600 frames had a generated frame before them (%.1f ms apart)\n",
                     made, interval_ms * 0.5);
+            print_skips();
             shown = made = 0;
         }
         host_lock(&plock);
@@ -526,6 +600,10 @@ int gpu_fg_record(VkCommandBuffer cb, VkImage image, VkFormat format, uint32_t w
         }
         pacer_started = 1;
     }
+    /* FSR's part of the window image (fsr_rect): the slots hold it alone, at 0,0 */
+    VkRect2D fr = fsr_rect(w, h);
+    int32_t ox = fr.offset.x, oy = fr.offset.y;
+    w = fr.extent.width, h = fr.extent.height;
     /* the context follows the presented size and the 3D's: made here, used from the next frame's prepare */
     if (want_rw && want_rh && create(w, h, want_rw, want_rh, raw_format(format)) == 0) return -1;
     int k = next_slot;
@@ -536,8 +614,9 @@ int gpu_fg_record(VkCommandBuffer cb, VkImage image, VkFormat format, uint32_t w
     host_unlock(&plock);
     Slot *s = &slots[k];
     slot_images(cb, s, format, w, h);
+    s->ox = ox, s->oy = oy;
     full_barrier(cb);
-    VkImageCopy c = {.srcSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1},
+    VkImageCopy c = {.srcSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1}, .srcOffset = {ox, oy, 0},
                      .dstSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1}, .extent = {w, h, 1}};
     vkCmdCopyImage(cb, image, VK_IMAGE_LAYOUT_GENERAL, s->real.image, VK_IMAGE_LAYOUT_GENERAL, 1, &c);
     s->has_gen = 0;
@@ -572,6 +651,7 @@ int gpu_fg_record(VkCommandBuffer cb, VkImage image, VkFormat format, uint32_t w
         next_id = id + 1;
         prepared_reset = 0;
     } else {
+        gpu_fg_skip(id ? FG_SKIP_NO_CONTEXT : FG_SKIP_NO_PREPARE);
         prepared_reset = 1;  /* a frame without a prepare: FSR starts over */
     }
     full_barrier(cb);
