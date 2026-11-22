@@ -872,6 +872,19 @@ static void fg_prepare(VkCommandBuffer cb, GpuImage *d, VkImageView dv, uint32_t
     int dlssg = gpu_fg() == 2 && dlssg_available();  /* DLSS's: tagged for Streamline instead */
     if (!gpu_fg_active() && !dlssg) return;
     uint64_t now = gpu_frames();
+    {   /* YW4_FG_MOTION_LOG=1: every 600 prepares, how old the motion is (frames before now; "none": none yet) */
+        static int on = -1, n;
+        static unsigned age[4];  /* 0, 1, 2 or more, none */
+        if (on < 0) on = getenv("YW4_FG_MOTION_LOG") != NULL;
+        if (on) {
+            age[!motion.image ? 3 : motion_frame >= now ? 0 : now - motion_frame == 1 ? 1 : 2]++;
+            if (++n == 600) {
+                fprintf(stderr, "yw4: fg: motion age at prepare: now %u, 1 old %u, 2+ old %u, none %u\n", age[0],
+                        age[1], age[2], age[3]);
+                n = 0, memset(age, 0, sizeof age);
+            }
+        }
+    }
     if (!motion.image || motion_frame + 1 < now || motion_frame > now + 1) {
         gpu_fg_skip(FG_SKIP_MOTION);
         return;

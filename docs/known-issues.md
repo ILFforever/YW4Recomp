@@ -11,6 +11,19 @@ move to [progress.md](progress.md).
   two job threads (`main+0x97ad10` is the job queue). Next: profile both there (`YW4_PROFILE=1`, threads 6 and 7).
 - **FSR frame generation with DLSS at 32:9 4K is slow for a few seconds after changing the aspect ratio** (~80
   frames of 200-660 ms "present"). The other upscaling and frame-generation choices recover at once (2026-11-10).
+- **FSR frame generation: trails on moving characters** (owner, 2026-11-22, 4K, FSR anti-aliasing; DLSS frame
+  generation doesn't show them). Three parts, each still to do:
+  - *Arms, legs and shadow doubled* in the generated frame while the player runs (`tools.dev.scene walk`, frame
+    3600, `YW4_FG_SHOT_GEN=2`). Gone with half the motion per frame (`YW4_REPLAY_HZ=120`), so mostly FSR's own limit
+    with large steps between frames; real play at ~40 game frames/s has larger steps than the replays (1/60 s).
+    Ruled out: late motion (`YW4_FG_MOTION_LOG=1`: always this frame's), the HUD-less copy, depth inverted / raw /
+    placeholder camera (no change).
+  - *Objects moved as a whole double too* (Whisper floating beside the player, at half motion as well): their
+    motion carries only the camera's ([decision 0041](decisions/0041-frame-generation.md)). Next: the motion view
+    (`YW4_AA=3 YW4_AA_DEBUG=4`) on Whisper.
+  - *The character jitters left and right while moving*, seen in play only (no saved frame shows it): likely our
+    pacing thread (`gpu_fg.c` `pacer`: the game's frame half an *averaged* frame time after the generated one, while
+    4K frame times swing ~24-33 ms). Next: present times at 4K (`YW4_PRESENT_LOG`).
 - **A short shadow flash after unpausing from the game's own pause menu** (the Plus button), only in the bamboo
   forest and not after closing our overlay (owner, 2026-11-06 and 2026-11-13). Minor; not looked into.
 - **The first battle after loading a save stutters for its first few seconds**: about 25 frames of 70-80 ms
