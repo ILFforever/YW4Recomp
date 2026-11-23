@@ -1419,7 +1419,8 @@ void gamemenu_mouse(float x, float y, int button) {
         if (click) focus = 1, bug_done_btn = h.a, bug_done_press(h.a);
         break;
     }
-    if (click || sel * 1000 + focus * 100 + srow + prow * 37 + choice * 7 + in_rows * 500 + brow * 11 + bug_page * 3 + crow * 13 != before)
+    if (click || sel * 1000 + focus * 100 + srow + prow * 37 + choice * 7 + in_rows * 500 + brow * 11 + bug_page * 3 + crow * 13 +
+                         orow * 17 != before)
         changed();
 }
 
@@ -2410,9 +2411,9 @@ static void pv_label(int part, const GameMenuInfo *in, int style, PvLabel *l) {
         snprintf(l->n2, sizeof l->n2, "Hold %s: shortcuts 5-8", hold);
         return;
     }
-    if (part == PV_DPAD && kv_mode == 1 && strstr(a, "Switch character") && strstr(a, "Target ally")) {
+    if (part == PV_DPAD && kv_mode == 1 && strstr(a, "Switch character") && strstr(a, "Cycle targets")) {
         snprintf(l->n1, sizeof l->n1, "Up / down: switch character");
-        snprintf(l->n2, sizeof l->n2, "Left / right: target ally");
+        snprintf(l->n2, sizeof l->n2, "Left / right: cycle targets");
         return;
     }
     char *cut = strlen(a) > 24 ? strstr(a, " / ") : NULL;  /* a long list of names: the first above the rest */

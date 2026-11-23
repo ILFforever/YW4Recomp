@@ -863,7 +863,8 @@ async function afterBuild() {
     dlss: options.dlss && rtx, freeUp: options.freeUp, desktop: options.desktop, startMenu: options.startMenu,
     originalsOffered: inst && inst.install === options.install ? !!inst.originalsOffered : false,
     onPlay: (inst && inst.onPlay) || 'hide', mods: !(inst && inst.mods === false), showLog: !!(inst && inst.showLog),
-    controlsHint: !(inst && inst.controlsHint === false), cheats: !(inst && inst.cheats === false), disabledMods: (inst && inst.disabledMods) || [], icon: inst && inst.icon };  // Settings' choices stay
+    controlsHint: !(inst && inst.controlsHint === false), cheats: !(inst && inst.cheats === false), disabledMods: (inst && inst.disabledMods) || [], icon: inst && inst.icon,
+    straightToGame: !!(inst && inst.straightToGame) };  // Settings' choices stay
   syncSettingsButton();
   try { await invoke('save_state', { state: inst }); } catch (e) { logLine('could not remember the install: ' + e); }
   // the icon the build just made: a first build has none cached, and Ready's install_info (DLC checks) is slow, so

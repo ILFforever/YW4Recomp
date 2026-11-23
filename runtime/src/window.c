@@ -1626,8 +1626,7 @@ static struct {
 } ov;
 
 static int pad_hints(const char **close);  /* below, with the gamepad */
-static int pad_has_mic(void);
-static const char *pad_name(void);
+static void pad_snapshot(const char **close, int *hints, char *name, size_t n, int *mic, int *has_name);
 const uint8_t *game_logo(int *w, int *h);  /* gamelogo.c */
 
 static void kept_read_back(uint32_t w, uint32_t h) {
@@ -1935,10 +1934,13 @@ static void menu_draw(VkImage dst, uint32_t index, int32_t x0, int32_t y0, uint3
             swheel_draw(&c);
         } else {
             const char *close = "Esc";
-            GameMenuInfo info = {hud_enabled(), yw4_version, pad_hints(&close), close, NULL, 0, 0, now};
+            static char pad_name_copy[128];
+            int hints, mic, has_name;
+            pad_snapshot(&close, &hints, pad_name_copy, sizeof pad_name_copy, &mic, &has_name);
+            GameMenuInfo info = {hud_enabled(), yw4_version, hints, close, NULL, 0, 0, now};
             info.logo = game_logo(&info.logo_w, &info.logo_h);
-            info.pad_name = pad_name();
-            info.pad_mic = pad_has_mic();
+            info.pad_name = has_name ? pad_name_copy : NULL;
+            info.pad_mic = mic;
             info.picture = pv ? NULL : ov.bg, info.picture_w = (int)bw, info.picture_h = (int)bh;
             if (pv) {
                 static HudContent hc;
@@ -2052,6 +2054,7 @@ static void hud_onto(uint8_t *rgba, uint32_t w, uint32_t h) {
         int32_t nx = (int32_t)((40 - 24) * nb.s), ny = (int32_t)h - (int32_t)(48 * nb.s) - note_bottom;
         for (int j = 0; j < nb.h && ny + j < (int32_t)h; j++)
             for (int i = 0; i < nb.w; i++) {
+                if (ny + j < 0) break;  /* a short window: the notice starts above the top */
                 if (nx + i < 0 || nx + i >= (int32_t)w) continue;
                 const uint8_t *sp = (const uint8_t *)nb.ptr + ((size_t)j * NOTE_W + (size_t)i) * 4;
                 uint8_t *dp = rgba + ((size_t)(ny + j) * w + (size_t)(nx + i)) * 4;
@@ -3054,6 +3057,19 @@ static const char *pad_name(void) { return gamepad ? SDL_GetGamepadName(gamepad)
 static int pad_has_mic(void) {
     if (!gamepad) return bindings_hints_forced() == 3;
     return pad_is_playstation() && SDL_GamepadHasButton(gamepad, SDL_GAMEPAD_BUTTON_MISC1);
+}
+
+/* The overlay's controller facts, for menu_draw on the present thread. Under input_lock: the SDL thread closes an
+ * unplugged gamepad under it, and the name is copied out because SDL frees its string with the gamepad. *close
+ * points at a string literal, so it outlives the lock. */
+static void pad_snapshot(const char **close, int *hints, char *name, size_t n, int *mic, int *has_name) {
+    host_lock(&input_lock);
+    *hints = pad_hints(close);
+    *mic = pad_has_mic();
+    const char *pn = pad_name();
+    *has_name = pn != NULL;
+    snprintf(name, n, "%s", pn ? pn : "");
+    host_unlock(&input_lock);
 }
 
 /* The parts of the controller held now, as the overlay's controller view draws them (gamemenu.h): what is pressed

@@ -918,17 +918,23 @@ static int memory_patch(Dir *root, const char *what, const char *const *paths, c
         uint32_t so = get32(lb + 4), sl = get32(lb + 8);
         if (sl && (uint64_t)so + sl <= ln && lb[so + sl - 1] == 0) empty = sl - 1;
     }
+    /* two passes: first check the list names every file, then change it. lb can be list->mem itself, so
+     * changing entries before knowing all are there would leave a half-changed list on a failure. */
     int named[8] = {0}, freed = 0, all = 1;
     for (int k = 0; k < ne && empty != EMPTY; k++)
         for (int i = 0; i < n; i++)
-            if (!strcmp(e[k].path, paths[i]) && e[k].archive + 8 <= ln) {
-                uint32_t sz = (uint32_t)on[i];
-                memcpy(lb + e[k].archive, &empty, 4);
-                memcpy(lb + e[k].archive + 4, &sz, 4);
-                named[i] = 1, freed++;
-            }
-    free(e);
+            if (!strcmp(e[k].path, paths[i]) && e[k].archive + 8 <= ln) named[i] = 1;
     for (int i = 0; i < n; i++) all &= named[i];
+    if (ok && all)
+        for (int k = 0; k < ne; k++)
+            for (int i = 0; i < n; i++)
+                if (!strcmp(e[k].path, paths[i]) && e[k].archive + 8 <= ln) {
+                    uint32_t sz = (uint32_t)on[i];
+                    memcpy(lb + e[k].archive, &empty, 4);
+                    memcpy(lb + e[k].archive + 4, &sz, 4);
+                    freed++;
+                }
+    free(e);
     if (!ok || !all) {
         if (ok) fprintf(stderr, "yw4: %s: the archive list doesn't name the files, not changed\n", what);
         if (lb && lb != list->mem) free(lb);

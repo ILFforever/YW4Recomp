@@ -808,7 +808,7 @@ static const char *key_gaiji(int sc) {
     if (sc >= SDL_SCANCODE_1 && sc <= SDL_SCANCODE_9) return digits[sc - SDL_SCANCODE_1];
     if (sc == SDL_SCANCODE_0) return digits[9];
     if (sc >= SDL_SCANCODE_F1 && sc <= SDL_SCANCODE_F12) return fn_keys[sc - SDL_SCANCODE_F1];
-    if (sc >= SDL_SCANCODE_KP_1 && sc <= SDL_SCANCODE_KP_9) return numpad[sc - SDL_SCANCODE_KP_1];
+    if (sc >= SDL_SCANCODE_KP_1 && sc <= SDL_SCANCODE_KP_9) return numpad[sc - SDL_SCANCODE_KP_1 + 1];
     if (sc == SDL_SCANCODE_KP_0) return numpad[0];
 
     switch (sc) {

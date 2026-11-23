@@ -652,15 +652,18 @@ pub fn play(app: tauri::AppHandle, install: String, mods: Option<bool>, on_play:
     Ok(())
 }
 
-/// A path from game.ini (`key`, relative to work\build or absolute), if game.ini has it.
+/// The folder that holds game.ini: the game's own folder (work\build, game, or the install itself). The game reads
+/// relative paths in it from there (game_ini.c), so the launcher must too.
+fn game_ini_dir(install: &str) -> PathBuf {
+    exe(install).parent().map(Path::to_path_buf).unwrap_or_else(|| PathBuf::from(install))
+}
+
+/// A path from game.ini (`key`, relative to game.ini's folder or absolute), if game.ini has it.
 fn game_ini_path(install: &str, key: &str) -> Option<PathBuf> {
-    let build = PathBuf::from(install).join("work").join("build");
-    let ini = std::fs::read_to_string(build.join("game.ini"))
-        .or_else(|_| std::fs::read_to_string(Path::new(install).join("game").join("game.ini")))
-        .or_else(|_| std::fs::read_to_string(Path::new(install).join("game.ini")))
-        .ok()?;
+    let dir = game_ini_dir(install);
+    let ini = std::fs::read_to_string(dir.join("game.ini")).ok()?;
     let rel = ini.lines().find_map(|l| l.strip_prefix(key).and_then(|r| r.strip_prefix('=')))?.trim().to_string();
-    Some(if Path::new(&rel).is_absolute() { PathBuf::from(&rel) } else { build.join(&rel) })
+    Some(if Path::new(&rel).is_absolute() { PathBuf::from(&rel) } else { dir.join(&rel) })
 }
 
 /// The log the game wrote during the play that started at `since` (the newest yw4_*.log in its log folder).
@@ -866,10 +869,7 @@ pub fn show_report(install: String, zip: String) -> Result<(), String> {
 /// Only a file written since `since` counts: the game writes settings.ini only when a setting changes, so after a
 /// play with no change its line is still an older play's theme, and taking it would undo the launcher's choice.
 fn game_theme(install: &str, since: std::time::SystemTime) -> Option<String> {
-    let build = PathBuf::from(install).join("work").join("build");
-    let ini = std::fs::read_to_string(build.join("game.ini")).ok()?;
-    let rel = ini.lines().find_map(|l| l.strip_prefix("YW4_SETTINGS_FILE="))?.trim().to_string();
-    let path = if Path::new(&rel).is_absolute() { PathBuf::from(&rel) } else { build.join(&rel) };
+    let path = game_ini_path(install, "YW4_SETTINGS_FILE")?;
     if std::fs::metadata(&path).ok()?.modified().ok()? < since { return None; }
     let settings = std::fs::read_to_string(path).ok()?;
     let id = settings.lines().find_map(|l| l.trim().strip_prefix("YW4_THEME="))?.trim().to_string();
@@ -1065,24 +1065,34 @@ pub fn move_saves(install: String, to: String) -> Result<(), String> {
     if has_files(&dst_save) || dst_ini.is_file() {
         return Err(format!("There are already saves in {}. Move or delete them first.", dst_save.parent().unwrap().display()));
     }
-    if src_save.is_dir() { copy_dir(&src_save, &dst_save).map_err(|e| format!("copying the saves: {e}"))?; }
-    else { std::fs::create_dir_all(&dst_save).map_err(|e| e.to_string())?; }
-    if src_ini.is_file() { std::fs::copy(&src_ini, &dst_ini).map_err(|e| format!("copying settings.ini: {e}"))?; }
-    // game.ini: the two lines that say where (decision 0050); relative inside the install, absolute in AppData
-    let ini_path = inst.join("work").join("build").join("game.ini");
+    // game.ini: the two lines that say where (decision 0050); relative inside the install, absolute in AppData.
+    // It sits in the game's own folder (work\build, game, or the install itself) and the game reads relative paths
+    // from there. Read it before copying anything: without it the game would not find the moved saves, so the old
+    // ones must not be deleted.
+    let ini_dir = game_ini_dir(&install);
+    let ini_path = ini_dir.join("game.ini");
+    let ini = std::fs::read_to_string(&ini_path).map_err(|e| format!("game.ini ({}): {e}", ini_path.display()))?;
     let (save_v, set_v) = if to == "appdata" {
         (dst_save.display().to_string(), dst_ini.display().to_string())
     } else {
-        ("../../save".to_string(), "../../settings.ini".to_string())
+        // "../" once per folder between the install and game.ini's folder
+        let depth = ini_dir.strip_prefix(&inst).map(|r| r.components().count()).unwrap_or(2);
+        let up = "../".repeat(depth);
+        (format!("{up}save"), format!("{up}settings.ini"))
     };
-    if let Ok(ini) = std::fs::read_to_string(&ini_path) {
-        let out: Vec<String> = ini.lines().map(|l| {
-            if l.starts_with("YW4_SAVE=") { format!("YW4_SAVE={save_v}") }
-            else if l.starts_with("YW4_SETTINGS_FILE=") { format!("YW4_SETTINGS_FILE={set_v}") }
-            else { l.to_string() }
-        }).collect();
-        std::fs::write(&ini_path, out.join("\n") + "\n").map_err(|e| format!("game.ini: {e}"))?;
-    }
+    if src_save.is_dir() { copy_dir(&src_save, &dst_save).map_err(|e| format!("copying the saves: {e}"))?; }
+    else { std::fs::create_dir_all(&dst_save).map_err(|e| e.to_string())?; }
+    if src_ini.is_file() { std::fs::copy(&src_ini, &dst_ini).map_err(|e| format!("copying settings.ini: {e}"))?; }
+    let (mut saw_save, mut saw_set) = (false, false);
+    let mut out: Vec<String> = ini.lines().map(|l| {
+        if l.starts_with("YW4_SAVE=") { saw_save = true; format!("YW4_SAVE={save_v}") }
+        else if l.starts_with("YW4_SETTINGS_FILE=") { saw_set = true; format!("YW4_SETTINGS_FILE={set_v}") }
+        else { l.to_string() }
+    }).collect();
+    // a game.ini without the lines: add them, or the game would keep using its default place
+    if !saw_save { out.push(format!("YW4_SAVE={save_v}")); }
+    if !saw_set { out.push(format!("YW4_SETTINGS_FILE={set_v}")); }
+    std::fs::write(&ini_path, out.join("\n") + "\n").map_err(|e| format!("game.ini: {e}"))?;
     let _ = std::fs::remove_dir_all(&src_save);
     let _ = std::fs::remove_file(&src_ini);
     Ok(())

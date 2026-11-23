@@ -1453,9 +1453,15 @@ static uint8_t *ring_alloc(VkDeviceSize size, VkBuffer *buf, VkDeviceSize *offse
                                     .memoryTypeIndex = vk_memory_type(mr.memoryTypeBits,
                                                                       VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT |
                                                                           VK_MEMORY_PROPERTY_HOST_COHERENT_BIT)};
-        if (vkAllocateMemory(vk.device, &mai, NULL, &pcf_mem) != VK_SUCCESS) return NULL;
-        vkBindBufferMemory(vk.device, pcf_buf, pcf_mem, 0);
-        vkMapMemory(vk.device, pcf_mem, 0, VK_WHOLE_SIZE, 0, (void **)&pcf_ptr);
+        /* any failure: undo it all, so the next draw tries again instead of using a buffer with no memory */
+        if (vkAllocateMemory(vk.device, &mai, NULL, &pcf_mem) != VK_SUCCESS ||
+            vkBindBufferMemory(vk.device, pcf_buf, pcf_mem, 0) != VK_SUCCESS ||
+            vkMapMemory(vk.device, pcf_mem, 0, VK_WHOLE_SIZE, 0, (void **)&pcf_ptr) != VK_SUCCESS) {
+            if (pcf_mem) vkFreeMemory(vk.device, pcf_mem, NULL);
+            vkDestroyBuffer(vk.device, pcf_buf, NULL);
+            pcf_buf = VK_NULL_HANDLE, pcf_mem = VK_NULL_HANDLE, pcf_ptr = NULL;
+            return NULL;
+        }
     }
     VkDeviceSize align = vk.props.limits.minUniformBufferOffsetAlignment;
     VkDeviceSize at = (pcf_at + align - 1) / align * align;
@@ -2170,6 +2176,7 @@ static int covers_screen(const GpuState *s, const Shader *vs, const CmdRec *r) {
         m = (const float *)(uintptr_t)ub.addr, rows = vs->pos_rows;
     }
     uint32_t a = s->attribs[0], stream = a >> 8 & 0x1F, offset = a >> 13, n;
+    if (stream >= sizeof s->vbuf / sizeof s->vbuf[0]) return 0;  /* 5 bits can name 32 streams; we keep 16 */
     switch (vertex_format(a & 0xFF)) {
     case VK_FORMAT_R32G32_SFLOAT: n = 2; break;
     case VK_FORMAT_R32G32B32_SFLOAT: n = 3; break;

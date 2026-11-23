@@ -1419,8 +1419,8 @@ void yw4_svc(CPUState *ctx, uint32_t imm) {
         if (imm == 0x1A) {  /* ArbitrateLock: x0 is the owner's handle; tally the owner's thread id (bit 40 marks it) */
             host_lock(&klock);
             KThread *ot = thread_get((uint32_t)ctx->x[0]);
+            if (ot) addr = ((uint64_t)ot->id) | (1ull << 40);  /* read under klock: another thread may free ot */
             host_unlock(&klock);
-            if (ot) addr = ((uint64_t)ot->id) | (1ull << 40);
         }
         int64_t t0 = host_now_ns();
         host_lock(&klock);
