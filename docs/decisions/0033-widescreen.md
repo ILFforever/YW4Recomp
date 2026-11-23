@@ -36,15 +36,17 @@ draw copies that into one of **two** window images (1920×1080) that it presents
 1. **Camera:** a hook on `f_97f510` sets `+0x2e8` of every camera whose setting is 16:9 (or one of our shapes, so
    going back restores them) to the chosen aspect before the copy. The vertical view stays; the sides grow.
 2. **Images:** every screen-sized target's width is also multiplied by the shape's factor against 16:9 (`ImageKey`
-   `wide_num / wide_den`: 16:10 = 9/10, 21:9 = 4/3, 32:9 = 2). Viewports and scissors across follow it, as do the
+   `wide_num / wide_den`: 16:10 = 9/10, 19.5:9 = 39/32, 20:9 = 5/4, 21:9 = 4/3, 32:9 = 2). Viewports and scissors across follow it, as do the
    camera block's row 32 tap offsets (x only) and the present's crop.
 3. **UI stays 16:9 in the middle:** a draw is UI when, in the same command list, it comes after the bloom composite,
    does not draw into one of the recently presented images (the window copies), and does not read a screen-sized
    image (the copy of the finished 3D picture into the UI image reads one). UI draws keep the game's width and are
    moved to the middle. TAA no longer shifts anything after the composite either (the rule it used, "after this
    frame's TAA by the frame counter", broke when render threads overlap).
-4. **Setting:** ASPECT RATIO in the panel: 16:9 (the game's), 16:10, 21:9, 32:9 (`YW4_ASPECT`). The window already
-   fits any aspect ratio with black bars.
+4. **Setting:** ASPECT RATIO in the panel: 16:9 (the game's), 16:10, 19.5:9, 20:9, 21:9, 32:9 (`YW4_ASPECT`). The
+   window already fits any aspect ratio with black bars. The two phone shapes were added 2026-11-24 (issue #27) for
+   streaming to a phone: 19.5:9 for iPhones and Galaxy S, 20:9 for most other Android phones. Six is the panel's
+   most options per row (`SETTINGS_MAX_OPTIONS`), so 18:9 and 19:9 phones were left out.
 5. **Full-screen layers are stretched** (added 2026-10-28): a UI draw that covers the game's whole screen is drawn
    across the full width instead of in the middle, so the dimming behind a dialog and the loading screen's black
    reach the sides. The runtime finds them without running the vertex program: the shader translator writes where

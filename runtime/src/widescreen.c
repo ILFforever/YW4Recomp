@@ -9,7 +9,7 @@
  *
  * The images (gpu.c): every screen-sized target is made wider (or narrower) by the factor below on top of the
  * resolution's; viewports and scissors follow, the UI draws keep the game's width in the middle (gpu_draw.c).
- * YW4_ASPECT=16:9 / 16:10 / 21:9 / 32:9 at start; the settings panel changes it. */
+ * YW4_ASPECT=16:9 / 16:10 / 19.5:9 / 20:9 / 21:9 / 32:9 at start; the settings panel changes it. */
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -22,7 +22,10 @@ static const struct {
     const char *name;
     float aspect;
     uint32_t num, den;  /* the width factor against 16:9 */
-} shapes[] = {{"16:9", 16.0f / 9.0f, 1, 1}, {"16:10", 1.6f, 9, 10}, {"21:9", 64.0f / 27.0f, 4, 3}, {"32:9", 32.0f / 9.0f, 2, 1}};
+} shapes[] = {{"16:9", 16.0f / 9.0f, 1, 1},     {"16:10", 1.6f, 9, 10},
+              /* phones (issue #27, 2026-11-24): 19.5:9 iPhones and Galaxy S, 20:9 most other Android phones */
+              {"19.5:9", 39.0f / 18.0f, 39, 32}, {"20:9", 20.0f / 9.0f, 5, 4},
+              {"21:9", 64.0f / 27.0f, 4, 3},     {"32:9", 32.0f / 9.0f, 2, 1}};
 enum { SHAPES = sizeof shapes / sizeof *shapes };
 
 static int shape = -1, shape_used = -1;  /* the choice, and the one the images and cameras use (gpu_sizes_settle) */

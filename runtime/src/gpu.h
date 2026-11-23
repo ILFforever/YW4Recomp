@@ -63,7 +63,8 @@ int gpu_sharpen_parse(const char *value);
 /* SHARPEN TEXT AND MENUS: 1 if the game's UI is sharpened too (YW4_SHARPEN_UI at start). */
 int gpu_sharpen_ui(void);
 void gpu_sharpen_ui_toggle(void);
-/* Picture shape (widescreen.c): 0 16:9 (the game's), 1 16:10, 2 21:9, 3 32:9 (YW4_ASPECT at start), and
+/* Picture shape (widescreen.c): 0 16:9 (the game's), 1 16:10, 2 19.5:9, 3 20:9, 4 21:9, 5 32:9
+ * (YW4_ASPECT at start), and
  * the width factor of the screen-sized targets against 16:9. */
 int gpu_wide(void);         /* the aspect ratio in use (follows the choice, gpu_sizes_settle) */
 int gpu_wide_choice(void);  /* the panel's choice */
