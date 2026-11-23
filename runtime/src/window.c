@@ -34,6 +34,7 @@
 #include "framerate.h"
 #include "gpu_dlss.h"
 #include "gpu_dlssg.h"
+#include "gpu_xess.h"
 #include "gpu_fg.h"
 #include "gbuffer.h"
 #include "gpu.h"
@@ -345,7 +346,21 @@ static int vk_init(void) {
 #define LOAD_GLOBAL(f) f = (PFN_##f)gipa(NULL, #f);
     VK_GLOBAL_FNS(LOAD_GLOBAL)
     Uint32 next = 0;
-    const char *const *exts = SDL_Vulkan_GetInstanceExtensions(&next);
+    const char *const *sdl_exts = SDL_Vulkan_GetInstanceExtensions(&next);
+    /* Intel XeSS's instance extensions (gpu_xess.c, decision 0089: libxess.dll loaded now), those not there yet */
+    static const char *exts[32];
+    if (next > 24) next = 24;
+    for (Uint32 i = 0; i < next; i++) exts[i] = sdl_exts[i];
+    {
+        const char *const *xe;
+        uint32_t nxe = 0;
+        gpu_xess_instance_extensions(&xe, &nxe);
+        for (uint32_t k = 0; k < nxe && next < 32; k++) {
+            Uint32 i = 0;
+            while (i < next && strcmp(exts[i], xe[k])) i++;
+            if (i == next) exts[next++] = xe[k];
+        }
+    }
     const char *layers[1];
     uint32_t nlayers = 0;
     const char *v = getenv("YW4_VULKAN_VALIDATION");
@@ -583,6 +598,27 @@ static int vk_init(void) {
             eder.pNext = (void *)enable.pNext, enable.pNext = &eder;
         }
     }
+    /* Intel XeSS (gpu_xess.c, decision 0089): its device extensions the GPU has and isn't given yet, and its features
+     * filled into our chain (it adds structures of its own where it needs them). None with YW4_XESS=0. */
+    {
+        const char *const *xe;
+        uint32_t nxe = 0;
+        gpu_xess_device_extensions(vk.instance, vk.gpu, &xe, &nxe);
+        uint32_t n = 0;
+        vkEnumerateDeviceExtensionProperties(vk.gpu, NULL, &n, NULL);
+        VkExtensionProperties *e = calloc(n ? n : 1, sizeof *e);
+        vkEnumerateDeviceExtensionProperties(vk.gpu, NULL, &n, e);
+        for (uint32_t k = 0; k < nxe; k++) {
+            uint32_t i = 0, has = 0;
+            while (i < ndexts && strcmp(dexts[i], xe[k])) i++;
+            for (uint32_t j = 0; j < n && !has; j++) has = !strcmp(e[j].extensionName, xe[k]);
+            if (i < ndexts) continue;
+            if (has && ndexts < 24) dexts[ndexts++] = xe[k];
+            else fprintf(stderr, "yw4: window: XeSS's %s left out%s\n", xe[k], has ? " (no room)" : " (the GPU lacks it)");
+        }
+        free(e);
+        gpu_xess_device_features(vk.instance, vk.gpu, &enable);  /* nothing without libxess.dll */
+    }
     if (!f13.dynamicRendering || !f12.timelineSemaphore || !f11.shaderDrawParameters) {
         fprintf(stderr, "yw4: window: the GPU lacks dynamic rendering, timeline semaphores or draw parameters\n");
         return -1;
@@ -627,6 +663,8 @@ static int vk_init(void) {
     yw4_boot_mark("DLSS frame generation and Reflex checked");
     gpu_dlss_available();
     yw4_boot_mark("DLSS (NGX) checked");
+    gpu_xess_available();
+    yw4_boot_mark("XeSS checked");
     __atomic_store_n(&vk.up, 1, __ATOMIC_RELEASE);
     {  /* a new install's first start: graphics for this GPU (settings_first_run), told in a notice */
         VkPhysicalDeviceMemoryProperties mp;

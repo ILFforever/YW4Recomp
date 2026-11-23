@@ -1405,12 +1405,12 @@ int gpu_render_height(void) {
  * slower than no anti-aliasing, and neither the screenshots nor the log said whether upscaling was on). FSR or
  * DLSS with upscaling off is anti-aliasing at full size: it costs GPU time and saves none, said in so many words. */
 void gpu_picture_text(char *buf, size_t n) {
-    static const char *const aa[6] = {"off", "FXAA", "SMAA", "TAA", "FSR", "DLSS"};
+    static const char *const aa[7] = {"off", "FXAA", "SMAA", "TAA", "FSR", "DLSS", "XeSS"};
     static const char *const up[4] = {"off", "quality (1.5x)", "balanced (1.7x)", "performance (2x)"};
     static const char *const fg[3] = {"off", "FSR", "DLSS"};
     int a = gpu_aa(), u = gpu_upscale(), s = gpu_sharpen(), f = gpu_fg();
     const char *note = a >= 4 && !u ? " (anti-aliasing only at full size: no speed-up)"
-                       : !u && gpu_upscale_setting() ? " (the choice needs FSR or DLSS anti-aliasing)" : "";
+                       : !u && gpu_upscale_setting() ? " (the choice needs FSR, DLSS or XeSS anti-aliasing)" : "";
     /* the shadows too (issues #8 and #14: the heaviest settings, and the shadow mask flickered on one AMD card);
      * soft shadows as the panel names them (OFF, X1, X2, X4); contact shadows need our shadow mask (the panel
      * greys the row out with the game's) */

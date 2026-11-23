@@ -16,6 +16,9 @@ NVIDIA Streamline (DLSS frame generation, with Reflex): the SDK's release archiv
 way; the headers, the docs we follow and the release DLLs it needs are taken out. Streamline itself
 is MIT (license.txt); nvngx_dlssg.dll and the Reflex DLL are under NVIDIA's RTX SDK licence like DLSS
 (bin/x64/*.license.txt, fetched with them), so never committed. Windows only.
+Intel XeSS (decision 0089): the SDK's release archive, pinned the same way; the Vulkan headers (MIT,
+SPDX line in each), libxess.dll and its licence are taken out. The DLL is under Intel's Simplified Software
+Licence (redistribution allowed unchanged, with LICENSE.txt), never committed. Windows only.
 Nothing here is committed: each archive is checked against its pinned hash and unpacked
 into its own folder.
 """
@@ -213,6 +216,35 @@ def fetch_streamline(cfg: config.Config) -> Path:
             dst.write_bytes(z.read(name))
     if not all(d.is_file() for d in dlls):
         raise RuntimeError(f"{archive.name} unpacked without the Streamline DLLs")
+    return out
+
+
+XESS_VERSION = "3.0.2"
+XESS_URL = f"https://github.com/intel/xess/releases/download/v{XESS_VERSION}/XeSS_SDK_{XESS_VERSION}.zip"
+XESS_SHA256 = "88b8a373f30e33f3558a77a93e634f11b8132fc3047ea1a8edeead32b8471990"
+# the upscaler only: XeSS frame generation (libxess_fg.dll) is Direct3D 12 only
+XESS_TAKE = ("inc/xess/xess.h", "inc/xess/xess_vk.h", "bin/libxess.dll", "LICENSE.txt", "third-party-programs.txt")
+
+
+def xess_dir(cfg: config.Config) -> Path:
+    """The XeSS files at their archive paths: inc/xess/, bin/libxess.dll, LICENSE.txt."""
+    return cfg.work_dir / "deps" / f"xess-{XESS_VERSION}"
+
+
+def fetch_xess(cfg: config.Config) -> Path:
+    out = xess_dir(cfg)
+    if all((out / t).is_file() for t in XESS_TAKE):
+        return out
+    deps = cfg.work_dir / "deps" / f"xess-{XESS_VERSION}-dl"  # the archive alone in its own folder
+    deps.mkdir(parents=True, exist_ok=True)
+    archive = deps / Path(XESS_URL).name
+    if not archive.is_file() or hashlib.sha256(archive.read_bytes()).hexdigest() != XESS_SHA256:
+        fetch_pinned([XESS_URL], archive, XESS_SHA256)  # ~77 MB, Intel's own address only
+    with zipfile.ZipFile(archive) as z:
+        for name in XESS_TAKE:
+            dst = out / name
+            dst.parent.mkdir(parents=True, exist_ok=True)
+            dst.write_bytes(z.read(name))
     return out
 
 

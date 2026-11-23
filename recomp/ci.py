@@ -38,6 +38,7 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--jobs", type=int, default=os.cpu_count() or 4)
     ap.add_argument("--no-fsr", action="store_true", help="without AMD FSR's headers (Windows)")
     ap.add_argument("--no-dlss", action="store_true", help="without NVIDIA DLSS's and Streamline's headers (Windows)")
+    ap.add_argument("--no-xess", action="store_true", help="without Intel XeSS's headers (Windows)")
     args = ap.parse_args(argv)
     with tempfile.TemporaryDirectory() as tmp:
         work = (args.work or Path(tmp)).resolve()
@@ -61,6 +62,8 @@ def main(argv: list[str] | None = None) -> int:
             if not args.no_dlss:
                 includes += [f"-I{deps.fetch_dlss(cfg) / 'include'}", "-DYW4_DLSS=1",
                              f"-I{deps.fetch_streamline(cfg) / 'include'}", "-DYW4_STREAMLINE=1"]
+            if not args.no_xess:
+                includes += [f"-I{deps.fetch_xess(cfg) / 'inc' / 'xess'}", "-DYW4_XESS=1"]
         srcs = (sorted((build.RUNTIME / "src").glob("*.c")) + sorted((build.RUNTIME / "src").glob("*.cpp"))
                 + build.musl_sources() + [build.version_source(cfg), build.dlc_source(cfg),
                                           build.wheel_icons_source(cfg)])

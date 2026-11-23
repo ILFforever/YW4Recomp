@@ -12,7 +12,9 @@
  * FSR (mode 4, gpu_fsr.c): AMD's upscaler in place of TAA's blend, from the same jitter, motion and the scene's
  * depth; at the scene's own size for now (native anti-aliasing), falling back to TAA when FSR can't run.
  * DLSS (mode 5, gpu_dlss.c): NVIDIA's upscaler in the same place, on NVIDIA RTX GPUs; FSR, then TAA, when it can't.
- * YW4_AA=0 off / 1 FXAA / 2 SMAA / 3 TAA / 4 FSR / 5 DLSS at start; the settings panel (F1) cycles it.
+ * XeSS (mode 6, gpu_xess.c, decision 0089): Intel's upscaler in the same place, any GPU, Windows; FSR, then TAA,
+ * when it can't.
+ * YW4_AA=0 off / 1 FXAA / 2 SMAA / 3 TAA / 4 FSR / 5 DLSS / 6 XeSS at start; the settings panel (F1) cycles it.
  * SHARPENING (gpu_sharpen, decision 0076) comes after any of them, OFF included. */
 #include <inttypes.h>
 #include <math.h>
@@ -25,6 +27,7 @@
 #include "gpu_fg.h"
 #include "gpu_fsr.h"
 #include "gpu_internal.h"
+#include "gpu_xess.h"
 #include "../../third_party/smaa/AreaTex.h"
 #include "../../third_party/smaa/SearchTex.h"
 
@@ -35,7 +38,11 @@ int gpu_aa(void) {
     if (m < 0) {
         const char *e = getenv("YW4_AA");
         m = e ? atoi(e) : 0;
-        if (m < 0 || m > 5) m = 0;
+        if (m < 0 || m > 6) m = 0;
+        if (m == 6 && !gpu_xess_built()) {
+            m = gpu_fsr_built() ? 4 : 3;
+            fprintf(stderr, "yw4: aa: XeSS is not in this build: %s instead\n", m == 4 ? "FSR" : "TAA");
+        }
         if (m == 5 && !gpu_dlss_built()) {
             m = gpu_fsr_built() ? 4 : 3;
             fprintf(stderr, "yw4: aa: DLSS is not in this build: %s instead\n", m == 4 ? "FSR" : "TAA");
@@ -51,17 +58,23 @@ int gpu_aa(void) {
         fprintf(stderr, "yw4: aa: DLSS is not available on this GPU: %s instead\n", m == 4 ? "FSR" : "TAA");
         __atomic_store_n(&aa_mode, m, __ATOMIC_RELEASE);
     }
+    if (m == 6 && __atomic_load_n(&vk.up, __ATOMIC_ACQUIRE) && !gpu_xess_available()) {
+        m = gpu_fsr_built() ? 4 : 3;
+        fprintf(stderr, "yw4: aa: XeSS is not available on this GPU: %s instead\n", m == 4 ? "FSR" : "TAA");
+        __atomic_store_n(&aa_mode, m, __ATOMIC_RELEASE);
+    }
     return m;
 }
 
-/* One step forward (dir 1) or back (dir -1), skipping FSR and DLSS where they can't run: one switch per step */
+/* One step forward (dir 1) or back (dir -1), skipping FSR, DLSS and XeSS where they can't run: one switch per step */
 void gpu_aa_step(int dir) {
-    int m = (gpu_aa() + 6 + dir) % 6;
-    while ((m == 5 && (!gpu_dlss_built() || !gpu_dlss_available())) || (m == 4 && !gpu_fsr_built()))
-        m = (m + 6 + dir) % 6;
+    int m = (gpu_aa() + 7 + dir) % 7;
+    while ((m == 6 && !gpu_xess_available()) || (m == 5 && (!gpu_dlss_built() || !gpu_dlss_available())) ||
+           (m == 4 && !gpu_fsr_built()))
+        m = (m + 7 + dir) % 7;
     __atomic_store_n(&aa_mode, m, __ATOMIC_RELEASE);
     fprintf(stderr, "yw4: gpu: anti-aliasing %s\n",
-            m == 5 ? "DLSS" : m == 4 ? "FSR" : m == 3 ? "TAA" : m == 2 ? "SMAA" : m == 1 ? "FXAA" : "off");
+            m == 6 ? "XeSS" : m == 5 ? "DLSS" : m == 4 ? "FSR" : m == 3 ? "TAA" : m == 2 ? "SMAA" : m == 1 ? "FXAA" : "off");
 }
 
 void gpu_aa_cycle(void) { gpu_aa_step(1); }
@@ -526,7 +539,7 @@ int gpu_taa_jitter(uint32_t w, uint32_t h, float *jx, float *jy) {
         gpu_fsr_jitter(w, scene_ow ? scene_ow : w, gpu_frames(), jx, jy);
         return 1;
     }
-    if (gpu_aa() == 5) {  /* DLSS: Halton 2, 3, as many positions as NVIDIA suggests: 8 x the upscale ratio squared */
+    if (gpu_aa() >= 5) {  /* DLSS, XeSS: Halton 2, 3, as many positions as both suggest: 8 x the upscale ratio squared */
         dlss_jitter(w, scene_ow ? scene_ow : w, gpu_frames(), jx, jy);
         return 1;
     }
@@ -553,7 +566,7 @@ int gpu_taa_clip_jitter(float *cx, float *cy) {
     float jx, jy;
     if (gpu_aa() == 4 && gpu_fsr_available() == 1) {
         gpu_fsr_jitter(scene_w, scene_ow ? scene_ow : scene_w, gpu_frames(), &jx, &jy);
-    } else if (gpu_aa() == 5) {
+    } else if (gpu_aa() >= 5) {
         dlss_jitter(scene_w, scene_ow ? scene_ow : scene_w, gpu_frames(), &jx, &jy);
     } else {
         int i = (int)(gpu_frames() % 8) + 1;
@@ -664,15 +677,26 @@ static void dlss_jitter(uint32_t w, uint32_t ow, uint64_t n, float *jx, float *j
  * copy instead: one full-screen pass, made once per depth image and frame. D24S8 (NVIDIA) keeps going in as it is:
  * as invalid, but it never showed a fault, and most players are there. */
 static AaImage fsr_depth;
+static void fsr_depth_copy(VkCommandBuffer cb, GpuImage *d, VkImageView src, uint32_t w, uint32_t h, VkImage *image,
+                           VkFormat *format, VkImageView *view, int always);
 static void fsr_depth_of(VkCommandBuffer cb, GpuImage *d, VkImageView src, uint32_t w, uint32_t h, VkImage *image,
                          VkFormat *format) {
+    fsr_depth_copy(cb, d, src, w, h, image, format, NULL, 0);
+}
+
+/* As fsr_depth_of; view: the copy's (NULL when the depth goes in as it is); always: a copy for any depth with stencil
+ * (XeSS: its inputs change layout, which a depth with stencil would need for both aspects) */
+static void fsr_depth_copy(VkCommandBuffer cb, GpuImage *d, VkImageView src, uint32_t w, uint32_t h, VkImage *image,
+                           VkFormat *format, VkImageView *view, int always) {
     *image = d->image, *format = d->format;
+    if (view) *view = NULL;
     /* D24S8 (NVIDIA): FSR's own X8_D24 view of it is invalid too, and it is the depth FSR's frame generation reads
      * as R32_UINT raw bits (ffx_api_vk.h): the copy makes it a plain float depth like on AMD. 2026-11-22.
      * YW4_FSR_D24_COPY=0: the old way (A/B). */
     static int d24_copy = -1;
     if (d24_copy < 0) d24_copy = !(getenv("YW4_FSR_D24_COPY") && *getenv("YW4_FSR_D24_COPY") == '0');
-    int copy = d->format == VK_FORMAT_D32_SFLOAT_S8_UINT || (d24_copy && d->format == VK_FORMAT_D24_UNORM_S8_UINT);
+    int copy = d->format == VK_FORMAT_D32_SFLOAT_S8_UINT ||
+               ((d24_copy || always) && d->format == VK_FORMAT_D24_UNORM_S8_UINT);
     if (!src || !copy) return;
     static uint64_t copied_frame = ~0ull;
     static VkImage copied_from;
@@ -690,6 +714,7 @@ static void fsr_depth_of(VkCommandBuffer cb, GpuImage *d, VkImageView src, uint3
         copied_frame = now, copied_from = d->image;
     }
     *image = fsr_depth.image, *format = VK_FORMAT_D32_SFLOAT;
+    if (view) *view = fsr_depth.view;
 }
 
 /* FSR in place of TAA's blend: the encoded scene, the scene's depth and the game's motion in (w x h), FSR's
@@ -783,6 +808,48 @@ static int dlss(VkCommandBuffer cb, GpuImage *d, VkImageView depth_view, VkImage
     pass(cb, P_TAA_OUT, target, fmt, ow, oh, 0, fsr_out.view);
     pass_params[0] = 0.0f;
     last = now, last_ow = ow, last_ns = t;
+    history_valid = 0;
+    return 1;
+}
+
+/* XeSS like DLSS (gpu_xess.c): the same inputs and output, the depth as a depth-only image (a copy when it has
+ * stencil). 0: it could not run. */
+static int xess(VkCommandBuffer cb, GpuImage *d, VkImageView depth_view, VkImageView target, VkFormat fmt, uint32_t w,
+                uint32_t h, uint32_t ow, uint32_t oh) {
+    uint64_t now = gpu_frames();
+    gpu_xess_prepare(w, h, ow, oh, gpu_upscale());  /* made now if it isn't, before the first frame it can run */
+    if (!motion.image || motion_frame + 1 < now || motion_frame > now + 1) return 0;
+    if (!d || d->width != w || d->height != h || motion.w != w || motion.h != h || !depth_view) return 0;
+    output_image(cb, ow, oh);
+    VkImage depth_image;
+    VkFormat depth_format;
+    VkImageView dv;
+    fsr_depth_copy(cb, d, depth_view, w, h, &depth_image, &depth_format, &dv, 1);
+    static uint64_t last = ~0ull;
+    static uint32_t last_ow;
+    GpuXessInputs in = {.color = encoded.image, .depth = depth_image, .motion = motion.image, .output = fsr_out.image,
+                        .color_view = encoded.view, .depth_view = dv ? dv : depth_view, .motion_view = motion.view,
+                        .output_view = fsr_out.view, .color_format = VK_FORMAT_R16G16B16A16_SFLOAT,
+                        .depth_format = depth_format, .output_format = VK_FORMAT_R16G16B16A16_SFLOAT, .render_w = w,
+                        .render_h = h, .output_w = ow, .output_h = oh, .quality = gpu_upscale(),
+                        .reset = last + 1 != now || last_ow != ow};
+    dlss_jitter(w, ow, now, &in.jitter[0], &in.jitter[1]);
+    float sy = nvn_window_origin == 1 ? -1.0f : 1.0f, mx = 1.0f, my = 1.0f, jsx = 1.0f, jsy = 1.0f;
+    const char *e = getenv("YW4_XESS_MV_SIGN");  /* testing: "x,y" flips the motion */
+    if (e) sscanf(e, "%f,%f", &mx, &my);
+    e = getenv("YW4_XESS_JITTER_SIGN");  /* testing: "x,y" flips the jitter told to XeSS */
+    if (e) sscanf(e, "%f,%f", &jsx, &jsy);
+    in.motion_scale[0] = -(float)w * mx, in.motion_scale[1] = -(float)h * sy * my;
+    in.jitter[0] *= jsx, in.jitter[1] *= jsy;
+    full_barrier(cb);
+    gpu_passes_other(cb, "XeSS itself", 0);  /* the per-pass timer (F5) */
+    if (!gpu_xess_dispatch(cb, &in)) return 0;
+    full_barrier(cb);
+    gpu_passes_other(cb, "XeSS: its output written back (SHARPENING)", 0);
+    pass_params[0] = sharpen_amount(SHARPEN_OURS);  /* XeSS has no sharpener of its own: ours */
+    pass(cb, P_TAA_OUT, target, fmt, ow, oh, 0, fsr_out.view);
+    pass_params[0] = 0.0f;
+    last = now, last_ow = ow;
     history_valid = 0;
     return 1;
 }
@@ -906,7 +973,7 @@ static void fg_prepare(VkCommandBuffer cb, GpuImage *d, VkImageView dv, uint32_t
     int mode = gpu_aa();
     if (mode == 4 && gpu_fsr_available() == 1) {
         gpu_fsr_jitter(w, ow, now, &p.jitter[0], &p.jitter[1]);
-    } else if (mode == 5) {
+    } else if (mode >= 5) {
         dlss_jitter(w, ow, now, &p.jitter[0], &p.jitter[1]);
     } else {
         int i = (int)(now % 8) + 1;
@@ -1043,15 +1110,18 @@ void gpu_aa_apply(VkCommandBuffer cb, GpuState *s) {
      * of the scene, anti-aliased as usual */
     static int debug = -1;
     if (debug < 0) debug = getenv("YW4_AA_DEBUG") ? atoi(getenv("YW4_AA_DEBUG")) : 0;
-    static const char *const label[6] = {"anti-aliasing off: SHARPENING", "anti-aliasing: FXAA", "anti-aliasing: SMAA",
-                                         "anti-aliasing: TAA", "anti-aliasing: FSR", "anti-aliasing: DLSS"};
+    static const char *const label[7] = {"anti-aliasing off: SHARPENING", "anti-aliasing: FXAA", "anti-aliasing: SMAA",
+                                         "anti-aliasing: TAA", "anti-aliasing: FSR", "anti-aliasing: DLSS",
+                                         "anti-aliasing: XeSS"};
     gpu_passes_other(cb, label[mode], 0);  /* its own line in the per-pass timer (F5) */
     pass(cb, debug == 3 ? P_TEST : P_ENCODE, encoded.view, VK_FORMAT_R16G16B16A16_SFLOAT, w, h, 0, scene);
     /* The swirl into a battle grows the view in nine steps of 32 x 18 (gpu.c zoom_chain), each a new size: DLSS and
      * FSR are made again for every size (~33 ms each, a stutter at every battle's start), so during those ~1 s our
      * TAA stands in; it only resizes its images. The settled battle view is DLSS's / FSR's again. */
     int zoom = g && gpu_zoom_step(g->key.width, g->key.height);
-    if (mode == 5 && !debug && !zoom && depth && dlss(cb, depth, depth_in, out, fmt, w, h, ow, oh)) {
+    if (mode == 6 && !debug && !zoom && depth && xess(cb, depth, depth_in, out, fmt, w, h, ow, oh)) {
+        /* done: XeSS wrote the output's size */
+    } else if (mode == 5 && !debug && !zoom && depth && dlss(cb, depth, depth_in, out, fmt, w, h, ow, oh)) {
         /* done: DLSS wrote the output's size */
     } else if (mode >= 4 && !debug && !zoom && depth && fsr(cb, depth, depth_in, out, fmt, w, h, ow, oh)) {
         /* done: FSR wrote the output's size (also when DLSS can't run) */

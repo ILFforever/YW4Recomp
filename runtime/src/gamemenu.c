@@ -1627,6 +1627,11 @@ static void sentence_case(const char *in, char *out, size_t n) {
             const char *e = p;
             while ((*e >= 'A' && *e <= 'Z') || (*e >= '0' && *e <= '9')) e++;
             size_t len = (size_t)(e - p);
+            if (len == 4 && !strncmp(p, "XESS", 4)) {  /* Intel's own spelling */
+                for (const char *q = "XeSS"; *q && o + 1 < n; q++) out[o++] = *q;
+                p = e;
+                continue;
+            }
             int acr = 0;
             for (size_t k = 0; k < sizeof keep / sizeof *keep; k++)
                 if (strlen(keep[k]) == len && !strncmp(keep[k], p, len)) acr = 1;
@@ -1651,7 +1656,8 @@ static void prose_case(const char *in, char *out, size_t n) {
         {"SWITCH", "Switch"}, {"SWITCH'S", "Switch's"}, {"ALT", "Alt"}, {"TAB", "Tab"}, {"ENTER", "Enter"},
         {"DELETE", "Delete"}, {"ESCAPE", "Escape"}, {"BACKSPACE", "Backspace"}, {"SHIFT", "Shift"}, {"MS", "ms"},
         {"HZ", "Hz"}, {"NVIDIA", "NVIDIA"}, {"AMD", "AMD"}, {"GPU", "GPU"}, {"GPUS", "GPUs"}, {"CPU", "CPU"},
-        {"HUD", "HUD"}, {"FXAA", "FXAA"}, {"SMAA", "SMAA"}, {"TAA", "TAA"}, {"FSR", "FSR"}, {"DLSS", "DLSS"},
+        {"HUD", "HUD"}, {"FXAA", "FXAA"}, {"SMAA", "SMAA"}, {"TAA", "TAA"}, {"FSR", "FSR"}, {"DLSS", "DLSS"}, {"XESS", "XeSS"},
+        {"INTEL", "Intel"}, {"ARC", "Arc"},
         {"RTX", "RTX"}, {"AI", "AI"}, {"HD", "HD"}, {"PCSS", "PCSS"}, {"VSYNC", "VSync"}, {"F1", "F1"}, {"F2", "F2"},
         {"F3", "F3"}, {"F11", "F11"}, {"ZL", "ZL"}, {"ZR", "ZR"}, {"LB", "LB"}, {"RB", "RB"}, {"OK", "OK"},
         /* names in Discord status's text: "Yo-kai Watch 4" ("KAI" stays lower case), "Watch rank", "this PC" */

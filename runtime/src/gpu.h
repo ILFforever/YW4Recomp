@@ -49,7 +49,8 @@ void gpu_dof_cycle(void);
 /* Effects resolution (gpu.c): 1 if the game's half-size targets are made the 3D view's size (YW4_EFFECTS). */
 int gpu_effects_full(void);
 void gpu_effects_cycle(void);
-/* Anti-aliasing between the scene and the UI (gpu_aa.c): 0 off, 1 FXAA, 2 SMAA, 3 TAA (YW4_AA at start). */
+/* Anti-aliasing between the scene and the UI (gpu_aa.c): 0 off, 1 FXAA, 2 SMAA, 3 TAA, 4 FSR, 5 DLSS, 6 XeSS
+ * (YW4_AA at start). */
 int gpu_aa(void);
 void gpu_aa_cycle(void);
 void gpu_aa_step(int dir);

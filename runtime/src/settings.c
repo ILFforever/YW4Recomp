@@ -14,6 +14,7 @@
 #include "gpu_dlssg.h"
 #include "gpu_fg.h"
 #include "gpu_fsr.h"
+#include "gpu_xess.h"
 #include "post.h"
 #include "gbuffer.h"
 #include "gpu.h"
@@ -144,19 +145,31 @@ static const char *reflex_disabled(void) {
     /* locked on, not off: the panels show a reason starting "ALWAYS ON" without their "Off for now" */
     return gpu_fg() == 2 && dlssg_available() ? "ALWAYS ON WITH DLSS FRAME GENERATION. NVIDIA REQUIRES IT" : NULL;
 }
+/* "NEEDS ANTI-ALIASING SET TO FSR, DLSS OR XESS": the choices this GPU and build can run (TAA first with taa) */
+static const char *needs_aa(int taa) {
+    const char *names[4];
+    int n = 0;
+    if (taa) names[n++] = "TAA";
+    names[n++] = "FSR";
+    if (gpu_dlss_available()) names[n++] = "DLSS";
+    if (gpu_xess_available() == 1) names[n++] = "XESS";
+    static char why[96];
+    int o = snprintf(why, sizeof why, "NEEDS ANTI-ALIASING SET TO ");
+    for (int i = 0; i < n && o > 0 && o < (int)sizeof why; i++)
+        o += snprintf(why + o, sizeof why - (size_t)o, "%s%s", i == 0 ? "" : i == n - 1 ? " OR " : ", ", names[i]);
+    return why;
+}
 static const char *fg_disabled(void) {
     if (!gpu_fsr_built() && (NO_STREAMLINE || !gpu_dlss_built())) return NOT_BUILT;
     if (!gpu_fsr_built() && !dlssg_available()) return "NOT SUPPORTED ON THIS GPU";
-    return gpu_aa() >= 3 ? NULL : (gpu_dlss_available() ? "NEEDS ANTI-ALIASING SET TO TAA, FSR OR DLSS"
-                                                        : "NEEDS ANTI-ALIASING SET TO TAA OR FSR");
+    return gpu_aa() >= 3 ? NULL : needs_aa(1);
 }
 static const char *sharpen_ui_disabled(void) { return gpu_sharpen() ? NULL : "NEEDS SHARPENING"; }
 static float sharpen_parse(const char *v) { return (float)gpu_sharpen_parse(v) / 100.0f; }
 static const char *upscale_disabled(void) {
-    if (!gpu_fsr_built() && !gpu_dlss_built()) return NOT_BUILT;
-    if (!gpu_fsr_built() && !gpu_dlss_available()) return "NEEDS AN NVIDIA RTX GPU FOR DLSS";
-    return gpu_aa() >= 4 ? NULL : (gpu_dlss_available() ? "NEEDS ANTI-ALIASING SET TO FSR OR DLSS"
-                                                        : "NEEDS ANTI-ALIASING SET TO FSR");
+    if (!gpu_fsr_built() && !gpu_dlss_built() && !gpu_xess_built()) return NOT_BUILT;
+    if (!gpu_fsr_built() && !gpu_dlss_available() && gpu_xess_available() != 1) return "NEEDS AN NVIDIA RTX GPU FOR DLSS";
+    return gpu_aa() >= 4 ? NULL : needs_aa(0);
 }
 /* DLSS MODEL: only while DLSS itself runs (anti-aliasing DLSS on a GPU that has it; else FSR stands in) */
 static int dlss_model_hidden(void) { return gpu_aa() != 5 || !gpu_dlss_available(); }
@@ -434,11 +447,12 @@ static const Setting player[] = {
      "ONLY THE NUMBERS", 1},
     {"ANTI-ALIASING AND UPSCALING", "ANTI-ALIASING",
      "SMOOTHS THE JAGGED EDGES OF OBJECTS. APPLIED BEFORE THE MENUS ARE DRAWN, SO TEXT STAYS SHARP.",
-     {"OFF", "FXAA", "SMAA", "TAA", "FSR", "DLSS"},
+     {"OFF", "FXAA", "SMAA", "TAA", "FSR", "DLSS", "XESS"},
      {"THE SWITCH'S DEFAULT: JAGGED EDGES", "SMOOTHEST, TEXTURES A LITTLE SOFTER", "CLEAN EDGES, TEXTURES STAY SHARP",
       "STEADY EDGES: NO SHIMMER ON FENCES, LEAVES AND SHADOWS", "AMD FSR: STEADY EDGES, BEST WITH UPSCALING",
-      "NVIDIA DLSS: AI UPSCALING, NVIDIA RTX GPUS (ELSE FSR)"}, 6, gpu_aa,
-     gpu_aa_cycle, "YW4_AA", {"0", "1", "2", "3", "4", "5"}},
+      "NVIDIA DLSS: AI UPSCALING, NVIDIA RTX GPUS (ELSE FSR)",
+      "INTEL XESS: AI UPSCALING, ANY GPU, FASTEST ON INTEL ARC (ELSE FSR)"}, 7, gpu_aa,
+     gpu_aa_cycle, "YW4_AA", {"0", "1", "2", "3", "4", "5", "6"}},
     {"ANTI-ALIASING AND UPSCALING", "DLSS MODEL",
      /* (decision 0040: K, or M with no trail behind characters in the night rain; shown only with DLSS) */
      "WHICH NVIDIA DLSS MODEL REBUILDS THE PICTURE. HIGH QUALITY REMOVES THE TRAILS BEHIND MOVING CHARACTERS IN "
@@ -448,10 +462,10 @@ static const Setting player[] = {
      gpu_dlss_model_setting, gpu_dlss_model_cycle, "YW4_DLSS_MODEL", {"k", "m"}, dlss_model_disabled,
      NULL, NULL, 0, 0, 0, NULL, 0, NULL, {NULL}, dlss_model_hidden},
     {"ANTI-ALIASING AND UPSCALING", "UPSCALING",
-     "DRAWS THE WORLD SMALLER THAN THE RESOLUTION, THEN AMD FSR OR NVIDIA DLSS REBUILDS IT AT FULL SIZE: MORE "
-     "FRAMES. MENUS AND TEXT STAY FULL SIZE. NEEDS ANTI-ALIASING SET TO FSR OR DLSS.",
+     "DRAWS THE WORLD SMALLER THAN THE RESOLUTION, THEN AMD FSR, NVIDIA DLSS OR INTEL XESS REBUILDS IT AT FULL SIZE: "
+     "MORE FRAMES. MENUS AND TEXT STAY FULL SIZE. NEEDS ANTI-ALIASING SET TO FSR, DLSS OR XESS.",
      {"OFF (NATIVE)", "QUALITY", "BALANCED", "PERFORMANCE"},
-     {"FULL RESOLUTION: FSR OR DLSS ONLY SMOOTH EDGES", "1.5X SMALLER: CLOSE TO FULL, FASTER", "1.7X SMALLER: FASTER STILL",
+     {"FULL RESOLUTION: THE UPSCALER ONLY SMOOTHS EDGES", "1.5X SMALLER: CLOSE TO FULL, FASTER", "1.7X SMALLER: FASTER STILL",
       "2X SMALLER: FASTEST, SOFTER"}, 4,
      gpu_upscale_setting, gpu_upscale_cycle, "YW4_UPSCALE", {"0", "1", "2", "3"}, upscale_disabled},
     {"ANTI-ALIASING AND UPSCALING", "SHARPENING",
@@ -873,15 +887,16 @@ static int fill_rows(SettingRow *rows, int max, const Setting *list, int count) 
         memcpy(rows[i].notes, list[i].notes, sizeof rows[i].notes);
         rows[i].noptions = list[i].noptions;
         if (typed_env(&list[i])) rows[i].options[0] = typed_shown(&list[i]), rows[i].verbatim = rows[i].textbox = 1;
-        /* leave out options this GPU or build can't run, only from the end of the list (FSR, then DLSS): an
+        /* leave out options this GPU or build can't run, only from the end of the list (FSR, DLSS, then XeSS): an
          * option in the middle stays listed, as the row's index is the mode (the cycle skips it) */
         if (list[i].next == gpu_aa_cycle || list[i].next == gpu_fg_cycle) {
             int aa = list[i].next == gpu_aa_cycle;
             int dlss_ok = gpu_dlss_built() && (aa ? gpu_dlss_available() : dlssg_available());
-            if (!dlss_ok) {
-                rows[i].noptions = aa ? 5 : 2;                     /* DLSS is last */
-                if (!gpu_fsr_built()) rows[i].noptions = aa ? 4 : 1;  /* and FSR before it */
-            }
+            int n = aa ? 7 : 3;
+            if (aa && gpu_xess_available() != 1) n = 6;   /* XeSS is last (anti-aliasing only) */
+            if (n == (aa ? 6 : 3) && !dlss_ok) n--;      /* then DLSS */
+            if (n == (aa ? 5 : 2) && !gpu_fsr_built()) n--;  /* and FSR before it */
+            rows[i].noptions = n;
         }
         if (list[i].next == gpu_card_cycle) gpu_card_fill(&rows[i]);  /* the cards found (window.c) */
         if (!list[i].noptions) {  /* a slider: its text, its position, and one note for the description */

@@ -266,6 +266,7 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--jobs", type=int, default=os.cpu_count() or 4)
     ap.add_argument("--no-fsr", action="store_true", help="leave out AMD FSR (decision 0039)")
     ap.add_argument("--no-dlss", action="store_true", help="leave out NVIDIA DLSS and Streamline (decision 0040)")
+    ap.add_argument("--no-xess", action="store_true", help="leave out Intel XeSS (decision 0089, Windows)")
     args = ap.parse_args(argv)
     try:
         cfg = config.load()
@@ -310,6 +311,11 @@ def main(argv: list[str] | None = None) -> int:
             sl = deps.fetch_streamline(cfg)
             includes.append(f"-I{sl / 'include'}")
             feature_defs.append("-DYW4_STREAMLINE=1")
+        # Intel XeSS (decision 0089): the Vulkan headers; libxess.dll is loaded at run time, copied below
+        if not args.no_xess:
+            xess = deps.fetch_xess(cfg)
+            includes.append(f"-I{xess / 'inc' / 'xess'}")
+            feature_defs.append("-DYW4_XESS=1")
     else:
         # the system's SDL3 (pkg-config) or the launcher's own copy (decisions 0071, 0083: tools/yw4/system.py)
         found = system.sdl3()
@@ -519,6 +525,12 @@ def main(argv: list[str] | None = None) -> int:
             (exe.parent / "nvngx_dlss.dll").unlink(missing_ok=True)
             for dll in deps.SL_DLLS:
                 (exe.parent / dll).unlink(missing_ok=True)
+        if not args.no_xess:  # Intel's licence asks for its text alongside the DLL
+            shutil.copy2(xess / "bin" / "libxess.dll", exe.parent / "libxess.dll")
+            shutil.copy2(xess / "LICENSE.txt", exe.parent / "libxess.license.txt")
+        else:
+            (exe.parent / "libxess.dll").unlink(missing_ok=True)
+            (exe.parent / "libxess.license.txt").unlink(missing_ok=True)
     else:
         # Linux: an SDL3 outside the system's folders (the launcher's own builder/sdl3, decision 0071, or one built by
         # hand) goes next to yw4, which finds it there through its run path ($ORIGIN): no LD_LIBRARY_PATH to set
