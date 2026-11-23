@@ -62,12 +62,13 @@ void hud_scale_set(float v);
 float hud_opacity_get(void);
 void hud_opacity_set(float v);
 
-/* The settings panel (settings.h) the same way: every row with all its options, the current one boxed. */
-void panel_render(uint8_t *rgba, int w, int h, const SettingRow *rows, int n, int selected, int developer,
-                  int *used_w, int *used_h);
+/* The settings panel (settings.h) the same way: every row with all its options, the current one boxed. At most
+ * max_h texels high: taller, its rows scroll to keep the selected one in view. */
+void legacy_panel_render(uint8_t *rgba, int w, int h, int max_h, const SettingRow *rows, int n, int selected,
+                         int developer, int *used_w, int *used_h);
 /* The panel's controls page (bindings.h) the same way: the chosen row and column, whether it waits for an
  * input, and the text for the explanation box. */
-void controls_render(uint8_t *rgba, int w, int h, const BindRow *rows, int n, int row, int col, int capturing,
-                     const char *help, int *used_w, int *used_h);
+void legacy_controls_render(uint8_t *rgba, int w, int h, const BindRow *rows, int n, int row, int col,
+                            int capturing, const char *help, int *used_w, int *used_h);
 
 #endif

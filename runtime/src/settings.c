@@ -393,9 +393,10 @@ static const Setting player[] = {
     {"DISPLAY", "GRAPHICS CARD",
      "THE GRAPHICS CARD THE GAME RUNS ON, FOR PCS WITH TWO (MOST GAMING LAPTOPS). AUTO PICKS THE FASTER ONE. THE "
      "GAME CHOOSES IT WHEN IT STARTS, SO A CHANGE TAKES EFFECT AFTER A RESTART.",
-     {gpu_shown[0], gpu_shown[1], gpu_shown[2], gpu_shown[3], gpu_shown[4], gpu_shown[5]}, {NULL},
-     SETTINGS_MAX_OPTIONS, gpu_card_index, gpu_card_cycle, "YW4_GPU",
-     {gpu_saved[0], gpu_saved[1], gpu_saved[2], gpu_saved[3], gpu_saved[4], gpu_saved[5]}, gpu_card_disabled},
+     {gpu_shown[0], gpu_shown[1], gpu_shown[2], gpu_shown[3], gpu_shown[4], gpu_shown[5], gpu_shown[6], gpu_shown[7]},
+     {NULL}, SETTINGS_MAX_OPTIONS, gpu_card_index, gpu_card_cycle, "YW4_GPU",
+     {gpu_saved[0], gpu_saved[1], gpu_saved[2], gpu_saved[3], gpu_saved[4], gpu_saved[5], gpu_saved[6], gpu_saved[7]},
+     gpu_card_disabled},
     {"DISPLAY", "WINDOW MODE",
      "A WINDOW, OR THE WHOLE SCREEN WITHOUT BORDERS. THE MONITOR'S OWN MODE NEVER CHANGES, SO ALT+TAB IS INSTANT. "
      "F11 SWITCHES TOO.",
@@ -410,10 +411,12 @@ static const Setting player[] = {
     {"DISPLAY", "ASPECT RATIO",
      "WIDER THAN THE SWITCH'S 16:9 FOR WIDE MONITORS AND PHONES (STREAMING): THE WORLD SHOWS MORE AT THE SIDES, THE "
      "MENUS STAY 16:9 IN THE MIDDLE.",
-     {"16:9", "16:10", "19.5:9", "20:9", "21:9", "32:9"},
-     {"THE SWITCH'S DEFAULT", "A LITTLE TALLER: LESS AT THE SIDES", "IPHONES AND GALAXY S PHONES",
-      "MOST OTHER ANDROID PHONES", "ULTRAWIDE", "SUPER ULTRAWIDE"},
-     6, gpu_wide_choice, gpu_wide_cycle, "YW4_ASPECT", {"16:9", "16:10", "19.5:9", "20:9", "21:9", "32:9"}},
+     {"16:9", "16:10", "18:9", "19:9", "19.5:9", "20:9", "21:9", "32:9"},
+     {"THE SWITCH'S DEFAULT", "A LITTLE TALLER: LESS AT THE SIDES", "OLDER PHONES (2017-2018)",
+      "SOME PHONES (2018-2019)", "IPHONES AND GALAXY S PHONES", "MOST OTHER ANDROID PHONES", "ULTRAWIDE",
+      "SUPER ULTRAWIDE"},
+     8, gpu_wide_choice, gpu_wide_cycle, "YW4_ASPECT",
+     {"16:9", "16:10", "18:9", "19:9", "19.5:9", "20:9", "21:9", "32:9"}},
     {"DISPLAY", "FRAME RATE",
      "HOW MANY PICTURES A SECOND. THE GAME MOVES BY REAL TIME, SO IT PLAYS AT THE SAME SPEED AT ANY RATE. HIGHER "
      "COSTS MORE GPU AND CPU TIME.",
@@ -619,7 +622,7 @@ static const char *const link_help =
     "SWITCHES FOR TESTING THE PORT: WHO DRAWS EACH PART OF THE PICTURE, THE GAME OR OUR OWN RENDERER, AND "
     "SPEED-UPS THAT LOOK THE SAME. THE PICTURE DOESN'T CHANGE; THE DEFAULTS ARE THE RECOMMENDED ONES.";
 
-static int panel_open, page, developer_page, selected[2];  /* selected: on the player's page, the developer page */
+static int legacy_open, page, developer_page, selected[2];  /* selected: on the player's page, the developer page */
 
 /* ---- the settings file: YW4_SETTINGS_FILE, or settings.ini next to the executable; "none": no file */
 
@@ -772,25 +775,25 @@ static void write_settings(FILE *f) {
     bindings_save(f);
 }
 
-int settings_open(void) { return __atomic_load_n(&panel_open, __ATOMIC_ACQUIRE); }
+int settings_legacy_open(void) { return __atomic_load_n(&legacy_open, __ATOMIC_ACQUIRE); }
 
-void settings_toggle(void) {
+void settings_legacy_toggle(void) {
     bindings_cancel();
     developer_page = 0;
-    __atomic_store_n(&panel_open, !settings_open(), __ATOMIC_RELEASE);
+    __atomic_store_n(&legacy_open, !settings_legacy_open(), __ATOMIC_RELEASE);
 }
 
-int settings_page(void) { return __atomic_load_n(&page, __ATOMIC_ACQUIRE); }
+int settings_legacy_page(void) { return __atomic_load_n(&page, __ATOMIC_ACQUIRE); }
 
-void settings_show(int p) {
+void settings_legacy_show(int p) {
     bindings_cancel();
-    if (settings_open() && settings_page() == p) {
+    if (settings_legacy_open() && settings_legacy_page() == p) {
         developer_page = 0;
-        __atomic_store_n(&panel_open, 0, __ATOMIC_RELEASE);
+        __atomic_store_n(&legacy_open, 0, __ATOMIC_RELEASE);
         return;
     }
     __atomic_store_n(&page, p, __ATOMIC_RELEASE);
-    __atomic_store_n(&panel_open, 1, __ATOMIC_RELEASE);
+    __atomic_store_n(&legacy_open, 1, __ATOMIC_RELEASE);
 }
 
 static void setting_step(const Setting *s, int dir) {
@@ -807,22 +810,22 @@ static void setting_step(const Setting *s, int dir) {
     for (int i = 0; i < s->noptions - 1; i++) s->next();  /* one step back: the other cycles go forward only */
 }
 
-void settings_action(int action) {
+void settings_legacy_action(int action) {
     if (action == SETTINGS_PAGE) {
         bindings_cancel();
-        __atomic_store_n(&page, !settings_page(), __ATOMIC_RELEASE);
+        __atomic_store_n(&page, !settings_legacy_page(), __ATOMIC_RELEASE);
         return;
     }
     if (action == SETTINGS_CLOSE) {
         bindings_cancel();
-        if (!settings_page() && developer_page) {  /* Escape or B on the developer page: back */
+        if (!settings_legacy_page() && developer_page) {  /* Escape or B on the developer page: back */
             developer_page = 0;
             return;
         }
-        __atomic_store_n(&panel_open, 0, __ATOMIC_RELEASE);
+        __atomic_store_n(&legacy_open, 0, __ATOMIC_RELEASE);
         return;
     }
-    if (settings_page()) {
+    if (settings_legacy_page()) {
         bindings_action(action);
         return;
     }
@@ -838,7 +841,20 @@ void settings_action(int action) {
     }
     if (!developer_page && *sel == LINK_ROW) return;
     const Setting *s = developer_page ? &developer[*sel] : &player[*sel];
-    if (typed_env(s)) return;  /* typed in the overlay's popup only (this panel's font has no lower case) */
+    if (typed_env(s)) {
+        /* A name or a code is typed on the overlay's keyboard popup (this panel's font has no lower case): Enter, A
+         * or D close the panel and open it, and the panel comes back when it ends (gamemenu.c prompt_close). A
+         * greyed-out row (a code while the room is public) does nothing. */
+        if ((action == SETTINGS_ACCEPT || action == SETTINGS_LEFT || action == SETTINGS_RIGHT) &&
+            !(s->disabled && s->disabled())) {
+            int overlay_was_open = gamemenu_open();
+            __atomic_store_n(&legacy_open, 0, __ATOMIC_RELEASE);
+            s->next();
+            if (!gamemenu_prompting()) __atomic_store_n(&legacy_open, 1, __ATOMIC_RELEASE);  /* no popup came up */
+            else if (!overlay_was_open) gamemenu_prompt_return_to_panel();
+        }
+        return;
+    }
     if ((action == SETTINGS_LEFT || action == SETTINGS_RIGHT) && s->disabled && s->disabled()) return;  /* greyed out */
     switch (action) {
     case SETTINGS_RIGHT: setting_step(s, 1), settings_save(); break;
@@ -846,7 +862,7 @@ void settings_action(int action) {
     }
 }
 
-int settings_developer(void) { return developer_page; }
+int settings_legacy_developer(void) { return developer_page; }
 
 static int fill_rows(SettingRow *rows, int max, const Setting *list, int count) {
     int n = count < max ? count : max;

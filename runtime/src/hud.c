@@ -165,8 +165,8 @@ static void hint(const Canvas *cv, int pw, int y, const char *s) {
     text(cv, (pw - (int)strlen(s) * CELL_W) / 2, y + 2, s, MUTED);
 }
 
-void panel_render(uint8_t *rgba, int w, int h, const SettingRow *rows, int n, int selected, int developer,
-                  int *used_w, int *used_h) {
+void legacy_panel_render(uint8_t *rgba, int w, int h, int max_h, const SettingRow *rows, int n, int selected,
+                         int developer, int *used_w, int *used_h) {
     enum { PAD = 10, ROW_H = 13, NAME_COLS = 21, GAP = 3, HEADER = 26, DESC_LINES = 5, SLIDER_COLS = 22 };
     /* the width: the widest row (name and all its options) */
     int cols = 0;
@@ -195,17 +195,51 @@ void panel_render(uint8_t *rgba, int w, int h, const SettingRow *rows, int n, in
     if (!developer) settings_w = pw, settings_h = ph;
     if (pw < settings_w) pw = settings_w, text_cols = (pw - 2 * PAD - 12) / CELL_W;
     if (ph < settings_h) ph = settings_h;
+    /* Taller than the window (max_h) or the image: the rows scroll (owner, 2026-11-24), the title, the explanation
+     * and the hints stay. The scroll moves only as far as needed to keep the chosen row (and its group's label, for
+     * a group's first row) in view; arrows at the right say there is more above or below. */
+    if (max_h <= 0) {  /* only measuring: the width (window.c picks the scale from it), nothing drawn */
+        *used_w = pw < w ? pw : w, *used_h = ph < h ? ph : h;
+        return;
+    }
+    int fixed = HEADER + 8 + 6 + desc_h + 6 + 14, limit = max_h < h ? max_h : h;
+    if (limit < fixed + 4 * ROW_H) limit = fixed + 4 * ROW_H;
+    if (ph > limit) ph = limit;
+    int top = HEADER + 8, area_h = ph - fixed, total = (n + groups) * ROW_H;
+    static int scroll;
+    {
+        int cy = 0, sel_y = -1, label = 0;
+        for (int i = 0; i < n && sel_y < 0; i++) {
+            int first = !i || strcmp(rows[i].category, rows[i - 1].category);
+            cy += first ? ROW_H : 0;
+            if (i == selected) sel_y = cy, label = first;
+            cy += ROW_H;
+        }
+        if (sel_y >= 0) {
+            if (sel_y - (label ? ROW_H : 0) < scroll) scroll = sel_y - (label ? ROW_H : 0);
+            if (sel_y + ROW_H > scroll + area_h) scroll = sel_y + ROW_H - area_h;
+        }
+        if (scroll > total - area_h) scroll = total - area_h;
+        if (scroll < 0) scroll = 0;
+    }
     Canvas cv = {rgba, w, h, pw < w ? pw : w, ph < h ? ph : h};
     card(&cv, pw, ph, developer ? 2 : 0);
-    /* rows */
-    int y = HEADER + 8;
+    /* rows: only those wholly inside the rows' area */
+    int y = top - scroll;
     int optx = PAD + (2 + NAME_COLS) * CELL_W;
+#define SHOWN_ROW(y) ((y) >= top && (y) + ROW_H <= top + area_h)
     for (int i = 0; i < n; i++) {
         if (!i || strcmp(rows[i].category, rows[i - 1].category)) {
-            text(&cv, PAD, y + 2, rows[i].category, TEAL);
-            int lx = PAD + ((int)strlen(rows[i].category) + 1) * CELL_W;
-            fill(&cv, lx, y + 5, pw - PAD - lx, 1, TEAL);
+            if (SHOWN_ROW(y)) {
+                text(&cv, PAD, y + 2, rows[i].category, TEAL);
+                int lx = PAD + ((int)strlen(rows[i].category) + 1) * CELL_W;
+                fill(&cv, lx, y + 5, pw - PAD - lx, 1, TEAL);
+            }
             y += ROW_H;
+        }
+        if (!SHOWN_ROW(y)) {
+            y += ROW_H;
+            continue;
         }
         int sel = i == selected;
         if (sel) box(&cv, PAD - 4, y - 1, pw - 2 * PAD + 8, ROW_H, 4, ROWSEL, NULL);
@@ -250,6 +284,9 @@ void panel_render(uint8_t *rgba, int w, int h, const SettingRow *rows, int n, in
         if (sel && !off) text(&cv, x - (GAP - 1) * CELL_W, y + 2, ">", PINK);
         y += ROW_H;
     }
+#undef SHOWN_ROW
+    if (scroll > 0) text(&cv, pw - PAD - CELL_W, top + 2, "\x01", PINK);  /* more above */
+    if (scroll + area_h < total) text(&cv, pw - PAD - CELL_W, top + area_h - ROW_H + 2, "\x02", PINK);  /* below */
     /* the chosen setting explained: its name, what it does, what the current option means; at the bottom */
     y = ph - desc_h - 26;
     y += 6;
@@ -269,8 +306,8 @@ void panel_render(uint8_t *rgba, int w, int h, const SettingRow *rows, int n, in
         text(&cv, PAD + 2, y + desc_h - 14, note, r->disabled ? MUTED : PINK);
     }
     y += desc_h + 6;
-    hint(&cv, pw, y, developer ? "UP/DOWN: CHOOSE   LEFT/RIGHT: CHANGE   ESC/B: BACK"
-                               : "UP/DOWN: CHOOSE   LEFT/RIGHT: CHANGE   F2, L/R: CONTROLS");
+    hint(&cv, pw, y, developer ? "W/S: CHOOSE   A/D: CHANGE   ESC/B: BACK"
+                               : "W/S: CHOOSE   A/D: CHANGE   F2, L/R: CONTROLS");
     *used_w = cv.bw, *used_h = cv.bh;
 }
 
@@ -280,8 +317,8 @@ static int same_group(const BindRow *a, const BindRow *b) {
 
 /* The controls page: a row per Switch input in groups, its two keys and gamepad input in columns, the
  * chosen cell on a chip (pink, orange when its key also presses another input), and the explanation box. */
-void controls_render(uint8_t *rgba, int w, int h, const BindRow *rows, int n, int row, int col, int capturing,
-                     const char *help, int *used_w, int *used_h) {
+void legacy_controls_render(uint8_t *rgba, int w, int h, const BindRow *rows, int n, int row, int col,
+                            int capturing, const char *help, int *used_w, int *used_h) {
     enum { PAD = CARD_PAD, ROW_H = 13, NAME_COLS = 19, CELL_COLS = 16, DESC_LINES = 4, SHOWN = 13, LINES = 64 };
     int pw = 2 * PAD + (2 + NAME_COLS + BIND_COLS * CELL_COLS) * CELL_W, text_cols = (pw - 2 * PAD - 12) / CELL_W;
     /* the lines: a group's label, then its rows; SHOWN of them at a time (so the card is as tall as the
@@ -356,7 +393,7 @@ void controls_render(uint8_t *rgba, int w, int h, const BindRow *rows, int n, in
     int k = wrap(help, text_cols, l, DESC_LINES);
     for (int j = 0; j < k; j++) text(&cv, PAD + 2, y + 6 + j * 10, l[j], capturing ? PINK : INK);
     y += desc_h + 6;
-    hint(&cv, pw, y, "ARROWS: MOVE  ENTER/A: CHANGE  DEL/X: CLEAR  F1, L/R: SETTINGS");
+    hint(&cv, pw, y, "WASD: MOVE  ENTER/A: CHANGE  DEL/X: CLEAR  F1, L/R: SETTINGS");
     *used_w = cv.bw, *used_h = cv.bh;
 }
 

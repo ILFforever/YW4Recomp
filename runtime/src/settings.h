@@ -2,13 +2,18 @@
  * its options shown and the current one marked, and a description of the chosen setting and option. Up/Down
  * pick a setting, Left/Right change it, F1, Escape or B close the panel. While it is open neither the keyboard
  * nor the gamepad reaches the game. The settings change through their own functions (gpu.c, gpu_draw.c,
- * gpu_aa.c, shadow.c, gbuffer.c). Drawn by hud.c (panel_render), shown by window.c. */
+ * gpu_aa.c, shadow.c, gbuffer.c). Drawn by hud.c (legacy_panel_render), shown by window.c.
+ *
+ * Naming (2026-11-24): this pixel-font panel is the LEGACY menu (the in-game overlay, gamemenu.c, is the normal
+ * one; the LEGACY MENUS setting brings the panel back). Code that only the panel uses says so: settings_legacy_*
+ * here, legacy_panel* and legacy_controls_render (hud.c, window.c). What the overlay shares has no prefix: the
+ * rows (settings_rows, settings_player_rows), settings_change, and the SETTINGS_* action codes (bindings.c). */
 #ifndef YW4_SETTINGS_H
 #define YW4_SETTINGS_H
 
 #include <stdint.h>
 
-enum { SETTINGS_MAX_OPTIONS = 6 };
+enum { SETTINGS_MAX_OPTIONS = 8 };
 
 typedef struct {
     const char *category;  /* the group it is listed under */
@@ -37,19 +42,19 @@ enum { SETTINGS_UP, SETTINGS_DOWN, SETTINGS_LEFT, SETTINGS_RIGHT, SETTINGS_CLOSE
  * environment, line by line, where the variable isn't set already, so the environment still wins. Called
  * first thing at start, before anything reads its variable; every change in the panel writes the file. */
 void settings_load(void);
-int settings_open(void);
-void settings_toggle(void);
+int settings_legacy_open(void);
+void settings_legacy_toggle(void);
 /* The page shown: 0 the settings (F1), 1 the controls (F2, bindings.h); SETTINGS_PAGE switches (a gamepad's
  * L/R, which has no F keys). */
-int settings_page(void);
+int settings_legacy_page(void);
 /* F1/F2: opens the panel on that page, or switches to it; closes the panel if it already shows it. */
-void settings_show(int page);
+void settings_legacy_show(int page);
 /* Writes the settings file (the settings and the controls); every change calls it. */
 void settings_save(void);
 /* The settings file's path ("" with YW4_SETTINGS_FILE=none): the bug report copies it. */
 const char *settings_file_name(void);
 /* One of the actions above, from the window's key presses while the panel is open. */
-void settings_action(int action);
+void settings_legacy_action(int action);
 /* The rows as they are now, and the selected one; returns the count. */
 int settings_rows(SettingRow *rows, int max, int *selected);
 /* The in-game overlay's settings page (gamemenu.c): the player's settings (no developer link), and changing row
@@ -92,7 +97,7 @@ void settings_hud_step(int opacity, int dir);
 /* The same slider set from a position along its track (0..1, the mouse), on its steps, saved. */
 void settings_hud_set(int opacity, float frac);
 /* The settings page shows its developer page (DEVELOPER OPTIONS, the last row's; Escape or B goes back). */
-int settings_developer(void);
+int settings_legacy_developer(void);
 /* LEGACY MENUS (YW4_LEGACY_KEYS, default on): 1 if the F1, F2 and F3 keys work. */
 int settings_legacy_keys(void);
 /* YW4_KEYS_NOTICE: 1 if the corner card that says how to see the controls shows at each start (default: on with a

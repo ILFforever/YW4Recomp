@@ -432,6 +432,9 @@ void gamemenu_live_rect(float r[4]) { memcpy(r, live_rect, sizeof live_rect); }
 void gamemenu_live_popup(void) { __atomic_store_n(&live_popup, 1, __ATOMIC_RELEASE), changed(); }
 int gamemenu_live(void) { return gamemenu_open() && __atomic_load_n(&live_popup, __ATOMIC_ACQUIRE); }
 
+static int prompt_to_panel;  /* gamemenu_prompt_return_to_panel */
+void gamemenu_prompt_return_to_panel(void) { __atomic_store_n(&prompt_to_panel, 1, __ATOMIC_RELEASE); }
+
 static void prompt_close(int how) {
     __atomic_store_n(&live_popup, 0, __ATOMIC_RELEASE);
     if (osk_switched && !strcmp(prompt_label, "Name")) {  /* the next name's keyboard opens on this language */
@@ -450,6 +453,10 @@ static void prompt_close(int how) {
         prompt_done = NULL;
         __atomic_store_n(&prompting, 0, __ATOMIC_RELEASE);
         if (how == 1) done(prompt_answer);
+        if (__atomic_exchange_n(&prompt_to_panel, 0, __ATOMIC_ACQ_REL)) {  /* begun from the old F1 panel: back to it */
+            __atomic_store_n(&open_, 0, __ATOMIC_RELEASE);
+            settings_legacy_show(0);
+        }
         changed();
         return;
     }
@@ -587,7 +594,7 @@ uint32_t gamemenu_look(uint64_t now) {
 }
 
 static void close_and_resume(void) {
-    if (settings_open()) settings_toggle();
+    if (settings_legacy_open()) settings_legacy_toggle();
     bindings_cancel();
     textin_focus(NULL);  /* no typing into a closed overlay (what was typed stays for next time) */
     __atomic_store_n(&focused_text_valid, 0, __ATOMIC_RELEASE);
@@ -609,7 +616,7 @@ static void close_and_resume_to_title(void) {
         fprintf(stderr, "yw4: overlay: return to title: the game isn't in its pause screen here\n");
         return;
     }
-    if (settings_open()) settings_toggle();
+    if (settings_legacy_open()) settings_legacy_toggle();
     bindings_cancel();
     textin_focus(NULL);
     __atomic_store_n(&focused_text_valid, 0, __ATOMIC_RELEASE);
@@ -696,7 +703,7 @@ void gamemenu_open_page(int item) {
         return;
     }
     if (preview) preview_stop();
-    if (settings_open()) settings_toggle();  /* a replay's old panel: the overlay's page instead */
+    if (settings_legacy_open()) settings_legacy_toggle();  /* a replay's old panel: the overlay's page instead */
     bindings_cancel();
     textin_focus(NULL);
     __atomic_store_n(&peek_, 0, __ATOMIC_RELEASE);
@@ -1081,7 +1088,7 @@ static void bug_page_action(int a) {
 }
 
 void gamemenu_action(int a) {
-    if (!gamemenu_open() || settings_open()) return;
+    if (!gamemenu_open() || settings_legacy_open()) return;
     changed();
     if (gamemenu_prompting() && __atomic_load_n(&pick_n, __ATOMIC_ACQUIRE)) {  /* a list: up / down, A picks */
         if (dy_hold) return;  /* answered: waiting for the game */
@@ -1212,7 +1219,7 @@ void gamemenu_peek_click(float x, float y) {
 }
 
 void gamemenu_mouse(float x, float y, int button) {
-    if (!gamemenu_open() || settings_open() || bindings_capturing()) return;
+    if (!gamemenu_open() || settings_legacy_open() || bindings_capturing()) return;
     Hit h;
     int found = hit_find(x, y, &h);
     if (gamemenu_prompting() && __atomic_load_n(&pick_n, __ATOMIC_ACQUIRE)) {  /* a list: hovering chooses, a click picks */
@@ -1425,7 +1432,7 @@ void gamemenu_wheel(int dy) {
      * mousemenu.c; before, 2026-11-06, it only scrolled the long lists). A list longer than its space scrolls to keep
      * the chosen row in view, as with the keys. Not in a popup, while a key is being bound or text is being typed, or
      * on the Controls page's keyboard view (nothing there to choose). */
-    if (!gamemenu_open() || settings_open() || bindings_capturing() || confirm || preview || gamemenu_prompting()) return;
+    if (!gamemenu_open() || settings_legacy_open() || bindings_capturing() || confirm || preview || gamemenu_prompting()) return;
     if (sel == GM_BUG && textin_has(&bug_text)) return;
     if (focus && sel == GM_CONTROLS && !ctrl_view) return;
     gamemenu_action(dy > 0 ? GM_UP : GM_DOWN);
@@ -2675,7 +2682,7 @@ static void draw_controls_pad(const UiCanvas *c, const GameMenuInfo *in, float x
  * does something, comes into focus. Elsewhere nothing is kept. */
 void gamemenu_held(const bool *keys, uint32_t mouse, uint32_t parts) {
     int peek = gamemenu_peeking();
-    int page = gamemenu_open() && !settings_open() && focus && sel == GM_CONTROLS && !ctrl_view && !confirm &&
+    int page = gamemenu_open() && !settings_legacy_open() && focus && sel == GM_CONTROLS && !ctrl_view && !confirm &&
                !preview && !gamemenu_prompting() && !bindings_capturing();
     uint8_t now[64] = {0};
     int fresh = 0, m = 0;

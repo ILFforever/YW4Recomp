@@ -71,6 +71,9 @@ void gamemenu_name_edit(const char *title, int max_chars, const char *fallback, 
 /* The same popup with a message instead of a field, and OK (a pad's A or B, Enter, Escape); taken the same way. */
 void gamemenu_message_begin(const char *title, const char *body);
 int gamemenu_prompting(void);
+/* The name entry just begun came from the old F1 panel (settings.c): when it ends (answered or cancelled) the
+ * overlay closes again and the panel comes back, instead of the overlay staying open. */
+void gamemenu_prompt_return_to_panel(void);
 /* The same popup with a list to choose from (the New Game slot picker, savefs.c): the question, then up to 12 rows,
  * `sel` chosen first. Up / Down, the wheel or hovering choose; A, Enter, OK or a click picks. No Cancel.
  * gamemenu_choice_take: -1 while it is open, then the row picked (once). While it shows, gamemenu_open() is 1. */

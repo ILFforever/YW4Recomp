@@ -664,8 +664,8 @@ uint64_t window_input_reads(void) { return 0; }
 void window_input_read_replayed(void) {}
 int window_paused(void) { return 0; }
 uint64_t window_pause_buttons(void) { return 0; }
-void settings_action(int a) {}
-int settings_open(void) { return 0; }
+void settings_legacy_action(int a) {}
+int settings_legacy_open(void) { return 0; }
 int gamemenu_open(void) { return 0; }
 void textin_type(const char *t) {}
 int bindings_capture_axis(int axis, int16_t val) { return 0; }
