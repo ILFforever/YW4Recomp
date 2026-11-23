@@ -31,6 +31,7 @@ void host_unlock(HostLock *l);
 void host_cond_init(HostCond *c);
 void host_cond_signal(HostCond *c);
 void host_cond_broadcast(HostCond *c);  /* wakes every waiter */
+void host_cond_destroy(HostCond *c);  /* no one may wait on it any more */
 /* Releases l, waits for a signal or at most timeout_ns (< 0: no limit), takes l again.
  * May wake early (spurious wake-ups): callers re-check their condition. */
 void host_cond_wait(HostCond *c, HostLock *l, int64_t timeout_ns);
@@ -65,6 +66,8 @@ int host_cpu_count(void);
 /* A handle to the calling thread, and the CPU time (user + kernel) a thread has used so far. */
 void *host_thread_self(void);
 int64_t host_thread_cpu_ns(void *thread);
+/* Frees a handle from host_thread_self (NULL is fine); `thread` is not valid afterwards. */
+void host_thread_release(void *thread);
 /* Sets the host priority of `thread` (or calling thread if NULL) based on guest priority (0..63). */
 void host_thread_set_priority(void *thread, int guest_priority);
 

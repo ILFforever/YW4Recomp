@@ -7,6 +7,8 @@
  * order. The S-box is computed from its definition (inverse in GF(2^8), then the affine
  * map) on first use rather than typed in.
  */
+#include <string.h>
+
 #include "yw4cpu.h"
 
 static uint8_t sbox[256], inv_sbox[256];
@@ -22,7 +24,11 @@ static uint8_t gmul(uint8_t a, uint8_t b) {
 }
 
 static void init_sbox(void) {
-    if (sbox[0]) return;  /* sbox[0] = 0x63 once built */
+    /* built into copies and published by one release store of `built`: setting sbox[0] first (as before) let a second
+     * thread see "built" and use a mostly-zero table. Two threads building at once write the same bytes. */
+    static int built;
+    if (__atomic_load_n(&built, __ATOMIC_ACQUIRE)) return;
+    uint8_t s_box[256], s_inv[256];
     for (int x = 0; x < 256; x++) {
         uint8_t inv = 0;
         for (int y = 1; y < 256 && x; y++)
@@ -30,9 +36,11 @@ static void init_sbox(void) {
         uint8_t s = inv;
         for (int k = 1; k < 5; k++) s ^= (uint8_t)((inv << k) | (inv >> (8 - k)));
         s ^= 0x63;
-        sbox[x] = s;
-        inv_sbox[s] = (uint8_t)x;
+        s_box[x] = s;
+        s_inv[s] = (uint8_t)x;
     }
+    memcpy(sbox, s_box, sizeof sbox), memcpy(inv_sbox, s_inv, sizeof inv_sbox);
+    __atomic_store_n(&built, 1, __ATOMIC_RELEASE);
 }
 
 static void mix_columns(uint8_t *out, const uint8_t *in, int inverse) {

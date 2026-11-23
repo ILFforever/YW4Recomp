@@ -82,6 +82,7 @@ void host_unlock(HostLock *l) { ReleaseSRWLockExclusive((PSRWLOCK)l); }
 void host_cond_init(HostCond *c) { InitializeConditionVariable((PCONDITION_VARIABLE)c); }
 void host_cond_signal(HostCond *c) { WakeConditionVariable((PCONDITION_VARIABLE)c); }
 void host_cond_broadcast(HostCond *c) { WakeAllConditionVariable((PCONDITION_VARIABLE)c); }
+void host_cond_destroy(HostCond *c) { (void)c; }  /* a CONDITION_VARIABLE holds no resources */
 
 void host_cond_wait(HostCond *c, HostLock *l, int64_t timeout_ns) {
     /* Millisecond resolution, rounded up so a wait is never shorter than asked. */
@@ -192,6 +193,10 @@ void *host_thread_self(void) {
     DuplicateHandle(GetCurrentProcess(), GetCurrentThread(), GetCurrentProcess(), &h,
                     THREAD_QUERY_LIMITED_INFORMATION | THREAD_SET_INFORMATION, FALSE, 0);
     return h;
+}
+
+void host_thread_release(void *thread) {
+    if (thread) CloseHandle((HANDLE)thread);
 }
 
 void host_thread_set_priority(void *thread, int guest_priority) {
@@ -426,6 +431,7 @@ void host_cond_init(HostCond *c) {
 }
 void host_cond_signal(HostCond *c) { pthread_cond_signal(c); }
 void host_cond_broadcast(HostCond *c) { pthread_cond_broadcast(c); }
+void host_cond_destroy(HostCond *c) { pthread_cond_destroy(c); }
 
 void host_cond_wait(HostCond *c, HostLock *l, int64_t timeout_ns) {
     if (timeout_ns < 0) {
@@ -545,6 +551,8 @@ int64_t host_thread_cpu_ns(void *thread) {
     if (!thread || clock_gettime(*(clockid_t *)thread, &ts)) return 0;
     return (int64_t)ts.tv_sec * 1000000000 + ts.tv_nsec;
 }
+
+void host_thread_release(void *thread) { free(thread); }  /* the malloc'd clockid */
 
 void host_thread_set_priority(void *thread, int guest_priority) {
     (void)thread;

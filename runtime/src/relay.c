@@ -435,7 +435,12 @@ long relay_request(uint8_t type, const void *p, size_t n, uint8_t *out, size_t c
     want = type, answer = out, answer_cap = cap, answer_len = -1;
     RSock s = sock;
     host_unlock(&lock);
-    if (write_frame(s, type, p, n)) return -1;
+    if (write_frame(s, type, p, n)) {
+        host_lock(&lock);  /* the reader must not fill `out` (the caller's buffer) after we return */
+        if (answer == out) want = 0, answer = NULL;
+        host_unlock(&lock);
+        return -1;
+    }
     host_lock(&lock);
     int64_t end = host_now_ns() + (int64_t)timeout_ms * 1000000;
     while (want == type && sock == s && host_now_ns() < end) host_cond_wait(&answered, &lock, end - host_now_ns());

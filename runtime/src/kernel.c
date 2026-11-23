@@ -483,6 +483,9 @@ static void thread_free_if_done(KThread *t) {
             break;
         }
     slots[t->slot] = NULL;
+    /* exited: the host thread is past its last use of t, and nobody else waits on t->cond */
+    host_thread_release(t->host);
+    host_cond_destroy(&t->cond);
     free(t->ctx);
     free(t);
 }
@@ -506,8 +509,12 @@ static void thread_main(void *p) {
     KThread *t = p;
     jmp_buf jump;
     cur = t;
-    t->host = host_thread_self();
-    host_thread_set_priority(t->host, t->priority);
+    void *self = host_thread_self();
+    host_lock(&klock);  /* t->host and t->priority are read under klock (SetThreadPriority, the CPU report) */
+    t->host = self;
+    int prio = t->priority;
+    host_unlock(&klock);
+    host_thread_set_priority(self, prio);
     exit_jump = &jump;
     yw4_profile_thread(YW4_ROLE_ANY, 0);  /* YW4_PROFILE=hitch samples them all */
     if (setjmp(jump) == 0) {
@@ -583,8 +590,11 @@ void yw4_thread_cpu_report(FILE *f, int64_t interval_ns) {
     host_unlock(&klock);
 }
 
+static void svc_env_init(void);
+
 uint32_t yw4_kernel_init(CPUState *ctx, uint64_t stack, uint64_t stack_size) {
     host_lock_init(&klock);
+    svc_env_init();
     host_install_crash_handler(report_crash);
     host_timer_init();
     for (size_t i = 0; i < yw4_nmodules; i++) {  /* as Horizon maps an NSO: three regions */
@@ -1099,7 +1109,8 @@ typedef struct {
     int64_t ns;
 } WaitSite;
 static WaitSite wait_sites[WAITPROF_SLOTS];
-static int waitprof = -1;
+static int waitprof;
+static int svc_trace;
 static uint64_t waitprof_thread;  /* YW4_WAITPROF_THREAD=n: watch guest thread n instead of the main thread (0: main) */
 
 static void waitprof_add(uint32_t imm, uint64_t addr, const uint64_t *st, int k, int64_t ns) {
@@ -1146,7 +1157,7 @@ typedef struct { uint8_t kind; int64_t t; } ProbeEv;
 static ProbeEv probe_ev[PROBE_N];
 static uint32_t probe_n;
 static uint64_t probe_dispatch, probe_done;
-static int probe_on = -1;
+static int probe_on;
 
 static void probe_rec(int kind, int64_t t) {  /* klock held */
     probe_ev[probe_n % PROBE_N] = (ProbeEv){(uint8_t)kind, t};
@@ -1159,7 +1170,7 @@ static void probe_rec(int kind, int64_t t) {  /* klock held */
  * are done in guest code without a kernel call, so only contended locks are seen here; the hold times this prints are
  * not usable (they pair a lock with a later unlock that may be far apart). The wait tally of ArbitrateLock is the
  * measure that holds: each contended acquisition waits about 15-20 us (see the wait report). */
-static int mutex_hold_on = -1;
+static int mutex_hold_on;
 typedef struct { uint64_t addr, tid, count; int64_t ns; } HoldSite;
 static HoldSite hold_sites[64];
 typedef struct { uint64_t addr, tid; int64_t since; } HoldOpen;
@@ -1189,9 +1200,9 @@ static void hold_release(uint64_t addr, int64_t t) {  /* klock held */
  * long the waiter waited, and how long after the holder's ArbitrateUnlock it returned (the wake-up). Under klock. */
 /* YW4_LOCK_SPIN=<ns>: a contended ArbitrateLock spins up to this long watching the mutex word (outside klock) before it
  * sleeps in the kernel; if the holder lets go in that time, the sleep and wake-up (a few us each) are skipped. 0: off. */
-static int64_t lock_spin_ns = -1;
+static int64_t lock_spin_ns;
 
-static int wake_on = -1;
+static int wake_on;
 typedef struct { uint64_t mutex, t; } WakeUnlock;
 static WakeUnlock wake_unl[32];
 typedef struct { uint64_t mutex, tid, count; int64_t wake_ns, wait_ns; int depth; uint64_t stack[WAITPROF_DEPTH]; } WakeStat;
@@ -1331,27 +1342,36 @@ void yw4_wait_report(FILE *f, int frames) {
     host_unlock(&klock);
 }
 
+/* Reads the profiling switches once, from yw4_kernel_init before any guest thread runs:
+ * the SVC path then only reads them. */
+static void svc_env_init(void) {
+    const char *t = getenv("YW4_TRACE_SVC");
+    svc_trace = t && *t && *t != '0';
+    t = getenv("YW4_WAITPROF");
+    waitprof = t && *t && *t != '0';
+    t = getenv("YW4_WAITPROF_THREAD");
+    waitprof_thread = t ? strtoull(t, NULL, 10) : 0;
+    t = getenv("YW4_LOCK_SPIN");
+    lock_spin_ns = t ? atoll(t) : 0;
+    t = getenv("YW4_WAKE_PROBE");
+    wake_on = t && *t != '0';  /* as before: set and not empty-or-0 */
+    t = getenv("YW4_MUTEX_HOLD");
+    mutex_hold_on = t && *t && *t != '0';
+    t = getenv("YW4_HANDOFF_PROBE");  /* <dispatch>,<done> */
+    char *e = NULL;
+    probe_dispatch = t ? strtoull(t, &e, 0) : 0;
+    probe_done = e && *e == ',' ? strtoull(e + 1, NULL, 0) : 0;
+    probe_on = probe_dispatch && probe_done;
+}
+
 void yw4_svc(CPUState *ctx, uint32_t imm) {
-    static int trace = -1;
-    if (trace < 0) {
-        const char *t = getenv("YW4_TRACE_SVC");
-        trace = t && *t && *t != '0';
-    }
-    if (waitprof < 0) {
-        const char *t = getenv("YW4_WAITPROF");
-        waitprof = t && *t && *t != '0';
-    }
-    if (lock_spin_ns < 0) {
-        const char *s = getenv("YW4_LOCK_SPIN");
-        lock_spin_ns = s ? atoll(s) : 0;
-    }
+    const int trace = svc_trace;
     if (lock_spin_ns > 0 && imm == 0x1A) {
         uint32_t *m = u32p(ctx->x[1]);
         uint32_t seen = __atomic_load_n(m, __ATOMIC_ACQUIRE);
         int64_t until = host_now_ns() + lock_spin_ns;
         while (__atomic_load_n(m, __ATOMIC_ACQUIRE) == seen && host_now_ns() < until) { }
     }
-    if (wake_on < 0) wake_on = getenv("YW4_WAKE_PROBE") && *getenv("YW4_WAKE_PROBE") != '0';
     if (wake_on && (imm == 0x1A || imm == 0x1B)) {
         host_lock(&klock);
         if (imm == 0x1B) {
@@ -1373,7 +1393,6 @@ void yw4_svc(CPUState *ctx, uint32_t imm) {
         host_unlock(&klock);
         return;
     }
-    if (mutex_hold_on < 0) mutex_hold_on = getenv("YW4_MUTEX_HOLD") && *getenv("YW4_MUTEX_HOLD") != '0';
     if (mutex_hold_on && (imm == 0x1A || imm == 0x1B)) {
         host_lock(&klock);
         uint64_t mutex = imm == 0x1A ? ctx->x[1] : ctx->x[0], tid = cur ? cur->id : 0;
@@ -1383,13 +1402,6 @@ void yw4_svc(CPUState *ctx, uint32_t imm) {
         if (imm == 0x1B) hold_release(mutex, t);
         host_unlock(&klock);
         return;
-    }
-    if (probe_on < 0) {  /* once: YW4_HANDOFF_PROBE=<dispatch>,<done> */
-        const char *p = getenv("YW4_HANDOFF_PROBE");
-        char *e = NULL;
-        probe_dispatch = p ? strtoull(p, &e, 0) : 0;
-        probe_done = e && *e == ',' ? strtoull(e + 1, NULL, 0) : 0;
-        probe_on = probe_dispatch && probe_done;
     }
     if (probe_on && imm == 0x34 && cur == &main_thread && ctx->x[0] == probe_done) {
         host_lock(&klock);
@@ -1406,10 +1418,6 @@ void yw4_svc(CPUState *ctx, uint32_t imm) {
         probe_rec(done ? PROBE_DONE : PROBE_DISPATCH, host_now_ns());
         host_unlock(&klock);
         return;
-    }
-    if (waitprof && !waitprof_thread) {  /* once: which thread the waits are watched on */
-        const char *w = getenv("YW4_WAITPROF_THREAD");
-        waitprof_thread = w ? strtoull(w, NULL, 10) : 0;
     }
     if (waitprof && (waitprof_thread ? cur->id == waitprof_thread : cur == &main_thread) &&
         (imm == 0x0B || imm == 0x18 || imm == 0x1A || imm == 0x1C || imm == 0x34)) {

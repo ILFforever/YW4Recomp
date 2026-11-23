@@ -384,6 +384,7 @@ static _Thread_local long unexplained[2];
 /* Projection x view of the last frame's G-buffer layer, for last frame's matrix (rows 12-15). */
 static Mat4 prev_vp, this_vp;
 static uint64_t this_vp_frame = ~0ull;
+static HostLock vp_lock = HOST_LOCK_INIT;  /* the three above: every render thread's layer start writes them */
 
 /* What the checks found since the last summary. */
 static _Thread_local struct {
@@ -421,16 +422,21 @@ static struct {
     uint64_t cmd;
     char name[16];
 } ab_open;
+static HostLock ab_lock = HOST_LOCK_INIT;  /* ab_open: layer starts on every render thread, buffer ends on any game thread */
 
-static void ab_close(const CPUState *ctx) {
+/* close the open range if it is in this command buffer; the record is made outside the lock */
+static void ab_close(const CPUState *ctx, uint64_t cmd) {
     char m[17] = "e";
-    memcpy(m + 1, ab_open.name, 16);
-    nvn_record_native(ctx, ab_open.cmd, gpu_ab_native, m, 1 + (uint32_t)strlen(ab_open.name));
-    ab_open.cmd = 0;
+    if (!cmd || !__atomic_load_n(&ab_open.cmd, __ATOMIC_RELAXED)) return;  /* nothing open (no A/B): no lock */
+    host_lock(&ab_lock);
+    int mine = cmd && ab_open.cmd == cmd;
+    if (mine) memcpy(m + 1, ab_open.name, 16), __atomic_store_n(&ab_open.cmd, 0, __ATOMIC_RELAXED);
+    host_unlock(&ab_lock);
+    if (mine) nvn_record_native(ctx, cmd, gpu_ab_native, m, 1 + (uint32_t)strnlen(m + 1, 16));
 }
 
 void gbuffer_end_recording(const CPUState *ctx, uint64_t cmd) {
-    if (cmd && ab_open.cmd == cmd) ab_close(ctx);
+    ab_close(ctx, cmd);
 }
 
 void gbuffer_layer_start(const CPUState *ctx) {
@@ -444,7 +450,7 @@ void gbuffer_layer_start(const CPUState *ctx) {
     after_material = item && material_layer(item) && mode != MODE_GAME;
     /* same-frame A/B (gpu_ab.c): the compared pass's layer ends here, or starts */
     uint64_t cmd = U64(ctx->x[0] + 0x10d0) + 0xd8;  /* the command buffer this thread records into */
-    if (ab_open.cmd == cmd) ab_close(ctx);
+    ab_close(ctx, cmd);
     const char *name = !item || mode == MODE_GAME ? NULL
                        : U8(item + 8) == LAYER_GBUFFER ? "gbuffer" : material_layer(item) ? "material"
                        : shadow_layer(item)          ? "shadow"
@@ -460,12 +466,16 @@ void gbuffer_layer_start(const CPUState *ctx) {
         if (f != seen_frame) seen_frame = f, nth = 0;
         ab_this = nth++ == (int)(f % (uint64_t)layers);
     }
-    if (name && ab_this && gpu_ab_wanted(name) && !ab_open.cmd) {
-        char m[17] = "b";
-        strcpy(m + 1, name);
-        nvn_record_native(ctx, cmd, gpu_ab_native, m, 1 + (uint32_t)strlen(name));
-        strcpy(ab_open.name, name);
-        ab_open.cmd = cmd;
+    if (name && ab_this && gpu_ab_wanted(name)) {
+        host_lock(&ab_lock);
+        int opened = !ab_open.cmd;
+        if (opened) strcpy(ab_open.name, name), __atomic_store_n(&ab_open.cmd, cmd, __ATOMIC_RELAXED);
+        host_unlock(&ab_lock);
+        if (opened) {
+            char m[17] = "b";
+            strcpy(m + 1, name);
+            nvn_record_native(ctx, cmd, gpu_ab_native, m, 1 + (uint32_t)strlen(name));
+        }
     }
     cur.active = mode != MODE_GAME && item &&
                  (U8(item + 8) == LAYER_GBUFFER || material_layer(item) || stage_layer(item) || shadow_layer(item));
@@ -505,7 +515,11 @@ void gbuffer_layer_start(const CPUState *ctx) {
             fprintf(stderr, "\n");
         }
     }
-    if (frame != this_vp_frame && !shadow_layer(item)) prev_vp = this_vp, this_vp = cur.vp, this_vp_frame = frame;
+    if (!shadow_layer(item)) {
+        host_lock(&vp_lock);
+        if (frame != this_vp_frame) prev_vp = this_vp, this_vp = cur.vp, this_vp_frame = frame;
+        host_unlock(&vp_lock);
+    }
     st.layers++;
 }
 
@@ -540,14 +554,17 @@ static uint64_t stack_span(uint64_t sp) {
 /* Submeshes whose draw item wasn't found lately: their draws skip the search (8 KiB of stack, every word tried as a
  * pointer) for 120 frames, instead of searching again at every draw (the Demon Hand's effect: frames up to 330 ms). */
 enum { MISSES = 64, MISS_FRAMES = 120 };
-static struct { uint64_t submesh, frame; } misses[MISSES];
+/* each entry is one word (frame in the top 24 bits, submesh in the low 40) so render threads never see a torn pair */
+static uint64_t misses[MISSES];
+#define MISS_SUB(s) ((s) & 0xFFFFFFFFFFull)
 static int missed_lately(uint64_t submesh, uint64_t frame) {
     const uint32_t h = (uint32_t)(submesh * 0x9E3779B97F4A7C15ull >> 58);
-    return misses[h].submesh == submesh && frame - misses[h].frame < MISS_FRAMES;
+    const uint64_t e = __atomic_load_n(&misses[h], __ATOMIC_RELAXED);
+    return e && MISS_SUB(e) == MISS_SUB(submesh) && ((frame - (e >> 40)) & 0xFFFFFF) < MISS_FRAMES;
 }
 static void note_miss(uint64_t submesh, uint64_t frame) {
     const uint32_t h = (uint32_t)(submesh * 0x9E3779B97F4A7C15ull >> 58);
-    misses[h].submesh = submesh, misses[h].frame = frame;
+    __atomic_store_n(&misses[h], (frame & 0xFFFFFF) << 40 | MISS_SUB(submesh), __ATOMIC_RELAXED);
 }
 static uint64_t find_item(uint64_t sp, int site) {
     static int where[2] = {-1, -1};  /* stack offset, +1 bit: 1 the slot holds a pointer, 0 the item is there */
@@ -1680,8 +1697,12 @@ void gbuffer_check_draw(const NvnCmdBuf *cb, uint64_t index_addr, uint32_t type,
      * last frame's world (rows 12-15) */
     if (mat4_diff(c2 + 48, world40.m, 16) < 1e-4f) st.prev_a++;
     if (mat4_diff(c2 + 48, world.m, 16) < 1e-4f) st.prev_b++;
-    if (cb->trace_ub[0][1] && mat4_diff((const float *)(uintptr_t)cb->trace_ub[0][1] + 128, prev_vp.m, 16) < 1e-3f)
-        st.prev_c++;
+    if (cb->trace_ub[0][1]) {
+        host_lock(&vp_lock);
+        Mat4 pvp = prev_vp;
+        host_unlock(&vp_lock);
+        if (mat4_diff((const float *)(uintptr_t)cb->trace_ub[0][1] + 128, pvp.m, 16) < 1e-3f) st.prev_c++;
+    }
     if (d >= 1e-3f && st.shown < 3) {  /* what the objects with another world are */
         st.shown++;
         uint64_t models = U64(cur.object + 0x140);
@@ -1721,10 +1742,10 @@ static void native_summary(void) {
     for (int i = 0; i < 24 && nat.other[i].n; i++)
         fprintf(stderr, "yw4: %s:   the game's: vs %016" PRIx64 " fs %016" PRIx64 ": %ld draws\n", pass_name,
                 nat.other[i].vs, nat.other[i].fs, nat.other[i].n);
-    if (motion_objects)
-        fprintf(stderr, "yw4: %s: motion: %ld draws with last frame's world, %ld of them moved\n", pass_name,
-                motion_objects, motion_moved);
-    motion_objects = motion_moved = 0;
+    long mo = __atomic_exchange_n(&motion_objects, 0, __ATOMIC_RELAXED);
+    long mm = __atomic_exchange_n(&motion_moved, 0, __ATOMIC_RELAXED);  /* other threads add under history_lock */
+    if (mo)
+        fprintf(stderr, "yw4: %s: motion: %ld draws with last frame's world, %ld of them moved\n", pass_name, mo, mm);
     memset(&nat, 0, sizeof nat);
 }
 
@@ -1760,7 +1781,8 @@ static void last_world(const float now[16], float last[16]) {
         } else {
             if (history[h].object == cur.world_rec && history[h].frame + 1 == frame) {
                 memcpy(last, history[h].world, 16 * sizeof(float));
-                motion_objects++, motion_moved += memcmp(last, now, 12 * sizeof(float)) != 0;
+                __atomic_add_fetch(&motion_objects, 1, __ATOMIC_RELAXED);
+                __atomic_add_fetch(&motion_moved, memcmp(last, now, 12 * sizeof(float)) != 0, __ATOMIC_RELAXED);
             }
             history[h].object = cur.world_rec, history[h].frame = frame;
             memcpy(history[h].world, now, 16 * sizeof(float));

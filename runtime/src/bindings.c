@@ -11,6 +11,7 @@
 #include "battle.h"
 #include "bindings.h"
 #include "gaiji_create.h"
+#include "host.h"
 #include "mousemenu.h"
 #include "pause.h"
 #include "relay.h"
@@ -104,6 +105,11 @@ typedef struct {
     int pad;
 } Bound;
 static Bound sets[NSETS][NINPUTS];
+/* sets and mouse_map are rebound on the window's thread (the controls page) and read on the game's (bindings_read,
+ * the hint hook) and the present thread (the page, the overlay). This lock makes a rebind whole to them: held only
+ * around copies and single writes, never over a call into another module. The startup fill (settings file, ready)
+ * runs before those threads read. */
+static HostLock sets_lock = HOST_LOCK_INIT;
 static int edit_set;  /* the set the controls page shows and changes */
 #define bound (sets[edit_set])
 static int bound_ready, battle_set_known;  /* the battle set was read from the settings file or copied */
@@ -261,11 +267,16 @@ uint32_t bindings_key_inputs(int set, int key) {
     sets_ready();
     if (set < 0 || set >= NSETS || !key) return 0;
     int part = mouse_part(key);  /* a mouse part: its own binding */
-    if (part >= 0) return mouse_map[set][part] >= 0 ? 1u << mouse_map[set][part] : 0;
     uint32_t m = 0;
-    for (int i = 0; i < NINPUTS && i < 32; i++)
-        for (int k = 0; k < BIND_KEYS; k++)
-            if (sets[set][i].keys[k] == key) m |= 1u << i;
+    host_lock(&sets_lock);
+    if (part >= 0) {
+        m = mouse_map[set][part] >= 0 ? 1u << mouse_map[set][part] : 0;
+    } else {
+        for (int i = 0; i < NINPUTS && i < 32; i++)
+            for (int k = 0; k < BIND_KEYS; k++)
+                if (sets[set][i].keys[k] == key) m |= 1u << i;
+    }
+    host_unlock(&sets_lock);
     return m;
 }
 
@@ -286,8 +297,12 @@ uint32_t bindings_pad_inputs(int set, int part) {
     sets_ready();
     if (set < 0 || set >= NSETS || part < 0 || part > BPAD_RSTICK) return 0;
     uint32_t m = 0;
+    int pads[32];  /* a copy, so the lock isn't held over the work below */
+    host_lock(&sets_lock);
+    for (int i = 0; i < NINPUTS && i < 32; i++) pads[i] = sets[set][i].pad;
+    host_unlock(&sets_lock);
     for (int i = 0; i < NINPUTS && i < 32; i++) {
-        int p = resolve(sets[set][i].pad), on;
+        int p = resolve(pads[i]), on;
         if (p == PAD_NONE) continue;
         int axis = p >= PAD_AXIS && p < PAD_FACE ? (p - PAD_AXIS) / 2 : -1;
         if (part == BPAD_DPAD) on = p >= SDL_GAMEPAD_BUTTON_DPAD_UP && p <= SDL_GAMEPAD_BUTTON_DPAD_RIGHT;
@@ -302,8 +317,11 @@ uint32_t bindings_pad_inputs(int set, int part) {
 static const char *key_name(int scancode);
 const char *bindings_input_key(int set, int i, int k) {
     sets_ready();
-    if (set < 0 || set >= NSETS || i < 0 || i >= NINPUTS || k < 0 || k >= BIND_KEYS || !sets[set][i].keys[k]) return NULL;
-    return key_name(sets[set][i].keys[k]);
+    if (set < 0 || set >= NSETS || i < 0 || i >= NINPUTS || k < 0 || k >= BIND_KEYS) return NULL;
+    host_lock(&sets_lock);
+    int key = sets[set][i].keys[k];
+    host_unlock(&sets_lock);
+    return key ? key_name(key) : NULL;
 }
 
 /* ---- mouse sensitivity, left-right and up-down: the controls page's first rows, saved as YW4_MOUSE_SENS_X and
@@ -378,15 +396,22 @@ static int pad_style;           /* the connected controller's (bindings_read); X
 static int ps_model = 5;        /* the PlayStation pad last connected: 3, 4, 5 (a DualSense when none was) */
 static int xbox360;             /* the Xbox-style pad last connected reports as an Xbox 360 one (Back, Start) */
 static int using_pad, had_pad;  /* 1 after a gamepad connection or input, 0 after a key or mouse input */
+/* pad_style, ps_model, xbox360 and using_pad are written on the game's thread (bindings_read, the mouse look hook) and
+ * the window's (the controls page), and read on the present and GPU threads: independent flags, so relaxed. */
+#define FLAG_GET(x) __atomic_load_n(&(x), __ATOMIC_RELAXED)
+#define FLAG_SET(x, v) __atomic_store_n(&(x), (v), __ATOMIC_RELAXED)
 /* CONTROLLER NINTENDO ICONS (YW4_NINTENDO_LAYOUT): a pad that reports as an Xbox one gets the Switch's button icons
  * and names. Switch-style pads in their X-input mode report as a Microsoft Xbox 360 pad (vendor 045e, product 028e;
  * tools/dev/padtest), so nothing tells them apart: the player says so here. The buttons keep their places (owner,
  * 2026-11-13: swap the hints, not the buttons): the bottom one still confirms, and its hint shows the B printed on
  * it. pad_style stays what the pad reports (which button does what); hint_style is what the icons follow. */
 static int nintendo_layout;
-static int hint_style(void) { return nintendo_layout && pad_style == STYLE_XBOX ? STYLE_NINTENDO : pad_style; }
+static int hint_style(void) {
+    int style = FLAG_GET(pad_style);
+    return nintendo_layout && style == STYLE_XBOX ? STYLE_NINTENDO : style;
+}
 
-int bindings_pad_nintendo(void) { return pad_style == STYLE_NINTENDO; }  /* which button confirms: by place */
+int bindings_pad_nintendo(void) { return FLAG_GET(pad_style) == STYLE_NINTENDO; }  /* which button confirms: by place */
 int bindings_pad_style(void) { return hint_style(); }                    /* the controller drawn, its names */
 
 /* YW4_HINTS: the device the button icons (and the overlay's views) follow for the whole run, for screenshots of
@@ -417,7 +442,7 @@ static int resolve(int pad) {
                      others[4] = {SDL_GAMEPAD_BUTTON_SOUTH, SDL_GAMEPAD_BUTTON_EAST, SDL_GAMEPAD_BUTTON_WEST,
                                   SDL_GAMEPAD_BUTTON_NORTH};
     if (pad < PAD_FACE || pad > PAD_FACE + 3) return pad;
-    return (pad_style == STYLE_NINTENDO ? nintendo : others)[pad - PAD_FACE];
+    return (FLAG_GET(pad_style) == STYLE_NINTENDO ? nintendo : others)[pad - PAD_FACE];
 }
 
 static const char *pad_label(int pad) {
@@ -522,10 +547,10 @@ static int32_t pad_amount(SDL_Gamepad *g, int pad) {
 static int run_held;
 int bindings_run_held(void) { return __atomic_load_n(&run_held, __ATOMIC_ACQUIRE); }
 
-static int battle_key_used(int key) {  /* the key does something in the battle set */
+static int battle_key_used(const Bound *battle_set, int key) {  /* the key does something in the battle set */
     for (int j = 0; key && j < NINPUTS; j++)
         for (int m = 0; m < BIND_KEYS; m++)
-            if (sets[SET_BATTLE][j].keys[m] == key) return 1;
+            if (battle_set[j].keys[m] == key) return 1;
     return 0;
 }
 
@@ -533,13 +558,17 @@ static int battle_key_used(int key) {  /* the key does something in the battle s
  * Blasters' missions (battle_busters) a button with no battle key takes the field set's, unless that key does
  * something else in battle (owner, 2026-11-20: the mission map's bell showed N/A: L has no battle key; the field set's
  * is the owner's 1). L still without one there (the field's 1 is the D-pad's left in battle) takes 2: the bell, in
- * missions only (owner, 2026-11-20: "make it a blaster specific"). Its own copy per thread: the input's and the hint
- * icons' threads both ask. */
+ * missions only (owner, 2026-11-20: "make it a blaster specific"). Its own copy per thread, taken under sets_lock so
+ * a rebind is whole: the input's and the hint icons' threads both ask. */
 static const Bound *keys_now(int battle) {
-    if (!battle || mousemenu_dpad_menu()) return sets[SET_FIELD];
-    if (!battle_busters()) return sets[SET_BATTLE];
     static _Thread_local Bound mix[NINPUTS];
-    memcpy(mix, sets[SET_BATTLE], sizeof mix);
+    const int field = !battle || mousemenu_dpad_menu(), busters = !field && battle_busters();
+    Bound fset[NINPUTS], bset[NINPUTS];  /* the sets at one moment (the other modules were asked above) */
+    host_lock(&sets_lock);
+    memcpy(mix, sets[field ? SET_FIELD : SET_BATTLE], sizeof mix);
+    if (busters) memcpy(bset, mix, sizeof bset), memcpy(fset, sets[SET_FIELD], sizeof fset);
+    host_unlock(&sets_lock);
+    if (!busters) return mix;
     static int in_l = -2;
     if (in_l == -2) in_l = input_by_id("L");
     for (int i = 0; i < NINPUTS; i++) {
@@ -549,11 +578,11 @@ static const Bound *keys_now(int battle) {
         if (!none) continue;
         int any = 0;
         for (int k = 0; k < BIND_KEYS; k++) {
-            int key = sets[SET_FIELD][i].keys[k];
-            mix[i].keys[k] = battle_key_used(key) ? 0 : key;
+            int key = fset[i].keys[k];
+            mix[i].keys[k] = battle_key_used(bset, key) ? 0 : key;
             any |= mix[i].keys[k] != 0;
         }
-        if (!any && i == in_l && !battle_key_used(SDL_SCANCODE_2)) mix[i].keys[0] = SDL_SCANCODE_2;
+        if (!any && i == in_l && !battle_key_used(bset, SDL_SCANCODE_2)) mix[i].keys[0] = SDL_SCANCODE_2;
     }
     return mix;
 }
@@ -576,29 +605,30 @@ void bindings_read(const bool *keyboard, uint32_t mouse_buttons, int wheel_up, i
     if (model_env < 0) {
         const char *e = getenv("YW4_PS_MODEL");
         model_env = e && (atoi(e) == 3 || atoi(e) == 4 || atoi(e) == 5) ? atoi(e) : 0;
-        if (model_env) ps_model = model_env;
+        if (model_env) FLAG_SET(ps_model, model_env);
     }
     static int x360_env = -1;  /* YW4_XBOX360=1 (0): an Xbox 360 pad's names (or not), for tests without the pad */
     if (x360_env < 0) {
         const char *e = getenv("YW4_XBOX360");
         x360_env = e && *e ? 1 : 0;
-        if (x360_env) xbox360 = atoi(e) != 0;
+        if (x360_env) FLAG_SET(xbox360, atoi(e) != 0);
     }
     if (gamepad) {
         SDL_GamepadType t = SDL_GetGamepadType(gamepad);
         if (!model_env && (t == SDL_GAMEPAD_TYPE_PS3 || t == SDL_GAMEPAD_TYPE_PS4 || t == SDL_GAMEPAD_TYPE_PS5))
-            ps_model = t == SDL_GAMEPAD_TYPE_PS3 ? 3 : t == SDL_GAMEPAD_TYPE_PS4 ? 4 : 5;
+            FLAG_SET(ps_model, t == SDL_GAMEPAD_TYPE_PS3 ? 3 : t == SDL_GAMEPAD_TYPE_PS4 ? 4 : 5);
         /* an Xbox-style pad: a 360 one (or one that says it is: many third-party pads) has Back and Start */
         if (!x360_env && t != SDL_GAMEPAD_TYPE_PS3 && t != SDL_GAMEPAD_TYPE_PS4 && t != SDL_GAMEPAD_TYPE_PS5 &&
             !(t >= SDL_GAMEPAD_TYPE_NINTENDO_SWITCH_PRO && t <= SDL_GAMEPAD_TYPE_NINTENDO_SWITCH_JOYCON_PAIR))
-            xbox360 = t == SDL_GAMEPAD_TYPE_XBOX360;
-        pad_style = t == SDL_GAMEPAD_TYPE_PS3 || t == SDL_GAMEPAD_TYPE_PS4 || t == SDL_GAMEPAD_TYPE_PS5 ? STYLE_PLAYSTATION
-                    : t >= SDL_GAMEPAD_TYPE_NINTENDO_SWITCH_PRO && t <= SDL_GAMEPAD_TYPE_NINTENDO_SWITCH_JOYCON_PAIR
-                        ? STYLE_NINTENDO
-                        : STYLE_XBOX;
-        if (!had_pad) using_pad = 1, had_pad = 1;
+            FLAG_SET(xbox360, t == SDL_GAMEPAD_TYPE_XBOX360);
+        FLAG_SET(pad_style, t == SDL_GAMEPAD_TYPE_PS3 || t == SDL_GAMEPAD_TYPE_PS4 || t == SDL_GAMEPAD_TYPE_PS5
+                                ? STYLE_PLAYSTATION
+                            : t >= SDL_GAMEPAD_TYPE_NINTENDO_SWITCH_PRO && t <= SDL_GAMEPAD_TYPE_NINTENDO_SWITCH_JOYCON_PAIR
+                                ? STYLE_NINTENDO
+                                : STYLE_XBOX);
+        if (!had_pad) FLAG_SET(using_pad, 1), had_pad = 1;
     } else {
-        using_pad = 0, had_pad = 0;
+        FLAG_SET(using_pad, 0), had_pad = 0;
     }
     uint64_t b = 0;
     int32_t key_stick[4] = {0, 0, 0, 0}, pad_stick[4] = {0, 0, 0, 0};
@@ -606,7 +636,11 @@ void bindings_read(const bool *keyboard, uint32_t mouse_buttons, int wheel_up, i
     /* the mouse's parts held now, and the Switch input each presses in this set (mouse_map) */
     const int held[BMOUSE_PARTS] = {(mouse_buttons & SDL_BUTTON_LMASK) != 0, (mouse_buttons & SDL_BUTTON_RMASK) != 0,
                                     (mouse_buttons & SDL_BUTTON_MMASK) != 0, wheel_up != 0, wheel_down != 0};
-    const int *mouse = mouse_map[battle ? SET_BATTLE : SET_FIELD];
+    int mouse_now[BMOUSE_PARTS];  /* a copy: a rebind on the window's thread is whole to us */
+    host_lock(&sets_lock);
+    memcpy(mouse_now, mouse_map[battle ? SET_BATTLE : SET_FIELD], sizeof mouse_now);
+    host_unlock(&sets_lock);
+    const int *mouse = mouse_now;
     /* the title screen's menus (pause.c scene_on_title) and conversations outside battles (mousemenu.c
      * mousemenu_talking): the mouse as a menu's, whatever the sets say (owner, 2026-11-15): left A (confirm), right
      * B (back, cancel), the wheel D-pad up and down (between choices); the wheel press nothing */
@@ -705,11 +739,11 @@ void bindings_read(const bool *keyboard, uint32_t mouse_buttons, int wheel_up, i
         for (int i = 0; i < 2; i++)
             if (!(pad_stick[i] > 4000 || pad_stick[i] < -4000)) sticks[i] = 0;
     }
-    if (any_pad) using_pad = 1;
-    else if (any_key) using_pad = 0;
+    if (any_pad) FLAG_SET(using_pad, 1);
+    else if (any_key) FLAG_SET(using_pad, 0);
     int hint_env = bindings_hints_forced();
-    if (hint_env == 1) using_pad = 0;
-    else if (hint_env >= 2) using_pad = 1, pad_style = hint_env - 2;
+    if (hint_env == 1) FLAG_SET(using_pad, 0);
+    else if (hint_env >= 2) FLAG_SET(using_pad, 1), FLAG_SET(pad_style, hint_env - 2);
     /* Blasters' R menu, Field Camera highlighted: it changes on Left / Right only and A does nothing, so A (the
      * owner's E, or a pad's A) steps it right, cycling (owner, 2026-11-20) */
     if (mousemenu_r_menu_camera_row()) {
@@ -742,7 +776,7 @@ int yw4_hook_mouse_look(CPUState *ctx) {
     if (dx != 0.0f || dy != 0.0f) {
         st8(cam + 0x48a, 1);  /* what the game sets when the right stick moves the camera */
         st8(cam + 0x48b, 1);
-        using_pad = 0;
+        FLAG_SET(using_pad, 0);
     }
     return 0;
 }
@@ -1007,7 +1041,7 @@ static uint32_t gaiji_swap(uint32_t crc, int *sheet) {
     int g = nx_names[i].glyph, style = nx_names[i].style, row = glyphs[g].row;
     sets_ready();
     const Bound *use = keys_now(battle_active());  /* the keys in use now */
-    if (!using_pad) {
+    if (!FLAG_GET(using_pad)) {
         /* the title's Continue: its hint's X Delete shows the X key, which deletes there (savefs.c; the X key is
          * the game's Minus elsewhere, so the X button's own key would be another; owner, 2026-11-17) */
         static int in_x = -2;
@@ -1025,7 +1059,11 @@ static uint32_t gaiji_swap(uint32_t crc, int *sheet) {
          * the mouse button, not U or O). Groups (a stick, the whole D-pad) keep the Switch icon: the keyboard sheet
          * has none for a set of keys */
         const int battle = battle_active() != 0;
-        const int *mouse = mouse_map[battle ? SET_BATTLE : SET_FIELD];
+        int mouse_now[BMOUSE_PARTS];  /* a copy, as in bindings_read */
+        host_lock(&sets_lock);
+        memcpy(mouse_now, mouse_map[battle ? SET_BATTLE : SET_FIELD], sizeof mouse_now);
+        host_unlock(&sets_lock);
+        const int *mouse = mouse_now;
         /* the battle's Stopwatching menu: Switch enemy is R, and ZR does it too. When every key of R is also an A
          * key (the default battle set's E), pressing it chooses the menu's line instead, so the hint shows ZR's key,
          * the one that works there (the owner's F; owner, 2026-11-15) */
@@ -1141,8 +1179,8 @@ int yw4_hook_gaiji_render(CPUState *ctx) {
     gaiji_init();
     gc_follow();
     uint64_t ps = ld64(sheets), xbox = ld64(sheets + 8), key = ld64(sheets + 16);
-    if (ps) st8(ps + 0x1c, (uint8_t)(using_pad && hint_style() == STYLE_PLAYSTATION));
-    if (xbox) st8(xbox + 0x1c, (uint8_t)(using_pad && hint_style() == STYLE_XBOX));
+    if (ps) st8(ps + 0x1c, (uint8_t)(FLAG_GET(using_pad) && hint_style() == STYLE_PLAYSTATION));
+    if (xbox) st8(xbox + 0x1c, (uint8_t)(FLAG_GET(using_pad) && hint_style() == STYLE_XBOX));
     if (key) st8(key + 0x1c, 1);
     uint64_t reqs = ctx->x[2];
     uint32_t n = (uint32_t)ctx->x[3];
@@ -1216,8 +1254,8 @@ static uint8_t gc_xb_view[XB_SIZE], gc_xb_menu[XB_SIZE];
 static int gc_xb_mode = -1;  /* written for: 1 an Xbox 360 pad, 0 others (the game's View and Menu) */
 static uint64_t gc_xb_print9, gc_xb_print10;
 
-int bindings_ps_model(void) { return ps_model; }
-int bindings_xbox360(void) { return xbox360; }
+int bindings_ps_model(void) { return FLAG_GET(ps_model); }
+int bindings_xbox360(void) { return FLAG_GET(xbox360); }
 
 static uint64_t gc_fnv(const uint8_t *p, size_t n) {
     uint64_t h = 0xcbf29ce484222325ull;
@@ -1271,7 +1309,7 @@ void bindings_patch_sheet(const TexLayout *L, uint32_t nvn_format, uint8_t *texe
     tegra_read_region(L, texels, 0, 0, 156, 0, 0, GC_CELL, GC_CELL, 1, cell);
     memcpy(gc_options_top, cell, GC_HALF);
     memcpy(gc_body, cell + GC_HALF, GC_HALF);
-    gc_write(texels, ps_model);  /* before the upload this is called from: nothing more to tell the GPU layer */
+    gc_write(texels, FLAG_GET(ps_model));  /* before the upload this is called from: nothing more to tell the GPU layer */
     __atomic_store_n(&gc_texels, texels, __ATOMIC_RELEASE);  /* only now may the hint hook write too */
 }
 
@@ -1291,14 +1329,15 @@ static void xb_found(const TexLayout *L, uint8_t *texels) {
     tegra_read_region(L, texels, 0, 0, 156 + XB_X, 0 + XB_Y, 0, XB_W, XB_H, 1, gc_xb_menu);
     gc_xb_print9 = gc_fnv(gc_xb_view, XB_SIZE), gc_xb_print10 = gc_fnv(gc_xb_menu, XB_SIZE);
     gc_xb_mode = 0;
-    if (xbox360) xb_write(texels, 1);  /* before the upload this is called from */
+    if (FLAG_GET(xbox360)) xb_write(texels, 1);  /* before the upload this is called from */
     __atomic_store_n(&gc_xb_texels, texels, __ATOMIC_RELEASE);
 }
 
 /* the Xbox sheet again when the pad changed between an Xbox 360 pad and others */
 static void xb_follow(void) {
     uint8_t *texels = __atomic_load_n(&gc_xb_texels, __ATOMIC_ACQUIRE);
-    if (!texels || gc_xb_mode == xbox360) return;
+    const int x360 = FLAG_GET(xbox360);
+    if (!texels || gc_xb_mode == x360) return;
     uint8_t a[XB_SIZE], b[XB_SIZE];
     tegra_read_region(&gc_xb_layout, texels, 0, 0, 104 + XB_X, 104 + XB_Y, 0, XB_W, XB_H, 1, a);
     tegra_read_region(&gc_xb_layout, texels, 0, 0, 156 + XB_X, 0 + XB_Y, 0, XB_W, XB_H, 1, b);
@@ -1307,7 +1346,7 @@ static void xb_follow(void) {
         __atomic_store_n(&gc_xb_texels, NULL, __ATOMIC_RELEASE);
         return;
     }
-    xb_write(texels, xbox360);
+    xb_write(texels, x360);
     gpu_note_written((uint64_t)(uintptr_t)texels, tegra_total_size(&gc_xb_layout));
 }
 
@@ -1315,7 +1354,8 @@ static void xb_follow(void) {
 static void gc_follow(void) {
     xb_follow();
     uint8_t *texels = __atomic_load_n(&gc_texels, __ATOMIC_ACQUIRE);
-    if (!texels || gc_model == ps_model) return;
+    const int model = FLAG_GET(ps_model);
+    if (!texels || gc_model == model) return;
     uint8_t cell[2 * GC_HALF];
     tegra_read_region(&gc_layout, texels, 0, 0, 104, 104, 0, GC_CELL, GC_CELL, 1, cell);
     uint64_t p9 = gc_fnv(cell, sizeof cell);
@@ -1325,7 +1365,7 @@ static void gc_follow(void) {
         __atomic_store_n(&gc_texels, NULL, __ATOMIC_RELEASE);
         return;
     }
-    gc_write(texels, ps_model);
+    gc_write(texels, model);
     gpu_note_written((uint64_t)(uintptr_t)texels, tegra_total_size(&gc_layout));
 }
 
@@ -1404,8 +1444,10 @@ void bindings_action(int action) {
             run_mode_set((run_mode() + 1) % RUN_MODES), settings_save();
         } else if (row == RESET_ROW) {
             /* the exploring set back to the starting keys; the battle set to a copy of the exploring set */
+            host_lock(&sets_lock);
             if (edit_set == SET_BATTLE) copy_exploring_to_battle();
             else reset_set(SET_FIELD);
+            host_unlock(&sets_lock);
             settings_save();
         } else if (row == MOUSE_ROW) {  /* opens its page (gamemenu.c) */
         } else if (row == RUN_INPUT_ROW && run_mode() == RUN_DEFAULT) {  /* greyed out: it does nothing */
@@ -1424,8 +1466,10 @@ void bindings_action(int action) {
         if (row == WHEEL_ROW) swheel_set_enabled(1), settings_save();  /* back to its start: on */
         if (row == RUN_ROW) run_mode_set(RUN_DEFAULT), settings_save();  /* back to the game's */
         if (row_input(row) < 0 || (row == RUN_INPUT_ROW && run_mode() == RUN_DEFAULT)) break;
+        host_lock(&sets_lock);
         if (col < BIND_KEYS) bound[row_input(row)].keys[col] = 0;
         else bound[row_input(row)].pad = PAD_NONE;
+        host_unlock(&sets_lock);
         settings_save();
         break;
     }
@@ -1435,10 +1479,12 @@ int bindings_capture_key(int scancode) {
     if (!bindings_capturing()) return 0;
     capturing = 0;
     if (col < BIND_KEYS) {  /* a key for a key column; the other key of the row cleared if it is the same */
+        host_lock(&sets_lock);
         for (int k = 0; k < BIND_KEYS; k++)
             if (bound[row_input(row)].keys[k] == scancode) bound[row_input(row)].keys[k] = 0;
         bound[row_input(row)].keys[col] = scancode;
-        using_pad = 0;
+        host_unlock(&sets_lock);
+        FLAG_SET(using_pad, 0);
         settings_save();
     }  /* a key while waiting for a gamepad input cancels */
     return 1;
@@ -1449,8 +1495,10 @@ int bindings_capture_key(int scancode) {
 static int capture_mouse_part(int part) {
     if (!bindings_capturing() || col >= BIND_KEYS || part < 0) return 0;
     capturing = 0;
+    host_lock(&sets_lock);
     mouse_map[edit_set][part] = row_input(row);
-    using_pad = 0;
+    host_unlock(&sets_lock);
+    FLAG_SET(using_pad, 0);
     settings_save();
     return 1;
 }
@@ -1463,12 +1511,18 @@ int bindings_capture_wheel(int y) { return capture_mouse_part(y > 0 ? BMOUSE_WHE
 /* ---- the Mouse buttons page (gamemenu.c) */
 int bindings_mouse_get(int set, int part) {
     sets_ready();
-    return set >= 0 && set < NSETS && part >= 0 && part < BMOUSE_PARTS ? mouse_map[set][part] : -1;
+    if (set < 0 || set >= NSETS || part < 0 || part >= BMOUSE_PARTS) return -1;
+    host_lock(&sets_lock);
+    int input = mouse_map[set][part];
+    host_unlock(&sets_lock);
+    return input;
 }
 void bindings_mouse_set(int set, int part, int input) {
     sets_ready();
     if (set < 0 || set >= NSETS || part < 0 || part >= BMOUSE_PARTS || input < -1 || input >= NINPUTS) return;
+    host_lock(&sets_lock);
     mouse_map[set][part] = input;
+    host_unlock(&sets_lock);
     settings_save();
 }
 /* the inputs a mouse part can press: the buttons and the D-pad (not a stick's directions) */
@@ -1484,15 +1538,22 @@ int bindings_set_shown(void) { return edit_set; }
 int bindings_capture_button(int button) {
     if (!bindings_capturing()) return 0;
     capturing = 0;
-    if (col == BIND_KEYS) bound[row_input(row)].pad = button, using_pad = 1, settings_save();
+    if (col == BIND_KEYS) {
+        host_lock(&sets_lock);
+        bound[row_input(row)].pad = button;
+        host_unlock(&sets_lock);
+        FLAG_SET(using_pad, 1), settings_save();
+    }
     return 1;
 }
 
 int bindings_capture_axis(int axis, int value) {
     if (!bindings_capturing() || col != BIND_KEYS || (value < 24000 && value > -24000)) return 0;
     capturing = 0;
+    host_lock(&sets_lock);
     bound[row_input(row)].pad = AXIS(axis, value > 0);
-    using_pad = 1;
+    host_unlock(&sets_lock);
+    FLAG_SET(using_pad, 1);
     settings_save();
     return 1;
 }
@@ -1522,12 +1583,14 @@ void bindings_input_title(int i, char *s, size_t n) {
 static void input_row(BindRow *r, int i) {
     memset(r, 0, sizeof *r);
     r->group = inputs[i].group, r->name = inputs[i].name, r->id = inputs[i].id;
+    host_lock(&sets_lock);  /* only this file's own helpers below: key_name, pad_label, also_used */
     for (int k = 0; k < BIND_KEYS; k++) {
         snprintf(r->cells[k], BIND_NAME, "%s", key_name(bound[i].keys[k]));
         r->conflict[k] = also_used(i, bound[i].keys[k], PAD_NONE) >= 0;
     }
     snprintf(r->cells[BIND_KEYS], BIND_NAME, "%s", pad_label(bound[i].pad));
     r->conflict[BIND_KEYS] = also_used(i, 0, bound[i].pad) >= 0;
+    host_unlock(&sets_lock);
 }
 
 int bindings_rows(BindRow *rows, int max, int *sel_row, int *sel_col, char *help, int help_size) {
@@ -1652,8 +1715,10 @@ int bindings_rows(BindRow *rows, int max, int *sel_row, int *sel_col, char *help
     }
     int in = row_input(row);
     input_title(in, title, sizeof title);
+    host_lock(&sets_lock);
     int key = col < BIND_KEYS ? bound[in].keys[col] : 0, pad = col == BIND_KEYS ? bound[in].pad : PAD_NONE;
     int o = also_used(in, key, pad);
+    host_unlock(&sets_lock);
     if (o >= 0) input_title(o, other, sizeof other);
     /* the first part: ours say what they do here; the game's are left empty for the overlay (its action names) */
     char what[160] = "";

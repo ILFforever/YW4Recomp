@@ -163,25 +163,32 @@ static uint32_t *decode(uint32_t *msg, IpcRequest *req, uint32_t *raw_words) {
             req->pid = p[0] | (uint64_t)p[1] << 32;
             p += 2;
         }
-        req->ncopy = (hd >> 1) & 0xF;
-        req->nmove = (hd >> 5) & 0xF;
-        for (int i = 0; i < req->ncopy; i++) req->copy_handles[i] = *p++;
-        for (int i = 0; i < req->nmove; i++) req->move_handles[i] = *p++;
+        /* 4-bit counts can say 15; the arrays hold 8 (the game never sends more): every one is stepped over, the
+         * first 8 kept */
+        int ncopy = (hd >> 1) & 0xF, nmove = (hd >> 5) & 0xF;
+        for (int i = 0; i < ncopy; i++, p++)
+            if (i < 8) req->copy_handles[i] = *p;
+        for (int i = 0; i < nmove; i++, p++)
+            if (i < 8) req->move_handles[i] = *p;
+        req->ncopy = ncopy < 8 ? ncopy : 8, req->nmove = nmove < 8 ? nmove : 8;
     }
     for (int i = 0; i < nx; i++, p += 2) {
+        if (i >= 8) continue;  /* as the handles: stepped over, not kept */
         req->x[i].addr = p[1] | (uint64_t)((p[0] >> 12) & 0xF) << 32 | (uint64_t)((p[0] >> 6) & 7) << 36;
         req->x[i].size = p[0] >> 16;
     }
     for (int i = 0; i < na; i++, p += 3) {
+        if (i >= 8) continue;
         req->a[i].size = p[0] | (uint64_t)((p[2] >> 24) & 0xF) << 32;
         req->a[i].addr = abw_address(p);
     }
     for (int i = 0; i < nb; i++, p += 3) {
+        if (i >= 8) continue;
         req->b[i].size = p[0] | (uint64_t)((p[2] >> 24) & 0xF) << 32;
         req->b[i].addr = abw_address(p);
     }
     p += 3 * nw;  /* exchange buffers: none seen yet */
-    req->nx = nx, req->na = na, req->nb = nb;
+    req->nx = nx < 8 ? nx : 8, req->na = na < 8 ? na : 8, req->nb = nb < 8 ? nb : 8;
     if (cmode >= 2) {
         uint32_t *c = p + *raw_words;
         req->nc = cmode == 2 ? 1 : (int)cmode - 2;

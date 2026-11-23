@@ -1360,7 +1360,7 @@ $('report-go').addEventListener('click', () => {
   else $('report-dlg').close();
 });
 $('help-report').addEventListener('click', () => { if (inst) openReport(null); });
-$('help-reports').addEventListener('click', () => invoke('open_folder', { install: inst.install, which: 'reports', saves: inst.saves }));
+$('help-reports').addEventListener('click', () => { if (inst) invoke('open_folder', { install: inst.install, which: 'reports', saves: inst.saves }); });
 
 $('play').addEventListener('click', async () => {
   if (!$('dlc-keys-box').hidden) {
@@ -1859,8 +1859,8 @@ $('offer-delete').addEventListener('click', async () => {
 $('originals-no').addEventListener('click', () => origDlg.close());
 $('originals-yes').addEventListener('click', async () => {
   origDlg.close();
-  try { await invoke('delete_originals', { state: inst }); } catch (e) { popup('Something went wrong', String(e)); }
-  markOffered();
+  // offered again after a failure, so the player can retry
+  try { await invoke('delete_originals', { state: inst }); markOffered(); } catch (e) { popup('Something went wrong', String(e)); }
 });
 renderFields();
 

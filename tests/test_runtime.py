@@ -781,6 +781,8 @@ class HidVibrationTest(unittest.TestCase):
 int battle_active(void) { return 0; }
 int battle_busters(void) { return 0; }
 void settings_save(void) {}
+void host_lock(HostLock *l) { (void)l; }  /* one thread here: bindings.c's sets_lock */
+void host_unlock(HostLock *l) { (void)l; }
 void window_mouse_motion(float *dx, float *dy) { *dx = 0; *dy = 0; }
 SDL_GamepadType SDL_GetGamepadType(SDL_Gamepad *gamepad) { return SDL_GAMEPAD_TYPE_STANDARD; }
 const Yw4Module yw4_modules[2] = {0};
@@ -925,6 +927,8 @@ static int battle_state;
 int battle_active(void) { return battle_state; }
 int battle_busters(void) { return 0; }
 void settings_save(void) {}
+void host_lock(HostLock *l) { (void)l; }  /* one thread here: bindings.c's sets_lock */
+void host_unlock(HostLock *l) { (void)l; }
 void window_mouse_motion(float *dx, float *dy) { *dx = 0; *dy = 0; }
 SDL_GamepadType SDL_GetGamepadType(SDL_Gamepad *gamepad) { return SDL_GAMEPAD_TYPE_STANDARD; }
 const Yw4Module yw4_modules[2] = {0};

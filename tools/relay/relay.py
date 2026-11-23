@@ -340,7 +340,8 @@ class Client:
         elif kind == JOIN and len(p) >= 16 + NODE:
             room = relay.rooms.get(bytes(p[:16]))
             ip = room.free_ip() if room and room.code == self.code else None
-            if room is None or ip is None or room.info[LDN + 0x12] == 1:  # gone, full, or AlwaysReject
+            # gone, full, AlwaysReject, or its own host (leave() would close the room it is joining)
+            if room is None or ip is None or room.info[LDN + 0x12] == 1 or room.host is self:
                 self.log("join refused")
                 await self.send(JOIN, struct.pack("<BI", 0, 0) + bytes(NETINFO))
                 return

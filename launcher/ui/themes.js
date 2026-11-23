@@ -84,8 +84,9 @@ function renderMenu() {
 }
 
 async function openMenu() {
+  const currentId = (THEMES[themeAt] || {}).id;  // before the list is replaced: themeAt indexes the old one
   await refreshThemes();  // a file added or changed since the last time shows now
-  themeAt = Math.max(0, THEMES.findIndex((t) => t.id === (THEMES[themeAt] || {}).id));
+  themeAt = Math.max(0, THEMES.findIndex((t) => t.id === currentId));
   renderMenu();
   lookMenu.hidden = false;
   lookBtn.setAttribute('aria-expanded', 'true');

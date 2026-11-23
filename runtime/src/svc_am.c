@@ -236,6 +236,7 @@ static void lm_logger(Service *s, IpcRequest *req, IpcResponse *resp) {
         if (p + len > end) break;
         if (key == 2)  /* the message text */
             n += snprintf(line + n, sizeof line - (size_t)n, "%.*s", len, (const char *)p);
+        if (n >= (int)sizeof line) n = (int)sizeof line - 1;  /* cut: snprintf counts what didn't fit too */
         p += len;
     }
     if (n) fprintf(stderr, "[game lm] %s%s", line, line[n - 1] == '\n' ? "" : "\n");

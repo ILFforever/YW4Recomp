@@ -63,9 +63,13 @@ static void mark(VkCommandBuffer cb, const char *label) {
 
 /* gpu.c, begin(): the slot's submission starts. */
 void gpu_passes_begin(VkCommandBuffer cb, int slot) {
+    if (slot < 0 || slot >= SLOTS) {
+        cur = -1;
+        return;
+    }
     cur = slot;
     timed[slot] = 0;
-    if (!enabled() || slot >= SLOTS) return;
+    if (!enabled()) return;
     if (!pool) {
         if (!vk.props.limits.timestampComputeAndGraphics || vk.props.limits.timestampPeriod <= 0) return;
         VkQueryPoolCreateInfo qi = {.sType = VK_STRUCTURE_TYPE_QUERY_POOL_CREATE_INFO,

@@ -61,11 +61,11 @@ static void save(void) {
             char tmp[1040];
             snprintf(tmp, sizeof tmp, "%s.tmp", path);
             FILE *f = fopen(tmp, "wb");
-            if (f && fwrite(data, 1, n, f) == n && fclose(f) == 0) {
+            int wrote = f && fwrite(data, 1, n, f) == n;
+            if (f && fclose(f) != 0) wrote = 0;  /* closed once, whatever happened */
+            if (wrote) {
                 remove(path);
                 if (rename(tmp, path) == 0) saved_builds = now;
-            } else if (f) {
-                fclose(f);
             }
         }
         free(data);

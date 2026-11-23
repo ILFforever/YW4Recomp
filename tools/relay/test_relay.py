@@ -114,6 +114,14 @@ def main() -> int:
         assert info[LDN + 0x17] == 2 and info[NODES + 0x40 + 0xC:NODES + 0x40 + 0xC + 6] == b"Friend"
         print("station: joins as 169.254.1.2; host sees 2 players")
 
+        # the host joining its own room is refused, and the room (and the server) live on: it used to close the room
+        # and crash the relay on r->host->name (code audit, 2026-11-24)
+        host.send(5, found[0x10:0x20] + bytes(0x40))
+        p = host.recv_type(5)
+        assert p[0] == 0, "the host joined its own room"
+        assert relay.poll() is None, "the relay died"
+        print("host: joining its own room is refused; the room stays")
+
         # a packet from the station to the host, its sender filled in by the relay
         station.send(8, struct.pack("<IHIH", 0xA9FE0101, 49152, 0, 50000) + b"hello host")
         p = host.recv_type(8)

@@ -478,13 +478,20 @@ static void handle(Client *c, int kind, const uint8_t *p, size_t n) {
     } else if (kind == JOIN && n >= 16 + NODE) {
         Room *r = room_by_session(p);
         uint32_t ip = r && !strcmp((char *)r->code, (char *)c->code) ? free_ip(r) : 0;
-        if (!r || !ip || r->info[LDN + 0x12] == 1) {  /* gone, full, or AlwaysReject */
+        /* gone, full, AlwaysReject, or its own host: leave() below would close the room it is joining (memset), and
+         * r->host->name then crashed the server for everyone (code audit, 2026-11-24) */
+        if (!r || !ip || r->info[LDN + 0x12] == 1 || r->host == c) {
             logf_(c->name, "join refused");
             static uint8_t no[5 + NETINFO];
             send_frame(c, JOIN, no, sizeof no);
             return;
         }
         leave(c);
+        if (!r->used || !r->host) {  /* not expected after the check above; never join a closed room */
+            static uint8_t no[5 + NETINFO];
+            send_frame(c, JOIN, no, sizeof no);
+            return;
+        }
         c->room = r, c->ip = ip;
         memcpy(c->node, p + 16, NODE);
         r->members[ip - BASE_IP - 1] = c;

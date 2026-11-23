@@ -902,7 +902,10 @@ pub fn open_folder(install: String, which: String, saves: String) -> Result<(), 
 pub fn open_shot(install: String, path: String) -> Result<(), String> {
     let p = PathBuf::from(&path);
     let dir = Path::new(&install).join("screenshots");
-    if p.parent() != Some(dir.as_path()) || !p.is_file() {
+    // only the pictures install_info lists: open() runs whatever it is given, so a program dropped in the folder must
+    // not start
+    let picture = p.extension().map_or(false, |x| x.eq_ignore_ascii_case("bmp") || x.eq_ignore_ascii_case("png"));
+    if p.parent() != Some(dir.as_path()) || !p.is_file() || !picture {
         return Err("not a screenshot".into());
     }
     platform::open(&p)

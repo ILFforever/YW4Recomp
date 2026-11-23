@@ -431,6 +431,10 @@ static void mark_written(uint64_t page, void *arg) {
 enum { MAX_POOLS = 64 };
 static NvnPool *pools[MAX_POOLS];
 static int npools;
+/* pools[] and npools change under gpu_lock AND pool_lock (pool_import, gpu_pool_finalize), so the GPU worker reads
+ * them under gpu_lock alone, and game threads (gpu_note_written, gpu_note_flushed: NVN calls) under pool_lock alone:
+ * not gpu_lock, which the worker holds for a whole command list. Order: gpu_lock, then pool_lock. */
+static HostLock pool_lock = HOST_LOCK_INIT;
 
 static NvnPool *pool_of(uint64_t addr) {
     for (int i = 0; i < npools; i++)
@@ -488,23 +492,31 @@ static uint64_t storage_sample(const NvnTexture *t) {
 }
 
 void gpu_note_written(uint64_t addr, uint64_t size) {
-    NvnPool *p = size ? pool_of(addr) : NULL;
-    if (!p || !p->gpu || !((GpuPool *)p->gpu)->untracked) return;  /* tracked: the host saw the write itself */
-    uint64_t end = addr + size < p->storage + p->size ? addr + size : p->storage + p->size;
-    uint32_t gen = __atomic_add_fetch(&write_gen, 1, __ATOMIC_RELAXED);  /* newer than every upload so far */
-    for (uint64_t a = (addr - p->storage) >> 12, z = (end - 1 - p->storage) >> 12; a <= z; a++)
-        __atomic_store_n(&((GpuPool *)p->gpu)->page_gen[a], gen, __ATOMIC_RELAXED);
+    if (!size) return;
+    host_lock(&pool_lock);  /* a game thread: the pool can't be added or freed meanwhile */
+    NvnPool *p = pool_of(addr);
+    if (p && p->gpu && ((GpuPool *)p->gpu)->untracked) {  /* tracked: the host saw the write itself */
+        uint64_t end = addr + size < p->storage + p->size ? addr + size : p->storage + p->size;
+        uint32_t gen = __atomic_add_fetch(&write_gen, 1, __ATOMIC_RELAXED);  /* newer than every upload so far */
+        for (uint64_t a = (addr - p->storage) >> 12, z = (end - 1 - p->storage) >> 12; a <= z; a++)
+            __atomic_store_n(&((GpuPool *)p->gpu)->page_gen[a], gen, __ATOMIC_RELAXED);
+    }
+    host_unlock(&pool_lock);
 }
 
 /* nvnMemoryPoolFlushMappedRange / nvnBufferFlushMappedRange: the game says the CPU wrote [addr, addr + size) for
  * the GPU (on the console a CPU-cached pool needs it). Measured for now (YW4_REUPLOAD_LOG). */
 void gpu_note_flushed(uint64_t addr, uint64_t size) {
-    NvnPool *p = size ? pool_of(addr) : NULL;
-    if (!p || !p->gpu) return;
-    uint64_t end = addr + size < p->storage + p->size ? addr + size : p->storage + p->size;
-    uint32_t seq = __atomic_add_fetch(&flush_count, 1, __ATOMIC_RELAXED);
-    for (uint64_t a = (addr - p->storage) >> 12, z = (end - 1 - p->storage) >> 12; a <= z; a++)
-        __atomic_store_n(&((GpuPool *)p->gpu)->flush_seq[a], seq, __ATOMIC_RELAXED);
+    if (!size) return;
+    host_lock(&pool_lock);  /* a game thread, as gpu_note_written */
+    NvnPool *p = pool_of(addr);
+    if (p && p->gpu) {
+        uint64_t end = addr + size < p->storage + p->size ? addr + size : p->storage + p->size;
+        uint32_t seq = __atomic_add_fetch(&flush_count, 1, __ATOMIC_RELAXED);
+        for (uint64_t a = (addr - p->storage) >> 12, z = (end - 1 - p->storage) >> 12; a <= z; a++)
+            __atomic_store_n(&((GpuPool *)p->gpu)->flush_seq[a], seq, __ATOMIC_RELAXED);
+    }
+    host_unlock(&pool_lock);
 }
 
 static int untracked_changed(const NvnTexture *t, GpuImage *g) {
@@ -557,7 +569,6 @@ static void pool_import(NvnPool *p) {
         fprintf(stderr, "yw4: gpu: pool %#" PRIx64 " + %#" PRIx64 " is not aligned for import\n", p->storage, p->size);
         yw4_exit(3, __FILE__, __LINE__);
     }
-    if (npools == MAX_POOLS) gpu_stop("more than %d memory pools", MAX_POOLS);
     VkMemoryHostPointerPropertiesEXT hp = {.sType = VK_STRUCTURE_TYPE_MEMORY_HOST_POINTER_PROPERTIES_EXT};
     CHECK(vkGetMemoryHostPointerPropertiesEXT(vk.device, VK_EXTERNAL_MEMORY_HANDLE_TYPE_HOST_ALLOCATION_BIT_EXT, host,
                                               &hp));
@@ -613,7 +624,10 @@ static void pool_import(NvnPool *p) {
     if (untracked_test < 0) untracked_test = getenv("YW4_UNTRACKED") && atoi(getenv("YW4_UNTRACKED"));
     if (untracked_test || host_written_pages(p->storage, p->size, mark_written, p) < 0) g->untracked = 1;
     host_lock(&gpu_lock);
+    host_lock(&pool_lock);
+    if (npools == MAX_POOLS) gpu_stop("more than %d memory pools", MAX_POOLS);  /* checked here: two threads can import */
     pools[npools++] = p;
+    host_unlock(&pool_lock);
     host_unlock(&gpu_lock);
 }
 
@@ -622,8 +636,10 @@ void gpu_pool_finalize(NvnPool *p) {
     if (!g) return;
     gpu_wait(gpu_submitted(), UINT64_MAX);
     host_lock(&gpu_lock);
+    host_lock(&pool_lock);  /* after this no game thread's note can still be using g (or p, which nvn_objects frees) */
     for (int i = 0; i < npools; i++)
         if (pools[i] == p) pools[i] = pools[--npools];
+    host_unlock(&pool_lock);
     host_unlock(&gpu_lock);
     vkDestroyBuffer(vk.device, g->buf, NULL);
     vkFreeMemory(vk.device, g->mem, NULL);

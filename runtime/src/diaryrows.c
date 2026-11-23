@@ -249,7 +249,7 @@ typedef struct {
 static int entries(const uint8_t *b, size_t n, Ent *e, int max) {
     if (n < 16) return -1;
     uint32_t count = get32(b), st = get32(b + 4);
-    if (st > n || (int)count > max) return -1;
+    if (st > n || max < 0 || count > (uint32_t)max) return -1;
     size_t p = 16;
     for (uint32_t i = 0; i < count; i++) {
         if (p + 5 > st) return -1;
