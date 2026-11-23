@@ -44,8 +44,10 @@ too (FSR on AMD shakes at the edges, #20).
    aspects moved).
 5. Its shaders are built in the background at start (`xessVKBuildPipelines`, non-blocking); `xessVKInit` for a size
    waits for them, the first time.
-6. The launcher has no XeSS switch: every Windows build includes it (~77 MB more to download), `--no-xess` leaves it
-   out.
+6. **A launcher switch** (Options: Intel XeSS, Windows only, on by default, ~77 MB), like FSR's and DLSS's: off
+   passes `--no-xess` through `tools.yw4.build_install` to `recomp.build`. No protocol change: older game code
+   ignores the option (`parse_known_args`), and older launchers never pass it (their builds include XeSS). Installs
+   from before the switch count as built with it.
 
 ## Results (RTX 4070 laptop, late-game bamboo forest, 3840x2160 output, quality: 3D at 2560x1440, 2026-11-24)
 

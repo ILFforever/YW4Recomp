@@ -1,7 +1,7 @@
 """Build the game into a launcher's install folder: every step, in order (decision 0054).
 
     python -m tools.yw4.build_install --mode files|folders [--exefs DIR --romfs DIR] [--saves install|appdata]
-                                      [--toolchain DIR] [--no-fsr] [--no-dlss]
+                                      [--toolchain DIR] [--no-fsr] [--no-dlss] [--no-xess]
 
 The launcher runs only this, with YW4_CONFIG naming the install's config.toml and YW4_PROGRESS=1. The steps live
 here, in the game's code, so a game update can change them without a new launcher. What the launcher reads on
@@ -311,6 +311,7 @@ def main() -> int:
                     help="extract or copy the game files again, even if this install already has them")
     ap.add_argument("--no-fsr", action="store_true")
     ap.add_argument("--no-dlss", action="store_true")
+    ap.add_argument("--no-xess", action="store_true")  # Intel XeSS (decision 0089); older game code ignores it
     ap.add_argument("--protocol", action="store_true", help="print the protocol number and stop")
     ap.add_argument("--recover", action="store_true",
                     help="after a stopped build: put the kept game back (the launcher runs it after Cancel)")
@@ -339,7 +340,8 @@ def main() -> int:
     put_files_back(cfg)
     if prev.put_back():  # a stopped build's leftovers first: the kept game is the one that works
         say("a stopped build had set the game aside: it is back")
-    build_args = [*(["--no-fsr"] if args.no_fsr else []), *(["--no-dlss"] if args.no_dlss else [])]
+    build_args = [*(["--no-fsr"] if args.no_fsr else []), *(["--no-dlss"] if args.no_dlss else []),
+                  *(["--no-xess"] if args.no_xess and sys.platform == "win32" else [])]
     actions = {
         "tools": lambda: tools(args, cfg),
         "game": lambda: game_files(cfg, args),

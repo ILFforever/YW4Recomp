@@ -27,10 +27,14 @@ pub struct Plan {
     install: String,
     fsr: bool,
     dlss: bool,
+    #[serde(default = "with_xess")]
+    xess: bool,                     // Intel XeSS (decision 0089, Windows); older game code ignores --no-xess
     saves: String,                  // "install" or "appdata"
     #[serde(default)]
     fresh: bool,                    // extract or copy the game files again, though the install already has them
 }
+
+fn with_xess() -> bool { true }
 
 #[derive(Default)]
 pub struct Running {
@@ -369,6 +373,7 @@ fn run_all(app: &AppHandle, run: &Running, plan: &Plan) -> Result<(), String> {
     }
     if !plan.fsr { args.push("--no-fsr".into()); }
     if !plan.dlss { args.push("--no-dlss".into()); }
+    if !plan.xess { args.push("--no-xess".into()); }
     if let Err(e) = python(app, run, &b, &cfg, "tools.yw4.build_install", &args) {
         if run.cancel.load(Ordering::SeqCst) {
             // Cancel ended the build's processes at once, so it couldn't put back the game it had set aside

@@ -344,7 +344,7 @@ const GB = 1024 ** 3;
 let homeDir = null;
 const defaultInstall = () => LINUX ? (homeDir ? homeDir.replace(/\/$/, '') + '/Games/YW4 Recomp' : '') : 'C:\\Games\\YW4 Recomp';
 const options = {
-  fsr: true, dlss: false, freeUp: false, desktop: true, startMenu: false,
+  fsr: true, dlss: false, xess: true, freeUp: false, desktop: true, startMenu: false,
   install: defaultInstall(), saves: 'install',
 };
 if (T && T.path) T.path.homeDir().then((h) => {
@@ -362,13 +362,17 @@ if (invoke) invoke('builder_bundled').then((b) => { bundled = b; renderSwitches(
 // Linux downloads no compiler: the system's builds (tools/yw4/system.py)
 // Linux (decision 0073): DLSS is NVIDIA's library alone (no Streamline: upscaling only); FSR is AMD's SDK source, built
 // on the PC in about a minute
-const downloadMB = () => (bundled && !LINUX ? 182 : 0) + (options.fsr ? (LINUX ? 200 : 240) : 0) + (options.dlss ? (LINUX ? 60 : 325) : 0);
+// Intel XeSS (decision 0089): Intel's SDK archive, 77 MB, Windows only
+const downloadMB = () => (bundled && !LINUX ? 182 : 0) + (options.fsr ? (LINUX ? 200 : 240) : 0) + (options.dlss ? (LINUX ? 60 : 325) : 0)
+  + (options.xess && !LINUX ? 77 : 0);
 const diskNeeded = () => (usingFound() && options.install === inst.install ? 0 : 8.5 * GB) + 2.4 * GB + (bundled && !LINUX ? 737 * 1024 ** 2 : 0) + downloadMB() * 1024 ** 2;
 
 const SWITCHES = [
   { key: 'fsr', title: 'AMD FSR', note: () => `Upscaling and frame generation, any graphics card · about ${LINUX ? 200 : 240} MB` },
   { key: 'dlss', title: 'NVIDIA DLSS', note: () => !rtx ? 'Needs an NVIDIA RTX graphics card'
     : LINUX ? 'Upscaling · about 60 MB' : 'Upscaling, frame generation, Reflex · about 325 MB', needsRtx: true },
+  { key: 'xess', title: 'Intel XeSS', note: () => 'Upscaling, any graphics card, sharpest on Intel Arc · about 77 MB',
+    windowsOnly: true },
   { key: 'freeUp', title: 'Free up space after building', note: () => `Deletes the tools and build files (${bundled ? '2 GB' : '1.3 GB'}). Updates then download them and rebuild` },
   { key: 'desktop', title: 'Desktop shortcut', note: () => 'Opens the launcher' },
   { key: 'startMenu', get title() { return LINUX ? 'App menu entry' : 'Start menu entry'; }, note: () => 'Opens the launcher' },
@@ -403,6 +407,7 @@ function renderSwitches() {
   const box = $('switches');
   box.textContent = '';
   for (const s of SWITCHES) {
+    if (s.windowsOnly && LINUX) continue;  // Intel ships XeSS for Windows only
     const off = s.needsRtx && !rtx;
     const row = document.createElement('div');
     row.className = 'switch-row' + (off ? ' off-limits' : '');
@@ -662,7 +667,7 @@ async function startBuild(kind = build ? build.kind : 'first') {
   options.install = await fixSlashFolder(options.install);
   const S = LINUX ? '/' : '\\';  // the system's separator (a \ on Linux is part of a folder's name)
   const paths = foundFrom ? { exefs: `${foundFrom}${S}data${S}exefs`, romfs: `${foundFrom}${S}data${S}romfs`, dlc: `${foundFrom}${S}data${S}dlc` } : chosen[mode];
-  const plan = { mode: foundFrom ? 'folders' : mode, paths, install: options.install, fsr: options.fsr, dlss: options.dlss && rtx, saves: options.saves, fresh: freshFiles };
+  const plan = { mode: foundFrom ? 'folders' : mode, paths, install: options.install, fsr: options.fsr, dlss: options.dlss && rtx, xess: options.xess && !LINUX, saves: options.saves, fresh: freshFiles };
   try {
     await invoke('start_build', { plan });
   } catch (e) {
@@ -860,8 +865,8 @@ $('build-next').addEventListener('click', () => {
 // After a successful build: the launcher remembers the install, makes the shortcuts, frees space if chosen
 async function afterBuild() {
   inst = { install: options.install, mode, paths: { ...chosen[mode] }, saves: options.saves, fsr: options.fsr,
-    dlss: options.dlss && rtx, freeUp: options.freeUp, desktop: options.desktop, startMenu: options.startMenu,
-    originalsOffered: inst && inst.install === options.install ? !!inst.originalsOffered : false,
+    dlss: options.dlss && rtx, xess: options.xess && !LINUX, freeUp: options.freeUp, desktop: options.desktop,
+    startMenu: options.startMenu, originalsOffered: inst && inst.install === options.install ? !!inst.originalsOffered : false,
     onPlay: (inst && inst.onPlay) || 'hide', mods: !(inst && inst.mods === false), showLog: !!(inst && inst.showLog),
     controlsHint: !(inst && inst.controlsHint === false), cheats: !(inst && inst.cheats === false), disabledMods: (inst && inst.disabledMods) || [], icon: inst && inst.icon,
     straightToGame: !!(inst && inst.straightToGame) };  // Settings' choices stay
@@ -1467,8 +1472,10 @@ async function showSettings() {
   try { setToggle('set-full', await invoke('game_full_screen', { install: inst.install, saves: inst.saves })); } catch (e) { /* off */ }
   setToggle('set-desktop', inst.desktop);
   setToggle('set-startmenu', inst.startMenu);
-  const dl = [inst.fsr && 'AMD FSR', inst.dlss && 'NVIDIA DLSS'].filter(Boolean);
-  $('set-downloads').textContent = dl.length ? dl.join(' and ') : 'No upscaler downloads';
+  // an install from before the XeSS switch (no xess field) was built with it on Windows
+  const dl = [inst.fsr && 'AMD FSR', inst.dlss && 'NVIDIA DLSS', inst.xess !== false && !LINUX && 'Intel XeSS'].filter(Boolean);
+  $('set-downloads').textContent = !dl.length ? 'No upscaler downloads'
+    : dl.length === 1 ? dl[0] : dl.slice(0, -1).join(', ') + ' and ' + dl[dl.length - 1];
   $('set-versions').textContent = `Launcher ${$('launcher-version').textContent.replace('Launcher ', '')} · Game ${$('game-version').textContent.replace('YW4 Recomp ', '')}`;
   const info = await invoke('install_info', { install: inst.install });
   reclaimable = info.reclaimable;
@@ -1684,6 +1691,7 @@ function choicesFromInstall() {
   Object.assign(options, { install: inst.install, saves: inst.saves, fsr: inst.fsr, freeUp: inst.freeUp,
     desktop: inst.desktop, startMenu: inst.startMenu });
   if (inst.dlss !== undefined) options.dlss = inst.dlss;
+  options.xess = inst.xess !== false;  // installs from before the switch had it
   renderFields();
 }
 function openRebuildOptions() {  // for the Settings page's "Rebuild with other downloads"

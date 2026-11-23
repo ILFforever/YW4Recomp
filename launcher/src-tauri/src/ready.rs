@@ -16,6 +16,9 @@ pub struct State {
     saves: String,
     fsr: bool,
     dlss: bool,
+    /// Intel XeSS (decision 0089, Windows); installs made before the switch were built with it
+    #[serde(default = "yes")]
+    xess: bool,
     #[serde(rename = "freeUp")]
     free_up: bool,
     desktop: bool,
@@ -1343,6 +1346,7 @@ pub fn locate_installed_game_path(raw_path: PathBuf) -> Result<State, String> {
     state.dlss = install_dir.join("work").join("build").join("nvngx_dlss.dll").is_file()
         || install_dir.join("game").join("nvngx_dlss.dll").is_file()
         || install_dir.join("nvngx_dlss.dll").is_file();
+    state.xess = true;  // like FSR: an install from before XeSS has no libxess.dll, which says nothing of a choice
 
     let dir = install_dir.join("work").join("icon");
     state.icon = ensure_icon_image(&dir)
