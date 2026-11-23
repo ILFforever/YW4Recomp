@@ -47,9 +47,26 @@ too (FSR on AMD shakes at the edges, #20).
 6. The launcher has no XeSS switch: every Windows build includes it (~77 MB more to download), `--no-xess` leaves it
    out.
 
+## Results (RTX 4070 laptop, late-game bamboo forest, 3840x2160 output, quality: 3D at 2560x1440, 2026-11-24)
+
+One run switching modes (`YW4_SET_AT`), GPU time from `YW4_GPU_PASSES`, sharpness = Laplacian variance of the
+screenshot, sharpening at MEDIUM (each upscaler's own steps):
+
+| Mode | the upscaler itself | GPU per frame | sharpness |
+|---|---|---|---|
+| XeSS (DP4a on NVIDIA) | ~5.0 ms | ~11.8 ms | 69 |
+| FSR 3.1.6 | ~4.7 ms | ~11.6 ms | 137 |
+| DLSS (model K) | ~4.8 ms | ~11.6 ms | 162 |
+| native TAA, no upscaling | 1.4 ms (TAA) | ~12.0 ms | 133 |
+
+XeSS works and costs about what FSR and DLSS do, but on this NVIDIA GPU its picture is clearly softer (leaves and
+water smeared at 1:1). XeSS without upscaling (4K in, 4K out) scores 90, also below TAA. Not a sign error: separate
+runs to the same frame with the jitter flipped in x, y or both, or the motion flipped, scored 62-73 against 71. So
+far this looks like XeSS's general (DP4a) path; Intel Arc's XMX path is said to be sharper, not checkable here.
+
 ## Not checked yet
 
-- Image quality against FSR and DLSS (same-run, same spot), and its cost on the RTX 4070 laptop and the 780M.
+- Whether stronger sharpening for XeSS (DLSS's steps) closes the gap; the 780M.
 - Intel Arc itself (no Arc GPU here).
 - Battles' zoom-in (TAA stands in, as for FSR and DLSS), menus, cutscenes, 21:9, frame generation on top.
 - The Vulkan validation layer with XeSS on.
