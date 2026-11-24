@@ -30,6 +30,9 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
       - uses: actions/cache@v4
         with:
           path: ${{ runner.temp }}/linux-tools
@@ -50,6 +53,8 @@ jobs:
           EOF
       - name: Compile the runtime, musl's math and our shaders
         run: python3 -m recomp.ci
+      - name: Test extras (Pillow for the BC7 test, lz4 for the NSO test; they skip without)
+        run: python -m pip install --quiet pillow==11.3.0 lz4
       - name: Tests
         run: python3 -m unittest discover -s tests -t .
       - name: Decision records
@@ -80,6 +85,8 @@ jobs:
       - name: Compile the runtime and musl's math (with the FSR, DLSS and Streamline headers)
         shell: pwsh
         run: python -m recomp.ci --work "$env:RUNNER_TEMP\yw4\work"
+      - name: Test extras (Pillow for the BC7 test, lz4 for the NSO test; they skip without)
+        run: python -m pip install --quiet pillow==11.3.0 lz4
       - name: Tests
         run: python -m unittest discover -s tests -t .
 

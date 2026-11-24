@@ -274,6 +274,7 @@ static char *next_line(char **p) {
 /* A translated shader's module and descriptor set layout, from the files (not kept in the list). */
 static Shader *load_shader(uint64_t key, int stage) {
     Shader *s = calloc(1, sizeof *s);
+    if (!s) gpu_stop("out of host memory for a shader");
     s->key = key, s->stage = stage;
     char path[1024];
     size_t n;
@@ -494,6 +495,7 @@ static Program *program_of(NvnProgram *p) {
     if (!(p->stage_mask & 1)) return NULL;  /* compute only, or nothing */
     if (p->stage_mask & 0x18) gpu_stop("tessellation shaders");
     Program *g = calloc(1, sizeof *g);
+    if (!g) gpu_stop("out of host memory for a program");
     VkDescriptorSetLayout layouts[NSETS];
     uint32_t nsets = 2;
     for (int i = 0; i < NSETS; i++) {
@@ -514,6 +516,7 @@ static Program *compute_program_of(NvnProgram *p) {
     if (!(p->stage_mask & 0x20)) return NULL;
     Program *g = p->gpu;
     if (!g) p->gpu = g = calloc(1, sizeof *g);
+    if (!g) gpu_stop("out of host memory for a compute program");
     if (g->comp_pipe) return g;
     g->comp = shader(p->stages[5].key, ST_COMP);
     VkPipelineLayoutCreateInfo pli = {.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO, .setLayoutCount = 1,
@@ -868,6 +871,7 @@ static VkPipeline pipeline(Program *g, const PipeKey *k) {
             return pl;
         }
     Pipe *p = calloc(1, sizeof *p);
+    if (!p) gpu_stop("out of host memory for a pipeline");
     p->key = *k;
     if (!g->warm && g->sh[ST_VERT] && g->sh[ST_VERT]->model && async_enabled() && !journal_knows(g, k)) {
         host_lock(&async_lock);

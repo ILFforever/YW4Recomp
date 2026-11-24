@@ -89,6 +89,8 @@ static void bone_name(char out[32], int i) { snprintf(out, 32, "_pos_load_bar_lo
  * names; after them a few bytes kept as they are. */
 
 #define MAXB 64
+/* This file's static scratch (here, and in the functions below): only romfs_open calls it, once, from main before
+ * any other thread starts, so nothing is shared. */
 static uint32_t sort_hash[MAXB];
 static int by_hash(const void *a, const void *b) {
     uint32_t x = sort_hash[*(const uint16_t *)a], y = sort_hash[*(const uint16_t *)b];

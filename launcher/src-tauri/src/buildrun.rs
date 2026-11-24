@@ -227,9 +227,11 @@ fn python(app: &AppHandle, run: &Running, b: &Builder, cfg: &Path, module: &str,
     platform::hidden(&mut cmd);
     emit_log(app, &format!("> python -m {module} {}", args.join(" ")));
     let mut child = cmd.spawn().map_err(|e| format!("couldn't start Python ({e})"))?;
-    let out = child.stdout.take().unwrap();
-    let err = child.stderr.take().unwrap();
-    *run.child.lock().unwrap() = Some(child);
+    let (Some(out), Some(err)) = (child.stdout.take(), child.stderr.take()) else {
+        let _ = child.kill();
+        return Err("couldn't read the step's output".into());
+    };
+    *run.child.lock().unwrap_or_else(|e| e.into_inner()) = Some(child);
     let app2 = app.clone();
     let err_thread = std::thread::spawn(move || {  // stderr: the log, and the last lines for an error message
         let mut tail = Vec::new();
@@ -269,7 +271,7 @@ fn python(app: &AppHandle, run: &Running, b: &Builder, cfg: &Path, module: &str,
         emit_log(app, &line);
     }
     let tail = err_thread.join().unwrap_or_default();
-    let status = run.child.lock().unwrap().take().map(|mut c| c.wait());
+    let status = run.child.lock().unwrap_or_else(|e| e.into_inner()).take().map(|mut c| c.wait());
     if run.cancel.load(Ordering::SeqCst) { return Err("cancelled".into()); }
     match status {
         Some(Ok(s)) if s.success() => Ok(()),
@@ -328,9 +330,16 @@ pub fn ensure_dlc_extracted(app: &AppHandle, inst: &Path) {
 pub fn save_keys_dir(inst: &Path, keys: &Path) -> std::io::Result<()> {
     let path = inst.join("config.toml");
     let text = std::fs::read_to_string(&path).unwrap_or_default();
-    let mut lines: Vec<String> = text.lines().filter(|l| !l.trim_start().starts_with("keys_dir")).map(String::from).collect();
-    lines.push(format!("keys_dir = {}", lit(keys)));
-    std::fs::write(&path, lines.join("\n") + "\n")
+    // parsed, so keys_dir lands in the [tools] table (where tools/yw4/config.py reads it) whatever table was last open
+    let mut doc: toml::Table = text.parse().map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, format!("config.toml: {e}")))?;
+    doc.remove("keys_dir");  // a stray top-level line from older launchers
+    let tools = doc.entry("tools").or_insert_with(|| toml::Value::Table(toml::Table::new()));
+    let toml::Value::Table(tools) = tools else {
+        return Err(std::io::Error::new(std::io::ErrorKind::InvalidData, "config.toml: [tools] is not a table"));
+    };
+    tools.insert("keys_dir".into(), toml::Value::String(keys.display().to_string()));
+    let out = toml::to_string(&doc).map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e.to_string()))?;
+    std::fs::write(&path, out)
 }
 
 /// The whole build: the game code's own steps (tools.yw4.build_install, decision 0054), then the DLC copy. The
@@ -420,7 +429,7 @@ pub fn start_build(app: AppHandle, plan: Plan) -> Result<(), String> {
 pub fn cancel_build(app: AppHandle) {
     let run = app.state::<Arc<Running>>().inner().clone();
     run.cancel.store(true, Ordering::SeqCst);
-    let pid = run.child.lock().unwrap().as_ref().map(|c| c.id());
+    let pid = run.child.lock().unwrap_or_else(|e| e.into_inner()).as_ref().map(|c| c.id());
     if let Some(pid) = pid {
         platform::kill_tree(pid);
     }

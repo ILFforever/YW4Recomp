@@ -107,8 +107,6 @@ void gamemenu_live_popup(void);
 int gamemenu_live(void);
 /* the live popup's area in the design's units (x, y, w, h): only that part is blended over the game */
 void gamemenu_live_rect(float r[4]);
-int gamemenu_selected(void);   /* GM_* */
-int gamemenu_confirming(void); /* a popup shows: Exit game's or Return to title's */
 void gamemenu_toggle(void);    /* the overlay button: open, or close and resume */
 /* LEGACY MENUS off (settings.h): F1, F2 and F3 open the overlay straight on GM_SETTINGS, GM_CONTROLS or GM_PERF
  * (pausing the game); the same key on its own page closes it and resumes. */

@@ -54,7 +54,7 @@ static int save_slot_test(void) {
     return c;
 }
 
-/* 10-slot Diary & Autosave system: enabled by default; set YW4_DIARY_SLOTS=0 for vanilla 1-slot behavior. */
+/* 5-slot Diary & Autosave system: enabled by default; set YW4_DIARY_SLOTS=0 for vanilla 1-slot behavior. */
 static int diary_slots_enabled(void) {
     static int cached = -1;
     int c = __atomic_load_n(&cached, __ATOMIC_RELAXED);
@@ -77,12 +77,12 @@ typedef struct {
 
 static HostLock slot_lock = HOST_LOCK_INIT;
 static char user_save_dir[1024];
-static int active_slot;            /* slot (0..9) backing live load/save/autosave I/O */
+static int active_slot;            /* slot (0..4) backing live load/save/autosave I/O */
 
 static void set_active_slot(int val) {
     __atomic_store_n(&active_slot, val, __ATOMIC_RELEASE);
 }
-static int diary_slot;             /* slot (0..9) currently shown in the Diary menu */
+static int diary_slot;             /* slot (0..4) currently shown in the Diary menu */
 static int diary_opened_once;
 /* the armed row's label: no button named, it is X, Tab, the X key or Square by device (owner, 2026-11-17) */
 #define DELETE_LABEL "Press again to delete"
@@ -107,7 +107,9 @@ static DiarySlotRow slot_cache[DIARY_SLOT_COUNT][2];
  * paint pass that lookup is sent to copy k (yw4_hook_menu_layer). Without the six copies the Diary pages as before. */
 #define DIARY_ROWS (DIARY_SLOT_COUNT + 1)
 #define SLOT_LAYER 0xd14f93d6u  /* crc32("diary_load_slot") */
-static int rows_on;             /* (declared above) this Diary has the stacked rows (diary_paint_rows found copy DIARY_ROWS - 1) */
+/* Set by the game thread, read by it and the present thread (HUD): relaxed atomics, a stale value shows one frame late. */
+static int rows_on;             /* this Diary has the stacked rows (diary_paint_rows found copy DIARY_ROWS - 1) */
+#define ROWS_ON() __atomic_load_n(&rows_on, __ATOMIC_RELAXED)
 static int paint_pending;       /* paint the rows at the next Diary frame */
 static int paint_slot = -1;     /* during a paint pass: the slot the populate hook puts in row 0 */
 static int paint_copy = -1;     /* during a paint pass: the copy row j's lookups go to */
@@ -129,7 +131,7 @@ static void slot_base_dir_locked(char out[1024], int slot) {
         return;
     }
     if (slot <= 0) snprintf(out, 1024, "%s", user_save_dir);
-    else snprintf(out, 1024, "%s/SLOT%02d", user_save_dir, slot + 1);  /* the number the Diary shows: SLOT02..SLOT10 */
+    else snprintf(out, 1024, "%s/SLOT%02d", user_save_dir, slot + 1);  /* the number the Diary shows: SLOT02..SLOT05 */
 }
 
 static int newest_auto_slot_locked(void);
@@ -295,9 +297,8 @@ static void utf8_copy_bounded(char *dst, size_t cap, const char *src, size_t max
 }
 
 /* delete_mode: 0 the name, 1 delete armed */
-static int rows_on;
 static void format_slot_label(char dst[36], int slot, int delete_mode, const uint8_t raw_name[36], uint8_t valid) {
-    if (rows_on) {  /* stacked rows: the five rows show which slot it is, no "<n>/5" (owner, 2026-11-17) */
+    if (ROWS_ON()) {  /* stacked rows: the five rows show which slot it is, no "<n>/5" (owner, 2026-11-17) */
         const char *t = delete_mode ? DELETE_LABEL : !valid ? "Empty Diary" : NULL;
         if (t) {
             snprintf(dst, 36, "%s", t);
@@ -762,7 +763,7 @@ static int host_path(const SaveFs *fs, const IpcRequest *req, int x, char out[10
     return 1;
 }
 
-/* 1 when the Switch path in X buffer x goes to a slot's own folder (SLOT02..SLOT10): the game made its save folders
+/* 1 when the Switch path in X buffer x goes to a slot's own folder (SLOT02..SLOT05): the game made its save folders
  * once, at its first start, in the root, so a slot's folder may not exist yet. Only there are missing files and
  * folders made on demand; anywhere else a missing path is still "not found", as before. */
 static int in_new_slot_folder(const IpcRequest *req, int x) {
@@ -954,7 +955,7 @@ uint32_t savefs_open(uint64_t program_id, const uint8_t uid[16], int create, Ser
     return 0;
 }
 
-/* ---- 10-slot Diary, In-Game Save selector, Non-destructive New Game & Delete UX */
+/* ---- 5-slot Diary, In-Game Save selector, Non-destructive New Game & Delete UX */
 
 #define HID_BTN_X            (1ull << 2)
 #define HID_BTN_MINUS        (1ull << 11)
@@ -968,7 +969,7 @@ uint32_t savefs_open(uint64_t program_id, const uint8_t uid[16], int create, Ser
 static void diary_paint_rows(CPUState *ctx, uint64_t menu);
 
 static void diary_refresh_ui(CPUState *ctx, uint64_t menu) {
-    if (rows_on) {  /* stacked rows: all of them again (a delete changed one) */
+    if (ROWS_ON()) {  /* stacked rows: all of them again (a delete changed one) */
         diary_paint_rows(ctx, menu);
         return;
     }
@@ -1055,7 +1056,7 @@ int yw4_hook_save_load(CPUState *ctx) {
         return 0;
     }
     if (scene_on_title()) {
-        if (req[0] == 3 && !rows_on) {  /* stacked rows: the focused slot stays, an empty one says "no save data" */
+        if (req[0] == 3 && !ROWS_ON()) {  /* stacked rows: the focused slot stays, an empty one says "no save data" */
             host_lock(&slot_lock);
             int cur = __atomic_load_n(&active_slot, __ATOMIC_ACQUIRE);
             if (!slot_any_data_locked(cur)) {
@@ -1068,7 +1069,7 @@ int yw4_hook_save_load(CPUState *ctx) {
             host_lock(&slot_lock);
             /* stacked rows: the game takes the kind from the focused copy (its copy 1 is the Autosave), so it is set
              * from the row: a save row loads its save, the Autosave row the Autosave */
-            if (rows_on) req[0] = focus_auto ? 2 : 0;
+            if (ROWS_ON()) req[0] = focus_auto ? 2 : 0;
             /* kind 2, the Autosave row: the newest autosave's slot, whose game goes on (its next saves go there) */
             int a = req[0] == 2 ? newest_auto_slot_locked() : -1;
             int chosen = a >= 0 ? a : diary_slot;
@@ -1152,7 +1153,7 @@ int yw4_hook_diary_open(CPUState *ctx) {
     input_cooldown = 10;
     repeat_dir = 0;
     repeat_hold = 0;
-    rows_on = 0;
+    __atomic_store_n(&rows_on, 0, __ATOMIC_RELAXED);
     focus_auto = 0;
     paint_pending = 1;
     open_ns = host_now_ns(), open_updates = 0, open_logged = 0, paint_ns_total = 0;
@@ -1257,7 +1258,7 @@ static void diary_repopulate(CPUState *ctx, uint64_t menu) {
     memcpy((void *)(uintptr_t)(menu + 0x6e0), &zero64, sizeof zero64);
     memcpy((void *)(uintptr_t)(menu + 0x6e8), &zero64, sizeof zero64);
     guest_call3(ctx, 0x761aa0, menu, 0, 0);
-    if (rows_on && __atomic_load_n(&paint_copy, __ATOMIC_ACQUIRE) < 0)  /* not inside a row's paint */
+    if (ROWS_ON() && __atomic_load_n(&paint_copy, __ATOMIC_ACQUIRE) < 0)  /* not inside a row's paint */
         for (int k = 0; k < DIARY_SLOT_COUNT; k++) diary_row_icons(ctx, menu, k);
 }
 
@@ -1326,10 +1327,10 @@ static void diary_debug_row(CPUState *ctx, uint64_t menu, int k) {
 static void diary_paint_rows(CPUState *ctx, uint64_t menu) {
     if (!*(const uint8_t *)(uintptr_t)(menu + 0x721)) return;  /* the title's Continue only: Save has no rows */
     if (!guest_call3(ctx, 0x9f3e90, menu, SLOT_LAYER, DIARY_ROWS - 1)) {
-        rows_on = 0;
+        __atomic_store_n(&rows_on, 0, __ATOMIC_RELAXED);
         return;
     }
-    rows_on = 1;
+    __atomic_store_n(&rows_on, 1, __ATOMIC_RELAXED);
     host_lock(&slot_lock);
     int latest = newest_row_locked();
     host_unlock(&slot_lock);
@@ -1452,7 +1453,7 @@ int yw4_hook_diary_setup(CPUState *ctx) {
  * stacked rows: the focused copy picks the slot (or the Autosave), the game's row data is filled for it, and +0x720
  * is set to the opposite so the game's flip lands on 0 (a save) or 1 (the Autosave). */
 int yw4_hook_diary_focus(CPUState *ctx) {
-    if (!diary_slots_enabled() || !rows_on || !ctx->x[1] || applying_focus) return 0;
+    if (!diary_slots_enabled() || !ROWS_ON() || !ctx->x[1] || applying_focus) return 0;
     uint64_t menu = ctx->x[0];
     uint32_t h;
     memcpy(&h, (const void *)(uintptr_t)ctx->x[1], sizeof h);
@@ -1489,7 +1490,7 @@ int yw4_hook_diary_focus(CPUState *ctx) {
  * Diary moves its cursor (line 0xb1f061c1 on the row layer, _pos_attach_cur_01 -> diary_load_cursor) with n = 2; with
  * the stacked rows all of them, or rows 2.. keep the cursor. */
 int yw4_hook_menu_attach(CPUState *ctx) {
-    if (rows_on && (uint32_t)ctx->x[1] == SLOT_LAYER && (uint32_t)ctx->x[2] == 0xb1f061c1u && (uint32_t)ctx->x[4] == 2)
+    if (ROWS_ON() && (uint32_t)ctx->x[1] == SLOT_LAYER && (uint32_t)ctx->x[2] == 0xb1f061c1u && (uint32_t)ctx->x[4] == 2)
         ctx->x[4] = DIARY_ROWS;
     return 0;
 }
@@ -1497,7 +1498,7 @@ int yw4_hook_menu_attach(CPUState *ctx) {
 /* f_9f2a00(menu, &layer hash, wrap): the engine's focus one up; at the top it wraps to the bottom only with wrap set,
  * and the Diary's rows don't set it (Down wraps). With the stacked rows Up from slot 1 goes to the Autosave. */
 int yw4_hook_menu_focus_up(CPUState *ctx) {
-    if (!rows_on || !ctx->x[1]) return 0;
+    if (!ROWS_ON() || !ctx->x[1]) return 0;
     uint32_t h;
     memcpy(&h, (const void *)(uintptr_t)ctx->x[1], sizeof h);
     if (h == SLOT_LAYER) ctx->x[2] |= 1;
@@ -1540,7 +1541,7 @@ int yw4_hook_diary_first_focus(CPUState *ctx) {
  * focused copy). With the stacked rows the answer is the focused row's: its slot's save, or the Autosave. As the game
  * does: the argument read (+0x8 counts them), a boolean pushed (f_d243e0), 1 returned. */
 int yw4_hook_diary_has_save(CPUState *ctx) {
-    if (!rows_on || !(uint32_t)ctx->x[1] || !savefs_diary_open() || !scene_on_title()) return 0;
+    if (!ROWS_ON() || !(uint32_t)ctx->x[1] || !savefs_diary_open() || !scene_on_title()) return 0;
     uint64_t args = ctx->x[0];
     host_lock(&slot_lock);
     int ok = focus_auto ? newest_auto_slot_locked() >= 0 : slot_cache[diary_slot][0].valid != 0;
@@ -1560,7 +1561,7 @@ int yw4_hook_diary_has_save(CPUState *ctx) {
  * kept: copy 5, the stacked Autosave row, would ask for kind 5). With the stacked rows: 0 (the focused slot's save,
  * from its folder: the active slot) or 2 (the Autosave). */
 int yw4_hook_diary_load_kind(CPUState *ctx) {
-    if (!rows_on || !savefs_diary_open() || !scene_on_title()) return 0;
+    if (!ROWS_ON() || !savefs_diary_open() || !scene_on_title()) return 0;
     ctx->x[22] = focus_auto ? 2 : 0;
     return 0;
 }
@@ -1575,7 +1576,7 @@ uint64_t savefs_filter_buttons(uint64_t buttons) {
 }
 
 int savefs_diary_rows(void) {
-    return savefs_diary_open() && rows_on;
+    return savefs_diary_open() && ROWS_ON();
 }
 
 int yw4_hook_diary_update(CPUState *ctx) {
@@ -1606,7 +1607,7 @@ int yw4_hook_diary_update(CPUState *ctx) {
     if (!open_logged && *(const uint8_t *)(uintptr_t)(menu + 0x750)) {  /* opened (OnOpenEndLayer) */
         open_logged = 1;
         fprintf(stderr, "yw4: diary: opened in %.1f ms, %d frames (rows %s; their painting %.2f ms)\n",
-                (double)(host_now_ns() - open_ns) / 1e6, open_updates, rows_on ? "stacked" : "the game's",
+                (double)(host_now_ns() - open_ns) / 1e6, open_updates, ROWS_ON() ? "stacked" : "the game's",
                 (double)paint_ns_total / 1e6);
     }
 
@@ -1628,7 +1629,7 @@ int yw4_hook_diary_update(CPUState *ctx) {
         return 0;
     }
 
-    if (rows_on) cur &= ~(uint64_t)(HID_BTN_DPAD_LEFT | HID_BTN_DPAD_RIGHT | HID_BTN_L | HID_BTN_R |
+    if (ROWS_ON()) cur &= ~(uint64_t)(HID_BTN_DPAD_LEFT | HID_BTN_DPAD_RIGHT | HID_BTN_L | HID_BTN_R |
                                      HID_BTN_LSTICK_LEFT | HID_BTN_LSTICK_RIGHT),
                  edge &= cur | HID_BTN_X;  /* stacked rows: Up / Down move (the game's focus), no paging */
     int prev_held = (cur & (HID_BTN_DPAD_LEFT | HID_BTN_L | HID_BTN_LSTICK_LEFT)) != 0;
@@ -1662,7 +1663,7 @@ int yw4_hook_diary_update(CPUState *ctx) {
         host_unlock(&slot_lock);
         fprintf(stderr, "yw4: diary: selected slot %d" DIARY_OF " (%s)\n", ns + 1, valid_any ? "occupied" : "empty");
         need_refresh = 1;
-    } else if ((edge & HID_BTN_X) && scene_on_title() && !(rows_on && focus_auto)) {
+    } else if ((edge & HID_BTN_X) && scene_on_title() && !(ROWS_ON() && focus_auto)) {
         /* X deletes on the title's Continue only, where its hint says so (owner, 2026-11-17): not from the
          * in-game Save (where the slot being played couldn't go anyway: its next autosave would write it back) */
         host_lock(&slot_lock);
@@ -1717,7 +1718,7 @@ static const char *replay_playing(void) {
  * thread waits here. The title's own list (yw4_hook_check_window_open) needs the game's "erase?" box, which a first
  * game ever doesn't show: this is that game's list, in the same Diary look (owner, 2026-11-20: "it should show this,
  * not the other older one") but with no way back, as the title has closed. An occupied slot asks again before it is
- * used. Replays and YW4_NEWGAME_SLOT=<1..10> answer at
+ * used. Replays and YW4_NEWGAME_SLOT=<1..5> answer at
  * once (a replay's clock counts frames, which stop while the game waits): the given slot, else the first empty one,
  * else slot 1. */
 static void ng_row(GameMenuDiaryRow *r, int s);

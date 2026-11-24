@@ -568,8 +568,6 @@ int gamemenu_text_rect(float r[4], float *caret_x) {
     if (caret_x) *caret_x = focused_caret_x;
     return 1;
 }
-int gamemenu_selected(void) { return sel; }
-int gamemenu_confirming(void) { return confirm; }
 
 static void changed(void) { __atomic_add_fetch(&changes, 1, __ATOMIC_RELEASE); }
 static void toast(const char *msg);  /* below: a short note, top right */

@@ -149,6 +149,8 @@ pub fn reveal(file: &Path) -> Result<(), String> {
         // explorer takes /select,"<path>" with the quotes round the path only: Rust's quoting of the whole argument
         // (the install's path had a space: "W:\YW4 Recomp") made it open Documents (owner, 2026-11-16)
         use std::os::windows::process::CommandExt;
+        // a quote in the path would end the quoted argument early and let the rest run as explorer switches
+        if file.to_string_lossy().contains('"') { return Err("path contains a quote".into()); }
         command("explorer").raw_arg(format!("/select,\"{}\"", file.display())).spawn().map(|_| ()).map_err(|e| e.to_string())
     }
     #[cfg(not(windows))]

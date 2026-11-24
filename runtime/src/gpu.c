@@ -582,6 +582,7 @@ static void pool_import(NvnPool *p) {
                  /* the game's conditional draws read its counters where they lie (gpu_query.c) */
                  (vk.conditional_rendering ? VK_BUFFER_USAGE_CONDITIONAL_RENDERING_BIT_EXT : 0)};
     GpuPool *g = calloc(1, sizeof *g);
+    if (!g) gpu_stop("out of host memory for a memory pool");
     CHECK(vkCreateBuffer(vk.device, &bci, NULL, &g->buf));
     VkMemoryRequirements mr;
     vkGetBufferMemoryRequirements(vk.device, g->buf, &mr);
@@ -1720,9 +1721,10 @@ static MemBlock *blocks;
 
 static void range_insert(MemBlock *b, int i, VkDeviceSize off, VkDeviceSize size) {
     if (b->nfree == b->cap) {
-        b->cap = b->cap ? 2 * b->cap : 16;
-        b->free = realloc(b->free, (size_t)b->cap * sizeof *b->free);
-        if (!b->free) gpu_stop("no memory for an image block's free list");
+        int cap = b->cap ? 2 * b->cap : 16;
+        FreeRange *grown = realloc(b->free, (size_t)cap * sizeof *grown);
+        if (!grown) gpu_stop("no memory for an image block's free list");
+        b->free = grown, b->cap = cap;
     }
     memmove(&b->free[i + 1], &b->free[i], (size_t)(b->nfree - i) * sizeof *b->free);
     b->free[i] = (FreeRange){off, size};
@@ -2001,6 +2003,7 @@ GpuImage *image_of(VkCommandBuffer cb, NvnTexture *t) {
         gpu_stop("texture format %#x target %u samples %u", t->format, t->target, t->samples);
     if (t->levels > 16) gpu_stop("texture with %u levels", t->levels);
     g = calloc(1, sizeof *g);
+    if (!g) gpu_stop("out of host memory for an image");
     g->key = key_of(t);
     g->last_frame = present_count, g->last_seq = cur ? cur->seq : 0;
     uint32_t bucket = key_hash(&g->key);
@@ -2118,6 +2121,7 @@ static VkImageView view_of(GpuImage *g, VkImageViewType type, VkFormat fmt, uint
             v->nlayers == nlayers && !memcmp(&v->sw, &sw, sizeof sw) && v->aspect == aspect)
             return v->view;
     GpuView *v = calloc(1, sizeof *v);
+    if (!v) gpu_stop("out of host memory for an image view");
     *v = (GpuView){g->views, type, fmt, level0, nlevels, layer0, nlayers, sw, aspect, VK_NULL_HANDLE};
     VkImageViewCreateInfo ci = {.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO, .image = g->image, .viewType = type,
                                 .format = fmt, .components = sw,
@@ -2831,6 +2835,10 @@ static void dump_images(uint64_t frame) {
                 size_t same = 0;
                 double first = 0;
                 double *v = malloc(n * sizeof *v);
+                if (!v) {  /* a debug dump: skip the layer rather than stop the game */
+                    fprintf(stderr, "yw4: image %#" PRIx64 ": no memory (%zu MB) to dump layer %u\n", addr, n * sizeof *v >> 20, l);
+                    continue;
+                }
                 for (size_t i = 0; i < n; i++) {
                     double x;
                     if (d24) x = (((const uint32_t *)src)[i] & 0xFFFFFF) / 16777215.0;

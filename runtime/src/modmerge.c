@@ -255,7 +255,7 @@ done:
  * crc, u8 value count, 2-bit value types four to a byte (0 string, 1 int, 2 float), 0xFF to a 4-byte boundary, u32
  * values; a string is an offset into the table, 0xFFFFFFFF for none); 0xFF to 16; the strings, each once, in the
  * order the entries first use them; 0xFF to 16; then the entry names' table (kept as it is). Measured on the
- * game's 2.2.0 files: a file written back this way is byte-for-byte the game's (cfgbin_rewrite, the check). */
+ * game's 2.2.0 files: a file written back this way is byte-for-byte the game's. */
 
 typedef struct {
     uint32_t crc;
@@ -435,14 +435,6 @@ static uint8_t *cfg_write(const Ent *e, size_t count, const uint8_t *tail, size_
     free(s.b);
     *out_n = o.n;
     return o.b;
-}
-
-uint8_t *cfgbin_rewrite(const uint8_t *b, size_t n, size_t *out_n) {
-    Cfg c;
-    if (cfg_parse(b, n, &c)) return NULL;
-    uint8_t *r = cfg_write(c.e, c.count, c.tail, c.ntail, out_n);
-    free(c.e);
-    return r;
 }
 
 /* ---- the diff: runs of base entries [i1, i2) a mod replaced with its entries [j1, j2) (an insert when i1 == i2) */

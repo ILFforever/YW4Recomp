@@ -321,8 +321,9 @@ void yw4_socket_Socket(CPUState *c) {
     type &= 0xF;
     HSock h = fam == 2 ? socket(AF_INET, type, proto) : HBAD;
     if (h == HBAD) {
+        int e = fam == 2 ? host_errno() : G_EAFNOSUPPORT;  /* before LOG, which can clobber errno */
         LOG("Socket(%d, %d, %d) failed\n", fam, type, proto);
-        ret(c, -1, fam == 2 ? host_errno() : G_EAFNOSUPPORT);
+        ret(c, -1, e);
         return;
     }
     host_lock(&fd_lock);
@@ -372,7 +373,9 @@ void yw4_socket_Close(CPUState *c) {
 void yw4_socket_Shutdown(CPUState *c) {
     Fd fs, *f = snap((int)c->x[0], &fs) ? &fs : NULL;
     LOG("Shutdown(%d, %d)\n", (int)c->x[0], (int)c->x[1]);
-    ret(c, f ? shutdown(f->h, (int)c->x[1]) : -1, f ? host_errno() : G_EBADF);
+    int r = f ? shutdown(f->h, (int)c->x[1]) : -1;
+    int e = f ? host_errno() : G_EBADF;  /* its own statement: argument order is unspecified */
+    ret(c, r, e);
 }
 
 /* Bind(fd, const sockaddr *, len) */
@@ -388,6 +391,7 @@ void yw4_socket_Bind(CPUState *c) {
         if (f->type == 2) a.sin_port = 0;
     }
     int r = bind(f->h, (struct sockaddr *)&a, sizeof a);
+    int e = host_errno();  /* right after bind: getsockname and LOG can clobber errno */
     if (r == 0) {
         struct sockaddr_in got;
         socklen_t gl = sizeof got;
@@ -398,7 +402,7 @@ void yw4_socket_Bind(CPUState *c) {
         commit_bound(f->h, 1, gip, f->guest_port);
     }
     LOG("Bind(%d, %s)%s\n", (int)c->x[0], ip_str(gip, a.sin_port, b), r ? " failed" : "");
-    ret(c, r, host_errno());
+    ret(c, r, e);
 }
 
 void yw4_socket_GetSockName(CPUState *c) {
@@ -431,7 +435,9 @@ void yw4_socket_Connect(CPUState *c) {
 void yw4_socket_Listen(CPUState *c) {
     Fd fs, *f = snap((int)c->x[0], &fs) ? &fs : NULL;
     LOG("Listen(%d, %d)\n", (int)c->x[0], (int)c->x[1]);
-    ret(c, f ? listen(f->h, (int)c->x[1]) : -1, f ? host_errno() : G_EBADF);
+    int r = f ? listen(f->h, (int)c->x[1]) : -1;
+    int e = f ? host_errno() : G_EBADF;  /* its own statement: argument order is unspecified */
+    ret(c, r, e);
 }
 
 void yw4_socket_Accept(CPUState *c) {

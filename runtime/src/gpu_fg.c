@@ -257,7 +257,7 @@ static int create(uint32_t dw, uint32_t dh, uint32_t rw, uint32_t rh, VkFormat f
         return 0;
     }
     struct ffxQueryGetProviderVersion qv = {.header = {.type = FFX_API_QUERY_DESC_TYPE_GET_PROVIDER_VERSION}};
-    fx.Query(&ctx, &qv.header);
+    if (fx.Query) fx.Query(&ctx, &qv.header);  /* only the version name: the feature works without it */
     fprintf(stderr, "yw4: fg: %s for %ux%u (3D up to %ux%u) ready in %.0f ms\n",
             qv.versionName ? qv.versionName : "frame generation", dw, dh, rw, rh, (double)(host_now_ns() - t0) / 1e6);
     return 1;

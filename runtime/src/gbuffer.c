@@ -77,8 +77,8 @@ int gbuffer_checking;
  * below), 4-7 mtxLV (view x world), 8-11 mtxLP (projection x view x world), 12-15 mtxLWOld and
  * 16-19 mtxLVOld (last frame's). recomp/shader.py writes in each program's .iface which block a
  * slot holds and which rows the program reads. Rows 0-11 are ours; last frame's are the object's
- * history, copied from the game's bound block (the game puts this frame's world there for most
- * objects, so only the camera's motion shows in the motion vectors; the skinned programs' last
+ * history (last_world; not read from the game's bound block, which puts this frame's world there for most
+ * objects, so only the camera's motion shows in the motion vectors); the skinned programs' last
  * view x world is sometimes one of a few fixed matrices). Check mode compares the rows each
  * program reads, bit for bit. */
 enum { LOCAL_ROWS = 20, OUR_ROWS = 12 };
@@ -411,7 +411,7 @@ static _Thread_local struct {
     long nv_ok, nv_regions[8];                   /* NVN state objects = the engine's; draws where each part differs */
     long bn_n, bn_hook, bn_old_n, bn_late;       /* bone palettes: this frame's ours; last frame's ours */
 } prog_st[PROGRAM_STATS];
-/* game: the game's bound vertex constants 2, for last frame's rows */
+/* game: the game's bound vertex constants 2; unused (last frame's rows come from the object history, last_world) */
 static void object_constants(const float *game, float out[GBUFFER_OBJECT_FLOATS]);
 static uint64_t indices_of(uint64_t geometry, uint64_t submesh);
 

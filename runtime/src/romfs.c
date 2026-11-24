@@ -52,6 +52,14 @@ static char *dup_str(const char *s) {
     return strcpy(d, s);
 }
 
+/* realloc that stops with a clear exit when memory runs out (the old block stays valid until then, and the caller
+ * only takes the new size after this returns). */
+static void *grow(void *p, size_t n) {
+    void *q = realloc(p, n);
+    if (!q) yw4_exit(3, __FILE__, __LINE__);
+    return q;
+}
+
 static int64_t file_size(const char *path, int *is_dir) {
 #ifdef _WIN32
     struct _stat64 st;
@@ -90,13 +98,21 @@ static Dir *scan(const char *path, const char *name, Dir *parent, int depth) {
             Dir *c = scan(p, e->d_name, dir, depth + 1);
             free(p);
             if (!c) continue;
-            if (dir->ndirs == cap_d) dir->dirs = realloc(dir->dirs, sizeof *dir->dirs * (size_t)(cap_d = cap_d ? 2 * cap_d : 8));
+            if (dir->ndirs == cap_d) {
+                int cap = cap_d ? 2 * cap_d : 8;
+                dir->dirs = grow(dir->dirs, sizeof *dir->dirs * (size_t)cap);
+                cap_d = cap;
+            }
             dir->dirs[dir->ndirs++] = c;
         } else {
             File *f = calloc(1, sizeof *f);
             if (!f) yw4_exit(3, __FILE__, __LINE__);
             f->name = dup_str(e->d_name), f->path = p, f->size = (uint64_t)size, f->parent = dir;
-            if (dir->nfiles == cap_f) dir->files = realloc(dir->files, sizeof *dir->files * (size_t)(cap_f = cap_f ? 2 * cap_f : 16));
+            if (dir->nfiles == cap_f) {
+                int cap = cap_f ? 2 * cap_f : 16;
+                dir->files = grow(dir->files, sizeof *dir->files * (size_t)cap);
+                cap_f = cap;
+            }
             dir->files[dir->nfiles++] = f;
         }
     }
@@ -120,9 +136,8 @@ static int count_files(const Dir *d) {
 }
 
 static void add_layer(File *f, char *path) {
-    f->layers = realloc(f->layers, sizeof *f->layers * (size_t)(f->nlayers + 1));
-    f->layer_mods = realloc(f->layer_mods, sizeof *f->layer_mods * (size_t)(f->nlayers + 1));
-    if (!f->layers || !f->layer_mods) yw4_exit(3, __FILE__, __LINE__);
+    f->layers = grow(f->layers, sizeof *f->layers * (size_t)(f->nlayers + 1));
+    f->layer_mods = grow(f->layer_mods, sizeof *f->layer_mods * (size_t)(f->nlayers + 1));
     f->layers[f->nlayers] = path, f->layer_mods[f->nlayers] = mod_now;
     f->nlayers++;
 }
@@ -155,7 +170,7 @@ static void overlay(Dir *dst, const char *path, int depth) {
             if (c) {
                 overlay(c, p, depth + 1);
             } else if ((c = scan(p, e->d_name, dst, depth + 1))) {
-                dst->dirs = realloc(dst->dirs, sizeof *dst->dirs * (size_t)(dst->ndirs + 1));
+                dst->dirs = grow(dst->dirs, sizeof *dst->dirs * (size_t)(dst->ndirs + 1));
                 dst->dirs[dst->ndirs++] = c;
                 mod_added += count_files(c);
                 mark_mod_files(c);
@@ -171,7 +186,7 @@ static void overlay(Dir *dst, const char *path, int depth) {
             } else {
                 if (!(f = calloc(1, sizeof *f))) yw4_exit(3, __FILE__, __LINE__);
                 f->name = dup_str(e->d_name), f->parent = dst;
-                dst->files = realloc(dst->files, sizeof *dst->files * (size_t)(dst->nfiles + 1));
+                dst->files = grow(dst->files, sizeof *dst->files * (size_t)(dst->nfiles + 1));
                 dst->files[dst->nfiles++] = f;
                 mod_added++;
             }
@@ -722,13 +737,19 @@ static const Dir *game_root;  /* the game's tree with the mods laid over it (rom
 
 static void flatten(RomfsImage *m, Dir *d) {
     for (int i = 0; i < d->nfiles; i++) {
-        if (m->nfiles == m->cap_files)
-            m->files = realloc(m->files, sizeof *m->files * (size_t)(m->cap_files = m->cap_files ? 2 * m->cap_files : 256));
+        if (m->nfiles == m->cap_files) {
+            int cap = m->cap_files ? 2 * m->cap_files : 256;
+            m->files = grow(m->files, sizeof *m->files * (size_t)cap);
+            m->cap_files = cap;
+        }
         m->files[m->nfiles++] = d->files[i];
     }
     for (int i = 0; i < d->ndirs; i++) {
-        if (m->ndirs == m->cap_dirs)
-            m->dirs = realloc(m->dirs, sizeof *m->dirs * (size_t)(m->cap_dirs = m->cap_dirs ? 2 * m->cap_dirs : 64));
+        if (m->ndirs == m->cap_dirs) {
+            int cap = m->cap_dirs ? 2 * m->cap_dirs : 64;
+            m->dirs = grow(m->dirs, sizeof *m->dirs * (size_t)cap);
+            m->cap_dirs = cap;
+        }
         m->dirs[m->ndirs++] = d->dirs[i];
     }
     for (int i = 0; i < d->ndirs; i++) flatten(m, d->dirs[i]);
@@ -754,7 +775,8 @@ static void put64(uint8_t *p, uint64_t v) { memcpy(p, &v, 8); }
 
 /* The tables and header of the image of `root` (scanned from `dir`). */
 static void build(RomfsImage *m, Dir *root, const char *dir) {
-    m->dirs = realloc(m->dirs, sizeof *m->dirs * (size_t)(m->cap_dirs = 64));
+    m->dirs = grow(m->dirs, sizeof *m->dirs * 64);
+    m->cap_dirs = 64;
     m->dirs[m->ndirs++] = root;
     flatten(m, root);
     Dir **dirs = m->dirs;

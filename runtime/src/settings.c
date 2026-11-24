@@ -751,6 +751,28 @@ void settings_save(void) {
     host_unlock(&save_lock);
 }
 
+/* A setting's name and value as the control file's "list" prints them, read the way write_settings reads each kind
+ * of row (typed, Graphics card, slider, options): "" for none (an unset typed row, a choice out of range). */
+static const char *setting_line(const Setting *t, char *v, size_t n) {
+    v[0] = 0;
+    if (typed_env(t)) {  /* typed (a name, a code), not one of the options */
+        const char *e = getenv(typed_env(t));
+        snprintf(v, n, "%s", e ? e : "");
+        return typed_env(t);
+    }
+    if (t->next == gpu_card_cycle) {  /* Graphics card: the choice as kept, even before the cards are known */
+        snprintf(v, n, "%s", gpu_choice());
+        return "YW4_GPU";
+    }
+    if (!t->noptions) {
+        slider_text(t, NULL, 0, v, n);
+        return t->env;
+    }
+    int c = t->current();
+    if (c >= 0 && c < t->noptions) snprintf(v, n, "%s", t->values[c] ? t->values[c] : "");
+    return t->env;
+}
+
 static void write_settings(FILE *f) {
     fprintf(f, "# The settings panel's choices (F1), written when one changes. An environment variable of the same\n"
                "# name wins over its line here.\n");
@@ -955,10 +977,10 @@ static void fill_theme_row(SettingRow *r) {
     r->options[0] = theme_name(theme_index()), r->notes[0] = note, r->noptions = 1, r->current = 0;
 }
 
-/* The overlay's rows: the player's settings (Online play and Profile first, then the graphics sections), Look > Theme, then Advanced:
- * Legacy menus and the developer page's settings (owner, 2026-11-11: the renderer switches and speed-ups were only on
- * the old panel). Every row but Online play's, Profile's and Legacy menus changes the picture, so Preview can show it
- * (`look`). */
+/* The overlay's rows: the player's settings (the graphics sections; Online play and Profile are left out, they are on
+ * the Online tab), Look > Theme, then Advanced: Legacy menus and the developer page's settings (owner, 2026-11-11: the
+ * renderer switches and speed-ups were only on the old panel). Every row but Legacy menus changes the picture, so
+ * Preview can show it (`look`). */
 int settings_player_rows(SettingRow *rows, int max) {
     int n = 0, at = theme_row();
     int themed = 0;
@@ -1142,11 +1164,10 @@ void settings_control_poll(uint64_t frame) {
         if (!strcmp(line, "list")) {
             for (int i = 0; i < NSETTINGS; i++) {
                 const Setting *s = setting(i);
-                if (!s->env) continue;
-                char v[64];
-                if (!s->noptions) slider_text(s, NULL, 0, v, sizeof v);
-                else snprintf(v, sizeof v, "%s", s->values[s->current()] ? s->values[s->current()] : "");
-                if (o) fprintf(o, "%s=%s\n", s->env, v);
+                char v[256];
+                const char *key = setting_line(s, v, sizeof v);
+                if (!key) continue;
+                if (o) fprintf(o, "%s=%s\n", key, v);
             }
             fprintf(stderr, "yw4: control: list (%s)\n", out_path);
             continue;

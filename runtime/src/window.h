@@ -68,7 +68,6 @@ int window_repaint(int keep);
 /* The performance HUD (F3, the in-game overlay's Performance page): on or off (back to its last mode); its mode
  * (0 off, 1 detailed, 2 compact), corner (0 top left, 1 top right, 2 bottom left, 3 bottom right) and parts in the
  * detailed one (hud.h HUD_PART_*); a preview of it drawn into an RGBA image (w x h), and the part drawn. */
-void window_hud_toggle(void);
 void window_hud_cycle(void);  /* F3: the HUD off, compact, detailed (saved) */
 int window_hud_shown(void);
 int window_hud_mode(void);

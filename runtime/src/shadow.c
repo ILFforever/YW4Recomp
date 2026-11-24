@@ -156,11 +156,13 @@ static void gather(uint64_t list, uint64_t item, const Mat4 *vp, Gathered *out) 
         /* Not instanced objects (an instance array at model+0x80, cbuf 11 of the instanced
          * shaders): their world matrix is the identity, each copy is placed by its own
          * transform. Culling them per copy is for later. */
-        if (vp && !U64(U64(obj + 0x140) + 0x80)) {  /* world: the node's own object; box: the redirected one */
+        uint64_t models = U64(obj + 0x140);
+        if (!models) continue;  /* no model data (not loaded yet): nothing to draw */
+        if (vp && !U64(models + 0x80)) {  /* world: the node's own object; box: the redirected one */
             Mat4 world = load(obj0), mvp = mul(vp, &world);
             if (outside(obj, &mvp)) continue;
         }
-        uint64_t models = U64(obj + 0x140), geos = U64(obj + 0x128);
+        uint64_t geos = U64(obj + 0x128);
         for (uint8_t g = 0; g < ngeo; g++) {
             uint64_t geom = U64(geos + 8ull * g), mdl = models + 0x240ull * g;
             uint16_t nsub = U16(mdl + 0x200);

@@ -71,7 +71,10 @@ static void first_scan(void) {
     uint64_t addr[64], size[64];
     int n = yw4_memory_rw_regions(addr, size, 64);
     cand = malloc(sizeof *cand * MAX_CANDIDATES);
-    if (!cand) return;
+    if (!cand) {
+        fprintf(stderr, "yw4: memscan: no memory for the candidate list, scan skipped\n");
+        return;
+    }
     uint64_t scanned = 0;
     for (int r = 0; r < n; r++) {
         const uint8_t *b = (const uint8_t *)(uintptr_t)addr[r];
@@ -88,6 +91,11 @@ static void first_scan(void) {
         scanned += size[r];
     }
     seen = calloc(ncand ? ncand : 1, sizeof *seen * MAX_FRAMES);
+    if (!seen) {  /* up to 2 GiB: a debug scan, so skip it (no candidates left means nothing reads seen) */
+        fprintf(stderr, "yw4: memscan: no memory for %zu places x %d frames, scan skipped\n", ncand, (int)MAX_FRAMES);
+        ncand = 0;
+        return;
+    }
     fprintf(stderr, "yw4: memscan: %zu places hold %" PRId64 " in %d regions (%" PRIu64 " MiB)%s\n", ncand, value, n,
             scanned >> 20, ncand == MAX_CANDIDATES ? ": the list is full, later places left out" : "");
 }

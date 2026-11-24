@@ -146,6 +146,8 @@ static int target_of(const NvnTexture *t, int add) {
         i = 0;
         for (int k = 1; k < TARGETS; k++)
             if (tg[k].last_used < tg[i].last_used) i = k;
+        /* No wait for the GPU: a copy still in flight writes its buffer in submission order, before any new copy into
+         * it (one queue, full_barrier at the start of each), and its picture is dropped here (seq 0). */
         for (int k = 0; k < SLOTS; k++) tg[i].slot[k].seq = 0;
         free(tg[i].prev);
         uint8_t *work = tg[i].work;
@@ -241,6 +243,11 @@ static void save_bmp(const WTarget *t, const uint8_t *px, uint64_t frame, uint64
     memcpy(hd + 28, &(uint16_t){24}, 2);
     fwrite(hd, 1, 54, f);
     uint8_t *line = calloc(1, row);
+    if (!line) {
+        fprintf(stderr, "yw4: minimap: out of memory: %s not written\n", path);
+        fclose(f);
+        return;
+    }
     for (uint32_t y = 0; y < h; y++) {
         for (uint32_t x = 0; x < w; x++) {
             const uint8_t *p = px + ((size_t)y * w + x) * 4;
@@ -309,6 +316,10 @@ static void picture(int ti, const uint8_t *px, uint64_t frame) {
         t->blank = 0;
     }
     if (!t->prev) t->prev = malloc(n * 4);
+    if (!t->prev) {  /* diagnostic only: no "before" picture this time */
+        fprintf(stderr, "yw4: minimap: out of memory: no previous picture kept\n");
+        return;
+    }
     memcpy(t->prev, px, n * 4);
     t->prev_frame = frame, t->prev_lit = lit_pm, t->prev_opaque = opaque_pm;
 }
@@ -427,6 +438,11 @@ void gpu_watch_frame(VkCommandBuffer cb, uint64_t frame) {
                 if (t->slot[k].seq && (!old || t->slot[k].frame < old->frame)) old = &t->slot[k];
             if (!old || gpu_wait(old->seq, 0) != 0) break;
             if (!t->work) t->work = malloc((size_t)t->pw * t->ph * 4);
+            if (!t->work) {  /* diagnostic only: drop this picture */
+                fprintf(stderr, "yw4: minimap: out of memory: a picture skipped\n");
+                old->seq = 0;
+                continue;
+            }
             memcpy(t->work, old->map, (size_t)t->pw * t->ph * 4);  /* one pass over the GPU's memory, then ours */
             picture(i, t->work, old->frame);
             old->seq = 0;

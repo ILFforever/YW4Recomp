@@ -16,7 +16,4 @@ uint8_t *cpk_read_file(const char *cpk_path, const char *inner_path, size_t *n);
 uint8_t *cfgbin_merge(const uint8_t *base, size_t nbase, const uint8_t *const *mods, const size_t *nmod, int nmods,
                       size_t *out_n, int *clash_a, int *clash_b);
 
-/* The file written back from its own entries, for the self-check: equal to the input when the writer is right. */
-uint8_t *cfgbin_rewrite(const uint8_t *b, size_t n, size_t *out_n);
-
 #endif

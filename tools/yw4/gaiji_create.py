@@ -29,6 +29,7 @@ The fingerprint is read from the owner's own font.cpk (config.local.toml).
 from __future__ import annotations
 
 import argparse
+import os
 import sys
 from pathlib import Path
 
@@ -37,7 +38,8 @@ from PIL import Image, ImageDraw, ImageFilter, ImageFont
 from tools.yw4 import config, cpk
 from tools.yw4.gaiji import deswizzle_bc7, decode_bc7_to_image
 
-FONT = "C:/Windows/Fonts/ARIALNB.TTF"
+# a system font, not game data; YW4_GAIJI_FONT overrides it (e.g. on Linux)
+FONT = os.environ.get("YW4_GAIJI_FONT", "C:/Windows/Fonts/ARIALNB.TTF")
 CELL = 48
 TOP = 24                      # rows of the cell we draw; the rest is the Options icon's pill
 TOUCHPAD_AT = (104, 104)      # gaiji_bt09 in the 256 x 256 sheet
@@ -246,7 +248,7 @@ NA_STYLES = ["key", "xbox", "ps", "nx"]  # the order of gaiji_na[] in the header
 NA_KEY_AT = {"key": (156, 104), "xbox": (260, 260), "ps": (208, 312), "nx": (468, 208)}
 NA_KEY_NAMES = {"key": "gaiji_alt", "xbox": "gaiji_shift", "ps": "gaiji_ctrl", "nx": "gaiji_mouse_all"}
 KEY_E_AT = (52, 156)  # gaiji_e: the keyboard sheet's fingerprint
-NA_FONT = "C:/Windows/Fonts/arialbd.ttf"
+NA_FONT = os.environ.get("YW4_GAIJI_NA_FONT", "C:/Windows/Fonts/arialbd.ttf")
 
 
 def _na_text(d: ImageDraw.ImageDraw, S: int, cx: float, cy: float, height: float, color, edge=None) -> None:

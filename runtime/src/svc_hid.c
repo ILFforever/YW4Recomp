@@ -179,6 +179,15 @@ extern uint64_t yw4_world_frames;  /* perf.c */
 static int replay_loaded;
 int yw4_replay_done;  /* the replay has handed over to the player (its last line): kernel.c's frame clock stops */
 
+/* Grows a replay array by one entry without losing the old block if memory runs out: 0 then (the caller stops
+ * reading the file and keeps what it has). */
+static int replay_grow(void **arr, size_t n, size_t elem) {
+    void *g = realloc(*arr, (n + 1) * elem);
+    if (!g) return 0;
+    *arr = g;
+    return 1;
+}
+
 static void replay_load(void) {
     replay_loaded = 1;
     const char *path = getenv("YW4_REPLAY");
@@ -189,25 +198,26 @@ static void replay_load(void) {
         return;
     }
     char line[2048];
-    while (fgets(line, sizeof line, f)) {
+    int out_of_memory = 0;  /* a test tool: keep the lines read so far and say so */
+    while (!out_of_memory && fgets(line, sizeof line, f)) {
         unsigned long long tick, buttons;
         int lx, ly, rx, ry, at = 0;
         char name[16];
         if (sscanf(line, "s %llu %llx %d %d %d %d", &tick, &buttons, &lx, &ly, &rx, &ry) == 6) {
-            replay_states = realloc(replay_states, (n_states + 1) * sizeof *replay_states);
+            if (!replay_grow((void **)&replay_states, n_states, sizeof *replay_states)) { out_of_memory = 1; break; }
             replay_states[n_states++] = (RecState){tick, buttons, {lx, ly, rx, ry}};
         } else if (sscanf(line, "k %llu %15s", &tick, name) == 2) {
-            replay_keys = realloc(replay_keys, (n_keys + 1) * sizeof *replay_keys);
+            if (!replay_grow((void **)&replay_keys, n_keys, sizeof *replay_keys)) { out_of_memory = 1; break; }
             replay_keys[n_keys].tick = tick;
             snprintf(replay_keys[n_keys].name, sizeof replay_keys[n_keys].name, "%s", name);
             replay_keys[n_keys].text = NULL;
             n_keys++;
         } else if (sscanf(line, "w %llu", &tick) == 1) {
-            replay_waits = realloc(replay_waits, (n_waits + 1) * sizeof *replay_waits);
+            if (!replay_grow((void **)&replay_waits, n_waits, sizeof *replay_waits)) { out_of_memory = 1; break; }
             replay_waits[n_waits++] = tick;
         } else if (sscanf(line, "t %llu %n", &tick, &at) == 1 && at > 0) {  /* typed text, to the end of the line */
             line[strcspn(line, "\r\n")] = 0;
-            replay_keys = realloc(replay_keys, (n_keys + 1) * sizeof *replay_keys);
+            if (!replay_grow((void **)&replay_keys, n_keys, sizeof *replay_keys)) { out_of_memory = 1; break; }
             replay_keys[n_keys].tick = tick;
             snprintf(replay_keys[n_keys].name, sizeof replay_keys[n_keys].name, "TEXT");
             size_t tl = strlen(line + at) + 1;  /* (strdup isn't C11) */
@@ -215,6 +225,9 @@ static void replay_load(void) {
             n_keys++;
         }
     }
+    if (out_of_memory)
+        fprintf(stderr, "yw4: replay: out of memory, using only the first %zu states and %zu key presses\n", n_states,
+                n_keys);
     fclose(f);
     fprintf(stderr, "yw4: replay: %zu input states and %zu key presses from %s\n", n_states, n_keys, path);
     if (!n_states && !n_keys) __atomic_store_n(&yw4_replay_done, 1, __ATOMIC_RELEASE);  /* an empty file: nothing to time */

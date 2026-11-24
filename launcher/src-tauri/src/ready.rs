@@ -113,8 +113,9 @@ fn put_back_previous(inst: &Path) {
 #[tauri::command]
 pub fn save_state(state: State) -> Result<(), String> {
     let p = state_path();
-    std::fs::create_dir_all(p.parent().unwrap()).map_err(|e| e.to_string())?;
-    std::fs::write(&p, serde_json::to_string_pretty(&state).unwrap()).map_err(|e| e.to_string())
+    if let Some(d) = p.parent() { std::fs::create_dir_all(d).map_err(|e| e.to_string())?; }
+    let json = serde_json::to_string_pretty(&state).map_err(|e| e.to_string())?;
+    std::fs::write(&p, json).map_err(|e| e.to_string())
 }
 
 fn exe(install: &str) -> PathBuf {
@@ -289,8 +290,8 @@ fn load_played(install: &str) -> Played {
 
 fn save_played(p: &Played) {
     let path = played_path();
-    let _ = std::fs::create_dir_all(path.parent().unwrap());
-    let _ = std::fs::write(path, serde_json::to_string_pretty(p).unwrap());
+    if let Some(d) = path.parent() { let _ = std::fs::create_dir_all(d); }
+    if let Ok(json) = serde_json::to_string_pretty(p) { let _ = std::fs::write(path, json); }
 }
 
 fn now() -> u64 {
@@ -487,7 +488,7 @@ fn ensure_icon_image(dir: &Path) -> Option<PathBuf> {
 }
 
 #[tauri::command]
-pub async fn install_info(app: tauri::AppHandle, install: String) -> Info {
+pub async fn install_info(app: tauri::AppHandle, install: String) -> Result<Info, String> {
     tauri::async_runtime::spawn_blocking(move || {
         let inst = PathBuf::from(&install);
         crate::buildrun::ensure_dlc_extracted(&app, &inst);
@@ -546,7 +547,7 @@ pub async fn install_info(app: tauri::AppHandle, install: String) -> Info {
                last_played: played.last_played, play_secs: played.seconds }
     })
     .await
-    .unwrap()
+    .map_err(|e| e.to_string())
 }
 
 /// Supplies prod.keys on the DLC tab when the 4++ Upgrade Pack was added after a build that had no keys_dir.
@@ -566,7 +567,7 @@ pub async fn set_dlc_keys(app: tauri::AppHandle, install: String, path: String) 
     if !inst.join("data").join("dlc-romfs").join("100").is_dir() {
         return Err("Couldn't unpack the 4++ Upgrade Pack with that prod.keys file.".into());
     }
-    Ok(install_info(app, install).await)
+    install_info(app, install).await
 }
 
 /// Enables or disables an individual mod by name; updates and saves the launcher's state.
@@ -592,7 +593,7 @@ pub fn play(app: tauri::AppHandle, install: String, mods: Option<bool>, on_play:
     crate::buildrun::ensure_dlc_extracted(&app, Path::new(&install));
     let e = exe(&install);
     let mut cmd = crate::platform::command(&e);
-    cmd.current_dir(e.parent().unwrap());
+    if let Some(d) = e.parent() { cmd.current_dir(d); }
     // the game is a console program: its window shows the log live. Off unless Settings asks for it (the log file is written either way)
     if show_log != Some(true) { crate::platform::hidden(&mut cmd); }
     if mods == Some(false) {
@@ -1066,7 +1067,7 @@ pub fn move_saves(install: String, to: String) -> Result<(), String> {
     let ((src_save, src_ini), (dst_save, dst_ini)) = (saves_place(&inst, from), saves_place(&inst, &to));
     let has_files = |d: &Path| std::fs::read_dir(d).map(|mut r| r.next().is_some()).unwrap_or(false);
     if has_files(&dst_save) || dst_ini.is_file() {
-        return Err(format!("There are already saves in {}. Move or delete them first.", dst_save.parent().unwrap().display()));
+        return Err(format!("There are already saves in {}. Move or delete them first.", dst_save.parent().unwrap_or(&dst_save).display()));
     }
     // game.ini: the two lines that say where (decision 0050); relative inside the install, absolute in AppData.
     // It sits in the game's own folder (work\build, game, or the install itself) and the game reads relative paths

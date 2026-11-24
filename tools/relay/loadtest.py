@@ -84,13 +84,15 @@ def relay_cpu(args) -> float | None:
     cmd = None
     if args.pid:
         try:
-            f = open(f"/proc/{args.pid}/stat").read().split()
-            return (int(f[13]) + int(f[14])) / os.sysconf("SC_CLK_TCK")
-        except OSError:
+            with open(f"/proc/{args.pid}/stat") as fh:
+                stat = fh.read()
+            f = stat.rsplit(")", 1)[1].split()  # after the command name, which may hold spaces: state is f[0]
+            return (int(f[11]) + int(f[12])) / os.sysconf("SC_CLK_TCK")
+        except (OSError, ValueError, IndexError):
             return None
     if args.ssh:
         cmd = ["ssh", "-i", str(Path.home() / ".ssh" / "yw4_relay"), "-o", "BatchMode=yes", args.ssh,
-               'p=$(systemctl show yw4-relay -p MainPID --value); awk "{print \\$14+\\$15}" /proc/$p/stat; getconf CLK_TCK']
+               "p=$(systemctl show yw4-relay -p MainPID --value); awk '{sub(/^.*[)] /,\"\"); print $12+$13}' /proc/$p/stat; getconf CLK_TCK"]
     if not cmd:
         return None
     try:

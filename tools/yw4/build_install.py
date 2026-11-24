@@ -246,8 +246,8 @@ def ensure_install_icon(cfg: config.Config) -> None:
         return
     try:
         run("tools.yw4.icon")
-    except Exception:
-        pass
+    except (OSError, RuntimeError, subprocess.SubprocessError) as e:
+        print(f"warning: tools.yw4.icon did not finish ({e}); continuing without it")
 
 
 def ensure_install_manual(cfg: config.Config) -> None:
@@ -262,8 +262,8 @@ def ensure_install_manual(cfg: config.Config) -> None:
         return
     try:
         run("tools.yw4.manual")
-    except Exception:
-        pass
+    except (OSError, RuntimeError, subprocess.SubprocessError) as e:
+        print(f"warning: tools.yw4.manual did not finish ({e}); continuing without it")
 
 
 def ensure_wheel_icons(cfg: config.Config) -> None:
@@ -272,8 +272,8 @@ def ensure_wheel_icons(cfg: config.Config) -> None:
         return
     try:
         run("tools.yw4.wheel_icons")
-    except Exception:
-        pass
+    except (OSError, RuntimeError, subprocess.SubprocessError) as e:
+        print(f"warning: tools.yw4.wheel_icons did not finish ({e}); continuing without it")
 
 
 def game_runtime_files(work: Path) -> list[str]:

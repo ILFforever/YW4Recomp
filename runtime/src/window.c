@@ -1457,7 +1457,7 @@ static void legacy_panel_draw(VkImage dst, int32_t x0, int32_t y0, uint32_t bw, 
                  y0 + ((int32_t)bh - (int32_t)((float)h * s)) / 2, s);
 }
 
-void window_hud_toggle(void) { __atomic_store_n(&hud_on, hud_enabled() ? 0 : hud_last, __ATOMIC_RELEASE); }
+static void window_hud_toggle(void) { __atomic_store_n(&hud_on, hud_enabled() ? 0 : hud_last, __ATOMIC_RELEASE); }
 
 /* F3 (owner, 2026-11-11: it cycles the HUD instead of opening the overlay's Overlay page): off, compact, detailed,
  * off again. */

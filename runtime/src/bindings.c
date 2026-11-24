@@ -657,7 +657,7 @@ void bindings_read(const bool *keyboard, uint32_t mouse_buttons, int wheel_up, i
     }
     /* a Yes / No box with its buttons side by side (mousemenu_sideways): the wheel steps left (up) and right (down) */
     if (scene_on_title() || (mousemenu_talking() && !battle)) mouse = mousemenu_sideways() ? sideways_mouse : title_mouse;
-    /* the Diary with its 10 slots (savefs_diary_open; title > Continue, and Save in the game): the wheel steps the
+    /* the Diary with its 5 slots (savefs_diary_open; title > Continue, and Save in the game): the wheel steps the
      * slot, as Left / Right do (savefs.c; owner, 2026-11-17); the clicks confirm and go back */
     /* stacked rows (title > Continue, savefs_diary_rows): the wheel moves up and down them, and left and right on their
      * Yes / No box */
