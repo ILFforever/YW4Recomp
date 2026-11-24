@@ -1538,9 +1538,10 @@ async function showSettings() {
   const dl = [inst.fsr && 'AMD FSR', inst.dlss && 'NVIDIA DLSS', inst.xess !== false && !LINUX && 'Intel XeSS'].filter(Boolean);
   $('set-downloads').textContent = !dl.length ? 'No upscaler downloads'
     : dl.length === 1 ? dl[0] : dl.slice(0, -1).join(', ') + ' and ' + dl[dl.length - 1];
-  $('set-versions').textContent = `Launcher ${$('launcher-version').textContent.replace('Launcher ', '')} · Game ${$('game-version').textContent.replace('YW4 Recomp ', '')}`;
   setToggle('set-checkupd', autoUpdates());
   const info = await invoke('install_info', { install: inst.install });
+  // the built game's own version (`yw4 --version`), not the Play screen's text: Settings can open first
+  $('set-versions').textContent = `Launcher ${$('launcher-version').textContent.replace('Launcher ', '')} · Game ${builtVersion(info) || 'not built yet'}`;
   reclaimable = info.reclaimable;
   $('set-free-size').textContent = reclaimable > RECLAIM_MIN_BYTES ? `${gb(reclaimable)} the game doesn't need to run` : 'Already freed up';
   $('set-free').disabled = reclaimable <= RECLAIM_MIN_BYTES;
