@@ -3924,225 +3924,176 @@ static void draw_pick(const UiCanvas *c, const GameMenuInfo *in, float W, float 
     }
 }
 
-void gamemenu_draw(const UiCanvas *c, const GameMenuInfo *in) {
-    TH = theme_colors();
-    draw_text_has = 0;
-    /* the overlay's own name entry has no thread waiting in gamemenu_prompt_take: Enter (the field let go) is OK here */
-    if (prompt_done && gamemenu_prompting() && !textin_has(&prompt_text)) prompt_finish();
-    if (gamemenu_peeking()) {  /* F2's quick look: the keyboard Overview alone, in the game's current mode */
-        int hk = hit_back();
-        hit_n[hk] = 0;  /* only the keys and the mode switch can be pointed at (gamemenu_peek_point) */
-        static const char *const ptitle[3] = {"Controls \xc2\xb7 Exploring", "Controls \xc2\xb7 Battle", "Controls \xc2\xb7 Cutscene"};
-        int saved = KV_GET();
-        KV_SET(peek_shown_mode());
-        /* centred on the 1600 x 900 design (owner: in the middle, bigger, the picture behind it blurred); the
-         * keyboard's card is taller by its detail bar */
-        float pw = 1360, ph = in->pad ? 640 : 714, px = (1600 - pw) / 2, py = (900 - ph) / 2;
-        ui_box(c, px, py, pw, ph, 22, PAPER, 0, 0);
-        /* the key hints along the card's bottom, as the other pages' bar (a dark band, the keys on light chips) */
-        float hb = py + ph - 56, hx = px + 40;
-        ui_box(c, px, hb, pw, 56, 22, NIGHT, 0, 0);
-        ui_rect(c, px, hb, pw, 24, NIGHT, 1);  /* its top corners square */
-        if (in->pad) {  /* the controller was used last (the quick look by holding View / Create / Minus): its view */
-            hx += hint(c, hx, hb, pv_chip(PV_MINUS, bindings_pad_style()), "Next page") + 28;
-            hx += hint(c, hx, hb, pv_chip(PV_MINUS, bindings_pad_style()), "Hold: hide") + 28;
-            hint(c, hx, hb, in->close, "Menu");
-            ui_text(c, UI_ROUNDED_800, 30, px + 40, py + 30, 30 * 1.25f, ptitle[KV_GET()], NIGHT);
-            draw_controls_pad(c, in, px + 40, py + 30 + 30 * 1.25f + 6, pw - 80, 1);
-        } else {
-            hx += hint(c, hx, hb, "F2", "Hide") + 28;
-            hint(c, hx, hb, "Esc", "Menu, to change the keys");
-            ui_text(c, UI_ROUNDED_800, 30, px + 40, py + 30, 30 * 1.25f, "Controls", NIGHT);
-            draw_controls_overview(c, px + 40, py + 30 + 30 * 1.25f + 18, pw - 80, 1);
-        }
-        KV_SET(saved);
-        pv_rect[0] = px, pv_rect[1] = py, pv_rect[2] = pw, pv_rect[3] = ph;  /* the part the window shows */
-        __atomic_store_n(&hit_front, hk, __ATOMIC_RELEASE);
-        return;
-    }
-    float W = (float)c->w / c->s, H = 900;
-    /* a picture narrower than 16:9 (the 16:10 aspect ratio): the design is fitted to its width and centred, with
-     * a strip of E design units above and below it (window.c, overlay_fit). The frame reaches the picture's
-     * edges: the tint and the side panel cover the strips, the header and the side buttons sit at the top (T),
-     * Exit game, the version and the key hints at the bottom (by). The pages and popups stay centred */
-    float E = c->oy > 0 ? c->oy / c->s : 0, T = -E, by = H - 56 + E;
-    edge = E;
+/* F2's quick look: the keyboard or controller overview alone over the running game (present thread). */
+static void draw_peek(const UiCanvas *c, const GameMenuInfo *in) {
     int hk = hit_back();
-    hit_n[hk] = 0;  /* the mouse's list, filled as things are drawn */
-    int req = __atomic_exchange_n(&bug_request, 0, __ATOMIC_ACQ_REL);
-    if (req) {  /* Save only / Send (bug_finish): here, where the paused picture is */
-        textin_read(&bug_text, bug_sent_text, sizeof bug_sent_text, NULL, NULL);
-        bug_sent_kind = bug_kind, bug_sent_often = bug_often;
-        BugReport r = bug_report_of(bug_sent_text, bug_kind, bug_often);
-        r.picture = in->picture, r.picture_w = in->picture_w, r.picture_h = in->picture_h;
-        r.window_w = c->w, r.window_h = c->h;
-        if (bugreport_save(&r, bug_zip, sizeof bug_zip) == 0) {
-            if (req == 2) bugreport_open_github(&r);
-            bug_sent_github = req == 2;
-            bug_page = 2, bug_done_btn = req == 2 ? 2 : 0;
-        } else {
-            toast("Couldn't save the report");
-        }
-        changed();
+    hit_n[hk] = 0;  /* only the keys and the mode switch can be pointed at (gamemenu_peek_point) */
+    static const char *const ptitle[3] = {"Controls \xc2\xb7 Exploring", "Controls \xc2\xb7 Battle", "Controls \xc2\xb7 Cutscene"};
+    int saved = KV_GET();
+    KV_SET(peek_shown_mode());
+    /* centred on the 1600 x 900 design (owner: in the middle, bigger, the picture behind it blurred); the
+     * keyboard's card is taller by its detail bar */
+    float pw = 1360, ph = in->pad ? 640 : 714, px = (1600 - pw) / 2, py = (900 - ph) / 2;
+    ui_box(c, px, py, pw, ph, 22, PAPER, 0, 0);
+    /* the key hints along the card's bottom, as the other pages' bar (a dark band, the keys on light chips) */
+    float hb = py + ph - 56, hx = px + 40;
+    ui_box(c, px, hb, pw, 56, 22, NIGHT, 0, 0);
+    ui_rect(c, px, hb, pw, 24, NIGHT, 1);  /* its top corners square */
+    if (in->pad) {  /* the controller was used last (the quick look by holding View / Create / Minus): its view */
+        hx += hint(c, hx, hb, pv_chip(PV_MINUS, bindings_pad_style()), "Next page") + 28;
+        hx += hint(c, hx, hb, pv_chip(PV_MINUS, bindings_pad_style()), "Hold: hide") + 28;
+        hint(c, hx, hb, in->close, "Menu");
+        ui_text(c, UI_ROUNDED_800, 30, px + 40, py + 30, 30 * 1.25f, ptitle[KV_GET()], NIGHT);
+        draw_controls_pad(c, in, px + 40, py + 30 + 30 * 1.25f + 6, pw - 80, 1);
+    } else {
+        hx += hint(c, hx, hb, "F2", "Hide") + 28;
+        hint(c, hx, hb, "Esc", "Menu, to change the keys");
+        ui_text(c, UI_ROUNDED_800, 30, px + 40, py + 30, 30 * 1.25f, "Controls", NIGHT);
+        draw_controls_overview(c, px + 40, py + 30 + 30 * 1.25f + 18, pw - 80, 1);
     }
-    if (gamemenu_prompting() && __atomic_load_n(&pick_n, __ATOMIC_ACQUIRE)) {  /* a list (the New Game slots) */
-        if (diary_n || dy_confirm) draw_diary_pick(c, in, W, H, T, E, by);
-        else draw_pick(c, in, W, H, T, E, by);
-        __atomic_store_n(&hit_front, hk, __ATOMIC_RELEASE);
-        return;
-    }
-    if (gamemenu_prompting()) {  /* name entry (board N1): only the popup, over the game's waiting picture */
-        ui_rect(c, 0, T - 1, W, H + 2 * E + 2, POP_BACKDROP, 0.45f);
-        float pw = 650, bar = 18 + 22 * 1.3f + 16, fh = 72, llh = 16 * 1.45f;
-        float blh = 17 * 1.5f, msg_h = prompt_body[0] ? ui_text_wrap(NULL, UI_GOTHIC_500, 17, 0, 0, 0, pw - 56, blh, 0,
-                                                                      prompt_body, 0) : 0;
-        static int osk_force = -1;  /* YW4_OSK=1: the keyboard with any device (tests, touch screens) */
-        if (osk_force < 0) osk_force = getenv("YW4_OSK") && *getenv("YW4_OSK") == '1';
-        osk_shown = (in->pad || osk_force) && !prompt_body[0];
-        float kh = 50, kgap = 8, tab_h = 40, osk_h = osk_shown ? 14 + tab_h + 12 + OSK_ROWS * (kh + kgap) : 0;
-        float body = prompt_body[0] ? 24 + msg_h + 24 : 24 + llh + 8 + fh + 12 + llh + osk_h + 22;
-        float tray = 16 + 52 + 16, ph = bar + 3 + body + tray;
-        float px = (W - pw) / 2, py = (H - 56 - ph) / 2;
-        ui_shadow(c, px, py + 14, pw, ph, 16, 40, POP_SHADOW, 0.45f);
-        ui_box_alpha(c, px - 1, py - 1, pw + 2, ph + 2, 17, POP_BORDER, 0.5f);
-        ui_box(c, px, py, pw, ph, 16, POP_WHITE, 0, 0);
-        ui_box(c, px, py, pw, bar + 16, 16, POP_DEEP, 0, 0);
-        ui_rect(c, px, py + bar, pw, 3, POP_GOLD, 1);
-        float ty = py + ph - tray;
-        ui_box(c, px, ty - 16, pw, tray + 16, 16, POP_LILAC, 0, 0);
-        ui_rect(c, px, py + bar + 3, pw, ty - (py + bar + 3), POP_WHITE, 1);
-        ui_rect(c, px, ty, pw, 1, POP_LINE, 1);
-        ui_text(c, UI_ROUNDED_800, 22, px + 28, py + 18, 22 * 1.3f, prompt_title, POP_WHITE);
-        float bx = px + 28, bw = pw - 56, y = py + bar + 3 + 24;
-        int typing = textin_has(&prompt_text);
-        if (prompt_body[0]) {  /* a message (download codes): the text, then OK */
-            ui_text_wrap(c, UI_GOTHIC_500, 17, 0, bx, y, bw, blh, 0, prompt_body, POP_INK);
-            goto prompt_ok;
-        }
-        ui_text(c, UI_GOTHIC_700, 16, bx, y, llh, prompt_label, MUTED);
-        y += llh + 8;
-        char text[TEXTIN_MAX];
-        int cur, sel, chars = 0;
-        textin_read(&prompt_text, text, sizeof text, &cur, &sel);
-        for (const char *p = text; *p; p++) chars += ((unsigned char)*p & 0xC0) != 0x80;
-        ui_box(c, bx, y, bw, fh, 14, WHITE, typing ? 3 : 2, typing ? PLUM : LINE);
-        hit_add(bx, y, bw, fh, HIT_PROMPT_FIELD, 0, 0);
-        char count[24] = "";
-        if (prompt_text.max_chars > 0) snprintf(count, sizeof count, "%d / %d", chars, prompt_text.max_chars);
-        float cw = ui_text_w(UI_GOTHIC_700, 17, count);
-        ui_text_in(c, UI_GOTHIC_700, 17, bx + bw - 20 - cw, y, cw, fh, 2, count, MUTED);
-        if (!text[0]) ui_text_in(c, UI_ROUNDED_800, 32, bx + 20 + 6, y, 0, fh, 0, prompt_fallback, LILAC);  /* the default */
-        ui_text_edit(c, UI_ROUNDED_800, 32, bx + 20, y + (fh - 32 * 1.3f) / 2, bw - 40 - cw - 16, 32 * 1.3f, 1, text,
-                     typing ? cur : -1, typing ? sel : -1, INK, PLUM, RING);
-        if (typing) {
-            draw_text_box[0] = bx, draw_text_box[1] = y, draw_text_box[2] = bw, draw_text_box[3] = fh;
-            draw_text_caret = ui_text_caret_x();
-            draw_text_has = 1;
-        }
-        y += fh + 12;
-        char help[128], limit[32] = "";
-        if (prompt_text.max_chars > 0) snprintf(limit, sizeof limit, " Up to %d letters.", prompt_text.max_chars);
-        snprintf(help, sizeof help, "%s%s%s%s%s", osk_shown ? "Pick the letters below." : "Type with your keyboard.", limit,
-                 prompt_fallback[0] ? " Leave it empty for " : "", prompt_fallback, prompt_fallback[0] ? "." : "");
-        ui_text(c, UI_GOTHIC_500, 16, bx, y, llh, help, MUTED);
-        if (osk_shown) {  /* the on-screen keyboard: the language switcher, then ten columns, the chosen key gold */
-            float ky = y + llh + 14, kw = (bw - (OSK_COLS - 1) * kgap) / OSK_COLS;
-            {  /* LB [‹] [ English ] [›] RB: the language's name in its own script, on plum */
-                const char *lb = in->pad == 2 ? "L1" : "LB", *rb = in->pad == 2 ? "R1" : "RB";
-                float sw = ui_text_w(UI_ROUNDED_800, 13, "L1") + 18;
-                if (ui_text_w(UI_ROUNDED_800, 13, "LB") + 18 > sw) sw = ui_text_w(UI_ROUNDED_800, 13, "LB") + 18;
-                float sh = 26, sy = ky + (tab_h - sh) / 2, aw = 52;
-                float ax0 = bx + sw + kgap, ax1 = bx + bw - sw - kgap - aw;  /* the two arrows */
-                float nx = ax0 + aw + kgap, nw = ax1 - kgap - nx;                /* the name between them */
-                ui_box(c, bx, sy, sw, sh, 8, PLUM, 0, 0);
-                ui_text_in(c, UI_ROUNDED_800, 13, bx, sy, sw, sh, 1, lb, SNOW);
-                ui_box(c, bx + bw - sw, sy, sw, sh, 8, PLUM, 0, 0);
-                ui_text_in(c, UI_ROUNDED_800, 13, bx + bw - sw, sy, sw, sh, 1, rb, SNOW);
-                ui_box(c, ax0, ky, aw, tab_h, 10, WHITE, 2, LINE);
-                ui_text_in(c, UI_ROUNDED_800, 24, ax0, ky, aw, tab_h, 1, "‹", PLUM);
-                hit_add(ax0, ky, aw, tab_h, HIT_OSK_PAGE, -1, 0);
-                ui_box(c, ax1, ky, aw, tab_h, 10, WHITE, 2, LINE);
-                ui_text_in(c, UI_ROUNDED_800, 24, ax1, ky, aw, tab_h, 1, "›", PLUM);
-                hit_add(ax1, ky, aw, tab_h, HIT_OSK_PAGE, 1, 0);
-                ui_box(c, nx, ky, nw, tab_h, 10, PLUM, 0, 0);
-                ui_text_in(c, UI_ROUNDED_800, 18, nx, ky, nw, tab_h, 1, osk_page ? "日本語" : "English", SNOW);
-                ky += tab_h + 12;
-            }
-            int nlast;
-            const OskKey *L = osk_last(&nlast);
-            for (int r = 0; r < OSK_ROWS; r++, ky += kh + kgap) {
-                int last = r == OSK_ROWS - 1, nkeys = last ? nlast : r < osk_letter_rows() ? OSK_COLS : 0;
-                for (int k = 0; k < nkeys; k++) {
-                    int c0 = last ? L[k].c0 : k, c1 = last ? L[k].c1 : k + 1;
-                    char label[16];
-                    if (last) snprintf(label, sizeof label, "%s", L[k].act == OSK_SCRIPT ? osk_page == 1 ? "ア" : "あ" : L[k].label);
-                    else osk_letter(r, k, label);
-                    if (!label[0]) continue;  /* や's column: no key in the gaps */
-                    float kx = bx + (float)c0 * (kw + kgap), w2 = (float)(c1 - c0) * (kw + kgap) - kgap;
-                    int on = osk_row == r && osk_col >= c0 && osk_col < c1;
-                    int shift_on = last && L[k].act == OSK_SHIFT && osk_caps, done = last && L[k].act == OSK_DONE;
-                    int word = last && label[0] >= 'A' && label[0] <= 'Z';  /* Shift, Space...: smaller than letters */
-                    uint32_t fill = on ? GOLD : done ? PLUM : shift_on ? LILAC : WHITE;
-                    ui_box(c, kx, ky, w2, kh, 10, fill, on ? 0 : 2, LINE);
-                    ui_text_in(c, UI_ROUNDED_800, word ? 17 : 22, kx, ky, w2, kh, 1, label,
-                               on ? ON_GOLD : done ? SNOW : PLUM);
-                    hit_add(kx, ky, w2, kh, HIT_OSK_KEY, r, c0);
-                }
-            }
-        }
-    prompt_ok:;
-        float okw = ui_text_w(UI_ROUNDED_800, 18, "OK") + 2 * 32, okx = px + pw - 16 - okw, oky = ty + 16;
-        int ok_on = prompt_enough();  /* a password with nothing typed: OK greyed out until there is a letter */
-        if (!typing && ok_on) ui_box(c, okx - 4, oky - 4, okw + 8, 60, 15, RING, 0, 0);
-        ui_box(c, okx, oky, okw, 52, 12, ok_on ? GOLD : LINE, 0, 0);
-        ui_text_in(c, UI_ROUNDED_800, 18, okx, oky, okw, 52, 1, "OK", ok_on ? ON_GOLD : MUTED);
-        hit_add(okx, oky, okw, 52, HIT_PROMPT_OK, 0, 0);
-        int can_cancel = prompt_cancel && !prompt_body[0];
-        if (can_cancel) {  /* Cancel (a password, a nickname): the game is told the keyboard was closed */
-            float cw2 = ui_text_w(UI_ROUNDED_800, 18, "Cancel") + 2 * 28, cx2 = okx - 10 - cw2;
-            ui_box(c, cx2, oky, cw2, 52, 12, POP_WHITE, 2, POP_LINE);
-            ui_text_in(c, UI_ROUNDED_800, 18, cx2, oky, cw2, 52, 1, "Cancel", POP_INK);
-            hit_add(cx2, oky, cw2, 52, HIT_PROMPT_CANCEL, 0, 0);
-        }
-        ui_rect(c, 0, by, W, 56 + 1, NIGHT, 1);  /* the key hints, the whole width */
-        float hx = 48;
-        if (in->pad && osk_shown) {  /* the on-screen keyboard */
-            int ps = in->pad == 2;
-            hx += hint(c, hx, by, "D-pad", "Move") + 28;
-            hx += hint(c, hx, by, ps ? "Cross" : "A", "Type") + 28;
-            hx += hint(c, hx, by, ps ? "Circle" : "B", can_cancel ? "Delete / Cancel" : "Delete") + 28;
-            hx += hint(c, hx, by, ps ? "Triangle" : "Y", osk_page ? "゛゜" : "Capitals") + 28;
-            hint(c, hx, by, ps ? "L1 R1" : "LB RB", "Language");
-        } else if (in->pad) {
-            hx += hint(c, hx, by, in->pad == 2 ? "Cross" : "A", "OK") + 28;
-            if (can_cancel) hint(c, hx, by, in->pad == 2 ? "Circle" : "B", "Cancel");
-        } else {
-            hx += hint(c, hx, by, "Enter", "OK") + 28;
-            if (can_cancel) hx += hint(c, hx, by, "Esc", "Cancel") + 28;
-            if (!prompt_body[0]) {
-                hx += hint(c, hx, by, "Backspace", "Delete") + 28;
-                hint(c, hx, by, "Ctrl V", "Paste");
-            }
-        }
-        __atomic_store_n(&hit_front, hk, __ATOMIC_RELEASE);
-        return;
-    }
-    if (preview) {  /* only the bar, over the running game */
-        draw_preview(c, in);
-        __atomic_store_n(&hit_front, hk, __ATOMIC_RELEASE);
-        return;
-    }
-    int cheats = cheats_allowed();
-    int page = (sel == GM_SETTINGS || sel == GM_CONTROLS || sel == GM_ONLINE || sel == GM_PERF || (sel == GM_CHEATS && cheats) ||
-                sel == GM_BUG) && !confirm;  /* these show a page */
-    ui_rect(c, 0, T - 1, W, H + 2 * E + 2, SHADE, page ? 0.62f : 0.35f);  /* the tint over the game, darker behind a page */
-    if (page && sel == GM_SETTINGS) draw_settings_page(c, in);
-    if (page && sel == GM_CONTROLS) draw_controls_page(c, in);
-    if (page && sel == GM_ONLINE) draw_online_page(c, in);
-    if (page && sel == GM_PERF) draw_perf_page(c, in);
-    if (page && sel == GM_CHEATS) draw_cheats_page(c, in);
-    if (page && sel == GM_BUG) draw_bug_page(c, in);
+    KV_SET(saved);
+    pv_rect[0] = px, pv_rect[1] = py, pv_rect[2] = pw, pv_rect[3] = ph;  /* the part the window shows */
+    __atomic_store_n(&hit_front, hk, __ATOMIC_RELEASE);
+}
 
+/* Name entry or message popup (board N1), with optional on-screen keyboard and key hints (present thread). */
+static void draw_prompt(const UiCanvas *c, const GameMenuInfo *in, float W, float H, float T, float E, float by) {
+    ui_rect(c, 0, T - 1, W, H + 2 * E + 2, POP_BACKDROP, 0.45f);
+    float pw = 650, bar = 18 + 22 * 1.3f + 16, fh = 72, llh = 16 * 1.45f;
+    float blh = 17 * 1.5f, msg_h = prompt_body[0] ? ui_text_wrap(NULL, UI_GOTHIC_500, 17, 0, 0, 0, pw - 56, blh, 0,
+                                                                  prompt_body, 0) : 0;
+    static int osk_force = -1;  /* YW4_OSK=1: the keyboard with any device (tests, touch screens) */
+    if (osk_force < 0) osk_force = getenv("YW4_OSK") && *getenv("YW4_OSK") == '1';
+    osk_shown = (in->pad || osk_force) && !prompt_body[0];
+    float kh = 50, kgap = 8, tab_h = 40, osk_h = osk_shown ? 14 + tab_h + 12 + OSK_ROWS * (kh + kgap) : 0;
+    float body = prompt_body[0] ? 24 + msg_h + 24 : 24 + llh + 8 + fh + 12 + llh + osk_h + 22;
+    float tray = 16 + 52 + 16, ph = bar + 3 + body + tray;
+    float px = (W - pw) / 2, py = (H - 56 - ph) / 2;
+    ui_shadow(c, px, py + 14, pw, ph, 16, 40, POP_SHADOW, 0.45f);
+    ui_box_alpha(c, px - 1, py - 1, pw + 2, ph + 2, 17, POP_BORDER, 0.5f);
+    ui_box(c, px, py, pw, ph, 16, POP_WHITE, 0, 0);
+    ui_box(c, px, py, pw, bar + 16, 16, POP_DEEP, 0, 0);
+    ui_rect(c, px, py + bar, pw, 3, POP_GOLD, 1);
+    float ty = py + ph - tray;
+    ui_box(c, px, ty - 16, pw, tray + 16, 16, POP_LILAC, 0, 0);
+    ui_rect(c, px, py + bar + 3, pw, ty - (py + bar + 3), POP_WHITE, 1);
+    ui_rect(c, px, ty, pw, 1, POP_LINE, 1);
+    ui_text(c, UI_ROUNDED_800, 22, px + 28, py + 18, 22 * 1.3f, prompt_title, POP_WHITE);
+    float bx = px + 28, bw = pw - 56, y = py + bar + 3 + 24;
+    int typing = textin_has(&prompt_text);
+    if (prompt_body[0]) {  /* a message (download codes): the text, then OK */
+        ui_text_wrap(c, UI_GOTHIC_500, 17, 0, bx, y, bw, blh, 0, prompt_body, POP_INK);
+        goto prompt_ok;
+    }
+    ui_text(c, UI_GOTHIC_700, 16, bx, y, llh, prompt_label, MUTED);
+    y += llh + 8;
+    char text[TEXTIN_MAX];
+    int cur, sel, chars = 0;
+    textin_read(&prompt_text, text, sizeof text, &cur, &sel);
+    for (const char *p = text; *p; p++) chars += ((unsigned char)*p & 0xC0) != 0x80;
+    ui_box(c, bx, y, bw, fh, 14, WHITE, typing ? 3 : 2, typing ? PLUM : LINE);
+    hit_add(bx, y, bw, fh, HIT_PROMPT_FIELD, 0, 0);
+    char count[24] = "";
+    if (prompt_text.max_chars > 0) snprintf(count, sizeof count, "%d / %d", chars, prompt_text.max_chars);
+    float cw = ui_text_w(UI_GOTHIC_700, 17, count);
+    ui_text_in(c, UI_GOTHIC_700, 17, bx + bw - 20 - cw, y, cw, fh, 2, count, MUTED);
+    if (!text[0]) ui_text_in(c, UI_ROUNDED_800, 32, bx + 20 + 6, y, 0, fh, 0, prompt_fallback, LILAC);  /* the default */
+    ui_text_edit(c, UI_ROUNDED_800, 32, bx + 20, y + (fh - 32 * 1.3f) / 2, bw - 40 - cw - 16, 32 * 1.3f, 1, text,
+                 typing ? cur : -1, typing ? sel : -1, INK, PLUM, RING);
+    if (typing) {
+        draw_text_box[0] = bx, draw_text_box[1] = y, draw_text_box[2] = bw, draw_text_box[3] = fh;
+        draw_text_caret = ui_text_caret_x();
+        draw_text_has = 1;
+    }
+    y += fh + 12;
+    char help[128], limit[32] = "";
+    if (prompt_text.max_chars > 0) snprintf(limit, sizeof limit, " Up to %d letters.", prompt_text.max_chars);
+    snprintf(help, sizeof help, "%s%s%s%s%s", osk_shown ? "Pick the letters below." : "Type with your keyboard.", limit,
+             prompt_fallback[0] ? " Leave it empty for " : "", prompt_fallback, prompt_fallback[0] ? "." : "");
+    ui_text(c, UI_GOTHIC_500, 16, bx, y, llh, help, MUTED);
+    if (osk_shown) {  /* the on-screen keyboard: the language switcher, then ten columns, the chosen key gold */
+        float ky = y + llh + 14, kw = (bw - (OSK_COLS - 1) * kgap) / OSK_COLS;
+        {  /* LB [‹] [ English ] [›] RB: the language's name in its own script, on plum */
+            const char *lb = in->pad == 2 ? "L1" : "LB", *rb = in->pad == 2 ? "R1" : "RB";
+            float sw = ui_text_w(UI_ROUNDED_800, 13, "L1") + 18;
+            if (ui_text_w(UI_ROUNDED_800, 13, "LB") + 18 > sw) sw = ui_text_w(UI_ROUNDED_800, 13, "LB") + 18;
+            float sh = 26, sy = ky + (tab_h - sh) / 2, aw = 52;
+            float ax0 = bx + sw + kgap, ax1 = bx + bw - sw - kgap - aw;  /* the two arrows */
+            float nx = ax0 + aw + kgap, nw = ax1 - kgap - nx;                /* the name between them */
+            ui_box(c, bx, sy, sw, sh, 8, PLUM, 0, 0);
+            ui_text_in(c, UI_ROUNDED_800, 13, bx, sy, sw, sh, 1, lb, SNOW);
+            ui_box(c, bx + bw - sw, sy, sw, sh, 8, PLUM, 0, 0);
+            ui_text_in(c, UI_ROUNDED_800, 13, bx + bw - sw, sy, sw, sh, 1, rb, SNOW);
+            ui_box(c, ax0, ky, aw, tab_h, 10, WHITE, 2, LINE);
+            ui_text_in(c, UI_ROUNDED_800, 24, ax0, ky, aw, tab_h, 1, "‹", PLUM);
+            hit_add(ax0, ky, aw, tab_h, HIT_OSK_PAGE, -1, 0);
+            ui_box(c, ax1, ky, aw, tab_h, 10, WHITE, 2, LINE);
+            ui_text_in(c, UI_ROUNDED_800, 24, ax1, ky, aw, tab_h, 1, "›", PLUM);
+            hit_add(ax1, ky, aw, tab_h, HIT_OSK_PAGE, 1, 0);
+            ui_box(c, nx, ky, nw, tab_h, 10, PLUM, 0, 0);
+            ui_text_in(c, UI_ROUNDED_800, 18, nx, ky, nw, tab_h, 1, osk_page ? "日本語" : "English", SNOW);
+            ky += tab_h + 12;
+        }
+        int nlast;
+        const OskKey *L = osk_last(&nlast);
+        for (int r = 0; r < OSK_ROWS; r++, ky += kh + kgap) {
+            int last = r == OSK_ROWS - 1, nkeys = last ? nlast : r < osk_letter_rows() ? OSK_COLS : 0;
+            for (int k = 0; k < nkeys; k++) {
+                int c0 = last ? L[k].c0 : k, c1 = last ? L[k].c1 : k + 1;
+                char label[16];
+                if (last) snprintf(label, sizeof label, "%s", L[k].act == OSK_SCRIPT ? osk_page == 1 ? "ア" : "あ" : L[k].label);
+                else osk_letter(r, k, label);
+                if (!label[0]) continue;  /* や's column: no key in the gaps */
+                float kx = bx + (float)c0 * (kw + kgap), w2 = (float)(c1 - c0) * (kw + kgap) - kgap;
+                int on = osk_row == r && osk_col >= c0 && osk_col < c1;
+                int shift_on = last && L[k].act == OSK_SHIFT && osk_caps, done = last && L[k].act == OSK_DONE;
+                int word = last && label[0] >= 'A' && label[0] <= 'Z';  /* Shift, Space...: smaller than letters */
+                uint32_t fill = on ? GOLD : done ? PLUM : shift_on ? LILAC : WHITE;
+                ui_box(c, kx, ky, w2, kh, 10, fill, on ? 0 : 2, LINE);
+                ui_text_in(c, UI_ROUNDED_800, word ? 17 : 22, kx, ky, w2, kh, 1, label,
+                           on ? ON_GOLD : done ? SNOW : PLUM);
+                hit_add(kx, ky, w2, kh, HIT_OSK_KEY, r, c0);
+            }
+        }
+    }
+prompt_ok:;
+    float okw = ui_text_w(UI_ROUNDED_800, 18, "OK") + 2 * 32, okx = px + pw - 16 - okw, oky = ty + 16;
+    int ok_on = prompt_enough();  /* a password with nothing typed: OK greyed out until there is a letter */
+    if (!typing && ok_on) ui_box(c, okx - 4, oky - 4, okw + 8, 60, 15, RING, 0, 0);
+    ui_box(c, okx, oky, okw, 52, 12, ok_on ? GOLD : LINE, 0, 0);
+    ui_text_in(c, UI_ROUNDED_800, 18, okx, oky, okw, 52, 1, "OK", ok_on ? ON_GOLD : MUTED);
+    hit_add(okx, oky, okw, 52, HIT_PROMPT_OK, 0, 0);
+    int can_cancel = prompt_cancel && !prompt_body[0];
+    if (can_cancel) {  /* Cancel (a password, a nickname): the game is told the keyboard was closed */
+        float cw2 = ui_text_w(UI_ROUNDED_800, 18, "Cancel") + 2 * 28, cx2 = okx - 10 - cw2;
+        ui_box(c, cx2, oky, cw2, 52, 12, POP_WHITE, 2, POP_LINE);
+        ui_text_in(c, UI_ROUNDED_800, 18, cx2, oky, cw2, 52, 1, "Cancel", POP_INK);
+        hit_add(cx2, oky, cw2, 52, HIT_PROMPT_CANCEL, 0, 0);
+    }
+    ui_rect(c, 0, by, W, 56 + 1, NIGHT, 1);  /* the key hints, the whole width */
+    float hx = 48;
+    if (in->pad && osk_shown) {  /* the on-screen keyboard */
+        int ps = in->pad == 2;
+        hx += hint(c, hx, by, "D-pad", "Move") + 28;
+        hx += hint(c, hx, by, ps ? "Cross" : "A", "Type") + 28;
+        hx += hint(c, hx, by, ps ? "Circle" : "B", can_cancel ? "Delete / Cancel" : "Delete") + 28;
+        hx += hint(c, hx, by, ps ? "Triangle" : "Y", osk_page ? "゛゜" : "Capitals") + 28;
+        hint(c, hx, by, ps ? "L1 R1" : "LB RB", "Language");
+    } else if (in->pad) {
+        hx += hint(c, hx, by, in->pad == 2 ? "Cross" : "A", "OK") + 28;
+        if (can_cancel) hint(c, hx, by, in->pad == 2 ? "Circle" : "B", "Cancel");
+    } else {
+        hx += hint(c, hx, by, "Enter", "OK") + 28;
+        if (can_cancel) hx += hint(c, hx, by, "Esc", "Cancel") + 28;
+        if (!prompt_body[0]) {
+            hx += hint(c, hx, by, "Backspace", "Delete") + 28;
+            hint(c, hx, by, "Ctrl V", "Paste");
+        }
+    }
+}
+
+/* Left side panel: header, page buttons, Return to title, Exit game, and version label (present thread). */
+static void draw_side_panel(const UiCanvas *c, const GameMenuInfo *in, float H, float T, float E, int cheats) {
     /* the side panel: 400 wide with a 4 px gold edge towards the game */
     ui_rect(c, 0, T - 1, 400, H + 2 * E + 2, PAPER, 1);
     ui_rect(c, 396, T - 1, 4, H + 2 * E + 2, GOLD, 1);
@@ -4181,7 +4132,10 @@ void gamemenu_draw(const UiCanvas *c, const GameMenuInfo *in) {
     char ver[48];
     snprintf(ver, sizeof ver, "YW4 Recomp %s", in->version);
     ui_text(c, UI_GOTHIC_400, 13, 20, vy, 19, ver, MUTED);
+}
 
+/* Bottom key-hint bar to the right of the side panel, tailored to the active page and focus (present thread). */
+static void draw_hint_bar(const UiCanvas *c, const GameMenuInfo *in, float W, float by) {
     /* the key hints along the bottom */
     ui_rect(c, 400, by, W - 400, 56 + 1, NIGHT, 1);
     float hx = 448;
@@ -4252,6 +4206,104 @@ void gamemenu_draw(const UiCanvas *c, const GameMenuInfo *in) {
         hx += hint(c, hx, by, "Enter", "Select") + 28;
         hint(c, hx, by, "Esc", "Close overlay");
     }
+}
+
+/* Confirm popup over the dimmed overlay for Return to title or Exit game (present thread). */
+static void draw_confirm_popup(const UiCanvas *c, float W, float H, float T, float E) {
+    int title = confirm == GM_TITLE;
+    char age[80];
+    save_age(age, sizeof age);
+    ui_rect(c, 0, T - 1, W, H + 2 * E + 2, POP_BACKDROP, 0.6f);
+    const float k = POP_K, r = 14 * k, gold = 3 * k;
+    float pw = 460 * k, lh_title = 17 * k * 1.3f, bar = (15 + 13) * k + lh_title, lh = 14 * k * 1.5f;
+    float tray = (12 + 40 + 12) * k, gap = 18 * k, pad = 22 * k;
+    float ph = bar + gold + gap + 2 * lh + gap + tray;  /* two lines: what is lost, and when the game saved */
+    float px = (W - pw) / 2, py = (H - ph) / 2;
+    ui_shadow(c, px, py + r, pw, ph, r, 36 * k, POP_SHADOW, 0.45f);
+    ui_box_alpha(c, px - 1, py - 1, pw + 2, ph + 2, r + 1, POP_BORDER, 0.5f);  /* the 1 px border, half seen */
+    ui_box(c, px, py, pw, ph, r, POP_WHITE, 0, 0);
+    ui_box(c, px, py, pw, bar + r, r, POP_DEEP, 0, 0);  /* the title bar (its lower corners covered below) */
+    ui_rect(c, px, py + bar, pw, gold, POP_GOLD, 1);
+    float ty = py + ph - tray;
+    ui_box(c, px, ty - r, pw, tray + r, r, POP_LILAC, 0, 0);  /* the tray (its upper corners covered) */
+    ui_rect(c, px, py + bar + gold, pw, ty - (py + bar + gold), POP_WHITE, 1);
+    ui_rect(c, px, ty, pw, 1, POP_LINE, 1);
+    /* the title bar: the side button's icon (house / power), then the question */
+    float is = 20 * k;
+    ui_icon(c, title ? ICON_TITLE : ICON_EXIT, px + pad, py + 15 * k + (lh_title - is) / 2, is, 2.2f, POP_WHITE);
+    ui_text(c, UI_ROUNDED_800, 17 * k, px + pad + is + 10 * k, py + 15 * k, lh_title,
+            title ? "Return to the title screen?" : "Quit the game?", POP_WHITE);
+    ui_text(c, UI_GOTHIC_400, 14 * k, px + pad, py + bar + gold + gap, lh, "Progress since your last save is lost.",
+            POP_INK);
+    ui_text(c, UI_GOTHIC_400, 14 * k, px + pad, py + bar + gold + gap + lh, lh, age, POP_INK);
+    float right = px + pw - 16 * k;
+    right -= popup_button(c, right, ty + 12 * k, title ? "Return to title" : "Quit game", 1, choice == 1) + 10 * k;
+    popup_button(c, right, ty + 12 * k, "Keep playing", 0, choice == 0);
+}
+
+void gamemenu_draw(const UiCanvas *c, const GameMenuInfo *in) {
+    TH = theme_colors();
+    draw_text_has = 0;
+    /* the overlay's own name entry has no thread waiting in gamemenu_prompt_take: Enter (the field let go) is OK here */
+    if (prompt_done && gamemenu_prompting() && !textin_has(&prompt_text)) prompt_finish();
+    if (gamemenu_peeking()) {  /* F2's quick look: the keyboard Overview alone, in the game's current mode */
+        draw_peek(c, in);
+        return;
+    }
+    float W = (float)c->w / c->s, H = 900;
+    /* a picture narrower than 16:9 (the 16:10 aspect ratio): the design is fitted to its width and centred, with
+     * a strip of E design units above and below it (window.c, overlay_fit). The frame reaches the picture's
+     * edges: the tint and the side panel cover the strips, the header and the side buttons sit at the top (T),
+     * Exit game, the version and the key hints at the bottom (by). The pages and popups stay centred */
+    float E = c->oy > 0 ? c->oy / c->s : 0, T = -E, by = H - 56 + E;
+    edge = E;
+    int hk = hit_back();
+    hit_n[hk] = 0;  /* the mouse's list, filled as things are drawn */
+    int req = __atomic_exchange_n(&bug_request, 0, __ATOMIC_ACQ_REL);
+    if (req) {  /* Save only / Send (bug_finish): here, where the paused picture is */
+        textin_read(&bug_text, bug_sent_text, sizeof bug_sent_text, NULL, NULL);
+        bug_sent_kind = bug_kind, bug_sent_often = bug_often;
+        BugReport r = bug_report_of(bug_sent_text, bug_kind, bug_often);
+        r.picture = in->picture, r.picture_w = in->picture_w, r.picture_h = in->picture_h;
+        r.window_w = c->w, r.window_h = c->h;
+        if (bugreport_save(&r, bug_zip, sizeof bug_zip) == 0) {
+            if (req == 2) bugreport_open_github(&r);
+            bug_sent_github = req == 2;
+            bug_page = 2, bug_done_btn = req == 2 ? 2 : 0;
+        } else {
+            toast("Couldn't save the report");
+        }
+        changed();
+    }
+    if (gamemenu_prompting() && __atomic_load_n(&pick_n, __ATOMIC_ACQUIRE)) {  /* a list (the New Game slots) */
+        if (diary_n || dy_confirm) draw_diary_pick(c, in, W, H, T, E, by);
+        else draw_pick(c, in, W, H, T, E, by);
+        __atomic_store_n(&hit_front, hk, __ATOMIC_RELEASE);
+        return;
+    }
+    if (gamemenu_prompting()) {  /* name entry (board N1): only the popup, over the game's waiting picture */
+        draw_prompt(c, in, W, H, T, E, by);
+        __atomic_store_n(&hit_front, hk, __ATOMIC_RELEASE);
+        return;
+    }
+    if (preview) {  /* only the bar, over the running game */
+        draw_preview(c, in);
+        __atomic_store_n(&hit_front, hk, __ATOMIC_RELEASE);
+        return;
+    }
+    int cheats = cheats_allowed();
+    int page = (sel == GM_SETTINGS || sel == GM_CONTROLS || sel == GM_ONLINE || sel == GM_PERF || (sel == GM_CHEATS && cheats) ||
+                sel == GM_BUG) && !confirm;  /* these show a page */
+    ui_rect(c, 0, T - 1, W, H + 2 * E + 2, SHADE, page ? 0.62f : 0.35f);  /* the tint over the game, darker behind a page */
+    if (page && sel == GM_SETTINGS) draw_settings_page(c, in);
+    if (page && sel == GM_CONTROLS) draw_controls_page(c, in);
+    if (page && sel == GM_ONLINE) draw_online_page(c, in);
+    if (page && sel == GM_PERF) draw_perf_page(c, in);
+    if (page && sel == GM_CHEATS) draw_cheats_page(c, in);
+    if (page && sel == GM_BUG) draw_bug_page(c, in);
+
+    draw_side_panel(c, in, H, T, E, cheats);
+    draw_hint_bar(c, in, W, by);
 
     /* a short note (toast_msg): top right */
     if (in->now < toast_until) {
@@ -4263,37 +4315,7 @@ void gamemenu_draw(const UiCanvas *c, const GameMenuInfo *in) {
 
     /* the exit popup: a small window as the launcher's popups (launcher/ui/style.css "dialog", 2026-11-05): a
      * violet title bar over a gold rule, the text on white, the buttons in a lilac tray at the bottom */
-    if (confirm) {
-        int title = confirm == GM_TITLE;
-        char age[80];
-        save_age(age, sizeof age);
-        ui_rect(c, 0, T - 1, W, H + 2 * E + 2, POP_BACKDROP, 0.6f);
-        const float k = POP_K, r = 14 * k, gold = 3 * k;
-        float pw = 460 * k, lh_title = 17 * k * 1.3f, bar = (15 + 13) * k + lh_title, lh = 14 * k * 1.5f;
-        float tray = (12 + 40 + 12) * k, gap = 18 * k, pad = 22 * k;
-        float ph = bar + gold + gap + 2 * lh + gap + tray;  /* two lines: what is lost, and when the game saved */
-        float px = (W - pw) / 2, py = (H - ph) / 2;
-        ui_shadow(c, px, py + r, pw, ph, r, 36 * k, POP_SHADOW, 0.45f);
-        ui_box_alpha(c, px - 1, py - 1, pw + 2, ph + 2, r + 1, POP_BORDER, 0.5f);  /* the 1 px border, half seen */
-        ui_box(c, px, py, pw, ph, r, POP_WHITE, 0, 0);
-        ui_box(c, px, py, pw, bar + r, r, POP_DEEP, 0, 0);  /* the title bar (its lower corners covered below) */
-        ui_rect(c, px, py + bar, pw, gold, POP_GOLD, 1);
-        float ty = py + ph - tray;
-        ui_box(c, px, ty - r, pw, tray + r, r, POP_LILAC, 0, 0);  /* the tray (its upper corners covered) */
-        ui_rect(c, px, py + bar + gold, pw, ty - (py + bar + gold), POP_WHITE, 1);
-        ui_rect(c, px, ty, pw, 1, POP_LINE, 1);
-        /* the title bar: the side button's icon (house / power), then the question */
-        float is = 20 * k;
-        ui_icon(c, title ? ICON_TITLE : ICON_EXIT, px + pad, py + 15 * k + (lh_title - is) / 2, is, 2.2f, POP_WHITE);
-        ui_text(c, UI_ROUNDED_800, 17 * k, px + pad + is + 10 * k, py + 15 * k, lh_title,
-                title ? "Return to the title screen?" : "Quit the game?", POP_WHITE);
-        ui_text(c, UI_GOTHIC_400, 14 * k, px + pad, py + bar + gold + gap, lh, "Progress since your last save is lost.",
-                POP_INK);
-        ui_text(c, UI_GOTHIC_400, 14 * k, px + pad, py + bar + gold + gap + lh, lh, age, POP_INK);
-        float right = px + pw - 16 * k;
-        right -= popup_button(c, right, ty + 12 * k, title ? "Return to title" : "Quit game", 1, choice == 1) + 10 * k;
-        popup_button(c, right, ty + 12 * k, "Keep playing", 0, choice == 0);
-    }
+    if (confirm) draw_confirm_popup(c, W, H, T, E);
     if (draw_text_has) {
         memcpy(focused_text_box, draw_text_box, sizeof focused_text_box);
         focused_caret_x = draw_text_caret;

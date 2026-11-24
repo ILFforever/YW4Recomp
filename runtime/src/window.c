@@ -3573,7 +3573,8 @@ static void window_size_track(void) {  /* the window's thread, each time it poll
     settings_save();
 }
 
-void window_run(void (*guest)(void *), void *arg) {
+/* Initialize SDL, create the window, start Vulkan/GPU, and start the guest on parallel boot (window thread). */
+static void window_startup(void (*guest)(void *), void *arg) {
     const char *dir = getenv("YW4_SCREENSHOT_DIR");
     if (dir && *dir) snprintf(screenshot_dir, sizeof screenshot_dir, "%s", dir);
     const char *headless = getenv("YW4_HEADLESS");
@@ -3605,6 +3606,412 @@ void window_run(void (*guest)(void *), void *arg) {
         }
     }
     gpu_start_done();
+}
+
+/* Keep SDL text input (IME) active and positioned over the focused overlay text field (window thread). */
+static void window_update_text_input(void) {
+    /* the system's text input (a keyboard layout's letters, an IME) runs while a text field has the focus */
+    static int text_on;
+    static SDL_Rect last_rect;
+    static int last_caret = -1;
+    int want = window && gamemenu_open() && textin_active();
+    if (want != text_on) {
+        if (want) {
+            SDL_StartTextInput(window);
+        } else if (window) {
+            SDL_StopTextInput(window);
+            memset(&last_rect, 0, sizeof last_rect);
+            last_caret = -1;
+        }
+        text_on = want;
+    }
+    if (want) {
+        float r[4], caret_x;
+        if (gamemenu_text_rect(r, &caret_x)) {
+            int ww = 0, wh = 0;
+            SDL_GetWindowSize(window, &ww, &wh);
+            float px = picture_rect[0] * (float)ww, py = picture_rect[1] * (float)wh;
+            float pw = picture_rect[2] * (float)ww, ph = picture_rect[3] * (float)wh;
+            if (ph > 0) {
+                float s, ox, oy;
+                overlay_fit(pw, ph, &s, &ox, &oy);
+                SDL_Rect rect;
+                rect.x = (int)roundf(px + ox + r[0] * s);
+                rect.y = (int)roundf(py + oy + r[1] * s);
+                rect.w = (int)roundf(r[2] * s);
+                rect.h = (int)roundf(r[3] * s);
+                int caret_offset = (int)roundf((caret_x - r[0]) * s);
+                if (caret_offset < 0) caret_offset = 0;
+                else if (caret_offset > rect.w) caret_offset = rect.w;
+                if (rect.x != last_rect.x || rect.y != last_rect.y ||
+                    rect.w != last_rect.w || rect.h != last_rect.h ||
+                    caret_offset != last_caret) {
+                    SDL_SetTextInputArea(window, &rect, caret_offset);
+                    last_rect = rect;
+                    last_caret = caret_offset;
+                    fprintf(stderr, "yw4: text input area: %d,%d %dx%d caret %d (window %dx%d)\n",
+                            rect.x, rect.y, rect.w, rect.h, caret_offset, ww, wh);
+                }
+            }
+        }
+    }
+}
+
+/* Editing, clipboard, and completion keys while an overlay text field is focused (window thread). */
+static void handle_text_input_key(SDL_Event e) {
+    SDL_Keycode k = e.key.key;
+    static const struct {
+        SDL_Keycode key;
+        int op;
+        const char *name;
+    } ek[] = {{SDLK_LEFT, TI_LEFT, "T_LEFT"},    {SDLK_RIGHT, TI_RIGHT, "T_RIGHT"},
+              {SDLK_HOME, TI_HOME, "T_HOME"},    {SDLK_END, TI_END, "T_END"},
+              {SDLK_BACKSPACE, TI_BACK, "T_BACK"}, {SDLK_DELETE, TI_DEL, "T_DEL"},
+              {SDLK_RETURN, TI_DONE, "T_DONE"},  {SDLK_KP_ENTER, TI_DONE, "T_DONE"},
+              {SDLK_ESCAPE, TI_DONE, "T_DONE"},  {SDLK_TAB, TI_DONE, "T_DONE"}};
+    used_pad(0);
+    if (k == SDLK_C && (e.key.mod & SDL_KMOD_CTRL)) {  /* copy */
+        textin_edit(TI_COPY), yw4_hid_note_key("T_COPY");
+        return;
+    }
+    if (k == SDLK_X && (e.key.mod & SDL_KMOD_CTRL)) {  /* cut */
+        textin_edit(TI_CUT), yw4_hid_note_key("T_CUT");
+        return;
+    }
+    if (k == SDLK_A && (e.key.mod & SDL_KMOD_CTRL)) {  /* select all */
+        textin_edit(TI_ALL), yw4_hid_note_key("T_ALL");
+        return;
+    }
+    if (k == SDLK_V && (e.key.mod & SDL_KMOD_CTRL)) {  /* paste */
+        char *clip = SDL_GetClipboardText();
+        if (clip && *clip) textin_type(clip), yw4_hid_note_text(clip);
+        SDL_free(clip);
+        return;
+    }
+    if (e.key.mod & SDL_KMOD_SHIFT) {
+        if (k == SDLK_LEFT) { textin_edit(TI_SLEFT), yw4_hid_note_key("T_SLEFT"); return; }
+        if (k == SDLK_RIGHT) { textin_edit(TI_SRIGHT), yw4_hid_note_key("T_SRIGHT"); return; }
+        if (k == SDLK_HOME) { textin_edit(TI_SHOME), yw4_hid_note_key("T_SHOME"); return; }
+        if (k == SDLK_END) { textin_edit(TI_SEND), yw4_hid_note_key("T_SEND"); return; }
+    }
+    /* the game's popup: Esc is its Cancel where it has one, else nothing. Never "done": the hero's name
+     * has no Cancel, and Esc meant as "back" confirmed the half-typed name (or "Nate") into the new save
+     * (review 2026-11-19). Enter, Tab, the pad's A and the OK button still finish it. */
+    if (k == SDLK_ESCAPE && gamemenu_prompting()) {
+        if (!e.key.repeat) gamemenu_prompt_cancel();
+        return;
+    }
+    for (size_t i = 0; i < sizeof ek / sizeof *ek; i++)
+        if (k == ek[i].key && !(e.key.repeat && ek[i].op == TI_DONE)) {
+            textin_edit(ek[i].op), yw4_hid_note_key(ek[i].name);
+            if (ek[i].op == TI_DONE) gamemenu_refresh();
+        }
+}
+
+/* Overlay toggle, binding capture, and overlay navigation keys while the legacy panel is closed (window thread). */
+static void handle_overlay_key(SDL_Event e) {
+    /* held keys repeat only to move and change (the arrows, W A S D), never to select or go back */
+    SDL_Keycode k = e.key.key;
+    int moves = k == SDLK_UP || k == SDLK_DOWN || k == SDLK_LEFT || k == SDLK_RIGHT || k == SDLK_W ||
+                k == SDLK_A || k == SDLK_S || k == SDLK_D;
+    if (e.key.repeat && !(moves && gamemenu_open() && !bindings_capturing())) return;
+    /* the overlay's controls page waits for a key to bind: it takes the key (not F1..F12; Escape
+     * gives up waiting) */
+    if (gamemenu_open() && bindings_capturing()) {
+        if (k == SDLK_ESCAPE) bindings_cancel();
+        else if (e.key.scancode < SDL_SCANCODE_F1 || e.key.scancode > SDL_SCANCODE_F12)
+            bindings_capture_key(e.key.scancode);
+        return;
+    }
+    if (gamemenu_open() && (e.key.scancode < SDL_SCANCODE_F1 || e.key.scancode > SDL_SCANCODE_F12))
+        used_pad(0);
+    if (k == SDLK_ESCAPE && !gamemenu_open()) {
+        gamemenu_toggle(), yw4_hid_note_key("MENU");
+    } else if (gamemenu_open()) {
+        /* Escape and Backspace go back one step: a page to the side panel, the popup away, the side
+         * panel to the game. W A S D as the arrows. */
+        static const struct {
+            SDL_Keycode key;
+            int action;
+            const char *name;
+        } mk[] = {{SDLK_UP, GM_UP, "M_UP"},          {SDLK_DOWN, GM_DOWN, "M_DOWN"},
+                  {SDLK_LEFT, GM_LEFT, "M_LEFT"},    {SDLK_RIGHT, GM_RIGHT, "M_RIGHT"},
+                  {SDLK_W, GM_UP, "M_UP"},           {SDLK_S, GM_DOWN, "M_DOWN"},
+                  {SDLK_A, GM_LEFT, "M_LEFT"},       {SDLK_D, GM_RIGHT, "M_RIGHT"},
+                  {SDLK_RETURN, GM_ACCEPT, "M_OK"},  {SDLK_KP_ENTER, GM_ACCEPT, "M_OK"},
+                  {SDLK_SPACE, GM_ACCEPT, "M_OK"},   {SDLK_BACKSPACE, GM_BACK, "M_BACK"},
+                  {SDLK_ESCAPE, GM_BACK, "M_BACK"},  {SDLK_DELETE, GM_CLEAR, "M_CLEAR"},
+                  {SDLK_Q, GM_PREV, "M_PREV"},       {SDLK_E, GM_NEXT, "M_NEXT"},
+                  {SDLK_P, GM_ALT, "M_ALT"},         {SDLK_H, GM_ALT, "M_ALT"}};  /* Preview; its bar */
+        /* a popup over the running game (the New Game slot list) is part of the game's screen: the
+         * keys bound to the game's A, B and up / down work on it too, whatever they are (owner,
+         * 2026-11-17: "E or whatever the user has it set as"), before the overlay's own keys */
+        int bound = 0;
+        if (gamemenu_live() || gamemenu_diary_showing()) {  /* also the first game's, game held */
+            uint32_t m = bindings_key_inputs(0, (int)e.key.scancode);
+            for (int i = 0; i < 32 && m && !bound; i++) {
+                if (!(m & (1u << i))) continue;
+                const char *id = bindings_input_id(i);
+                int act = !strcmp(id, "A") ? GM_ACCEPT : !strcmp(id, "B") ? GM_BACK
+                        : !strcmp(id, "DPAD_UP") || !strcmp(id, "LS_UP") ? GM_UP
+                        : !strcmp(id, "DPAD_DOWN") || !strcmp(id, "LS_DOWN") ? GM_DOWN : -1;
+                if (act >= 0) gamemenu_action(act), yw4_hid_note_key(id), bound = 1;
+            }
+        }
+        for (size_t i = 0; i < sizeof mk / sizeof *mk && !bound; i++)
+            if (k == mk[i].key) gamemenu_action(mk[i].action), yw4_hid_note_key(mk[i].name);
+    }
+}
+
+/* Dispatch SDL_EVENT_KEY_DOWN: hotkeys, overlay text input, overlay navigation, and legacy panel (window thread). */
+static void handle_key_down(SDL_Event e) {
+    /* F2's quick look: a key (not F1..F12, so F12's screenshot keeps the view) shows the keyboard's view */
+    if (gamemenu_peeking() && !e.key.repeat && (e.key.scancode < SDL_SCANCODE_F1 || e.key.scancode > SDL_SCANCODE_F12))
+        used_pad(0);  /* no keys for its mode switch: keyboard players click it (owner, 2026-11-13) */
+    /* Alt: the mouse to the camera and back; not while F2's quick look shows (owner, 2026-11-13: the cursor
+     * stays a pointer there, and Alt pressed to see it light up mustn't take it away) */
+    if ((e.key.key == SDLK_LALT || e.key.key == SDLK_RALT) && !settings_legacy_open() && !mouse_off() &&
+        !gamemenu_peeking()) {
+        if (window) {
+            bool rel = SDL_GetWindowRelativeMouseMode(window);
+            SDL_SetWindowRelativeMouseMode(window, !rel);
+        }
+    }
+    if (e.key.key == SDLK_F12) __atomic_store_n(&screenshot_requested, screenshot_burst(), __ATOMIC_RELEASE),
+                                __atomic_store_n(&flash_dump_requested, 1, __ATOMIC_RELEASE), yw4_hid_note_key("F12");
+    /* F11: full screen, like most PC games (saved like the panel's row); Shift+F11: the draws of the next
+     * frame, in the log (still "F11" in recordings) */
+    if (e.key.key == SDLK_F11 && !e.key.repeat) {
+        if (e.key.mod & SDL_KMOD_SHIFT) gpu_request_trace(12000), yw4_hid_note_key("F11");
+        else window_fullscreen_cycle(), settings_save();
+    }
+    if (e.key.key == SDLK_F10) gpu_request_dump(), yw4_hid_note_key("F10");      /* shadow maps etc.: work/dump/ */
+    /* YW4_MEMSCAN=<v>@live (memscan.c): a sample. F8 too: laptops often have no Insert key */
+    if ((e.key.key == SDLK_INSERT || e.key.key == SDLK_F8) && !e.key.repeat) yw4_memscan_key();
+    if (e.key.key == SDLK_F3 && settings_legacy_keys()) window_hud_toggle(), settings_save();  /* the HUD */
+    /* LEGACY MENUS off (the default): F1 and F2 open the overlay on its Settings and Controls pages instead
+     * (owner, 2026-11-08); the same key again resumes. F3 cycles the HUD (owner, 2026-11-11). Not while the
+     * old panel is open: there F1 and F2 still close it (below). Not while typing: F keys go nowhere then. */
+    if (!settings_legacy_keys() && !settings_legacy_open() && !e.key.repeat && !textin_active() &&
+        e.key.key == SDLK_F3) {
+        window_hud_cycle(), yw4_hid_note_key("HUDCYC");
+        return;
+    }
+    /* F2 while playing: the keyboard card as a quick look, the game not paused (owner, 2026-11-11); in the
+     * overlay F2 still goes to its Controls page */
+    if (!settings_legacy_keys() && !settings_legacy_open() && !e.key.repeat && !textin_active() &&
+        e.key.key == SDLK_F2 && !gamemenu_open()) {
+        used_pad(0);  /* by the keyboard: its view */
+        gamemenu_peek_toggle(), yw4_hid_note_key("KV_PEEK");
+        return;
+    }
+    if (!settings_legacy_keys() && !settings_legacy_open() && !e.key.repeat && !textin_active() &&
+        (e.key.key == SDLK_F1 || e.key.key == SDLK_F2)) {
+        if (window && SDL_GetWindowRelativeMouseMode(window)) SDL_SetWindowRelativeMouseMode(window, false);
+        if (e.key.key == SDLK_F1) gamemenu_open_page(GM_SETTINGS), yw4_hid_note_key("M_SET");
+        else gamemenu_open_page(GM_CONTROLS), yw4_hid_note_key("M_CTRL");
+        return;
+    }
+    /* F4: on the Ark Swap / Blasters pages (local play), the overlay's Online tab (owner, 2026-11-19); nothing
+     * elsewhere (it was the overlay's pause test, still in replays as PAUSE, then lamp shadows for a while) */
+    if (e.key.key == SDLK_F4 && !e.key.repeat && !textin_active() && !settings_legacy_open() && !gamemenu_open() &&
+        ldn_active()) {
+        if (window && SDL_GetWindowRelativeMouseMode(window)) SDL_SetWindowRelativeMouseMode(window, false);
+        gamemenu_open_page(GM_ONLINE), yw4_hid_note_key("M_ONLINE");
+        return;
+    }
+    if (e.key.key == SDLK_F5) gpu_passes_toggle();  /* per-pass GPU timing in the log */
+    if (e.key.key == SDLK_F7 && !e.key.repeat) screen_passes_toggle();  /* the screen passes: ours or the game's */
+    if (e.key.key == SDLK_F6 && !e.key.repeat && drawdist_key()) {  /* tests: DRAW DISTANCE's next step */
+        drawdist_cycle();
+        float f = drawdist_factor();
+        window_notice(f > 1, "Draw distance",
+                      f > 1 ? "x%g \xc2\xb7 F6 changes it" : "Off: the game's own \xc2\xb7 F6 changes it", f);
+        yw4_hid_note_key("F6");
+    }
+    /* the settings live in the panel only (F1); its keys are recorded like the F keys, so a replay
+     * of a recording changes the same settings at the same ticks. While the controls page waits for
+     * a key, any key but F1..F12 is the new binding. LEGACY MENUS off: F1 and F2 only still close a panel
+     * that is open (the setting was just turned off in it). */
+    int legacy_panel = settings_legacy_keys() || settings_legacy_open();
+    if (e.key.key == SDLK_F1 && legacy_panel) {
+        if (window && SDL_GetWindowRelativeMouseMode(window)) SDL_SetWindowRelativeMouseMode(window, false);
+        settings_legacy_show(0), yw4_hid_note_key("F1");  /* the settings */
+    }
+    if (e.key.key == SDLK_F2 && legacy_panel) {
+        if (window && SDL_GetWindowRelativeMouseMode(window)) SDL_SetWindowRelativeMouseMode(window, false);
+        settings_legacy_show(1), yw4_hid_note_key("F2");  /* the controls */
+    }
+    /* the in-game overlay (gamemenu.h): Escape opens it; while it shows, the arrows or W A S D choose and
+     * change, Enter or Space selects, Escape or Backspace go back one step (from the side panel: resume).
+     * A settings page it opened takes Escape itself (back to the overlay). */
+    /* typing in a text field of the overlay (textin.h): the letters come as text (above); here only the keys
+     * that edit, paste or end the typing; every other key goes nowhere, so W A S D type instead of moving */
+    if (gamemenu_open() && !settings_legacy_open() && textin_active() &&
+        (e.key.scancode < SDL_SCANCODE_F1 || e.key.scancode > SDL_SCANCODE_F12)) {
+        handle_text_input_key(e);
+        return;
+    }
+    if (!settings_legacy_open()) {
+        handle_overlay_key(e);
+        return;  /* not the settings panel's keys below: the overlay's Enter mustn't reach a page it opens */
+    }
+    if (settings_legacy_open() && !e.key.repeat &&
+        !((e.key.scancode < SDL_SCANCODE_F1 || e.key.scancode > SDL_SCANCODE_F12) &&
+          bindings_capture_key(e.key.scancode))) {
+        static const struct {
+            SDL_Keycode key;
+            int action;
+            const char *name;
+        } map[] = {{SDLK_UP, SETTINGS_UP, "UP"},           {SDLK_DOWN, SETTINGS_DOWN, "DOWN"},
+                   {SDLK_LEFT, SETTINGS_LEFT, "LEFT"},     {SDLK_RIGHT, SETTINGS_RIGHT, "RIGHT"},
+                   {SDLK_ESCAPE, SETTINGS_CLOSE, "F1"},    {SDLK_RETURN, SETTINGS_ACCEPT, "ENTER"},
+                   {SDLK_KP_ENTER, SETTINGS_ACCEPT, "ENTER"}, {SDLK_DELETE, SETTINGS_CLEAR, "DELETE"},
+                   {SDLK_BACKSPACE, SETTINGS_CLEAR, "DELETE"},
+                   /* W/S choose; A/D below */
+                   {SDLK_W, SETTINGS_UP, "UP"},            {SDLK_S, SETTINGS_DOWN, "DOWN"}};
+        for (size_t i = 0; i < sizeof map / sizeof *map; i++)
+            if (e.key.key == map[i].key) settings_legacy_action(map[i].action), yw4_hid_note_key(map[i].name);
+        /* A / D (owner, 2026-11-24): Left / Right, on the settings page (change the value) and the
+         * controls page (the key column, the run mode, the sensitivities). Recorded as those, so a replay
+         * needs nothing new. Enter starts a rebind, Escape leaves. */
+        if (e.key.key == SDLK_A || e.key.key == SDLK_D) {
+            int left = e.key.key == SDLK_A;
+            settings_legacy_action(left ? SETTINGS_LEFT : SETTINGS_RIGHT), yw4_hid_note_key(left ? "LEFT" : "RIGHT");
+        }
+    }
+}
+
+/* Dispatch one polled SDL event (text, gamepad, mouse, focus, quit, key down, resize; window thread). */
+static void handle_sdl_event(SDL_Event e) {
+    switch (e.type) {
+    case SDL_EVENT_TEXT_INPUT:
+        if (gamemenu_open() && textin_active()) textin_type(e.text.text), yw4_hid_note_text(e.text.text);
+        break;
+    case SDL_EVENT_GAMEPAD_ADDED:
+        host_lock(&input_lock);
+        if (!gamepad && (gamepad = SDL_OpenGamepad(e.gdevice.which)))
+            fprintf(stderr, "yw4: window: gamepad %s\n", SDL_GetGamepadName(gamepad));
+        host_unlock(&input_lock);
+        break;
+    case SDL_EVENT_GAMEPAD_REMOVED:
+        host_lock(&input_lock);
+        if (gamepad && SDL_GetGamepadID(gamepad) == e.gdevice.which) {
+            SDL_CloseGamepad(gamepad);
+            gamepad = NULL;
+            fprintf(stderr, "yw4: window: gamepad removed\n");
+        }
+        host_unlock(&input_lock);
+        break;
+    case SDL_EVENT_GAMEPAD_BUTTON_DOWN:
+        if (gamepad && SDL_GetGamepadID(gamepad) == e.gbutton.which) used_pad(1), panel_pad_button(e.gbutton.button);
+        break;
+    case SDL_EVENT_GAMEPAD_TOUCHPAD_DOWN:
+    case SDL_EVENT_GAMEPAD_TOUCHPAD_MOTION:
+    case SDL_EVENT_GAMEPAD_TOUCHPAD_UP:  /* the first finger moves the menu pointer (tp_touch) */
+        if (gamepad && SDL_GetGamepadID(gamepad) == e.gtouchpad.which && e.gtouchpad.finger == 0)
+            tp_touch(e.type, e.gtouchpad.x, e.gtouchpad.y);
+        break;
+    case SDL_EVENT_GAMEPAD_AXIS_MOTION:
+        if (gamepad && SDL_GetGamepadID(gamepad) == e.gaxis.which && (settings_legacy_open() || gamemenu_open()) &&
+            !bindings_capture_axis(e.gaxis.axis, e.gaxis.value)) {
+            if (e.gaxis.value > 16000 || e.gaxis.value < -16000) used_pad(1);
+            panel_pad_stick(), panel_pad_triggers();
+        } else if (gamepad && SDL_GetGamepadID(gamepad) == e.gaxis.which && gamemenu_peeking() &&
+                   (e.gaxis.value > 16000 || e.gaxis.value < -16000)) {
+            used_pad(1);  /* F2's quick look: a stick or trigger shows the controller's view */
+        }
+        break;
+    case SDL_EVENT_MOUSE_MOTION: {
+        /* the touchpad's own cursor move (tp_touch) is the controller's, not the mouse's; the mouse itself
+         * moving brings the usual arrow back */
+        int pad_move = tp_moved_ms && SDL_GetTicks() - tp_moved_ms < 150;
+        /* in the game's menus with a cursor (the Yo-kai Pad and its pages: mousemenu.c) the mouse gets the
+         * touchpad's disc too, the console look (owner, 2026-11-15: "much cleaner"); elsewhere the arrow */
+        if (!pad_move && window && mousemenu_open() && !gamemenu_open() && !settings_legacy_open() &&
+            !SDL_GetWindowRelativeMouseMode(window)) {
+            int ww = 0, wh = 0;
+            SDL_GetWindowSize(window, &ww, &wh);
+            tp_cursor_show(wh);
+        } else if (!pad_move) {
+            tp_cursor_hide();
+        }
+        if (window && SDL_GetWindowRelativeMouseMode(window) && !gamemenu_peeking() && swheel_open()) {
+            swheel_motion(e.motion.xrel, e.motion.yrel);  /* the shortcut wheel's pointer; the camera holds still */
+        } else if (window && SDL_GetWindowRelativeMouseMode(window) && !gamemenu_peeking()) {
+            host_lock(&mouse_lock);  /* the camera's; never while the quick look shows */
+            mouse_accum_x += e.motion.xrel;
+            mouse_accum_y += e.motion.yrel;
+            map_accum_x += e.motion.xrel;
+            map_accum_y += e.motion.yrel;
+            host_unlock(&mouse_lock);
+        } else if (gamemenu_open() && !settings_legacy_open()) {  /* the overlay: hovering chooses */
+            float x, y;
+            if (overlay_point(e.motion.x, e.motion.y, &x, &y)) {
+                if (!pad_move) used_pad(0);
+                gamemenu_mouse(x, y, e.motion.state & SDL_BUTTON_LMASK ? 4 : 0);
+            }
+        } else if (gamemenu_peeking()) {  /* the quick look: the key under the mouse */
+            float x, y;
+            if (overlay_point(e.motion.x, e.motion.y, &x, &y)) gamemenu_peek_point(x, y);
+        }
+        break;
+    }
+    case SDL_EVENT_MOUSE_BUTTON_DOWN:
+        if (settings_legacy_open() || gamemenu_open()) {  /* not the game's: the panel's or the overlay's */
+            float x, y;
+            if (bindings_capturing()) bindings_capture_mouse(e.button.button);
+            else if (!settings_legacy_open() && (e.button.button == SDL_BUTTON_LEFT || e.button.button == SDL_BUTTON_RIGHT) &&
+                     overlay_point(e.button.x, e.button.y, &x, &y))
+                used_pad(0), gamemenu_mouse(x, y, e.button.button == SDL_BUTTON_LEFT ? (e.button.clicks >= 2 ? 2 : 1) : 3);
+        } else if (gamemenu_peeking()) {  /* the quick look: a click doesn't take the cursor back (nor Alt) */
+            float x, y;
+            used_pad(0);  /* but shows the keyboard's view, and on the mode switch changes the mode */
+            if (e.button.button == SDL_BUTTON_LEFT && overlay_point(e.button.x, e.button.y, &x, &y))
+                gamemenu_peek_click(x, y);
+        } else if (window && !SDL_GetWindowRelativeMouseMode(window) && !mouse_off() && !mousemenu_open()) {
+            SDL_SetWindowRelativeMouseMode(window, true);
+            mouse_held_off = 1;
+        }
+        break;
+    case SDL_EVENT_MOUSE_WHEEL:
+        if (settings_legacy_open() || gamemenu_open()) {
+            if (bindings_capturing()) bindings_capture_wheel(e.wheel.y > 0 ? 1 : -1);
+            else if (!settings_legacy_open() && e.wheel.y != 0) used_pad(0), gamemenu_wheel(e.wheel.y > 0 ? 1 : -1);
+        } else if (e.wheel.y != 0 && mousemenu_wheel(e.wheel.y > 0 ? 1 : -1)) {
+            used_pad(0);
+        } else if (e.wheel.y != 0) {
+            host_lock(&mouse_lock);
+            int dir = e.wheel.y > 0 ? 0 : 1;
+            int notches = e.wheel.y > 0 ? (e.wheel.y >= 1.0f ? (int)e.wheel.y : 1)
+                                        : (e.wheel.y <= -1.0f ? -(int)e.wheel.y : 1);
+            wheel_queue[!dir] = 0;  /* scrolling the other way cancels pending opposite steps */
+            wheel_queue[dir] += notches;
+            if (wheel_queue[dir] > 8) wheel_queue[dir] = 8;
+            host_unlock(&mouse_lock);
+        }
+        break;
+    case SDL_EVENT_WINDOW_FOCUS_LOST:
+        if (window && SDL_GetWindowRelativeMouseMode(window)) {
+            SDL_SetWindowRelativeMouseMode(window, false);
+        }
+        break;
+    case SDL_EVENT_QUIT:
+        fprintf(stderr, "yw4: window closed\n");
+        yw4_exit(0, __FILE__, __LINE__);
+    case SDL_EVENT_KEY_DOWN:
+        handle_key_down(e);
+        break;
+    case SDL_EVENT_WINDOW_PIXEL_SIZE_CHANGED:
+        host_lock(&present_lock);
+        swapchain_stale = 1;
+        host_unlock(&present_lock);
+        break;
+    }
+}
+
+void window_run(void (*guest)(void *), void *arg) {
+    window_startup(guest, arg);
     if (!window) {
         guest(arg);
         return;
@@ -3630,386 +4037,8 @@ void window_run(void (*guest)(void *), void *arg) {
         overlay_pad_repeat();
         fullscreen_apply();
         window_size_track();
-        {  /* the system's text input (a keyboard layout's letters, an IME) runs while a text field has the focus */
-            static int text_on;
-            static SDL_Rect last_rect;
-            static int last_caret = -1;
-            int want = window && gamemenu_open() && textin_active();
-            if (want != text_on) {
-                if (want) {
-                    SDL_StartTextInput(window);
-                } else if (window) {
-                    SDL_StopTextInput(window);
-                    memset(&last_rect, 0, sizeof last_rect);
-                    last_caret = -1;
-                }
-                text_on = want;
-            }
-            if (want) {
-                float r[4], caret_x;
-                if (gamemenu_text_rect(r, &caret_x)) {
-                    int ww = 0, wh = 0;
-                    SDL_GetWindowSize(window, &ww, &wh);
-                    float px = picture_rect[0] * (float)ww, py = picture_rect[1] * (float)wh;
-                    float pw = picture_rect[2] * (float)ww, ph = picture_rect[3] * (float)wh;
-                    if (ph > 0) {
-                        float s, ox, oy;
-                        overlay_fit(pw, ph, &s, &ox, &oy);
-                        SDL_Rect rect;
-                        rect.x = (int)roundf(px + ox + r[0] * s);
-                        rect.y = (int)roundf(py + oy + r[1] * s);
-                        rect.w = (int)roundf(r[2] * s);
-                        rect.h = (int)roundf(r[3] * s);
-                        int caret_offset = (int)roundf((caret_x - r[0]) * s);
-                        if (caret_offset < 0) caret_offset = 0;
-                        else if (caret_offset > rect.w) caret_offset = rect.w;
-                        if (rect.x != last_rect.x || rect.y != last_rect.y ||
-                            rect.w != last_rect.w || rect.h != last_rect.h ||
-                            caret_offset != last_caret) {
-                            SDL_SetTextInputArea(window, &rect, caret_offset);
-                            last_rect = rect;
-                            last_caret = caret_offset;
-                            fprintf(stderr, "yw4: text input area: %d,%d %dx%d caret %d (window %dx%d)\n",
-                                    rect.x, rect.y, rect.w, rect.h, caret_offset, ww, wh);
-                        }
-                    }
-                }
-            }
-        }
+        window_update_text_input();
         if (!got) continue;
-        switch (e.type) {
-        case SDL_EVENT_TEXT_INPUT:
-            if (gamemenu_open() && textin_active()) textin_type(e.text.text), yw4_hid_note_text(e.text.text);
-            break;
-        case SDL_EVENT_GAMEPAD_ADDED:
-            host_lock(&input_lock);
-            if (!gamepad && (gamepad = SDL_OpenGamepad(e.gdevice.which)))
-                fprintf(stderr, "yw4: window: gamepad %s\n", SDL_GetGamepadName(gamepad));
-            host_unlock(&input_lock);
-            break;
-        case SDL_EVENT_GAMEPAD_REMOVED:
-            host_lock(&input_lock);
-            if (gamepad && SDL_GetGamepadID(gamepad) == e.gdevice.which) {
-                SDL_CloseGamepad(gamepad);
-                gamepad = NULL;
-                fprintf(stderr, "yw4: window: gamepad removed\n");
-            }
-            host_unlock(&input_lock);
-            break;
-        case SDL_EVENT_GAMEPAD_BUTTON_DOWN:
-            if (gamepad && SDL_GetGamepadID(gamepad) == e.gbutton.which) used_pad(1), panel_pad_button(e.gbutton.button);
-            break;
-        case SDL_EVENT_GAMEPAD_TOUCHPAD_DOWN:
-        case SDL_EVENT_GAMEPAD_TOUCHPAD_MOTION:
-        case SDL_EVENT_GAMEPAD_TOUCHPAD_UP:  /* the first finger moves the menu pointer (tp_touch) */
-            if (gamepad && SDL_GetGamepadID(gamepad) == e.gtouchpad.which && e.gtouchpad.finger == 0)
-                tp_touch(e.type, e.gtouchpad.x, e.gtouchpad.y);
-            break;
-        case SDL_EVENT_GAMEPAD_AXIS_MOTION:
-            if (gamepad && SDL_GetGamepadID(gamepad) == e.gaxis.which && (settings_legacy_open() || gamemenu_open()) &&
-                !bindings_capture_axis(e.gaxis.axis, e.gaxis.value)) {
-                if (e.gaxis.value > 16000 || e.gaxis.value < -16000) used_pad(1);
-                panel_pad_stick(), panel_pad_triggers();
-            } else if (gamepad && SDL_GetGamepadID(gamepad) == e.gaxis.which && gamemenu_peeking() &&
-                       (e.gaxis.value > 16000 || e.gaxis.value < -16000)) {
-                used_pad(1);  /* F2's quick look: a stick or trigger shows the controller's view */
-            }
-            break;
-        case SDL_EVENT_MOUSE_MOTION: {
-            /* the touchpad's own cursor move (tp_touch) is the controller's, not the mouse's; the mouse itself
-             * moving brings the usual arrow back */
-            int pad_move = tp_moved_ms && SDL_GetTicks() - tp_moved_ms < 150;
-            /* in the game's menus with a cursor (the Yo-kai Pad and its pages: mousemenu.c) the mouse gets the
-             * touchpad's disc too, the console look (owner, 2026-11-15: "much cleaner"); elsewhere the arrow */
-            if (!pad_move && window && mousemenu_open() && !gamemenu_open() && !settings_legacy_open() &&
-                !SDL_GetWindowRelativeMouseMode(window)) {
-                int ww = 0, wh = 0;
-                SDL_GetWindowSize(window, &ww, &wh);
-                tp_cursor_show(wh);
-            } else if (!pad_move) {
-                tp_cursor_hide();
-            }
-            if (window && SDL_GetWindowRelativeMouseMode(window) && !gamemenu_peeking() && swheel_open()) {
-                swheel_motion(e.motion.xrel, e.motion.yrel);  /* the shortcut wheel's pointer; the camera holds still */
-            } else if (window && SDL_GetWindowRelativeMouseMode(window) && !gamemenu_peeking()) {
-                host_lock(&mouse_lock);  /* the camera's; never while the quick look shows */
-                mouse_accum_x += e.motion.xrel;
-                mouse_accum_y += e.motion.yrel;
-                map_accum_x += e.motion.xrel;
-                map_accum_y += e.motion.yrel;
-                host_unlock(&mouse_lock);
-            } else if (gamemenu_open() && !settings_legacy_open()) {  /* the overlay: hovering chooses */
-                float x, y;
-                if (overlay_point(e.motion.x, e.motion.y, &x, &y)) {
-                    if (!pad_move) used_pad(0);
-                    gamemenu_mouse(x, y, e.motion.state & SDL_BUTTON_LMASK ? 4 : 0);
-                }
-            } else if (gamemenu_peeking()) {  /* the quick look: the key under the mouse */
-                float x, y;
-                if (overlay_point(e.motion.x, e.motion.y, &x, &y)) gamemenu_peek_point(x, y);
-            }
-            break;
-        }
-        case SDL_EVENT_MOUSE_BUTTON_DOWN:
-            if (settings_legacy_open() || gamemenu_open()) {  /* not the game's: the panel's or the overlay's */
-                float x, y;
-                if (bindings_capturing()) bindings_capture_mouse(e.button.button);
-                else if (!settings_legacy_open() && (e.button.button == SDL_BUTTON_LEFT || e.button.button == SDL_BUTTON_RIGHT) &&
-                         overlay_point(e.button.x, e.button.y, &x, &y))
-                    used_pad(0), gamemenu_mouse(x, y, e.button.button == SDL_BUTTON_LEFT ? (e.button.clicks >= 2 ? 2 : 1) : 3);
-            } else if (gamemenu_peeking()) {  /* the quick look: a click doesn't take the cursor back (nor Alt) */
-                float x, y;
-                used_pad(0);  /* but shows the keyboard's view, and on the mode switch changes the mode */
-                if (e.button.button == SDL_BUTTON_LEFT && overlay_point(e.button.x, e.button.y, &x, &y))
-                    gamemenu_peek_click(x, y);
-            } else if (window && !SDL_GetWindowRelativeMouseMode(window) && !mouse_off() && !mousemenu_open()) {
-                SDL_SetWindowRelativeMouseMode(window, true);
-                mouse_held_off = 1;
-            }
-            break;
-        case SDL_EVENT_MOUSE_WHEEL:
-            if (settings_legacy_open() || gamemenu_open()) {
-                if (bindings_capturing()) bindings_capture_wheel(e.wheel.y > 0 ? 1 : -1);
-                else if (!settings_legacy_open() && e.wheel.y != 0) used_pad(0), gamemenu_wheel(e.wheel.y > 0 ? 1 : -1);
-            } else if (e.wheel.y != 0 && mousemenu_wheel(e.wheel.y > 0 ? 1 : -1)) {
-                used_pad(0);
-            } else if (e.wheel.y != 0) {
-                host_lock(&mouse_lock);
-                int dir = e.wheel.y > 0 ? 0 : 1;
-                int notches = e.wheel.y > 0 ? (e.wheel.y >= 1.0f ? (int)e.wheel.y : 1)
-                                            : (e.wheel.y <= -1.0f ? -(int)e.wheel.y : 1);
-                wheel_queue[!dir] = 0;  /* scrolling the other way cancels pending opposite steps */
-                wheel_queue[dir] += notches;
-                if (wheel_queue[dir] > 8) wheel_queue[dir] = 8;
-                host_unlock(&mouse_lock);
-            }
-            break;
-        case SDL_EVENT_WINDOW_FOCUS_LOST:
-            if (window && SDL_GetWindowRelativeMouseMode(window)) {
-                SDL_SetWindowRelativeMouseMode(window, false);
-            }
-            break;
-        case SDL_EVENT_QUIT:
-            fprintf(stderr, "yw4: window closed\n");
-            yw4_exit(0, __FILE__, __LINE__);
-        case SDL_EVENT_KEY_DOWN:
-            /* F2's quick look: a key (not F1..F12, so F12's screenshot keeps the view) shows the keyboard's view */
-            if (gamemenu_peeking() && !e.key.repeat && (e.key.scancode < SDL_SCANCODE_F1 || e.key.scancode > SDL_SCANCODE_F12))
-                used_pad(0);  /* no keys for its mode switch: keyboard players click it (owner, 2026-11-13) */
-            /* Alt: the mouse to the camera and back; not while F2's quick look shows (owner, 2026-11-13: the cursor
-             * stays a pointer there, and Alt pressed to see it light up mustn't take it away) */
-            if ((e.key.key == SDLK_LALT || e.key.key == SDLK_RALT) && !settings_legacy_open() && !mouse_off() &&
-                !gamemenu_peeking()) {
-                if (window) {
-                    bool rel = SDL_GetWindowRelativeMouseMode(window);
-                    SDL_SetWindowRelativeMouseMode(window, !rel);
-                }
-            }
-            if (e.key.key == SDLK_F12) __atomic_store_n(&screenshot_requested, screenshot_burst(), __ATOMIC_RELEASE),
-                                        __atomic_store_n(&flash_dump_requested, 1, __ATOMIC_RELEASE), yw4_hid_note_key("F12");
-            /* F11: full screen, like most PC games (saved like the panel's row); Shift+F11: the draws of the next
-             * frame, in the log (still "F11" in recordings) */
-            if (e.key.key == SDLK_F11 && !e.key.repeat) {
-                if (e.key.mod & SDL_KMOD_SHIFT) gpu_request_trace(12000), yw4_hid_note_key("F11");
-                else window_fullscreen_cycle(), settings_save();
-            }
-            if (e.key.key == SDLK_F10) gpu_request_dump(), yw4_hid_note_key("F10");      /* shadow maps etc.: work/dump/ */
-            /* YW4_MEMSCAN=<v>@live (memscan.c): a sample. F8 too: laptops often have no Insert key */
-            if ((e.key.key == SDLK_INSERT || e.key.key == SDLK_F8) && !e.key.repeat) yw4_memscan_key();
-            if (e.key.key == SDLK_F3 && settings_legacy_keys()) window_hud_toggle(), settings_save();  /* the HUD */
-            /* LEGACY MENUS off (the default): F1 and F2 open the overlay on its Settings and Controls pages instead
-             * (owner, 2026-11-08); the same key again resumes. F3 cycles the HUD (owner, 2026-11-11). Not while the
-             * old panel is open: there F1 and F2 still close it (below). Not while typing: F keys go nowhere then. */
-            if (!settings_legacy_keys() && !settings_legacy_open() && !e.key.repeat && !textin_active() &&
-                e.key.key == SDLK_F3) {
-                window_hud_cycle(), yw4_hid_note_key("HUDCYC");
-                break;
-            }
-            /* F2 while playing: the keyboard card as a quick look, the game not paused (owner, 2026-11-11); in the
-             * overlay F2 still goes to its Controls page */
-            if (!settings_legacy_keys() && !settings_legacy_open() && !e.key.repeat && !textin_active() &&
-                e.key.key == SDLK_F2 && !gamemenu_open()) {
-                used_pad(0);  /* by the keyboard: its view */
-                gamemenu_peek_toggle(), yw4_hid_note_key("KV_PEEK");
-                break;
-            }
-            if (!settings_legacy_keys() && !settings_legacy_open() && !e.key.repeat && !textin_active() &&
-                (e.key.key == SDLK_F1 || e.key.key == SDLK_F2)) {
-                if (window && SDL_GetWindowRelativeMouseMode(window)) SDL_SetWindowRelativeMouseMode(window, false);
-                if (e.key.key == SDLK_F1) gamemenu_open_page(GM_SETTINGS), yw4_hid_note_key("M_SET");
-                else gamemenu_open_page(GM_CONTROLS), yw4_hid_note_key("M_CTRL");
-                break;
-            }
-            /* F4: on the Ark Swap / Blasters pages (local play), the overlay's Online tab (owner, 2026-11-19); nothing
-             * elsewhere (it was the overlay's pause test, still in replays as PAUSE, then lamp shadows for a while) */
-            if (e.key.key == SDLK_F4 && !e.key.repeat && !textin_active() && !settings_legacy_open() && !gamemenu_open() &&
-                ldn_active()) {
-                if (window && SDL_GetWindowRelativeMouseMode(window)) SDL_SetWindowRelativeMouseMode(window, false);
-                gamemenu_open_page(GM_ONLINE), yw4_hid_note_key("M_ONLINE");
-                break;
-            }
-            if (e.key.key == SDLK_F5) gpu_passes_toggle();  /* per-pass GPU timing in the log */
-            if (e.key.key == SDLK_F7 && !e.key.repeat) screen_passes_toggle();  /* the screen passes: ours or the game's */
-            if (e.key.key == SDLK_F6 && !e.key.repeat && drawdist_key()) {  /* tests: DRAW DISTANCE's next step */
-                drawdist_cycle();
-                float f = drawdist_factor();
-                window_notice(f > 1, "Draw distance",
-                              f > 1 ? "x%g \xc2\xb7 F6 changes it" : "Off: the game's own \xc2\xb7 F6 changes it", f);
-                yw4_hid_note_key("F6");
-            }
-            /* the settings live in the panel only (F1); its keys are recorded like the F keys, so a replay
-             * of a recording changes the same settings at the same ticks. While the controls page waits for
-             * a key, any key but F1..F12 is the new binding. LEGACY MENUS off: F1 and F2 only still close a panel
-             * that is open (the setting was just turned off in it). */
-            int legacy_panel = settings_legacy_keys() || settings_legacy_open();
-            if (e.key.key == SDLK_F1 && legacy_panel) {
-                if (window && SDL_GetWindowRelativeMouseMode(window)) SDL_SetWindowRelativeMouseMode(window, false);
-                settings_legacy_show(0), yw4_hid_note_key("F1");  /* the settings */
-            }
-            if (e.key.key == SDLK_F2 && legacy_panel) {
-                if (window && SDL_GetWindowRelativeMouseMode(window)) SDL_SetWindowRelativeMouseMode(window, false);
-                settings_legacy_show(1), yw4_hid_note_key("F2");  /* the controls */
-            }
-            /* the in-game overlay (gamemenu.h): Escape opens it; while it shows, the arrows or W A S D choose and
-             * change, Enter or Space selects, Escape or Backspace go back one step (from the side panel: resume).
-             * A settings page it opened takes Escape itself (back to the overlay). */
-            /* typing in a text field of the overlay (textin.h): the letters come as text (above); here only the keys
-             * that edit, paste or end the typing; every other key goes nowhere, so W A S D type instead of moving */
-            if (gamemenu_open() && !settings_legacy_open() && textin_active() &&
-                (e.key.scancode < SDL_SCANCODE_F1 || e.key.scancode > SDL_SCANCODE_F12)) {
-                SDL_Keycode k = e.key.key;
-                static const struct {
-                    SDL_Keycode key;
-                    int op;
-                    const char *name;
-                } ek[] = {{SDLK_LEFT, TI_LEFT, "T_LEFT"},    {SDLK_RIGHT, TI_RIGHT, "T_RIGHT"},
-                          {SDLK_HOME, TI_HOME, "T_HOME"},    {SDLK_END, TI_END, "T_END"},
-                          {SDLK_BACKSPACE, TI_BACK, "T_BACK"}, {SDLK_DELETE, TI_DEL, "T_DEL"},
-                          {SDLK_RETURN, TI_DONE, "T_DONE"},  {SDLK_KP_ENTER, TI_DONE, "T_DONE"},
-                          {SDLK_ESCAPE, TI_DONE, "T_DONE"},  {SDLK_TAB, TI_DONE, "T_DONE"}};
-                used_pad(0);
-                if (k == SDLK_C && (e.key.mod & SDL_KMOD_CTRL)) {  /* copy */
-                    textin_edit(TI_COPY), yw4_hid_note_key("T_COPY");
-                    break;
-                }
-                if (k == SDLK_X && (e.key.mod & SDL_KMOD_CTRL)) {  /* cut */
-                    textin_edit(TI_CUT), yw4_hid_note_key("T_CUT");
-                    break;
-                }
-                if (k == SDLK_A && (e.key.mod & SDL_KMOD_CTRL)) {  /* select all */
-                    textin_edit(TI_ALL), yw4_hid_note_key("T_ALL");
-                    break;
-                }
-                if (k == SDLK_V && (e.key.mod & SDL_KMOD_CTRL)) {  /* paste */
-                    char *clip = SDL_GetClipboardText();
-                    if (clip && *clip) textin_type(clip), yw4_hid_note_text(clip);
-                    SDL_free(clip);
-                    break;
-                }
-                if (e.key.mod & SDL_KMOD_SHIFT) {
-                    if (k == SDLK_LEFT) { textin_edit(TI_SLEFT), yw4_hid_note_key("T_SLEFT"); break; }
-                    if (k == SDLK_RIGHT) { textin_edit(TI_SRIGHT), yw4_hid_note_key("T_SRIGHT"); break; }
-                    if (k == SDLK_HOME) { textin_edit(TI_SHOME), yw4_hid_note_key("T_SHOME"); break; }
-                    if (k == SDLK_END) { textin_edit(TI_SEND), yw4_hid_note_key("T_SEND"); break; }
-                }
-                /* the game's popup: Esc is its Cancel where it has one, else nothing. Never "done": the hero's name
-                 * has no Cancel, and Esc meant as "back" confirmed the half-typed name (or "Nate") into the new save
-                 * (review 2026-11-19). Enter, Tab, the pad's A and the OK button still finish it. */
-                if (k == SDLK_ESCAPE && gamemenu_prompting()) {
-                    if (!e.key.repeat) gamemenu_prompt_cancel();
-                    break;
-                }
-                for (size_t i = 0; i < sizeof ek / sizeof *ek; i++)
-                    if (k == ek[i].key && !(e.key.repeat && ek[i].op == TI_DONE)) {
-                        textin_edit(ek[i].op), yw4_hid_note_key(ek[i].name);
-                        if (ek[i].op == TI_DONE) gamemenu_refresh();
-                    }
-                break;
-            }
-            if (!settings_legacy_open()) {
-                /* held keys repeat only to move and change (the arrows, W A S D), never to select or go back */
-                SDL_Keycode k = e.key.key;
-                int moves = k == SDLK_UP || k == SDLK_DOWN || k == SDLK_LEFT || k == SDLK_RIGHT || k == SDLK_W ||
-                            k == SDLK_A || k == SDLK_S || k == SDLK_D;
-                if (e.key.repeat && !(moves && gamemenu_open() && !bindings_capturing())) break;
-                /* the overlay's controls page waits for a key to bind: it takes the key (not F1..F12; Escape
-                 * gives up waiting) */
-                if (gamemenu_open() && bindings_capturing()) {
-                    if (k == SDLK_ESCAPE) bindings_cancel();
-                    else if (e.key.scancode < SDL_SCANCODE_F1 || e.key.scancode > SDL_SCANCODE_F12)
-                        bindings_capture_key(e.key.scancode);
-                    break;
-                }
-                if (gamemenu_open() && (e.key.scancode < SDL_SCANCODE_F1 || e.key.scancode > SDL_SCANCODE_F12))
-                    used_pad(0);
-                if (k == SDLK_ESCAPE && !gamemenu_open()) {
-                    gamemenu_toggle(), yw4_hid_note_key("MENU");
-                } else if (gamemenu_open()) {
-                    /* Escape and Backspace go back one step: a page to the side panel, the popup away, the side
-                     * panel to the game. W A S D as the arrows. */
-                    static const struct {
-                        SDL_Keycode key;
-                        int action;
-                        const char *name;
-                    } mk[] = {{SDLK_UP, GM_UP, "M_UP"},          {SDLK_DOWN, GM_DOWN, "M_DOWN"},
-                              {SDLK_LEFT, GM_LEFT, "M_LEFT"},    {SDLK_RIGHT, GM_RIGHT, "M_RIGHT"},
-                              {SDLK_W, GM_UP, "M_UP"},           {SDLK_S, GM_DOWN, "M_DOWN"},
-                              {SDLK_A, GM_LEFT, "M_LEFT"},       {SDLK_D, GM_RIGHT, "M_RIGHT"},
-                              {SDLK_RETURN, GM_ACCEPT, "M_OK"},  {SDLK_KP_ENTER, GM_ACCEPT, "M_OK"},
-                              {SDLK_SPACE, GM_ACCEPT, "M_OK"},   {SDLK_BACKSPACE, GM_BACK, "M_BACK"},
-                              {SDLK_ESCAPE, GM_BACK, "M_BACK"},  {SDLK_DELETE, GM_CLEAR, "M_CLEAR"},
-                              {SDLK_Q, GM_PREV, "M_PREV"},       {SDLK_E, GM_NEXT, "M_NEXT"},
-                              {SDLK_P, GM_ALT, "M_ALT"},         {SDLK_H, GM_ALT, "M_ALT"}};  /* Preview; its bar */
-                    /* a popup over the running game (the New Game slot list) is part of the game's screen: the
-                     * keys bound to the game's A, B and up / down work on it too, whatever they are (owner,
-                     * 2026-11-17: "E or whatever the user has it set as"), before the overlay's own keys */
-                    int bound = 0;
-                    if (gamemenu_live() || gamemenu_diary_showing()) {  /* also the first game's, game held */
-                        uint32_t m = bindings_key_inputs(0, (int)e.key.scancode);
-                        for (int i = 0; i < 32 && m && !bound; i++) {
-                            if (!(m & (1u << i))) continue;
-                            const char *id = bindings_input_id(i);
-                            int act = !strcmp(id, "A") ? GM_ACCEPT : !strcmp(id, "B") ? GM_BACK
-                                    : !strcmp(id, "DPAD_UP") || !strcmp(id, "LS_UP") ? GM_UP
-                                    : !strcmp(id, "DPAD_DOWN") || !strcmp(id, "LS_DOWN") ? GM_DOWN : -1;
-                            if (act >= 0) gamemenu_action(act), yw4_hid_note_key(id), bound = 1;
-                        }
-                    }
-                    for (size_t i = 0; i < sizeof mk / sizeof *mk && !bound; i++)
-                        if (k == mk[i].key) gamemenu_action(mk[i].action), yw4_hid_note_key(mk[i].name);
-                }
-                break;  /* not the settings panel's keys below: the overlay's Enter mustn't reach a page it opens */
-            }
-            if (settings_legacy_open() && !e.key.repeat &&
-                !((e.key.scancode < SDL_SCANCODE_F1 || e.key.scancode > SDL_SCANCODE_F12) &&
-                  bindings_capture_key(e.key.scancode))) {
-                static const struct {
-                    SDL_Keycode key;
-                    int action;
-                    const char *name;
-                } map[] = {{SDLK_UP, SETTINGS_UP, "UP"},           {SDLK_DOWN, SETTINGS_DOWN, "DOWN"},
-                           {SDLK_LEFT, SETTINGS_LEFT, "LEFT"},     {SDLK_RIGHT, SETTINGS_RIGHT, "RIGHT"},
-                           {SDLK_ESCAPE, SETTINGS_CLOSE, "F1"},    {SDLK_RETURN, SETTINGS_ACCEPT, "ENTER"},
-                           {SDLK_KP_ENTER, SETTINGS_ACCEPT, "ENTER"}, {SDLK_DELETE, SETTINGS_CLEAR, "DELETE"},
-                           {SDLK_BACKSPACE, SETTINGS_CLEAR, "DELETE"},
-                           /* W/S choose; A/D below */
-                           {SDLK_W, SETTINGS_UP, "UP"},            {SDLK_S, SETTINGS_DOWN, "DOWN"}};
-                for (size_t i = 0; i < sizeof map / sizeof *map; i++)
-                    if (e.key.key == map[i].key) settings_legacy_action(map[i].action), yw4_hid_note_key(map[i].name);
-                /* A / D (owner, 2026-11-24): Left / Right, on the settings page (change the value) and the
-                 * controls page (the key column, the run mode, the sensitivities). Recorded as those, so a replay
-                 * needs nothing new. Enter starts a rebind, Escape leaves. */
-                if (e.key.key == SDLK_A || e.key.key == SDLK_D) {
-                    int left = e.key.key == SDLK_A;
-                    settings_legacy_action(left ? SETTINGS_LEFT : SETTINGS_RIGHT), yw4_hid_note_key(left ? "LEFT" : "RIGHT");
-                }
-            }
-            break;
-        case SDL_EVENT_WINDOW_PIXEL_SIZE_CHANGED:
-            host_lock(&present_lock);
-            swapchain_stale = 1;
-            host_unlock(&present_lock);
-            break;
-        }
+        handle_sdl_event(e);
     }
 }
