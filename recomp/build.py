@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import argparse
 import concurrent.futures
+from dataclasses import dataclass
 import hashlib
 import json
 import os
@@ -260,31 +261,35 @@ def dev_game_ini(cfg: config.Config) -> None:
     ini.write_text("\n".join(lines) + "\n")
 
 
-def main(argv: list[str] | None = None) -> int:
-    ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--run", action="store_true", help="run the result on work/exefs/")
-    ap.add_argument("--jobs", type=int, default=os.cpu_count() or 4)
-    ap.add_argument("--no-fsr", action="store_true", help="leave out AMD FSR (decision 0039)")
-    ap.add_argument("--no-dlss", action="store_true", help="leave out NVIDIA DLSS and Streamline (decision 0040)")
-    ap.add_argument("--no-xess", action="store_true", help="leave out Intel XeSS (decision 0089, Windows)")
-    args = ap.parse_args(argv)
-    try:
-        cfg = config.load()
-    except config.ConfigError as e:
-        print(f"config error: {e}", file=sys.stderr)
-        return 1
-    if not (cfg.work_dir / "recomp" / "image_info.c").is_file():
-        print("no generated code; run python -m recomp.translate first", file=sys.stderr)
-        return 1
+@dataclass
+class _BuildDeps:
+    includes: list[str]
+    feature_defs: list[str]
+    sdl_libs: list[str]
+    sdl_libdir: str | None = None
+    sdl: Path | None = None
+    fsr: Path | None = None
+    dlss: Path | None = None
+    sl: Path | None = None
+    xess: Path | None = None
 
-    cc = check.host_cc()
-    objdir = cfg.work_dir / "build" / "obj"
-    objdir.mkdir(parents=True, exist_ok=True)
+
+@dataclass
+class _BuildPlan:
+    todo: list[tuple[Path, Path]]
+    objs: list[Path]
+    stamps: tuple[tuple[Path, str], ...]
+
+
+def _resolve_deps(cfg: config.Config, args: argparse.Namespace, cc: str) -> _BuildDeps | None:
+    """Phase 1: collect include flags, feature defines, and platform libraries (returns None if SDL3 is missing)."""
     includes = [f"-I{RUNTIME / 'include'}", f"-I{cfg.work_dir / 'recomp'}"]
     # The window (decision 0019): SDL3 (fetched on Windows, the system's elsewhere), Vulkan headers
     includes.append(f"-I{check.REPO / 'third_party' / 'vulkan' / 'include'}")
     includes.append(f"-I{check.REPO / 'third_party' / 'stb'}")  # stb_truetype: the HUD's font (hud.c)
     feature_defs: list[str] = []
+    sdl = fsr = dlss = sl = xess = None
+    sdl_libdir: str | None = None
     if sys.platform == "win32":
         sdl = deps.fetch_sdl(cfg)
         includes.append(f"-I{sdl / 'include'}")
@@ -321,7 +326,7 @@ def main(argv: list[str] | None = None) -> int:
         found = system.sdl3()
         if not found:
             print("error: SDL3 not found (install sdl3 / libsdl3-dev / SDL3-devel)", file=sys.stderr)
-            return 1
+            return None
         sdl_cflags, sdl_libs, sdl_libdir = found
         includes += sdl_cflags
         # NVIDIA DLSS upscaling on Linux (decision 0073): NVIDIA's static NGX library (built with GCC: C++ runtime and
@@ -346,6 +351,11 @@ def main(argv: list[str] | None = None) -> int:
                 feature_defs.append("-DYW4_FSR=1")
                 sdl_libs.append("-ldl")
     includes += feature_defs
+    return _BuildDeps(includes, feature_defs, sdl_libs, sdl_libdir, sdl, fsr, dlss, sl, xess)
+
+
+def _plan_build(cfg: config.Config, objdir: Path, cc: str, feature_defs: list[str]) -> _BuildPlan | None:
+    """Phase 2: decide which objects are stale and build Windows resources (returns None if windres fails)."""
     hdr = newest_header(cfg)
     # runtime/src/*.h are private to the runtime: changing one doesn't rebuild generated code
     rt_hdr = max([hdr, *(h.stat().st_mtime for h in (RUNTIME / "src").glob("*.h"))])
@@ -408,11 +418,16 @@ def main(argv: list[str] | None = None) -> int:
                 r = subprocess.run([windres, str(rc), "-O", "coff", "-o", str(res)], capture_output=True, text=True)
                 if r.returncode:
                     print(f"resource (manifest, icon) failed:\n{r.stderr[-1000:]}", file=sys.stderr)
-                    return 1
+                    return None
             objs.append(res)
     else:
         res.unlink(missing_ok=True)
+    return _BuildPlan(todo, objs, ((stamp, flags_now), (feature_stamp, features_now), (source_stamp, sources_now)))
 
+
+def _compile_all(todo: list[tuple[Path, Path]], n_objs: int, objdir: Path, cc: str, includes: list[str],
+                 jobs: int) -> float | None:
+    """Phase 3: compile stale objects in parallel under the memory budget (returns start time t0, or None on error)."""
     times_file = objdir / "compile_times.json"
     measured = {**load_times(COST_TABLE), **load_times(times_file)}
     cost = {src: measured.get(src.name, src.stat().st_size / 1e6 * 8) for src, _ in todo}  # ~8 s per MB
@@ -426,7 +441,7 @@ def main(argv: list[str] | None = None) -> int:
     budget = free * 0.8 / 1e9 if free else float("inf")
     mem_lock, in_use, held = threading.Condition(), [0.0], [0]
     t0 = time.time()
-    print(f"compiling {len(todo)} of {len(objs)} files with {Path(cc).name} ({args.jobs} jobs"
+    print(f"compiling {len(todo)} of {n_objs} files with {Path(cc).name} ({jobs} jobs"
           + (f", within {budget:.1f} GB of memory)" if free else ")"))
     errors = []
     # Progress counts source bytes, not files: the few biggest generated files take minutes each, so a file count
@@ -474,7 +489,7 @@ def main(argv: list[str] | None = None) -> int:
     def took(s: float) -> str:
         return f"{s:.0f} s" if s < 90 else f"{s / 60:.0f} min"
 
-    with concurrent.futures.ThreadPoolExecutor(args.jobs) as pool:
+    with concurrent.futures.ThreadPoolExecutor(jobs) as pool:
         futures = {pool.submit(compile_timed, src, obj): src for src, obj in todo}
         pending, done_n, done_bytes, quiet_since = set(futures), 0, 0, time.time()
         while pending:
@@ -501,10 +516,15 @@ def main(argv: list[str] | None = None) -> int:
     if errors:
         print("\n".join(errors), file=sys.stderr)
         print(f"{len(errors)} file(s) failed", file=sys.stderr)
-        return 1
-    stamp.write_text(flags_now + "\n")
-    feature_stamp.write_text(features_now + "\n")
-    source_stamp.write_text(sources_now + "\n")
+        return None
+    return t0
+
+
+def _link_exe(cfg: config.Config, args: argparse.Namespace, cc: str, objdir: Path, objs: list[Path],
+              dep: _BuildDeps, t0: float) -> Path | None:
+    """Phase 4: copy runtime libraries next to the binary and link yw4 (returns exe path, or None on link failure)."""
+    sdl_libs, feature_defs = dep.sdl_libs, dep.feature_defs
+    sdl, fsr, dlss, sl, xess, sdl_libdir = dep.sdl, dep.fsr, dep.dlss, dep.sl, dep.xess, dep.sdl_libdir
     exe = cfg.work_dir / "build" / ("yw4.exe" if sys.platform == "win32" else "yw4")
     # winmm: timeBeginPeriod; gdi32: the game icon read back for the in-game overlay (gamelogo.c); ws2_32: sockets
     # for local play (socket.c); math on Linux
@@ -562,9 +582,46 @@ def main(argv: list[str] | None = None) -> int:
     progress.report("link", 1, 1)
     if link.returncode != 0:
         print(f"link failed:\n{link.stderr[-3000:]}", file=sys.stderr)
-        return 1
+        return None
     print(f"linked {exe.name} ({time.time() - t_link:.0f} s)")
     print(f"built {exe} in {time.time() - t0:.0f} s")
+    return exe
+
+
+def main(argv: list[str] | None = None) -> int:
+    ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap.add_argument("--run", action="store_true", help="run the result on work/exefs/")
+    ap.add_argument("--jobs", type=int, default=os.cpu_count() or 4)
+    ap.add_argument("--no-fsr", action="store_true", help="leave out AMD FSR (decision 0039)")
+    ap.add_argument("--no-dlss", action="store_true", help="leave out NVIDIA DLSS and Streamline (decision 0040)")
+    ap.add_argument("--no-xess", action="store_true", help="leave out Intel XeSS (decision 0089, Windows)")
+    args = ap.parse_args(argv)
+    try:
+        cfg = config.load()
+    except config.ConfigError as e:
+        print(f"config error: {e}", file=sys.stderr)
+        return 1
+    if not (cfg.work_dir / "recomp" / "image_info.c").is_file():
+        print("no generated code; run python -m recomp.translate first", file=sys.stderr)
+        return 1
+
+    cc = check.host_cc()
+    objdir = cfg.work_dir / "build" / "obj"
+    objdir.mkdir(parents=True, exist_ok=True)
+    dep = _resolve_deps(cfg, args, cc)
+    if dep is None:
+        return 1
+    plan = _plan_build(cfg, objdir, cc, dep.feature_defs)
+    if plan is None:
+        return 1
+    t0 = _compile_all(plan.todo, len(plan.objs), objdir, cc, dep.includes, args.jobs)
+    if t0 is None:
+        return 1
+    for stamp_path, stamp_value in plan.stamps:
+        stamp_path.write_text(stamp_value + "\n")
+    exe = _link_exe(cfg, args, cc, objdir, plan.objs, dep, t0)
+    if exe is None:
+        return 1
     if not native_shaders(cfg):
         return 1
     dev_game_ini(cfg)

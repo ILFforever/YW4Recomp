@@ -885,19 +885,19 @@ static uint32_t get_info(uint32_t id0, uint32_t handle, uint64_t id1, uint64_t *
     }
 }
 
-static void svc(CPUState *ctx, uint32_t imm) {
-    uint64_t *x = ctx->x;
+/* Memory SVCs (heap, map/unmap, query, shared/transfer memory); returns 1 if handled. */
+static int svc_memory(uint64_t *x, uint32_t imm) {
     switch (imm) {
     case 0x01: {  /* SetHeapSize(_, size) -> address */
         uint32_t r = set_heap_size(x[1]);
         x[0] = r;
         x[1] = r == R_OK ? YW4_HEAP_BASE : 0;
-        return;
+        return 1;
     }
     case 0x04:  /* MapMemory(dst, src, size): dst aliases src, src is inaccessible meanwhile */
     case 0x05: {  /* UnmapMemory(dst, src, size) */
         uint64_t dst = x[0], src = x[1], size = x[2];
-        if ((dst | src | size) & 0xFFF || !size) { x[0] = R_INVALID_SIZE; return; }
+        if ((dst | src | size) & 0xFFF || !size) { x[0] = R_INVALID_SIZE; return 1; }
         if (imm == 0x04) {
             /* Copying is equivalent to aliasing: nothing may touch src until UnmapMemory. */
             if (yw4_commit(dst, size)) {
@@ -912,22 +912,39 @@ static void svc(CPUState *ctx, uint32_t imm) {
             region_remove(dst);
         }
         x[0] = R_OK;
-        return;
+        return 1;
     }
     case 0x06:  /* QueryMemory(MemoryInfo *out, PageInfo *_, addr) -> page info */
         query_memory(x[2], x[0]);
         x[0] = R_OK;
         x[1] = 0;
-        return;
+        return 1;
+    case 0x13:  /* MapSharedMemory(handle, address, size, permission) */
+        x[0] = map_shared_memory((uint32_t)x[0], x[1], x[2]);
+        return 1;
+    case 0x15: {  /* CreateTransferMemory(_, address, size, permission) -> handle */
+        uint32_t h = 0;
+        x[0] = create_transfer_memory(x[1], x[2], (uint32_t)x[3], &h);
+        x[1] = h;
+        return 1;
+    }
+    default:
+        return 0;
+    }
+}
+
+/* Thread lifecycle and attribute SVCs; returns 1 if handled (0x0A ExitThread does not return). */
+static int svc_thread(uint64_t *x, uint32_t imm) {
+    switch (imm) {
     case 0x08: {  /* CreateThread(_, entry, argument, stack top, priority, core) -> handle */
         uint32_t h = 0;
         x[0] = create_thread(x[1], x[2], x[3], (int32_t)x[4], (int32_t)x[5], &h);
         x[1] = h;
-        return;
+        return 1;
     }
     case 0x09:  /* StartThread(handle) */
         x[0] = start_thread((uint32_t)x[0]);
-        return;
+        return 1;
     case 0x0A:  /* ExitThread: does not return */
         if (cur == &main_thread) {
             fprintf(stderr, "yw4: kernel: the main thread called ExitThread: not implemented\n");
@@ -938,12 +955,12 @@ static void svc(CPUState *ctx, uint32_t imm) {
         longjmp(*exit_jump, 1);
     case 0x0B:  /* SleepThread(ns): 0 / -1 / -2 are yields */
         sleep_thread((int64_t)x[0]);
-        return;
+        return 1;
     case 0x0C: {  /* GetThreadPriority(_, handle) -> priority */
         KThread *t = thread_get((uint32_t)x[1]);
         x[0] = t ? R_OK : R_INVALID_HANDLE;
         x[1] = t ? (uint64_t)t->priority : 0;
-        return;
+        return 1;
     }
     case 0x0D: {  /* SetThreadPriority(handle, priority) */
         KThread *t = thread_get((uint32_t)x[0]);
@@ -952,41 +969,98 @@ static void svc(CPUState *ctx, uint32_t imm) {
             if (t->host) host_thread_set_priority(t->host, t->priority);
         }
         x[0] = t ? R_OK : R_INVALID_HANDLE;
-        return;
+        return 1;
     }
     case 0x0E: {  /* GetThreadCoreMask(_, _, handle) -> ideal core, affinity mask */
         KThread *t = thread_get((uint32_t)x[2]);
         x[0] = t ? R_OK : R_INVALID_HANDLE;
         x[1] = t ? (uint64_t)(uint32_t)t->core : 0;
         x[2] = 0x7;  /* cores 0-2: an application's */
-        return;
+        return 1;
     }
     case 0x0F: {  /* SetThreadCoreMask(handle, ideal core, mask): recorded, not enforced */
         KThread *t = thread_get((uint32_t)x[0]);
         if (t && (int32_t)x[1] >= 0) t->core = (int32_t)x[1];
         x[0] = t ? R_OK : R_INVALID_HANDLE;
-        return;
+        return 1;
     }
     case 0x10:  /* GetCurrentProcessorNumber: the ideal core, as threads don't migrate here */
         x[0] = (uint64_t)cur->core;
-        return;
+        return 1;
+    case 0x25: {  /* GetThreadId(_, handle) -> id */
+        KThread *t = thread_get((uint32_t)x[1]);
+        x[0] = t ? R_OK : R_INVALID_HANDLE;
+        x[1] = t ? t->id : 0;
+        return 1;
+    }
+    default:
+        return 0;
+    }
+}
+
+/* Event, synchronisation, mutex, condvar and address-arbiter SVCs; returns 1 if handled. */
+static int svc_sync(uint64_t *x, uint32_t imm) {
+    switch (imm) {
     case 0x11: case 0x12: case 0x17: {  /* SignalEvent / ClearEvent / ResetSignal(handle) */
         KEvent *e = event_get((uint32_t)x[0]);
         if (!e) x[0] = R_INVALID_HANDLE;
         else if (imm == 0x11) yw4_event_signal(e), x[0] = R_OK;
         else if (imm == 0x17 && !e->signaled) x[0] = R_INVALID_STATE;
         else yw4_event_clear(e), x[0] = R_OK;
-        return;
+        return 1;
     }
-    case 0x13:  /* MapSharedMemory(handle, address, size, permission) */
-        x[0] = map_shared_memory((uint32_t)x[0], x[1], x[2]);
-        return;
-    case 0x15: {  /* CreateTransferMemory(_, address, size, permission) -> handle */
-        uint32_t h = 0;
-        x[0] = create_transfer_memory(x[1], x[2], (uint32_t)x[3], &h);
-        x[1] = h;
-        return;
+    case 0x18: {  /* WaitSynchronization(_, handles, count, timeout ns) -> index */
+        int32_t index = -1;
+        x[0] = wait_synchronization(x[1], (int32_t)x[2], (int64_t)x[3], &index);
+        x[1] = (uint64_t)(uint32_t)index;
+        return 1;
     }
+    case 0x19: {  /* CancelSynchronization(thread handle) */
+        KThread *t = thread_get((uint32_t)x[0]);
+        if (!t) { x[0] = R_INVALID_HANDLE; return 1; }
+        if (t->wait == WAIT_SYNC) end_wait(t, R_CANCELLED);
+        else t->cancel_pending = 1;
+        x[0] = R_OK;
+        return 1;
+    }
+    case 0x1A:  /* ArbitrateLock(owner handle, mutex, requester tag) */
+        x[0] = arbitrate_lock((uint32_t)x[0], x[1], (uint32_t)x[2]);
+        return 1;
+    case 0x1B:  /* ArbitrateUnlock(mutex) */
+        if (x[0] & 3) { x[0] = R_INVALID_ADDRESS; return 1; }
+        release_lock(x[0]);
+        x[0] = R_OK;
+        return 1;
+    case 0x1C:  /* WaitProcessWideKeyAtomic(mutex, key, tag, timeout ns) */
+        x[0] = wait_condvar(x[0], x[1], (uint32_t)x[2], (int64_t)x[3]);
+        return 1;
+    case 0x1D:  /* SignalProcessWideKey(key, count; <= 0: all) */
+        signal_condvar(x[0], (int32_t)x[1]);
+        x[0] = R_OK;
+        return 1;
+    case 0x34:  /* WaitForAddress(address, type, value, timeout ns) */
+        x[0] = wait_for_address(x[0], (uint32_t)x[1], (int32_t)x[2], (int64_t)x[3]);
+        return 1;
+    case 0x35:  /* SignalToAddress(address, type, value, count; <= 0: all) */
+        x[0] = signal_to_address(x[0], (uint32_t)x[1], (int32_t)x[2], (int32_t)x[3]);
+        return 1;
+    case 0x45: {  /* CreateEvent -> writable, readable (one object behind both handles) */
+        uint32_t w;
+        KEvent *e = yw4_event_new(&w);
+        x[0] = R_OK;
+        x[1] = w;
+        x[2] = yw4_handle_new(&e->obj);
+        return 1;
+    }
+    default:
+        return 0;
+    }
+}
+
+/* Handle, system-tick, IPC, debug and GetInfo SVCs; returns 1 if handled (0x26 Break does not return). */
+static int svc_ipc_misc(CPUState *ctx, uint32_t imm) {
+    uint64_t *x = ctx->x;
+    switch (imm) {
     case 0x16: {  /* CloseHandle(handle) */
         uint32_t h = (uint32_t)x[0];
         KThread *t = thread_get(h);
@@ -996,58 +1070,23 @@ static void svc(CPUState *ctx, uint32_t imm) {
             thread_free_if_done(t);
         }
         x[0] = R_OK;
-        return;
+        return 1;
     }
-    case 0x18: {  /* WaitSynchronization(_, handles, count, timeout ns) -> index */
-        int32_t index = -1;
-        x[0] = wait_synchronization(x[1], (int32_t)x[2], (int64_t)x[3], &index);
-        x[1] = (uint64_t)(uint32_t)index;
-        return;
-    }
-    case 0x19: {  /* CancelSynchronization(thread handle) */
-        KThread *t = thread_get((uint32_t)x[0]);
-        if (!t) { x[0] = R_INVALID_HANDLE; return; }
-        if (t->wait == WAIT_SYNC) end_wait(t, R_CANCELLED);
-        else t->cancel_pending = 1;
-        x[0] = R_OK;
-        return;
-    }
-    case 0x1A:  /* ArbitrateLock(owner handle, mutex, requester tag) */
-        x[0] = arbitrate_lock((uint32_t)x[0], x[1], (uint32_t)x[2]);
-        return;
-    case 0x1B:  /* ArbitrateUnlock(mutex) */
-        if (x[0] & 3) { x[0] = R_INVALID_ADDRESS; return; }
-        release_lock(x[0]);
-        x[0] = R_OK;
-        return;
-    case 0x1C:  /* WaitProcessWideKeyAtomic(mutex, key, tag, timeout ns) */
-        x[0] = wait_condvar(x[0], x[1], (uint32_t)x[2], (int64_t)x[3]);
-        return;
-    case 0x1D:  /* SignalProcessWideKey(key, count; <= 0: all) */
-        signal_condvar(x[0], (int32_t)x[1]);
-        x[0] = R_OK;
-        return;
     case 0x1E:  /* GetSystemTick */
         x[0] = yw4_cntpct();
-        return;
+        return 1;
     case 0x1F: {  /* ConnectToNamedPort(_, name) -> session */
         uint32_t h = 0;
         x[0] = ipc_connect_named_port((const char *)GPTR(x[1]), &h);
         x[1] = h;
-        return;
+        return 1;
     }
     case 0x21:  /* SendSyncRequest(session): the message is in this thread's TLR */
         x[0] = ipc_send_request((uint32_t)x[0], ctx->tpidrro_el0);
-        return;
+        return 1;
     case 0x22:  /* SendSyncRequestWithUserBuffer(buffer, size, session) */
         x[0] = ipc_send_request((uint32_t)x[2], x[0]);
-        return;
-    case 0x25: {  /* GetThreadId(_, handle) -> id */
-        KThread *t = thread_get((uint32_t)x[1]);
-        x[0] = t ? R_OK : R_INVALID_HANDLE;
-        x[1] = t ? t->id : 0;
-        return;
-    }
+        return 1;
     case 0x26: {  /* Break(reason, info, size): the program stops itself */
         char where[48];
         fprintf(stderr, "yw4: guest svcBreak(reason %#" PRIx64 ") at %s", x[0], yw4_describe(x[30], where));
@@ -1060,34 +1099,26 @@ static void svc(CPUState *ctx, uint32_t imm) {
     case 0x27:  /* OutputDebugString(text, size) */
         fprintf(stderr, "[game debug] %.*s\n", (int)x[1], (const char *)GPTR(x[0]));
         x[0] = R_OK;
-        return;
+        return 1;
     case 0x29: {  /* GetInfo(_, id0, handle, id1) -> value */
         uint64_t v = 0;
         x[0] = get_info((uint32_t)x[1], (uint32_t)x[2], x[3], &v);
         x[1] = v;
-        return;
+        return 1;
     }
-    case 0x34:  /* WaitForAddress(address, type, value, timeout ns) */
-        x[0] = wait_for_address(x[0], (uint32_t)x[1], (int32_t)x[2], (int64_t)x[3]);
-        return;
-    case 0x35:  /* SignalToAddress(address, type, value, count; <= 0: all) */
-        x[0] = signal_to_address(x[0], (uint32_t)x[1], (int32_t)x[2], (int32_t)x[3]);
-        return;
-    case 0x45: {  /* CreateEvent -> writable, readable (one object behind both handles) */
-        uint32_t w;
-        KEvent *e = yw4_event_new(&w);
-        x[0] = R_OK;
-        x[1] = w;
-        x[2] = yw4_handle_new(&e->obj);
-        return;
+    default:
+        return 0;
     }
-    default: {
-        char where[48];
-        fprintf(stderr, "yw4: unimplemented SVC %#x at %s on thread %" PRIu64 " (x0=%#" PRIx64 " x1=%#" PRIx64
-                        " x2=%#" PRIx64 " x3=%#" PRIx64 ")\n", imm, yw4_describe(x[30], where), cur->id, x[0], x[1], x[2], x[3]);
-        yw4_exit(3, __FILE__, __LINE__);
-    }
-    }
+}
+
+static void svc(CPUState *ctx, uint32_t imm) {
+    uint64_t *x = ctx->x;
+    if (svc_memory(x, imm) || svc_thread(x, imm) || svc_sync(x, imm) || svc_ipc_misc(ctx, imm))
+        return;
+    char where[48];
+    fprintf(stderr, "yw4: unimplemented SVC %#x at %s on thread %" PRIu64 " (x0=%#" PRIx64 " x1=%#" PRIx64
+                    " x2=%#" PRIx64 " x3=%#" PRIx64 ")\n", imm, yw4_describe(x[30], where), cur->id, x[0], x[1], x[2], x[3]);
+    yw4_exit(3, __FILE__, __LINE__);
 }
 
 /* YW4_WAITPROF=1: where the main thread blocks (SleepThread, WaitSynchronization, ArbitrateLock,

@@ -329,13 +329,15 @@ int window_gpu_find(const char *choice) {
     return -1;
 }
 
-static int vk_init(void) {
+/* Phase 1 of vk_init: wait for Streamline, load Vulkan, create the instance and window surface; returns 0 or -1. */
+static int vk_init_instance(int *sl_out) {
     /* DLSS frame generation (gpu_dlssg.cpp): Vulkan through Streamline, which adds what it needs */
     yw4_boot_mark("SDL and the window ready");
     host_lock(&sl_lock);  /* Streamline is starting on its own thread since main() (window_prestart) */
     while (sl_state == 1) host_cond_wait(&sl_cond, &sl_lock, -1);
     host_unlock(&sl_lock);
     int sl = dlssg_start();
+    *sl_out = sl;
     yw4_boot_mark("Streamline started (or left out)");
     PFN_vkGetInstanceProcAddr gipa =
         sl ? dlssg_loader() : (PFN_vkGetInstanceProcAddr)SDL_Vulkan_GetVkGetInstanceProcAddr();
@@ -394,7 +396,11 @@ static int vk_init(void) {
         fprintf(stderr, "yw4: window: SDL_Vulkan_CreateSurface: %s\n", SDL_GetError());
         return -1;
     }
+    return 0;
+}
 
+/* Phase 2 of vk_init: enumerate GPUs, pick Auto or YW4_GPU, require Vulkan 1.3 and log driver info; returns 0 or -1. */
+static int vk_init_pick_gpu(void) {
     /* A GPU with a queue that draws and presents to this window: the one Settings > Display > Graphics card names
      * (YW4_GPU, part of its name), else a discrete one if there is one (Auto). The list is kept for that row. */
     uint32_t ngpu = 16;
@@ -455,12 +461,25 @@ static int vk_init(void) {
         fprintf(stderr, "yw4: window: driver %s, %s (id %d), window system %s\n", dp.driverName, dp.driverInfo,
                 (int)dp.driverID, wsys ? wsys : "?");
     }
-    static const char *dexts[24] = {VK_KHR_SWAPCHAIN_EXTENSION_NAME};  /* kept: vk.device_exts */
-    uint32_t ndexts = 1;
+    return 0;
+}
+
+typedef struct {
+    const char **dexts;
+    uint32_t ndexts;
+    const char **dlss_exts;
+    unsigned ndlss;
+    int bda_ext, has_present_id, has_derivatives, has_conditional;
+} VkDevicePlan;
+
+/* Phase 3a of vk_init: probe supported device extensions and populate plan->dexts; returns 0 or -1 on OOM. */
+static int vk_init_extensions(VkDevicePlan *plan) {
+    const char **dexts = plan->dexts;
+    uint32_t ndexts = plan->ndexts;
     /* NVIDIA DLSS's device extensions (gpu_dlss.c, decision 0040), those the GPU has */
     const char **dlss_exts;
     unsigned ndlss = 0;
-    gpu_dlss_device_extensions(props.vendorID, &dlss_exts, &ndlss);
+    gpu_dlss_device_extensions(vk.props.vendorID, &dlss_exts, &ndlss);
     VkPhysicalDeviceVulkan12Features q12 = {.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES};
     VkPhysicalDeviceFeatures2 q = {.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2, .pNext = &q12};
     vkGetPhysicalDeviceFeatures2(vk.gpu, &q);
@@ -521,6 +540,20 @@ static int vk_init(void) {
     }
     fprintf(stderr, "yw4: window: push descriptors: %s (up to %u)\n", vk.push_descriptor ? "yes" : "no",
             vk.max_push_descriptors);
+    plan->ndexts = ndexts, plan->dlss_exts = dlss_exts, plan->ndlss = ndlss;
+    plan->bda_ext = bda_ext, plan->has_present_id = has_present_id;
+    plan->has_derivatives = has_derivatives, plan->has_conditional = has_conditional;
+    return 0;
+}
+
+/* Phase 3b of vk_init: enable features (including XeSS), create the Vulkan device and load device functions; returns 0 or -1. */
+static int vk_init_device(int sl, VkDevicePlan *plan) {
+    const char **dexts = plan->dexts;
+    uint32_t ndexts = plan->ndexts;
+    const char **dlss_exts = plan->dlss_exts;
+    unsigned ndlss = plan->ndlss;
+    int bda_ext = plan->bda_ext, has_present_id = plan->has_present_id;
+    int has_derivatives = plan->has_derivatives, has_conditional = plan->has_conditional;
 
     /* Features: what the translated shaders (0020) and NVN's state use, where the GPU has it. */
     VkPhysicalDeviceVulkan13Features f13 = {.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_3_FEATURES};
@@ -658,7 +691,7 @@ static int vk_init(void) {
             if (i == ndexts) fprintf(stderr, "yw4: window: DLSS's %s left out\n", dlss_exts[k]);
         }
     }
-    r = vkCreateDevice(vk.gpu, &dci, NULL, &vk.device);
+    VkResult r = vkCreateDevice(vk.gpu, &dci, NULL, &vk.device);
     if (r != VK_SUCCESS) return vk_fail("vkCreateDevice", r);
     vk.device_exts = dexts, vk.ndevice_exts = ndexts;
     vk.shader_f16 = e12.shaderFloat16, vk.shader_i16 = enable.features.shaderInt16, vk.sync2 = e13.synchronization2;
@@ -666,6 +699,12 @@ static int vk_init(void) {
 #define LOAD_DEVICE(f) f = (PFN_##f)vkGetDeviceProcAddr(vk.device, #f);
     VK_DEVICE_FNS(LOAD_DEVICE)
     vkGetDeviceQueue(vk.device, vk.queue_family, 0, &vk.queue);
+    plan->ndexts = ndexts;
+    return 0;
+}
+
+/* Phase 4 of vk_init: check upscalers, publish vk.up, run first-start notices, create sync objects and swapchain; returns 0 or -1. */
+static int vk_init_sync(int sl) {
     if (sl) dlssg_available();  /* checked and logged once, Reflex set up */
     yw4_boot_mark("DLSS frame generation and Reflex checked");
     gpu_dlss_available();
@@ -708,6 +747,17 @@ static int vk_init(void) {
     int failed = create_swapchain(0);
     yw4_boot_mark("swapchain");
     return failed;
+}
+
+static int vk_init(void) {
+    int sl = 0;
+    if (vk_init_instance(&sl)) return -1;
+    if (vk_init_pick_gpu()) return -1;
+    static const char *dexts[24] = {VK_KHR_SWAPCHAIN_EXTENSION_NAME};  /* kept: vk.device_exts */
+    VkDevicePlan plan = {.dexts = dexts, .ndexts = 1};
+    if (vk_init_extensions(&plan)) return -1;
+    if (vk_init_device(sl, &plan)) return -1;
+    return vk_init_sync(sl);
 }
 
 /* The staging buffer and the image a w x h frame goes through. */

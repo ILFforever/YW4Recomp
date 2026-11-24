@@ -1247,8 +1247,8 @@ fn game_version(exe: &Path) -> String {
     out.trim().to_string()
 }
 
-/// Verifies an install folder, writes launcher.json, and returns the resulting state.
-pub fn locate_installed_game_path(raw_path: PathBuf) -> Result<State, String> {
+/// Resolves a user-picked folder or executable to its install root and checks `yw4 --version`.
+fn resolve_and_verify_install(raw_path: PathBuf) -> Result<(PathBuf, String, PathBuf), String> {
     let norm_path = if let Ok(c) = raw_path.canonicalize() {
         normalize_path(c)
     } else {
@@ -1269,21 +1269,11 @@ pub fn locate_installed_game_path(raw_path: PathBuf) -> Result<State, String> {
     if !ver.is_empty() && !ver.to_lowercase().contains("yw4") && !ver.to_lowercase().contains("recomp") {
         return Err(format!("'{}' is not Yo-kai Watch 4 Recomp.", exe_file.display()));
     }
+    Ok((install_dir, install_str, exe_file))
+}
 
-    // Build or update state
-    let mut state = read_state().unwrap_or_default();
-    let prev_install = std::mem::replace(&mut state.install, install_str.clone());
-
-    if prev_install != install_str {
-        state.install = install_str.clone();
-        state.originals_offered = true;
-        state.free_up = false;
-        state.desktop = false;
-        state.start_menu = false;
-        state.paths.clear();
-        state.disabled_mods.clear();
-    }
-
+/// Populates `state.paths` and `state.mode` from `config.toml` (if present) and the install's `data/` folders.
+fn populate_located_paths(install_dir: &Path, state: &mut State) {
     // Read config.toml if present
     let cfg_path = install_dir.join("config.toml");
     if let Ok(content) = std::fs::read_to_string(&cfg_path) {
@@ -1328,13 +1318,16 @@ pub fn locate_installed_game_path(raw_path: PathBuf) -> Result<State, String> {
     if !state.paths.contains_key("dlc") && install_dir.join("data").join("dlc").is_dir() {
         state.paths.insert("dlc".into(), install_dir.join("data").join("dlc").display().to_string());
     }
+}
 
+/// Detects the saves location (install vs appdata), upscaler flags, and the game icon for a located install.
+fn detect_install_features(install_dir: &Path, install_str: &str, state: &mut State) {
     // Determine saves place
     if state.saves.is_empty() {
         state.saves = "install".into();
-        if let Some(ini_save) = game_ini_path(&install_str, "YW4_SAVE") {
+        if let Some(ini_save) = game_ini_path(install_str, "YW4_SAVE") {
             let s = ini_save.to_string_lossy();
-            if s.contains("APPDATA") || s.contains("AppData") || (ini_save.is_absolute() && !ini_save.starts_with(&install_dir)) {
+            if s.contains("APPDATA") || s.contains("AppData") || (ini_save.is_absolute() && !ini_save.starts_with(install_dir)) {
                 state.saves = "appdata".into();
             }
         }
@@ -1350,7 +1343,10 @@ pub fn locate_installed_game_path(raw_path: PathBuf) -> Result<State, String> {
     state.icon = ensure_icon_image(&dir)
         .or_else(|| ensure_icon_image(&install_dir.join("icon")))
         .map(|p| p.display().to_string());
+}
 
+/// Creates missing install subdirectories and writes a default `game.ini` next to the executable if absent.
+fn ensure_install_layout(install_dir: &Path, exe_file: &Path, state: &State) {
     // Ensure common folders exist
     let _ = std::fs::create_dir_all(install_dir.join("mods").join("contents"));
     let _ = std::fs::create_dir_all(install_dir.join("screenshots"));
@@ -1377,6 +1373,29 @@ pub fn locate_installed_game_path(raw_path: PathBuf) -> Result<State, String> {
             let _ = std::fs::write(&ini_path, text);
         }
     }
+}
+
+/// Verifies an install folder, writes launcher.json, and returns the resulting state.
+pub fn locate_installed_game_path(raw_path: PathBuf) -> Result<State, String> {
+    let (install_dir, install_str, exe_file) = resolve_and_verify_install(raw_path)?;
+
+    // Build or update state
+    let mut state = read_state().unwrap_or_default();
+    let prev_install = std::mem::replace(&mut state.install, install_str.clone());
+
+    if prev_install != install_str {
+        state.install = install_str.clone();
+        state.originals_offered = true;
+        state.free_up = false;
+        state.desktop = false;
+        state.start_menu = false;
+        state.paths.clear();
+        state.disabled_mods.clear();
+    }
+
+    populate_located_paths(&install_dir, &mut state);
+    detect_install_features(&install_dir, &install_str, &mut state);
+    ensure_install_layout(&install_dir, &exe_file, &state);
 
     save_state(state.clone())?;
     Ok(state)
