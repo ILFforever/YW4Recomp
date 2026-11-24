@@ -88,102 +88,73 @@ static const char *shader_dir(void) {
     return d && *d ? d : "work/shaders/glsl";
 }
 
-/* The rows of constants 2 a vertex program reads, from its .iface; 0 if they are not the local
- * matrix block, or not all at fixed rows of it. */
-static uint64_t read_local_rows(uint64_t vs) {
+/* One .iface reader and cache for all three queries (local-matrix rows, constant-buffer slots, texture slots).
+ * Read concurrently by the game's render threads; each slot is claimed by CAS on key and published with ready
+ * (release/acquire, decision 0090). */
+typedef struct {
+    uint64_t local_rows;  /* rows of constants 2 read if CBUSE_UB_LOCAL_MATRIX_IDX and all < LOCAL_ROWS, else 0 */
+    uint32_t cbuf_slots;  /* bit mask of .iface "r <slot> <rows>" slots < 32 (0 if file missing) */
+    uint32_t tex_slots;   /* bit mask of .iface "t <slot> <dim>" slots < 32 (~0u if file missing) */
+} ShaderIface;
+
+static ShaderIface read_iface(uint64_t key) {
     char path[1024], line[256];
-    snprintf(path, sizeof path, "%s/%016" PRIx64 ".iface", shader_dir(), vs);
+    snprintf(path, sizeof path, "%s/%016" PRIx64 ".iface", shader_dir(), key);
     FILE *f = fopen(path, "r");
-    if (!f) return 0;
+    if (!f) return (ShaderIface){.tex_slots = ~0u};  /* unknown textures: as if it read everything */
+    ShaderIface out = {0};
     int local = 0;
     uint64_t rows = 0;
     while (fgets(line, sizeof line, f)) {
+        unsigned slot;
+        if (line[0] == 'r' && sscanf(line + 1, "%u", &slot) == 1 && slot < 32) out.cbuf_slots |= 1u << slot;
+        if (line[0] == 't' && sscanf(line + 1, "%u", &slot) == 1 && slot < 32) out.tex_slots |= 1u << slot;
         char kind, word[128] = "";
-        unsigned slot;
-        if (sscanf(line, "%c %u %127s", &kind, &slot, word) < 2 || slot != 2) continue;
-        if (kind == 'c') local = !strcmp(word, "CBUSE_UB_LOCAL_MATRIX_IDX");
-        if (kind == 'r') rows = word[0] == '*' ? ~0ull : strtoull(word, NULL, 16);
+        if (sscanf(line, "%c %u %127s", &kind, &slot, word) >= 2 && slot == 2) {
+            if (kind == 'c') local = !strcmp(word, "CBUSE_UB_LOCAL_MATRIX_IDX");
+            if (kind == 'r') rows = word[0] == '*' ? ~0ull : strtoull(word, NULL, 16);
+        }
     }
     fclose(f);
-    return local && !(rows >> LOCAL_ROWS) ? rows : 0;
+    out.local_rows = local && !(rows >> LOCAL_ROWS) ? rows : 0;
+    return out;
 }
 
-/* The constant buffer slots a translated shader reads (its .iface "r <slot> <rows>" lines), as a
- * bit mask; remembered per shader. */
-static uint32_t read_cbuf_slots(uint64_t key) {
-    char path[1024], line[256];
-    snprintf(path, sizeof path, "%s/%016" PRIx64 ".iface", shader_dir(), key);
-    FILE *f = fopen(path, "r");
-    if (!f) return 0;
-    uint32_t mask = 0;
-    while (fgets(line, sizeof line, f)) {
-        unsigned slot;
-        if (line[0] == 'r' && sscanf(line + 1, "%u", &slot) == 1 && slot < 32) mask |= 1u << slot;
-    }
-    fclose(f);
-    return mask;
-}
-static uint32_t cbuf_slots(uint64_t key) {
+static ShaderIface shader_iface(uint64_t key) {
     enum { SLOTS = 1 << 12 };
-    static struct { uint64_t key; uint32_t mask; } seen[SLOTS];  /* mask | 1 << 31 once read */
+    static struct {
+        uint64_t key;
+        int ready;
+        ShaderIface info;
+    } seen[SLOTS];
+    if (!key) return read_iface(0);
     uint32_t h = (uint32_t)(key * 0x9E3779B97F4A7C15ull >> 52);
     for (uint32_t i = 0; i < SLOTS; i++, h = (h + 1) & (SLOTS - 1)) {
         uint64_t k = __atomic_load_n(&seen[h].key, __ATOMIC_ACQUIRE);
         if (k == key) {
-            uint32_t m = __atomic_load_n(&seen[h].mask, __ATOMIC_ACQUIRE);
-            if (m) return m & ~(1u << 31);
-            break;
+            if (__atomic_load_n(&seen[h].ready, __ATOMIC_ACQUIRE)) return seen[h].info;
+            break;  /* another thread is reading it: read it too */
         }
         if (!k) {
             uint64_t zero = 0;
-            if (!__atomic_compare_exchange_n(&seen[h].key, &zero, key, 0, __ATOMIC_ACQ_REL, __ATOMIC_ACQUIRE) &&
-                zero != key)
+            if (!__atomic_compare_exchange_n(&seen[h].key, &zero, key, 0, __ATOMIC_ACQ_REL, __ATOMIC_ACQUIRE)) {
+                if (zero == key) break;  /* another thread claimed it just now: it fills the slot, we only read */
                 continue;
-            uint32_t m = read_cbuf_slots(key);
-            __atomic_store_n(&seen[h].mask, m | 1u << 31, __ATOMIC_RELEASE);
-            return m;
+            }
+            ShaderIface info = read_iface(key);
+            seen[h].info = info;
+            __atomic_store_n(&seen[h].ready, 1, __ATOMIC_RELEASE);
+            return info;
         }
     }
-    return read_cbuf_slots(key);
+    return read_iface(key);
 }
 
-/* The texture slots a translated shader reads (.iface "t <slot> <dim>"), as a bit mask; remembered. */
-static uint32_t read_tex_slots(uint64_t key) {
-    char path[1024], line[256];
-    snprintf(path, sizeof path, "%s/%016" PRIx64 ".iface", shader_dir(), key);
-    FILE *f = fopen(path, "r");
-    if (!f) return ~0u;  /* unknown: as if it read everything */
-    uint32_t mask = 0;
-    while (fgets(line, sizeof line, f)) {
-        unsigned slot;
-        if (line[0] == 't' && sscanf(line + 1, "%u", &slot) == 1 && slot < 32) mask |= 1u << slot;
-    }
-    fclose(f);
-    return mask;
-}
-static uint32_t tex_slots(uint64_t key) {
-    enum { SLOTS = 1 << 12 };
-    static struct { uint64_t key; uint64_t mask; } seen[SLOTS];  /* mask | 1 << 32 once read */
-    uint32_t h = (uint32_t)(key * 0x9E3779B97F4A7C15ull >> 52);
-    for (uint32_t i = 0; i < SLOTS; i++, h = (h + 1) & (SLOTS - 1)) {
-        uint64_t k = __atomic_load_n(&seen[h].key, __ATOMIC_ACQUIRE);
-        if (k == key) {
-            uint64_t m = __atomic_load_n(&seen[h].mask, __ATOMIC_ACQUIRE);
-            if (m) return (uint32_t)m;
-            break;
-        }
-        if (!k) {
-            uint64_t zero = 0;
-            if (!__atomic_compare_exchange_n(&seen[h].key, &zero, key, 0, __ATOMIC_ACQ_REL, __ATOMIC_ACQUIRE) &&
-                zero != key)
-                continue;
-            uint32_t m = read_tex_slots(key);
-            __atomic_store_n(&seen[h].mask, m | 1ull << 32, __ATOMIC_RELEASE);
-            return m;
-        }
-    }
-    return read_tex_slots(key);
-}
+/* The constant buffer slots a translated shader reads (its .iface "r <slot> <rows>" lines), as a bit mask. */
+static uint32_t cbuf_slots(uint64_t key) { return shader_iface(key).cbuf_slots; }
+
+/* The texture slots a translated shader reads (.iface "t <slot> <dim>"), as a bit mask. */
+static uint32_t tex_slots(uint64_t key) { return shader_iface(key).tex_slots; }
 
 /* The NVN programs the engine has made, by their vertex and fragment code (decision 0030): learned
  * from the game's own draws (the engine makes one program per combination of stage shaders and keeps
@@ -221,32 +192,8 @@ static uint64_t program_of(uint64_t vs, uint64_t fs) {
     return 0;
 }
 
-/* The same, remembered per program (the render threads ask before every model draw). */
-static uint64_t local_rows(const NvnProgram *p) {
-    enum { SLOTS = 1 << 11 };
-    static struct { uint64_t vs, rows; } seen[SLOTS];  /* rows + 1 (0: not read yet) */
-    if (!p) return 0;
-    uint64_t vs = p->stages[0].key;
-    uint32_t h = (uint32_t)(vs * 0x9E3779B97F4A7C15ull >> 53);
-    for (uint32_t i = 0; i < SLOTS; i++, h = (h + 1) & (SLOTS - 1)) {
-        uint64_t k = __atomic_load_n(&seen[h].vs, __ATOMIC_ACQUIRE);
-        if (k == vs) {
-            uint64_t r = __atomic_load_n(&seen[h].rows, __ATOMIC_ACQUIRE);
-            if (r) return r - 1;
-            break;  /* another thread is reading it: read it too */
-        }
-        if (!k) {
-            uint64_t zero = 0;
-            if (!__atomic_compare_exchange_n(&seen[h].vs, &zero, vs, 0, __ATOMIC_ACQ_REL, __ATOMIC_ACQUIRE) &&
-                zero != vs)
-                continue;
-            uint64_t r = read_local_rows(vs);
-            __atomic_store_n(&seen[h].rows, r + 1, __ATOMIC_RELEASE);
-            return r;
-        }
-    }
-    return read_local_rows(vs);
-}
+/* The rows of constants 2 a vertex program reads, remembered per program (the render threads ask before every model draw). */
+static uint64_t local_rows(const NvnProgram *p) { return p ? shader_iface(p->stages[0].key).local_rows : 0; }
 
 /* Are the rows in the mask the same, bit for bit, in a and b? */
 static int same_rows(uint64_t rows, const float *a, const float *b) {

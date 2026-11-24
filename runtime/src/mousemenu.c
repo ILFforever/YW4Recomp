@@ -704,13 +704,21 @@ static int screen_focus(const Screen *s, uint64_t ctrl, uint64_t lv) {
     return f >= 0 && f < s->cols * s->rows ? f : -1;
 }
 
+typedef struct { float x, y, w, h; } MenuRect;
+
+/* The menus' 16:9 area: the largest 16:9 rectangle centred inside a w x h window. */
+static MenuRect menu_16x9_bounds(int w, int h) {
+    float uw = (float)w, uh = (float)h;
+    if (uw * 9.0f > uh * 16.0f) uw = uh * 16.0f / 9.0f;
+    else uh = uw * 9.0f / 16.0f;
+    return (MenuRect){((float)w - uw) / 2, ((float)h - uh) / 2, uw, uh};
+}
+
 /* The slot under the mouse (0 .. cols*rows - 1) on screen s, or -1. */
 static int slot_at(const Screen *s, uint64_t lv, float mx, float my, int w, int h) {
     if (!s || !(s->flags & (SCR_HOVER | SCR_CLICK)) || w <= 0 || h <= 0) return -1;
-    float uw = (float)w, uh = (float)h;  /* the menus' 16:9 area: the largest one in the middle of the picture */
-    if (uw * 9.0f > uh * 16.0f) uw = uh * 16.0f / 9.0f;
-    else uh = uw * 9.0f / 16.0f;
-    float x = (mx - (w - uw) / 2) * 1280.0f / uw, y = (my - (h - uh) / 2) * 720.0f / uh;
+    MenuRect b = menu_16x9_bounds(w, h);
+    float x = (mx - b.x) * 1280.0f / b.w, y = (my - b.y) * 720.0f / b.h;
     int c = s->cols > 1 ? (int)floorf((x - (s->x0 - s->dx * 0.5f)) / s->dx) : 0;
     int r = s->rows > 1 ? (int)floorf((y - (s->y0 - s->dy * 0.5f)) / s->dy) : 0;
     if (c < 0 || c >= s->cols || r < 0 || r >= s->rows) return -1;
@@ -766,11 +774,9 @@ static int script_step(float *mx, float *my, int w, int h, uint32_t *buttons, ui
             for (int k = 0; k < abs(lines[at].wheel); k++) mousemenu_wheel(w_dir);
         }
     }
-    float uw = (float)w, uh = (float)h;
-    if (uw * 9.0f > uh * 16.0f) uw = uh * 16.0f / 9.0f;
-    else uh = uw * 9.0f / 16.0f;
-    *mx = (w - uw) / 2 + lines[at].x * uw / 1280.0f;
-    *my = (h - uh) / 2 + lines[at].y * uh / 720.0f;
+    MenuRect b = menu_16x9_bounds(w, h);
+    *mx = b.x + lines[at].x * b.w / 1280.0f;
+    *my = b.y + lines[at].y * b.h / 720.0f;
     *buttons = lines[at].b & 0xff;
     return 1;
 }
@@ -966,19 +972,15 @@ uint64_t mousemenu_update(float mx, float my, int w, int h, uint32_t mouse_butto
             }
         } else if (click_target >= 0) {
             if (s->vtable == 0x14c60f8u) {
-                float uw = (float)w, uh = (float)h;
-                if (uw * 9.0f > uh * 16.0f) uw = uh * 16.0f / 9.0f;
-                else uh = uw * 9.0f / 16.0f;
-                float x = (mx - (w - uw) / 2) * 1280.0f / uw;
+                MenuRect b = menu_16x9_bounds(w, h);
+                float x = (mx - b.x) * 1280.0f / b.w;
                 if (x >= 470.0f && x <= 530.0f) press = BTN_LEFT;
                 else if (x >= 730.0f && x <= 798.5f) press = BTN_RIGHT;
             } else if (s->vtable == RETIRE_MENU_VTABLE && focus == 1) {
                 /* Field Camera changes on Left / Right only (A does nothing there): its < arrow (x 675: owner's F12,
                  * 2026-11-20) steps left, the rest of the row right, cycling (owner: "make E on it cycle right") */
-                float uw = (float)w, uh = (float)h;
-                if (uw * 9.0f > uh * 16.0f) uw = uh * 16.0f / 9.0f;
-                else uh = uw * 9.0f / 16.0f;
-                float x = (mx - (w - uw) / 2) * 1280.0f / uw;
+                MenuRect b = menu_16x9_bounds(w, h);
+                float x = (mx - b.x) * 1280.0f / b.w;
                 press = x >= 650.0f && x <= 705.0f ? BTN_LEFT : BTN_RIGHT;
             } else {
                 press = BTN_A;

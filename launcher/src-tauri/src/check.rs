@@ -295,15 +295,77 @@ fn same_file(a: &str, b: &str) -> bool {
     }
 }
 
+/// Checks one base-game or update NSP/XCI file against its expected title ID and the swapped title ID,
+/// appending any rights IDs that need title.keys into `rights`. Returns `(row, is_xci)`.
+fn check_nsp(
+    path: Option<&String>,
+    is_update: bool,
+    base_is_xci: bool,
+    t: &Target,
+    rights: &mut Vec<String>,
+) -> (Row, bool) {
+    let label = if is_update { "Update" } else { "Base game" };
+    let upd_id = t.app | 0x800;
+    let (want_id, other_id) = if is_update { (upd_id, t.app) } else { (t.app, upd_id) };
+    let Some(p) = path else {
+        let r = if is_update && base_is_xci {
+            row(label, "warn", "None chosen: fine if your XCI includes 2.2.0 (checked while building)")
+        } else if is_update {
+            row(label, "bad", "Choose the 2.2.0 update NSP")
+        } else {
+            row(label, "bad", "Choose the base game")
+        };
+        return (r, false);
+    };
+    let (entries, xci) = match contents(Path::new(p)) {
+        Ok(v) => v,
+        Err(e) => return (row(label, "bad", format!("This file can't be used: {e}")), false),
+    };
+    let titles = ticket_titles(&entries);
+    let file_path = Path::new(p);
+    let named = cnmt_titles(file_path, &entries);
+    let r = if !is_update && xci {
+        row(label, "ok", "Game card image (XCI)")
+    } else if titles.iter().any(|(id, _)| *id == want_id) || named.contains(&want_id) {
+        if is_update {
+            row(label, "ok", format!("An update of this game · {upd_id:016X}"))
+        } else {
+            row(label, "ok", format!("Yo-kai Watch 4++ · {:016X}", t.app))
+        }
+    } else if titles.iter().any(|(id, _)| *id == other_id) || named.contains(&other_id) {
+        if is_update {
+            row(label, "bad", "This is the base game. Choose the 2.2.0 update here")
+        } else {
+            row(label, "bad", "This is the update. Choose the base game ([v0]) here")
+        }
+    } else if titles.is_empty() && named.is_empty() {
+        if named_update(p, t.app) == Some(!is_update) {
+            if is_update {
+                row(label, "bad", "Its name says it's the base game. Choose the 2.2.0 update here")
+            } else {
+                row(label, "bad", "Its name says it's an update. Choose the base game ([v0]) here")
+            }
+        } else {
+            row(label, "warn", "No ticket or metadata to check it by: checked while building")
+        }
+    } else if is_update {
+        row(label, "bad", "This NSP isn't an update of Yo-kai Watch 4++")
+    } else {
+        row(label, "bad", "This NSP isn't Yo-kai Watch 4++")
+    };
+    rights.extend(rights_needing_keys(file_path, &entries));
+    (r, xci)
+}
+
 // Mix-ups said at Check, not after unpacking (owner, 2026-11-20: the build stopped on "two update Program NCAs"):
 // the same file in both boxes, the update in the base box or the base game in the update box (by its ticket or
 // metadata, else by its name when that says).
 fn check_files(paths: &HashMap<String, String>, t: &Target) -> Vec<Row> {
-    let upd_id = t.app | 0x800;
     let mut rows = Vec::new();
     let mut rights = Vec::new();
     let base_path = paths.get("base").filter(|p| !p.is_empty());
-    if let (Some(b), Some(u)) = (base_path, paths.get("update").filter(|p| !p.is_empty())) {
+    let upd_path = paths.get("update").filter(|p| !p.is_empty());
+    if let (Some(b), Some(u)) = (base_path, upd_path) {
         if same_file(b, u) {
             rows.push(row("Base game", "bad", "The same file is chosen as the update. Choose the base game ([v0]) here"));
             rows.push(row("Update", "bad", "The same file is chosen as the base game. Choose the 2.2.0 update here"));
@@ -314,57 +376,10 @@ fn check_files(paths: &HashMap<String, String>, t: &Target) -> Vec<Row> {
             return rows;
         }
     }
-    let mut base_is_xci = false;
-    match base_path.map(|p| contents(Path::new(p))) {
-        None => rows.push(row("Base game", "bad", "Choose the base game")),
-        Some(Err(e)) => rows.push(row("Base game", "bad", format!("This file can't be used: {e}"))),
-        Some(Ok((entries, xci))) => {
-            base_is_xci = xci;
-            let titles = ticket_titles(&entries);
-            let path = Path::new(base_path.unwrap());
-            let named = cnmt_titles(path, &entries);
-            if xci {
-                rows.push(row("Base game", "ok", "Game card image (XCI)"));
-            } else if titles.iter().any(|(id, _)| *id == t.app) || named.contains(&t.app) {
-                rows.push(row("Base game", "ok", format!("Yo-kai Watch 4++ · {:016X}", t.app)));
-            } else if titles.iter().any(|(id, _)| *id == upd_id) || named.contains(&upd_id) {
-                rows.push(row("Base game", "bad", "This is the update. Choose the base game ([v0]) here"));
-            } else if titles.is_empty() && named.is_empty() {
-                if named_update(base_path.unwrap(), t.app) == Some(true) {
-                    rows.push(row("Base game", "bad", "Its name says it's an update. Choose the base game ([v0]) here"));
-                } else {
-                    rows.push(row("Base game", "warn", "No ticket or metadata to check it by: checked while building"));
-                }
-            } else {
-                rows.push(row("Base game", "bad", "This NSP isn't Yo-kai Watch 4++"));
-            }
-            rights.extend(rights_needing_keys(path, &entries));
-        }
-    }
-    match paths.get("update").filter(|p| !p.is_empty()).map(|p| contents(Path::new(p))) {
-        None if base_is_xci => rows.push(row("Update", "warn", "None chosen: fine if your XCI includes 2.2.0 (checked while building)")),
-        None => rows.push(row("Update", "bad", "Choose the 2.2.0 update NSP")),
-        Some(Err(e)) => rows.push(row("Update", "bad", format!("This file can't be used: {e}"))),
-        Some(Ok((entries, _))) => {
-            let titles = ticket_titles(&entries);
-            let path = Path::new(paths.get("update").unwrap());
-            let named = cnmt_titles(path, &entries);
-            if titles.iter().any(|(id, _)| *id == upd_id) || named.contains(&upd_id) {
-                rows.push(row("Update", "ok", format!("An update of this game · {upd_id:016X}")));
-            } else if titles.iter().any(|(id, _)| *id == t.app) || named.contains(&t.app) {
-                rows.push(row("Update", "bad", "This is the base game. Choose the 2.2.0 update here"));
-            } else if titles.is_empty() && named.is_empty() {
-                if named_update(paths.get("update").unwrap(), t.app) == Some(false) {
-                    rows.push(row("Update", "bad", "Its name says it's the base game. Choose the 2.2.0 update here"));
-                } else {
-                    rows.push(row("Update", "warn", "No ticket or metadata to check it by: checked while building"));
-                }
-            } else {
-                rows.push(row("Update", "bad", "This NSP isn't an update of Yo-kai Watch 4++"));
-            }
-            rights.extend(rights_needing_keys(path, &entries));
-        }
-    }
+    let (base_row, base_is_xci) = check_nsp(base_path, false, false, t, &mut rights);
+    rows.push(base_row);
+    let (upd_row, _) = check_nsp(upd_path, true, base_is_xci, t, &mut rights);
+    rows.push(upd_row);
     let krow = keys_row(paths.get("keys"), &rights);
     let has_keys = krow.state == "ok";
     rows.push(krow);

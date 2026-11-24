@@ -57,26 +57,6 @@ static void draw_skipped(const ShadowDraw *d, int why) {
                 n == 3 ? " (the last one logged for this reason)" : "");
 }
 
-static VkShaderModule module(const char *name) {
-    const char *dir = getenv("YW4_NATIVE_SHADER_DIR");
-    char path[1024];
-    snprintf(path, sizeof path, "%s/%s.spv", dir && *dir ? dir : "work/build/shaders", name);
-    FILE *f = fopen(path, "rb");
-    if (!f) gpu_stop("no native shader %s (python -m recomp.build compiles runtime/shaders)", path);
-    fseek(f, 0, SEEK_END);
-    long n = ftell(f);
-    fseek(f, 0, SEEK_SET);
-    uint32_t *code = malloc((size_t)n);
-    if (!code || fread(code, 1, (size_t)n, f) != (size_t)n) gpu_stop("cannot read %s", path);
-    fclose(f);
-    VkShaderModuleCreateInfo mci = {.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO, .codeSize = (size_t)n,
-                                    .pCode = code};
-    VkShaderModule m;
-    CHECK(vkCreateShaderModule(vk.device, &mci, NULL, &m));
-    free(code);
-    return m;
-}
-
 /* Kinds of caster, each its own shaders and pipeline layout. The instanced ones draw all of a
  * submesh's copies at once, their matrices in the copies ring. */
 enum {
@@ -324,8 +304,8 @@ static VkPipeline pipeline(VkFormat depth, int kind, VkFormat uv, VkFormat wind)
                                                "shadow_instanced_cutout.vert", "shadow_wind.vert"};
     static const char *const fs_name[KINDS] = {NULL, "shadow_cutout.frag", NULL, NULL, NULL, "shadow_cutout.frag",
                                                "shadow_fade.frag", "shadow_fade_cutout.frag", "shadow_cutout.frag"};
-    if (!vs[kind]) vs[kind] = module(vs_name[kind]);
-    if (fs_name[kind] && !fs[kind]) fs[kind] = module(fs_name[kind]);
+    if (!vs[kind]) vs[kind] = gpu_native_shader(vs_name[kind]);
+    if (fs_name[kind] && !fs[kind]) fs[kind] = gpu_native_shader(fs_name[kind]);
     VkPipelineShaderStageCreateInfo st[2] = {
         {.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO, .stage = VK_SHADER_STAGE_VERTEX_BIT,
          .module = vs[kind], .pName = "main"},

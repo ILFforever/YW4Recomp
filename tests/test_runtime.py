@@ -750,24 +750,7 @@ int main(void) {
 """
 
 
-class HidVibrationTest(unittest.TestCase):
-    """The controller vibration handling (runtime/src/svc_hid.c)."""
-
-    def test_vibration_routing(self):
-        with tempfile.TemporaryDirectory() as t:
-            t = Path(t)
-            (t / "drv.c").write_text(HID_VIBRATION_DRIVER)
-            exe = t / "vib_test.exe"
-            subprocess.run([check.host_cc(), "-std=c17", "-O1", "-Wall",
-                            f"-I{RUNTIME / 'include'}", f"-I{RUNTIME / 'src'}",
-                            f"-I{check.REPO / 'third_party' / 'vulkan' / 'include'}",
-                            *POSIX,
-                            "-o", str(exe), str(t / "drv.c")], check=True, capture_output=True)
-            got = subprocess.run([str(exe)], capture_output=True, text=True, check=True)
-            self.assertEqual(got.returncode, 0)
-
-    def test_vibration_toggle(self):
-        driver = r"""
+BINDINGS_TEST_STUBS = r"""
 #include <stdio.h>
 #include <stdint.h>
 #include <stdbool.h>
@@ -778,7 +761,8 @@ class HidVibrationTest(unittest.TestCase):
 #include "yw4load.h"
 #include "window.h"
 
-int battle_active(void) { return 0; }
+static int battle_state;
+int battle_active(void) { return battle_state; }
 int battle_busters(void) { return 0; }
 void settings_save(void) {}
 void host_lock(HostLock *l) { (void)l; }  /* one thread here: bindings.c's sets_lock */
@@ -827,7 +811,47 @@ const char *run_mode_name(int mode) { (void)mode; return "DEFAULT"; }
 const char *run_mode_save(int mode) { (void)mode; return "default"; }
 
 #include "bindings.c"
+"""
 
+
+def _run_bindings_driver(case: unittest.TestCase, name: str, main_body: str) -> None:
+    """Compile and run a standalone C test driver that includes bindings.c with shared stubs."""
+    with tempfile.TemporaryDirectory() as t:
+        t = Path(t)
+        src = t / f"drv_{name}.c"
+        src.write_text(BINDINGS_TEST_STUBS + main_body)
+        exe = t / f"{name}_test.exe"
+        sdl = sdl3(t)
+        if sdl is None:
+            case.skipTest("no SDL3 on this system (pkg-config sdl3)")
+        sdl_flags, sdl_libs = sdl
+        subprocess.run([check.host_cc(), "-std=c17", "-O1", "-Wall",
+                        f"-I{RUNTIME / 'include'}", f"-I{RUNTIME / 'src'}",
+                        f"-I{check.REPO / 'third_party' / 'vulkan' / 'include'}",
+                        *POSIX, *sdl_flags,
+                        "-o", str(exe), str(src), *sdl_libs], check=True, capture_output=True)
+        got = subprocess.run([str(exe)], capture_output=True, text=True, check=True)
+        case.assertEqual(got.returncode, 0)
+
+
+class HidVibrationTest(unittest.TestCase):
+    """The controller vibration handling (runtime/src/svc_hid.c)."""
+
+    def test_vibration_routing(self):
+        with tempfile.TemporaryDirectory() as t:
+            t = Path(t)
+            (t / "drv.c").write_text(HID_VIBRATION_DRIVER)
+            exe = t / "vib_test.exe"
+            subprocess.run([check.host_cc(), "-std=c17", "-O1", "-Wall",
+                            f"-I{RUNTIME / 'include'}", f"-I{RUNTIME / 'src'}",
+                            f"-I{check.REPO / 'third_party' / 'vulkan' / 'include'}",
+                            *POSIX,
+                            "-o", str(exe), str(t / "drv.c")], check=True, capture_output=True)
+            got = subprocess.run([str(exe)], capture_output=True, text=True, check=True)
+            self.assertEqual(got.returncode, 0)
+
+    def test_vibration_toggle(self):
+        main_body = r"""
 int main(void) {
     BindRow rows[64];
     int r = 0, c = 0;
@@ -891,82 +915,14 @@ int main(void) {
     return 0;
 }
 """
-        with tempfile.TemporaryDirectory() as t:
-            t = Path(t)
-            (t / "drv_toggle.c").write_text(driver)
-            exe = t / "toggle_test.exe"
-            sdl = sdl3(t)
-            if sdl is None:
-                self.skipTest("no SDL3 on this system (pkg-config sdl3)")
-            sdl_flags, sdl_libs = sdl
-            subprocess.run([check.host_cc(), "-std=c17", "-O1", "-Wall",
-                            f"-I{RUNTIME / 'include'}", f"-I{RUNTIME / 'src'}",
-                            f"-I{check.REPO / 'third_party' / 'vulkan' / 'include'}",
-                            *POSIX, *sdl_flags,
-                            "-o", str(exe), str(t / "drv_toggle.c"), *sdl_libs], check=True, capture_output=True)
-            got = subprocess.run([str(exe)], capture_output=True, text=True, check=True)
-            self.assertEqual(got.returncode, 0)
+        _run_bindings_driver(self, "toggle", main_body)
 
 
 class BattleScrollTest(unittest.TestCase):
     """Mouse scroll in battle selects character (D-pad up/down) by default."""
 
     def test_battle_wheel_bindings(self):
-        driver = r"""
-#include <stdio.h>
-#include <stdint.h>
-#include <stdbool.h>
-#include <string.h>
-#include <stdlib.h>
-
-#include <SDL3/SDL.h>
-#include "yw4load.h"
-#include "window.h"
-
-static int battle_state;
-int battle_active(void) { return battle_state; }
-int battle_busters(void) { return 0; }
-void settings_save(void) {}
-void host_lock(HostLock *l) { (void)l; }  /* one thread here: bindings.c's sets_lock */
-void host_unlock(HostLock *l) { (void)l; }
-void window_mouse_motion(float *dx, float *dy) { *dx = 0; *dy = 0; }
-SDL_GamepadType SDL_GetGamepadType(SDL_Gamepad *gamepad) { return SDL_GAMEPAD_TYPE_STANDARD; }
-const Yw4Module yw4_modules[2] = {0};
-
-int window_rumble_enabled(void) { return 1; }
-void window_rumble_set_enabled(int on) { (void)on; }
-int swheel_enabled(void) { return 1; }
-void swheel_set_enabled(int on) { (void)on; }
-void window_rumble(uint16_t low, uint16_t high, uint32_t duration_ms) { (void)low; (void)high; (void)duration_ms; }
-void window_rumble_test(void) {}
-#include "tegra.h"
-/* the icon sheets' patch (bindings_patch_sheet) is not tested here: its GPU and texture-layout calls do nothing */
-void gpu_note_written(uint64_t addr, uint64_t size) { (void)addr; (void)size; }
-void tegra_read_region(const TexLayout *t, const uint8_t *base, uint32_t level, uint32_t layer, uint32_t x, uint32_t y,
-                       uint32_t z, uint32_t w, uint32_t h, uint32_t d, uint8_t *dst) {}
-void tegra_write_region(const TexLayout *t, uint8_t *base, uint32_t level, uint32_t layer, uint32_t x, uint32_t y,
-                        uint32_t z, uint32_t w, uint32_t h, uint32_t d, const uint8_t *src) {}
-uint64_t tegra_total_size(const TexLayout *t) { return 0; }
-/* the menu and scene checks that switch the mouse's buttons (mousemenu.c, pause.c): never on here */
-int scene_on_title(void) { return 0; }
-int mousemenu_talking(void) { return 0; }
-int mousemenu_map(void) { return 0; }
-int mousemenu_naviwoof(void) { return 0; }
-int mousemenu_sideways(void) { return 0; }
-int mousemenu_stopwatch(void) { return 0; }
-int mousemenu_dpad_menu(void) { return 0; }
-int mousemenu_r_menu_camera_row(void) { return 0; }
-int savefs_diary_open(void) { return 0; }
-/* the running modes (run.c, issue #18): the Controls page's Run row; the game's own way here */
-#include "run.h"
-static int run_state = RUN_DEFAULT;
-int run_mode(void) { return run_state; }
-void run_mode_set(int mode) { run_state = mode; }
-const char *run_mode_name(int mode) { (void)mode; return "DEFAULT"; }
-const char *run_mode_save(int mode) { (void)mode; return "default"; }
-
-#include "bindings.c"
-
+        main_body = r"""
 int main(void) {
     uint64_t b = 0;
     int32_t s[4] = {0};
@@ -1037,21 +993,7 @@ int main(void) {
     return 0;
 }
 """
-        with tempfile.TemporaryDirectory() as t:
-            t = Path(t)
-            (t / "drv_battle_scroll.c").write_text(driver)
-            exe = t / "battle_scroll_test.exe"
-            sdl = sdl3(t)
-            if sdl is None:
-                self.skipTest("no SDL3 on this system (pkg-config sdl3)")
-            sdl_flags, sdl_libs = sdl
-            subprocess.run([check.host_cc(), "-std=c17", "-O1", "-Wall",
-                            f"-I{RUNTIME / 'include'}", f"-I{RUNTIME / 'src'}",
-                            f"-I{check.REPO / 'third_party' / 'vulkan' / 'include'}",
-                            *POSIX, *sdl_flags,
-                            "-o", str(exe), str(t / "drv_battle_scroll.c"), *sdl_libs], check=True, capture_output=True)
-            got = subprocess.run([str(exe)], capture_output=True, text=True, check=True)
-            self.assertEqual(got.returncode, 0)
+        _run_bindings_driver(self, "battle_scroll", main_body)
 
 
 class CxxHeadersTest(unittest.TestCase):

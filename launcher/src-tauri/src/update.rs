@@ -247,6 +247,30 @@ pub fn open_release_page(url: String) -> Result<(), String> {
     crate::platform::open(&url)
 }
 
+/// Downloads `url` to a `.part` file beside `dest` with `curl --max-time`, checks its SHA-256 against `sha256`,
+/// and renames it to `dest` only when verified. Removes the `.part` file on any failure.
+fn download_verified(url: &str, dest: &Path, sha256: &str, max_time: u32, mismatch_msg: &str) -> Result<(), String> {
+    let mut part_os = dest.as_os_str().to_os_string();
+    part_os.push(".part");
+    let part = PathBuf::from(part_os);
+    let _ = std::fs::remove_file(dest);
+    let timeout = max_time.to_string();
+    let ok = hidden(crate::platform::command(tool("curl")).args(["-sSfL", "--max-time", &timeout, "-o"]).arg(&part).arg(url))
+        .status().map(|s| s.success()).unwrap_or(false);
+    if !ok {
+        let _ = std::fs::remove_file(&part);
+        return Err("The download didn't finish. Check your connection and try again.".into());
+    }
+    let data = std::fs::read(&part).map_err(|e| e.to_string())?;
+    let got: String = Sha256::digest(&data).iter().map(|b| format!("{b:02x}")).collect();
+    if got != sha256.to_lowercase() {
+        let _ = std::fs::remove_file(&part);
+        return Err(mismatch_msg.into());
+    }
+    std::fs::rename(&part, dest).map_err(|e| e.to_string())?;
+    Ok(())
+}
+
 /// Downloads a game update into <install>\builder\game\<version>\: checked against GitHub's SHA-256 before it is
 /// unpacked, then its release.toml (a newer launcher needed: refused, with the reason).
 #[tauri::command]
@@ -264,19 +288,9 @@ pub async fn download_game_update(install: String, version: String, url: String,
         }
         let dir = PathBuf::from(&install).join("builder").join("game");
         std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
-        let (zip, tmp, dst) = (dir.join(format!("{version}.zip.part")), dir.join(format!("{version}.unpack")), dir.join(&version));
-        let ok = hidden(crate::platform::command(tool("curl")).args(["-sSfL", "--max-time", "300", "-o"]).arg(&zip).arg(&url))
-            .status().map(|s| s.success()).unwrap_or(false);
-        if !ok {
-            let _ = std::fs::remove_file(&zip);
-            return Err("The download didn't finish. Check your connection and try again.".into());
-        }
-        let data = std::fs::read(&zip).map_err(|e| e.to_string())?;
-        let got: String = Sha256::digest(&data).iter().map(|b| format!("{b:02x}")).collect();
-        if got != sha256.to_lowercase() {
-            let _ = std::fs::remove_file(&zip);
-            return Err("The download isn't the file GitHub lists for this update. Try again later.".into());
-        }
+        let (zip, tmp, dst) = (dir.join(format!("{version}.zip")), dir.join(format!("{version}.unpack")), dir.join(&version));
+        download_verified(&url, &zip, &sha256, 300,
+            "The download isn't the file GitHub lists for this update. Try again later.")?;
         let _ = std::fs::remove_dir_all(&tmp);
         std::fs::create_dir_all(&tmp).map_err(|e| e.to_string())?;
         // Windows' bsdtar and Python's zipfile both refuse absolute paths and ".." in an archive
@@ -391,21 +405,9 @@ pub async fn download_launcher_update(app: tauri::AppHandle, version: String, ur
         }
         let dir = std::env::temp_dir().join("YW4 Recomp");
         std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
-        let (part, exe) = (dir.join(format!("{name}.part")), dir.join(&name));
-        let _ = std::fs::remove_file(&exe);
-        let ok = hidden(crate::platform::command(tool("curl")).args(["-sSfL", "--max-time", "600", "-o"]).arg(&part).arg(&url))
-            .status().map(|s| s.success()).unwrap_or(false);
-        if !ok {
-            let _ = std::fs::remove_file(&part);
-            return Err("The download didn't finish. Check your connection and try again.".into());
-        }
-        let data = std::fs::read(&part).map_err(|e| e.to_string())?;
-        let got: String = Sha256::digest(&data).iter().map(|b| format!("{b:02x}")).collect();
-        if got != sha256.to_lowercase() {
-            let _ = std::fs::remove_file(&part);
-            return Err("The download isn't the file GitHub lists for this launcher. Try again later.".into());
-        }
-        std::fs::rename(&part, &exe).map_err(|e| e.to_string())?;
+        let exe = dir.join(&name);
+        download_verified(&url, &exe, &sha256, 600,
+            "The download isn't the file GitHub lists for this launcher. Try again later.")?;
         *CHECKED_INSTALLER.lock().map_err(|e| e.to_string())? = Some(exe);
         Ok(())
     }).await.map_err(|e| e.to_string())?

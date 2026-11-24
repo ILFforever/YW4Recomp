@@ -550,15 +550,16 @@ static float last_caret_x;
 
 float ui_text_caret_x(void) { return last_caret_x; }
 
-float ui_text_edit(const UiCanvas *c, int f, float px, float x, float y, float w, float lh, int max_lines,
-                   const char *str, int cursor, int sel_anchor, uint32_t rgb, uint32_t caret, uint32_t sel_color) {
-    if (cursor >= 0) last_caret_x = x;
-    else last_caret_x = 0;
-    enum { MAXL = 64 };
-    int start[MAXL], end[MAXL], n = 0, len = (int)strlen(str);
-    /* lines: words (with the spaces after them) while they fit; a word wider than the box breaks between letters */
+enum { EDIT_MAX_LINES = 64 };
+
+/* Breaks str into wrapped lines fitting width w: words (with the spaces after them) while they fit; a word wider than
+ * the box breaks between UTF-8 letters. Shared by ui_text_edit and ui_text_offset_at so drawing and mouse clicks
+ * always break lines identically. Also computes the caret's line (*out_cl) and first visible line (*out_first). */
+static int layout_edit_lines(int f, float px, float w, int max_lines, const char *str, int cursor,
+                             int start[EDIT_MAX_LINES], int end[EDIT_MAX_LINES], int *out_cl, int *out_first) {
+    int n = 0, len = (int)strlen(str);
     int ls = 0, i = 0;
-    while (n < MAXL) {
+    while (n < EDIT_MAX_LINES) {
         int le = ls;  /* the line so far: [ls, le) */
         i = ls;
         while (i < len) {
@@ -594,6 +595,16 @@ float ui_text_edit(const UiCanvas *c, int f, float px, float x, float y, float w
             }
     int first = 0;  /* the lines shown: the caret's always among them */
     if (max_lines > 0 && cl >= max_lines) first = cl - max_lines + 1;
+    *out_cl = cl, *out_first = first;
+    return n;
+}
+
+float ui_text_edit(const UiCanvas *c, int f, float px, float x, float y, float w, float lh, int max_lines,
+                   const char *str, int cursor, int sel_anchor, uint32_t rgb, uint32_t caret, uint32_t sel_color) {
+    if (cursor >= 0) last_caret_x = x;
+    else last_caret_x = 0;
+    int start[EDIT_MAX_LINES], end[EDIT_MAX_LINES], cl, first;
+    int n = layout_edit_lines(f, px, w, max_lines, str, cursor, start, end, &cl, &first);
     int shown = 0;
     int has_sel = sel_anchor >= 0 && cursor >= 0 && sel_anchor != cursor;
     int sel_min = sel_anchor < cursor ? sel_anchor : cursor;
@@ -626,45 +637,9 @@ float ui_text_edit(const UiCanvas *c, int f, float px, float x, float y, float w
 
 int ui_text_offset_at(int f, float px, float x, float y, float w, float lh, int max_lines,
                       const char *str, int cursor, float mx, float my) {
-    enum { MAXL = 64 };
-    int start[MAXL], end[MAXL], n = 0, len = (int)strlen(str);
-    int ls = 0, i = 0;
-    while (n < MAXL) {
-        int le = ls;
-        i = ls;
-        while (i < len) {
-            int we = i;
-            while (we < len && str[we] != ' ') we++;
-            while (we < len && str[we] == ' ') we++;
-            if (span_w(f, px, str, ls, we) <= w || le == ls) {
-                if (le == ls && span_w(f, px, str, ls, we) > w) {
-                    int k = ls;
-                    while (k < we) {
-                        int nk = k + 1;
-                        while (nk < we && (str[nk] & 0xC0) == 0x80) nk++;
-                        if (k > ls && span_w(f, px, str, ls, nk) > w) break;
-                        k = nk;
-                    }
-                    le = k;
-                    break;
-                }
-                le = we, i = we;
-            } else break;
-        }
-        start[n] = ls, end[n] = le, n++;
-        if (le >= len) break;
-        ls = le;
-    }
+    int start[EDIT_MAX_LINES], end[EDIT_MAX_LINES], cl, first;
+    int n = layout_edit_lines(f, px, w, max_lines, str, cursor, start, end, &cl, &first);
     if (n == 0) return 0;
-    int cl = n - 1;
-    if (cursor >= 0)
-        for (int k = 0; k < n; k++)
-            if (cursor >= start[k] && (cursor < end[k] || k == n - 1)) {
-                cl = k;
-                break;
-            }
-    int first = 0;
-    if (max_lines > 0 && cl >= max_lines) first = cl - max_lines + 1;
     int visible = max_lines > 0 && n - first > max_lines ? max_lines : n - first;
     if (visible <= 0) visible = 1;
 

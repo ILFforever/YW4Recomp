@@ -40,43 +40,57 @@ typedef struct {
     int pad;
 } Input;
 
+/* Explicit indices shared by inputs[], battle_keys[], sets[][], and glyphs[].row so adding or reordering an input
+ * cannot silently shift the parallel tables. IN_RUN stays last (RUN_INPUT). */
+enum InputId {
+    IN_A, IN_B, IN_X, IN_Y, IN_L, IN_R, IN_ZL, IN_ZR, IN_PLUS, IN_MINUS,
+    IN_LS_PRESS, IN_RS_PRESS,
+    IN_DPAD_UP, IN_DPAD_DOWN, IN_DPAD_LEFT, IN_DPAD_RIGHT,
+    IN_LS_UP, IN_LS_DOWN, IN_LS_LEFT, IN_LS_RIGHT,
+    IN_RS_UP, IN_RS_DOWN, IN_RS_LEFT, IN_RS_RIGHT,
+    IN_RUN,
+    NINPUTS
+};
+
 /* The starting keys are the owner's own (2026-11-13: "ship my keys as defaults"); the battle set's are below. */
-static const Input inputs[] = {
-    {"BUTTONS", "A", "A", 0, 0, 0, {SDL_SCANCODE_E, SDL_SCANCODE_RETURN}, PAD_FACE + 0},
-    {"BUTTONS", "B", "B", 1, 0, 0, {SDL_SCANCODE_SPACE}, PAD_FACE + 1},
-    {"BUTTONS", "X", "X", 2, 0, 0, {SDL_SCANCODE_TAB}, PAD_FACE + 2},
-    {"BUTTONS", "Y", "Y", 3, 0, 0, {SDL_SCANCODE_M}, PAD_FACE + 3},
-    {"BUTTONS", "L", "L", 6, 0, 0, {SDL_SCANCODE_1}, SDL_GAMEPAD_BUTTON_LEFT_SHOULDER},
-    {"BUTTONS", "R", "R", 7, 0, 0, {SDL_SCANCODE_3}, SDL_GAMEPAD_BUTTON_RIGHT_SHOULDER},
-    {"BUTTONS", "ZL", "ZL", 8, 0, 0, {SDL_SCANCODE_Q}, AXIS(SDL_GAMEPAD_AXIS_LEFT_TRIGGER, 1)},
-    {"BUTTONS", "ZR", "ZR", 9, 0, 0, {SDL_SCANCODE_F}, AXIS(SDL_GAMEPAD_AXIS_RIGHT_TRIGGER, 1)},
-    {"BUTTONS", "PLUS", "PLUS", 10, 0, 0, {SDL_SCANCODE_P, SDL_SCANCODE_ESCAPE}, SDL_GAMEPAD_BUTTON_START},
-    {"BUTTONS", "MINUS", "MINUS", 11, 0, 0, {SDL_SCANCODE_X}, SDL_GAMEPAD_BUTTON_BACK},
+static const Input inputs[NINPUTS] = {
+    [IN_A] = {"BUTTONS", "A", "A", 0, 0, 0, {SDL_SCANCODE_E, SDL_SCANCODE_RETURN}, PAD_FACE + 0},
+    [IN_B] = {"BUTTONS", "B", "B", 1, 0, 0, {SDL_SCANCODE_SPACE}, PAD_FACE + 1},
+    [IN_X] = {"BUTTONS", "X", "X", 2, 0, 0, {SDL_SCANCODE_TAB}, PAD_FACE + 2},
+    [IN_Y] = {"BUTTONS", "Y", "Y", 3, 0, 0, {SDL_SCANCODE_M}, PAD_FACE + 3},
+    [IN_L] = {"BUTTONS", "L", "L", 6, 0, 0, {SDL_SCANCODE_1}, SDL_GAMEPAD_BUTTON_LEFT_SHOULDER},
+    [IN_R] = {"BUTTONS", "R", "R", 7, 0, 0, {SDL_SCANCODE_3}, SDL_GAMEPAD_BUTTON_RIGHT_SHOULDER},
+    [IN_ZL] = {"BUTTONS", "ZL", "ZL", 8, 0, 0, {SDL_SCANCODE_Q}, AXIS(SDL_GAMEPAD_AXIS_LEFT_TRIGGER, 1)},
+    [IN_ZR] = {"BUTTONS", "ZR", "ZR", 9, 0, 0, {SDL_SCANCODE_F}, AXIS(SDL_GAMEPAD_AXIS_RIGHT_TRIGGER, 1)},
+    [IN_PLUS] = {"BUTTONS", "PLUS", "PLUS", 10, 0, 0, {SDL_SCANCODE_P, SDL_SCANCODE_ESCAPE}, SDL_GAMEPAD_BUTTON_START},
+    [IN_MINUS] = {"BUTTONS", "MINUS", "MINUS", 11, 0, 0, {SDL_SCANCODE_X}, SDL_GAMEPAD_BUTTON_BACK},
     /* Left Ctrl, not Left Shift, since Run took Shift (owner, 2026-11-18); older files move over in migrate_hints */
-    {"BUTTONS", "LEFT STICK PRESS", "LS_PRESS", 4, 0, 0, {SDL_SCANCODE_LCTRL}, SDL_GAMEPAD_BUTTON_LEFT_STICK},
-    {"BUTTONS", "RIGHT STICK PRESS", "RS_PRESS", 5, 0, 0, {0, SDL_SCANCODE_R}, SDL_GAMEPAD_BUTTON_RIGHT_STICK},
-    {"D-PAD", "UP", "DPAD_UP", 13, 0, 0, {SDL_SCANCODE_UP}, SDL_GAMEPAD_BUTTON_DPAD_UP},
-    {"D-PAD", "DOWN", "DPAD_DOWN", 15, 0, 0, {SDL_SCANCODE_DOWN}, SDL_GAMEPAD_BUTTON_DPAD_DOWN},
-    {"D-PAD", "LEFT", "DPAD_LEFT", 12, 0, 0, {SDL_SCANCODE_LEFT}, SDL_GAMEPAD_BUTTON_DPAD_LEFT},
-    {"D-PAD", "RIGHT", "DPAD_RIGHT", 14, 0, 0, {SDL_SCANCODE_RIGHT}, SDL_GAMEPAD_BUTTON_DPAD_RIGHT},
+    [IN_LS_PRESS] = {"BUTTONS", "LEFT STICK PRESS", "LS_PRESS", 4, 0, 0, {SDL_SCANCODE_LCTRL}, SDL_GAMEPAD_BUTTON_LEFT_STICK},
+    [IN_RS_PRESS] = {"BUTTONS", "RIGHT STICK PRESS", "RS_PRESS", 5, 0, 0, {0, SDL_SCANCODE_R}, SDL_GAMEPAD_BUTTON_RIGHT_STICK},
+    [IN_DPAD_UP] = {"D-PAD", "UP", "DPAD_UP", 13, 0, 0, {SDL_SCANCODE_UP}, SDL_GAMEPAD_BUTTON_DPAD_UP},
+    [IN_DPAD_DOWN] = {"D-PAD", "DOWN", "DPAD_DOWN", 15, 0, 0, {SDL_SCANCODE_DOWN}, SDL_GAMEPAD_BUTTON_DPAD_DOWN},
+    [IN_DPAD_LEFT] = {"D-PAD", "LEFT", "DPAD_LEFT", 12, 0, 0, {SDL_SCANCODE_LEFT}, SDL_GAMEPAD_BUTTON_DPAD_LEFT},
+    [IN_DPAD_RIGHT] = {"D-PAD", "RIGHT", "DPAD_RIGHT", 14, 0, 0, {SDL_SCANCODE_RIGHT}, SDL_GAMEPAD_BUTTON_DPAD_RIGHT},
     /* SDL's stick y grows downwards, the Switch's upwards */
-    {"LEFT STICK", "UP", "LS_UP", -1, 1, 1, {SDL_SCANCODE_W}, AXIS(SDL_GAMEPAD_AXIS_LEFTY, 0)},
-    {"LEFT STICK", "DOWN", "LS_DOWN", -1, 1, -1, {SDL_SCANCODE_S}, AXIS(SDL_GAMEPAD_AXIS_LEFTY, 1)},
-    {"LEFT STICK", "LEFT", "LS_LEFT", -1, 0, -1, {SDL_SCANCODE_A}, AXIS(SDL_GAMEPAD_AXIS_LEFTX, 0)},
-    {"LEFT STICK", "RIGHT", "LS_RIGHT", -1, 0, 1, {SDL_SCANCODE_D}, AXIS(SDL_GAMEPAD_AXIS_LEFTX, 1)},
-    {"RIGHT STICK", "UP", "RS_UP", -1, 3, 1, {SDL_SCANCODE_I}, AXIS(SDL_GAMEPAD_AXIS_RIGHTY, 0)},
-    {"RIGHT STICK", "DOWN", "RS_DOWN", -1, 3, -1, {SDL_SCANCODE_K}, AXIS(SDL_GAMEPAD_AXIS_RIGHTY, 1)},
-    {"RIGHT STICK", "LEFT", "RS_LEFT", -1, 2, -1, {SDL_SCANCODE_J}, AXIS(SDL_GAMEPAD_AXIS_RIGHTX, 0)},
-    {"RIGHT STICK", "RIGHT", "RS_RIGHT", -1, 2, 1, {SDL_SCANCODE_L}, AXIS(SDL_GAMEPAD_AXIS_RIGHTX, 1)},
+    [IN_LS_UP] = {"LEFT STICK", "UP", "LS_UP", -1, 1, 1, {SDL_SCANCODE_W}, AXIS(SDL_GAMEPAD_AXIS_LEFTY, 0)},
+    [IN_LS_DOWN] = {"LEFT STICK", "DOWN", "LS_DOWN", -1, 1, -1, {SDL_SCANCODE_S}, AXIS(SDL_GAMEPAD_AXIS_LEFTY, 1)},
+    [IN_LS_LEFT] = {"LEFT STICK", "LEFT", "LS_LEFT", -1, 0, -1, {SDL_SCANCODE_A}, AXIS(SDL_GAMEPAD_AXIS_LEFTX, 0)},
+    [IN_LS_RIGHT] = {"LEFT STICK", "RIGHT", "LS_RIGHT", -1, 0, 1, {SDL_SCANCODE_D}, AXIS(SDL_GAMEPAD_AXIS_LEFTX, 1)},
+    [IN_RS_UP] = {"RIGHT STICK", "UP", "RS_UP", -1, 3, 1, {SDL_SCANCODE_I}, AXIS(SDL_GAMEPAD_AXIS_RIGHTY, 0)},
+    [IN_RS_DOWN] = {"RIGHT STICK", "DOWN", "RS_DOWN", -1, 3, -1, {SDL_SCANCODE_K}, AXIS(SDL_GAMEPAD_AXIS_RIGHTY, 1)},
+    [IN_RS_LEFT] = {"RIGHT STICK", "LEFT", "RS_LEFT", -1, 2, -1, {SDL_SCANCODE_J}, AXIS(SDL_GAMEPAD_AXIS_RIGHTX, 0)},
+    [IN_RS_RIGHT] = {"RIGHT STICK", "RIGHT", "RS_RIGHT", -1, 2, 1, {SDL_SCANCODE_L}, AXIS(SDL_GAMEPAD_AXIS_RIGHTX, 1)},
     /* ours, the last (issue #18), shown on the Controls page up with the settings, under NINTENDO ICONS (RUN_INPUT_ROW):
      * what it does follows the RUNNING mode (run.c). Left Shift; on a pad the left stick press, shared with Close
      * hints, every button having a job already (owner, 2026-11-18) */
-    {"BUTTONS", "RUN", "RUN", INPUT_OURS, 0, 0, {SDL_SCANCODE_LSHIFT}, SDL_GAMEPAD_BUTTON_LEFT_STICK},
+    [IN_RUN] = {"BUTTONS", "RUN", "RUN", INPUT_OURS, 0, 0, {SDL_SCANCODE_LSHIFT}, SDL_GAMEPAD_BUTTON_LEFT_STICK},
 };
+_Static_assert(sizeof inputs / sizeof *inputs == NINPUTS, "inputs[] length must match InputId");
+_Static_assert(IN_RUN == NINPUTS - 1, "IN_RUN must remain the last input");
 /* The controls page's rows: the mouse's two sensitivities, its buttons (a page of their own in the overlay), the
  * shortcut wheel's On / Off (shortcutwheel.h), the vibration toggle, which set is shown, the inputs, the reset
  * row. */
-enum { NINPUTS = sizeof inputs / sizeof *inputs, NMOUSE = 2,
+enum { NMOUSE = 2,
        SENS_ROW = 0,
        MOUSE_ROW = SENS_ROW + NMOUSE,
        WHEEL_ROW = MOUSE_ROW + 1,
@@ -84,7 +98,7 @@ enum { NINPUTS = sizeof inputs / sizeof *inputs, NMOUSE = 2,
        LAYOUT_ROW = RUMBLE_ROW + 1,
        /* Run / Walk (the last input, ours) and RUNNING up here with the other settings, under NINTENDO ICONS
         * (owner, 2026-11-17); the Switch's inputs follow KEYS FOR */
-       RUN_INPUT = NINPUTS - 1, OURS = 1,
+       RUN_INPUT = IN_RUN, OURS = 1,
        RUN_ROW = LAYOUT_ROW + 1,  /* RUNNING, then the Run key under it (owner, 2026-11-18) */
        RUN_INPUT_ROW = RUN_ROW + 1,
        SET_ROW = RUN_INPUT_ROW + 1,
@@ -114,30 +128,34 @@ static int edit_set;  /* the set the controls page shows and changes */
 #define bound (sets[edit_set])
 static int bound_ready, battle_set_known;  /* the battle set was read from the settings file or copied */
 
-/* The battle set's starting keys (the owner's battle set, 2026-11-13), in the order of inputs[]; the controller's
+/* The battle set's starting keys (the owner's battle set, 2026-11-13), indexed by InputId; the controller's
  * inputs are exploring's but for X and Y (battle_starting_set) */
 static const int battle_keys[NINPUTS][BIND_KEYS] = {
-    {SDL_SCANCODE_E, SDL_SCANCODE_RETURN},      /* A */
-    {SDL_SCANCODE_SPACE, SDL_SCANCODE_LSHIFT},  /* B */
-    {SDL_SCANCODE_Q},                           /* X */
-    {0, SDL_SCANCODE_U},                        /* Y (and the left button: mouse_starting) */
-    {0},                                        /* L (Blasters' missions: 2, keys_now) */
-    {SDL_SCANCODE_E},                           /* R */
-    {0, SDL_SCANCODE_O},                        /* ZL (and the right button) */
-    {SDL_SCANCODE_F},                           /* ZR */
-    {SDL_SCANCODE_R, SDL_SCANCODE_P},           /* PLUS */
-    {SDL_SCANCODE_C},                           /* MINUS */
-    {SDL_SCANCODE_TAB},                         /* LS_PRESS */
-    {0},                                        /* RS_PRESS (the wheel press) */
-    {SDL_SCANCODE_UP},                          /* DPAD_UP (and wheel up) */
-    {SDL_SCANCODE_DOWN},                        /* DPAD_DOWN (and wheel down) */
+    [IN_A] = {SDL_SCANCODE_E, SDL_SCANCODE_RETURN},
+    [IN_B] = {SDL_SCANCODE_SPACE, SDL_SCANCODE_LSHIFT},
+    [IN_X] = {SDL_SCANCODE_Q},
+    [IN_Y] = {0, SDL_SCANCODE_U},                        /* and the left button: mouse_starting */
+    [IN_L] = {0},                                        /* Blasters' missions: 2, keys_now */
+    [IN_R] = {SDL_SCANCODE_E},
+    [IN_ZL] = {0, SDL_SCANCODE_O},                       /* and the right button */
+    [IN_ZR] = {SDL_SCANCODE_F},
+    [IN_PLUS] = {SDL_SCANCODE_R, SDL_SCANCODE_P},
+    [IN_MINUS] = {SDL_SCANCODE_C},
+    [IN_LS_PRESS] = {SDL_SCANCODE_TAB},
+    [IN_RS_PRESS] = {0},                                 /* the wheel press */
+    [IN_DPAD_UP] = {SDL_SCANCODE_UP},                    /* and wheel up */
+    [IN_DPAD_DOWN] = {SDL_SCANCODE_DOWN},                /* and wheel down */
     /* DPAD_LEFT, DPAD_RIGHT: the target switch through everyone, also on 1 and 3 (owner, 2026-11-20: "this is what I
      * wanted", replacing 1 / 3 on L / R from earlier that day) */
-    {SDL_SCANCODE_LEFT, SDL_SCANCODE_1}, {SDL_SCANCODE_RIGHT, SDL_SCANCODE_3},
-    {SDL_SCANCODE_W}, {SDL_SCANCODE_S}, {SDL_SCANCODE_A}, {SDL_SCANCODE_D},  /* LS */
-    {SDL_SCANCODE_I}, {SDL_SCANCODE_K}, {SDL_SCANCODE_J}, {SDL_SCANCODE_L},  /* RS */
-    {0},                                                                     /* RUN: the field's only */
+    [IN_DPAD_LEFT] = {SDL_SCANCODE_LEFT, SDL_SCANCODE_1},
+    [IN_DPAD_RIGHT] = {SDL_SCANCODE_RIGHT, SDL_SCANCODE_3},
+    [IN_LS_UP] = {SDL_SCANCODE_W}, [IN_LS_DOWN] = {SDL_SCANCODE_S},
+    [IN_LS_LEFT] = {SDL_SCANCODE_A}, [IN_LS_RIGHT] = {SDL_SCANCODE_D},
+    [IN_RS_UP] = {SDL_SCANCODE_I}, [IN_RS_DOWN] = {SDL_SCANCODE_K},
+    [IN_RS_LEFT] = {SDL_SCANCODE_J}, [IN_RS_RIGHT] = {SDL_SCANCODE_L},
+    [IN_RUN] = {0},                                      /* the field's only */
 };
+_Static_assert(sizeof battle_keys / sizeof *battle_keys == NINPUTS, "battle_keys[] length must match InputId");
 
 /* The mouse's own bindings (owner, 2026-11-13: the Mouse buttons page): in each set, the Switch input each part of
  * the mouse presses (an index of inputs[], -1 none), one each. Kept apart from an input's two keys, so binding the
@@ -903,22 +921,22 @@ static const struct {
     const char *nx, *suffix, *pad;
     int row;
 } glyphs[NGLYPHS] = {
-    [G_SELECT] = {"gaiji_bt09", NULL, "gaiji_bt09", 9},
-    [G_L3] = {"gaiji_bt11", NULL, "gaiji_bt11", 10},
-    [G_R3] = {"gaiji_bt12", NULL, "gaiji_bt12", 11},
-    [G_START] = {"gaiji_bt10", NULL, "gaiji_bt10", 8},
-    [G_UP] = {"gaiji_key_up", NULL, "gaiji_key_up", 12},
-    [G_RIGHT] = {"gaiji_key_rt", NULL, "gaiji_key_rt", 15},
-    [G_DOWN] = {"gaiji_key_dwn", NULL, "gaiji_key_dwn", 13},
-    [G_LEFT] = {"gaiji_key_lt", NULL, "gaiji_key_lt", 14},
-    [G_L2] = {"gaiji_bt06", NULL, "gaiji_bt06", 6},
-    [G_R2] = {"gaiji_bt08", NULL, "gaiji_bt08", 7},
-    [G_L1] = {"gaiji_bt05", NULL, "gaiji_bt05", 4},
-    [G_R1] = {"gaiji_bt07", NULL, "gaiji_bt07", 5},
-    [G_NORTH] = {"gaiji_bt01", NULL, "gaiji_bt01", 2},
-    [G_EAST] = {"gaiji_bt02", NULL, "gaiji_bt02", 0},
-    [G_SOUTH] = {"gaiji_bt03", NULL, "gaiji_bt03", 1},
-    [G_WEST] = {"gaiji_bt04", NULL, "gaiji_bt04", 3},
+    [G_SELECT] = {"gaiji_bt09", NULL, "gaiji_bt09", IN_MINUS},
+    [G_L3] = {"gaiji_bt11", NULL, "gaiji_bt11", IN_LS_PRESS},
+    [G_R3] = {"gaiji_bt12", NULL, "gaiji_bt12", IN_RS_PRESS},
+    [G_START] = {"gaiji_bt10", NULL, "gaiji_bt10", IN_PLUS},
+    [G_UP] = {"gaiji_key_up", NULL, "gaiji_key_up", IN_DPAD_UP},
+    [G_RIGHT] = {"gaiji_key_rt", NULL, "gaiji_key_rt", IN_DPAD_RIGHT},
+    [G_DOWN] = {"gaiji_key_dwn", NULL, "gaiji_key_dwn", IN_DPAD_DOWN},
+    [G_LEFT] = {"gaiji_key_lt", NULL, "gaiji_key_lt", IN_DPAD_LEFT},
+    [G_L2] = {"gaiji_bt06", NULL, "gaiji_bt06", IN_ZL},
+    [G_R2] = {"gaiji_bt08", NULL, "gaiji_bt08", IN_ZR},
+    [G_L1] = {"gaiji_bt05", NULL, "gaiji_bt05", IN_L},
+    [G_R1] = {"gaiji_bt07", NULL, "gaiji_bt07", IN_R},
+    [G_NORTH] = {"gaiji_bt01", NULL, "gaiji_bt01", IN_X},
+    [G_EAST] = {"gaiji_bt02", NULL, "gaiji_bt02", IN_A},
+    [G_SOUTH] = {"gaiji_bt03", NULL, "gaiji_bt03", IN_B},
+    [G_WEST] = {"gaiji_bt04", NULL, "gaiji_bt04", IN_Y},
     [G_DPAD_LR] = {"gaiji_key_all", "s100", "gaiji_key_lr", -1},
     [G_DPAD_UPDOWN] = {"gaiji_key_all", "s200", "gaiji_key_updwn", -1},
     [G_DPAD] = {"gaiji_key_all", NULL, "gaiji_key_all", -1},
