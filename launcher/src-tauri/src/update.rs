@@ -254,8 +254,9 @@ pub async fn check_updates(app: tauri::AppHandle, install: String, built: String
         });
         // a newer version out than the downloaded one waiting to be built: download that instead of building this
         // (2026-11-11: a 0.9.3 that didn't build stood in front of the 0.9.4 that fixed it)
-        // (not for an older version the player chose: building it is what they asked for)
-        if u.game.is_some() && !u.rebuild_older { u.rebuild = None; u.rebuild_notes.clear(); }
+        // (not for a version the player chose from a file, older or newer than the build: building it is what they
+        // asked for. 2026-11-24: 1.4.0 from a zip over a built 1.0.2, with 2.2.1 out, got no rebuild question)
+        if u.game.is_some() && chosen(&inst).is_none() { u.rebuild = None; u.rebuild_notes.clear(); }
         u.launcher = launcher.filter(|(v, _)| *v > launcher_ver()).map(|(_, l)| l);
         u
     }).await.unwrap_or_default()
