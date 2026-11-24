@@ -311,7 +311,9 @@ def main() -> int:
                     help="extract or copy the game files again, even if this install already has them")
     ap.add_argument("--no-fsr", action="store_true")
     ap.add_argument("--no-dlss", action="store_true")
-    ap.add_argument("--no-xess", action="store_true")  # Intel XeSS (decision 0089); older game code ignores it
+    # Intel XeSS (decision 0089). Older game code REJECTS it (the strict parse_args below), so the launcher passes it
+    # only when this file names it (buildrun.rs code_knows); no protocol bump, which older launchers would refuse
+    ap.add_argument("--no-xess", action="store_true")
     ap.add_argument("--protocol", action="store_true", help="print the protocol number and stop")
     ap.add_argument("--recover", action="store_true",
                     help="after a stopped build: put the kept game back (the launcher runs it after Cancel)")

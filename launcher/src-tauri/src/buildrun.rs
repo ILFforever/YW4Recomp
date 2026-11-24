@@ -170,6 +170,14 @@ fn code_protocol(b: &Builder) -> i64 {
         .unwrap_or(1)
 }
 
+/// Whether the game code's build_install.py takes an option. For options added without a protocol bump: a new
+/// protocol would make every older launcher refuse the game updates that carry it (update.rs usable()).
+fn code_knows(b: &Builder, option: &str) -> bool {
+    std::fs::read_to_string(b.src.join("tools").join("yw4").join("build_install.py"))
+        .map(|s| s.contains(&format!("\"{option}\"")))
+        .unwrap_or(false)
+}
+
 fn write_config(b: &Builder, plan: &Plan, inst: &Path) -> std::io::Result<PathBuf> {
     let get = |k: &str| plan.paths.get(k).filter(|v| !v.is_empty()).map(PathBuf::from);
     let mut s = String::from("# Written by the YW4 Recomp launcher for this install folder (decision 0050).\n[input]\n");
@@ -382,7 +390,15 @@ fn run_all(app: &AppHandle, run: &Running, plan: &Plan) -> Result<(), String> {
     }
     if !plan.fsr { args.push("--no-fsr".into()); }
     if !plan.dlss { args.push("--no-dlss".into()); }
-    if !plan.xess { args.push("--no-xess".into()); }
+    if !plan.xess {
+        // game code from before XeSS (any game zip up to 2.2.1) knows no --no-xess: its build_install.py parses
+        // its options strictly and would stop the build. It has no XeSS to leave out anyway.
+        if code_knows(&b, "--no-xess") {
+            args.push("--no-xess".into());
+        } else {
+            emit_log(app, "that game code has no XeSS: nothing to leave out");
+        }
+    }
     if let Err(e) = python(app, run, &b, &cfg, "tools.yw4.build_install", &args) {
         if run.cancel.load(Ordering::SeqCst) {
             // Cancel ended the build's processes at once, so it couldn't put back the game it had set aside
