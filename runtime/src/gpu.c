@@ -2220,13 +2220,6 @@ void gpu_texture_finalize(NvnTexture *t) {
 
 /* ================================================================== samplers */
 
-static VkCompareOp compare_op(uint32_t f) {
-    static const VkCompareOp ops[9] = {VK_COMPARE_OP_ALWAYS, VK_COMPARE_OP_NEVER, VK_COMPARE_OP_LESS,
-                                       VK_COMPARE_OP_EQUAL, VK_COMPARE_OP_LESS_OR_EQUAL, VK_COMPARE_OP_GREATER,
-                                       VK_COMPARE_OP_NOT_EQUAL, VK_COMPARE_OP_GREATER_OR_EQUAL, VK_COMPARE_OP_ALWAYS};
-    return f < 9 ? ops[f] : VK_COMPARE_OP_ALWAYS;
-}
-
 /* Texture filtering: every sampler the game makes has anisotropic filtering off and picks one mip
  * level per texel (linear within it, nearest between levels: min filter 3), so distant and slanted
  * surfaces drop to small, blurry levels early, in steps (2026-10-27, YW4_SAMPLER_LOG). With this on,
@@ -2336,7 +2329,7 @@ VkSampler gpu_sampler(const NvnSamplerDesc *d) {
             si.anisotropyEnable = VK_TRUE, si.maxAnisotropy = fminf((float)af, vk.props.limits.maxSamplerAnisotropy);
     }
     if (ub != 0.0f && mf >= 2 && !d->compare_mode && si.maxLod > si.minLod + 0.25f) si.mipLodBias += ub;  /* above */
-    if (d->compare_mode) si.compareEnable = VK_TRUE, si.compareOp = compare_op(d->compare_func);
+    if (d->compare_mode) si.compareEnable = VK_TRUE, si.compareOp = gpu_compare_op(d->compare_func);
     if (border) {  /* nearest standard border colour (custom colours: to do) */
         const float *c = d->border;
         si.borderColor = c[3] < 0.5f ? VK_BORDER_COLOR_FLOAT_TRANSPARENT_BLACK
@@ -2457,7 +2450,7 @@ void gpu_execute(uint64_t handle) {
             gpu_taa_targets_end(cb);  /* TAA: the G-buffer's motion, before the game reuses it */
             memcpy(&s.rt, r->extra, sizeof s.rt);
             render_targets_fix(&s.rt);  /* point at our own copies of the textures */
-            s.ncolor = (int)r->x[0];
+            s.ncolor = r->x[0] > 8 ? 8 : (int)r->x[0];
             s.targets_noted = 0;  /* noted at the first draw, with the state the game draws with */
             gpu_ab_targets(cb, &s);
             gpu_passes_targets(cb, &s);
@@ -2485,8 +2478,8 @@ void gpu_execute(uint64_t handle) {
 
         /* ---- work */
         case CMD_CLEAR_COLOR: {  /* (index, colour, mask) */
-            int i = (int)r->x[0];
-            NvnTexture *t = i < s.ncolor ? s.rt.color[i] : NULL;
+            uint32_t i = (uint32_t)r->x[0];
+            NvnTexture *t = i < (uint32_t)s.ncolor && i < 8 ? s.rt.color[i] : NULL;
             if (!t) break;
             if (gpu_watch_on()) gpu_watch_clear(t);
             gpu_end_rendering(cb, &s);

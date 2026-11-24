@@ -28,7 +28,6 @@
 #include "window.h"
 #include "relay.h"
 
-const char *shadow_mode_name(void);
 int drawdist_index(void);  /* drawdist.c: DRAW DISTANCE (TEST) */
 void drawdist_cycle(void);
 
@@ -450,8 +449,8 @@ static const Setting player[] = {
      {"OFF", "FXAA", "SMAA", "TAA", "FSR", "DLSS", "XESS"},
      {"THE SWITCH'S DEFAULT: JAGGED EDGES", "SMOOTHEST, TEXTURES A LITTLE SOFTER", "CLEAN EDGES, TEXTURES STAY SHARP",
       "STEADY EDGES: NO SHIMMER ON FENCES, LEAVES AND SHADOWS", "AMD FSR: STEADY EDGES, BEST WITH UPSCALING",
-      "NVIDIA DLSS: AI UPSCALING, NVIDIA RTX GPUS (ELSE FSR)",
-      "INTEL XESS: AI UPSCALING, ANY GPU, FASTEST ON INTEL ARC (ELSE FSR)"}, 7, gpu_aa,
+      "NVIDIA DLSS: AI UPSCALING, NVIDIA RTX GPUS",
+      "INTEL XESS: AI UPSCALING, ANY GPU, FASTEST ON INTEL ARC"}, 7, gpu_aa,
      gpu_aa_cycle, "YW4_AA", {"0", "1", "2", "3", "4", "5", "6"}},
     {"ANTI-ALIASING AND UPSCALING", "DLSS MODEL",
      /* (decision 0040: K, or M with no trail behind characters in the night rain; shown only with DLSS) */

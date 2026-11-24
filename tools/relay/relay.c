@@ -203,13 +203,17 @@ static void flush_out(Client *c) {
 
 static void send_frame2(Client *c, int kind, const void *a, size_t an, const void *b, size_t bn) {
     if (c->closing) return;
+    if (c->out_off) {
+        size_t rem = c->out_len - c->out_off;
+        if (rem) memmove(c->out, c->out + c->out_off, rem);
+        c->out_len = rem, c->out_off = 0;
+    }
     size_t need = c->out_len + 5 + an + bn;
     if (need > OUT_MAX) {  /* it reads nothing: let it go rather than hold its traffic */
         logf_(c->name, "too slow to read its traffic: dropped");
         c->closing = 1;
         return;
     }
-    if (c->out_off && c->out_off == c->out_len) c->out_off = c->out_len = 0, need = 5 + an + bn;
     if (need > c->out_cap) {
         size_t cap = c->out_cap ? c->out_cap : 4096;
         while (cap < need) cap *= 2;

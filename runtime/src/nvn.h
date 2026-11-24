@@ -43,8 +43,6 @@ extern const NvnImpl nvn_cmdbuf_impls[];
 
 /* Stops: something this NVN can't do yet. */
 YW4_NORETURN void nvn_fatal(const CPUState *c, const char *fmt, ...);
-/* Calls a guest function (a game callback) on this thread; x0.. are already set. */
-void nvn_guest_call(CPUState *c, uint64_t fn);
 
 /* ---- host objects */
 

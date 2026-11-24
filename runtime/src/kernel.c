@@ -703,11 +703,6 @@ static uint32_t create_transfer_memory(uint64_t addr, uint64_t size, uint32_t pe
     return R_OK;
 }
 
-KTransferMemory *yw4_transfer_memory_get(uint32_t handle) {
-    KObject *o = yw4_handle_get(handle);
-    return o && o->type == KOBJ_TRANSFER_MEMORY ? (KTransferMemory *)o : NULL;
-}
-
 /* ---- mutexes and condition variables (mesosphere KConditionVariable)
  *
  * The sdk's mutex is a word in guest memory: 0 = free, else the owner's tag (its thread

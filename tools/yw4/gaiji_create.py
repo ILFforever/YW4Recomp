@@ -189,11 +189,7 @@ def encode(im: Image.Image) -> bytes:
     return bytes(out)
 
 
-def fnv1a64(data: bytes) -> int:
-    h = 0xCBF29CE484222325
-    for b in data:
-        h = ((h ^ b) * 0x100000001B3) & 0xFFFFFFFFFFFFFFFF
-    return h
+from tools.yw4.shaders import fnv1a64
 
 
 def cell_blocks(linear: bytes, sheet_w: int, at: tuple[int, int], rows: int = CELL) -> bytes:
@@ -332,24 +328,18 @@ def draw_na(style: str) -> Image.Image:
     return big.resize((CELL, CELL), Image.LANCZOS)
 
 
-def region_blocks(linear: bytes, sheet_w: int, x: int, y: int, w: int, h: int) -> bytes:
-    pitch = sheet_w // 4 * 16
-    return b"".join(linear[by * pitch + x // 4 * 16: by * pitch + (x + w) // 4 * 16] for by in range(y // 4, (y + h) // 4))
-
-
 def load_sheet(name: str) -> bytes:
     """A sheet from the owner's font.cpk, as linear rows of BC7 blocks (256 x 256; the keyboard sheet 620 x 620)."""
     font_cpk = config.load().romfs_dir / "data" / "nx" / "font" / "font.cpk"
     entry = next(f for f in cpk.list_files(font_cpk).files if f.path.endswith("/" + name))
     data = cpk.read(font_cpk, entry)
-    u16 = lambda off: int.from_bytes(data[off:off + 2], "little")
-    nxtch = 4 * (u16(0x0A) + u16(0x3E))
-    w = int.from_bytes(data[nxtch + 0x14:nxtch + 0x18], "little")
-    h = int.from_bytes(data[nxtch + 0x18:nxtch + 0x1C], "little")
+    from tools.yw4.g4tx import parse_g4tx
+
+    sheet = parse_g4tx(data)
     want = (620, 620) if name == "gaiji_key.g4tx" else (256, 256)
-    if (w, h) != want:
-        raise SystemExit(f"error: {name} is {w}x{h}, expected {want[0]}x{want[1]}")
-    return bytes(deswizzle_bc7(data[nxtch + 0x100:], w, h))
+    if (sheet.width, sheet.height) != want:
+        raise SystemExit(f"error: {name} is {sheet.width}x{sheet.height}, expected {want[0]}x{want[1]}")
+    return sheet.linear_bc7
 
 
 def c_array(fp, name: str, data: bytes, indent: str = "") -> None:

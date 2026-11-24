@@ -182,6 +182,7 @@ VkShaderModule gpu_native_shader(const char *name) {
     if (!f) gpu_stop("no native shader %s (python -m recomp.build compiles runtime/shaders)", path);
     fseek(f, 0, SEEK_END);
     long n = ftell(f);
+    if (n <= 0 || (n & 3)) gpu_stop("bad native shader %s", path);
     fseek(f, 0, SEEK_SET);
     uint32_t *code = malloc((size_t)n);
     if (!code || fread(code, 1, (size_t)n, f) != (size_t)n) gpu_stop("cannot read %s", path);

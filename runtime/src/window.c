@@ -371,7 +371,10 @@ static int vk_init(void) {
         if (n > 128) n = 128;
         vkEnumerateInstanceLayerProperties(&n, props);
         for (uint32_t i = 0; i < n; i++)
-            if (!strcmp(props[i].layerName, "VK_LAYER_KHRONOS_validation")) layers[nlayers++] = "VK_LAYER_KHRONOS_validation";
+            if (!strcmp(props[i].layerName, "VK_LAYER_KHRONOS_validation")) {  /* once: several manifests may list it */
+                layers[nlayers++] = "VK_LAYER_KHRONOS_validation";
+                break;
+            }
         fprintf(stderr, "yw4: window: Vulkan validation %s\n", nlayers ? "on" : "asked for, but the layer isn't installed");
     }
     VkApplicationInfo app = {.sType = VK_STRUCTURE_TYPE_APPLICATION_INFO, .pApplicationName = "yw4",
@@ -468,7 +471,11 @@ static int vk_init(void) {
     {
         uint32_t n = 0;
         vkEnumerateDeviceExtensionProperties(vk.gpu, NULL, &n, NULL);
-        VkExtensionProperties *e = calloc(n, sizeof *e);
+        VkExtensionProperties *e = calloc(n ? n : 1, sizeof *e);
+        if (!e) {
+            fprintf(stderr, "yw4: window: out of memory listing the device extensions" "\n");
+            return -1;
+        }
         vkEnumerateDeviceExtensionProperties(vk.gpu, NULL, &n, e);
         for (uint32_t i = 0; i < n; i++) {
             if (!strcmp(e[i].extensionName, VK_EXT_EXTERNAL_MEMORY_HOST_EXTENSION_NAME)) vk.host_import = 1;
@@ -704,32 +711,41 @@ static int vk_init(void) {
 }
 
 /* The staging buffer and the image a w x h frame goes through. */
+static void frame_free(void) {  /* destroys what there is and zeroes the handles: a failed make leaves none stale */
+    if (frame) vkDestroyImage(vk.device, frame, NULL);
+    if (frame_mem) vkFreeMemory(vk.device, frame_mem, NULL);
+    if (staging) vkDestroyBuffer(vk.device, staging, NULL);
+    if (staging_mem) vkFreeMemory(vk.device, staging_mem, NULL);  /* freeing it unmaps it */
+    frame = VK_NULL_HANDLE, frame_mem = VK_NULL_HANDLE, staging = VK_NULL_HANDLE, staging_mem = VK_NULL_HANDLE;
+    staging_ptr = NULL, frame_w = frame_h = 0;
+}
+
 static int frame_resources(uint32_t w, uint32_t h) {
     if (frame && w == frame_w && h == frame_h) return 0;
     vkDeviceWaitIdle(vk.device);
-    if (frame) vkDestroyImage(vk.device, frame, NULL), vkFreeMemory(vk.device, frame_mem, NULL);
-    if (staging) vkDestroyBuffer(vk.device, staging, NULL), vkFreeMemory(vk.device, staging_mem, NULL);
+    frame_free();
     VkBufferCreateInfo bci = {.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO, .size = (VkDeviceSize)w * h * 4,
                               .usage = VK_BUFFER_USAGE_TRANSFER_SRC_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT};
-    vkCreateBuffer(vk.device, &bci, NULL, &staging);
+    if (vkCreateBuffer(vk.device, &bci, NULL, &staging) != VK_SUCCESS) return frame_free(), -1;
     VkMemoryRequirements mr;
     vkGetBufferMemoryRequirements(vk.device, staging, &mr);
     VkMemoryAllocateInfo mai = {.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO, .allocationSize = mr.size,
                                 .memoryTypeIndex = vk_memory_type(mr.memoryTypeBits, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT |
                                                                                       VK_MEMORY_PROPERTY_HOST_COHERENT_BIT)};
-    if (vkAllocateMemory(vk.device, &mai, NULL, &staging_mem) != VK_SUCCESS) return -1;
-    vkBindBufferMemory(vk.device, staging, staging_mem, 0);
-    vkMapMemory(vk.device, staging_mem, 0, VK_WHOLE_SIZE, 0, &staging_ptr);
+    if (vkAllocateMemory(vk.device, &mai, NULL, &staging_mem) != VK_SUCCESS) return frame_free(), -1;
+    if (vkBindBufferMemory(vk.device, staging, staging_mem, 0) != VK_SUCCESS ||
+        vkMapMemory(vk.device, staging_mem, 0, VK_WHOLE_SIZE, 0, &staging_ptr) != VK_SUCCESS)
+        return frame_free(), -1;
     VkImageCreateInfo ici = {.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO, .imageType = VK_IMAGE_TYPE_2D,
                              .format = VK_FORMAT_R8G8B8A8_UNORM, .extent = {w, h, 1}, .mipLevels = 1, .arrayLayers = 1,
                              .samples = VK_SAMPLE_COUNT_1_BIT, .tiling = VK_IMAGE_TILING_OPTIMAL,
                              .usage = VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT};
-    vkCreateImage(vk.device, &ici, NULL, &frame);
+    if (vkCreateImage(vk.device, &ici, NULL, &frame) != VK_SUCCESS) return frame_free(), -1;
     vkGetImageMemoryRequirements(vk.device, frame, &mr);
     mai.allocationSize = mr.size;
     mai.memoryTypeIndex = vk_memory_type(mr.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
-    if (vkAllocateMemory(vk.device, &mai, NULL, &frame_mem) != VK_SUCCESS) return -1;
-    vkBindImageMemory(vk.device, frame, frame_mem, 0);
+    if (vkAllocateMemory(vk.device, &mai, NULL, &frame_mem) != VK_SUCCESS) return frame_free(), -1;
+    if (vkBindImageMemory(vk.device, frame, frame_mem, 0) != VK_SUCCESS) return frame_free(), -1;
     frame_w = w, frame_h = h;
     return 0;
 }
@@ -1113,7 +1129,8 @@ static void window_notice(int high, const char *title, const char *fmt, ...) {
     va_start(ap, fmt);
     vsnprintf(note_text, sizeof note_text, fmt, ap);
     va_end(ap);
-    note_high = high, note_keys = note_update = 0, note_start = 0, nb.s = 0, note_on = 1;
+    note_high = high, note_keys = note_update = 0, note_start = 0, nb.s = 0;
+    __atomic_store_n(&note_on, 1, __ATOMIC_RELEASE);  /* last: the present's thread reads the card when it sees this */
     fprintf(stderr, "yw4: window: notice: %s. %s\n", note_title, note_text);
 }
 
@@ -1130,8 +1147,9 @@ static void note_keys_words(int pad) {
     note_pad = pad, note_style = bindings_pad_style(), nb.s = 0;
 }
 static void note_keys_start(void) {
-    note_keys_wait = 0, note_keys = 1, note_update = 0, note_start = 0, note_on = 1;
+    note_keys_wait = 0, note_keys = 1, note_update = 0, note_start = 0;
     note_keys_words(note_keys_pad());
+    __atomic_store_n(&note_on, 1, __ATOMIC_RELEASE);
     fprintf(stderr, "yw4: window: notice: %s. %s\n", note_title, note_text);
 }
 /* The update card (owner, 2026-11-18): the launcher's "Open straight into the game" starts the game without showing
@@ -1139,20 +1157,21 @@ static void note_keys_start(void) {
  * 1.7.0 and launcher 1.4.0"); the launcher shows when the game closes and offers it there. */
 static void note_update_start(void) {
     const char *e = getenv("YW4_UPDATE_NOTICE");
-    note_update_wait = 0, note_update = 1, note_keys = 0, note_start = 0, nb.s = 0, note_on = 1;
+    note_update_wait = 0, note_update = 1, note_keys = 0, note_start = 0, nb.s = 0;
     snprintf(note_title, sizeof note_title, "Update available");
     snprintf(note_text, sizeof note_text, "%s \xc2\xb7 Get it in the launcher after you close the game", e ? e : "");
+    __atomic_store_n(&note_on, 1, __ATOMIC_RELEASE);
     fprintf(stderr, "yw4: window: notice: %s. %s\n", note_title, note_text);
 }
 static void window_notice_update(void) {
     const char *e = getenv("YW4_UPDATE_NOTICE");
     if (!e || !*e) return;
-    if (note_on) note_update_wait = 1;
+    if (__atomic_load_n(&note_on, __ATOMIC_ACQUIRE)) note_update_wait = 1;
     else note_update_start();
 }
 static void window_notice_keys(void) {
     if (!settings_keys_notice() || settings_legacy_keys()) return;  /* the old menus: no quick look to point at */
-    if (note_on) note_keys_wait = 1;
+    if (__atomic_load_n(&note_on, __ATOMIC_ACQUIRE)) note_keys_wait = 1;
     else note_keys_start();
 }
 
@@ -1243,9 +1262,10 @@ static void note_render(float s) {
 
 static void note_draw(VkImage dst, uint32_t index, int32_t x0, int32_t y0, uint32_t bw, uint32_t bh) {
     (void)bw;
-    if (!note_on || index >= 8 || !swap_views[index]) return;
+    if (!__atomic_load_n(&note_on, __ATOMIC_ACQUIRE) || index >= 8 || !swap_views[index]) return;
     if (hb_resources() || nb_resources()) {
-        note_on = note_keys_wait = 0;
+        note_keys_wait = 0;
+        __atomic_store_n(&note_on, 0, __ATOMIC_RELEASE);
         return;
     }
     VkPipeline pipe = hb_pipeline(swap_format);
@@ -1255,7 +1275,7 @@ static void note_draw(VkImage dst, uint32_t index, int32_t x0, int32_t y0, uint3
     const float in = 0.4f, hold = 6.0f, out = 1.2f;
     float t = (float)(now - note_start) / 1000.0f, a = t < in ? t / in : t < in + hold ? 1.0f : 1.0f - (t - in - hold) / out;
     if (a <= 0 && t > in) {
-        note_on = 0;
+        __atomic_store_n(&note_on, 0, __ATOMIC_RELEASE);
         if (note_update_wait) note_update_start();  /* the update card's turn, then the controls card's */
         else if (note_keys_wait) note_keys_start();  /* the controls card's turn, from the next frame */
         return;
@@ -1475,7 +1495,9 @@ static void overlay_fit(float pw, float ph, float *s, float *ox, float *oy) {
  * input twice (as mousemenu.c; replays count as reads). */
 enum { BTN_A_BIT = 1 << 0, BTN_PLUS_BIT = 1 << 10 };
 static int paused_view;          /* the window shows the kept picture; the player's input is held back */
-static int pause_keep_request;   /* keep the next presented picture */
+static int pause_keep_request;   /* keep the next presented picture; relaxed atomic: the window's thread asks, the present's takes */
+#define PKEEP_GET() __atomic_load_n(&pause_keep_request, __ATOMIC_RELAXED)
+#define PKEEP_SET(v) __atomic_store_n(&pause_keep_request, (v), __ATOMIC_RELAXED)
 static uint64_t pause_press, pause_press_reads;  /* the button pressed for the player */
 static uint64_t pause_asked_at;  /* SDL ticks of F4 (pausing, then resuming) */
 static uint64_t pause_a_at;      /* SDL ticks of the last A on Continue */
@@ -1512,7 +1534,7 @@ static void game_pause_toggle(void) {
     if (!paused_view) {
         pause_resume_pending = 0;
         pause_request();
-        pause_keep_request = 1, kept.valid = 0, pause_asked_at = SDL_GetTicks();
+        PKEEP_SET(1), kept.valid = 0, pause_asked_at = SDL_GetTicks();
         __atomic_store_n(&paused_view, 1, __ATOMIC_RELEASE);
         pause_press_button(BTN_PLUS_BIT);
         fprintf(stderr, "yw4: pause: Plus for the player, the picture kept\n");
@@ -1610,8 +1632,8 @@ static void kept_read_back(uint32_t w, uint32_t h);  /* below: the in-game overl
 
 /* in present_image, while recording: keep src (w x h at sx, sy, in layout) when asked */
 static void pause_keep(VkImage src, VkImageLayout layout, int32_t sx, int32_t sy, uint32_t w, uint32_t h, VkFormat format) {
-    if (!pause_keep_request) return;
-    pause_keep_request = 0;
+    if (!PKEEP_GET()) return;
+    PKEEP_SET(0);
     if (kept.image && (kept.w != w || kept.h != h || kept.format != format)) {
         vkDeviceWaitIdle(vk.device);
         vkDestroyImage(vk.device, kept.image, NULL), vkFreeMemory(vk.device, kept.mem, NULL);
@@ -2088,7 +2110,7 @@ static void hud_onto(uint8_t *rgba, uint32_t w, uint32_t h) {
         const char *e = getenv("YW4_SHOT_MENU");
         shot_menu = !(e && e[0] == '0');
     }
-    if (shot_menu && note_on && nb.ptr && nb.w) {  /* the notice too, as faded now, at the window's pixel size */
+    if (shot_menu && __atomic_load_n(&note_on, __ATOMIC_ACQUIRE) && nb.ptr && nb.w) {  /* the notice too, as faded now, at the window's pixel size */
         int32_t nx = (int32_t)((40 - 24) * nb.s), ny = (int32_t)h - (int32_t)(48 * nb.s) - note_bottom;
         for (int j = 0; j < nb.h && ny + j < (int32_t)h; j++)
             for (int i = 0; i < nb.w; i++) {
@@ -2471,7 +2493,7 @@ int window_repaint(int keep) {
         host_unlock(&present_lock);
         return -1;
     }
-    if (keep) pause_keep_request = 1, kept.valid = 0, ov.uploaded = 0;
+    if (keep) PKEEP_SET(1), kept.valid = 0, ov.uploaded = 0;
     if (swap_free != free_running() || swap_dlssg != dlssg_chosen()) swapchain_stale = 1;
     if (!(swapchain_stale && create_swapchain(last_n)) && !frame_resources(last_rect.extent.width, last_rect.extent.height))
         present_image(last_image, VK_IMAGE_LAYOUT_GENERAL, last_rect, 0);

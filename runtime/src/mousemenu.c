@@ -470,13 +470,14 @@ int yw4_hook_menu_focus(CPUState *ctx) {
         if (screens[idx].vtable == GENERAL_WINDOW_VTABLE) {  /* a box over an Ark Swap screen: remember that screen */
             int prev = __atomic_load_n(&active_idx, __ATOMIC_ACQUIRE);
             if (prev >= 0 && (screens[prev].vtable == TRADE_VTABLE || screens[prev].vtable == RETIRE_MENU_VTABLE)) {
-                under_idx = prev, under_recruit = __atomic_load_n(&rooms_recruit, __ATOMIC_ACQUIRE);
+                under_recruit = __atomic_load_n(&rooms_recruit, __ATOMIC_ACQUIRE);
                 under_menu = __atomic_load_n(&active_menu, __ATOMIC_ACQUIRE);
                 under_ctrl = __atomic_load_n(&active_ctrl, __ATOMIC_ACQUIRE);
                 under_lv = __atomic_load_n(&active_lv, __ATOMIC_ACQUIRE);
+                __atomic_store_n(&under_idx, prev, __ATOMIC_RELEASE);  /* last: the other thread checks it first */
             }
         } else {
-            under_idx = -1;
+            __atomic_store_n(&under_idx, -1, __ATOMIC_RELEASE);
         }
         __atomic_store_n(&rooms_recruit, on_recruit, __ATOMIC_RELEASE);
         uint64_t prev_menu = __atomic_load_n(&active_menu, __ATOMIC_ACQUIRE);
@@ -555,15 +556,17 @@ int yw4_hook_menu_back(CPUState *ctx) {
 
 /* The box over an Ark Swap screen is gone: that screen is the mouse's again */
 static void box_gone(const char *why) {
+    /* take the index once and clear it: the game's thread and the window's both end up here, and only one may act */
+    int u = __atomic_exchange_n(&under_idx, -1, __ATOMIC_ACQ_REL);
+    if (u < 0 || u >= NSCREENS) return;
     __atomic_store_n(&rooms_recruit, under_recruit, __ATOMIC_RELEASE);
     __atomic_store_n(&active_ctrl, under_ctrl, __ATOMIC_RELEASE);
     __atomic_store_n(&active_lv, under_lv, __ATOMIC_RELEASE);
     __atomic_store_n(&active_menu, under_menu, __ATOMIC_RELEASE);
-    __atomic_store_n(&active_idx, under_idx, __ATOMIC_RELEASE);
+    __atomic_store_n(&active_idx, u, __ATOMIC_RELEASE);
     __atomic_store_n(&page, PAGE_NONE, __ATOMIC_RELEASE);
     __atomic_store_n(&wheel_steps, 0, __ATOMIC_RELEASE);
-    if (menu_log_on()) fprintf(stderr, "yw4: mouse menus: %s: %s again\n", why, screens[under_idx].name);
-    under_idx = -1;
+    if (menu_log_on()) fprintf(stderr, "yw4: mouse menus: %s: %s again\n", why, screens[u].name);
 }
 
 /* OnDecideFocus (main+0x6c6ba0): an item or icon was chosen; a page or dialog may open over the screen. */
@@ -576,7 +579,7 @@ int yw4_hook_menu_decide(CPUState *ctx) {
         fprintf(stderr, "yw4: menu_decide: menu=%#llx vt=%#llx\n", (unsigned long long)menu, (unsigned long long)vt);
     if (vt == STOPWATCH_VTABLE || vt == STOPWATCH_MEMBERS_VTABLE || vt == STOPWATCH_ITEMS_VTABLE)
         __atomic_store_n(&stopwatch_off_at, 0, __ATOMIC_RELEASE);  /* a pick in it: still open */
-    if (vt == GENERAL_WINDOW_VTABLE && under_idx >= 0 && menu == __atomic_load_n(&active_menu, __ATOMIC_ACQUIRE)) {
+    if (vt == GENERAL_WINDOW_VTABLE && __atomic_load_n(&under_idx, __ATOMIC_ACQUIRE) >= 0 && menu == __atomic_load_n(&active_menu, __ATOMIC_ACQUIRE)) {
         /* a pick in a box over an Ark Swap screen: the box closes, the screen under it is back (a box or page the
          * pick opens focuses itself, and takes over) */
         box_gone("a pick in the box");
@@ -613,7 +616,8 @@ int yw4_hook_menu_layer_opened(CPUState *ctx) {
 
 /* Blasters' R menu closed (standalone): the mouse is the battle's again */
 static void standalone_close(const char *why) {
-    standalone = 0, under_idx = -1;
+    standalone = 0;
+    __atomic_store_n(&under_idx, -1, __ATOMIC_RELEASE);
     __atomic_store_n(&pad_open, 0, __ATOMIC_RELEASE);
     __atomic_store_n(&active_idx, -1, __ATOMIC_RELEASE);
     __atomic_store_n(&active_menu, 0, __ATOMIC_RELEASE);
@@ -800,10 +804,10 @@ uint64_t mousemenu_update(float mx, float my, int w, int h, uint32_t mouse_butto
      * the wheel worked there only after opening and backing out of Recruit's box): the game destroyed it, so its
      * object is no longer a box (the destructors set its type back to a base class's). A box waiting for its click
      * (Please select a Yo-kai to swap) stays one until then. The screen's own layer events can't tell the two apart. */
-    if (under_idx >= 0) {
+    if (__atomic_load_n(&under_idx, __ATOMIC_ACQUIRE) >= 0) {
         int cur = __atomic_load_n(&active_idx, __ATOMIC_ACQUIRE);
         uint64_t box = __atomic_load_n(&active_menu, __ATOMIC_ACQUIRE);
-        if (cur >= 0 && screens[cur].vtable == GENERAL_WINDOW_VTABLE && box &&
+        if (cur >= 0 && cur < NSCREENS && screens[cur].vtable == GENERAL_WINDOW_VTABLE && box &&
             ld64(box) - yw4_image_base != GENERAL_WINDOW_VTABLE)
             box_gone("the box was destroyed");
     }

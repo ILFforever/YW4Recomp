@@ -340,6 +340,7 @@ $('continue').addEventListener('click', () => {
 
 // ---- 3 · Options: downloads (by the graphics card), where the game goes, saves, shortcuts
 const GB = 1024 ** 3;
+const RECLAIM_MIN_BYTES = 0.05 * GB;  // under ~50 MB left to free: treat as already freed
 // the folder offered first: C:\Games\YW4 Recomp, or on Linux ~/Games/YW4 Recomp once the home folder is known
 let homeDir = null;
 const defaultInstall = () => LINUX ? (homeDir ? homeDir.replace(/\/$/, '') + '/Games/YW4 Recomp' : '') : 'C:\\Games\\YW4 Recomp';
@@ -1251,10 +1252,10 @@ async function showReady() {
   renderModsDlc(info);
 
   reclaimable = info.reclaimable;
-  const nothingToFree = reclaimable <= 0.05 * GB;  // nothing left to free: the row shows the space used instead
+  const nothingToFree = reclaimable <= RECLAIM_MIN_BYTES;  // nothing left to free: the row shows the space used instead
   $('row-free').textContent = nothingToFree ? gb(info.used) : gb(reclaimable);
   $('row-free-label').textContent = nothingToFree ? 'Space used' : 'Free up space';
-  $('free-btn').disabled = reclaimable <= 0.05 * GB;
+  $('free-btn').disabled = reclaimable <= RECLAIM_MIN_BYTES;
   $('offer').hidden = !!inst.originalsOffered;
 }
 let reclaimable = 0;
@@ -1479,8 +1480,8 @@ async function showSettings() {
   $('set-versions').textContent = `Launcher ${$('launcher-version').textContent.replace('Launcher ', '')} · Game ${$('game-version').textContent.replace('YW4 Recomp ', '')}`;
   const info = await invoke('install_info', { install: inst.install });
   reclaimable = info.reclaimable;
-  $('set-free-size').textContent = reclaimable > 0.05 * GB ? `${gb(reclaimable)} the game doesn't need to run` : 'Already freed up';
-  $('set-free').disabled = reclaimable <= 0.05 * GB;
+  $('set-free-size').textContent = reclaimable > RECLAIM_MIN_BYTES ? `${gb(reclaimable)} the game doesn't need to run` : 'Already freed up';
+  $('set-free').disabled = reclaimable <= RECLAIM_MIN_BYTES;
 }
 // Settings has three pages (no scrolling): Playing, Files, Launcher; the arrows on the heading row switch. Page 3
 // came from page 2 running off the bottom of the window (owner, 2026-11-21)

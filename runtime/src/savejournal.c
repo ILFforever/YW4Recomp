@@ -61,9 +61,10 @@ int sj_before_change(const char *path) {
     for (int i = 0; i < nchanged; i++)
         if (!strcmp(changed[i], path)) { host_unlock(&lock); return 0; }
     if (nchanged == capchanged) {
-        char **grown = realloc(changed, (size_t)(capchanged = capchanged ? 2 * capchanged : 8) * sizeof *changed);
+        int ncap = capchanged ? 2 * capchanged : 8;
+        char **grown = realloc(changed, (size_t)ncap * sizeof *changed);
         if (!grown) { host_unlock(&lock); return -1; }
-        changed = grown;
+        changed = grown, capchanged = ncap;
     }
     char side[1100];
     int is_dir = 0, r;

@@ -48,7 +48,7 @@ int gpu_dlss_device_extensions(uint32_t vendor, const char ***exts, unsigned *co
  * against K's ~48; M with upscaling at quality ~50, about K at DLAA. So a panel row, K by default: 1 K, 2 M. */
 static int model_v = -1;
 
-int gpu_dlss_model(void) {
+static int gpu_dlss_model(void) {
     int m = __atomic_load_n(&model_v, __ATOMIC_ACQUIRE);
     if (m < 0) {
         const char *e = getenv("YW4_DLSS_MODEL");
@@ -212,7 +212,6 @@ int gpu_dlss_device_extensions(uint32_t vendor, const char ***exts, unsigned *co
     return 0;
 }
 int gpu_dlss_available(void) { return 0; }
-int gpu_dlss_model(void) { return 1; }
 int gpu_dlss_model_setting(void) { return 0; }
 void gpu_dlss_model_cycle(void) {}
 int gpu_dlss_dispatch(VkCommandBuffer cb, const GpuDlssInputs *in) {

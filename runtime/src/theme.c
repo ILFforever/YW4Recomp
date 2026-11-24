@@ -7,6 +7,7 @@
 
 #include <SDL3/SDL.h>
 
+#include "host.h"
 #include "theme.h"
 
 /* the built-in look: the overlay's design colours (gamemenu.c's before themes) and the HUD's (hud_style.c) */
@@ -111,8 +112,12 @@ static struct {
     char id[64], name[64];
     Theme colours;
 } themes[MAX_THEMES];
-static int nthemes = -1, chosen;
-static Theme current;  /* what the overlay and the HUD read (a copy: changed on the window's thread, read on the present's) */
+static int nthemes = -1, chosen, loaded;
+static HostLock theme_lock = HOST_LOCK_INIT;  /* nthemes, chosen, themes[] while loading; leaf lock, calls nothing of ours */
+/* What the overlay and the HUD read (a copy: changed on the window's thread, read on the present's). Two copies and
+ * an index: the readers keep the pointer, so a step writes the copy nobody is shown and then flips the index. */
+static Theme current[2];
+static int current_at;
 
 /* a theme file into t, over the built-in colours; its name from the "name:" comment */
 static int load_file(const char *path, Theme *t, char *name, size_t nn) {
@@ -167,8 +172,7 @@ static const char *themes_dir(void) {
 
 static int by_id(const void *a, const void *b) { return strcmp((const char *)a, (const char *)b); }
 
-static void load_all(void) {
-    if (nthemes >= 0) return;
+static void load_all_locked(void) {
     nthemes = 1;
     snprintf(themes[0].id, sizeof themes[0].id, "recomp");
     snprintf(themes[0].name, sizeof themes[0].name, "YW4 Recomp");
@@ -194,21 +198,41 @@ static void load_all(void) {
     chosen = 0;
     for (int i = 0; want && i < nthemes; i++)
         if (!strcmp(themes[i].id, want)) chosen = i;
-    current = themes[chosen].colours;
+    current[0] = themes[chosen].colours;
     fprintf(stderr, "yw4: themes: %d (%s), %s\n", nthemes, dir ? dir : "no themes folder", themes[chosen].id);
+}
+
+static void load_all(void) {
+    if (__atomic_load_n(&loaded, __ATOMIC_ACQUIRE)) return;
+    host_lock(&theme_lock);
+    if (!loaded) {
+        load_all_locked();
+        __atomic_store_n(&loaded, 1, __ATOMIC_RELEASE);
+    }
+    host_unlock(&theme_lock);
 }
 
 const Theme *theme_colors(void) {
     load_all();
-    return &current;
+    return &current[__atomic_load_n(&current_at, __ATOMIC_ACQUIRE)];
 }
-int theme_count(void) { return load_all(), nthemes; }
-int theme_index(void) { return load_all(), chosen; }
+int theme_count(void) { return load_all(), nthemes; }  /* fixed once loaded */
+int theme_index(void) {
+    load_all();
+    host_lock(&theme_lock);
+    int c = chosen;
+    host_unlock(&theme_lock);
+    return c;
+}
 const char *theme_name(int i) { return load_all(), i >= 0 && i < nthemes ? themes[i].name : ""; }
-const char *theme_id(void) { return load_all(), themes[chosen].id; }
+const char *theme_id(void) { return themes[theme_index()].id; }
 
 void theme_step(int dir) {
     load_all();
+    host_lock(&theme_lock);
     chosen = (chosen + (dir < 0 ? nthemes - 1 : 1)) % nthemes;
-    current = themes[chosen].colours;
+    int next = 1 - current_at;
+    current[next] = themes[chosen].colours;
+    __atomic_store_n(&current_at, next, __ATOMIC_RELEASE);
+    host_unlock(&theme_lock);
 }

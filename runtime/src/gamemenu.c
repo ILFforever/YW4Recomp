@@ -40,6 +40,10 @@ static int ctrl_first;  /* the Controls table: its first row shown */
  * mockup, 2026-11-11), switched by one button or P; the keyboard view's mode: 0 exploring, 1 battles, 2 cutscenes
  * (the exploring keys, only those that do something there) */
 static int ctrl_view = 1, kv_mode;
+/* kv_mode and pv_down are changed by the window's thread (keys, mouse) and by the present's (the quick look borrows
+ * the mode while it draws): relaxed atomics, a stale value only shows a frame late */
+#define KV_GET() __atomic_load_n(&kv_mode, __ATOMIC_RELAXED)
+#define KV_SET(v) __atomic_store_n(&kv_mode, (v), __ATOMIC_RELAXED)
 static int mb_open;  /* the Controls page shows its Mouse buttons page (mouse_page_action) */
 /* Pressing a real key lights it on the keyboard view (gamemenu_held): the drawn keys held now, by scancode (a gold
  * ring round each), the mouse's buttons held (bits: left, right, wheel), and the last lit key pressed, which stays
@@ -855,7 +859,7 @@ static void controls_page_action(int a) {
     } else if (a == GM_ALT && !bindings_capturing()) {  /* P, Y / Triangle: Overview <-> Bindings */
         ctrl_view = !ctrl_view;
     } else if (!ctrl_view) {  /* the Overview: Q / E (LB / RB) step the mode; nothing else to choose */
-        if (a == GM_PREV || a == GM_NEXT) kv_mode = (kv_mode + (a == GM_NEXT ? 1 : 2)) % 3;
+        if (a == GM_PREV || a == GM_NEXT) KV_SET((KV_GET() + (a == GM_NEXT ? 1 : 2)) % 3);
     } else if (a == GM_UP || a == GM_DOWN || a == GM_LEFT || a == GM_RIGHT || a == GM_ACCEPT || a == GM_CLEAR) {
         bindings_action(map[a]);
     }
@@ -1241,12 +1245,13 @@ void gamemenu_mouse(float x, float y, int button) {
             if (button == 1) textin_focus(&prompt_text), textin_set_caret(offset), changed();
             else if (button == 2) textin_focus(&prompt_text), textin_select_word(offset), changed();
         }
-        if (button == 4 && textin_has(&prompt_text) && draw_text_has) {
+        float tb[4];
+        if (button == 4 && textin_has(&prompt_text) && gamemenu_text_rect(tb, NULL)) {  /* the drawn box, copied safely */
             char text[TEXTIN_MAX]; int cur;
             textin_read(&prompt_text, text, sizeof text, &cur, NULL);
             int fh = prompt_body[0] ? 52 : 72;
-            int offset = ui_text_offset_at(UI_ROUNDED_800, 32, draw_text_box[0] + 20, draw_text_box[1] + (fh - 32 * 1.3f) / 2,
-                                          draw_text_box[2] - 40 - 100, 32 * 1.3f, 1, text, cur, x, y);
+            int offset = ui_text_offset_at(UI_ROUNDED_800, 32, tb[0] + 20, tb[1] + (fh - 32 * 1.3f) / 2,
+                                          tb[2] - 40 - 100, 32 * 1.3f, 1, text, cur, x, y);
             textin_drag(offset), changed();
         }
         if (button == 1 && found && h.kind == HIT_PROMPT_OK) prompt_finish();
@@ -1266,12 +1271,13 @@ void gamemenu_mouse(float x, float y, int button) {
         int k = found ? h.kind : -1, ha = found ? h.a : 0, hb = found ? h.b : 0;
         if (k != hover_kind || ha != hover_a || hb != hover_b) hover_kind = k, hover_a = ha, hover_b = hb, changed();
     }
-    if (button == 4 && textin_has(&bug_text) && draw_text_has) {
+    float tb[4];
+    if (button == 4 && textin_has(&bug_text) && gamemenu_text_rect(tb, NULL)) {  /* the drawn box, copied safely */
         char text[TEXTIN_MAX]; int cur;
         textin_read(&bug_text, text, sizeof text, &cur, NULL);
         float tlh = 18 * 1.5f;
-        int offset = ui_text_offset_at(UI_GOTHIC_500, 18, draw_text_box[0] + 20, draw_text_box[1] + 16,
-                                      draw_text_box[2] - 40, tlh, (int)((draw_text_box[3] - 32) / tlh), text, cur, x, y);
+        int offset = ui_text_offset_at(UI_GOTHIC_500, 18, tb[0] + 20, tb[1] + 16,
+                                      tb[2] - 40, tlh, (int)((tb[3] - 32) / tlh), text, cur, x, y);
         textin_drag(offset), changed();
         return;
     }
@@ -1340,7 +1346,7 @@ void gamemenu_mouse(float x, float y, int button) {
         if (click && !bindings_capturing()) focus = 1, ctrl_view = h.a;
         break;
     case HIT_KV_MODE:
-        if (click) focus = 1, kv_mode = h.a;
+        if (click) focus = 1, KV_SET(h.a);
         break;
     case HIT_KV_KEY: case HIT_PV_PART:  /* pointing is enough: the detail bar follows the hover */
         break;
@@ -2076,7 +2082,7 @@ static const char *kv_action(int mode, const char *id) {
  * *move: only moving or the camera (teal); *shortcut: exploring's D-pad shortcut number (1-4, +4 while 1 is held). */
 static int kv_mask_names(uint32_t m, char *out, size_t n, int *move, int *shortcut);
 static int kv_names(int key, char *out, size_t n, int *move, int *shortcut) {
-    return kv_mask_names(bindings_key_inputs(kv_mode == 1 ? 1 : 0, key), out, n, move, shortcut);
+    return kv_mask_names(bindings_key_inputs(KV_GET() == 1 ? 1 : 0, key), out, n, move, shortcut);
 }
 /* the same for a set of inputs (a mask of input numbers): a key's, or a part of the controller's */
 static int kv_mask_names(uint32_t m, char *out, size_t n, int *move, int *shortcut) {
@@ -2084,9 +2090,9 @@ static int kv_mask_names(uint32_t m, char *out, size_t n, int *move, int *shortc
     int found = 0;
     for (int i = 0; i < 32; i++) {
         if (!(m >> i & 1)) continue;
-        const char *id = bindings_input_id(i), *a = kv_action(kv_mode, id);
+        const char *id = bindings_input_id(i), *a = kv_action(KV_GET(), id);
         if (!a) continue;
-        if (kv_mode == 0 && !strncmp(id, "DPAD_", 5))
+        if (KV_GET() == 0 && !strncmp(id, "DPAD_", 5))
             *shortcut = !strcmp(id, "DPAD_UP") ? 1 : !strcmp(id, "DPAD_RIGHT") ? 2 : !strcmp(id, "DPAD_DOWN") ? 3 : 4;
         if (strcmp(a, "Move") && strcmp(a, "Camera")) *move = 0;
         if (strstr(out, a)) continue;  /* the same action twice (a stick's directions) */
@@ -2160,7 +2166,7 @@ static float kv_seg(const UiCanvas *c, float x, float y, const char *const *labe
 static void draw_controls_overview(const UiCanvas *c, float x0, float top, float W, int peek) {
     static const char *const modes[3] = {"Exploring", "Battle", "Cutscene"};
     const uint32_t TEAL = 0x1e9aa6;
-    kv_seg(c, x0, top, modes, 3, kv_mode, HIT_KV_MODE);
+    kv_seg(c, x0, top, modes, 3, KV_GET(), HIT_KV_MODE);
     /* the keyboard: 18.5 units wide with 18 gaps, beside the mouse */
     float mw = 120, g = 5, kbw = W - mw - 36, k = (kbw - g * 18) / 18.5f;
     float ky = top + 64, hover_key = -1;
@@ -2318,6 +2324,8 @@ enum { PV_ZL = GM_PAD_ZL, PV_L, PV_ZR, PV_R, PV_LS, PV_RS, PV_DPAD, PV_S, PV_E, 
 /* Pressing a real button lights it on the drawing (gamemenu_held): the parts held now (a gold ring round each), and
  * the last one pressed, which stays in focus as if the mouse pointed at it when it is lit (-1 none) */
 static uint32_t pv_down;
+#define PV_GET() __atomic_load_n(&pv_down, __ATOMIC_RELAXED)
+#define PV_SET(v) __atomic_store_n(&pv_down, (v), __ATOMIC_RELAXED)
 static int pv_focus = -1;
 
 /* where each part sits in the pad's 400 x 260 box, per style; every layout is mirrored around x = 200 */
@@ -2374,7 +2382,7 @@ typedef struct {
 } PvLabel;
 static void pv_label(int part, const GameMenuInfo *in, int style, PvLabel *l) {
     char a[200], b[200];
-    int move, sc, set = kv_mode == 1 ? 1 : 0;
+    int move, sc, set = KV_GET() == 1 ? 1 : 0;
     memset(l, 0, sizeof *l);
     if (part == PV_SHARE) {  /* the overlay button; a pad without one opens it with its two middle buttons */
         snprintf(l->n1, sizeof l->n1, "Overlay");
@@ -2407,7 +2415,7 @@ static void pv_label(int part, const GameMenuInfo *in, int style, PvLabel *l) {
     }
     if (!has) return;
     l->kind = 1;
-    if (part == PV_DPAD && kv_mode == 0 && sc) {  /* exploring: the shortcuts, four more while L is held */
+    if (part == PV_DPAD && KV_GET() == 0 && sc) {  /* exploring: the shortcuts, four more while L is held */
         const char *hold = "L";
         for (int i = 0; i < 32; i++)
             if (!strcmp(bindings_input_id(i), "L"))
@@ -2417,7 +2425,7 @@ static void pv_label(int part, const GameMenuInfo *in, int style, PvLabel *l) {
         snprintf(l->n2, sizeof l->n2, "Hold %s: shortcuts 5-8", hold);
         return;
     }
-    if (part == PV_DPAD && kv_mode == 1 && strstr(a, "Switch character") && strstr(a, "Cycle targets")) {
+    if (part == PV_DPAD && KV_GET() == 1 && strstr(a, "Switch character") && strstr(a, "Cycle targets")) {
         snprintf(l->n1, sizeof l->n1, "Up / down: switch character");
         snprintf(l->n2, sizeof l->n2, "Left / right: cycle targets");
         return;
@@ -2438,11 +2446,11 @@ static void pv_keys(int part, char *out, size_t n) {
         snprintf(out, n, "%s", part == PV_SHARE ? "Esc" : "F3");
         return;
     }
-    int set = kv_mode == 1 ? 1 : 0;
+    int set = KV_GET() == 1 ? 1 : 0;
     uint32_t m = bindings_pad_inputs(set, pv_bpad(part));
     const char *sep = part == PV_LS || part == PV_RS || part == PV_DPAD ? "  " : " or ";  /* directions: side by side */
     for (int i = 0; i < 32; i++) {
-        if (!(m >> i & 1) || !kv_action(kv_mode, bindings_input_id(i))) continue;
+        if (!(m >> i & 1) || !kv_action(KV_GET(), bindings_input_id(i))) continue;
         for (int k = 0; k < BIND_KEYS; k++) {
             const char *name = bindings_input_key(set, i, k);
             if (!name || !strncmp(name, "WHEEL", 5)) continue;
@@ -2506,7 +2514,7 @@ static uint32_t pv_button(const UiCanvas *c, int part, float cx, float cy, float
     uint32_t fill, ink, border = 0;
     float bw = 0, ring = 4 * k;
     /* held on the real controller: a gold ring round it (dark round a gold one), lit or not */
-    if (pv_down >> part & 1)
+    if (PV_GET() >> part & 1)
         ui_box(c, cx - w / 2 - ring, cy - h / 2 - ring, w + 2 * ring, h + 2 * ring, r + ring, kind == 3 ? NIGHT : RING, 0, 0);
     if (!kind) fill = pv_mix(SOFT, bg, 0.45f), border = pv_mix(LINE, bg, 0.3f), bw = 1.5f * k, ink = pv_mix(MUTED, fill, 0.5f);
     else fill = kind == 3 ? GOLD : kind == 2 ? 0x1e9aa6 : PLUM, ink = kind == 3 ? ON_GOLD : SNOW;
@@ -2526,7 +2534,7 @@ static void draw_controls_pad(const UiCanvas *c, const GameMenuInfo *in, float x
     const float S = 1.4f, PX = 320, PY = 120;
     int style = bindings_pad_style();
     float k = W / 1280, oy = top;
-    if (!peek) kv_seg(c, x0, top, modes, 3, kv_mode, HIT_KV_MODE), oy = top + 56;
+    if (!peek) kv_seg(c, x0, top, modes, 3, KV_GET(), HIT_KV_MODE), oy = top + 56;
 #define MX(v) (x0 + ((v) + 40) * k)
 #define MY(v) (oy + ((v) - 50) * k)
     float pos[PV_PARTS][2];
@@ -2628,16 +2636,16 @@ static void draw_controls_pad(const UiCanvas *c, const GameMenuInfo *in, float x
     }
     {  /* the D-pad: a cross of two bars; not lit, its outline is one cross (no lines through its middle) */
         float cx = MX(PX + pos[PV_DPAD][0] * S), cy = MY(PY + pos[PV_DPAD][1] * S), u = S * k;
-        uint32_t held = pv_down;  /* held: one ring round the whole cross, under both bars */
+        uint32_t held = PV_GET();  /* held: one ring round the whole cross, under both bars */
         if (held >> PV_DPAD & 1) {
             float ring = 4 * k;
             ui_box(c, cx - 10 * u - ring, cy - 28 * u - ring, 20 * u + 2 * ring, 56 * u + 2 * ring, 4 * u + ring, RING, 0, 0);
             ui_box(c, cx - 28 * u - ring, cy - 10 * u - ring, 56 * u + 2 * ring, 20 * u + 2 * ring, 4 * u + ring, RING, 0, 0);
         }
-        pv_down &= ~(1u << PV_DPAD);
+        PV_SET(held & ~(1u << PV_DPAD));
         BTN(PV_DPAD, 20, 56, 4, "", WHITE);
         uint32_t fill = BTN(PV_DPAD, 56, 20, 4, "", WHITE);
-        pv_down = held;
+        PV_SET(held);
         if (!lab[PV_DPAD].kind) ui_rect(c, cx - 10 * u + 1.5f * k, cy - 11 * u, 20 * u - 3 * k, 22 * u, fill, 1);
     }
     for (int p = PV_S; p <= PV_N; p++) BTN(p, 30, 30, 15, pv_chip(p, style), WHITE);
@@ -2704,20 +2712,20 @@ void gamemenu_held(const bool *keys, uint32_t mouse, uint32_t parts) {
     /* the mouse's buttons only in the quick look: on the page they click its own buttons. SDL's mask: 1 the left
      * button, 2 the middle one, 4 the right one */
     if (peek) m = (mouse & 1 ? 1 : 0) | (mouse & 4 ? 2 : 0) | (mouse & 2 ? 4 : 0);
-    if (!memcmp(now, kv_held, sizeof now) && m == kv_mouse_held && parts == pv_down) return;
+    if (!memcmp(now, kv_held, sizeof now) && m == kv_mouse_held && parts == PV_GET()) return;
     for (int b = 0; b < 3; b++)
         if ((m & ~kv_mouse_held) >> b & 1) fresh = b == 0 ? MOUSE_BIND_LEFT : b == 1 ? MOUSE_BIND_RIGHT : MOUSE_BIND_MIDDLE;
     if (fresh) {  /* into focus if it does something in the view's mode (the quick look: the game's) */
         char names[200];
-        int move, sc, saved = kv_mode;
-        if (peek) kv_mode = battle_active() ? 1 : 0;
+        int move, sc, saved = KV_GET();
+        if (peek) KV_SET(battle_active() ? 1 : 0);
         if ((fresh < 1000 && kv_port(fresh)) || kv_names(fresh, names, sizeof names, &move, &sc)) kv_focus = fresh, hover_kind = -1;
-        kv_mode = saved;
+        KV_SET(saved);
     }
     for (int p = 0; p < PV_PARTS; p++)
-        if ((parts & ~pv_down) >> p & 1) pv_focus = p, hover_kind = -1;
+        if ((parts & ~PV_GET()) >> p & 1) pv_focus = p, hover_kind = -1;
     memcpy(kv_held, now, sizeof now);
-    kv_mouse_held = m, pv_down = parts;
+    kv_mouse_held = m, PV_SET(parts);
     changed();
 }
 
@@ -2894,9 +2902,9 @@ static void draw_controls_page(const UiCanvas *c, const GameMenuInfo *in) {
      * keeps its size and the controls their place from row to row (owner, 2026-11-18) */
     const float hlh = 15 * 1.45f, hh = 4 * hlh + 4;
     float x = 488, w = 1024, cw[3] = {379, 379, 266}, hdr = 16 * 1.45f + 28, rh = 17 * 1.45f + 24;
-    int visible = (int)((bottom - hh - 22 - top - hdr - 4) / rh);
+    int visible = (int)((bottom - hh - 22 - top - hdr - 6) / rh);
     if (visible < 1) visible = 1;
-    float th = hdr + visible * rh + 4;
+    float th = hdr + visible * rh + 6;  /* +2 top border, +2 bottom border, +2 bottom inset matching the ring's sides */
     /* the rows shown: they move only when the chosen row leaves them (keys, the pad, the wheel), never because the
      * mouse hovers a row, so the table doesn't run away under the cursor */
     if (row < ctrl_first) ctrl_first = row;
@@ -3215,7 +3223,7 @@ static void draw_online_page(const UiCanvas *c, const GameMenuInfo *in) {
     if (!pinged || now - pinged > 20000000000LL) {
         const char *addrs[4];
         for (int i = 0; i < n && i < 4; i++) addrs[i] = settings_online_server_address(i);
-        relay_ping_start(addrs, n);
+        relay_ping_start(addrs, n < 4 ? n : 4);
         pinged = now;
     }
     int best = -1;
@@ -3895,8 +3903,8 @@ void gamemenu_draw(const UiCanvas *c, const GameMenuInfo *in) {
         int hk = hit_back();
         hit_n[hk] = 0;  /* only the keys and the mode switch can be pointed at (gamemenu_peek_point) */
         static const char *const ptitle[3] = {"Controls \xc2\xb7 Exploring", "Controls \xc2\xb7 Battle", "Controls \xc2\xb7 Cutscene"};
-        int saved = kv_mode;
-        kv_mode = peek_shown_mode();
+        int saved = KV_GET();
+        KV_SET(peek_shown_mode());
         /* centred on the 1600 x 900 design (owner: in the middle, bigger, the picture behind it blurred); the
          * keyboard's card is taller by its detail bar */
         float pw = 1360, ph = in->pad ? 640 : 714, px = (1600 - pw) / 2, py = (900 - ph) / 2;
@@ -3909,7 +3917,7 @@ void gamemenu_draw(const UiCanvas *c, const GameMenuInfo *in) {
             hx += hint(c, hx, hb, pv_chip(PV_MINUS, bindings_pad_style()), "Next page") + 28;
             hx += hint(c, hx, hb, pv_chip(PV_MINUS, bindings_pad_style()), "Hold: hide") + 28;
             hint(c, hx, hb, in->close, "Menu");
-            ui_text(c, UI_ROUNDED_800, 30, px + 40, py + 30, 30 * 1.25f, ptitle[kv_mode], NIGHT);
+            ui_text(c, UI_ROUNDED_800, 30, px + 40, py + 30, 30 * 1.25f, ptitle[KV_GET()], NIGHT);
             draw_controls_pad(c, in, px + 40, py + 30 + 30 * 1.25f + 6, pw - 80, 1);
         } else {
             hx += hint(c, hx, hb, "F2", "Hide") + 28;
@@ -3917,7 +3925,7 @@ void gamemenu_draw(const UiCanvas *c, const GameMenuInfo *in) {
             ui_text(c, UI_ROUNDED_800, 30, px + 40, py + 30, 30 * 1.25f, "Controls", NIGHT);
             draw_controls_overview(c, px + 40, py + 30 + 30 * 1.25f + 18, pw - 80, 1);
         }
-        kv_mode = saved;
+        KV_SET(saved);
         pv_rect[0] = px, pv_rect[1] = py, pv_rect[2] = pw, pv_rect[3] = ph;  /* the part the window shows */
         __atomic_store_n(&hit_front, hk, __ATOMIC_RELEASE);
         return;

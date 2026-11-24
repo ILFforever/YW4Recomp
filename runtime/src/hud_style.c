@@ -128,7 +128,10 @@ static void graph_draw(const UiCanvas *cv, const HudContent *c, float x, float y
 
 void hud_style_render(uint8_t *rgba, int w, int h, const HudContent *c, int compact, unsigned parts, float s,
                       int *used_w, int *used_h) {
-    /* only what the last drawing touched (the rest is still clear); none known: everything */
+    /* only what the last drawing touched (the rest is still clear); none known: everything. A card can be wider than
+     * the buffer, so the remembered size is kept inside it. */
+    if (*used_w > w) *used_w = w;
+    if (*used_h > h) *used_h = h;
     if (*used_w > 0 && *used_h > 0) {
         for (int j = 0; j < *used_h && j < h; j++) memset(rgba + (size_t)j * (size_t)w * 4, 0, (size_t)*used_w * 4);
     } else {
@@ -145,6 +148,8 @@ void hud_style_render(uint8_t *rgba, int w, int h, const HudContent *c, int comp
         card(&cv, cw, ch, 10);
         ui_text_in(&cv, WORD, 12, PAD_X, 0.5f, 0, ch, 0, c->nlines ? c->lines[0] : "", LABEL);
         *used_w = (int)ceilf((cw + 1) * s), *used_h = (int)ceilf((ch + 1) * s);
+        if (*used_w > w) *used_w = w;
+        if (*used_h > h) *used_h = h;
         return;
     }
 
@@ -165,6 +170,8 @@ void hud_style_render(uint8_t *rgba, int w, int h, const HudContent *c, int comp
         card(&cv, cw, ch, 10);
         line(&cv, PAD_X + 0.5f, 0.5f, ch, p, n);
         *used_w = (int)ceilf((cw + 1) * s), *used_h = (int)ceilf((ch + 1) * s);
+        if (*used_w > w) *used_w = w;
+        if (*used_h > h) *used_h = h;
         return;
     }
 

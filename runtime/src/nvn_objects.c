@@ -169,7 +169,7 @@ static uint64_t next_flip;
 /* The presented texture, read back from the game's memory as RGBA8 rows for the window. */
 static void show(NvnTexture *t, uint64_t frame, const int crop[4]) {
     static uint8_t *texels, *rgba;
-    static size_t cap;
+    static size_t texels_cap, rgba_cap;
     static uint32_t logged_format;
     if (t && gpu_ready()) {
         gpu_queue_present(t, frame, crop);
@@ -177,12 +177,18 @@ static void show(NvnTexture *t, uint64_t frame, const int crop[4]) {
     }
     if (!t || !t->addr || t->target != 1 /* 2D */ || t->layout.fmt->bw != 1) return;
     uint32_t w = t->width, h = t->height, bpb = t->layout.fmt->bpb;
-    size_t n = (size_t)w * h;
-    if (n > cap) {
-        free(texels), free(rgba);
-        texels = malloc(n * bpb), rgba = malloc(n * 4);
-        if (!texels || !rgba) yw4_exit(3, __FILE__, __LINE__);
-        cap = n;
+    size_t n = (size_t)w * h, tb = n * bpb;
+    if (tb > texels_cap) {
+        free(texels);
+        texels = malloc(tb);
+        if (!texels) yw4_exit(3, __FILE__, __LINE__);
+        texels_cap = tb;
+    }
+    if (n > rgba_cap) {
+        free(rgba);
+        rgba = malloc(n * 4);
+        if (!rgba) yw4_exit(3, __FILE__, __LINE__);
+        rgba_cap = n;
     }
     tegra_read_region(&t->layout, (const uint8_t *)(uintptr_t)t->addr, 0, 0, 0, 0, 0, w, h, 1, texels);
     for (size_t i = 0; i < n; i++)

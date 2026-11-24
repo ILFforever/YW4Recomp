@@ -1,7 +1,6 @@
 /* Discord Rich Presence (discord.h, decision 0077). A thread of its own, once a second: while DISCORD STATUS is on and
- * the Discord app runs on this PC, the profile shows the game (the Discord application's name, its icon) and the time
- * since the game started, over Discord's local IPC (discord_ipc.c). Nothing about the game's state is read: the game's
- * threads never meet this one.
+ * the Discord app runs on this PC, the profile shows the game, the current area/party from discord_game.c, and the
+ * time since the game started, over Discord's local IPC (discord_ipc.c).
  *
  * Quiet by design: no Discord, no window, no log spam. It tries to connect every 15 s while on, sets the activity once
  * per connection, and clears it when the setting is turned off. */

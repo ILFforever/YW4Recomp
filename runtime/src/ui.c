@@ -218,6 +218,7 @@ static void box_a(const UiCanvas *c, float x, float y, float w, float h, float r
                   uint32_t border, float ba) {
     float s = c->s;
     float x0 = c->ox + x * s, y0 = c->oy + y * s, x1 = x0 + w * s, y1 = y0 + h * s, R = r * s, B = bw * s;
+    if (B > 0 && border == fill && ba == fa) B = 0;  /* same colour and alpha: one fill, no inner seam */
     float mr = (x1 - x0 < y1 - y0 ? x1 - x0 : y1 - y0) * 0.5f;
     if (R > mr) R = mr;
     float iR = R - B > 0 ? R - B : 0;
@@ -252,9 +253,21 @@ static void box_a(const UiCanvas *c, float x, float y, float w, float h, float r
                 continue;
             }
             float ci = x1 - x0 > 2 * B && y1 - y0 > 2 * B ? cover(box_dist(px, py, x0 + B, y0 + B, x1 - B, y1 - B, iR)) : 0;
-            /* the border where the inner box isn't, the fill inside it */
-            if (ci < 1.0f) blend(c, i, j, border, co * (1.0f - ci) * ba);
-            if (ci > 0.0f) blend(c, i, j, fill, co * ci * fa);
+            /* the border where the inner box isn't, the fill inside it: one combined blend so the background doesn't
+             * leak through the 1 px antialiased seam between them */
+            if (ci <= 0.0f) {
+                blend(c, i, j, border, co * ba);
+            } else if (ci >= 1.0f) {
+                blend(c, i, j, fill, co * fa);
+            } else {
+                float ab = co * (1.0f - ci) * ba, af = co * ci * fa, a = ab + af;
+                if (a > 0.0f) {
+                    uint32_t r8 = (uint32_t)(((border >> 16 & 255) * ab + (fill >> 16 & 255) * af) / a + 0.5f);
+                    uint32_t g8 = (uint32_t)(((border >> 8 & 255) * ab + (fill >> 8 & 255) * af) / a + 0.5f);
+                    uint32_t b8 = (uint32_t)(((border & 255) * ab + (fill & 255) * af) / a + 0.5f);
+                    blend(c, i, j, r8 << 16 | g8 << 8 | b8, a);
+                }
+            }
         }
     }
 }
@@ -681,6 +694,7 @@ int ui_text_offset_at(int f, float px, float x, float y, float w, float lh, int 
 /* ---- images */
 
 void ui_image(const UiCanvas *c, const uint8_t *rgba, int iw, int ih, float x, float y, float w, float h, float r) {
+    if (!rgba || iw <= 0 || ih <= 0 || w <= 0 || h <= 0) return;
     float s = c->s;
     float x0 = c->ox + x * s, y0 = c->oy + y * s, x1 = x0 + w * s, y1 = y0 + h * s, R = r * s;
     int ix0 = (int)floorf(x0), iy0 = (int)floorf(y0), ix1 = (int)ceilf(x1), iy1 = (int)ceilf(y1);
@@ -692,6 +706,9 @@ void ui_image(const UiCanvas *c, const uint8_t *rgba, int iw, int ih, float x, f
             /* bilinear */
             float u = (px - x0) / (x1 - x0) * (float)iw - 0.5f, v = (py - y0) / (y1 - y0) * (float)ih - 0.5f;
             int u0 = u < 0 ? 0 : (int)u, v0 = v < 0 ? 0 : (int)v;
+            /* an antialiased edge pixel's centre lies just outside the box: keep the read inside the image */
+            if (u0 > iw - 1) u0 = iw - 1;
+            if (v0 > ih - 1) v0 = ih - 1;
             int u1 = u0 + 1 < iw ? u0 + 1 : u0, v1 = v0 + 1 < ih ? v0 + 1 : v0;
             float fu = u < 0 ? 0 : u - (float)u0, fv = v < 0 ? 0 : v - (float)v0;
             const uint8_t *a = rgba + ((size_t)v0 * iw + u0) * 4, *b = rgba + ((size_t)v0 * iw + u1) * 4;

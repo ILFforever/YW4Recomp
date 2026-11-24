@@ -47,7 +47,12 @@ static int enabled(void) {
     return on;
 }
 
-void gpu_passes_toggle(void) {
+/* F5 (window thread) only asks; the GPU worker applies it in gpu_passes_begin, as it owns on/ngroups/report_from. */
+static int toggle_req;
+
+void gpu_passes_toggle(void) { __atomic_store_n(&toggle_req, 1, __ATOMIC_RELEASE); }
+
+static void apply_toggle(void) {
     on = !enabled();
     ngroups = 0, report_from = gpu_frames();
     fprintf(stderr, "yw4: gpu passes: timing %s (F5)\n", on ? "on: the most expensive passes every 300 frames" : "off");
@@ -69,6 +74,7 @@ void gpu_passes_begin(VkCommandBuffer cb, int slot) {
     }
     cur = slot;
     timed[slot] = 0;
+    if (__atomic_exchange_n(&toggle_req, 0, __ATOMIC_ACQUIRE)) apply_toggle();
     if (!enabled()) return;
     if (!pool) {
         if (!vk.props.limits.timestampComputeAndGraphics || vk.props.limits.timestampPeriod <= 0) return;

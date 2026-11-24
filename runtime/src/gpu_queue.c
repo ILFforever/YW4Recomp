@@ -157,7 +157,8 @@ int gpu_queue_wait(uint64_t fence, uint64_t timeout_ns) {
     /* the submissions job `fence` had made; a ticket long past: whatever has been submitted */
     uint64_t seq = done - fence < TICKETS ? seq_after[fence % TICKETS] : gpu_submitted();
     host_unlock(&lock);
-    uint64_t left = forever ? UINT64_MAX : deadline > host_now_ns() ? (uint64_t)(deadline - host_now_ns()) : 0;
+    int64_t now = forever ? 0 : host_now_ns();
+    uint64_t left = forever ? UINT64_MAX : deadline > now ? (uint64_t)(deadline - now) : 0;
     int r = gpu_wait(seq, left);
     return r == 2 ? 2 : waited || r;
 }

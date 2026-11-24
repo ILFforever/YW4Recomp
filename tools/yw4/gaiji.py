@@ -15,41 +15,7 @@ from pathlib import Path
 from PIL import Image
 
 from tools.yw4 import config, cpk
-
-
-def deswizzle_bc7(raw: bytes, w: int, h: int) -> bytearray:
-    """Convert Switch Tegra block-linear BC7 texture into linear BC7 rows."""
-    bw, bh_texel, bpb = 4, 4, 16
-    wb = (w + bw - 1) // bw
-    hb = (h + bh_texel - 1) // bh_texel
-    gobs = (hb + 7) // 8
-    bh = 0
-    while (1 << bh) < gobs and bh < 4:
-        bh += 1
-    while bh > 0 and (8 << (bh - 1)) >= hb:
-        bh -= 1
-    width_gobs = (wb * bpb + 63) // 64
-    block_rows = (hb + (8 << bh) - 1) // (8 << bh)
-    block_size = 512 << bh
-
-    linear = bytearray(wb * hb * bpb)
-    row_bytes = wb * bpb
-
-    for y in range(hb):
-        gob_y = y >> 3
-        y_in_block = (gob_y & ((1 << bh) - 1)) * 512
-        block_row_off = (gob_y >> bh) * width_gobs * block_size
-        yi = y & 7
-        y_sector = ((yi >> 1) << 6) | ((yi & 1) << 4)
-
-        for xb in range(0, row_bytes, 16):
-            off = block_row_off + (xb >> 6) * block_size + y_in_block
-            xi = xb & 63
-            src_off = off + (((xi >> 5) << 8) | y_sector | (((xi >> 4) & 1) << 5) | (xi & 15))
-            dst_off = y * row_bytes + xb
-            linear[dst_off : dst_off + 16] = raw[src_off : src_off + 16]
-
-    return linear
+from tools.yw4.bc7 import deswizzle_bc7
 
 
 def decode_bc7_to_image(linear_bc7: bytes, w: int, h: int) -> Image.Image:
@@ -81,47 +47,15 @@ def decode_bc7_to_image(linear_bc7: bytes, w: int, h: int) -> Image.Image:
 
 def extract_g4tx(data: bytes, out_dir: Path | None = None) -> tuple[Image.Image, list[dict]]:
     """Parse G4TX container, decode the sheet image, and extract icons."""
-    if data[:4] != b"G4TX":
-        raise ValueError("Not a G4TX container")
+    from tools.yw4.g4tx import parse_g4tx
 
-    u16 = lambda off: struct.unpack_from("<H", data, off)[0]
-    base = u16(0x0A)
-    total_names = u16(0x22)
-
-    # String table
-    str_tab = 4 * (base + u16(0x46))
-    names = []
-    for i in range(total_names):
-        off = str_tab + u16(str_tab + 2 * i)
-        end = data.index(b"\0", off)
-        names.append(data[off:end].decode("ascii"))
-
-    sheet_name = names[0] if names else "sheet"
-
-    # Texture info from NXTCH
-    nxtch_off = 4 * (base + u16(0x3E))
-    if data[nxtch_off : nxtch_off + 8] != b"NXTCH000":
-        raise ValueError(f"Expected NXTCH000 at offset {nxtch_off:#x}")
-
-    w = struct.unpack_from("<I", data, nxtch_off + 0x14)[0]
-    h = struct.unpack_from("<I", data, nxtch_off + 0x18)[0]
-    raw_tex = data[nxtch_off + 0x100 :]
-
-    # De-swizzle and decode
-    linear_bc7 = deswizzle_bc7(raw_tex, w, h)
-    sheet_img = decode_bc7_to_image(linear_bc7, w, h)
-
-    # Sub-image atlas records (table 0x42)
-    rec_tab = 4 * (base + u16(0x42))
-    icons = []
-    for i in range(1, total_names):
-        off = rec_tab + (i - 1) * 24
-        x = u16(off + 4)
-        y = u16(off + 6)
-        icon_w = u16(off + 8)
-        icon_h = u16(off + 10)
-        name = names[i]
-        icons.append({"name": name, "x": x, "y": y, "w": icon_w, "h": icon_h})
+    sheet = parse_g4tx(data)
+    sheet_name = sheet.name
+    sheet_img = decode_bc7_to_image(sheet.linear_bc7, sheet.width, sheet.height)
+    icons = [
+        {"name": name, "x": x, "y": y, "w": iw, "h": ih}
+        for name, (x, y, iw, ih) in sheet.records.items()
+    ]
 
     if out_dir:
         out_dir.mkdir(parents=True, exist_ok=True)

@@ -42,8 +42,6 @@ void yw4_perf_hud(HudContent *c, int compact, unsigned parts);
 void hud_style_render(uint8_t *rgba, int w, int h, const HudContent *c, int compact, unsigned parts, float s,
                       int *used_w, int *used_h);
 
-/* shadow.c: whose shadow casters are drawn ("ORIGINAL": the game's, "CUSTOM": our pass, "CHECK"). */
-const char *shadow_mode_name(void);
 /* gpu.c: the shadow maps' size (1024 is the game's). */
 int gpu_shadow_res(void);
 /* gpu.c: the 3D view's height (900 is the game's). */

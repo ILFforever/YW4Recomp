@@ -88,7 +88,6 @@ static int diary_opened_once;
 #define DELETE_LABEL "Press again to delete"
 static int delete_confirm_slot = -1;
 static int delete_confirm_frames;
-static int delete_blocked;         /* X on the slot being played (in the game): "In use" shows instead of DELETE? */
 static uint64_t diary_seen_ms;     /* host ms of the Diary's last update: savefs_diary_open, for the mouse */
 /* A slot a New Game was started over (yw4_hook_save_clear): its old files stay on disk until the new game's first
  * save, but it reads as empty until then, so no save writes the old game's rows back into its HEADERSAVE. -1 none. */
@@ -295,13 +294,11 @@ static void utf8_copy_bounded(char *dst, size_t cap, const char *src, size_t max
     dst[n] = '\0';
 }
 
-/* delete_mode: 0 the name, 1 delete armed, 2 X on the slot being played (it can't be deleted from the game) */
+/* delete_mode: 0 the name, 1 delete armed */
 static int rows_on;
 static void format_slot_label(char dst[36], int slot, int delete_mode, const uint8_t raw_name[36], uint8_t valid) {
     if (rows_on) {  /* stacked rows: the five rows show which slot it is, no "<n>/5" (owner, 2026-11-17) */
-        const char *t = delete_mode == 2 ? "In use: can't delete" : delete_mode ? DELETE_LABEL
-                        : !valid                  ? "Empty Diary"
-                                                  : NULL;
+        const char *t = delete_mode ? DELETE_LABEL : !valid ? "Empty Diary" : NULL;
         if (t) {
             snprintf(dst, 36, "%s", t);
         } else {
@@ -313,8 +310,7 @@ static void format_slot_label(char dst[36], int slot, int delete_mode, const uin
         return;
     }
     if (delete_mode) {
-        snprintf(dst, 36, delete_mode == 2 ? "%d" DIARY_OF " In use: can't delete" : "%d" DIARY_OF " " DELETE_LABEL,
-                 slot + 1);
+        snprintf(dst, 36, "%d" DIARY_OF " " DELETE_LABEL, slot + 1);
         return;
     }
     if (!valid) {
@@ -755,10 +751,12 @@ static int host_path(const SaveFs *fs, const IpcRequest *req, int x, char out[10
         (n >= 3 && !memcmp(p + n - 3, "/..", 3)) || strstr(p, ":"))
         return 0;
     int s = diary_slots_enabled() ? __atomic_load_n(&active_slot, __ATOMIC_ACQUIRE) : 0;
+    int w;
     if (s > 0 && switch_path_is_slot_scoped(p, n))
-        snprintf(out, 1024, "%s/SLOT%02d%.*s", fs->root, s + 1, (int)n, p);  /* as slot_base_dir_locked */
+        w = snprintf(out, 1024, "%s/SLOT%02d%.*s", fs->root, s + 1, (int)n, p);  /* as slot_base_dir_locked */
     else
-        snprintf(out, 1024, "%s%.*s", fs->root, (int)n, p);
+        w = snprintf(out, 1024, "%s%.*s", fs->root, (int)n, p);
+    if (w < 0 || w >= 1024) return 0;
     size_t len = strlen(out);
     while (len > strlen(fs->root) + 1 && out[len - 1] == '/') out[--len] = 0;  /* "/dir/" -> "/dir" */
     return 1;
@@ -1037,7 +1035,6 @@ static void diary_refresh_ui(CPUState *ctx, uint64_t menu) {
     memcpy(&handle, (const void *)(uintptr_t)(menu + 0x468), sizeof handle);
     /* f_75e810 passes row0's +0x460 to f_70f150 when handle==0 and +0x751==1; guard against NULL. */
     uint8_t reload = (handle != 0 || *(const uint64_t *)(uintptr_t)(menu + 0x460) != 0) ? 1 : 0;
-    if (portrait != 0 && handle == 0 && *(const uint64_t *)(uintptr_t)(menu + 0x460) == 0) reload = 0;
     memcpy((void *)(uintptr_t)(menu + 0x751), &reload, sizeof reload);
 
     *ctx = saved;
@@ -1134,7 +1131,6 @@ int yw4_hook_diary_open(CPUState *ctx) {
     if (user_save_dir[0]) scan_all_slots_locked();
     delete_confirm_slot = -1;
     delete_confirm_frames = 0;
-    delete_blocked = 0;
     int cur_active = __atomic_load_n(&active_slot, __ATOMIC_ACQUIRE);
     if (!diary_opened_once) {
         diary_opened_once = 1;
@@ -1191,7 +1187,7 @@ int yw4_hook_diary_populate(CPUState *ctx) {
     host_lock(&slot_lock);
     uint64_t hdr = get_headersave_obj();
     int s = paint_slot >= 0 ? paint_slot : diary_slot;
-    write_slot_to_hdr_locked(hdr, s, delete_confirm_slot == s ? 1 + delete_blocked : 0);
+    write_slot_to_hdr_locked(hdr, s, delete_confirm_slot == s ? 1 : 0);
     host_unlock(&slot_lock);
     return 0;
 }
@@ -1479,7 +1475,7 @@ int yw4_hook_diary_focus(CPUState *ctx) {
      * blinked back to the name and the second press armed it again instead of deleting) */
     if (v != was) {
         if (delete_confirm_slot >= 0) paint_pending = 1;
-        delete_confirm_slot = -1, delete_confirm_frames = 0, delete_blocked = 0;
+        delete_confirm_slot = -1, delete_confirm_frames = 0;
     }
     host_unlock(&slot_lock);
     diary_repopulate(ctx, menu);
@@ -1661,7 +1657,6 @@ int yw4_hook_diary_update(CPUState *ctx) {
         diary_slot = (diary_slot + delta + DIARY_SLOT_COUNT) % DIARY_SLOT_COUNT;
         delete_confirm_slot = -1;
         delete_confirm_frames = 0;
-        delete_blocked = 0;
         int ns = diary_slot;
         int valid_any = slot_any_data_locked(ns);
         host_unlock(&slot_lock);
@@ -1674,7 +1669,6 @@ int yw4_hook_diary_update(CPUState *ctx) {
         int ds = diary_slot;
         int valid_any = slot_any_data_locked(ds);
         if (valid_any) {
-            delete_blocked = 0;
             if (delete_confirm_slot == ds) {
                 delete_slot_files_locked(ds);
                 if (scene_on_title() && __atomic_load_n(&active_slot, __ATOMIC_ACQUIRE) == ds) {
@@ -1695,13 +1689,14 @@ int yw4_hook_diary_update(CPUState *ctx) {
         } else {
             host_unlock(&slot_lock);
         }
-    } else if (delete_confirm_slot >= 0) {
-        if ((edge & ~HID_BTN_X) != 0 || --delete_confirm_frames <= 0) {
+    } else {
+        host_lock(&slot_lock);
+        if (delete_confirm_slot >= 0 && ((edge & ~HID_BTN_X) != 0 || --delete_confirm_frames <= 0)) {
             delete_confirm_slot = -1;
             delete_confirm_frames = 0;
-            delete_blocked = 0;
             need_refresh = 1;
         }
+        host_unlock(&slot_lock);
     }
 
     if (need_refresh) diary_refresh_ui(ctx, menu);

@@ -1,5 +1,5 @@
 // YW4 Recomp launcher (decision 0050): the screens are plain HTML/CSS/JS in launcher/ui, shown in Windows' own
-// WebView2; this side does what a web page can't (files, processes, starting the game). One command so far.
+// WebView2; this side does what a web page can't (files, processes, starting the game).
 
 // No console window behind the launcher in release builds.
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
@@ -123,7 +123,7 @@ fn main() {
             update::download_launcher_update, update::run_launcher_update,
             ready::load_state, ready::save_state, ready::install_info, ready::set_dlc_keys, ready::set_mod_enabled, ready::play, ready::open_folder, ready::open_shot,
             ready::free_space, ready::originals, ready::delete_originals, ready::make_shortcuts, ready::move_saves, ready::game_full_screen, ready::set_game_full_screen, ready::game_cheats, ready::set_game_cheat, ready::uninstall_info, ready::uninstall, ready::save_report, ready::open_report_github, ready::show_report,
-            ready::locate_installed_game, ready::locate_game, slashfix::install_slash_fix, slashfix::move_install_folder])
+            ready::locate_installed_game, slashfix::install_slash_fix, slashfix::move_install_folder])
         .run(tauri::generate_context!())
         .expect("the launcher window could not start");
 }

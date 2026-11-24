@@ -67,6 +67,18 @@ static void popup(const char *title, const char *body) {
     window_repaint(0);
 }
 
+#ifndef _WIN32
+/* realpath() into a 1024-byte buffer can overflow (PATH_MAX is 4096): let it allocate, then copy what fits. 0 if the
+ * path doesn't resolve. */
+static int resolve_path(const char *src, char *dst, size_t n) {
+    char *rp = realpath(src, NULL);
+    if (!rp) return 0;
+    snprintf(dst, n, "%s", rp);
+    free(rp);
+    return 1;
+}
+#endif
+
 /* ShowOfflineHtmlPage(OfflineHtmlPageReturnValue *, const ShowOfflineHtmlPageArg &) -> Result. The return value keeps
  * what its constructor put there (the page closed normally). */
 void yw4_web_ShowOfflineHtmlPage(CPUState *c) {
@@ -77,7 +89,7 @@ void yw4_web_ShowOfflineHtmlPage(CPUState *c) {
 #ifdef _WIN32
     if (!_fullpath(full, rel, sizeof full)) snprintf(full, sizeof full, "%s", rel);
 #else
-    if (!realpath(rel, full)) snprintf(full, sizeof full, "%s", rel);
+    if (!resolve_path(rel, full, sizeof full)) snprintf(full, sizeof full, "%s", rel);
 #endif
     FILE *f = fopen(full, "rb");
     if (!f) {
@@ -97,7 +109,7 @@ void yw4_web_ShowOfflineHtmlPage(CPUState *c) {
 #ifdef _WIN32
     if (!_fullpath(full, one, sizeof full)) snprintf(full, sizeof full, "%s", one);
 #else
-    if (!realpath(one, full)) snprintf(full, sizeof full, "%s", one);
+    if (!resolve_path(one, full, sizeof full)) snprintf(full, sizeof full, "%s", one);
 #endif
     char anchor[128] = "";
     if ((f = fopen(full, "rb")) != NULL) {
@@ -109,7 +121,7 @@ void yw4_web_ShowOfflineHtmlPage(CPUState *c) {
 #ifdef _WIN32
         if (!_fullpath(full, rel, sizeof full)) snprintf(full, sizeof full, "%s", rel);
 #else
-        if (!realpath(rel, full)) snprintf(full, sizeof full, "%s", rel);
+        if (!resolve_path(rel, full, sizeof full)) snprintf(full, sizeof full, "%s", rel);
 #endif
     }
     file_url(full, url, sizeof url);

@@ -89,8 +89,10 @@ static int check_name(CPUState *c, const uint8_t *a, const char *name, int utf8,
         for (const unsigned char *p = (const unsigned char *)name; *p && n + 4 < orig_size;) {
             int len = *p < 0x80 ? 1 : *p < 0xE0 ? 2 : *p < 0xF0 ? 3 : 4;
             if (max > 0 && (int)chars >= max) break;
-            for (int k = 0; k < len && p[k]; k++) out[n++] = p[k];
-            p += len, chars++;
+            int k = 0;
+            for (; k < len && p[k]; k++) out[n++] = p[k];
+            p += k, chars++;
+            if (k < len) break;
         }
         out[n] = 0;
     } else {
@@ -102,8 +104,13 @@ static int check_name(CPUState *c, const uint8_t *a, const char *name, int utf8,
                 for (p++; (*p & 0xC0) == 0x80; p++) {}
                 continue;
             }
-            if (cp >= 0xE0) cp = (cp & 15) << 12 | (p[1] & 63) << 6 | (p[2] & 63), len = 3;
-            else if (cp >= 0xC0) cp = (cp & 31) << 6 | (p[1] & 63), len = 2;
+            if (cp >= 0xE0) {
+                if (!p[1] || !p[2]) break;
+                cp = (cp & 15) << 12 | (p[1] & 63) << 6 | (p[2] & 63), len = 3;
+            } else if (cp >= 0xC0) {
+                if (!p[1]) break;
+                cp = (cp & 31) << 6 | (p[1] & 63), len = 2;
+            }
             if (max > 0 && (int)chars >= max) break;
             buf[n++] = (uint16_t)cp, p += len, chars++;
         }
@@ -345,8 +352,10 @@ void yw4_swkbd_ShowKeyboard(CPUState *c) {
         for (const unsigned char *p = (const unsigned char *)name; buf && *p && n + 4 < size;) {
             int len = *p < 0x80 ? 1 : *p < 0xE0 ? 2 : *p < 0xF0 ? 3 : 4;
             if (max > 0 && (int)chars >= max) break;
-            for (int k = 0; k < len && p[k]; k++) out[n++] = p[k];
-            p += len, chars++;
+            int k = 0;
+            for (; k < len && p[k]; k++) out[n++] = p[k];
+            p += k, chars++;
+            if (k < len) break;
         }
         if (buf && size) out[n] = 0;
     } else {
@@ -358,8 +367,13 @@ void yw4_swkbd_ShowKeyboard(CPUState *c) {
                 for (p++; (*p & 0xC0) == 0x80; p++) {}
                 continue;
             }
-            if (cp >= 0xE0) cp = (cp & 15) << 12 | (p[1] & 63) << 6 | (p[2] & 63), len = 3;
-            else if (cp >= 0xC0) cp = (cp & 31) << 6 | (p[1] & 63), len = 2;
+            if (cp >= 0xE0) {
+                if (!p[1] || !p[2]) break;
+                cp = (cp & 15) << 12 | (p[1] & 63) << 6 | (p[2] & 63), len = 3;
+            } else if (cp >= 0xC0) {
+                if (!p[1]) break;
+                cp = (cp & 31) << 6 | (p[1] & 63), len = 2;
+            }
             if (max > 0 && (int)chars >= max) break;
             buf[n++] = (uint16_t)cp, p += len, chars++;
         }

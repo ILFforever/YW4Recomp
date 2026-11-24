@@ -391,8 +391,9 @@ __attribute__((noinline)) int host_readable(uint64_t addr, uint64_t size) {
     long long dt = host_now_ns() - t0;
     __atomic_add_fetch(&host_readable_ns, dt, __ATOMIC_RELAXED);
     if (dt > host_readable_max_ns) host_readable_max_ns = dt;
-    if (!got || mbi.State != MEM_COMMIT) return 0;
+    if (!got || mbi.State != MEM_COMMIT || (mbi.Protect & PAGE_GUARD)) return 0;
     if (!(mbi.Protect & (PAGE_READONLY | PAGE_READWRITE | PAGE_EXECUTE_READ | PAGE_EXECUTE_READWRITE))) return 0;
+    if (addr + size < addr) return 0;
     return addr + size <= (uint64_t)(uintptr_t)mbi.BaseAddress + mbi.RegionSize;
 }
 
@@ -624,9 +625,10 @@ int host_readable(uint64_t addr, uint64_t size) {
     pid_t pid = getpid();
     char dummy;
     struct iovec local = {.iov_base = &dummy, .iov_len = 1};
-    for (uint64_t p = start_page; p <= end_page; p += (uint64_t)page) {
+    for (uint64_t p = start_page;; p += (uint64_t)page) {
         struct iovec remote = {.iov_base = (void *)(uintptr_t)p, .iov_len = 1};
         if (process_vm_readv(pid, &local, 1, &remote, 1, 0) != 1) return 0;
+        if (p == end_page) break;
     }
     return 1;
 }

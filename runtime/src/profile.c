@@ -163,17 +163,21 @@ static void finish(void) {
 
 static void setup(void) {
     const char *on = getenv("YW4_PROFILE");
-    mode = !on || !*on || *on == '0' ? 0 : !strcmp(on, "submit") ? 2 : !strcmp(on, "hitch") ? 3 : 1;
+    /* mode is published last (release): another thread that sees it >= 0 skips setup and uses keys/counts */
+    int m = !on || !*on || *on == '0' ? 0 : !strcmp(on, "submit") ? 2 : !strcmp(on, "hitch") ? 3 : 1;
     if (getenv("YW4_PROFILE_HITCH_MS")) hitch_ms = strtoull(getenv("YW4_PROFILE_HITCH_MS"), NULL, 10);
     const char *from = getenv("YW4_PROFILE_FROM");
     if (from) from_frame = strtoull(from, NULL, 10);
-    if (!mode) return;
+    if (!m) {
+        __atomic_store_n(&mode, 0, __ATOMIC_RELEASE);
+        return;
+    }
     HMODULE exe = GetModuleHandleA(NULL);
     IMAGE_NT_HEADERS *nt = (IMAGE_NT_HEADERS *)((uint8_t *)exe + ((IMAGE_DOS_HEADER *)exe)->e_lfanew);
     exe_base = (uintptr_t)exe, exe_end = exe_base + nt->OptionalHeader.SizeOfImage;
     keys = calloc(PROFILE_SLOTS, sizeof *keys), counts = calloc(PROFILE_SLOTS, sizeof *counts);
     if (!keys || !counts) {
-        mode = 0;
+        __atomic_store_n(&mode, 0, __ATOMIC_RELEASE);
         return;
     }
     time_t now = time(NULL);
@@ -183,16 +187,17 @@ static void setup(void) {
     strftime(when, sizeof when, "%Y%m%d_%H%M%S", &tmv);
     snprintf(out_path, sizeof out_path, "work/perf/profile_%s.txt", when);
     atexit(finish);
+    __atomic_store_n(&mode, m, __ATOMIC_RELEASE);
     CreateThread(NULL, 1 << 16, sampler, NULL, 0, NULL);
-    fprintf(stderr, "yw4: profiling the %s thread(s) from frame %" PRIu64 "\n", mode == 2 ? "submitting" : mode == 3 ? "presenting (hitches only)" : "presenting",
+    fprintf(stderr, "yw4: profiling the %s thread(s) from frame %" PRIu64 "\n", m == 2 ? "submitting" : m == 3 ? "presenting (hitches only)" : "presenting",
             from_frame);
 }
 
 /* Adds the calling thread to the sampled ones (once) if it plays the role being profiled. */
 void yw4_profile_thread(int role, uint64_t frame) {
     static _Thread_local int added;
-    if (added || mode == 0) return;
-    if (mode < 0) {
+    if (added || __atomic_load_n(&mode, __ATOMIC_ACQUIRE) == 0) return;
+    if (__atomic_load_n(&mode, __ATOMIC_ACQUIRE) < 0) {
         static INIT_ONCE once = INIT_ONCE_STATIC_INIT;
         BOOL pending;
         InitOnceBeginInitialize(&once, 0, &pending, NULL);

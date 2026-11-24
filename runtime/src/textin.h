@@ -56,8 +56,6 @@ void textin_set_caret(int pos);
 void textin_drag(int pos);
 /* Selects the word around pos. */
 void textin_select_word(int pos);
-/* Copies the selected substring into out (up to n bytes, null-terminated); returns length (0 if no selection). */
-int textin_get_selection(char *out, size_t n);
 /* f's text, cursor, and selection anchor as they are now, for drawing (the typing runs on the window's thread). */
 void textin_read(const TextField *f, char *out, size_t n, int *cursor, int *sel_anchor);
 /* f emptied (a new report). */

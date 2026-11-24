@@ -24,7 +24,6 @@ int gpu_dlss_device_extensions(uint32_t vendor, const char ***exts, unsigned *co
 /* The DLSS model (panel DLSS MODEL, YW4_DLSS_MODEL): 1 the transformer K (STANDARD, the default), 2 the
  * second-generation transformer M (HIGH QUALITY: no trail behind characters in the rain, more GPU time); 0 the CNN
  * (preset E), YW4_DLSS_MODEL=0 for tests only (it makes shadow edges flicker). Changing it rebuilds DLSS. */
-int gpu_dlss_model(void);
 int gpu_dlss_model_setting(void);  /* the panel's row: 0 STANDARD, 1 HIGH QUALITY */
 void gpu_dlss_model_cycle(void);
 /* 1: NGX started and DLSS is available on this GPU (checked once, after the device exists). */

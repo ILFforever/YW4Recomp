@@ -106,7 +106,8 @@ static struct {
 } cps;
 static HostLock cps_lock = HOST_LOCK_INIT;
 
-static VkDescriptorSetLayout copies_set_layout(void) {
+/* cps_lock held. */
+static VkDescriptorSetLayout copies_layout_locked(void) {
     if (!cps.layout) {
         VkDescriptorSetLayoutBinding b = {0, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1, VK_SHADER_STAGE_VERTEX_BIT, NULL};
         VkDescriptorSetLayoutCreateInfo lci = {.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
@@ -114,6 +115,14 @@ static VkDescriptorSetLayout copies_set_layout(void) {
         CHECK(vkCreateDescriptorSetLayout(vk.device, &lci, NULL, &cps.layout));
     }
     return cps.layout;
+}
+
+/* Called by the GPU worker too, while guest render threads may be making it: same lock. */
+static VkDescriptorSetLayout copies_set_layout(void) {
+    host_lock(&cps_lock);
+    VkDescriptorSetLayout l = copies_layout_locked();
+    host_unlock(&cps_lock);
+    return l;
 }
 
 /* The ring, its memory and its one descriptor set (cps_lock held). */
@@ -136,7 +145,7 @@ static void copies_ring(void) {
                                       .poolSizeCount = 1, .pPoolSizes = &size};
     VkDescriptorPool pool;
     CHECK(vkCreateDescriptorPool(vk.device, &pci, NULL, &pool));
-    VkDescriptorSetLayout l = copies_set_layout();
+    VkDescriptorSetLayout l = copies_layout_locked();
     VkDescriptorSetAllocateInfo ai = {.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO, .descriptorPool = pool,
                                       .descriptorSetCount = 1, .pSetLayouts = &l};
     CHECK(vkAllocateDescriptorSets(vk.device, &ai, &cps.set));
@@ -176,7 +185,8 @@ static struct {
 } pal;
 static HostLock pal_lock = HOST_LOCK_INIT;
 
-static VkDescriptorSetLayout palette_set_layout(void) {
+/* pal_lock held. */
+static VkDescriptorSetLayout palette_layout_locked(void) {
     if (!pal.layout) {
         VkDescriptorSetLayoutBinding b = {0, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC, 1, VK_SHADER_STAGE_VERTEX_BIT, NULL};
         VkDescriptorSetLayoutCreateInfo lci = {.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
@@ -184,6 +194,14 @@ static VkDescriptorSetLayout palette_set_layout(void) {
         CHECK(vkCreateDescriptorSetLayout(vk.device, &lci, NULL, &pal.layout));
     }
     return pal.layout;
+}
+
+/* Called by the GPU worker too, while guest render threads may be making it: same lock. */
+static VkDescriptorSetLayout palette_set_layout(void) {
+    host_lock(&pal_lock);
+    VkDescriptorSetLayout l = palette_layout_locked();
+    host_unlock(&pal_lock);
+    return l;
 }
 
 /* The ring, its memory and its one descriptor set (pal_lock held). */
@@ -206,7 +224,7 @@ static void palette_ring(void) {
                                       .poolSizeCount = 1, .pPoolSizes = &size};
     VkDescriptorPool pool;
     CHECK(vkCreateDescriptorPool(vk.device, &pci, NULL, &pool));
-    VkDescriptorSetLayout l = palette_set_layout();
+    VkDescriptorSetLayout l = palette_layout_locked();
     VkDescriptorSetAllocateInfo ai = {.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO, .descriptorPool = pool,
                                       .descriptorSetCount = 1, .pSetLayouts = &l};
     CHECK(vkAllocateDescriptorSets(vk.device, &ai, &pal.set));

@@ -594,10 +594,7 @@ pub fn play(app: tauri::AppHandle, install: String, mods: Option<bool>, on_play:
     let mut cmd = crate::platform::command(&e);
     cmd.current_dir(e.parent().unwrap());
     // the game is a console program: its window shows the log live. Off unless Settings asks for it (the log file is written either way)
-    #[cfg(windows)]
-    if show_log != Some(true) { use std::os::windows::process::CommandExt; cmd.creation_flags(0x0800_0000); }  // CREATE_NO_WINDOW
-    #[cfg(not(windows))]
-    let _ = show_log;  // Linux: a program started from the launcher has no console window either way
+    if show_log != Some(true) { crate::platform::hidden(&mut cmd); }
     if mods == Some(false) {
         cmd.env("YW4_MODS", "none");
     } else {
@@ -1414,16 +1411,6 @@ async fn locate_game_impl(app: tauri::AppHandle, target: Option<String>) -> Resu
 /// If `path` is omitted (or empty), prompts the user to select the game folder via a folder picker dialog.
 #[tauri::command]
 pub async fn locate_installed_game(
-    app: tauri::AppHandle,
-    path: Option<String>,
-    install: Option<String>,
-) -> Result<State, String> {
-    locate_game_impl(app, path.or(install)).await
-}
-
-/// Alias for `locate_installed_game`.
-#[tauri::command]
-pub async fn locate_game(
     app: tauri::AppHandle,
     path: Option<String>,
     install: Option<String>,

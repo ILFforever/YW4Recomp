@@ -93,7 +93,6 @@ int gpu_contact(void);
 void gpu_contact_toggle(void);
 /* Lamp shadows in our lamp lights (gpu_draw.c, YW4_LAMP_SHADOWS, the panel) */
 int gpu_lamp_shadows(void);
-void gpu_lamp_shadows_toggle(void);  /* off, or on at the last strength */
 int gpu_lamp_shadow_level(void);     /* the panel's row: 0 off, 1-4 light .. full */
 void gpu_lamp_shadow_cycle(void);
 /* ... and an 8-tap soft filter turned each frame (YW4_PCSS_FILTER_TAPS=8) */

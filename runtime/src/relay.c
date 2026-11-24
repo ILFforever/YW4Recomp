@@ -126,6 +126,7 @@ void relay_choose(int on, int what) {
         generation++;               /* its reader ends without reporting a lost room */
         rclose(sock);
         sock = RBAD;
+        if (usock != RBAD) rclose(usock), usock = RBAD;
         host_cond_broadcast(&answered);
     }
     host_unlock(&lock);
@@ -142,6 +143,7 @@ void relay_settings_changed(void) {
         generation++;
         rclose(sock);
         sock = RBAD;
+        if (usock != RBAD) rclose(usock), usock = RBAD;
         host_cond_broadcast(&answered);
     }
     host_unlock(&lock);
@@ -409,19 +411,25 @@ static int connect_locked(void) {
         rclose(s);
         return -1;
     }
+    Reader *r = malloc(sizeof *r), *h = malloc(sizeof *h);  /* each thread frees its own */
+    if (!r || !h) {
+        free(r), free(h);
+        rclose(s);
+        return -1;
+    }
     sock = s;
     generation++;
     __atomic_store_n(&server_protocol, 0, __ATOMIC_RELEASE);
     __atomic_store_n(&last_rx, host_now_ns(), __ATOMIC_RELEASE);
-    Reader *r = malloc(sizeof *r), *h = malloc(sizeof *h);  /* each thread frees its own */
-    if (!r || !h) {
-        free(r), free(h);
-        return -1;
-    }
     r->s = s, r->gen = generation;
     *h = *r;
-    host_thread_start(reader, r, 1 << 16);
-    host_thread_start(heartbeat, h, 1 << 15);
+    if (host_thread_start(reader, r, 1 << 16) != 0) {
+        free(r), free(h);
+        rclose(s);
+        sock = RBAD;
+        return -1;
+    }
+    if (host_thread_start(heartbeat, h, 1 << 15) != 0) free(h);
     fprintf(stderr, "yw4: relay: connected to %s:%s, room code \"%s\"\n", host, port, code ? code : "");
     return 0;
 }

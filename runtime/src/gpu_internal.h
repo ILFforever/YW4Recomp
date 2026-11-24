@@ -288,4 +288,11 @@ VkPipelineCache gpu_pcache(void);
 void gpu_pcache_built(void);
 void gpu_pcache_save(void);
 
+static inline VkCompareOp gpu_compare_op(uint32_t f) {
+    static const VkCompareOp ops[9] = {VK_COMPARE_OP_ALWAYS, VK_COMPARE_OP_NEVER, VK_COMPARE_OP_LESS,
+                                       VK_COMPARE_OP_EQUAL, VK_COMPARE_OP_LESS_OR_EQUAL, VK_COMPARE_OP_GREATER,
+                                       VK_COMPARE_OP_NOT_EQUAL, VK_COMPARE_OP_GREATER_OR_EQUAL, VK_COMPARE_OP_ALWAYS};
+    return f < 9 ? ops[f] : VK_COMPARE_OP_ALWAYS;
+}
+
 #endif

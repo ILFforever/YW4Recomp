@@ -123,6 +123,10 @@ static void *read_file(const char *path, size_t *size) {
     if (!f) return NULL;
     fseek(f, 0, SEEK_END);
     long n = ftell(f);
+    if (n < 0) {
+        fclose(f);
+        return NULL;
+    }
     fseek(f, 0, SEEK_SET);
     char *p = malloc((size_t)n + 1);
     if (!p || fread(p, 1, (size_t)n, f) != (size_t)n) gpu_stop("cannot read %s", path);
@@ -150,26 +154,43 @@ static VkImageViewType view_type(const char *dim, int *shadow) {
 /* The shadow settings block (binding 95, pcss_settings_fill): soft shadows, contact shadows, lamp shadows. */
 #define PCSS_BLOCK 80
 
-/* The screen passes: the game's full-screen programs between the G-buffer and the UI that ours replace in
- * the engine's own draws (the shadow mask's way, decision 0044): same inputs, targets and state.
- * YW4_SCREEN_PASSES=game: the game's. */
-static const uint64_t screen_fs[] = {
-    0x95ea1b3181bdf579ull,  /* colour and depth copy (depth_copy.frag) */
-    0x6b4575fb57b97548ull,  /* depth-only copy */
-    0xd2aaa383b27842ecull,  /* fill with the quad's colour */
-    0x2571d0a66582ab9bull,  /* copy, negatives to 0 */
-    0x2d68c875031cfe11ull,  /* copy times the quad's colour */
-    0x79077436c58013f9ull,  /* the lighting inputs (f_7f4c90) */
-    0x3c94bd209d61eddcull,  /* edge-aware upsample */
-    0x22d01556d2366ea7ull,  /* tone mapping */
-    0x42759b97412ca8acull,  /* lamp lights (a light volume per lamp, not a quad) */
-    0x3f9fc96541a9bd43ull,  /* the game's own FXAA */
-    0x627287ec450d41fdull,  /* sky and aerial perspective */
+/* Our replacements for game programs (decision 0026): readable GLSL in runtime/shaders with the
+ * translated program's interface, used in its place when the G-buffer pass is on (settings panel).
+ * screen = 1: the screen passes between the G-buffer and the UI (decision 0044, YW4_SCREEN_PASSES=game). */
+static const struct {
+    uint64_t key;
+    int stage;
+    const char *name;
+    int screen;
+} replacements[] = {
+    {0xbc358b88a500029full, ST_VERT, "gbuffer_main.vert", 0},
+    {0xa93492ef0b558e21ull, ST_FRAG, "gbuffer_main.frag", 0},
+    {0x01fd748a298cf8b6ull, ST_FRAG, "gbuffer_main_cutout.frag", 0},
+    {0x53ce6660dbaa7332ull, ST_FRAG, "gbuffer_gloss.frag", 0},
+    {0xca3b58d6b4fb04f7ull, ST_FRAG, "gbuffer_gloss_cutout.frag", 0},
+    {0x2c5e1e076da5b271ull, ST_FRAG, "gbuffer_plain.frag", 0},
+    {0xb742aa7d4094cd28ull, ST_VERT, "gbuffer_skinned.vert", 0},
+    {0x046b2a15a631058full, ST_VERT, "material_main.vert", 0},
+    {0x5eb3b2cacbdb9824ull, ST_FRAG, "material_main.frag", 0},
+    {0xb0aa5d810b96a62eull, ST_FRAG, "gbuffer_skinned.frag", 0},
+    {SHADOW_MASK_FS, ST_FRAG, "shadow_mask.frag", 0},  /* its own switch (shadow_mask.c) */
+    /* the screen passes' (screen_native) */
+    {0x95ea1b3181bdf579ull, ST_FRAG, "depth_copy.frag", 1},        /* colour and depth copy */
+    {0x6b4575fb57b97548ull, ST_FRAG, "depth_only_copy.frag", 1},   /* depth-only copy */
+    {0xd2aaa383b27842ecull, ST_FRAG, "vertex_colour.frag", 1},     /* fill with the quad's colour */
+    {0x2571d0a66582ab9bull, ST_FRAG, "clamp_copy.frag", 1},        /* copy, negatives to 0 */
+    {0x2d68c875031cfe11ull, ST_FRAG, "tinted_copy.frag", 1},       /* copy times the quad's colour */
+    {0x79077436c58013f9ull, ST_FRAG, "lighting_inputs.frag", 1},   /* the lighting inputs (f_7f4c90) */
+    {0x3c94bd209d61eddcull, ST_FRAG, "edge_upsample.frag", 1},     /* edge-aware upsample */
+    {0x22d01556d2366ea7ull, ST_FRAG, "tonemap.frag", 1},           /* tone mapping */
+    {0x42759b97412ca8acull, ST_FRAG, "lamp_light.frag", 1},        /* lamp lights (light volume per lamp) */
+    {0x3f9fc96541a9bd43ull, ST_FRAG, "game_fxaa.frag", 1},         /* the game's own FXAA */
+    {0x627287ec450d41fdull, ST_FRAG, "sky_fog.frag", 1},           /* sky and aerial perspective */
 };
 
 static int is_screen_fs(uint64_t key) {
-    for (size_t i = 0; i < sizeof screen_fs / sizeof *screen_fs; i++)
-        if (screen_fs[i] == key) return 1;
+    for (size_t i = 0; i < sizeof replacements / sizeof *replacements; i++)
+        if (replacements[i].screen && replacements[i].key == key) return 1;
     return 0;
 }
 
@@ -216,38 +237,6 @@ int gpu_screen_ab_draw(const GpuState *s) {
     if (frame != gpu_frames()) frame = gpu_frames(), seen = 0;
     return ++seen == (all ? (int)(frame % 32) + 1 : nth);
 }
-
-/* Our replacements for game programs (decision 0026): readable GLSL in runtime/shaders with the
- * translated program's interface, used in its place when the G-buffer pass is on (settings panel). */
-static const struct {
-    uint64_t key;
-    int stage;
-    const char *name;
-} replacements[] = {
-    {0xbc358b88a500029full, ST_VERT, "gbuffer_main.vert"},
-    {0xa93492ef0b558e21ull, ST_FRAG, "gbuffer_main.frag"},
-    {0x01fd748a298cf8b6ull, ST_FRAG, "gbuffer_main_cutout.frag"},
-    {0x53ce6660dbaa7332ull, ST_FRAG, "gbuffer_gloss.frag"},
-    {0xca3b58d6b4fb04f7ull, ST_FRAG, "gbuffer_gloss_cutout.frag"},
-    {0x2c5e1e076da5b271ull, ST_FRAG, "gbuffer_plain.frag"},
-    {0xb742aa7d4094cd28ull, ST_VERT, "gbuffer_skinned.vert"},
-    {0x046b2a15a631058full, ST_VERT, "material_main.vert"},
-    {0x5eb3b2cacbdb9824ull, ST_FRAG, "material_main.frag"},
-    {0xb0aa5d810b96a62eull, ST_FRAG, "gbuffer_skinned.frag"},
-    {SHADOW_MASK_FS, ST_FRAG, "shadow_mask.frag"},  /* its own switch (shadow_mask.c) */
-    /* the screen passes' (screen_native) */
-    {0x95ea1b3181bdf579ull, ST_FRAG, "depth_copy.frag"},
-    {0x6b4575fb57b97548ull, ST_FRAG, "depth_only_copy.frag"},
-    {0xd2aaa383b27842ecull, ST_FRAG, "vertex_colour.frag"},
-    {0x2571d0a66582ab9bull, ST_FRAG, "clamp_copy.frag"},
-    {0x2d68c875031cfe11ull, ST_FRAG, "tinted_copy.frag"},
-    {0x79077436c58013f9ull, ST_FRAG, "lighting_inputs.frag"},
-    {0x3c94bd209d61eddcull, ST_FRAG, "edge_upsample.frag"},
-    {0x22d01556d2366ea7ull, ST_FRAG, "tonemap.frag"},
-    {0x42759b97412ca8acull, ST_FRAG, "lamp_light.frag"},
-    {0x3f9fc96541a9bd43ull, ST_FRAG, "game_fxaa.frag"},
-    {0x627287ec450d41fdull, ST_FRAG, "sky_fog.frag"},
-};
 
 static VkShaderModule replacement(uint64_t key, int stage) {
     for (size_t i = 0; i < sizeof replacements / sizeof *replacements; i++) {
@@ -579,13 +568,6 @@ static VkBlendOp blend_op(uint8_t e) {
     case 5: return VK_BLEND_OP_MAX;
     default: gpu_stop("blend equation %u", e);
     }
-}
-
-static VkCompareOp compare_fn(uint8_t f) {
-    static const VkCompareOp ops[9] = {VK_COMPARE_OP_ALWAYS, VK_COMPARE_OP_NEVER, VK_COMPARE_OP_LESS,
-                                       VK_COMPARE_OP_EQUAL, VK_COMPARE_OP_LESS_OR_EQUAL, VK_COMPARE_OP_GREATER,
-                                       VK_COMPARE_OP_NOT_EQUAL, VK_COMPARE_OP_GREATER_OR_EQUAL, VK_COMPARE_OP_ALWAYS};
-    return f < 9 ? ops[f] : VK_COMPARE_OP_ALWAYS;
 }
 
 static VkStencilOp stencil_op(uint8_t o) {
@@ -1663,13 +1645,6 @@ int gpu_lamp_shadows(void) {
     return v;
 }
 
-/* off, or back on at the strength chosen last */
-void gpu_lamp_shadows_toggle(void) {
-    int v = !gpu_lamp_shadows();
-    __atomic_store_n(&lamp_shadow_on, v, __ATOMIC_RELEASE);
-    fprintf(stderr, "yw4: gpu: lamp shadows %s (F4)\n", v ? "on" : "off");
-}
-
 /* The settings panel's LAMP SHADOWS row (owner, 2026-11-19: "can you make shadow strength adjustable"): off, then
  * four strengths. */
 static const float lamp_levels[5] = {0, 0.25f, 0.4f, 0.6f, 1.0f};
@@ -2311,7 +2286,7 @@ void gpu_dynamic_state(VkCommandBuffer cb, const GpuState *s, VkFormat depth, ui
     int has_stencil = depth == VK_FORMAT_S8_UINT || depth == VK_FORMAT_D24_UNORM_S8_UINT ||
                       depth == VK_FORMAT_D32_SFLOAT_S8_UINT;
     d.depth_test = has_depth && ds[0], d.depth_write = has_depth && ds[1];
-    d.depth_op = compare_fn(ds[2]);
+    d.depth_op = gpu_compare_op(ds[2]);
     d.stencil_test = has_stencil && ds[3];
     if (mismatch) d.depth_test = d.depth_write = d.stencil_test = 0;  /* above */
     uint32_t ops = ds[5] | ds[6] << 8 | ds[7] << 16;
@@ -2319,7 +2294,7 @@ void gpu_dynamic_state(VkCommandBuffer cb, const GpuState *s, VkFormat depth, ui
         uint32_t o = ops >> (12 * face);
         d.face[face].fail = stencil_op(o & 0xF), d.face[face].pass = stencil_op(o >> 8 & 0xF);
         d.face[face].depth_fail = stencil_op(o >> 4 & 0xF);
-        d.face[face].op = compare_fn(face ? ds[4] >> 4 : ds[4] & 0xF);
+        d.face[face].op = gpu_compare_op(face ? ds[4] >> 4 : ds[4] & 0xF);
         d.face[face].ref = s->stencil_ref[face], d.face[face].write_mask = s->stencil_mask[face];
         d.face[face].compare_mask = s->stencil_value_mask[face];
     }

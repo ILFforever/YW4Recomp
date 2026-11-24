@@ -47,12 +47,6 @@ _Noreturn void nvn_fatal(const CPUState *c, const char *fmt, ...) {
     yw4_stop();
 }
 
-void nvn_guest_call(CPUState *c, uint64_t fn) {
-    uint64_t lr = c->x[30];
-    yw4_resolve(fn)(c);
-    c->x[30] = lr;
-}
-
 /* ---- names to guest addresses */
 
 #define MAX_PROCS 1024

@@ -29,6 +29,9 @@ static void nickname(uint8_t out[0x21]) {
         unsigned char b = (unsigned char)n[i];
         if (b >= 0xF0) len = 4; else if (b >= 0xE0) len = 3; else if (b >= 0xC0) len = 2;
         if (i + len > 0x20) break;
+        size_t k = 1;
+        while (k < len && n[i + k]) k++;
+        if (k < len) break;
         i += len, chars++;
     }
     memcpy(out, n, i);

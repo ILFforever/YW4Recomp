@@ -662,10 +662,7 @@ static int sampler_state(uint64_t item, unsigned k, uint8_t out[15]) {
  * 0xa depth compare function (0: off); 0xb-0xe border colour. The device's texture quality
  * settings (+0x4620 mode, +0x4624 anisotropy, +0x4625 on) can raise the filter and anisotropy. */
 static void sampler_desc(const uint8_t s[15], NvnSamplerDesc *d) {
-    static uint64_t base;
-    if (!base)
-        for (size_t i = 0; i < yw4_ncode; i++)
-            if (!strcmp(yw4_code[i].name, "main")) base = *yw4_code[i].base;
+    uint64_t base = *yw4_modules[YW4_MAIN].base;
     float c16, c17, c18, c19;
     memcpy(&c16, (const void *)(uintptr_t)(base + 0x11fdba0), 4);
     memcpy(&c17, (const void *)(uintptr_t)(base + 0x11fdbe8), 4);
@@ -754,10 +751,7 @@ static unsigned effect_id(uint64_t item) {
 static _Thread_local unsigned effect_pass_count;  /* of the pass effect_pass chose last: the commit draws
                                                     * that many consecutive pass records (f_977e30) */
 static uint64_t effect_pass(uint64_t effect) {
-    static uint64_t base;
-    if (!base)
-        for (size_t i = 0; i < yw4_ncode; i++)
-            if (!strcmp(yw4_code[i].name, "main")) base = *yw4_code[i].base;
+    uint64_t base = *yw4_modules[YW4_MAIN].base;
     uint64_t passes = U64(effect + 0x30);
     unsigned n = U8(effect + 0x48), sel = 0xffff, matches = 0;
     if (!passes) return 0;
@@ -776,10 +770,7 @@ static uint64_t effect_pass(uint64_t effect) {
 /* The material's shader effect: the effect manager (main+0x58656e8) keeps them in an array (+0x10,
  * 0x28 bytes each, the effect object first) by id from 1 (f_a9edf0). 0 if none. */
 static uint64_t effect_of(uint64_t item) {
-    static uint64_t base;
-    if (!base)
-        for (size_t i = 0; i < yw4_ncode; i++)
-            if (!strcmp(yw4_code[i].name, "main")) base = *yw4_code[i].base;
+    uint64_t base = *yw4_modules[YW4_MAIN].base;
     unsigned id = effect_id(item);
     return id ? U64(U64(U64(base + 0x58656e8) + 0x10) + 0x28ull * (id - 1)) : 0;
 }
@@ -791,10 +782,7 @@ static uint64_t effect_of(uint64_t item) {
  * translated shader). The engine combines the stages into one NVN program (f_965880, cached by the
  * stages' ids). 0 if there is no pass. */
 static int pass_shaders(uint64_t effect, uint64_t *vs, uint64_t *fs) {
-    static uint64_t base;
-    if (!base)
-        for (size_t i = 0; i < yw4_ncode; i++)
-            if (!strcmp(yw4_code[i].name, "main")) base = *yw4_code[i].base;
+    uint64_t base = *yw4_modules[YW4_MAIN].base;
     uint64_t pass = effect ? effect_pass(effect) : 0, mgr = U64(base + 0x58656e8);
     if (!pass) return 0;
     *vs = U16(pass + 4) < U16(mgr + 0x4c) ? U64(U64(U64(mgr + 0x30) + 0x20ull * U16(pass + 4))) : 0;
@@ -845,10 +833,7 @@ static int bone_palette_previous(uint64_t item, uint64_t *data) {
  * (nvn_objects.c: format, stream << 8, offset << 13), 0 where unused. Returns the attributes used
  * (bit mask), 0 if there is no layout; *other: elements on other streams (left to the game). */
 static uint32_t vertex_layout(uint64_t item, uint32_t out[16], int *other) {
-    static uint64_t base;
-    if (!base)
-        for (size_t i = 0; i < yw4_ncode; i++)
-            if (!strcmp(yw4_code[i].name, "main")) base = *yw4_code[i].base;
+    uint64_t base = *yw4_modules[YW4_MAIN].base;
     unsigned id = effect_id(item);
     *other = 0;
     if (!id) return 0;
@@ -887,10 +872,7 @@ static uint32_t vertex_layout(uint64_t item, uint32_t out[16], int *other) {
  * Rows past the material's textures keep what an earlier draw left (the engine reuses the block);
  * *ntex is how many are this draw's. */
 static void model_material(uint64_t item, const uint8_t state[33], uint8_t out[0x160], unsigned *ntex) {
-    static uint64_t base;
-    if (!base)
-        for (size_t i = 0; i < yw4_ncode; i++)
-            if (!strcmp(yw4_code[i].name, "main")) base = *yw4_code[i].base;
+    uint64_t base = *yw4_modules[YW4_MAIN].base;
     float c01, c255, w[4] = {0};
     memcpy(&c01, (const void *)(uintptr_t)(base + 0x11fddb8), 4);
     memcpy(&c255, (const void *)(uintptr_t)(base + 0x11fdf24), 4);
@@ -983,10 +965,7 @@ static uint8_t nvn_compare(uint8_t b) { return b >= 2 && b <= 8 ? b : 1; }
  *   f_979da0 (0x1c): depth bias -byte at +0x2bc, +0x2c0 cleared;
  *   f_979d40 (0x1f, 0x20): +0x2f0, multisample enable. */
 static void nvn_state(const uint8_t b[33], uint8_t out[NVN_STATE_BYTES]) {
-    static uint64_t base;
-    if (!base)
-        for (size_t i = 0; i < yw4_ncode; i++)
-            if (!strcmp(yw4_code[i].name, "main")) base = *yw4_code[i].base;
+    uint64_t base = *yw4_modules[YW4_MAIN].base;
     memcpy(out, cur.layer_nvn, NVN_STATE_BYTES);
     uint8_t *blend = out, *color = out + 0x44, *ds = out + 0x48, *ms = out + 0x50, *poly = out + 0x68;
     uint32_t mask, u;
@@ -1235,10 +1214,7 @@ int gbuffer_hook_world(const CPUState *ctx, float out[12]) {
 
 int gbuffer_submesh(const CPUState *ctx) {
     if (!cur.active) return 0;
-    static uint64_t base;
-    if (!base)
-        for (size_t i = 0; i < yw4_ncode; i++)
-            if (!strcmp(yw4_code[i].name, "main")) base = *yw4_code[i].base;
+    uint64_t base = *yw4_modules[YW4_MAIN].base;
     uint64_t ret = ctx->x[30] - base;
     if (ret != 0xa4bf94 && ret != 0xa4c2d0) return 0;  /* from the model renderer */
     /* the object being drawn is in the model renderer's stack slot sp+0x390 */

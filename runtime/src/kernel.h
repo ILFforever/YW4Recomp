@@ -72,7 +72,6 @@ typedef struct {
     uint64_t addr, size;
     uint32_t perm;  /* what the game itself may still do with it meanwhile */
 } KTransferMemory;
-KTransferMemory *yw4_transfer_memory_get(uint32_t handle);  /* NULL if not one */
 
 /* The display's vsync (vi.c): a 60 Hz host thread, started on first use. */
 void yw4_vsync_start(void);

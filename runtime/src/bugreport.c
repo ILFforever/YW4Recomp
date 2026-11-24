@@ -236,8 +236,15 @@ int bugreport_save(const BugReport *r, char *path, size_t n) {
 #ifdef _WIN32
     if (!_fullpath(path, rel, n)) snprintf(path, n, "%s", rel);
 #else
-    if (!realpath(dir, path)) snprintf(path, n, "%s", rel);
-    else snprintf(path + strlen(path), n - strlen(path), "/yw4_report_%s.zip", stamp);
+    /* realpath into a caller buffer can write PATH_MAX bytes past a small one: let it allocate, then copy what fits */
+    char *rp = realpath(dir, NULL);
+    if (!rp) snprintf(path, n, "%s", rel);
+    else {
+        snprintf(path, n, "%s", rp);
+        free(rp);
+        size_t len = strlen(path);
+        snprintf(path + len, n - len, "/yw4_report_%s.zip", stamp);
+    }
 #endif
     static Zip z;  /* large: not on the stack */
     memset(&z, 0, sizeof z);

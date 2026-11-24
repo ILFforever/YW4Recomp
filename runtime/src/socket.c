@@ -116,7 +116,38 @@ static void ret(CPUState *c, int64_t v, int err) {
 }
 
 static Fd *get(int fd) {
-    return fd >= 0 && fd < MAX_FDS && fds[fd].used ? &fds[fd] : NULL;
+    return fd >= 0 && fd < MAX_FDS && fds[fd].used ? &fds[fd] : NULL;  /* fd_lock must be held */
+}
+
+/* A copy of the fd's entry, taken under fd_lock: the calls below work on the copy, so none of them blocks (recv,
+ * poll, connect) with the lock held, and none reads an entry another thread is changing. A change to the entry goes
+ * back through the commit helpers, found by the host handle (a closed and reused fd number is then not touched). */
+static int snap(int fd, Fd *out) {
+    host_lock(&fd_lock);
+    Fd *f = get(fd);
+    if (f) *out = *f;
+    host_unlock(&fd_lock);
+    return f != NULL;
+}
+static void commit_bound(HSock h, int set_addr, uint32_t addr, uint16_t port) {
+    host_lock(&fd_lock);
+    for (int i = 0; i < MAX_FDS; i++)
+        if (fds[i].used && fds[i].h == h) {
+            if (set_addr) fds[i].guest_addr = addr;
+            fds[i].guest_port = port;
+            fds[i].bound = 1;
+            break;
+        }
+    host_unlock(&fd_lock);
+}
+static void commit_peer(HSock h, uint32_t addr, uint16_t port) {
+    host_lock(&fd_lock);
+    for (int i = 0; i < MAX_FDS; i++)
+        if (fds[i].used && fds[i].h == h) {
+            fds[i].peer_addr = addr, fds[i].peer_port = port;
+            break;
+        }
+    host_unlock(&fd_lock);
 }
 
 static int is_local_net(uint32_t a_be) { return (ntohl(a_be) >> 16) == 0xA9FE; }  /* 169.254.0.0/16 */
@@ -159,6 +190,16 @@ static void set_nonblock(Fd *f, int on) {
 #endif
 }
 
+static void fd_set_nonblock(HSock h, int on) {
+    host_lock(&fd_lock);
+    for (int i = 0; i < MAX_FDS; i++)
+        if (fds[i].used && fds[i].h == h) {
+            set_nonblock(&fds[i], on);
+            break;
+        }
+    host_unlock(&fd_lock);
+}
+
 /* an unbound UDP socket that sends gets a port, as bind(0) would give it */
 static void autobind(Fd *f) {
     if (f->bound) return;
@@ -170,6 +211,7 @@ static void autobind(Fd *f) {
         getsockname(f->h, (struct sockaddr *)&a, &l);
         f->guest_port = a.sin_port;
         f->bound = 1;
+        commit_bound(f->h, 0, 0, f->guest_port);
     }
 }
 
@@ -328,14 +370,14 @@ void yw4_socket_Close(CPUState *c) {
 }
 
 void yw4_socket_Shutdown(CPUState *c) {
-    Fd *f = get((int)c->x[0]);
+    Fd fs, *f = snap((int)c->x[0], &fs) ? &fs : NULL;
     LOG("Shutdown(%d, %d)\n", (int)c->x[0], (int)c->x[1]);
     ret(c, f ? shutdown(f->h, (int)c->x[1]) : -1, f ? host_errno() : G_EBADF);
 }
 
 /* Bind(fd, const sockaddr *, len) */
 void yw4_socket_Bind(CPUState *c) {
-    Fd *f = get((int)c->x[0]);
+    Fd fs, *f = snap((int)c->x[0], &fs) ? &fs : NULL;
     struct sockaddr_in a;
     uint32_t gip = 0;
     char b[32];
@@ -353,13 +395,14 @@ void yw4_socket_Bind(CPUState *c) {
         f->guest_addr = gip;
         f->guest_port = want_port ? want_port : got.sin_port;
         f->bound = 1;
+        commit_bound(f->h, 1, gip, f->guest_port);
     }
     LOG("Bind(%d, %s)%s\n", (int)c->x[0], ip_str(gip, a.sin_port, b), r ? " failed" : "");
     ret(c, r, host_errno());
 }
 
 void yw4_socket_GetSockName(CPUState *c) {
-    Fd *f = get((int)c->x[0]);
+    Fd fs, *f = snap((int)c->x[0], &fs) ? &fs : NULL;
     if (!f) { ret(c, -1, G_EBADF); return; }
     uint32_t me = htonl(ldn_my_address());
     to_guest(c->x[1], c->x[2], f->guest_addr ? f->guest_addr : me, f->guest_port);
@@ -367,7 +410,7 @@ void yw4_socket_GetSockName(CPUState *c) {
 }
 
 void yw4_socket_Connect(CPUState *c) {
-    Fd *f = get((int)c->x[0]);
+    Fd fs, *f = snap((int)c->x[0], &fs) ? &fs : NULL;
     struct sockaddr_in a;
     uint32_t gip = 0;
     char b[32];
@@ -375,6 +418,7 @@ void yw4_socket_Connect(CPUState *c) {
     LOG("Connect(%d, %s)\n", (int)c->x[0], ip_str(gip, a.sin_port, b));
     if (f->type == 2) {  /* UDP: only remembers the destination */
         f->peer_addr = gip, f->peer_port = a.sin_port;
+        commit_peer(f->h, gip, a.sin_port);
         autobind(f);
         c->x[0] = 0;
         return;
@@ -385,7 +429,7 @@ void yw4_socket_Connect(CPUState *c) {
 }
 
 void yw4_socket_Listen(CPUState *c) {
-    Fd *f = get((int)c->x[0]);
+    Fd fs, *f = snap((int)c->x[0], &fs) ? &fs : NULL;
     LOG("Listen(%d, %d)\n", (int)c->x[0], (int)c->x[1]);
     ret(c, f ? listen(f->h, (int)c->x[1]) : -1, f ? host_errno() : G_EBADF);
 }
@@ -397,7 +441,7 @@ void yw4_socket_Accept(CPUState *c) {
 
 /* SendTo(fd, buf, len, flags, const sockaddr *, addrlen) */
 void yw4_socket_SendTo(CPUState *c) {
-    Fd *f = get((int)c->x[0]);
+    Fd fs, *f = snap((int)c->x[0], &fs) ? &fs : NULL;
     size_t n = c->x[2];
     if (!f) { ret(c, -1, G_EBADF); return; }
     struct sockaddr_in a = {0};
@@ -432,16 +476,24 @@ void yw4_socket_Send(CPUState *c) {
 
 /* RecvFrom(fd, buf, len, flags, sockaddr *, socklen *) */
 void yw4_socket_RecvFrom(CPUState *c) {
-    Fd *f = get((int)c->x[0]);
+    Fd fs, *f = snap((int)c->x[0], &fs) ? &fs : NULL;
     if (!f) { ret(c, -1, G_EBADF); return; }
     int flags = (int)c->x[3];
     int dontwait = (flags & 0x40) != 0;  /* MSG_DONTWAIT, Linux's */
     if (dontwait && !f->nonblock) {
         fd_set rs;
+#ifndef _WIN32
+        if (f->h >= FD_SETSIZE) {  /* FD_SET would write past the set: ask poll instead */
+            struct pollfd pf = {.fd = f->h, .events = POLLIN};
+            if (poll(&pf, 1, 0) <= 0) { ret(c, -1, G_EAGAIN); return; }
+        } else
+#endif
+        {
         FD_ZERO(&rs);
         FD_SET(f->h, &rs);
         struct timeval tv = {0, 0};
         if (select((int)f->h + 1, &rs, NULL, NULL, &tv) <= 0) { ret(c, -1, G_EAGAIN); return; }
+        }
     }
     struct sockaddr_in a;
     socklen_t al = sizeof a;
@@ -500,8 +552,8 @@ void yw4_socket_Poll(CPUState *c) {
         int16_t ev;
         memcpy(&fd, p + 8 * i, 4);
         memcpy(&ev, p + 8 * i + 4, 2);
-        Fd *f = get(fd);
-        h[i].fd = f ? f->h : HBAD;
+        Fd pf;
+        h[i].fd = snap(fd, &pf) ? pf.h : HBAD;
         h[i].events = (short)((ev & 1 ? POLLIN : 0) | (ev & 4 ? POLLOUT : 0));
         h[i].revents = 0;
     }
@@ -518,12 +570,12 @@ void yw4_socket_Poll(CPUState *c) {
 
 /* Fcntl(fd, cmd, ...): F_GETFL 3, F_SETFL 4; O_NONBLOCK is Linux's 0x800 */
 void yw4_socket_Fcntl(CPUState *c) {
-    Fd *f = get((int)c->x[0]);
+    Fd fs, *f = snap((int)c->x[0], &fs) ? &fs : NULL;
     int cmd = (int)c->x[1];
     if (!f) { ret(c, -1, G_EBADF); return; }
     if (cmd == 3) { c->x[0] = f->nonblock ? 0x800 : 0; return; }
     if (cmd == 4) {
-        set_nonblock(f, (c->x[2] & 0x800) != 0);
+        fd_set_nonblock(f->h, (c->x[2] & 0x800) != 0);
         LOG("Fcntl(%d, F_SETFL, %#x)\n", (int)c->x[0], (unsigned)c->x[2]);
         c->x[0] = 0;
         return;
@@ -535,14 +587,14 @@ void yw4_socket_Fcntl(CPUState *c) {
 /* SetSockOpt(fd, level, name, const void *, len): SOL_SOCKET (0xffff) options are BSD's, as Winsock's; the rest
  * is logged and accepted */
 void yw4_socket_SetSockOpt(CPUState *c) {
-    Fd *f = get((int)c->x[0]);
+    Fd fs, *f = snap((int)c->x[0], &fs) ? &fs : NULL;
     int level = (int)c->x[1], name = (int)c->x[2];
     uint32_t len = (uint32_t)c->x[4];
     if (!f) { ret(c, -1, G_EBADF); return; }
     int v = 0;
     if (len >= 4) memcpy(&v, GPTR(c->x[3]), 4);
     LOG("SetSockOpt(%d, level %#x, option %#x, value %d)\n", (int)c->x[0], level, name, v);
-    if (level == 0xFFFF && name == 0x1100) { set_nonblock(f, v != 0); c->x[0] = 0; return; }  /* SO_NONBLOCK */
+    if (level == 0xFFFF && name == 0x1100) { fd_set_nonblock(f->h, v != 0); c->x[0] = 0; return; }  /* SO_NONBLOCK */
     if (level == 0xFFFF && (name == 4 || name == 0x20 || name == 0x1001 || name == 0x1002)) {
         setsockopt(f->h, SOL_SOCKET, name, (const char *)&v, sizeof v);
     }
@@ -550,14 +602,16 @@ void yw4_socket_SetSockOpt(CPUState *c) {
 }
 
 void yw4_socket_GetSockOpt(CPUState *c) {
-    Fd *f = get((int)c->x[0]);
+    Fd fs, *f = snap((int)c->x[0], &fs) ? &fs : NULL;
     int level = (int)c->x[1], name = (int)c->x[2];
     if (!f) { ret(c, -1, G_EBADF); return; }
     int v = 0;
     socklen_t l = sizeof v;
     if (level == 0xFFFF) getsockopt(f->h, SOL_SOCKET, name == 0x1007 ? SO_ERROR : name, (char *)&v, &l);
-    if (c->x[3]) memcpy(GPTR(c->x[3]), &v, 4);
-    if (c->x[4]) *(uint32_t *)GPTR(c->x[4]) = 4;
+    uint32_t room = c->x[4] ? *(uint32_t *)GPTR(c->x[4]) : 4;  /* the game's buffer size, which we may not pass */
+    if (room > 4) room = 4;
+    if (c->x[3]) memcpy(GPTR(c->x[3]), &v, room);
+    if (c->x[4]) *(uint32_t *)GPTR(c->x[4]) = room;
     LOG("GetSockOpt(%d, level %#x, option %#x) -> %d\n", (int)c->x[0], level, name, v);
     c->x[0] = 0;
 }

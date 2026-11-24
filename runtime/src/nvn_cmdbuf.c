@@ -408,6 +408,10 @@ void nvn_execute(uint64_t handle) {
             nvn_stats_program((const void *)(uintptr_t)r->x[0]);
             break;
         case CMD_SET_RENDER_TARGETS: {
+            /* only the CPU clears below read render_targets: with the GPU path it is dead state, and several
+             * submitting game threads would race on it */
+            if (gpu) break;
+            /* static: render_targets[] points into rt's own copies (color_snap) and is read by later clears */
             static RenderTargets rt;  /* the record's copies; its pointers must be re-pointed */
             memcpy(&rt, r->extra, sizeof rt);
             render_targets_fix(&rt);

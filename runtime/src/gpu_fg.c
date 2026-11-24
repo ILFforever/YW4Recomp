@@ -44,17 +44,18 @@ static const char *const skip_names[FG_SKIP_N] = {"no motion", "size", "not acti
                                                   "dispatch", "no prepare", "no context"};
 static uint32_t skips[FG_SKIP_N];
 void gpu_fg_skip(int reason) {
-    if (reason >= 0 && reason < FG_SKIP_N) skips[reason]++;
+    /* the GPU worker and others count, the pacing thread prints: atomic */
+    if (reason >= 0 && reason < FG_SKIP_N) __atomic_fetch_add(&skips[reason], 1, __ATOMIC_RELAXED);
 }
 static void print_skips(void) {
+    uint32_t got[FG_SKIP_N];  /* taken and reset in one step, so no count is lost between print and reset */
     int any = 0;
-    for (int i = 0; i < FG_SKIP_N; i++) any |= skips[i] != 0;
+    for (int i = 0; i < FG_SKIP_N; i++) any |= (got[i] = __atomic_exchange_n(&skips[i], 0, __ATOMIC_RELAXED)) != 0;
     if (!any) return;
     fprintf(stderr, "yw4: fg: frames without one, by reason:");
     for (int i = 0; i < FG_SKIP_N; i++)
-        if (skips[i]) fprintf(stderr, " %s %u,", skip_names[i], (unsigned)skips[i]);
+        if (got[i]) fprintf(stderr, " %s %u,", skip_names[i], (unsigned)got[i]);
     fprintf(stderr, "\n");
-    memset(skips, 0, sizeof skips);
 }
 
 int gpu_fg(void) {
@@ -525,7 +526,7 @@ static int gen_share_x1000;  /* the share of recent game frames shown with a gen
 
 float gpu_fg_shown_per_frame(void) {
     if (gpu_fg() == 2) return dlssg_shown_per_frame();
-    if (!gpu_fg_active() || !pacer_started) return 0.0f;
+    if (!gpu_fg_active() || !__atomic_load_n(&pacer_started, __ATOMIC_ACQUIRE)) return 0.0f;
     return 1.0f + (float)__atomic_load_n(&gen_share_x1000, __ATOMIC_RELAXED) / 1000.0f;
 }
 
@@ -590,7 +591,7 @@ int gpu_fg_record(VkCommandBuffer cb, VkImage image, VkFormat format, uint32_t w
         if (ctx && gpu_fg() != 1) destroy();
         return -1;
     }
-    if (!pacer_started) {
+    if (!__atomic_load_n(&pacer_started, __ATOMIC_RELAXED)) {  /* only this (GPU worker) thread sets it */
         host_lock_init(&plock);
         host_cond_init(&pcond);
         if (host_thread_start(pacer, NULL, 1 << 20)) {
@@ -598,7 +599,7 @@ int gpu_fg_record(VkCommandBuffer cb, VkImage image, VkFormat format, uint32_t w
             loaded = 0;
             return -1;
         }
-        pacer_started = 1;
+        __atomic_store_n(&pacer_started, 1, __ATOMIC_RELEASE);  /* plock/pcond are ready for readers of it */
     }
     /* FSR's part of the window image (fsr_rect): the slots hold it alone, at 0,0 */
     VkRect2D fr = fsr_rect(w, h);
@@ -667,7 +668,7 @@ void gpu_fg_show(int k, VkRect2D rect, uint64_t frame) {
 }
 
 void gpu_fg_drain(void) {
-    if (!pacer_started) return;
+    if (!__atomic_load_n(&pacer_started, __ATOMIC_ACQUIRE)) return;
     host_lock(&plock);
     while (queued >= 0 || showing >= 0) host_cond_wait(&pcond, &plock, -1);
     host_unlock(&plock);

@@ -48,25 +48,13 @@ class WheelIconError(Exception):
 
 def sheet_records(data: bytes) -> tuple[dict[str, tuple[int, int, int, int]], int, int, bytes]:
     """The G4TX file's sub-image records by name, and its first texture: width, height, linear BC7 blocks."""
-    if data[:4] != b"G4TX":
-        raise WheelIconError("not a G4TX file")
-    u16 = lambda off: struct.unpack_from("<H", data, off)[0]
-    base, count = u16(0x0A), u16(0x22)
-    strings = 4 * (base + u16(0x46))
-    names = []
-    for i in range(count):
-        off = strings + u16(strings + 2 * i)
-        names.append(data[off:data.index(b"\0", off)].decode("ascii"))
-    tex = 4 * (base + u16(0x3E))
-    if data[tex:tex + 8] != b"NXTCH000":
-        raise WheelIconError("no texture where the header says")
-    w, h = struct.unpack_from("<II", data, tex + 0x14)
-    records = 4 * (base + u16(0x42))
-    rects = {}
-    for i in range(1, count):
-        x, y, rw, rh = struct.unpack_from("<4H", data, records + (i - 1) * 24 + 4)
-        rects[names[i]] = (x, y, rw, rh)
-    return rects, w, h, bytes(bc7.deswizzle_bc7(data[tex + 0x100:], w, h))
+    from tools.yw4.g4tx import parse_g4tx
+
+    try:
+        sheet = parse_g4tx(data)
+    except ValueError as e:
+        raise WheelIconError(str(e)) from e
+    return sheet.records, sheet.width, sheet.height, sheet.linear_bc7
 
 
 def icons_from(data: bytes) -> dict[int, tuple[int, int, bytes]]:

@@ -77,12 +77,19 @@ void nvn_stats_pool(uint32_t flags, uint64_t size) {
     pools[i].count++, pools[i].bytes += size;
 }
 
-void nvn_stats_texels(uint64_t bytes) { texel_writes++, texel_bytes += bytes; }
+void nvn_stats_texels(uint64_t bytes) {
+    if (!nvn_stats_enabled()) return;
+    texel_writes++, texel_bytes += bytes;
+}
 
 /* kind: 0 draw, 1 indexed draw, 2 indirect draw, 3 dispatch */
-void nvn_stats_draw(int kind) { draws_by_kind[kind]++; }
+void nvn_stats_draw(int kind) {
+    if (!nvn_stats_enabled()) return;
+    draws_by_kind[kind]++;
+}
 
 void nvn_stats_program(const void *program) {
+    if (!nvn_stats_enabled()) return;
     binds++;
     uint64_t p = (uint64_t)(uintptr_t)program;
     for (int i = 0; i < nframe_programs; i++)

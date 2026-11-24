@@ -117,15 +117,24 @@ fn entry_bytes(path: &Path, e: &Entry, max: u64) -> Option<Vec<u8>> {
 /// Is this .tik a common ticket, whose title key the build takes from the ticket itself (tools/yw4/extract.py
 /// ticket_title_key)? A personalised one needs the key from title.keys.
 fn common_ticket(d: &[u8]) -> bool {
+    const SIG_RSA4096_SHA1: u32 = 0x10000;
+    const SIG_RSA2048_SHA1: u32 = 0x10001;
+    const SIG_ECDSA240_SHA1: u32 = 0x10002;
+    const SIG_RSA4096_SHA256: u32 = 0x10003;
+    const SIG_RSA2048_SHA256: u32 = 0x10004;
+    const SIG_ECDSA240_SHA256: u32 = 0x10005;
+    const TICKET_BODY_MIN_LEN: usize = 0x170;
+    const TICKET_TITLE_KEY_TYPE_OFF: usize = 0x141; // 0 = common, 1 = personalised
+
     if d.len() < 4 { return false; }
     let (sig, pad) = match u32le(d, 0) {
-        0x10000 | 0x10003 => (0x200, 0x3C),
-        0x10001 | 0x10004 => (0x100, 0x3C),
-        0x10002 | 0x10005 => (0x3C, 0x40),
+        SIG_RSA4096_SHA1 | SIG_RSA4096_SHA256 => (0x200, 0x3C),
+        SIG_RSA2048_SHA1 | SIG_RSA2048_SHA256 => (0x100, 0x3C),
+        SIG_ECDSA240_SHA1 | SIG_ECDSA240_SHA256 => (0x3C, 0x40),
         _ => return false,
     };
     let body = 4 + sig + pad;
-    d.len() >= body + 0x170 && d[body + 0x141] == 0
+    d.len() >= body + TICKET_BODY_MIN_LEN && d[body + TICKET_TITLE_KEY_TYPE_OFF] == 0
 }
 
 /// The rights IDs of an NSP's tickets that need title.keys: those its own common tickets don't carry the key for.

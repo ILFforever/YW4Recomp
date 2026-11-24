@@ -69,6 +69,7 @@ void yw4_perf_add(int what, int64_t ns) {
 }
 
 static FILE *csv, *events;  /* events: events.h */
+static HostLock events_lock = HOST_LOCK_INIT;  /* yw4_event runs on any thread; finish() closes the file */
 static char summary_path[600];
 static int enabled = -1, exiting;
 static int64_t t0, last_exit, last_cpu;
@@ -309,7 +310,7 @@ void yw4_event_text(const char *kind, uint64_t frame, const char *key, const cha
 
 void yw4_event(const char *kind, uint64_t frame, const char *fields, ...) {
     if (enabled < 0) start();
-    if (!events) return;
+    if (!__atomic_load_n(&events, __ATOMIC_ACQUIRE)) return;
     char line[1400];  /* one fputs per line: lines of different threads don't mix */
     size_t n = (size_t)snprintf(line, sizeof line, "{\"kind\":\"%s\",\"frame\":%" PRIu64 ",\"t\":%.3f", kind, frame,
                                 (double)(host_now_ns() - t0) / 1e9);
@@ -323,8 +324,12 @@ void yw4_event(const char *kind, uint64_t frame, const char *fields, ...) {
         n += m < 0 ? 0 : (size_t)m < room ? (size_t)m : room - 1;
     }
     line[n++] = '}', line[n++] = '\n', line[n] = 0;
-    fputs(line, events);
-    fflush(events);
+    host_lock(&events_lock);
+    if (events) {
+        fputs(line, events);
+        fflush(events);
+    }
+    host_unlock(&events_lock);
 }
 
 /* At exit: what was scheduled for a frame the run never got to. A screenshot, an image dump or a setting change
@@ -359,8 +364,10 @@ static void finish(void) {
     uint64_t last = nrows ? ROW(nrows - 1).frame : 0;
     report_unreached(last);
     yw4_event("end", last, "\"frames\":%zu", nrows);
+    host_lock(&events_lock);
     if (events) fclose(events);
     events = NULL;
+    host_unlock(&events_lock);
 }
 
 static void start(void) {
@@ -420,20 +427,21 @@ void yw4_perf_hud(HudContent *c, int compact, unsigned parts) {
     c->target_fps = hz > 0 ? (float)hz : 0.0f;
     c->target_ms = hz > 0 ? 1000.0f / (float)hz : 1000.0f / 30.0f;
 #define LINE(...) (c->nlines < HUD_LINES ? snprintf(c->lines[c->nlines++], HUD_COLS, __VA_ARGS__) : 0)
-    if (enabled <= 0 || !nrows) {
+    size_t nr = __atomic_load_n(&nrows, __ATOMIC_ACQUIRE);  /* the present thread publishes a row after filling it */
+    if (enabled <= 0 || !nr) {
         LINE(enabled == 0 ? "PERF OFF (YW4_PERF=0)" : "PERF: NO FRAMES YET");
     } else {
-        size_t k = nrows < 30 ? nrows : 30, from = nrows - k;
+        size_t k = nr < 30 ? nr : 30, from = nr - k;
         double interval = 0, work = 0, cpu = 0, draws = 0;
-        for (size_t i = from; i < nrows; i++)
+        for (size_t i = from; i < nr; i++)
             interval += ROW(i).interval, work += ROW(i).work, cpu += ROW(i).cpu, draws += (double)ROW(i).draws;
         interval /= (double)k, work /= (double)k, cpu /= (double)k, draws /= (double)k;
         /* 1% / 0.1% low: the frame rate of the 99th / 99.9th percentile frame time */
         static double recent[600];
-        size_t m = nrows < 600 ? nrows : 600;
+        size_t m = nr < 600 ? nr : 600;
         double lo = 1e9, hi = 0;
         for (size_t i = 0; i < m; i++) {
-            recent[i] = ROW(nrows - m + i).interval;
+            recent[i] = ROW(nr - m + i).interval;
             if (recent[i] < lo) lo = recent[i];
             if (recent[i] > hi) hi = recent[i];
         }
@@ -451,7 +459,7 @@ void yw4_perf_hud(HudContent *c, int compact, unsigned parts) {
             c->frame_avg_ms = (float)interval, c->min_ms = (float)lo, c->max_ms = (float)hi;
             c->work_avg_ms = (float)work, c->gpu_ms = gg ? (float)(b / (double)gg) : -1.0f;
             c->ncpu = nc, c->cpu_pct = (float)(cpu / nc), c->cpu_cores = (float)(cpu / 100.0);
-            c->draws = (float)draws, c->ram_mb = (float)ROW(nrows - 1).rss;
+            c->draws = (float)draws, c->ram_mb = (float)ROW(nr - 1).rss;
             c->shown_fps = sh > 0.0f && interval > 0 ? (float)(1000.0 / interval * sh) : 0.0f;
             c->fg = gpu_fg() == 2 ? "DLSS" : "FSR";
         }
@@ -481,12 +489,12 @@ void yw4_perf_hud(HudContent *c, int compact, unsigned parts) {
         if (!ncpu) ncpu = host_cpu_count();
         if (parts & HUD_PART_TIMES) {
             LINE("CPU %.0f%% (%.1f OF %d CORES)", cpu / ncpu, cpu / 100.0, ncpu);
-            LINE("DRAWS %.0f  RAM %.0f MB", draws, ROW(nrows - 1).rss);
+            LINE("DRAWS %.0f  RAM %.0f MB", draws, ROW(nr - 1).rss);
         }
-        size_t p = nrows < HUD_POINTS ? nrows : HUD_POINTS;
+        size_t p = nr < HUD_POINTS ? nr : HUD_POINTS;
         for (size_t i = 0; i < p; i++) {
-            c->frame_ms[i] = (float)ROW(nrows - p + i).interval;
-            c->work_ms[i] = (float)ROW(nrows - p + i).work;
+            c->frame_ms[i] = (float)ROW(nr - p + i).interval;
+            c->work_ms[i] = (float)ROW(nr - p + i).work;
         }
         c->npoints = parts & HUD_PART_GRAPH ? (int)p : 0;
     }
@@ -518,7 +526,6 @@ void yw4_perf_frame(uint64_t frame, int64_t enter, int64_t shown, int64_t exit_,
     host_process_usage(&cpu, &rss);
     double cpu_pct = exit_ > last_exit ? 100.0 * (double)(cpu - last_cpu) / (double)(exit_ - last_exit) : 0;
     Row *r = &ROW(nrows);
-    nrows++;
     *r = (Row){.frame = frame, .draws = draws, .t = (double)(exit_ - t0) / 1e9,
                           .interval = (double)(exit_ - last_exit) / 1e6, .work = (double)(enter - last_exit) / 1e6,
                           .present = (double)(shown - enter) / 1e6, .wait = (double)(exit_ - shown) / 1e6,
@@ -526,6 +533,7 @@ void yw4_perf_frame(uint64_t frame, int64_t enter, int64_t shown, int64_t exit_,
                           .submit = (double)__atomic_exchange_n(&acc_submit, 0, __ATOMIC_RELAXED) / 1e6,
                           .submit_other = (double)__atomic_exchange_n(&acc_submit_other, 0, __ATOMIC_RELAXED) / 1e6,
                           .sync = (double)__atomic_exchange_n(&acc_sync, 0, __ATOMIC_RELAXED) / 1e6};
+    __atomic_store_n(&nrows, nrows + 1, __ATOMIC_RELEASE);  /* the row is complete: the HUD may read it now */
     last_cpu = cpu, last_exit = exit_;
     if (rss > peak_rss) peak_rss = rss;
     cpu_pct_sum += cpu_pct;

@@ -65,12 +65,15 @@ static int utf_open(Utf *u, const uint8_t *b, size_t n) {
         uint8_t flags = b[pos];
         uint32_t name = be32(b + pos + 1);
         pos += 5;
-        if (u->str_off + name >= n || !memchr(b + u->str_off + name, 0, n - u->str_off - name)) return -1;
+        /* size_t math: a 32-bit str_off + name can wrap */
+        if ((size_t)u->str_off > n || (size_t)name >= n - (size_t)u->str_off ||
+            !memchr(b + u->str_off + name, 0, n - (size_t)u->str_off - (size_t)name)) return -1;
         u->cols[i].name = (const char *)b + u->str_off + name;
         u->cols[i].storage = flags & 0xF0, u->cols[i].type = flags & 0x0F;
         int sz = utf_size(u->cols[i].type);
         if (sz < 0) return -1;
         if (u->cols[i].storage == 0x30) {
+            if (pos + (size_t)sz > n) return -1;  /* the constant must lie inside the table */
             u->cols[i].at = pos;
             pos += (size_t)sz;
         } else if (u->cols[i].storage == 0x50) {
@@ -97,7 +100,8 @@ static int utf_get(const Utf *u, uint32_t row, const char *name, uint64_t *v, co
         case 6: case 7: *v = be64(p); return 1;
         case 0xA: {
             uint32_t o = be32(p);
-            if (u->str_off + o >= u->n || !memchr(u->b + u->str_off + o, 0, u->n - u->str_off - o)) return 0;
+            if ((size_t)u->str_off > u->n || (size_t)o >= u->n - (size_t)u->str_off ||
+                !memchr(u->b + u->str_off + o, 0, u->n - (size_t)u->str_off - (size_t)o)) return 0;
             *s = (const char *)u->b + u->str_off + o;
             return 1;
         }

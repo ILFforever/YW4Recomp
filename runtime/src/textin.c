@@ -64,7 +64,6 @@ void textin_type(const char *s) {
         host_unlock(&lock);
         return;
     }
-    delete_selection(f);
     char add[TEXTIN_MAX];
     int n = 0;
     for (const unsigned char *p = (const unsigned char *)s; *p && n < (int)sizeof add - 1; p++) {
@@ -86,6 +85,11 @@ void textin_type(const char *s) {
         else if (ch < 32 || ch == 127) continue;
         add[n++] = (char)ch;
     }
+    if (n <= 0) {
+        host_unlock(&lock);
+        return;
+    }
+    delete_selection(f);
     int room = TEXTIN_MAX - 1 - f->len;
     if (n > room) {  /* cut at a whole character */
         n = room;
@@ -255,23 +259,6 @@ void textin_select_word(int pos) {
         changed();
     }
     host_unlock(&lock);
-}
-
-int textin_get_selection(char *out, size_t n) {
-    host_lock(&lock);
-    TextField *f = active;
-    int len = 0;
-    if (f && f->sel_anchor >= 0 && f->sel_anchor != f->cursor && out && n > 0) {
-        int s = f->sel_anchor < f->cursor ? f->sel_anchor : f->cursor;
-        int e = f->sel_anchor > f->cursor ? f->sel_anchor : f->cursor;
-        len = e - s < (int)n - 1 ? e - s : (int)n - 1;
-        memcpy(out, f->text + s, (size_t)len);
-        out[len] = 0;
-    } else if (out && n > 0) {
-        out[0] = 0;
-    }
-    host_unlock(&lock);
-    return len;
 }
 
 void textin_read(const TextField *f, char *out, size_t n, int *cursor, int *sel_anchor) {

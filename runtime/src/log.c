@@ -15,6 +15,7 @@
 #define PIPE(fds) _pipe(fds, 1 << 16, _O_BINARY)
 #else
 #include <dirent.h>
+#include <errno.h>
 #include <sys/stat.h>
 #include <unistd.h>
 #define MKDIR(p) mkdir(p, 0777)
@@ -39,10 +40,12 @@ static void copy_thread(void *arg) {
     for (;;) {
 #ifdef _WIN32
         int n = _read(pipe_fds[0], buf, sizeof buf);
+        if (n <= 0) return;
 #else
         ssize_t n = read(pipe_fds[0], buf, sizeof buf);
-#endif
+        if (n < 0 && errno == EINTR) continue;
         if (n <= 0) return;
+#endif
 #ifdef _WIN32
         _write(saved_stderr, buf, (unsigned)n);
 #else
@@ -170,13 +173,20 @@ void yw4_log_start(void) {
     snprintf(name, sizeof name, "%s/yw4_%s.log", path, when);
     logfile = fopen(name, "wb");
     if (!logfile) return;
-    snprintf(log_name, sizeof log_name, "%s", name);
 #ifdef _WIN32
     saved_stderr = _dup(2);
-    if (PIPE(pipe_fds) != 0 || saved_stderr < 0 || _dup2(pipe_fds[1], 2) != 0) return;
+    if (PIPE(pipe_fds) != 0 || saved_stderr < 0 || _dup2(pipe_fds[1], 2) != 0) {
+        if (saved_stderr >= 0) _close(saved_stderr), saved_stderr = -1;
+        fclose(logfile), logfile = NULL;
+        return;
+    }
 #else
     saved_stderr = dup(2);
-    if (PIPE(pipe_fds) != 0 || saved_stderr < 0 || dup2(pipe_fds[1], 2) < 0) return;
+    if (PIPE(pipe_fds) != 0 || saved_stderr < 0 || dup2(pipe_fds[1], 2) < 0) {
+        if (saved_stderr >= 0) close(saved_stderr), saved_stderr = -1;
+        fclose(logfile), logfile = NULL;
+        return;
+    }
 #endif
     setvbuf(stderr, NULL, _IONBF, 0);
     if (host_thread_start(copy_thread, NULL, 1 << 16) != 0) {
@@ -185,12 +195,16 @@ void yw4_log_start(void) {
          * empty terminal and an empty log.) */
 #ifdef _WIN32
         _dup2(saved_stderr, 2);
+        _close(pipe_fds[0]), _close(pipe_fds[1]), _close(saved_stderr), saved_stderr = -1;
 #else
         dup2(saved_stderr, 2);
+        close(pipe_fds[0]), close(pipe_fds[1]), close(saved_stderr), saved_stderr = -1;
 #endif
+        fclose(logfile), logfile = NULL;
         fprintf(stderr, "yw4: log: cannot start the copying thread; no log file this run\n");
         return;
     }
+    snprintf(log_name, sizeof log_name, "%s", name);
     atexit(drain);
     fprintf(stderr, "yw4: log file %s\n", name);
     yw4_prune_runs(path, "yw4_", when);  /* after this run's file exists, so it is the newest */

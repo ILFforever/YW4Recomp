@@ -30,14 +30,18 @@ enum { NLEVELS = sizeof factors / sizeof *factors };
 static int level = -1;
 
 int drawdist_index(void) {
-    if (level < 0) {
+    /* guest threads read this, the window thread cycles it: compute in a local, store once */
+    int l = __atomic_load_n(&level, __ATOMIC_RELAXED);
+    if (l < 0) {
         const char *e = getenv("YW4_DRAW_DISTANCE");
         float f = e && *e ? (float)atof(e) : 4;
-        level = 0;
+        l = 0;
         for (int i = 0; i < NLEVELS; i++)
-            if (f >= factors[i]) level = i;
+            if (f >= factors[i]) l = i;
+        int none = -1;  /* a cycle that got in first wins */
+        if (!__atomic_compare_exchange_n(&level, &none, l, 0, __ATOMIC_RELAXED, __ATOMIC_RELAXED)) l = none;
     }
-    return level;
+    return l;
 }
 
 float drawdist_factor(void) { return factors[drawdist_index()]; }
@@ -49,8 +53,9 @@ int drawdist_key(void) {
 }
 
 void drawdist_cycle(void) {
-    level = (drawdist_index() + 1) % NLEVELS;
-    fprintf(stderr, "yw4: drawdist: DRAW DISTANCE x%g\n", factors[level]);
+    int l = (drawdist_index() + 1) % NLEVELS;
+    __atomic_store_n(&level, l, __ATOMIC_RELAXED);
+    fprintf(stderr, "yw4: drawdist: DRAW DISTANCE x%g\n", factors[l]);
 }
 
 /* the game's own values per object, so the factor applies to them and not to what was written before */

@@ -454,7 +454,9 @@ static int shadowed(const Seen *f, const float pos[3]) {
 }
 
 static void watch_frame(uint64_t now, int live) {
-    if (seen[0].frame == now && seen[0].n) return;  /* this frame's first lamp draw only */
+    static int have_seen;
+    if (have_seen && seen[0].frame == now) return;  /* this frame's first lamp draw only */
+    have_seen = 1;
     seen[2] = seen[1], seen[1] = seen[0];
     Seen *f = &seen[0];
     memset(f, 0, sizeof *f);

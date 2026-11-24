@@ -143,7 +143,8 @@ extern "C" int dlssg_start(void) {
 #undef LOAD
     sl_gipa = (PFN_vkGetInstanceProcAddr)(void *)GetProcAddress(mod, "vkGetInstanceProcAddr");
     sl_gdpa = (PFN_vkGetDeviceProcAddr)(void *)GetProcAddress(mod, "vkGetDeviceProcAddr");
-    if (!p_slInit || !p_slSetTagForFrame || !p_slGetFeatureFunction || !p_slGetNewFrameToken || !sl_gipa || !sl_gdpa) {
+    if (!p_slInit || !p_slIsFeatureSupported || !p_slSetTagForFrame || !p_slSetConstants ||
+        !p_slGetFeatureFunction || !p_slGetNewFrameToken || !sl_gipa || !sl_gdpa) {
         fprintf(stderr, "yw4: dlssg: sl.interposer.dll lacks its functions\n");
         return 0;
     }

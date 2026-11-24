@@ -288,9 +288,13 @@ static void check_flush(Check *k) {
     k->pending = 0;
     char line[512];
     int at = snprintf(line, sizeof line, "yw4: %s: check frame %" PRIu64 ":", k->name, k->frame);
+    /* snprintf returns the length it wanted, not what fit: keep `at` inside the line (and not negative) */
+#define CLAMP_AT() (at = at < 0 ? 0 : at > (int)sizeof line - 1 ? (int)sizeof line - 1 : at)
+    CLAMP_AT();
     for (int i = 0; i < k->n; i++) {
         if (!k->bytes[i]) {
             at += snprintf(line + at, sizeof line - (size_t)at, " %s not compared;", k->image[i]);
+            CLAMP_AT();
             continue;
         }
         const uint8_t *a, *b;
@@ -299,12 +303,14 @@ static void check_flush(Check *k) {
         uint32_t tb = texel_bytes(k->ours[i].format), n = k->bytes[i] / tb, bad = 0;
         for (uint32_t t = 0; t < n; t++) bad += memcmp(a + (size_t)t * tb, b + (size_t)t * tb, tb) != 0;
         at += snprintf(line + at, sizeof line - (size_t)at, " %s %u of %u differ;", k->image[i], bad, n);
+        CLAMP_AT();
+        /* always freed, even when the line is full: no break here, or the later images' buffers leak */
         for (int j = 0; j < 2; j++) {
             vkUnmapMemory(vk.device, k->mem[j][i]);
             vkDestroyBuffer(vk.device, k->buf[j][i], NULL), vkFreeMemory(vk.device, k->mem[j][i], NULL);
         }
-        if (at >= (int)sizeof line - 64) break;
     }
+#undef CLAMP_AT
     fprintf(stderr, "%s\n", line);
 }
 
