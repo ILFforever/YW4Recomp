@@ -8,7 +8,7 @@ use crate::platform::{self, GAME_EXE};
 
 /// The launcher's own bookkeeping, in %AppData%\YW4 Recomp\launcher.json: which install it built and with what.
 /// Not the game's saves or settings (those go where the player chose, game.ini says where).
-#[derive(Serialize, Deserialize, Clone, Default)]
+#[derive(Serialize, Deserialize, Clone)]
 pub struct State {
     install: String,
     mode: String,
@@ -45,6 +45,10 @@ pub struct State {
     /// closes (owner, 2026-11-18; main.rs, app.js straightToGame)
     #[serde(rename = "straightToGame", default)]
     straight_to_game: bool,
+    /// Settings: look for a new game or launcher on GitHub by itself (on by default); off, only Check now asks
+    /// (owner, 2026-11-24; app.js autoUpdates)
+    #[serde(rename = "checkUpdates", default = "yes")]
+    check_updates: bool,
     /// Disabled mods by name: skipped during LayeredFS overlay
     #[serde(rename = "disabledMods", default)]
     pub disabled_mods: Vec<String>,
@@ -55,6 +59,20 @@ pub struct State {
 
 fn default_on_play() -> String { "hide".into() }
 fn yes() -> bool { true }
+
+/// The same defaults as a launcher.json without the field (the serde defaults above). A derived Default made every
+/// bool false, so Find my game on a launcher with no state saved Mods, the Cheats page, the Controls hint, XeSS and
+/// Check for updates as off (found 2026-11-24).
+impl Default for State {
+    fn default() -> Self {
+        State {
+            install: String::new(), mode: String::new(), paths: HashMap::new(), saves: String::new(),
+            fsr: false, dlss: false, xess: yes(), free_up: false, desktop: false, start_menu: false,
+            originals_offered: false, on_play: default_on_play(), mods: yes(), show_log: false, controls_hint: yes(),
+            cheats: yes(), straight_to_game: false, check_updates: yes(), disabled_mods: Vec::new(), icon: None,
+        }
+    }
+}
 
 pub(crate) fn state_path() -> PathBuf {
     if let Ok(p) = std::env::var("YW4_LAUNCHER_STATE") {  // tests: keep their state out of the player's AppData

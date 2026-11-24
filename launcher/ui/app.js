@@ -870,7 +870,7 @@ async function afterBuild() {
     startMenu: options.startMenu, originalsOffered: inst && inst.install === options.install ? !!inst.originalsOffered : false,
     onPlay: (inst && inst.onPlay) || 'hide', mods: !(inst && inst.mods === false), showLog: !!(inst && inst.showLog),
     controlsHint: !(inst && inst.controlsHint === false), cheats: !(inst && inst.cheats === false), disabledMods: (inst && inst.disabledMods) || [], icon: inst && inst.icon,
-    straightToGame: !!(inst && inst.straightToGame) };  // Settings' choices stay
+    straightToGame: !!(inst && inst.straightToGame), checkUpdates: !(inst && inst.checkUpdates === false) };  // Settings' choices stay
   syncSettingsButton();
   try { await invoke('save_state', { state: inst }); } catch (e) { logLine('could not remember the install: ' + e); }
   // the icon the build just made: a first build has none cached, and Ready's install_info (DLC checks) is slow, so
@@ -1397,7 +1397,7 @@ async function straightToGame() {
     if (!info.version || !$('dlc-keys-box').hidden) throw new Error('not ready to play');
     let u = null;
     try {
-      u = await Promise.race([invoke('check_updates', { install: inst.install, built: info.version || '' }),
+      u = await Promise.race([invoke('check_updates', { install: inst.install, built: info.version || '', github: autoUpdates() }),
         new Promise((r) => setTimeout(() => r(null), 3000))]);
     } catch (_) { /* no notice */ }
     const say = [];
@@ -1417,6 +1417,10 @@ async function straightToGame() {
 // ---- Settings (the top bar's gear): every change is saved at once (launcher.json); moving the saves asks first
 const onScreen = (name) => !document.querySelector(`.screen[data-screen="${name}"]`).hidden;
 function setToggle(id, on) { (typeof id === 'string' ? $(id) : id).setAttribute('aria-checked', String(!!on)); }
+// Settings' Check for updates (owner, 2026-11-24): off, nothing asks GitHub by itself; Check now still does
+const autoUpdates = () => !(inst && inst.checkUpdates === false);
+// the game version a build made, from install_info's `yw4 --version` line ("YW4 Recomp 2.2.1 (...)")
+const builtVersion = (info) => ((info && info.version || '').match(/YW4 Recomp (\S+)/) || [])[1] || '';
 async function saveInst() {
   try { await invoke('save_state', { state: inst }); } catch (e) { popup('Settings', 'Could not save: ' + e); }
 }
@@ -1448,6 +1452,9 @@ function showSettingsLite() {
   document.querySelectorAll('.settings-grid[data-page]').forEach((g) => { g.hidden = g.dataset.page !== 'lite'; });
   $('set-versions').textContent = $('launcher-version').textContent;
   $('set-update-line').textContent = 'Checked when the launcher starts';
+  $('set-checkupd-row').hidden = true;  // a setting of a built install
+  $('set-check').dataset.offer = '';
+  $('set-check').textContent = 'Check now';
 }
 
 async function showSettings() {
@@ -1478,10 +1485,24 @@ async function showSettings() {
   $('set-downloads').textContent = !dl.length ? 'No upscaler downloads'
     : dl.length === 1 ? dl[0] : dl.slice(0, -1).join(', ') + ' and ' + dl[dl.length - 1];
   $('set-versions').textContent = `Launcher ${$('launcher-version').textContent.replace('Launcher ', '')} · Game ${$('game-version').textContent.replace('YW4 Recomp ', '')}`;
+  setToggle('set-checkupd', autoUpdates());
+  $('set-checkupd-row').hidden = false;
   const info = await invoke('install_info', { install: inst.install });
   reclaimable = info.reclaimable;
   $('set-free-size').textContent = reclaimable > RECLAIM_MIN_BYTES ? `${gb(reclaimable)} the game doesn't need to run` : 'Already freed up';
   $('set-free').disabled = reclaimable <= RECLAIM_MIN_BYTES;
+  // the version row: Update when a newer game is out (owner, 2026-11-24), Check now otherwise
+  const check = $('set-check');
+  check.dataset.offer = '';
+  check.textContent = 'Check now';
+  $('set-update-line').textContent = autoUpdates() ? 'Checked when the launcher starts' : 'Only when you check';
+  let u = null;
+  try { u = await invoke('check_updates', { install: inst.install, built: info.version || '', github: autoUpdates() }); } catch (e) { /* as is */ }
+  if (u && u.game && onScreen('settings')) {
+    check.dataset.offer = '1';
+    check.textContent = 'Update';
+    $('set-update-line').textContent = `Game ${u.game.version} is out`;
+  }
 }
 // Settings has three pages (no scrolling): Playing, Files, Launcher; the arrows on the heading row switch. Page 3
 // came from page 2 running off the bottom of the window (owner, 2026-11-21)
@@ -1589,6 +1610,13 @@ document.querySelectorAll('[data-onplay]').forEach((b) => b.addEventListener('cl
 $('set-mods').addEventListener('click', async () => { inst.mods = inst.mods === false; setToggle('set-mods', inst.mods); await saveInst(); });
 $('set-showlog').addEventListener('click', async () => { inst.showLog = !inst.showLog; setToggle('set-showlog', inst.showLog); await saveInst(); });
 $('set-hint').addEventListener('click', async () => { inst.controlsHint = inst.controlsHint === false; setToggle('set-hint', inst.controlsHint); await saveInst(); });
+$('set-checkupd').addEventListener('click', async () => {
+  inst.checkUpdates = !autoUpdates();
+  setToggle('set-checkupd', inst.checkUpdates);
+  if (!$('set-check').dataset.offer)
+    $('set-update-line').textContent = inst.checkUpdates ? 'Checked when the launcher starts' : 'Only when you check';
+  await saveInst();
+});
 $('set-straight').addEventListener('click', async () => { inst.straightToGame = !inst.straightToGame; setToggle('set-straight', inst.straightToGame); await saveInst(); });
 // the game's Cheats page (on by default); off starts the game with YW4_CHEATS=0: the page hidden, every cheat off
 $('set-cheats').addEventListener('click', async () => { inst.cheats = inst.cheats === false; setToggle('set-cheats', inst.cheats); await saveInst(); });
@@ -1630,6 +1658,11 @@ $('move-yes').addEventListener('click', async () => {
 // Check now: GitHub asked again (not the hour-old answer); what it finds opens the update popup
 $('set-check').addEventListener('click', async () => {
   const btn = $('set-check');
+  if (inst && btn.dataset.offer) {  // Update: the update popup, its change log and its Update
+    laterFor.clear();
+    showUpdates(await invoke('install_info', { install: inst.install }), true);
+    return;
+  }
   btn.disabled = true;
   btn.textContent = 'Checking…';
   if (!inst) {  // before a build: the launcher only (the first build takes the newest game code itself)
@@ -1651,7 +1684,7 @@ $('set-check').addEventListener('click', async () => {
   btn.textContent = 'Check now';
   if (!u) return;
   laterFor.clear();  // asked for: offer again what "Later" put off
-  if (u.rebuild || u.game || u.launcher) { showUpdates(info); return; }
+  if (u.rebuild || u.game || u.launcher) { showUpdates(info, true); return; }
   $('set-update-line').textContent = u.offline ? "Couldn't reach GitHub. Try again later." : 'Everything is up to date';
 });
 // Game from a file (no GitHub): a game zip, or the folder it unpacks to. Installed like a download; a built install
@@ -1711,10 +1744,11 @@ function openRebuildOptions() {  // for the Settings page's "Rebuild with other 
 const updateDlg = $('update-dlg');
 const laterFor = new Set();  // offers put off in this run
 let updatesFor = null;  // the install info of the last check, for the next offer after "Later"
+let updatesManual = false;  // ... and whether that check was asked for
 $('update-later').addEventListener('click', () => {
   laterFor.add(updateDlg.dataset.offer);
   updateDlg.close();
-  if (updatesFor) showUpdates(updatesFor);
+  if (updatesFor) showUpdates(updatesFor, updatesManual);
 });
 // a release's change log (its GitHub description, Markdown): "-" / "*" lines as a list, "#" lines as headings, the
 // rest as paragraphs; plain text only (nothing from GitHub becomes HTML)
@@ -1802,12 +1836,18 @@ async function newerLauncher() {
   } catch (e) { return null; }
 }
 
-async function showUpdates(info) {
+// manual: asked for (Check now, Settings' Update), so GitHub is asked even with Check for updates off
+async function showUpdates(info, manual) {
   let u = null;
-  try { u = await invoke('check_updates', { install: inst.install, built: info.version || '' }); } catch (e) { return; }
+  try {
+    u = await invoke('check_updates', { install: inst.install, built: info.version || '', github: !!manual || autoUpdates() });
+  } catch (e) { return; }
   updatesFor = info;
-  if (u.rebuild && askUpdate('rebuild ' + u.rebuild, `Game update ${u.rebuild} is ready`,
-      'Rebuild the game to play it. It takes about 5 minutes; your saves stay as they are.', 'Rebuild', async () => {
+  updatesManual = !!manual;
+  // an older version chosen from a file (owner, 2026-11-24): built like an update, and the popup says it is older
+  const older = u.rebuild_older ? ` This is older than the game you play now (${builtVersion(info)}). Update in Settings goes back to the newest.` : '';
+  if (u.rebuild && askUpdate('rebuild ' + u.rebuild, u.rebuild_older ? `Game ${u.rebuild} is installed` : `Game update ${u.rebuild} is ready`,
+      'Rebuild the game to play it. It takes about 5 minutes; your saves stay as they are.' + older, 'Rebuild', async () => {
         updateDlg.close();
         choicesFromInstall();
         await loadOptions();
@@ -1830,7 +1870,7 @@ async function showUpdates(info) {
           popup('Game update', String(e));
           return;
         }
-        showUpdates(info);  // now the rebuild question, in the same popup
+        showUpdates(info, manual);  // now the rebuild question, in the same popup
       }, u.game.notes);
   }
 }

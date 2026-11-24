@@ -56,8 +56,24 @@ pub struct GameCode {
     pub version: String,
 }
 
-/// The game code a build uses: the newest of the launcher's own and the downloaded ones it can run.
+/// <install>\builder\game\chosen.txt: the version the player installed from a file (Settings, Update game from
+/// file), which builds use even when it is older than the launcher's own code (owner, 2026-11-24: any game version
+/// from its zip). Removed by a downloaded game update, so Update goes back to the newest.
+const CHOSEN: &str = "chosen.txt";
+
+fn chosen(install: &Path) -> Option<GameCode> {
+    let v = std::fs::read_to_string(install.join("builder").join("game").join(CHOSEN)).ok()?;
+    let v = v.trim();
+    // the version names a folder: exactly "X.Y.Z", as install_game_source writes it
+    if v.split('.').count() != 3 || !v.chars().all(|c| c.is_ascii_digit() || c == '.') { return None; }
+    let dir = install.join("builder").join("game").join(v);
+    usable(&dir).ok().filter(|u| u == v).map(|version| GameCode { dir, version })
+}
+
+/// The game code a build uses: the version the player chose from a file, else the newest of the launcher's own
+/// and the downloaded ones it can run.
 pub fn game_code(own: &Path, install: &Path) -> GameCode {
+    if let Some(c) = chosen(install) { return c; }
     let own_version = usable(own).ok()
         .or_else(|| std::fs::read_to_string(own.join("VERSION")).ok().map(|s| s.trim().to_string()))
         .unwrap_or_default();
@@ -103,11 +119,12 @@ fn release_notes(list: &serde_json::Value, version: &str) -> Option<String> {
         .map(str::to_string)
 }
 
-/// After a build: downloaded game code other than the one just used is no longer needed.
+/// After a build: downloaded game code other than the one just used is no longer needed (the player's choice,
+/// chosen.txt, stays: it names the folder just used).
 pub fn drop_other_game_code(install: &Path, used: &Path) {
     if let Ok(rd) = std::fs::read_dir(install.join("builder").join("game")) {
         for p in rd.flatten().map(|e| e.path()) {
-            if p != used {
+            if p != used && p.file_name().map_or(true, |n| n != CHOSEN) {
                 let _ = if p.is_dir() { std::fs::remove_dir_all(&p) } else { std::fs::remove_file(&p) };
             }
         }
@@ -135,7 +152,8 @@ fn launcher_installer(release: &serde_json::Value, v: Ver) -> Option<(String, St
 pub struct Updates {
     game: Option<GameOffer>,          // newer game code on GitHub
     launcher: Option<LauncherOffer>,  // a newer launcher on GitHub
-    rebuild: Option<String>,          // game code on this PC newer than the game built from it: its version
+    rebuild: Option<String>,          // game code on this PC other than the game built from it: its version
+    rebuild_older: bool,              // ... and older than that game (a version chosen from a file)
     rebuild_notes: String,            // its change log: kept from its release when it was downloaded, else that release's text on GitHub
     offline: bool,                    // GitHub couldn't be asked (Settings' "Check now" says so)
 }
@@ -179,9 +197,10 @@ pub(crate) fn built_version(line: &str) -> Option<(u32, u32, u32)> {
 
 /// What the Play screen offers: a game update, a newer launcher, or a rebuild. Nothing for a launcher run from the
 /// repo (it builds the repo's own code), except a test feed's launcher offers (YW4_UPDATE_FEED: the box can then be
-/// seen in `tauri dev`).
+/// seen in `tauri dev`). github false (Settings' Check for updates off): only the rebuild, GitHub isn't asked.
 #[tauri::command]
-pub async fn check_updates(app: tauri::AppHandle, install: String, built: String, fresh: Option<bool>) -> Updates {
+pub async fn check_updates(app: tauri::AppHandle, install: String, built: String, fresh: Option<bool>,
+                           github: Option<bool>) -> Updates {
     let own = crate::buildrun::bundled_src(&app);
     if own.is_none() && std::env::var("YW4_UPDATE_FEED").is_err() { return Updates::default() }
     tauri::async_runtime::spawn_blocking(move || {
@@ -190,11 +209,14 @@ pub async fn check_updates(app: tauri::AppHandle, install: String, built: String
         let mut u = Updates::default();
         if let Some((Some(have), Some(built))) = code.as_ref().map(|c| (ver(&c.version), built_version(&built))) {
             let code = code.as_ref().unwrap();
-            if have > built {
+            // newer code to build, or an older version the player chose from a file
+            if have != built {
                 u.rebuild = Some(code.version.clone());
+                u.rebuild_older = have < built;
                 u.rebuild_notes = std::fs::read_to_string(code.dir.join("notes.md")).unwrap_or_default();
             }
         }
+        if github == Some(false) { return u; }
         let Some(list) = releases(fresh.unwrap_or(false)) else { u.offline = true; return u };
         if let Some(v) = u.rebuild.as_deref().filter(|_| u.rebuild_notes.trim().is_empty()) {
             u.rebuild_notes = release_notes(&list, v).unwrap_or_default();  // code that came with the launcher
@@ -232,7 +254,8 @@ pub async fn check_updates(app: tauri::AppHandle, install: String, built: String
         });
         // a newer version out than the downloaded one waiting to be built: download that instead of building this
         // (2026-11-11: a 0.9.3 that didn't build stood in front of the 0.9.4 that fixed it)
-        if u.game.is_some() { u.rebuild = None; u.rebuild_notes.clear(); }
+        // (not for an older version the player chose: building it is what they asked for)
+        if u.game.is_some() && !u.rebuild_older { u.rebuild = None; u.rebuild_notes.clear(); }
         u.launcher = launcher.filter(|(v, _)| *v > launcher_ver()).map(|(_, l)| l);
         u
     }).await.unwrap_or_default()
@@ -302,6 +325,7 @@ pub async fn download_game_update(install: String, version: String, url: String,
                 let _ = std::fs::remove_dir_all(&dst);
                 std::fs::rename(&tmp, &dst).map_err(|e| e.to_string())?;
                 let _ = std::fs::write(dst.join("notes.md"), notes);  // the change log, for the rebuild question
+                let _ = std::fs::remove_file(dir.join(CHOSEN));  // Update: back to the newest version
                 Ok(version)
             }
             other => {
@@ -313,9 +337,9 @@ pub async fn download_game_update(install: String, version: String, url: String,
 }
 
 /// Installs game code the player already has, with no GitHub: a yw4recomp-game-X.Y.Z.zip, or the folder it unpacks to.
-/// It goes into <install>\builder\game\<version>\ like a download, after the same usable() check, so the build takes
-/// the newest game code there as usual. A file from someone else has no GitHub SHA-256 to check: install only one
-/// you trust. Returns the version.
+/// It goes into <install>\builder\game\<version>\ like a download, after the same usable() check, and becomes the
+/// version builds use (chosen.txt), older ones too (owner, 2026-11-24). A file from someone else has no GitHub
+/// SHA-256 to check: install only one you trust. Returns the version.
 #[tauri::command]
 pub async fn install_game_file(app: tauri::AppHandle, install: String, path: String) -> Result<String, String> {
     if crate::buildrun::building(&app) {
@@ -358,6 +382,7 @@ fn install_game_source(src: &Path, dir: &Path) -> Result<String, String> {
         let dst = dir.join(&version);
         let _ = std::fs::remove_dir_all(&dst);
         std::fs::rename(&staged, &dst).map_err(|e| e.to_string())?;
+        std::fs::write(dir.join(CHOSEN), &version).map_err(|e| e.to_string())?;
         Ok(version)
     })();
     let _ = std::fs::remove_dir_all(&tmp);
@@ -485,6 +510,39 @@ mod tests {
         assert!(!dir.join("1.2.3").exists());
         // a file that is not a zip: refused with the reason
         assert!(install_game_source(&src.join("release.toml"), &dir).is_err());
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
+    #[test]
+    fn a_version_from_a_file_is_built_even_when_older() {
+        let base = std::env::temp_dir().join(format!("yw4-chosen-game-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&base);
+        let code = |dir: &Path, v: &str| {
+            std::fs::create_dir_all(dir).unwrap();
+            std::fs::write(dir.join("release.toml"), format!("version = \"{v}\"\n")).unwrap();
+        };
+        let own = base.join("own");
+        code(&own, "2.2.1");
+        let install = base.join("install");
+        let game = install.join("builder").join("game");
+        // a newer download than the launcher's own code: the newest wins, as before
+        code(&game.join("2.3.0"), "2.3.0");
+        assert_eq!(game_code(&own, &install).version, "2.3.0");
+        // an older one installed from a file: that one, and the choice is remembered
+        let src = base.join("zip").join("yw4recomp-game");
+        code(&src, "1.8.0");
+        assert_eq!(install_game_source(&src, &game).as_deref(), Ok("1.8.0"));
+        assert_eq!(std::fs::read_to_string(game.join(CHOSEN)).unwrap(), "1.8.0");
+        assert_eq!(game_code(&own, &install).version, "1.8.0");
+        // after its build the other code goes, the choice stays
+        drop_other_game_code(&install, &game.join("1.8.0"));
+        assert!(!game.join("2.3.0").exists());
+        assert_eq!(game_code(&own, &install).version, "1.8.0");
+        // a choice whose folder is gone, or that isn't a plain version: back to the newest
+        std::fs::write(game.join(CHOSEN), "9.9.9").unwrap();
+        assert_eq!(game_code(&own, &install).version, "2.2.1");
+        std::fs::write(game.join(CHOSEN), "1.8.0/../../x").unwrap();
+        assert_eq!(game_code(&own, &install).version, "2.2.1");
         let _ = std::fs::remove_dir_all(&base);
     }
 }
