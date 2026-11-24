@@ -1424,48 +1424,102 @@ const builtVersion = (info) => ((info && info.version || '').match(/YW4 Recomp (
 async function saveInst() {
   try { await invoke('save_state', { state: inst }); } catch (e) { popup('Settings', 'Could not save: ' + e); }
 }
-// Settings before a build: the parts that work with no game, on a page of their own (index.html data-page="lite").
-// The theme row and the Support and Updates cards are moved there and back (their ids are wired once), not copied.
-const liteParts = [['.look-row', 'lite-look'], ['#set-support-card', 'lite-col1'], ['#set-updates-card', 'lite-col2']];
-let liteHome = null;  // where each part sits on the full pages, while it is on the short one
-let liteFrom = 'home';  // the screen Settings was opened from: Back returns there (a first build keeps running)
-function liteMove(toLite) {
-  if (toLite && !liteHome) {
-    liteHome = liteParts.map(([sel, into]) => {
-      const el = document.querySelector(sel), home = { el, parent: el.parentNode, next: el.nextSibling };
-      $(into).append(el);
-      return home;
-    });
-  } else if (!toLite && liteHome) {
-    for (const h of liteHome) h.parent.insertBefore(h.el, h.next);
-    liteHome = null;
-  }
-  $('settings-pager').hidden = toLite;
-  $('set-rebuild-now').hidden = toLite;
-  $('set-uninstall').hidden = toLite;
+// ---- Settings is one page (owner, 2026-11-24, design "D3"): a search box, a chip per group, the groups below.
+// settingsFilter shows a row when it matches the search (its text and data-kw), sits in the chosen chip's group
+// (a search looks in every group), and before a build (lite) only the rows marked data-lite: what works with no
+// game. data-only-lite rows (Find my game) show only then. A heading with nothing under it hides.
+let settingsLite = false;
+let setChip = 'all';
+let liteFrom = 'home';  // the screen Settings was opened from before a build: Back returns there (a first build keeps running)
+function settingsFilter() {
+  const q = $('set-search').value.trim().toLowerCase();
+  const words = q.split(/\s+/).filter(Boolean);
+  let n = 0;
+  document.querySelectorAll('#settings-scroll .set-group').forEach((g) => {
+    const head = g.querySelector('.set-gh').textContent;
+    const inChip = words.length > 0 || setChip === 'all' || g.dataset.group === setChip;
+    let sub = null, subAny = false, groupAny = false, last = null;
+    const endSub = () => { if (sub) sub.hidden = !subAny; };
+    for (const el of g.querySelector('.set-panel').children) {
+      if (el.classList.contains('set-sub')) { endSub(); sub = el; subAny = false; continue; }
+      el.classList.remove('last');
+      let shown = inChip && (settingsLite ? el.hasAttribute('data-lite') : !el.hasAttribute('data-only-lite'));
+      if (shown && words.length) {
+        const hay = `${head} ${sub ? sub.textContent : ''} ${el.textContent} ${el.dataset.kw || ''}`.toLowerCase();
+        shown = words.every((w) => hay.includes(w));
+      }
+      el.hidden = !shown;
+      if (shown) { subAny = groupAny = true; last = el; n++; }
+    }
+    endSub();
+    if (last) last.classList.add('last');  // no line under the last row shown
+    g.hidden = !groupAny;
+  });
+  $('set-count').hidden = !words.length || !n;
+  $('set-count').textContent = n === 1 ? '1 setting matches' : `${n} settings match`;
+  $('set-none').hidden = !words.length || n > 0;
+  $('set-search-clear').hidden = !q;
+  $('set-search-key').hidden = !!q;
+  $('set-chips').classList.toggle('dim', !!words.length);
+  document.querySelectorAll('#set-chips [data-chip]').forEach((c) => c.setAttribute('aria-pressed', String(c.dataset.chip === setChip)));
 }
+function resetSettingsFilter() {
+  $('set-search').value = '';
+  setChip = 'all';
+  $('settings-scroll').scrollTop = 0;
+  settingsFilter();
+}
+$('set-search').addEventListener('input', () => { $('settings-scroll').scrollTop = 0; settingsFilter(); });
+$('set-search').addEventListener('keydown', (e) => {
+  if (e.key === 'Escape' && $('set-search').value) { e.preventDefault(); e.stopPropagation(); $('set-search').value = ''; settingsFilter(); }
+});
+$('set-search-clear').addEventListener('click', () => { $('set-search').value = ''; settingsFilter(); $('set-search').focus(); });
+document.querySelectorAll('#set-chips [data-chip]').forEach((c) => c.addEventListener('click', () => {
+  setChip = c.dataset.chip;
+  $('set-search').value = '';
+  $('settings-scroll').scrollTop = 0;
+  settingsFilter();
+}));
+document.querySelectorAll('#set-none [data-try]').forEach((b) => b.addEventListener('click', () => {
+  $('set-search').value = b.dataset.try;
+  settingsFilter();
+}));
+// Ctrl F: the search box, while Settings shows
+document.addEventListener('keydown', (e) => {
+  if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'f' && onScreen('settings')) {
+    e.preventDefault();
+    $('set-search').focus();
+    $('set-search').select();
+  }
+});
+
 function showSettingsLite() {
   const now = document.querySelector('.screen:not([hidden])');
   if (now && now.dataset.screen !== 'settings') liteFrom = now.dataset.screen;
-  liteMove(true);
+  const fresh = !onScreen('settings');
+  settingsLite = true;
   show('settings');
-  document.querySelectorAll('.settings-grid[data-page]').forEach((g) => { g.hidden = g.dataset.page !== 'lite'; });
+  $('set-rebuild-now').hidden = true;
+  $('set-uninstall').hidden = true;
+  if (fresh) resetSettingsFilter(); else settingsFilter();
   $('set-versions').textContent = $('launcher-version').textContent;
   $('set-update-line').textContent = 'Checked when the launcher starts';
-  $('set-checkupd-row').hidden = true;  // a setting of a built install
   $('set-check').dataset.offer = '';
   $('set-check').textContent = 'Check now';
 }
 
 async function showSettings() {
   if (!inst) { showSettingsLite(); return; }
-  liteMove(false);
+  const fresh = !onScreen('settings') || settingsLite;  // opened, not just redrawn after a change
+  settingsLite = false;
+  $('set-rebuild-now').hidden = false;
+  $('set-uninstall').hidden = false;
   rebuildFlow = false;
   freshFiles = false;
   foundFrom = null;
   renderFound();
   show('settings');
-  settingsPage(1);
+  if (fresh) resetSettingsFilter(); else settingsFilter();
   $('set-install').textContent = inst.install;
   $('set-install').title = inst.install;  // one line, cut off when long: the whole of it on hover
   document.querySelectorAll('[data-move]').forEach((b) => b.setAttribute('aria-checked', String(b.dataset.move === inst.saves)));
@@ -1486,7 +1540,6 @@ async function showSettings() {
     : dl.length === 1 ? dl[0] : dl.slice(0, -1).join(', ') + ' and ' + dl[dl.length - 1];
   $('set-versions').textContent = `Launcher ${$('launcher-version').textContent.replace('Launcher ', '')} · Game ${$('game-version').textContent.replace('YW4 Recomp ', '')}`;
   setToggle('set-checkupd', autoUpdates());
-  $('set-checkupd-row').hidden = false;
   const info = await invoke('install_info', { install: inst.install });
   reclaimable = info.reclaimable;
   $('set-free-size').textContent = reclaimable > RECLAIM_MIN_BYTES ? `${gb(reclaimable)} the game doesn't need to run` : 'Already freed up';
@@ -1504,22 +1557,6 @@ async function showSettings() {
     $('set-update-line').textContent = `Game ${u.game.version} is out`;
   }
 }
-// Settings has three pages (no scrolling): Playing, Files, Launcher; the arrows on the heading row switch. Page 3
-// came from page 2 running off the bottom of the window (owner, 2026-11-21)
-const SETTINGS_PAGES = ['playing', 'where things are kept', 'launcher'];
-let settingsAt = 1;
-function settingsPage(n) {
-  settingsAt = n;
-  const last = SETTINGS_PAGES.length;
-  document.querySelectorAll('.settings-grid[data-page]').forEach((g) => { g.hidden = g.dataset.page !== String(n); });
-  $('page-num').textContent = `${n} / ${last}`;
-  $('page-prev').disabled = n === 1;
-  $('page-next').disabled = n === last;
-  $('page-prev').title = n === 1 ? '' : `Back: ${SETTINGS_PAGES[n - 2]}`;
-  $('page-next').title = n === last ? '' : `Next: ${SETTINGS_PAGES[n]}`;
-}
-$('page-prev').addEventListener('click', () => settingsPage(Math.max(1, settingsAt - 1)));
-$('page-next').addEventListener('click', () => settingsPage(Math.min(SETTINGS_PAGES.length, settingsAt + 1)));
 $('settings-back').addEventListener('click', () => { if (inst) showReady(); else show(liteFrom); });
 
 // Settings › Cheats › Manage: the game's own cheat lines in its settings.ini (ready.rs game_cheats), so the launcher
@@ -1536,7 +1573,7 @@ async function showCheats() {
     : inst.cheats === false ? 'The Cheats page is off in Settings: no cheat works until it is on' : '';
 }
 $('set-cheats-manage').addEventListener('click', () => showCheats());
-$('cheats-back').addEventListener('click', () => showSettings().then(() => settingsPage(1)));
+$('cheats-back').addEventListener('click', () => showSettings());
 document.querySelectorAll('[data-cheat]').forEach((b) => b.addEventListener('click', async () => {
   const on = b.getAttribute('aria-checked') !== 'true';
   try {

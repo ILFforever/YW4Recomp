@@ -602,14 +602,53 @@ dialog p { margin: 0 0 10px; font-size: 14px; overflow-wrap: anywhere; }
 .set-row small { display: block; font-size: 12px; color: var(--ink-2); overflow-wrap: anywhere; }
 .settings-head { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
 .settings-head h1 { margin: 0; }
-/* Settings' page switcher, right of the heading: one white pill, round arrow chips around "1 / 2" */
-.pager { display: flex; align-items: center; gap: 4px; height: 40px; padding: 0 3px; border-radius: 999px;
-  border: 1.5px solid var(--lilac-3); background: var(--white); }
-.pager > span { min-width: 44px; text-align: center; font: 700 15px/1 var(--display); color: var(--violet); }
-.pager-btn { width: 32px; height: 32px; border: 0; border-radius: 999px; background: var(--lilac-1); color: var(--violet);
-  font: 800 22px/1 var(--display); cursor: pointer; display: grid; place-items: center; padding: 0 0 2px; }
-.pager-btn:not(:disabled):hover { background: var(--lilac-2); }
-.pager-btn:disabled { background: transparent; color: var(--lilac-3); cursor: default; }
+/* Settings as one page (owner, 2026-11-24, "D3"): the heading row with the search box, a chip per group, then the
+   groups scrolling inside the window (the page itself doesn't scroll) */
+.settings-body { overflow: hidden; padding-bottom: 18px; }
+.settings-head { justify-content: flex-start; }
+.settings-head-gap { flex: 1; }
+.btn.icon-only { width: 40px; height: 40px; padding: 0; justify-content: center; flex-shrink: 0; }
+.set-search { display: flex; align-items: center; gap: 10px; flex: 1; max-width: 460px; height: 42px; padding: 0 8px 0 15px;
+  border-radius: 999px; background: var(--white); border: 2px solid var(--lilac-3); color: var(--ink-2); }
+.set-search:focus-within { border-color: var(--select); }
+.set-search svg { flex-shrink: 0; }
+.set-search input { flex: 1; min-width: 0; border: 0; outline: 0; background: transparent; color: var(--ink); font: 500 15px var(--body); }
+.set-search input::-webkit-search-cancel-button { display: none; }
+.set-search .kbd { padding: 2px 8px; border-radius: 6px; border: 1px solid var(--lilac-3); background: var(--lilac-0);
+  font: 700 11px/1.4 var(--display); color: var(--ink-2); white-space: nowrap; }
+.set-search-clear { width: 28px; height: 28px; flex-shrink: 0; display: grid; place-items: center; border: 0; border-radius: 50%;
+  background: var(--lilac-1); color: var(--violet); cursor: pointer; }
+.set-chips { display: flex; flex-wrap: wrap; gap: 8px; }
+.set-chips.dim { opacity: .45; }
+.set-chips button { display: inline-flex; align-items: center; gap: 8px; height: 34px; padding: 0 15px; border-radius: 999px;
+  border: 1.5px solid var(--lilac-3); background: var(--white); color: var(--violet); font: 700 13px/1 var(--display); cursor: pointer; }
+.set-chips button:hover { background: var(--lilac-1); }
+.set-chips button[aria-pressed="true"] { background: var(--violet); border-color: var(--violet); color: var(--white); }
+.settings-scroll { flex: 1; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; gap: 18px; padding: 2px 8px 4px 0; }
+.set-count { margin: 0 4px; font: 800 16px/1.2 var(--display); color: var(--violet); }
+.set-gh { display: flex; align-items: center; gap: 12px; margin: 0 0 8px; font: 800 19px/1.2 var(--display); color: var(--violet); }
+.set-gh::after { content: ""; flex: 1; height: 2px; border-radius: 2px; background: var(--gold); }
+.set-gi { display: grid; place-items: center; width: 32px; height: 32px; flex-shrink: 0; border-radius: 10px;
+  background: var(--violet); color: var(--gold); }  /* the group's icon, as on its chip */
+.set-panel { border-radius: 16px; background: var(--white); border: 1px solid var(--lilac-3); }  /* not clipped: the theme menu hangs out */
+.set-sub { display: flex; align-items: center; gap: 12px; padding: 12px 18px 2px; font: 800 13px/1.2 var(--display); color: var(--select); }
+.set-sub .link { margin: 0 0 0 auto; padding: 0; text-decoration: none; }
+.set-panel .set-row, .set-panel .switch-row { padding: 10px 18px; }
+.set-panel .look-row { padding: 4px 18px; }
+.set-panel > .last { border-bottom: 0; }
+.seg { display: inline-flex; flex-shrink: 0; padding: 3px; border-radius: 999px; background: var(--lilac-1); border: 1px solid var(--lilac-3); }
+.seg button { height: 30px; padding: 0 12px; border: 0; border-radius: 999px; background: transparent; color: var(--ink-2);
+  font: 700 12px/1 var(--display); cursor: pointer; white-space: nowrap; }
+.seg button:hover { color: var(--violet); }
+.seg button[aria-checked="true"] { background: var(--select); color: var(--select-ink); }
+.set-none { display: flex; flex-direction: column; align-items: flex-start; gap: 10px; padding: 24px 26px; }
+.set-none[hidden] { display: none; }
+.set-none b { font: 800 17px/1.2 var(--display); color: var(--violet); }
+.set-none span { font-size: 14px; color: var(--ink-2); }
+.set-try { display: flex; flex-wrap: wrap; gap: 8px; }
+.set-try button { height: 30px; padding: 0 12px; border-radius: 999px; border: 1px solid var(--lilac-3); background: var(--white);
+  color: var(--violet); font: 700 12px/1 var(--display); cursor: pointer; }
+.set-try button:hover { border-color: var(--select); }
 .look { position: relative; display: flex; align-items: center; }
 .look-btn { display: flex; align-items: center; gap: 10px; min-width: 180px; height: 36px; padding: 0 12px 0 14px; border-radius: 999px;
   border: 1.5px solid var(--lilac-3); background: var(--white); color: var(--violet); font: 700 15px/1 var(--display); cursor: pointer; }

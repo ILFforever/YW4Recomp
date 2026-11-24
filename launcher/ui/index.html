@@ -185,179 +185,177 @@
 
   <!-- Settings (the top bar's gear): playing, where things are kept, shortcuts, disk space, downloads, updates -->
   <main class="screen setup" data-screen="settings" hidden>
+    <!-- One page (owner, 2026-11-24, design canvas https://claude.ai/artifact/4PZMR7NDBiJgeBgwbMhERo "D3"): a search
+         box, a chip per group, the groups below scrolling inside the window. app.js settingsFilter shows the rows that
+         match the search, the chip and, before a build (lite), only the rows marked data-lite. -->
     <div class="setup-body settings-body">
       <div class="settings-head">
+        <button class="btn icon-only" type="button" id="settings-back" aria-label="Back" title="Back">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 6l-6 6 6 6"/></svg>
+        </button>
         <h1>Settings</h1>
-        <!-- three pages (no scrolling): the arrows switch, the middle says which one is shown -->
-        <div class="pager" role="group" aria-label="Settings page" id="settings-pager">
-          <button class="pager-btn" type="button" id="page-prev" aria-label="Previous page">&lsaquo;</button>
-          <span id="page-num">1 / 3</span>
-          <button class="pager-btn" type="button" id="page-next" aria-label="Next page">&rsaquo;</button>
-        </div>
+        <label class="set-search">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/></svg>
+          <input type="search" id="set-search" placeholder="Search settings" aria-label="Search settings" autocomplete="off" spellcheck="false">
+          <button class="set-search-clear" type="button" id="set-search-clear" aria-label="Clear the search" hidden>
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.8" stroke-linecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg>
+          </button>
+          <span class="kbd" id="set-search-key">Ctrl F</span>
+        </label>
+        <span class="settings-head-gap"></span>
+        <button class="btn small" type="button" id="set-rebuild-now">Rebuild</button>
+        <button class="btn small danger" type="button" id="set-uninstall">Uninstall</button>
       </div>
-      <div class="settings-grid two" data-page="1">
-        <div class="settings-col">
-        <section class="card look-host">
-          <h2>Playing</h2>
-          <div class="set-row look-row">
-            <span><b>Theme</b></span>
-            <div class="look">
-              <button class="look-btn" type="button" id="look-btn" aria-haspopup="listbox" aria-expanded="false" aria-label="Theme">
-                <span class="look-dots" id="look-dots" aria-hidden="true"></span>
-                <b id="set-look-name"></b>
-                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg>
-              </button>
-              <div class="look-menu" id="look-menu" role="listbox" aria-label="Themes" hidden></div>
+      <div class="set-chips" role="group" aria-label="Show a group" id="set-chips">
+        <button type="button" data-chip="all" aria-pressed="true"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><path d="M4 6h16M4 12h16M4 18h16"/></svg>All</button>
+        <button type="button" data-chip="game" aria-pressed="false"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 11h4M8 9v4M15 12h.01M18 10h.01M7 6h10a5 5 0 0 1 0 12H7A5 5 0 0 1 7 6z"/></svg>Game</button>
+        <button type="button" data-chip="updates" aria-pressed="false"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v11M7.5 9.5L12 14l4.5-4.5M4 15v4h16v-4"/></svg>Updates</button>
+        <button type="button" data-chip="pc" aria-pressed="false"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 7h6l2 2h10v10H3z"/></svg>Files and shortcuts</button>
+        <button type="button" data-chip="support" aria-pressed="false"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 20s-7-4.4-7-10a4 4 0 0 1 7-2.6A4 4 0 0 1 19 10c0 5.6-7 10-7 10z"/></svg>Support</button>
+      </div>
+
+      <div class="settings-scroll" id="settings-scroll">
+        <p class="set-count" id="set-count" hidden></p>
+
+        <section class="set-group" data-group="game">
+          <h2 class="set-gh"><span class="set-gi"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 11h4M8 9v4M15 12h.01M18 10h.01M7 6h10a5 5 0 0 1 0 12H7A5 5 0 0 1 7 6z"/></svg></span>Game</h2>
+          <div class="set-panel">
+            <div class="set-sub">Theme and start</div>
+            <div class="set-row look-row" data-lite data-kw="theme look colour color skin">
+              <span><b>Theme</b></span>
+              <div class="look">
+                <button class="look-btn" type="button" id="look-btn" aria-haspopup="listbox" aria-expanded="false" aria-label="Theme">
+                  <span class="look-dots" id="look-dots" aria-hidden="true"></span>
+                  <b id="set-look-name"></b>
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 9l6 6 6-6"/></svg>
+                </button>
+                <div class="look-menu" id="look-menu" role="listbox" aria-label="Themes" hidden></div>
+              </div>
+            </div>
+            <div class="set-row" data-kw="when the game starts launcher hide minimise minimize keep open close play time">
+              <span><b>When the game starts</b><small>Hide: the launcher comes back when the game closes. Close: play time isn't counted</small></span>
+              <div class="seg" role="radiogroup" aria-label="When the game starts">
+                <button type="button" role="radio" data-onplay="hide">Hide</button>
+                <button type="button" role="radio" data-onplay="minimise">Minimise</button>
+                <button type="button" role="radio" data-onplay="keep">Keep open</button>
+                <button type="button" role="radio" data-onplay="close">Close</button>
+              </div>
+            </div>
+            <div class="set-sub">In the game</div>
+            <div class="switch-row" data-kw="start in full screen fullscreen window f11">
+              <span><b>Start in full screen</b><small>Same as F11 in the game</small></span>
+              <button class="toggle" type="button" role="switch" aria-label="Start in full screen" id="set-full"></button>
+            </div>
+            <div class="switch-row" data-kw="mods english patch translation layeredfs">
+              <span><b>Mods</b><small id="set-mods-line">The mods folder, e.g. the English patch</small></span>
+              <button class="toggle" type="button" role="switch" aria-label="Mods" id="set-mods"></button>
+            </div>
+            <div class="switch-row" data-kw="show log while playing console debug">
+              <span><b>Show log while playing</b><small>A console window opens next to the game</small></span>
+              <button class="toggle" type="button" role="switch" aria-label="Show log while playing" id="set-showlog"></button>
+            </div>
+            <div class="switch-row" data-kw="controls hint keys keyboard controller">
+              <span><b>Controls hint</b><small>A card at the start says how to see the controls</small></span>
+              <button class="toggle" type="button" role="switch" aria-label="Controls hint" id="set-hint"></button>
+            </div>
+            <div class="set-sub">Cheats <button class="link" type="button" id="set-cheats-manage">Manage &rsaquo;</button></div>
+            <div class="switch-row" data-kw="cheats page coins money manage">
+              <span><b>Cheats page</b><small>In the game's menu. Off hides it and turns every cheat off</small></span>
+              <button class="toggle" type="button" role="switch" aria-label="Cheats page" id="set-cheats"></button>
             </div>
           </div>
-          <div class="set-label">When the game starts</div>
-          <div class="radios compact" role="radiogroup" aria-label="When the game starts">
-            <button type="button" class="radio" role="radio" data-onplay="hide"><span class="dot" aria-hidden="true"></span><span><b>Hide the launcher</b><small>It comes back when the game closes</small></span></button>
-            <button type="button" class="radio" role="radio" data-onplay="minimise"><span class="dot" aria-hidden="true"></span><span><b>Minimise it</b></span></button>
-            <button type="button" class="radio" role="radio" data-onplay="keep"><span class="dot" aria-hidden="true"></span><span><b>Keep it open</b></span></button>
-            <button type="button" class="radio" role="radio" data-onplay="close"><span class="dot" aria-hidden="true"></span><span><b>Close it</b><small>Play time isn't counted</small></span></button>
+        </section>
+
+        <section class="set-group" data-group="updates">
+          <h2 class="set-gh"><span class="set-gi"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v11M7.5 9.5L12 14l4.5-4.5M4 15v4h16v-4"/></svg></span>Updates</h2>
+          <div class="set-panel">
+            <div class="set-sub">Versions</div>
+            <div class="set-row" data-lite data-kw="updates version launcher game new latest check now">
+              <span><b id="set-versions"></b><small id="set-update-line">Checked when the launcher starts</small></span>
+              <button class="btn small" type="button" id="set-check">Check now</button>
+            </div>
+            <div class="switch-row" id="set-checkupd-row" data-kw="check for updates auto automatic github offline">
+              <span><b>Check for updates</b><small>When the launcher starts</small></span>
+              <button class="toggle" type="button" role="switch" aria-label="Check for updates" id="set-checkupd"></button>
+            </div>
+            <div class="set-row" data-lite data-kw="update game from file zip older version downgrade offline">
+              <span><b>Update game from file</b><small>Any version, from its zip</small></span>
+              <button class="btn small" type="button" id="set-file-zip">Select zip</button>
+            </div>
+            <div class="set-sub">Upscalers</div>
+            <div class="set-row" data-kw="downloads upscaling upscaler fsr dlss xess nvidia amd intel graphics">
+              <span><b id="set-downloads"></b><small>Changing them rebuilds the game</small></span>
+              <button class="btn small" type="button" id="set-rebuild">Change</button>
+            </div>
+            <div class="set-sub">Disk space</div>
+            <div class="set-row" data-kw="disk space build files free up storage delete compiler">
+              <span><b>Build files</b><small id="set-free-size"></small></span>
+              <button class="btn small" type="button" id="set-free">Free up</button>
+            </div>
+            <div class="switch-row" data-kw="free up space after every build storage compiler">
+              <span><b>Free up space after every build</b><small>Updates then download the compiler again</small></span>
+              <button class="toggle" type="button" role="switch" aria-label="Free up space after every build" id="set-freeup"></button>
+            </div>
           </div>
         </section>
-        <section class="card">
-          <div class="card-head"><h2>Cheats</h2><button class="link" type="button" id="set-cheats-manage">Manage &rsaquo;</button></div>
-          <div class="switch-row">
-            <span><b>Cheats page</b><small>In the game's menu. Off hides it and turns every cheat off</small></span>
-            <button class="toggle" type="button" role="switch" aria-label="Cheats page" id="set-cheats"></button>
+
+        <section class="set-group" data-group="pc">
+          <h2 class="set-gh"><span class="set-gi"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 7h6l2 2h10v10H3z"/></svg></span>Files and shortcuts</h2>
+          <div class="set-panel">
+            <div class="set-sub">Folders</div>
+            <div class="set-row" data-kw="game folder install path open">
+              <span><b>Game folder</b><small id="set-install"></small></span>
+              <button class="btn small" type="button" id="set-open-install">Open</button>
+            </div>
+            <div class="set-row" data-kw="saves and settings save backup appdata home folder move">
+              <span><b>Saves and settings</b><small>The game folder: one folder, easy to back up. <span class="saves-place">In AppData</span>: kept if the game folder is deleted</small></span>
+              <div class="seg" role="radiogroup" aria-label="Where saves and settings are kept">
+                <button type="button" role="radio" data-move="install">Game folder</button>
+                <button type="button" role="radio" data-move="appdata" class="saves-place">In AppData</button>
+              </div>
+            </div>
+            <div class="set-row" data-lite data-only-lite data-kw="built it before find my game folder locate">
+              <span><b>Built it before?</b><small>Point the launcher at the folder it's in</small></span>
+              <button class="btn small" type="button" data-locate>Find my game</button>
+            </div>
+            <div class="set-sub">Start-up and shortcuts</div>
+            <div class="switch-row" data-kw="open straight into the game skip start launcher">
+              <span><b>Open straight into the game</b><small>The launcher shows when the game closes</small></span>
+              <button class="toggle" type="button" role="switch" aria-label="Open straight into the game" id="set-straight"></button>
+            </div>
+            <div class="switch-row" data-kw="desktop shortcut icon shortcuts">
+              <span><b>Desktop shortcut</b></span>
+              <button class="toggle" type="button" role="switch" aria-label="Desktop shortcut" id="set-desktop"></button>
+            </div>
+            <div class="switch-row" data-kw="start menu entry icon shortcuts applications">
+              <span><b class="startmenu-name">Start menu entry</b></span>
+              <button class="toggle" type="button" role="switch" aria-label="Start menu entry" id="set-startmenu"></button>
+            </div>
           </div>
         </section>
-        </div>
-        <div class="settings-col">
-        <section class="card">
-          <h2>In the game</h2>
-          <div class="switch-row">
-            <span><b>Start in full screen</b><small>Same as F11 in the game</small></span>
-            <button class="toggle" type="button" role="switch" aria-label="Start in full screen" id="set-full"></button>
-          </div>
-          <div class="switch-row">
-            <span><b>Mods</b><small id="set-mods-line">The mods folder, e.g. the English patch</small></span>
-            <button class="toggle" type="button" role="switch" aria-label="Mods" id="set-mods"></button>
-          </div>
-          <div class="switch-row">
-            <span><b>Show log while playing</b><small>A console window opens next to the game</small></span>
-            <button class="toggle" type="button" role="switch" aria-label="Show log while playing" id="set-showlog"></button>
-          </div>
-          <div class="switch-row">
-            <span><b>Controls hint</b><small>A card at the start says how to see the controls</small></span>
-            <button class="toggle" type="button" role="switch" aria-label="Controls hint" id="set-hint"></button>
+
+        <section class="set-group" data-group="support">
+          <h2 class="set-gh"><span class="set-gi"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 20s-7-4.4-7-10a4 4 0 0 1 7-2.6A4 4 0 0 1 19 10c0 5.6-7 10-7 10z"/></svg></span>Support</h2>
+          <div class="set-panel">
+            <div class="switch-row" data-lite data-kw="support enjoying donate coffee kofi">
+              <span><b>Enjoying YW4 Recomp?</b><small>It's free and made in spare time. A coffee helps it keep going.</small></span>
+              <button class="btn small coffee" type="button" data-link="coffee"><svg viewBox="0 0 16 16" width="17" height="17" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2.5 5.5h8.5v4.5a3.5 3.5 0 0 1-3.5 3.5h-1.5a3.5 3.5 0 0 1-3.5-3.5Z"/><path d="M11 6.5h1a2 2 0 0 1 0 4h-1"/><path d="M5 1.5c-.6.8.6 1.4 0 2.2M8 1.5c-.6.8.6 1.4 0 2.2"/></svg>Buy me a coffee</button>
+            </div>
           </div>
         </section>
-        <section class="card" id="set-support-card">
-          <h2>Support</h2>
-          <div class="switch-row">
-            <span><b>Enjoying YW4 Recomp?</b><small>It's free and made in spare time. A coffee helps it keep going.</small></span>
-            <button class="btn small coffee" type="button" data-link="coffee"><svg viewBox="0 0 16 16" width="17" height="17" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2.5 5.5h8.5v4.5a3.5 3.5 0 0 1-3.5 3.5h-1.5a3.5 3.5 0 0 1-3.5-3.5Z"/><path d="M11 6.5h1a2 2 0 0 1 0 4h-1"/><path d="M5 1.5c-.6.8.6 1.4 0 2.2M8 1.5c-.6.8.6 1.4 0 2.2"/></svg>Buy me a coffee</button>
+
+        <div class="set-panel set-none" id="set-none" hidden>
+          <b>Nothing matches that</b>
+          <span>Try one of these:</span>
+          <div class="set-try">
+            <button type="button" data-try="update">update</button>
+            <button type="button" data-try="zip">zip</button>
+            <button type="button" data-try="DLSS">DLSS</button>
+            <button type="button" data-try="mods">mods</button>
+            <button type="button" data-try="shortcut">shortcut</button>
           </div>
-        </section>
-        </div>
-      </div>
-      <div class="settings-grid two" data-page="2" hidden>
-        <div class="settings-col">
-        <section class="card">
-          <h2>Where things are kept</h2>
-          <div class="set-row">
-            <span><b>Game folder</b><small id="set-install"></small></span>
-            <button class="btn small" type="button" id="set-open-install">Open</button>
-          </div>
-          <div class="set-label">Saves and settings</div>
-          <div class="radios" role="radiogroup" aria-label="Where saves and settings are kept">
-            <button type="button" class="radio" role="radio" data-move="install" aria-checked="true">
-              <span class="dot" aria-hidden="true"></span><span><b>In the game folder</b><small>One folder, easy to back up</small></span>
-            </button>
-            <button type="button" class="radio" role="radio" data-move="appdata" aria-checked="false">
-              <span class="dot" aria-hidden="true"></span><span><b class="saves-place">In AppData</b><small>Kept if the game folder is deleted</small></span>
-            </button>
-          </div>
-        </section>
-        <section class="card">
-          <h2>Shortcuts</h2>
-          <div class="switch-row">
-            <span><b>Desktop shortcut</b></span>
-            <button class="toggle" type="button" role="switch" aria-label="Desktop shortcut" id="set-desktop"></button>
-          </div>
-          <div class="switch-row">
-            <span><b class="startmenu-name">Start menu entry</b></span>
-            <button class="toggle" type="button" role="switch" aria-label="Start menu entry" id="set-startmenu"></button>
-          </div>
-        </section>
-        </div>
-        <div class="settings-col">
-        <section class="card">
-          <h2>Disk space</h2>
-          <div class="set-row">
-            <span><b>Build files</b><small id="set-free-size"></small></span>
-            <button class="btn small" type="button" id="set-free">Free up</button>
-          </div>
-          <div class="switch-row">
-            <span><b>Free up space after every build</b><small>Updates then download the compiler again</small></span>
-            <button class="toggle" type="button" role="switch" aria-label="Free up space after every build" id="set-freeup"></button>
-          </div>
-        </section>
-        <section class="card">
-          <h2>Downloads</h2>
-          <div class="set-row">
-            <span><b id="set-downloads"></b><small>Changing them rebuilds the game</small></span>
-            <button class="btn small" type="button" id="set-rebuild">Change</button>
-          </div>
-        </section>
-        <section class="card" id="set-updates-card">
-          <h2>Updates</h2>
-          <div class="set-row">
-            <span><b id="set-versions"></b><small id="set-update-line">Checked when the launcher starts</small></span>
-            <button class="btn small" type="button" id="set-check">Check now</button>
-          </div>
-          <div class="switch-row" id="set-checkupd-row" hidden>
-            <span><b>Check for updates</b><small>When the launcher starts</small></span>
-            <button class="toggle" type="button" role="switch" aria-label="Check for updates" id="set-checkupd"></button>
-          </div>
-          <div class="set-row">
-            <span><b>Update game from file</b><small>Choose game update zip</small></span>
-            <button class="btn small" type="button" id="set-file-zip">Select zip</button>
-          </div>
-        </section>
         </div>
       </div>
-      <!-- page 3: moved off page 2, which ran off the bottom of the window (owner, 2026-11-21) -->
-      <div class="settings-grid two" data-page="3" hidden>
-        <div class="settings-col">
-        <section class="card">
-          <h2>Launcher</h2>
-          <div class="switch-row">
-            <span><b>Open straight into the game</b><small>The launcher shows when the game closes</small></span>
-            <button class="toggle" type="button" role="switch" aria-label="Open straight into the game" id="set-straight"></button>
-          </div>
-        </section>
-        </div>
-      </div>
-      <!-- Before a build (no install yet): only what works without a game (owner, 2026-11-19: Settings was locked, so
-           Check now couldn't be reached). The theme row, Support and Updates move in here from the pages above while
-           it shows and back after (app.js showSettingsLite) -->
-      <div class="settings-grid two" data-page="lite" hidden>
-        <div class="settings-col" id="lite-col1">
-        <section class="card look-host" id="lite-look">
-          <h2>Look</h2>
-        </section>
-        </div>
-        <div class="settings-col" id="lite-col2">
-        <section class="card">
-          <h2>Built it before?</h2>
-          <div class="set-row">
-            <span><b>Find my game</b><small>Point the launcher at the folder it's in</small></span>
-            <button class="btn small" type="button" data-locate>Find</button>
-          </div>
-        </section>
-        </div>
-      </div>
-    </div>
-    <div class="setup-foot">
-      <button class="btn" type="button" id="settings-back">Back</button>
-      <span class="foot-note"></span>
-      <button class="btn" type="button" id="set-rebuild-now">Rebuild</button>
-      <button class="btn danger" type="button" id="set-uninstall">Uninstall</button>
     </div>
   </main>
 
