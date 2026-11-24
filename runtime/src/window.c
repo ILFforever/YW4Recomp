@@ -2772,9 +2772,8 @@ int window_key_x_held(void) {
     return k && window && (SDL_GetWindowFlags(window) & SDL_WINDOW_INPUT_FOCUS) && k[SDL_SCANCODE_X];
 }
 
-static void update_input(void) {
-    uint64_t b;
-    int32_t s[4];
+/* Read mouse buttons, position, and wheel pulse queue (SDL thread); returns gated mouse button mask. */
+static uint32_t input_read_mouse(float *mx_out, float *my_out, int *wup_out, int *wdwn_out) {
     float mx, my;
     uint32_t mb = SDL_GetMouseState(&mx, &my);
     if (mouse_held_off && !mb) mouse_held_off = 0;
@@ -2807,37 +2806,39 @@ static void update_input(void) {
     wup = wheel_active[0];
     wdwn = wheel_active[1];
     host_unlock(&mouse_lock);
+    *mx_out = mx, *my_out = my, *wup_out = wup, *wdwn_out = wdwn;
+    return mb;
+}
 
-    pad_back_hold();
-    pad_shoulders_overlay();
-    pad_r_online();
-    bindings_read(SDL_GetKeyboardState(NULL), mb, wup, wdwn, gamepad, &b, s);
-    {   /* the map (owner, 2026-11-15): moving the mouse pans it, as the left stick, from the movement since the last
-         * read, smoothed over a few reads. As a real stick (the owner: it only began to move after half the screen):
-         * any movement pushes it past the game's dead zone at once (a third of the way), more movement further; still,
-         * it lets go. The keys and a pad that push the stick themselves win. (Edge scrolling with a free cursor was
-         * tried the same day and turned down.) */
-        static float vx, vy;
-        host_lock(&mouse_lock);
-        float ax = map_accum_x, ay = map_accum_y;
-        map_accum_x = map_accum_y = 0.0f;
-        host_unlock(&mouse_lock);
-        if (mousemenu_map() && !mousemenu_mirapo() && !mousemenu_map_pin() && !mouse_off() && window &&
-            SDL_GetWindowRelativeMouseMode(window)) {
-            vx = vx * 0.5f + ax * 0.5f, vy = vy * 0.5f + ay * 0.5f;
-            const float start = 11000.0f, gain = 6000.0f;  /* stick units: the first push, then per pixel per read */
-            float fx = vx > 0.3f ? start + vx * gain : vx < -0.3f ? -start + vx * gain : 0.0f;
-            float fy = vy > 0.3f ? start + vy * gain : vy < -0.3f ? -start + vy * gain : 0.0f;
-            int32_t sx = (int32_t)(fx > 32767.0f ? 32767.0f : fx < -32767.0f ? -32767.0f : fx);
-            int32_t sy = (int32_t)(fy > 32767.0f ? -32767.0f : fy < -32767.0f ? 32767.0f : -fy);
-            if (!s[0] && sx) s[0] = sx;
-            if (!s[1] && sy) s[1] = sy;
-        } else {
-            vx = vy = 0.0f;
-        }
+/* Turn relative mouse movement into left-stick panning while the in-game map is open. */
+static void input_map_pan(int32_t s[4]) {
+    /* the map (owner, 2026-11-15): moving the mouse pans it, as the left stick, from the movement since the last
+     * read, smoothed over a few reads. As a real stick (the owner: it only began to move after half the screen):
+     * any movement pushes it past the game's dead zone at once (a third of the way), more movement further; still,
+     * it lets go. The keys and a pad that push the stick themselves win. (Edge scrolling with a free cursor was
+     * tried the same day and turned down.) */
+    static float vx, vy;
+    host_lock(&mouse_lock);
+    float ax = map_accum_x, ay = map_accum_y;
+    map_accum_x = map_accum_y = 0.0f;
+    host_unlock(&mouse_lock);
+    if (mousemenu_map() && !mousemenu_mirapo() && !mousemenu_map_pin() && !mouse_off() && window &&
+        SDL_GetWindowRelativeMouseMode(window)) {
+        vx = vx * 0.5f + ax * 0.5f, vy = vy * 0.5f + ay * 0.5f;
+        const float start = 11000.0f, gain = 6000.0f;  /* stick units: the first push, then per pixel per read */
+        float fx = vx > 0.3f ? start + vx * gain : vx < -0.3f ? -start + vx * gain : 0.0f;
+        float fy = vy > 0.3f ? start + vy * gain : vy < -0.3f ? -start + vy * gain : 0.0f;
+        int32_t sx = (int32_t)(fx > 32767.0f ? 32767.0f : fx < -32767.0f ? -32767.0f : fx);
+        int32_t sy = (int32_t)(fy > 32767.0f ? -32767.0f : fy < -32767.0f ? 32767.0f : -fy);
+        if (!s[0] && sx) s[0] = sx;
+        if (!s[1] && sy) s[1] = sy;
+    } else {
+        vx = vy = 0.0f;
     }
-    /* the overlay's keyboard and controller views light up what is pressed */
-    gamemenu_held(SDL_GetKeyboardState(NULL), SDL_GetMouseState(NULL, NULL), pad_parts_held());
+}
+
+/* Gate game input and relative mouse capture while the overlay, legacy panel, or F2 quick look is open. */
+static void input_gate_overlay(uint64_t *b, int32_t s[4], int *is_open_out, int *peek_out) {
     /* The settings panel takes the keyboard, mouse, and the gamepad while it is open, and after it closes until
      * everything is let go, so the button that closed it (B, Escape) doesn't reach the game as well. */
     static int withheld;
@@ -2878,127 +2879,154 @@ static void update_input(void) {
         was_peek = peek;
     }
     if (withheld) {
-        if (!b && !s[0] && !s[1] && !s[2] && !s[3] && !is_open && !peek) withheld = 0;
-        b = 0, memset(s, 0, sizeof s);
+        if (!*b && !s[0] && !s[1] && !s[2] && !s[3] && !is_open && !peek) withheld = 0;
+        *b = 0, memset(s, 0, 4 * sizeof *s);
     }
+    *is_open_out = is_open, *peek_out = peek;
+}
+
+/* Translate cursor hover/clicks into game-menu button presses and toggle relative mouse mode around menus. */
+static void input_mouse_menus(float mx, float my, uint64_t *b) {
+    static int freed;  /* we turned the relative mouse off for a menu */
+    int ww = 0, wh = 0, want = 0;
+    SDL_GetWindowSize(window, &ww, &wh);
+    /* the mouse in the picture's own rectangle (the window minus any black bars) */
+    float px = picture_rect[0] * (float)ww, py = picture_rect[1] * (float)wh;
+    float pw = picture_rect[2] * (float)ww, ph = picture_rect[3] * (float)wh;
+    /* a touchpad click begun in the menu is the left button until the touchpad is let go */
+    if (tp_game_click && !(gamepad && SDL_GetGamepadButton(gamepad, SDL_GAMEPAD_BUTTON_TOUCHPAD))) tp_game_click = 0;
+    uint64_t mm = mousemenu_update(mx - px, my - py, (int)(pw + 0.5f), (int)(ph + 0.5f),
+                                   SDL_GetMouseState(NULL, NULL) | (tp_game_click ? SDL_BUTTON_LMASK : 0), &want);
+    {
+        static uint64_t last_mm;
+        if (mm != last_mm && mousemenu_log_on()) fprintf(stderr, "yw4: mouse menus: sends %#llx\n", (unsigned long long)mm);
+        last_mm = mm;
+    }
+    *b |= mm;
+    if (want && SDL_GetWindowRelativeMouseMode(window)) SDL_SetWindowRelativeMouseMode(window, false), freed = 1;
+    else if (!want && freed) {
+        freed = 0;
+        if (SDL_GetWindowFlags(window) & SDL_WINDOW_INPUT_FOCUS) SDL_SetWindowRelativeMouseMode(window, true);
+    }
+}
+
+/* Drive the exploring shortcut wheel (and its YW4_WHEEL_TEST / YW4_WHEEL_SHOTS harness); returns updated buttons. */
+static uint64_t input_shortcut_wheel(uint64_t b, int is_open, int peek) {
+    /* the shortcut wheel (decision 0075): while exploring, the key bound to L shows it and the mouse picks */
+    /* YW4_WHEEL_TEST=<read>:<slot>[,<read>:<slot>...] (tests, no real mouse needed): from each of those game
+     * input reads the wheel's key is held for 40 reads and the pointer goes to the slot (1-8) once it is open;
+     * then the key is let go. Slot 0: let go in the middle. <read>:<slot>><slot2>: 15 reads after pointing at the
+     * slot the pointer moves on to slot2 (the lens's glide). */
+    static int t_n = -1, t_cur = -1, t_moved, t_slot, t_slot2;
+    static uint64_t t_reads[8];
+    static int t_slots[8], t_slots2[8];
+    if (t_n < 0) {
+        t_n = 0;
+        const char *e = getenv("YW4_WHEEL_TEST");
+        unsigned long long a;
+        int sl, used;
+        while (e && t_n < 8 && sscanf(e, "%llu:%d%n", &a, &sl, &used) == 2 && sl >= 0 && sl <= 8) {
+            t_reads[t_n] = a, t_slots[t_n] = sl, t_slots2[t_n] = 0;
+            e += used;
+            int s2, used2;
+            if (*e == '>' && sscanf(e + 1, "%d%n", &s2, &used2) == 1 && s2 >= 1 && s2 <= 8) t_slots2[t_n] = s2, e += 1 + used2;
+            t_n++;
+            if (*e != ',') break;
+            e++;
+        }
+    }
+    uint64_t reads = window_input_reads();
+    int test = 0;
+    for (int i = 0; i < t_n; i++)
+        if (reads >= t_reads[i] && reads < t_reads[i] + 40) {
+            test = 1;
+            if (i != t_cur) t_cur = i, t_moved = 0, t_slot = t_slots[i], t_slot2 = t_slots2[i];
+        }
+    if (test) b |= 1ull << 6;  /* as the key would: L */
+    int key = test || ((b & (1ull << 6)) && wheel_key_held(SDL_GetKeyboardState(NULL)));
+    int menus = !is_open && !peek && !window_paused() && !battle_active() && !mousemenu_open() && !mousemenu_talking() &&
+                !mousemenu_map() && !mousemenu_stopwatch() && swheel_hud_ready();
+    /* a test run has no mouse of its own (YW4_MOUSE=0): the mouse's conditions are left out for the whole run */
+    /* the mouse: the camera's (relative), or not taken back yet after a game menu but the window has the keyboard
+     * (owner, 2026-11-16: after Mirapo's list the wheel said "mouse not captured" until a click); the wheel then
+     * takes it, as that click would (below) */
+    int mouse_ok = window && !mouse_off() && !mouse_held_off &&
+                   (SDL_GetWindowRelativeMouseMode(window) || (SDL_GetWindowFlags(window) & SDL_WINDOW_INPUT_FOCUS));
+    int ok = menus && (t_n > 0 || mouse_ok);
+    {  /* the key pressed and the wheel not opening: why, in the log (owner, 2026-11-16: after Mirapo it didn't
+        * come up again) */
+        static int key_before;
+        if (key && !key_before && !ok && swheel_enabled())
+            fprintf(stderr, "yw4: shortcut wheel: key down, not opened:%s%s%s%s%s%s%s%s%s%s%s%s\n",
+                    is_open ? " overlay open" : "", peek ? " quick look" : "", window_paused() ? " paused" : "",
+                    battle_active() ? " battle" : "", mousemenu_open() ? " a game menu open" : "",
+                    mousemenu_talking() ? " talking" : "", mousemenu_map() ? " map" : "",
+                    mousemenu_stopwatch() ? " stopwatch" : "", !swheel_hud_ready() ? " no field HUD seen" : "",
+                    menus && mouse_off() ? " mouse off" : "", menus && mouse_held_off ? " mouse held off" : "",
+                    menus && !mouse_ok ? " the window doesn't have the keyboard" : "");
+        key_before = key;
+    }
+    b = swheel_update(b, key, ok, reads);
+    if (swheel_open() && window && !mouse_off() && !SDL_GetWindowRelativeMouseMode(window))
+        SDL_SetWindowRelativeMouseMode(window, true);  /* the pointer's moves come as the camera's do */
+    if (test && !t_moved && swheel_open()) {
+        if (t_slot) {
+            int i = t_slot <= 4 ? (t_slot - 1) * 2 : (t_slot - 5) * 2 + 1;  /* its place round the ring */
+            float a = (float)i * 45.0f * 3.14159265f / 180.0f;
+            swheel_motion(100.0f * sinf(a), -100.0f * cosf(a));
+        }
+        t_moved = 1;
+    }
+    static int t_moved2 = -1;
+    if (test && t_slot && t_slot2 && t_moved2 != t_cur && reads >= t_reads[t_cur] + 15 && swheel_open()) {
+        int i = t_slot <= 4 ? (t_slot - 1) * 2 : (t_slot - 5) * 2 + 1, k = t_slot2 <= 4 ? (t_slot2 - 1) * 2 : (t_slot2 - 5) * 2 + 1;
+        float a = (float)i * 45.0f * 3.14159265f / 180.0f, b2 = (float)k * 45.0f * 3.14159265f / 180.0f;
+        swheel_motion(100.0f * (sinf(b2) - sinf(a)), -100.0f * (cosf(b2) - cosf(a)));
+        t_moved2 = t_cur;
+    }
+    /* screenshots of the wheel (input reads come faster than frames, so --shots can't aim at it): 20 reads into
+     * each test, or YW4_WHEEL_SHOTS=<reads>,<reads>,... after each test's start (past 40: its use or cancel) */
+    static int s_n = -1, s_next, s_test = -1;
+    static int s_at[16];
+    if (s_n < 0) {
+        s_n = 0;
+        const char *e = getenv("YW4_WHEEL_SHOTS");
+        int v, used;
+        while (e && s_n < 16 && sscanf(e, "%d%n", &v, &used) == 1) {
+            s_at[s_n++] = v, e += used;
+            if (*e != ',') break;
+            e++;
+        }
+    }
+    if (!s_n) {
+        if (test && t_moved == 1 && swheel_open() && reads >= t_reads[t_cur] + 20) window_request_screenshot(), t_moved = 2;
+    } else if (t_cur >= 0) {
+        if (s_test != t_cur) s_test = t_cur, s_next = 0;
+        if (s_next < s_n && reads >= t_reads[t_cur] + (uint64_t)s_at[s_next]) window_request_screenshot(), s_next++;
+    }
+    return b;
+}
+
+static void update_input(void) {
+    uint64_t b;
+    int32_t s[4];
+    float mx, my;
+    int wup, wdwn;
+    uint32_t mb = input_read_mouse(&mx, &my, &wup, &wdwn);
+
+    pad_back_hold();
+    pad_shoulders_overlay();
+    pad_r_online();
+    bindings_read(SDL_GetKeyboardState(NULL), mb, wup, wdwn, gamepad, &b, s);
+    input_map_pan(s);
+    /* the overlay's keyboard and controller views light up what is pressed */
+    gamemenu_held(SDL_GetKeyboardState(NULL), SDL_GetMouseState(NULL, NULL), pad_parts_held());
+    int is_open, peek;
+    input_gate_overlay(&b, s, &is_open, &peek);
     /* the mouse in a supported menu (mousemenu.c): the cursor shows while it is open, and hovering and clicking
      * become the menu's own D-pad, A and B presses; the camera gets the mouse back when it closes */
-    if (window && !is_open && !peek) {
-        static int freed;  /* we turned the relative mouse off for a menu */
-        int ww = 0, wh = 0, want = 0;
-        SDL_GetWindowSize(window, &ww, &wh);
-        /* the mouse in the picture's own rectangle (the window minus any black bars) */
-        float px = picture_rect[0] * (float)ww, py = picture_rect[1] * (float)wh;
-        float pw = picture_rect[2] * (float)ww, ph = picture_rect[3] * (float)wh;
-        /* a touchpad click begun in the menu is the left button until the touchpad is let go */
-        if (tp_game_click && !(gamepad && SDL_GetGamepadButton(gamepad, SDL_GAMEPAD_BUTTON_TOUCHPAD))) tp_game_click = 0;
-        uint64_t mm = mousemenu_update(mx - px, my - py, (int)(pw + 0.5f), (int)(ph + 0.5f),
-                                       SDL_GetMouseState(NULL, NULL) | (tp_game_click ? SDL_BUTTON_LMASK : 0), &want);
-        {
-            static uint64_t last_mm;
-            if (mm != last_mm && mousemenu_log_on()) fprintf(stderr, "yw4: mouse menus: sends %#llx\n", (unsigned long long)mm);
-            last_mm = mm;
-        }
-        b |= mm;
-        if (want && SDL_GetWindowRelativeMouseMode(window)) SDL_SetWindowRelativeMouseMode(window, false), freed = 1;
-        else if (!want && freed) {
-            freed = 0;
-            if (SDL_GetWindowFlags(window) & SDL_WINDOW_INPUT_FOCUS) SDL_SetWindowRelativeMouseMode(window, true);
-        }
-    }
-    {   /* the shortcut wheel (decision 0075): while exploring, the key bound to L shows it and the mouse picks */
-        /* YW4_WHEEL_TEST=<read>:<slot>[,<read>:<slot>...] (tests, no real mouse needed): from each of those game
-         * input reads the wheel's key is held for 40 reads and the pointer goes to the slot (1-8) once it is open;
-         * then the key is let go. Slot 0: let go in the middle. <read>:<slot>><slot2>: 15 reads after pointing at the
-         * slot the pointer moves on to slot2 (the lens's glide). */
-        static int t_n = -1, t_cur = -1, t_moved, t_slot, t_slot2;
-        static uint64_t t_reads[8];
-        static int t_slots[8], t_slots2[8];
-        if (t_n < 0) {
-            t_n = 0;
-            const char *e = getenv("YW4_WHEEL_TEST");
-            unsigned long long a;
-            int sl, used;
-            while (e && t_n < 8 && sscanf(e, "%llu:%d%n", &a, &sl, &used) == 2 && sl >= 0 && sl <= 8) {
-                t_reads[t_n] = a, t_slots[t_n] = sl, t_slots2[t_n] = 0;
-                e += used;
-                int s2, used2;
-                if (*e == '>' && sscanf(e + 1, "%d%n", &s2, &used2) == 1 && s2 >= 1 && s2 <= 8) t_slots2[t_n] = s2, e += 1 + used2;
-                t_n++;
-                if (*e != ',') break;
-                e++;
-            }
-        }
-        uint64_t reads = window_input_reads();
-        int test = 0;
-        for (int i = 0; i < t_n; i++)
-            if (reads >= t_reads[i] && reads < t_reads[i] + 40) {
-                test = 1;
-                if (i != t_cur) t_cur = i, t_moved = 0, t_slot = t_slots[i], t_slot2 = t_slots2[i];
-            }
-        if (test) b |= 1ull << 6;  /* as the key would: L */
-        int key = test || ((b & (1ull << 6)) && wheel_key_held(SDL_GetKeyboardState(NULL)));
-        int menus = !is_open && !peek && !window_paused() && !battle_active() && !mousemenu_open() && !mousemenu_talking() &&
-                    !mousemenu_map() && !mousemenu_stopwatch() && swheel_hud_ready();
-        /* a test run has no mouse of its own (YW4_MOUSE=0): the mouse's conditions are left out for the whole run */
-        /* the mouse: the camera's (relative), or not taken back yet after a game menu but the window has the keyboard
-         * (owner, 2026-11-16: after Mirapo's list the wheel said "mouse not captured" until a click); the wheel then
-         * takes it, as that click would (below) */
-        int mouse_ok = window && !mouse_off() && !mouse_held_off &&
-                       (SDL_GetWindowRelativeMouseMode(window) || (SDL_GetWindowFlags(window) & SDL_WINDOW_INPUT_FOCUS));
-        int ok = menus && (t_n > 0 || mouse_ok);
-        {  /* the key pressed and the wheel not opening: why, in the log (owner, 2026-11-16: after Mirapo it didn't
-            * come up again) */
-            static int key_before;
-            if (key && !key_before && !ok && swheel_enabled())
-                fprintf(stderr, "yw4: shortcut wheel: key down, not opened:%s%s%s%s%s%s%s%s%s%s%s%s\n",
-                        is_open ? " overlay open" : "", peek ? " quick look" : "", window_paused() ? " paused" : "",
-                        battle_active() ? " battle" : "", mousemenu_open() ? " a game menu open" : "",
-                        mousemenu_talking() ? " talking" : "", mousemenu_map() ? " map" : "",
-                        mousemenu_stopwatch() ? " stopwatch" : "", !swheel_hud_ready() ? " no field HUD seen" : "",
-                        menus && mouse_off() ? " mouse off" : "", menus && mouse_held_off ? " mouse held off" : "",
-                        menus && !mouse_ok ? " the window doesn't have the keyboard" : "");
-            key_before = key;
-        }
-        b = swheel_update(b, key, ok, reads);
-        if (swheel_open() && window && !mouse_off() && !SDL_GetWindowRelativeMouseMode(window))
-            SDL_SetWindowRelativeMouseMode(window, true);  /* the pointer's moves come as the camera's do */
-        if (test && !t_moved && swheel_open()) {
-            if (t_slot) {
-                int i = t_slot <= 4 ? (t_slot - 1) * 2 : (t_slot - 5) * 2 + 1;  /* its place round the ring */
-                float a = (float)i * 45.0f * 3.14159265f / 180.0f;
-                swheel_motion(100.0f * sinf(a), -100.0f * cosf(a));
-            }
-            t_moved = 1;
-        }
-        static int t_moved2 = -1;
-        if (test && t_slot && t_slot2 && t_moved2 != t_cur && reads >= t_reads[t_cur] + 15 && swheel_open()) {
-            int i = t_slot <= 4 ? (t_slot - 1) * 2 : (t_slot - 5) * 2 + 1, k = t_slot2 <= 4 ? (t_slot2 - 1) * 2 : (t_slot2 - 5) * 2 + 1;
-            float a = (float)i * 45.0f * 3.14159265f / 180.0f, b2 = (float)k * 45.0f * 3.14159265f / 180.0f;
-            swheel_motion(100.0f * (sinf(b2) - sinf(a)), -100.0f * (cosf(b2) - cosf(a)));
-            t_moved2 = t_cur;
-        }
-        /* screenshots of the wheel (input reads come faster than frames, so --shots can't aim at it): 20 reads into
-         * each test, or YW4_WHEEL_SHOTS=<reads>,<reads>,... after each test's start (past 40: its use or cancel) */
-        static int s_n = -1, s_next, s_test = -1;
-        static int s_at[16];
-        if (s_n < 0) {
-            s_n = 0;
-            const char *e = getenv("YW4_WHEEL_SHOTS");
-            int v, used;
-            while (e && s_n < 16 && sscanf(e, "%d%n", &v, &used) == 1) {
-                s_at[s_n++] = v, e += used;
-                if (*e != ',') break;
-                e++;
-            }
-        }
-        if (!s_n) {
-            if (test && t_moved == 1 && swheel_open() && reads >= t_reads[t_cur] + 20) window_request_screenshot(), t_moved = 2;
-        } else if (t_cur >= 0) {
-            if (s_test != t_cur) s_test = t_cur, s_next = 0;
-            if (s_next < s_n && reads >= t_reads[t_cur] + (uint64_t)s_at[s_next]) window_request_screenshot(), s_next++;
-        }
-    }
+    if (window && !is_open && !peek) input_mouse_menus(mx, my, &b);
+    b = input_shortcut_wheel(b, is_open, peek);
     if (window_paused()) b = 0, memset(s, 0, sizeof s);  /* the overlay's pause: the player's input held back */
     b |= window_pause_buttons();  /* the overlay's pause: Plus and A pressed for the player */
     host_lock(&input_lock);

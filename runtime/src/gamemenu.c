@@ -1220,45 +1220,211 @@ void gamemenu_peek_click(float x, float y) {
         __atomic_store_n(&peek_mode, h.a, __ATOMIC_RELEASE), changed();
 }
 
-void gamemenu_mouse(float x, float y, int button) {
-    if (!gamemenu_open() || settings_legacy_open() || bindings_capturing()) return;
-    Hit h;
-    int found = hit_find(x, y, &h);
-    if (gamemenu_prompting() && __atomic_load_n(&pick_n, __ATOMIC_ACQUIRE)) {  /* a list: hovering chooses, a click picks */
+/* Mouse handling while a list picker or text/OSK prompt is active (SDL thread). */
+static void gamemenu_mouse_prompt(float x, float y, int button, int found, const Hit *h) {
+    if (__atomic_load_n(&pick_n, __ATOMIC_ACQUIRE)) {  /* a list: hovering chooses, a click picks */
         if (dy_hold) return;  /* answered: waiting for the game */
-        if (found && h.kind == HIT_PICK_ROW && (button == 0 || button == 1)) {
-            if (pick_sel != h.a) pick_sel = h.a, changed();
+        if (found && h->kind == HIT_PICK_ROW && (button == 0 || button == 1)) {
+            if (pick_sel != h->a) pick_sel = h->a, changed();
             if (button == 1) pick_finish();
-        } else if (button == 1 && found && h.kind == HIT_PROMPT_OK) {
+        } else if (button == 1 && found && h->kind == HIT_PROMPT_OK) {
             pick_finish();
         }
         return;
     }
-    if (gamemenu_prompting()) {  /* the name popup: its field takes the typing again, OK finishes */
-        if (found && h.kind == HIT_PROMPT_FIELD) {
-            char text[TEXTIN_MAX]; int cur;
-            textin_read(&prompt_text, text, sizeof text, &cur, NULL);
-            int fh = prompt_body[0] ? 52 : 72;
-            int offset = ui_text_offset_at(UI_ROUNDED_800, 32, h.x + 20, h.y + (fh - 32 * 1.3f) / 2, h.w - 40 - 100, 32 * 1.3f, 1, text, cur, x, y);
-            if (button == 1) textin_focus(&prompt_text), textin_set_caret(offset), changed();
-            else if (button == 2) textin_focus(&prompt_text), textin_select_word(offset), changed();
+    /* the name popup: its field takes the typing again, OK finishes */
+    if (found && h->kind == HIT_PROMPT_FIELD) {
+        char text[TEXTIN_MAX]; int cur;
+        textin_read(&prompt_text, text, sizeof text, &cur, NULL);
+        int fh = prompt_body[0] ? 52 : 72;
+        int offset = ui_text_offset_at(UI_ROUNDED_800, 32, h->x + 20, h->y + (fh - 32 * 1.3f) / 2, h->w - 40 - 100, 32 * 1.3f, 1, text, cur, x, y);
+        if (button == 1) textin_focus(&prompt_text), textin_set_caret(offset), changed();
+        else if (button == 2) textin_focus(&prompt_text), textin_select_word(offset), changed();
+    }
+    float tb[4];
+    if (button == 4 && textin_has(&prompt_text) && gamemenu_text_rect(tb, NULL)) {  /* the drawn box, copied safely */
+        char text[TEXTIN_MAX]; int cur;
+        textin_read(&prompt_text, text, sizeof text, &cur, NULL);
+        int fh = prompt_body[0] ? 52 : 72;
+        int offset = ui_text_offset_at(UI_ROUNDED_800, 32, tb[0] + 20, tb[1] + (fh - 32 * 1.3f) / 2,
+                                      tb[2] - 40 - 100, 32 * 1.3f, 1, text, cur, x, y);
+        textin_drag(offset), changed();
+    }
+    if (button == 1 && found && h->kind == HIT_PROMPT_OK) prompt_finish();
+    if (button == 1 && found && h->kind == HIT_PROMPT_CANCEL) gamemenu_prompt_cancel();
+    if (found && h->kind == HIT_OSK_KEY && (button == 0 || button == 1)) {  /* the on-screen keyboard's keys */
+        if (osk_row != h->a || osk_col != h->b) osk_row = h->a, osk_col = h->b, changed();
+        if (button == 1) osk_press(), changed();
+    }
+    if (button == 1 && found && h->kind == HIT_OSK_PAGE) osk_step_language(), changed();  /* the switcher's arrows */
+}
+
+/* Mouse hit dispatch for sidebar, Settings, Cheats, Online, Overlay, popup, hints, and preview.
+ * Returns 1 if handled, -1 to return immediately without the trailing changed() check, 0 otherwise. */
+static int gamemenu_mouse_pages(const Hit *h, float x, int click, int drag) {
+    switch (h->kind) {
+    case HIT_SIDE:
+        /* hovering chooses on the side panel; on a page, only a click goes to another item */
+        if (click) sel = h->a, focus = 0, accept();
+        else if (!focus) sel = h->a;
+        return 1;
+    case HIT_SECTION:
+        if (click) srow = h->a, focus = 1, in_rows = 0;
+        return 1;
+    case HIT_ROW: case HIT_ROW_PREV: case HIT_ROW_NEXT:
+        if (sel == GM_CHEATS) {  /* the Cheats page's rows */
+            crow = h->a, focus = 1;
+            if (click) settings_cheat_change(h->a, h->kind == HIT_ROW_PREV ? -1 : 1);
+            return 1;
         }
-        float tb[4];
-        if (button == 4 && textin_has(&prompt_text) && gamemenu_text_rect(tb, NULL)) {  /* the drawn box, copied safely */
-            char text[TEXTIN_MAX]; int cur;
-            textin_read(&prompt_text, text, sizeof text, &cur, NULL);
-            int fh = prompt_body[0] ? 52 : 72;
-            int offset = ui_text_offset_at(UI_ROUNDED_800, 32, tb[0] + 20, tb[1] + (fh - 32 * 1.3f) / 2,
-                                          tb[2] - 40 - 100, 32 * 1.3f, 1, text, cur, x, y);
-            textin_drag(offset), changed();
+        srow = h->a, focus = 1, in_rows = 1;
+        if (click) settings_change(h->a, h->kind == HIT_ROW_PREV ? -1 : 1);
+        return 1;
+    case HIT_ROW_SLIDER:  /* a slider row's track (SHARPENING): a click or a drag sets it where the mouse is */
+        srow = h->a, focus = 1, in_rows = 1;
+        if (click || drag) settings_slide(h->a, (x - h->x - ROW_SLIDER_PAD) / (h->w - 2 * ROW_SLIDER_PAD)), changed();
+        return 1;
+    case HIT_ON_ITEM:  /* the Online page: a: its control (ON_*); b: a switch's side (0 Public / Off, 1 Private / On), -1 */
+        if (!online_enabled(h->a)) return 1;
+        focus = 1, orow = h->a;
+        if (click) online_use(h->a, h->b < 0 ? 0 : h->b ? 1 : -1);
+        return 1;
+    case HIT_MODE:
+        focus = 1, prow = 0;
+        if (click) window_hud_set_mode(perf_modes[h->a]), settings_save();
+        return 1;
+    case HIT_CORNER:
+        focus = 1, prow = 1;
+        if (click) window_hud_set_corner(h->a), settings_save();
+        return 1;
+    case HIT_CORNER_BOX:
+        focus = 1, prow = 1;
+        if (click) window_hud_set_corner((window_hud_corner() + 1) % 4), settings_save();
+        return 1;
+    case HIT_PART:
+        focus = 1, prow = 2 + h->a;
+        if (click) window_hud_set_parts(window_hud_parts() ^ (1u << h->a)), settings_save();
+        return 1;
+    case HIT_SLIDER:  /* a: 1 opacity; the track from x to x + w */
+        focus = 1, prow = 6 + h->a;
+        if (click || drag) settings_hud_set(h->a, (x - h->x) / h->w), changed();
+        return 1;
+    case HIT_POPUP:
+        choice = h->a;
+        if (click) gamemenu_action(GM_ACCEPT);
+        return -1;
+    case HIT_HINT:  /* a key hint along the bottom: clicked, as its key */
+        if (!click) return -1;
+        if (h->a == HINT_CLOSE) close_and_resume();
+        else gamemenu_action(h->a);
+        return -1;
+    case HIT_PREVIEW:  /* the Settings page's Preview button */
+        if (click) preview_start(), changed();
+        return -1;
+    default:
+        return 0;
+    }
+}
+
+/* Mouse hit dispatch for the Controls page (bindings, mouse-buttons subpage, keyboard/pad views); returns 1 if handled. */
+static int gamemenu_mouse_controls(const Hit *h, int click) {
+    switch (h->kind) {
+    case HIT_BIND:
+        focus = 1, bindings_select(h->a, h->b < 0 ? -1 : h->b);
+        if (click && bindings_on_mouse_row()) mb_page_open();  /* the Mouse buttons row: its page */
+        else if (click && h->b != -2) bindings_action(SETTINGS_ACCEPT);  /* a key: waits for the new one; a value: the next */
+        return 1;
+    case HIT_MB_BACK:
+        if (click) mb_open = 0, mb_list = 0;
+        return 1;
+    case HIT_MB_SET:
+        if (click) mb_set = h->a;
+        return 1;
+    case HIT_MB_ROW:  /* a part's row or the part on the drawing: hovering chooses it, a click opens the list */
+        if (!mb_list && mb_row != h->a) mb_row = h->a, changed();
+        if (click && !mb_list) {
+            int ids[48], cur;
+            mb_entries(ids, 48, &cur);
+            mb_list = 1, mb_list_sel = cur;
         }
-        if (button == 1 && found && h.kind == HIT_PROMPT_OK) prompt_finish();
-        if (button == 1 && found && h.kind == HIT_PROMPT_CANCEL) gamemenu_prompt_cancel();
-        if (found && h.kind == HIT_OSK_KEY && (button == 0 || button == 1)) {  /* the on-screen keyboard's keys */
-            if (osk_row != h.a || osk_col != h.b) osk_row = h.a, osk_col = h.b, changed();
-            if (button == 1) osk_press(), changed();
+        return 1;
+    case HIT_MB_STEP:
+        if (click) mb_step(h->a, h->b);
+        return 1;
+    case HIT_MB_OPT:
+        if (mb_list_sel != h->a) mb_list_sel = h->a, changed();
+        if (click) {
+            int ids[48], cur, n = mb_entries(ids, 48, &cur);
+            if (h->a < n) bindings_mouse_set(mb_set, mb_row, ids[h->a]);
+            mb_list = 0;
         }
-        if (button == 1 && found && h.kind == HIT_OSK_PAGE) osk_step_language(), changed();  /* the switcher's arrows */
+        return 1;
+    case HIT_MB_SCRIM:  /* a click beside the list closes it */
+        if (click) mb_list = 0;
+        return 1;
+    case HIT_KV_TAB:
+        if (click && !bindings_capturing()) focus = 1, ctrl_view = h->a;
+        return 1;
+    case HIT_KV_MODE:
+        if (click) focus = 1, KV_SET(h->a);
+        return 1;
+    case HIT_KV_KEY: case HIT_PV_PART:  /* pointing is enough: the detail bar follows the hover */
+        return 1;
+    case HIT_BIND_STEP:  /* a value's arrows on the controls page: b -1 or 1, as Left / Right */
+        focus = 1, bindings_select(h->a, -1);
+        if (click) bindings_action(h->b < 0 ? SETTINGS_LEFT : SETTINGS_RIGHT);
+        return 1;
+    default:
+        return 0;
+    }
+}
+
+/* Mouse hit dispatch for the bug-report pages; returns 1 if handled. */
+static int gamemenu_mouse_bug(const Hit *h, float x, float y, int button, int click) {
+    /* the report's pages: hovering only shows where the mouse is; a click picks, ticks, types or presses */
+    switch (h->kind) {
+    case HIT_BUG_KIND:
+        if (click) focus = 1, brow = 0, bug_kind = h->a;
+        return 1;
+    case HIT_BUG_TEXT: {
+        char text[TEXTIN_MAX]; int cur;
+        textin_read(&bug_text, text, sizeof text, &cur, NULL);
+        float tlh = 18 * 1.5f;
+        int offset = ui_text_offset_at(UI_GOTHIC_500, 18, h->x + 20, h->y + 16, h->w - 40, tlh, (int)((h->h - 32) / tlh), text, cur, x, y);
+        if (click) focus = 1, brow = 1, textin_focus(&bug_text), textin_set_caret(offset);
+        else if (button == 2) focus = 1, brow = 1, textin_focus(&bug_text), textin_select_word(offset);
+        return 1;
+    }
+    case HIT_BUG_OFTEN:
+        if (click) focus = 1, brow = 2, bug_often = h->a;
+        return 1;
+    case HIT_BUG_NEXT:
+        if (click) focus = 1, bug_page = 1, brow = 0;
+        return 1;
+    case HIT_BUG_TICK:
+        if (click) focus = 1, brow = h->a, bug_attach ^= 1u << h->a;
+        return 1;
+    case HIT_BUG_BTN:
+        if (click) {
+            focus = 1, brow = 3, bug_btn = h->a;
+            if (h->a == 0) bug_page = 0, brow = 3;
+            else bug_finish(h->a == 2);
+        }
+        return 1;
+    case HIT_BUG_DONE:
+        if (click) focus = 1, bug_done_btn = h->a, bug_done_press(h->a);
+        return 1;
+    default:
+        return 0;
+    }
+}
+
+void gamemenu_mouse(float x, float y, int button) {
+    if (!gamemenu_open() || settings_legacy_open() || bindings_capturing()) return;
+    Hit h;
+    int found = hit_find(x, y, &h);
+    if (gamemenu_prompting()) {
+        gamemenu_mouse_prompt(x, y, button, found, &h);
         return;
     }
     if (button == 3) {  /* the right button: back, as Escape */
@@ -1285,144 +1451,10 @@ void gamemenu_mouse(float x, float y, int button) {
     int click = button == 1, drag = button == 4;  /* 4: moved with the left button held (a slider's thumb) */
     int before = sel * 1000 + focus * 100 + srow + prow * 37 + choice * 7 + in_rows * 500 + brow * 11 + bug_page * 3 + crow * 13 +
                  orow * 17;
-    switch (h.kind) {
-    case HIT_SIDE:
-        /* hovering chooses on the side panel; on a page, only a click goes to another item */
-        if (click) sel = h.a, focus = 0, accept();
-        else if (!focus) sel = h.a;
-        break;
-    case HIT_SECTION:
-        if (click) srow = h.a, focus = 1, in_rows = 0;
-        break;
-    case HIT_ROW: case HIT_ROW_PREV: case HIT_ROW_NEXT:
-        if (sel == GM_CHEATS) {  /* the Cheats page's rows */
-            crow = h.a, focus = 1;
-            if (click) settings_cheat_change(h.a, h.kind == HIT_ROW_PREV ? -1 : 1);
-            break;
-        }
-        srow = h.a, focus = 1, in_rows = 1;
-        if (click) settings_change(h.a, h.kind == HIT_ROW_PREV ? -1 : 1);
-        break;
-    case HIT_ROW_SLIDER:  /* a slider row's track (SHARPENING): a click or a drag sets it where the mouse is */
-        srow = h.a, focus = 1, in_rows = 1;
-        if (click || drag) settings_slide(h.a, (x - h.x - ROW_SLIDER_PAD) / (h.w - 2 * ROW_SLIDER_PAD)), changed();
-        break;
-    case HIT_BIND:
-        focus = 1, bindings_select(h.a, h.b < 0 ? -1 : h.b);
-        if (click && bindings_on_mouse_row()) mb_page_open();  /* the Mouse buttons row: its page */
-        else if (click && h.b != -2) bindings_action(SETTINGS_ACCEPT);  /* a key: waits for the new one; a value: the next */
-        break;
-    case HIT_MB_BACK:
-        if (click) mb_open = 0, mb_list = 0;
-        break;
-    case HIT_MB_SET:
-        if (click) mb_set = h.a;
-        break;
-    case HIT_MB_ROW:  /* a part's row or the part on the drawing: hovering chooses it, a click opens the list */
-        if (!mb_list && mb_row != h.a) mb_row = h.a, changed();
-        if (click && !mb_list) {
-            int ids[48], cur;
-            mb_entries(ids, 48, &cur);
-            mb_list = 1, mb_list_sel = cur;
-        }
-        break;
-    case HIT_MB_STEP:
-        if (click) mb_step(h.a, h.b);
-        break;
-    case HIT_MB_OPT:
-        if (mb_list_sel != h.a) mb_list_sel = h.a, changed();
-        if (click) {
-            int ids[48], cur, n = mb_entries(ids, 48, &cur);
-            if (h.a < n) bindings_mouse_set(mb_set, mb_row, ids[h.a]);
-            mb_list = 0;
-        }
-        break;
-    case HIT_MB_SCRIM:  /* a click beside the list closes it */
-        if (click) mb_list = 0;
-        break;
-    case HIT_KV_TAB:
-        if (click && !bindings_capturing()) focus = 1, ctrl_view = h.a;
-        break;
-    case HIT_KV_MODE:
-        if (click) focus = 1, KV_SET(h.a);
-        break;
-    case HIT_KV_KEY: case HIT_PV_PART:  /* pointing is enough: the detail bar follows the hover */
-        break;
-    case HIT_ON_ITEM:  /* the Online page: a: its control (ON_*); b: a switch's side (0 Public / Off, 1 Private / On), -1 */
-        if (!online_enabled(h.a)) break;
-        focus = 1, orow = h.a;
-        if (click) online_use(h.a, h.b < 0 ? 0 : h.b ? 1 : -1);
-        break;
-    case HIT_MODE:
-        focus = 1, prow = 0;
-        if (click) window_hud_set_mode(perf_modes[h.a]), settings_save();
-        break;
-    case HIT_CORNER:
-        focus = 1, prow = 1;
-        if (click) window_hud_set_corner(h.a), settings_save();
-        break;
-    case HIT_CORNER_BOX:
-        focus = 1, prow = 1;
-        if (click) window_hud_set_corner((window_hud_corner() + 1) % 4), settings_save();
-        break;
-    case HIT_PART:
-        focus = 1, prow = 2 + h.a;
-        if (click) window_hud_set_parts(window_hud_parts() ^ (1u << h.a)), settings_save();
-        break;
-    case HIT_SLIDER:  /* a: 1 opacity; the track from x to x + w */
-        focus = 1, prow = 6 + h.a;
-        if (click || drag) settings_hud_set(h.a, (x - h.x) / h.w), changed();
-        break;
-    case HIT_POPUP:
-        choice = h.a;
-        if (click) gamemenu_action(GM_ACCEPT);
-        return;
-    case HIT_HINT:  /* a key hint along the bottom: clicked, as its key */
-        if (!click) return;
-        if (h.a == HINT_CLOSE) close_and_resume();
-        else gamemenu_action(h.a);
-        return;
-    case HIT_PREVIEW:  /* the Settings page's Preview button */
-        if (click) preview_start(), changed();
-        return;
-    case HIT_BIND_STEP:  /* a value's arrows on the controls page: b -1 or 1, as Left / Right */
-        focus = 1, bindings_select(h.a, -1);
-        if (click) bindings_action(h.b < 0 ? SETTINGS_LEFT : SETTINGS_RIGHT);
-        break;
-    /* the report's pages: hovering only shows where the mouse is; a click picks, ticks, types or presses */
-    case HIT_BUG_KIND:
-        if (click) focus = 1, brow = 0, bug_kind = h.a;
-        break;
-    case HIT_BUG_TEXT:
-        {
-            char text[TEXTIN_MAX]; int cur;
-            textin_read(&bug_text, text, sizeof text, &cur, NULL);
-            float tlh = 18 * 1.5f;
-            int offset = ui_text_offset_at(UI_GOTHIC_500, 18, h.x + 20, h.y + 16, h.w - 40, tlh, (int)((h.h - 32) / tlh), text, cur, x, y);
-            if (click) focus = 1, brow = 1, textin_focus(&bug_text), textin_set_caret(offset);
-            else if (button == 2) focus = 1, brow = 1, textin_focus(&bug_text), textin_select_word(offset);
-        }
-        break;
-    case HIT_BUG_OFTEN:
-        if (click) focus = 1, brow = 2, bug_often = h.a;
-        break;
-    case HIT_BUG_NEXT:
-        if (click) focus = 1, bug_page = 1, brow = 0;
-        break;
-    case HIT_BUG_TICK:
-        if (click) focus = 1, brow = h.a, bug_attach ^= 1u << h.a;
-        break;
-    case HIT_BUG_BTN:
-        if (click) {
-            focus = 1, brow = 3, bug_btn = h.a;
-            if (h.a == 0) bug_page = 0, brow = 3;
-            else bug_finish(h.a == 2);
-        }
-        break;
-    case HIT_BUG_DONE:
-        if (click) focus = 1, bug_done_btn = h.a, bug_done_press(h.a);
-        break;
-    }
+    int r = gamemenu_mouse_pages(&h, x, click, drag);
+    if (r < 0) return;
+    if (!r && !gamemenu_mouse_controls(&h, click))
+        gamemenu_mouse_bug(&h, x, y, button, click);
     if (click || sel * 1000 + focus * 100 + srow + prow * 37 + choice * 7 + in_rows * 500 + brow * 11 + bug_page * 3 + crow * 13 +
                          orow * 17 != before)
         changed();

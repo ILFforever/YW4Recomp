@@ -2379,6 +2379,220 @@ static void ab_trace_depth(const GpuState *s, uint64_t exec, uint64_t at, const 
             s->program ? s->program->stages[1].key : 0, gpu_ab_game);
 }
 
+/* Pipeline, binding, and render-target state commands (called with gpu_lock held). */
+static inline void gpu_exec_state(VkCommandBuffer cb, GpuState *s, const CmdRec *r, uint64_t exec, uint64_t at) {
+    switch (r->op) {
+    case CMD_BIND_PROGRAM: s->program = (NvnProgram *)(uintptr_t)r->x[0]; break;
+    case CMD_BIND_BLEND: memcpy(s->blend[r->extra[0] & 7], r->extra, 8); break;
+    case CMD_BIND_COLOR: memcpy(s->color, r->extra, 4); break;
+    case CMD_BIND_CHANNEL_MASK: memcpy(&s->channel_mask, r->extra, 4); break;
+    case CMD_BIND_DEPTH_STENCIL: memcpy(s->depth_stencil, r->extra, 8); break;
+    case CMD_BIND_POLYGON: memcpy(s->polygon, r->extra, 4); break;
+    case CMD_BIND_MULTISAMPLE: break;  /* single-sampled for now */
+    case CMD_BIND_VERTEX_ATTRIB:
+        s->nattribs = r->x[0] < 16 ? (uint32_t)r->x[0] : 16;
+        memcpy(s->attribs, r->extra, s->nattribs * 4);
+        break;
+    case CMD_BIND_VERTEX_STREAM:
+        s->nstreams = r->x[0] < 16 ? (uint32_t)r->x[0] : 16;
+        memcpy(s->streams, r->extra, s->nstreams * 8);
+        break;
+    case CMD_BIND_VERTEX_BUFFERS:  /* (index, address, size) */
+        if (r->x[0] < 16) s->vbuf[r->x[0]] = (GpuRange){r->x[1], r->x[2]};
+        break;
+    case CMD_BIND_UNIFORM_BUFFERS:  /* (stage, index, address, size) */
+        if (r->x[0] < STAGES && r->x[1] < UBOS) s->ubo[r->x[0]][r->x[1]] = (GpuRange){r->x[2], r->x[3]};
+        break;
+    case CMD_BIND_STORAGE_BUFFERS:
+        if (r->x[0] < STAGES && r->x[1] < SSBOS) s->ssbo[r->x[0]][r->x[1]] = (GpuRange){r->x[2], r->x[3]};
+        break;
+    case CMD_BIND_TEXTURES:  /* (stage, index, handle) */
+        if (r->x[0] < STAGES && r->x[1] < TEXTURES) s->tex[r->x[0]][r->x[1]] = r->x[2];
+        break;
+    case CMD_BIND_IMAGES:
+        if (r->x[0] < STAGES && r->x[1] < TEXTURES) s->img[r->x[0]][r->x[1]] = r->x[2];
+        break;
+    case CMD_SET_TEXTURE_POOL:
+    case CMD_SET_SAMPLER_POOL: {
+        const NvnDescPool **p = r->op == CMD_SET_TEXTURE_POOL ? &s->tex_pool : &s->sampler_pool;
+        if (*p != (const NvnDescPool *)(uintptr_t)r->x[0] && nvn_trace_texpool(UINT32_MAX) > 0)
+            fprintf(stderr, "yw4: texpool: frame %" PRIu64 ": %s pool %p -> %p\n", gpu_frames(),
+                    r->op == CMD_SET_TEXTURE_POOL ? "texture" : "sampler", (const void *)*p, (const void *)(uintptr_t)r->x[0]);
+        *p = (const NvnDescPool *)(uintptr_t)r->x[0];
+        break;
+    }
+    case CMD_SET_RENDER_TARGETS:
+        gpu_end_rendering(cb, s);
+        gpu_taa_targets_end(cb);  /* TAA: the G-buffer's motion, before the game reuses it */
+        memcpy(&s->rt, r->extra, sizeof s->rt);
+        render_targets_fix(&s->rt);  /* point at our own copies of the textures */
+        s->ncolor = r->x[0] > 8 ? 8 : (int)r->x[0];
+        s->targets_noted = 0;  /* noted at the first draw, with the state the game draws with */
+        gpu_ab_targets(cb, s);
+        gpu_passes_targets(cb, s);
+        ab_trace_depth(s, exec, at, "targets");
+        break;
+    case CMD_SET_VIEWPORTS:  /* (x, y, w, h) */
+        for (int i = 0; i < 4; i++) s->viewport[i] = (int32_t)r->x[i];
+        s->have_viewport = 1;
+        break;
+    case CMD_SET_SCISSORS:
+        for (int i = 0; i < 4; i++) s->scissor[i] = (int32_t)r->x[i];
+        s->have_scissor = 1;
+        break;
+    case CMD_SET_DEPTH_RANGES: s->depth_range[0] = r->f[0], s->depth_range[1] = r->f[1]; break;
+    case CMD_SET_BLEND_COLOR: memcpy(s->blend_color, r->extra, 16); break;
+    case CMD_SET_STENCIL: {  /* (faces, value); x[6]: 0 reference, 1 write mask, 2 value mask */
+        uint32_t *v = r->x[6] == 0 ? s->stencil_ref : r->x[6] == 1 ? s->stencil_mask : s->stencil_value_mask;
+        if (r->x[0] & 1) v[0] = (uint32_t)r->x[1];
+        if (r->x[0] & 2) v[1] = (uint32_t)r->x[1];
+        break;
+    }
+    case CMD_SET_POLYGON_OFFSET: memcpy(s->polygon_offset, r->f, 12); break;
+    case CMD_SET_RASTERIZER_DISCARD: s->rasterizer_discard = (int)r->x[0]; break;
+    case CMD_SET_DEPTH_CLAMP: s->depth_clamp = (int)r->x[0]; break;
+    }
+}
+
+/* Color and depth-stencil clear commands (called with gpu_lock held). */
+static inline void gpu_exec_clear(VkCommandBuffer cb, GpuState *s, const CmdRec *r, uint64_t exec, uint64_t at) {
+    if (r->op == CMD_CLEAR_COLOR) {  /* (index, colour, mask) */
+        uint32_t i = (uint32_t)r->x[0];
+        NvnTexture *t = i < (uint32_t)s->ncolor && i < 8 ? s->rt.color[i] : NULL;
+        if (!t) return;
+        if (gpu_watch_on()) gpu_watch_clear(t);
+        gpu_end_rendering(cb, s);
+        if ((r->x[2] & 0xF) != 0xF) {
+            static int logged;
+            if (!logged++)
+                fprintf(stderr, "yw4: gpu: clear with channel mask %#x: whole texels for now\n", (unsigned)r->x[2]);
+        }
+        GpuImage *g = image_of(cb, t);
+        VkClearColorValue color;
+        memcpy(color.float32, r->extra, 16);
+        VkImageSubresourceRange range = target_range(g, &s->rt.views[i], s->rt.has_view[i]);
+        vkCmdClearColorImage(cb, g->image, VK_IMAGE_LAYOUT_GENERAL, &color, 1, &range);
+        full_barrier(cb);
+    } else {  /* CMD_CLEAR_DEPTH_STENCIL: (depth in s0; depth mask, stencil, stencil mask in x1..x3) */
+        ab_trace_depth(s, exec, at, "clear");
+        NvnTexture *t = s->rt.depth;
+        if (!t) return;
+        gpu_end_rendering(cb, s);
+        GpuImage *g = image_of(cb, t);
+        VkImageSubresourceRange range = target_range(g, &s->rt.depth_view, s->rt.has_depth_view);
+        range.aspectMask = 0;
+        if (r->x[0] && g->aspect & VK_IMAGE_ASPECT_DEPTH_BIT) range.aspectMask |= VK_IMAGE_ASPECT_DEPTH_BIT;
+        if ((r->x[2] & 0xFF) && g->aspect & VK_IMAGE_ASPECT_STENCIL_BIT) range.aspectMask |= VK_IMAGE_ASPECT_STENCIL_BIT;
+        if (!range.aspectMask) return;
+        VkClearDepthStencilValue v = {.depth = r->f[0], .stencil = (uint32_t)r->x[1] & 0xFF};
+        vkCmdClearDepthStencilImage(cb, g->image, VK_IMAGE_LAYOUT_GENERAL, &v, 1, &range);
+        full_barrier(cb);
+    }
+}
+
+/* Direct draw commands (CMD_DRAW_ARRAYS / CMD_DRAW_ELEMENTS); returns 1 if *at jumped for A/B replay. */
+static inline int gpu_exec_draw(VkCommandBuffer cb, GpuState *s, const CmdRec *r, uint64_t exec, uint64_t *at) {
+    ab_trace_depth(s, exec, *at, "draw");
+    if (s->skip_next_draw) {  /* a game shadow draw ours replaces, kept for the A/B's second run */
+        s->skip_next_draw = 0;
+        return 0;
+    }
+    /* same-frame A/B of one screen-pass draw (YW4_AB_PASS=screen): a range of just this draw, run
+     * again from the draw itself */
+    int ab_draw = gpu_screen_ab_draw(s);
+    char ab_name[16];  /* 'b' or 'e', then the pass's name for the log: the program */
+    if (ab_draw) {
+        snprintf(ab_name, sizeof ab_name, "bfs %06" PRIx64, s->program->stages[1].key >> 40);
+        gpu_ab_marker(cb, s, ab_name, (uint32_t)strlen(ab_name), exec, *at, at);
+        ab_name[0] = 'e';
+    }
+    if (!s->targets_noted) gpu_shadow_note_targets(s), s->targets_noted = 1;
+    /* (primitive, type, count, ...) / (primitive, first, count, ...): count, and the instances */
+    /* YW4_MASK_BREAKDOWN: the shadow mask's draw on a line of its own in the per-pass timer, by form */
+    const char *mask_form = gpu_mask_breakdown_label(s);
+    if (mask_form) gpu_passes_other(cb, mask_form, 0);
+    gpu_passes_draw(s->program, r->x[2] * (r->op == CMD_DRAW_ELEMENTS ? (r->x[6] ? r->x[6] : 1) : (r->x[4] ? r->x[4] : 1)));
+    gpu_draw(cb, s, r);
+    if (mask_form) gpu_passes_other(cb, "(after the shadow mask)", 0);
+    if (ab_draw && gpu_ab_marker(cb, s, ab_name, (uint32_t)strlen(ab_name), exec, *at + r->size, at)) return 1;
+    return 0;
+}
+
+/* Native renderer pass command (CMD_NATIVE); returns 1 if *at jumped for A/B replay. */
+static inline int gpu_exec_native(VkCommandBuffer cb, GpuState *s, const CmdRec *r, uint64_t exec, uint64_t *at) {
+    {   /* YW4_AB_TRACE=<from>-<to>: in those GPU frames, the order the A/B's markers, our shadow passes and
+         * the skipped game shadow draws run in (is our pass inside the compared range?) */
+        static uint64_t tr_from = 1, tr_to;
+        if (tr_from == 1) {
+            tr_from = 0;
+            const char *e = getenv("YW4_AB_TRACE");
+            if (e) sscanf(e, "%" SCNu64 "-%" SCNu64, &tr_from, &tr_to);
+        }
+        uint64_t gf = gpu_frames();
+        NvnNativePass fn = (NvnNativePass)(uintptr_t)r->x[0];
+        if (gf >= tr_from && gf <= tr_to && tr_to) {
+            if (fn == gpu_ab_native)
+                fprintf(stderr, "yw4: abtrace: frame %" PRIu64 " exec %#" PRIx64 " at %" PRIu64 ": A/B marker %.*s (run %d)\n",
+                        gf, (uint64_t)exec, (uint64_t)*at, (int)r->x[1], (const char *)r->extra, gpu_ab_game);
+            else if (fn == gpu_shadow_pass) {
+                const ShadowPass *sp;
+                memcpy(&sp, r->extra, sizeof sp);
+                fprintf(stderr, "yw4: abtrace: frame %" PRIu64 " exec %#" PRIx64 " at %" PRIu64 ": our shadow pass, %u draws"
+                        " into %#" PRIx64 "/%u (run %d)\n", gf, (uint64_t)exec, (uint64_t)*at, sp ? sp->n : 0,
+                        sp ? sp->depth_addr : 0, sp ? sp->depth_layer : 0, gpu_ab_game);
+            } else if (fn == gpu_shadow_game_draw)
+                fprintf(stderr, "yw4: abtrace: frame %" PRIu64 " exec %#" PRIx64 " at %" PRIu64 ": game draw marker (run %d)\n",
+                        gf, (uint64_t)exec, (uint64_t)*at, gpu_ab_game);
+        }
+    }
+    if ((NvnNativePass)(uintptr_t)r->x[0] == gpu_ab_native) {  /* same-frame A/B: may run a range again */
+        if (gpu_ab_marker(cb, s, r->extra, (uint32_t)r->x[1], exec, *at + r->size, at)) return 1;
+        return 0;
+    }
+    if ((NvnNativePass)(uintptr_t)r->x[0] == gpu_shadow_pass) {  /* our shadow pass: its own time */
+        gpu_passes_other(cb, "our shadow pass", 0);
+        gpu_shadow_pass(cb, s, r->extra, (uint32_t)r->x[1]);
+        gpu_passes_targets(cb, s);
+        return 0;
+    }
+    if ((NvnNativePass)(uintptr_t)r->x[0] == gpu_gbuffer_draw && s->skip_next_draw) {
+        s->skip_next_draw = 0;  /* a game shadow draw ours replaces (in shadow layers they come in place) */
+        return 0;
+    }
+    if ((NvnNativePass)(uintptr_t)r->x[0] == gpu_gbuffer_draw) {  /* a draw, in place */
+        /* noted as the game's draws are: our shadow pass draws where a layer's draws went
+         * (a cutscene's second shadow map), and a layer can be all in-place draws */
+        if (!s->targets_noted) gpu_shadow_note_targets(s), s->targets_noted = 1;
+        const GBufferDraw *d = (const GBufferDraw *)r->extra;
+        gpu_passes_draw(s->program, (uint64_t)(d->index_count ? d->index_count : d->vertex_count) * (d->instances ? d->instances : 1));
+    }
+    ((NvnNativePass)(uintptr_t)r->x[0])(cb, s, r->extra, (uint32_t)r->x[1]);
+    return 0;
+}
+
+/* Counter-report and conditional-rendering commands (called with gpu_lock held). */
+static inline void gpu_exec_query(VkCommandBuffer cb, GpuState *s, const CmdRec *r) {
+    if (r->op == CMD_REPORT_COUNTER) {  /* (counter, address): NVNcounterData {u64 value, u64 GPU ticks at 614.4 MHz} */
+        static uint32_t logged;
+        if (r->x[0] < 32 && !(logged & 1u << r->x[0])) {
+            logged |= 1u << r->x[0];
+            fprintf(stderr, "yw4: gpu: ReportCounter type %u (first use)\n", (unsigned)r->x[0]);
+        }
+        uint64_t *out = (uint64_t *)(uintptr_t)r->x[1];
+        /* 1 = SAMPLES_PASSED: the value comes from an occlusion query, on the GPU (gpu_query.c) */
+        if (r->x[0] == 1) gpu_query_report(cb, s, r->x[1]);
+        else out[0] = 0;
+        out[1] = (uint64_t)((unsigned __int128)(uint64_t)host_now_ns() * 384 / 625);
+    } else {  /* CMD_SET_RENDER_ENABLE: (enable), or x[6] = 1: (mode, counter address) */
+        if (!r->x[6] && !r->x[0]) {
+            static int logged;
+            if (!logged++)
+                fprintf(stderr, "yw4: gpu: SetRenderEnable(false): not done, its draws are made (first use)\n");
+        }
+        gpu_query_render_enable(cb, s, r->x[6] ? (int)r->x[0] + 1 : 0, r->x[1]);
+    }
+}
+
 void gpu_execute(uint64_t handle) {
     int64_t t0 = host_now_ns();
     host_lock(&gpu_lock);
@@ -2409,225 +2623,40 @@ void gpu_execute(uint64_t handle) {
             continue;
         }
         switch (r->op) {
-        /* ---- state */
-        case CMD_BIND_PROGRAM: s.program = (NvnProgram *)(uintptr_t)r->x[0]; break;
-        case CMD_BIND_BLEND: memcpy(s.blend[r->extra[0] & 7], r->extra, 8); break;
-        case CMD_BIND_COLOR: memcpy(s.color, r->extra, 4); break;
-        case CMD_BIND_CHANNEL_MASK: memcpy(&s.channel_mask, r->extra, 4); break;
-        case CMD_BIND_DEPTH_STENCIL: memcpy(s.depth_stencil, r->extra, 8); break;
-        case CMD_BIND_POLYGON: memcpy(s.polygon, r->extra, 4); break;
-        case CMD_BIND_MULTISAMPLE: break;  /* single-sampled for now */
-        case CMD_BIND_VERTEX_ATTRIB:
-            s.nattribs = r->x[0] < 16 ? (uint32_t)r->x[0] : 16;
-            memcpy(s.attribs, r->extra, s.nattribs * 4);
+        case CMD_CLEAR_COLOR:
+        case CMD_CLEAR_DEPTH_STENCIL:
+            gpu_exec_clear(cb, &s, r, exec, at);
             break;
-        case CMD_BIND_VERTEX_STREAM:
-            s.nstreams = r->x[0] < 16 ? (uint32_t)r->x[0] : 16;
-            memcpy(s.streams, r->extra, s.nstreams * 8);
+        case CMD_DRAW_ARRAYS:
+        case CMD_DRAW_ELEMENTS:
+            if (gpu_exec_draw(cb, &s, r, exec, &at)) continue;
             break;
-        case CMD_BIND_VERTEX_BUFFERS:  /* (index, address, size) */
-            if (r->x[0] < 16) s.vbuf[r->x[0]] = (GpuRange){r->x[1], r->x[2]};
-            break;
-        case CMD_BIND_UNIFORM_BUFFERS:  /* (stage, index, address, size) */
-            if (r->x[0] < STAGES && r->x[1] < UBOS) s.ubo[r->x[0]][r->x[1]] = (GpuRange){r->x[2], r->x[3]};
-            break;
-        case CMD_BIND_STORAGE_BUFFERS:
-            if (r->x[0] < STAGES && r->x[1] < SSBOS) s.ssbo[r->x[0]][r->x[1]] = (GpuRange){r->x[2], r->x[3]};
-            break;
-        case CMD_BIND_TEXTURES:  /* (stage, index, handle) */
-            if (r->x[0] < STAGES && r->x[1] < TEXTURES) s.tex[r->x[0]][r->x[1]] = r->x[2];
-            break;
-        case CMD_BIND_IMAGES:
-            if (r->x[0] < STAGES && r->x[1] < TEXTURES) s.img[r->x[0]][r->x[1]] = r->x[2];
-            break;
-        case CMD_SET_TEXTURE_POOL:
-        case CMD_SET_SAMPLER_POOL: {
-            const NvnDescPool **p = r->op == CMD_SET_TEXTURE_POOL ? &s.tex_pool : &s.sampler_pool;
-            if (*p != (const NvnDescPool *)(uintptr_t)r->x[0] && nvn_trace_texpool(UINT32_MAX) > 0)
-                fprintf(stderr, "yw4: texpool: frame %" PRIu64 ": %s pool %p -> %p\n", gpu_frames(),
-                        r->op == CMD_SET_TEXTURE_POOL ? "texture" : "sampler", (const void *)*p, (const void *)(uintptr_t)r->x[0]);
-            *p = (const NvnDescPool *)(uintptr_t)r->x[0];
-            break;
-        }
-        case CMD_SET_RENDER_TARGETS:
-            gpu_end_rendering(cb, &s);
-            gpu_taa_targets_end(cb);  /* TAA: the G-buffer's motion, before the game reuses it */
-            memcpy(&s.rt, r->extra, sizeof s.rt);
-            render_targets_fix(&s.rt);  /* point at our own copies of the textures */
-            s.ncolor = r->x[0] > 8 ? 8 : (int)r->x[0];
-            s.targets_noted = 0;  /* noted at the first draw, with the state the game draws with */
-            gpu_ab_targets(cb, &s);
-            gpu_passes_targets(cb, &s);
-            ab_trace_depth(&s, exec, at, "targets");
-            break;
-        case CMD_SET_VIEWPORTS:  /* (x, y, w, h) */
-            for (int i = 0; i < 4; i++) s.viewport[i] = (int32_t)r->x[i];
-            s.have_viewport = 1;
-            break;
-        case CMD_SET_SCISSORS:
-            for (int i = 0; i < 4; i++) s.scissor[i] = (int32_t)r->x[i];
-            s.have_scissor = 1;
-            break;
-        case CMD_SET_DEPTH_RANGES: s.depth_range[0] = r->f[0], s.depth_range[1] = r->f[1]; break;
-        case CMD_SET_BLEND_COLOR: memcpy(s.blend_color, r->extra, 16); break;
-        case CMD_SET_STENCIL: {  /* (faces, value); x[6]: 0 reference, 1 write mask, 2 value mask */
-            uint32_t *v = r->x[6] == 0 ? s.stencil_ref : r->x[6] == 1 ? s.stencil_mask : s.stencil_value_mask;
-            if (r->x[0] & 1) v[0] = (uint32_t)r->x[1];
-            if (r->x[0] & 2) v[1] = (uint32_t)r->x[1];
-            break;
-        }
-        case CMD_SET_POLYGON_OFFSET: memcpy(s.polygon_offset, r->f, 12); break;
-        case CMD_SET_RASTERIZER_DISCARD: s.rasterizer_discard = (int)r->x[0]; break;
-        case CMD_SET_DEPTH_CLAMP: s.depth_clamp = (int)r->x[0]; break;
-
-        /* ---- work */
-        case CMD_CLEAR_COLOR: {  /* (index, colour, mask) */
-            uint32_t i = (uint32_t)r->x[0];
-            NvnTexture *t = i < (uint32_t)s.ncolor && i < 8 ? s.rt.color[i] : NULL;
-            if (!t) break;
-            if (gpu_watch_on()) gpu_watch_clear(t);
-            gpu_end_rendering(cb, &s);
-            if ((r->x[2] & 0xF) != 0xF) {
-                static int logged;
-                if (!logged++)
-                    fprintf(stderr, "yw4: gpu: clear with channel mask %#x: whole texels for now\n", (unsigned)r->x[2]);
-            }
-            GpuImage *g = image_of(cb, t);
-            VkClearColorValue color;
-            memcpy(color.float32, r->extra, 16);
-            VkImageSubresourceRange range = target_range(g, &s.rt.views[i], s.rt.has_view[i]);
-            vkCmdClearColorImage(cb, g->image, VK_IMAGE_LAYOUT_GENERAL, &color, 1, &range);
-            full_barrier(cb);
-            break;
-        }
-        case CMD_CLEAR_DEPTH_STENCIL: {  /* (depth in s0; depth mask, stencil, stencil mask in x1..x3) */
-            ab_trace_depth(&s, exec, at, "clear");
-            NvnTexture *t = s.rt.depth;
-            if (!t) break;
-            gpu_end_rendering(cb, &s);
-            GpuImage *g = image_of(cb, t);
-            VkImageSubresourceRange range = target_range(g, &s.rt.depth_view, s.rt.has_depth_view);
-            range.aspectMask = 0;
-            if (r->x[0] && g->aspect & VK_IMAGE_ASPECT_DEPTH_BIT) range.aspectMask |= VK_IMAGE_ASPECT_DEPTH_BIT;
-            if ((r->x[2] & 0xFF) && g->aspect & VK_IMAGE_ASPECT_STENCIL_BIT) range.aspectMask |= VK_IMAGE_ASPECT_STENCIL_BIT;
-            if (!range.aspectMask) break;
-            VkClearDepthStencilValue v = {.depth = r->f[0], .stencil = (uint32_t)r->x[1] & 0xFF};
-            vkCmdClearDepthStencilImage(cb, g->image, VK_IMAGE_LAYOUT_GENERAL, &v, 1, &range);
-            full_barrier(cb);
-            break;
-        }
-        case CMD_DRAW_ARRAYS: case CMD_DRAW_ELEMENTS: {
-            ab_trace_depth(&s, exec, at, "draw");
-            if (s.skip_next_draw) {  /* a game shadow draw ours replaces, kept for the A/B's second run */
-                s.skip_next_draw = 0;
-                break;
-            }
-            /* same-frame A/B of one screen-pass draw (YW4_AB_PASS=screen): a range of just this draw, run
-             * again from the draw itself */
-            int ab_draw = gpu_screen_ab_draw(&s);
-            char ab_name[16];  /* 'b' or 'e', then the pass's name for the log: the program */
-            if (ab_draw) {
-                snprintf(ab_name, sizeof ab_name, "bfs %06" PRIx64, s.program->stages[1].key >> 40);
-                gpu_ab_marker(cb, &s, ab_name, (uint32_t)strlen(ab_name), exec, at, &at);
-                ab_name[0] = 'e';
-            }
-            if (!s.targets_noted) gpu_shadow_note_targets(&s), s.targets_noted = 1;
-            /* (primitive, type, count, ...) / (primitive, first, count, ...): count, and the instances */
-            /* YW4_MASK_BREAKDOWN: the shadow mask's draw on a line of its own in the per-pass timer, by form */
-            const char *mask_form = gpu_mask_breakdown_label(&s);
-            if (mask_form) gpu_passes_other(cb, mask_form, 0);
-            gpu_passes_draw(s.program, r->x[2] * (r->op == CMD_DRAW_ELEMENTS ? (r->x[6] ? r->x[6] : 1) : (r->x[4] ? r->x[4] : 1)));
-            gpu_draw(cb, &s, r);
-            if (mask_form) gpu_passes_other(cb, "(after the shadow mask)", 0);
-            if (ab_draw && gpu_ab_marker(cb, &s, ab_name, (uint32_t)strlen(ab_name), exec, at + r->size, &at)) continue;
-            break;
-        }
-        case CMD_DRAW_ARRAYS_INDIRECT: case CMD_DRAW_ELEMENTS_INDIRECT: case CMD_DRAW_TRANSFORM_FEEDBACK: {
+        case CMD_DRAW_ARRAYS_INDIRECT:
+        case CMD_DRAW_ELEMENTS_INDIRECT:
+        case CMD_DRAW_TRANSFORM_FEEDBACK: {
             static int logged;
             if (!logged++) fprintf(stderr, "yw4: gpu: indirect / transform feedback draws skipped for now\n");
             break;
         }
-        case CMD_DISPATCH: {
+        case CMD_DISPATCH:
             gpu_passes_other(cb, "compute", s.program ? s.program->stages[5].key : 0);
             gpu_dispatch(cb, &s, r);
             gpu_passes_targets(cb, &s);
             break;
-        }
         case CMD_BARRIER:
             gpu_end_rendering(cb, &s);
             full_barrier(cb);
             break;
         case CMD_NATIVE:  /* a pass of our own renderer (decision 0024) */
-            {   /* YW4_AB_TRACE=<from>-<to>: in those GPU frames, the order the A/B's markers, our shadow passes and
-                 * the skipped game shadow draws run in (is our pass inside the compared range?) */
-                static uint64_t tr_from = 1, tr_to;
-                if (tr_from == 1) {
-                    tr_from = 0;
-                    const char *e = getenv("YW4_AB_TRACE");
-                    if (e) sscanf(e, "%" SCNu64 "-%" SCNu64, &tr_from, &tr_to);
-                }
-                uint64_t gf = gpu_frames();
-                NvnNativePass fn = (NvnNativePass)(uintptr_t)r->x[0];
-                if (gf >= tr_from && gf <= tr_to && tr_to) {
-                    if (fn == gpu_ab_native)
-                        fprintf(stderr, "yw4: abtrace: frame %" PRIu64 " exec %#" PRIx64 " at %" PRIu64 ": A/B marker %.*s (run %d)\n",
-                                gf, (uint64_t)exec, (uint64_t)at, (int)r->x[1], (const char *)r->extra, gpu_ab_game);
-                    else if (fn == gpu_shadow_pass) {
-                        const ShadowPass *sp;
-                        memcpy(&sp, r->extra, sizeof sp);
-                        fprintf(stderr, "yw4: abtrace: frame %" PRIu64 " exec %#" PRIx64 " at %" PRIu64 ": our shadow pass, %u draws"
-                                " into %#" PRIx64 "/%u (run %d)\n", gf, (uint64_t)exec, (uint64_t)at, sp ? sp->n : 0,
-                                sp ? sp->depth_addr : 0, sp ? sp->depth_layer : 0, gpu_ab_game);
-                    } else if (fn == gpu_shadow_game_draw)
-                        fprintf(stderr, "yw4: abtrace: frame %" PRIu64 " exec %#" PRIx64 " at %" PRIu64 ": game draw marker (run %d)\n",
-                                gf, (uint64_t)exec, (uint64_t)at, gpu_ab_game);
-                }
-            }
-            if ((NvnNativePass)(uintptr_t)r->x[0] == gpu_ab_native) {  /* same-frame A/B: may run a range again */
-                if (gpu_ab_marker(cb, &s, r->extra, (uint32_t)r->x[1], exec, at + r->size, &at)) continue;
-                break;
-            }
-            if ((NvnNativePass)(uintptr_t)r->x[0] == gpu_shadow_pass) {  /* our shadow pass: its own time */
-                gpu_passes_other(cb, "our shadow pass", 0);
-                gpu_shadow_pass(cb, &s, r->extra, (uint32_t)r->x[1]);
-                gpu_passes_targets(cb, &s);
-                break;
-            }
-            if ((NvnNativePass)(uintptr_t)r->x[0] == gpu_gbuffer_draw && s.skip_next_draw) {
-                s.skip_next_draw = 0;  /* a game shadow draw ours replaces (in shadow layers they come in place) */
-                break;
-            }
-            if ((NvnNativePass)(uintptr_t)r->x[0] == gpu_gbuffer_draw) {  /* a draw, in place */
-                /* noted as the game's draws are: our shadow pass draws where a layer's draws went
-                 * (a cutscene's second shadow map), and a layer can be all in-place draws */
-                if (!s.targets_noted) gpu_shadow_note_targets(&s), s.targets_noted = 1;
-                const GBufferDraw *d = (const GBufferDraw *)r->extra;
-                gpu_passes_draw(s.program, (uint64_t)(d->index_count ? d->index_count : d->vertex_count) * (d->instances ? d->instances : 1));
-            }
-            ((NvnNativePass)(uintptr_t)r->x[0])(cb, &s, r->extra, (uint32_t)r->x[1]);
+            if (gpu_exec_native(cb, &s, r, exec, &at)) continue;
             break;
-        case CMD_REPORT_COUNTER: {  /* (counter, address): NVNcounterData {u64 value, u64 GPU ticks at 614.4 MHz} */
-            static uint32_t logged;
-            if (r->x[0] < 32 && !(logged & 1u << r->x[0])) {
-                logged |= 1u << r->x[0];
-                fprintf(stderr, "yw4: gpu: ReportCounter type %u (first use)\n", (unsigned)r->x[0]);
-            }
-            uint64_t *out = (uint64_t *)(uintptr_t)r->x[1];
-            /* 1 = SAMPLES_PASSED: the value comes from an occlusion query, on the GPU (gpu_query.c) */
-            if (r->x[0] == 1) gpu_query_report(cb, &s, r->x[1]);
-            else out[0] = 0;
-            out[1] = (uint64_t)((unsigned __int128)(uint64_t)host_now_ns() * 384 / 625);
+        case CMD_REPORT_COUNTER:
+        case CMD_SET_RENDER_ENABLE:
+            gpu_exec_query(cb, &s, r);
             break;
-        }
-        case CMD_SET_RENDER_ENABLE: {  /* (enable), or x[6] = 1: (mode, counter address) */
-            if (!r->x[6] && !r->x[0]) {
-                static int logged;
-                if (!logged++)
-                    fprintf(stderr, "yw4: gpu: SetRenderEnable(false): not done, its draws are made (first use)\n");
-            }
-            gpu_query_render_enable(cb, &s, r->x[6] ? (int)r->x[0] + 1 : 0, r->x[1]);
+        default:
+            gpu_exec_state(cb, &s, r, exec, at);
             break;
-        }
         }
         at += r->size;
     }

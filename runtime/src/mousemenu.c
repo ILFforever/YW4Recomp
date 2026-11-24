@@ -781,31 +781,28 @@ static int script_step(float *mx, float *my, int w, int h, uint32_t *buttons, ui
     return 1;
 }
 
-uint64_t mousemenu_update(float mx, float my, int w, int h, uint32_t mouse_buttons, int *want_cursor) {
-    static uint64_t press, press_until, gap_until, press_reads, gap_reads;  /* the button being pressed now */
-    static int step_from = -1;  /* a D-pad step's start focus, until the screen's focus changes */
-    static uint64_t step_at;
-    static int click_target = -1, hover_target = -1, last_hover = -1, back_wanted, moved, unanswered, pad_page;
-    static int last_idx = -1;
-    static uint64_t last_menu;
-    static uint32_t last_buttons;
-    static float last_x = -1, last_y = -1;
-    static int target_is_sib;
-    *want_cursor = 0;
-    if (!enabled()) return 0;
-    uint64_t now = SDL_GetTicks();
-    int open = __atomic_load_n(&pad_open, __ATOMIC_ACQUIRE);
-    if (open) script_step(&mx, &my, w, h, &mouse_buttons, now);
-    uint32_t down = mouse_buttons & ~last_buttons;
-    last_buttons = mouse_buttons;
-    if (!open) {
-        press = 0, click_target = hover_target = last_hover = -1, step_from = -1, back_wanted = moved = pad_page = 0;
-        target_is_sib = 0;
-        last_idx = -1, last_menu = 0;
-        last_x = mx, last_y = my;
-        return 0;
-    }
-    *want_cursor = 1;
+/* Persistent state for mousemenu_update across calls (SDL thread only). */
+typedef struct {
+    uint64_t press, press_until, gap_until, press_reads, gap_reads;  /* the button being pressed now */
+    int step_from;  /* a D-pad step's start focus, until the screen's focus changes */
+    uint64_t step_at;
+    int click_target, hover_target, last_hover, back_wanted, moved, unanswered, pad_page;
+    int last_idx;
+    uint64_t last_menu;
+    uint32_t last_buttons;
+    float last_x, last_y;
+    int target_is_sib;
+} MouseMenuState;
+
+/* Per-update snapshot of the active game menu screen. */
+typedef struct {
+    int idx, front, focus;
+    const Screen *s;
+    uint64_t ctrl, lv;
+} MouseMenuFrame;
+
+/* Phase 1: check destroyed boxes, active screen transitions, PAGE_OPENING timeout, and current focus. */
+static void mousemenu_sync_screen(MouseMenuState *st, uint64_t now, MouseMenuFrame *f) {
     /* a box over an Ark Swap screen that closed with no pick (the room list's after its scan; owner's runs 2026-11-20:
      * the wheel worked there only after opening and backing out of Recruit's box): the game destroyed it, so its
      * object is no longer a box (the destructors set its type back to a base class's). A box waiting for its click
@@ -820,14 +817,14 @@ uint64_t mousemenu_update(float mx, float my, int w, int h, uint32_t mouse_butto
     int idx = __atomic_load_n(&active_idx, __ATOMIC_ACQUIRE);
     uint64_t menu = __atomic_load_n(&active_menu, __ATOMIC_ACQUIRE);
     const Screen *s = idx >= 0 && idx < NSCREENS ? &screens[idx] : NULL;
-    if (idx != last_idx || menu != last_menu) {
-        int was_members = is_members_screen(last_idx) && is_members_screen(idx) && menu == last_menu;
-        last_idx = idx, last_menu = menu;
+    if (idx != st->last_idx || menu != st->last_menu) {
+        int was_members = is_members_screen(st->last_idx) && is_members_screen(idx) && menu == st->last_menu;
+        st->last_idx = idx, st->last_menu = menu;
         if (!was_members) {
-            click_target = hover_target = last_hover = -1, step_from = -1, moved = 0, unanswered = 0;
-            target_is_sib = 0;
+            st->click_target = st->hover_target = st->last_hover = -1, st->step_from = -1, st->moved = 0, st->unanswered = 0;
+            st->target_is_sib = 0;
         } else {
-            target_is_sib = 0;
+            st->target_is_sib = 0;
         }
     }
     /* a choice that opened no page (nothing happened in 600 ms on a list or 2 s on the Pad): the screen is still in front */
@@ -847,8 +844,16 @@ uint64_t mousemenu_update(float mx, float my, int w, int h, uint32_t mouse_butto
             __atomic_store_n(&rooms_recruit, 1, __ATOMIC_RELEASE);
         was = b;
     }
-    int focus = front ? screen_focus(s, ctrl, lv) : -1;
-    if (mx != last_x || my != last_y) moved = 1, last_x = mx, last_y = my;
+    f->idx = idx, f->s = s, f->front = front, f->ctrl = ctrl, f->lv = lv;
+    f->focus = front ? screen_focus(s, ctrl, lv) : -1;
+}
+
+/* Phase 2: map cursor position and button edges to hover/click/back targets; returns slot index under cursor or -1. */
+static int mousemenu_track_pointer(MouseMenuState *st, const MouseMenuFrame *f, float mx, float my, int w, int h, uint32_t down) {
+    const Screen *s = f->s;
+    int idx = f->idx, front = f->front, focus = f->focus;
+    uint64_t ctrl = f->ctrl, lv = f->lv;
+    if (mx != st->last_x || my != st->last_y) st->moved = 1, st->last_x = mx, st->last_y = my;
     /* what the mouse asks for, every update (also while a press is under way): a right click is B; on an active
      * screen, a left click on a slot goes there and presses A; moving onto a slot goes there and stays wanted
      * until the focus arrives (a still mouse then leaves the keys and the gamepad alone until it moves onto
@@ -877,44 +882,52 @@ uint64_t mousemenu_update(float mx, float my, int w, int h, uint32_t mouse_butto
             under_sib = slot_at(&screens[sib], 0, mx, my, w, h);
             if (under_sib >= 0) {
                 if (down & SDL_BUTTON_LMASK) {
-                    click_target = under_sib;
-                    target_is_sib = 1;
+                    st->click_target = under_sib;
+                    st->target_is_sib = 1;
                 }
-                if (under_sib != last_hover) {
-                    last_hover = under_sib;
-                    if (moved) {
-                        hover_target = under_sib;
-                        target_is_sib = 1;
+                if (under_sib != st->last_hover) {
+                    st->last_hover = under_sib;
+                    if (st->moved) {
+                        st->hover_target = under_sib;
+                        st->target_is_sib = 1;
                     }
                 }
             }
         } else if (under >= 0) {
-            target_is_sib = 0;
+            st->target_is_sib = 0;
         }
     }
-    if (!front) click_target = hover_target = -1, moved = 0, target_is_sib = 0;
+    if (!front) st->click_target = st->hover_target = -1, st->moved = 0, st->target_is_sib = 0;
     if (down & SDL_BUTTON_RMASK) {
-        back_wanted = 1, click_target = hover_target = -1, target_is_sib = 0;
+        st->back_wanted = 1, st->click_target = st->hover_target = -1, st->target_is_sib = 0;
         __atomic_store_n(&wheel_steps, 0, __ATOMIC_RELEASE);
     } else if ((down & SDL_BUTTON_LMASK) && under >= 0 && (s->flags & SCR_CLICK)) {
-        click_target = under;
-        target_is_sib = 0;
+        st->click_target = under;
+        st->target_is_sib = 0;
     } else if ((down & SDL_BUTTON_LMASK) && under < 0 && front && focus >= 0 && (s->flags & SCR_CLICK_ANY)) {
-        click_target = focus;  /* off the rows: the highlighted one, as A */
-        target_is_sib = 0;
+        st->click_target = focus;  /* off the rows: the highlighted one, as A */
+        st->target_is_sib = 0;
     }
     if (under >= 0) {
-        if (under != last_hover) {
-            last_hover = under;
-            if (moved && (s->flags & SCR_HOVER)) {
-                hover_target = under;
-                target_is_sib = 0;
+        if (under != st->last_hover) {
+            st->last_hover = under;
+            if (st->moved && (s->flags & SCR_HOVER)) {
+                st->hover_target = under;
+                st->target_is_sib = 0;
             }
         }
     } else if (under_sib < 0) {
-        last_hover = -1;
+        st->last_hover = -1;
     }
-    if (hover_target >= 0 && hover_target == focus && !target_is_sib) hover_target = -1;
+    if (st->hover_target >= 0 && st->hover_target == focus && !st->target_is_sib) st->hover_target = -1;
+    return under;
+}
+
+/* Phase 3: pace active button pulses and emit the next D-pad, wheel, A, or B press; returns button mask to hold. */
+static uint64_t mousemenu_step_press(MouseMenuState *st, const MouseMenuFrame *f, float mx, float my, int w, int h,
+                                     uint64_t now, int under) {
+    const Screen *s = f->s;
+    int idx = f->idx, front = f->front, focus = f->focus;
     /* a press lasts until the game has read the input twice (at least 40 ms), then it is up for as long before the
      * next: by reads, not time, so a stall (a screenshot, a loading hitch) can't swallow a press */
     uint64_t reads = window_input_reads();
@@ -923,33 +936,33 @@ uint64_t mousemenu_update(float mx, float my, int w, int h, uint32_t mouse_butto
         if (now >= next_dump) {
             next_dump = now + 500;
             fprintf(stderr, "yw4: mouse menus: state t=%llu screen=%s focus=%d under=%d hover=%d click=%d wheel=%d front=%d\n",
-                    (unsigned long long)now, s ? s->name : "none", focus, under, hover_target, click_target,
+                    (unsigned long long)now, s ? s->name : "none", focus, under, st->hover_target, st->click_target,
                     __atomic_load_n(&wheel_steps, __ATOMIC_ACQUIRE), front);
         }
     }
-    if (press) {
-        if (now < press_until || reads < press_reads) return press;
-        press = 0, gap_until = now + 40, gap_reads = reads + 2;
+    if (st->press) {
+        if (now < st->press_until || reads < st->press_reads) return st->press;
+        st->press = 0, st->gap_until = now + 40, st->gap_reads = reads + 2;
     }
-    if (now < gap_until || reads < gap_reads) return 0;
+    if (now < st->gap_until || reads < st->gap_reads) return 0;
     /* a step's answer: the screen's focus changes. The Pad drops a press in a new direction right after a move
      * (its cursor is still animating), so an unanswered step is sent again after 400 ms; after two unanswered
      * steps in a row the mouse stops asking for that slot (one the game won't move to). */
-    if (step_from >= 0) {
-        if (focus == step_from && now < step_at + 400) return 0;
-        if (focus == step_from && ++unanswered >= 2) unanswered = 0, hover_target = click_target = -1;
-        if (focus != step_from) unanswered = 0;
-        step_from = -1;
+    if (st->step_from >= 0) {
+        if (focus == st->step_from && now < st->step_at + 400) return 0;
+        if (focus == st->step_from && ++st->unanswered >= 2) st->unanswered = 0, st->hover_target = st->click_target = -1;
+        if (focus != st->step_from) st->unanswered = 0;
+        st->step_from = -1;
     }
-    if (back_wanted) back_wanted = 0, press = BTN_B;
+    if (st->back_wanted) st->back_wanted = 0, st->press = BTN_B;
     int wheel = __atomic_load_n(&wheel_steps, __ATOMIC_ACQUIRE);
-    if (!press && front && wheel != 0 && (s->flags & SCR_WHEEL)) {
-        press = (s->flags & SCR_WHEEL_LR) ? (wheel > 0 ? BTN_LEFT : BTN_RIGHT)
-              : s->cols > 1 ? ((pad_page ^= 1) ? BTN_R : BTN_L) : (wheel > 0 ? BTN_UP : BTN_DOWN);
+    if (!st->press && front && wheel != 0 && (s->flags & SCR_WHEEL)) {
+        st->press = (s->flags & SCR_WHEEL_LR) ? (wheel > 0 ? BTN_LEFT : BTN_RIGHT)
+                  : s->cols > 1 ? ((st->pad_page ^= 1) ? BTN_R : BTN_L) : (wheel > 0 ? BTN_UP : BTN_DOWN);
         __atomic_store_n(&wheel_steps, wheel > 0 ? wheel - 1 : wheel + 1, __ATOMIC_RELEASE);
-        hover_target = click_target = -1;
+        st->hover_target = st->click_target = -1;
     }
-    int target = click_target >= 0 ? click_target : hover_target;
+    int target = st->click_target >= 0 ? st->click_target : st->hover_target;
     if (menu_log_on()) {
         static int last_under = -2, last_target = -2, last_front = -1, logged;
         if ((under != last_under || target != last_target || front != last_front) && logged++ < 2000)
@@ -957,38 +970,63 @@ uint64_t mousemenu_update(float mx, float my, int w, int h, uint32_t mouse_butto
                     s ? s->name : "none", front ? "in front" : "covered", under, target, focus);
         last_under = under, last_target = target, last_front = front;
     }
-    if (!press && front && target_is_sib && is_members_screen(idx)) {
-        press = (screens[idx].hash == 0x180cb413u) ? BTN_DOWN : BTN_UP;
-        step_from = focus, step_at = now;
-    } else if (!press && front && target >= 0 && focus >= 0) {
+    if (!st->press && front && st->target_is_sib && is_members_screen(idx)) {
+        st->press = (screens[idx].hash == 0x180cb413u) ? BTN_DOWN : BTN_UP;
+        st->step_from = focus, st->step_at = now;
+    } else if (!st->press && front && target >= 0 && focus >= 0) {
         int cols = s->cols;
         int dr = target / cols - focus / cols, dc = target % cols - focus % cols;
-        if (dr) press = dr > 0 ? BTN_DOWN : BTN_UP;
+        if (dr) st->press = dr > 0 ? BTN_DOWN : BTN_UP;
         else if (dc) {
-            press = dc > 0 ? BTN_RIGHT : BTN_LEFT;
+            st->press = dc > 0 ? BTN_RIGHT : BTN_LEFT;
             if (s->vtable == WATCH_SKILLS_VTABLE) {  /* the press moves the highlight: count it (see wsk_index) */
                 int n = __atomic_load_n(&wsk_index, __ATOMIC_ACQUIRE) + (dc > 0 ? 1 : -1);
                 __atomic_store_n(&wsk_index, n < 0 ? 0 : n > 5 ? 5 : n, __ATOMIC_RELEASE);
             }
-        } else if (click_target >= 0) {
+        } else if (st->click_target >= 0) {
             if (s->vtable == 0x14c60f8u) {
                 MenuRect b = menu_16x9_bounds(w, h);
                 float x = (mx - b.x) * 1280.0f / b.w;
-                if (x >= 470.0f && x <= 530.0f) press = BTN_LEFT;
-                else if (x >= 730.0f && x <= 798.5f) press = BTN_RIGHT;
+                if (x >= 470.0f && x <= 530.0f) st->press = BTN_LEFT;
+                else if (x >= 730.0f && x <= 798.5f) st->press = BTN_RIGHT;
             } else if (s->vtable == RETIRE_MENU_VTABLE && focus == 1) {
                 /* Field Camera changes on Left / Right only (A does nothing there): its < arrow (x 675: owner's F12,
                  * 2026-11-20) steps left, the rest of the row right, cycling (owner: "make E on it cycle right") */
                 MenuRect b = menu_16x9_bounds(w, h);
                 float x = (mx - b.x) * 1280.0f / b.w;
-                press = x >= 650.0f && x <= 705.0f ? BTN_LEFT : BTN_RIGHT;
+                st->press = x >= 650.0f && x <= 705.0f ? BTN_LEFT : BTN_RIGHT;
             } else {
-                press = BTN_A;
+                st->press = BTN_A;
             }
-            click_target = -1;
+            st->click_target = -1;
         }
-        if (press && (dr || dc)) step_from = focus, step_at = now;
+        if (st->press && (dr || dc)) st->step_from = focus, st->step_at = now;
     }
-    if (press) press_until = now + 40, press_reads = reads + 2;
-    return press;
+    if (st->press) st->press_until = now + 40, st->press_reads = reads + 2;
+    return st->press;
+}
+
+uint64_t mousemenu_update(float mx, float my, int w, int h, uint32_t mouse_buttons, int *want_cursor) {
+    static MouseMenuState st = {.step_from = -1, .click_target = -1, .hover_target = -1, .last_hover = -1,
+                                .last_idx = -1, .last_x = -1, .last_y = -1};
+    *want_cursor = 0;
+    if (!enabled()) return 0;
+    uint64_t now = SDL_GetTicks();
+    int open = __atomic_load_n(&pad_open, __ATOMIC_ACQUIRE);
+    if (open) script_step(&mx, &my, w, h, &mouse_buttons, now);
+    uint32_t down = mouse_buttons & ~st.last_buttons;
+    st.last_buttons = mouse_buttons;
+    if (!open) {
+        st.press = 0, st.click_target = st.hover_target = st.last_hover = -1, st.step_from = -1;
+        st.back_wanted = st.moved = st.pad_page = 0;
+        st.target_is_sib = 0;
+        st.last_idx = -1, st.last_menu = 0;
+        st.last_x = mx, st.last_y = my;
+        return 0;
+    }
+    *want_cursor = 1;
+    MouseMenuFrame f;
+    mousemenu_sync_screen(&st, now, &f);
+    int under = mousemenu_track_pointer(&st, &f, mx, my, w, h, down);
+    return mousemenu_step_press(&st, &f, mx, my, w, h, now, under);
 }

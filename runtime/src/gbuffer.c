@@ -1308,266 +1308,246 @@ static void find_world(const float *game_world) {
     unexplained[cur.ret == 0xa4c2d0]++;
 }
 
-void gbuffer_check_draw(const NvnCmdBuf *cb, uint64_t index_addr, uint32_t type, uint32_t count) {
-    if (!cur.armed) return;
-    cur.armed = 0;
-    learn_program(cb);  /* the takeover may run in check mode too */
-    st.draws++;
-    const NvnProgram *p = cb->program;
-    uint64_t rows = local_rows(p);
-    if (rows && cb->trace_ub[0][2] && cur.have_world) {  /* our constants against the game's, bit for bit */
-        const float *game = (const float *)(uintptr_t)cb->trace_ub[0][2];
-        float ours[GBUFFER_OBJECT_FLOATS];
-        object_constants(game, ours);
-        int l = 0;
-        while (l < PROGRAM_STATS && prog_st[l].n && prog_st[l].vs != p->stages[0].key) l++;
-        if (l == PROGRAM_STATS) l = PROGRAM_STATS - 1;  /* full: the last one counts the rest */
-        prog_st[l].vs = p->stages[0].key;
-        prog_st[l].n++;
-        prog_st[l].exact += same_rows(rows, game, cur.hook_object);  /* as captured at the hook */
-        /* the material's textures, against the guest NVNtexture the game bound at fragment slot k (a
-         * slot the program doesn't read may hold an older texture: "another" is not by itself wrong) */
-        uint64_t tex[8];
-        unsigned ntex = cur.item ? material_textures(cur.item, tex) : 0;
-        /* the slots the fragment program reads: the engine's program ([device+0x10d0]+0x2f8) keeps per
-         * stage (+0xc8, +0xd0, +0xd8: fragment) a table of (engine slot, binding) pairs at +0xb8, count
-         * +0xc0, for the textures the shader uses (engine slot = binding in every program seen) */
-        uint32_t reads = 0;
-        uint64_t eprog = U64(cur.device + 0x10d0), fsobj = 0, tab;
-        if (guest_ptr(eprog) && guest_ptr(eprog = U64(eprog + 0x2f8))) fsobj = U64(eprog + 0xd8);
-        if (guest_ptr(fsobj) && guest_ptr(tab = U64(fsobj + 0xb8)))
-            for (unsigned j = 0; j < U32(fsobj + 0xc0) && j < 32; j++)
-                if (U32(tab + 8ull * j) < 32) reads |= 1u << U32(tab + 8ull * j);
-        for (unsigned k = 0; k < ntex && cb->trace_texpool; k++) {
+/* Check-mode texture and sampler comparisons (material, per-draw diff, and scene textures). */
+static inline void gbuffer_check_textures(const NvnCmdBuf *cb, const NvnProgram *p, int l) {
+    /* the material's textures, against the guest NVNtexture the game bound at fragment slot k (a
+     * slot the program doesn't read may hold an older texture: "another" is not by itself wrong) */
+    uint64_t tex[8];
+    unsigned ntex = cur.item ? material_textures(cur.item, tex) : 0;
+    /* the slots the fragment program reads: the engine's program ([device+0x10d0]+0x2f8) keeps per
+     * stage (+0xc8, +0xd0, +0xd8: fragment) a table of (engine slot, binding) pairs at +0xb8, count
+     * +0xc0, for the textures the shader uses (engine slot = binding in every program seen) */
+    uint32_t reads = 0;
+    uint64_t eprog = U64(cur.device + 0x10d0), fsobj = 0, tab;
+    if (guest_ptr(eprog) && guest_ptr(eprog = U64(eprog + 0x2f8))) fsobj = U64(eprog + 0xd8);
+    if (guest_ptr(fsobj) && guest_ptr(tab = U64(fsobj + 0xb8)))
+        for (unsigned j = 0; j < U32(fsobj + 0xc0) && j < 32; j++)
+            if (U32(tab + 8ull * j) < 32) reads |= 1u << U32(tab + 8ull * j);
+    for (unsigned k = 0; k < ntex && cb->trace_texpool; k++) {
+        if (!(reads >> k & 1)) continue;
+        uint64_t h = cb->trace_tex[1][k];
+        uint32_t id = (uint32_t)(h & 0xFFFFF);
+        const NvnTexEntry *e = h && (int)id < cb->trace_texpool->count
+                                   ? (const NvnTexEntry *)cb->trace_texpool->entries + id : NULL;
+        prog_st[l].tex_n++;
+        if (!tex[k]) prog_st[l].tex_unknown++;
+        else if (e && e->tex && e->guest == tex[k]) prog_st[l].tex_ok++;
+        else prog_st[l].tex_other++;
+        /* its sampler: our state against the engine's at the draw, our settings against the
+         * sampler bound with the texture (the handle's high bits) */
+        uint8_t ss[15];
+        uint32_t sid = (uint32_t)(h >> 20);
+        if (!h || !sampler_state(cur.item, k, ss)) continue;
+        prog_st[l].smp_n++;
+        prog_st[l].smp_state += !memcmp(ss, (const void *)(uintptr_t)(cur.device + 0x1120 + 0xfull * k), 15);
+        if (!cb->trace_samplerpool || (int)sid >= cb->trace_samplerpool->count) continue;
+        NvnSamplerDesc ours, game = ((const NvnSamplerDesc *)cb->trace_samplerpool->entries)[sid];
+        sampler_desc(ss, &ours);
+        ours.reduction = game.reduction;  /* not set by the engine */
+        if (!memcmp(&ours, &game, sizeof ours)) prog_st[l].smp_desc++;
+        else {
+            static int shown;
+            if (shown++ < 6)
+                fprintf(stderr, "yw4: gbuffer: sampler differs: game min %u mag %u wrap %u %u %u cmp %u %u lod %g %g"
+                        " bias %g aniso %g; ours min %u mag %u wrap %u %u %u cmp %u %u lod %g %g bias %g aniso %g\n",
+                        game.min_filter, game.mag_filter, game.wrap[0], game.wrap[1], game.wrap[2],
+                        game.compare_mode, game.compare_func, game.lod_min, game.lod_max, game.lod_bias,
+                        game.max_aniso, ours.min_filter, ours.mag_filter, ours.wrap[0], ours.wrap[1], ours.wrap[2],
+                        ours.compare_mode, ours.compare_func, ours.lod_min, ours.lod_max, ours.lod_bias,
+                        ours.max_aniso);
+        }
+    }
+    {  /* what the engine changes per draw beyond what ours provides (constants 2, the material
+        * constants and model material slots, bones 4 and 5; material textures 0..n-1): what a
+        * draw of ours that skips the engine's would still miss */
+        enum { P = 4 };
+        static long n[P], ub[P][2][16], tx[P][2][32];
+        static uint64_t lastd;
+        int pi = !strcmp(pass_name, "gbuffer") ? 0 : !strcmp(pass_name, "material") ? 1 : !strcmp(pass_name, "shadow") ? 2 : 3;
+        unsigned mslot = U16(cur.list + 0x7a);
+        unsigned mmslot = U16(cur.list + 0x74);
+        uint32_t ours_ub = 1u << 2 | 1u << 4 | 1u << 5 | (mslot < 16 ? 1u << mslot : 0) | (mmslot < 16 ? 1u << mmslot : 0);
+        uint64_t t8[8];
+        unsigned nt = cur.item ? material_textures(cur.item, t8) : 0;
+        uint32_t ours_tex = (1u << nt) - 1;
+        __atomic_fetch_add(&n[pi], 1, __ATOMIC_RELAXED);
+        /* only what changed since this thread's previous draw (rebinding the same is free to skip);
+         * for constants, the contents: the engine uploads blocks into fresh memory each time */
+        static _Thread_local uint64_t prev_tex[2][32];
+        static _Thread_local uint8_t prev_ub[2][16][256];
+        for (int st = 0; st < 2; st++) {
+            uint32_t u = cb->bound_ub[st] & ~ours_ub, t = cb->bound_tex[st] & ~(st ? ours_tex : 0);
+            if (p) u &= cbuf_slots(p->stages[st].key);
+            for (int k = 0; k < 16; k++)
+                if (u >> k & 1) {
+                    const void *now = (const void *)(uintptr_t)cb->trace_ub[st][k];
+                    if (now && !memcmp(prev_ub[st][k], now, 256)) u &= ~(1u << k);
+                    if (now) memcpy(prev_ub[st][k], now, 256);
+                }
+            for (int k = 0; k < 32 && k < TRACE_TEXTURES; k++)
+                if (t >> k & 1) {
+                    if (prev_tex[st][k] == cb->trace_tex[st][k]) t &= ~(1u << k);
+                    prev_tex[st][k] = cb->trace_tex[st][k];
+                }
+            for (int k = 0; k < 16; k++) if (u >> k & 1) __atomic_fetch_add(&ub[pi][st][k], 1, __ATOMIC_RELAXED);
+            for (int k = 0; k < 32; k++) if (t >> k & 1) __atomic_fetch_add(&tx[pi][st][k], 1, __ATOMIC_RELAXED);
+        }
+        uint64_t frame = __atomic_load_n(&yw4_frames_presented, __ATOMIC_RELAXED);
+        if (frame >= lastd + 1800 && frame > 2000) {
+            lastd = frame;
+            static const char *nm[P] = {"gbuffer", "material", "shadow", "stages"};
+            for (int q = 0; q < P; q++) {
+                fprintf(stderr, "yw4: gbuffer: per-draw changes not ours: %s %ld draws; constants read:", nm[q], n[q]);
+                for (int st = 0; st < 2; st++)
+                    for (int k = 0; k < 16; k++)
+                        if (ub[q][st][k]) fprintf(stderr, " %s%d:%ld", st ? "fs" : "vs", k, ub[q][st][k]);
+                fprintf(stderr, "; textures:");
+                for (int st = 0; st < 2; st++)
+                    for (int k = 0; k < 32; k++)
+                        if (tx[q][st][k]) fprintf(stderr, " %s%d:%ld", st ? "fs" : "vs", k, tx[q][st][k]);
+                fprintf(stderr, "\n");
+            }
+        }
+    }
+    ((NvnCmdBuf *)cb)->bound_ub[0] = ((NvnCmdBuf *)cb)->bound_ub[1] = 0;
+    ((NvnCmdBuf *)cb)->bound_tex[0] = ((NvnCmdBuf *)cb)->bound_tex[1] = 0;
+    /* the fragment textures beyond the material's (scene textures, the reflection probe), against the
+     * game's binding: texture and sampler, as captured at the hook */
+    if (p && cb->trace_texpool && cb->trace_samplerpool) {
+        uint64_t mt[8];
+        unsigned nmat = cur.item ? material_textures(cur.item, mt) : 0;
+        uint32_t reads = tex_slots(p->stages[1].key);
+        for (unsigned k = nmat; k < TAKEOVER_TEXTURES && k < TRACE_TEXTURES; k++) {
             if (!(reads >> k & 1)) continue;
             uint64_t h = cb->trace_tex[1][k];
-            uint32_t id = (uint32_t)(h & 0xFFFFF);
-            const NvnTexEntry *e = h && (int)id < cb->trace_texpool->count
-                                       ? (const NvnTexEntry *)cb->trace_texpool->entries + id : NULL;
-            prog_st[l].tex_n++;
-            if (!tex[k]) prog_st[l].tex_unknown++;
-            else if (e && e->tex && e->guest == tex[k]) prog_st[l].tex_ok++;
-            else prog_st[l].tex_other++;
-            /* its sampler: our state against the engine's at the draw, our settings against the
-             * sampler bound with the texture (the handle's high bits) */
-            uint8_t ss[15];
-            uint32_t sid = (uint32_t)(h >> 20);
-            if (!h || !sampler_state(cur.item, k, ss)) continue;
-            prog_st[l].smp_n++;
-            prog_st[l].smp_state += !memcmp(ss, (const void *)(uintptr_t)(cur.device + 0x1120 + 0xfull * k), 15);
-            if (!cb->trace_samplerpool || (int)sid >= cb->trace_samplerpool->count) continue;
+            uint32_t id = (uint32_t)(h & 0xFFFFF), sid = (uint32_t)(h >> 20);
+            if (!h || (int)id >= cb->trace_texpool->count || (int)sid >= cb->trace_samplerpool->count) continue;
             NvnSamplerDesc ours, game = ((const NvnSamplerDesc *)cb->trace_samplerpool->entries)[sid];
-            sampler_desc(ss, &ours);
-            ours.reduction = game.reduction;  /* not set by the engine */
-            if (!memcmp(&ours, &game, sizeof ours)) prog_st[l].smp_desc++;
-            else {
-                static int shown;
-                if (shown++ < 6)
-                    fprintf(stderr, "yw4: gbuffer: sampler differs: game min %u mag %u wrap %u %u %u cmp %u %u lod %g %g"
-                            " bias %g aniso %g; ours min %u mag %u wrap %u %u %u cmp %u %u lod %g %g bias %g aniso %g\n",
-                            game.min_filter, game.mag_filter, game.wrap[0], game.wrap[1], game.wrap[2],
-                            game.compare_mode, game.compare_func, game.lod_min, game.lod_max, game.lod_bias,
-                            game.max_aniso, ours.min_filter, ours.mag_filter, ours.wrap[0], ours.wrap[1], ours.wrap[2],
-                            ours.compare_mode, ours.compare_func, ours.lod_min, ours.lod_max, ours.lod_bias,
-                            ours.max_aniso);
-            }
-        }
-        {  /* what the engine changes per draw beyond what ours provides (constants 2, the material
-            * constants and model material slots, bones 4 and 5; material textures 0..n-1): what a
-            * draw of ours that skips the engine's would still miss */
-            enum { P = 4 };
-            static long n[P], ub[P][2][16], tx[P][2][32];
-            static uint64_t lastd;
-            int pi = !strcmp(pass_name, "gbuffer") ? 0 : !strcmp(pass_name, "material") ? 1 : !strcmp(pass_name, "shadow") ? 2 : 3;
-            unsigned mslot = U16(cur.list + 0x7a);
-            unsigned mmslot = U16(cur.list + 0x74);
-            uint32_t ours_ub = 1u << 2 | 1u << 4 | 1u << 5 | (mslot < 16 ? 1u << mslot : 0) | (mmslot < 16 ? 1u << mmslot : 0);
-            uint64_t t8[8];
-            unsigned nt = cur.item ? material_textures(cur.item, t8) : 0;
-            uint32_t ours_tex = (1u << nt) - 1;
-            __atomic_fetch_add(&n[pi], 1, __ATOMIC_RELAXED);
-            /* only what changed since this thread's previous draw (rebinding the same is free to skip);
-             * for constants, the contents: the engine uploads blocks into fresh memory each time */
-            static _Thread_local uint64_t prev_tex[2][32];
-            static _Thread_local uint8_t prev_ub[2][16][256];
-            for (int st = 0; st < 2; st++) {
-                uint32_t u = cb->bound_ub[st] & ~ours_ub, t = cb->bound_tex[st] & ~(st ? ours_tex : 0);
-                if (p) u &= cbuf_slots(p->stages[st].key);
-                for (int k = 0; k < 16; k++)
-                    if (u >> k & 1) {
-                        const void *now = (const void *)(uintptr_t)cb->trace_ub[st][k];
-                        if (now && !memcmp(prev_ub[st][k], now, 256)) u &= ~(1u << k);
-                        if (now) memcpy(prev_ub[st][k], now, 256);
-                    }
-                for (int k = 0; k < 32 && k < TRACE_TEXTURES; k++)
-                    if (t >> k & 1) {
-                        if (prev_tex[st][k] == cb->trace_tex[st][k]) t &= ~(1u << k);
-                        prev_tex[st][k] = cb->trace_tex[st][k];
-                    }
-                for (int k = 0; k < 16; k++) if (u >> k & 1) __atomic_fetch_add(&ub[pi][st][k], 1, __ATOMIC_RELAXED);
-                for (int k = 0; k < 32; k++) if (t >> k & 1) __atomic_fetch_add(&tx[pi][st][k], 1, __ATOMIC_RELAXED);
-            }
-            uint64_t frame = __atomic_load_n(&yw4_frames_presented, __ATOMIC_RELAXED);
-            if (frame >= lastd + 1800 && frame > 2000) {
-                lastd = frame;
-                static const char *nm[P] = {"gbuffer", "material", "shadow", "stages"};
-                for (int q = 0; q < P; q++) {
-                    fprintf(stderr, "yw4: gbuffer: per-draw changes not ours: %s %ld draws; constants read:", nm[q], n[q]);
-                    for (int st = 0; st < 2; st++)
-                        for (int k = 0; k < 16; k++)
-                            if (ub[q][st][k]) fprintf(stderr, " %s%d:%ld", st ? "fs" : "vs", k, ub[q][st][k]);
-                    fprintf(stderr, "; textures:");
-                    for (int st = 0; st < 2; st++)
-                        for (int k = 0; k < 32; k++)
-                            if (tx[q][st][k]) fprintf(stderr, " %s%d:%ld", st ? "fs" : "vs", k, tx[q][st][k]);
-                    fprintf(stderr, "\n");
-                }
-            }
-        }
-        ((NvnCmdBuf *)cb)->bound_ub[0] = ((NvnCmdBuf *)cb)->bound_ub[1] = 0;
-        ((NvnCmdBuf *)cb)->bound_tex[0] = ((NvnCmdBuf *)cb)->bound_tex[1] = 0;
-        /* the fragment textures beyond the material's (scene textures, the reflection probe), against the
-         * game's binding: texture and sampler, as captured at the hook */
-        if (p && cb->trace_texpool && cb->trace_samplerpool) {
-            uint64_t mt[8];
-            unsigned nmat = cur.item ? material_textures(cur.item, mt) : 0;
-            uint32_t reads = tex_slots(p->stages[1].key);
-            for (unsigned k = nmat; k < TAKEOVER_TEXTURES && k < TRACE_TEXTURES; k++) {
-                if (!(reads >> k & 1)) continue;
-                uint64_t h = cb->trace_tex[1][k];
-                uint32_t id = (uint32_t)(h & 0xFFFFF), sid = (uint32_t)(h >> 20);
-                if (!h || (int)id >= cb->trace_texpool->count || (int)sid >= cb->trace_samplerpool->count) continue;
-                NvnSamplerDesc ours, game = ((const NvnSamplerDesc *)cb->trace_samplerpool->entries)[sid];
-                sampler_desc(cur.hook_samp[k], &ours);
-                ours.reduction = game.reduction;
-                prog_st[l].st_n++;
-                prog_st[l].st_tex += ((const NvnTexEntry *)cb->trace_texpool->entries)[id].guest == cur.hook_tex[k];
-                prog_st[l].st_samp += !memcmp(&ours, &game, sizeof ours);
-            }
-        }
-        /* the bone palettes, against vertex constants 4 (this frame's) and 5 (last frame's) the game bound */
-        uint64_t prev;
-        if (cur.bones_size && cb->trace_ub[0][4] && cur.item) {
-            prog_st[l].bn_n++;
-            prog_st[l].bn_hook += !memcmp(cur.bones, (const void *)(uintptr_t)cb->trace_ub[0][4], cur.bones_size);
-            if (cb->trace_ub[0][5] && bone_palette_previous(cur.item, &prev)) {  /* as captured at the hook */
-                prog_st[l].bn_old_n++;
-                prog_st[l].bn_late += !memcmp(cur.hook_old_bones, (const void *)(uintptr_t)cb->trace_ub[0][5], cur.bones_size);
-            }
-        }
-        /* the shader effect, the program and the render state block, against the engine's at the draw */
-        if (cur.item) {
-            uint8_t rs[33];
-            uint64_t effect = effect_of(cur.item), vs = 0, fs = 0;
-            draw_state(cur.item, effect, rs);
-            prog_st[l].pg_n++;
-            prog_st[l].pg_eff += effect == U64(cur.device + 0x27a0);
-            prog_st[l].pg_stages += pass_shaders(effect, &vs, &fs) && cb->program && vs == cb->program->stages[0].code &&
-                                    fs == cb->program->stages[1].code;
-            int same = 1;
-            for (int b = 0; b < 33; b++)
-                if (rs[b] != U8(cur.device + 0xeb9 + b)) prog_st[l].rs_bytes[b]++, same = 0;
-            prog_st[l].rs_ok += same;
-            /* the NVN state objects made from our block, against the engine's (blend 0, channel mask,
-             * colour, depth stencil, multisample, polygon, stencil reference and mask and depth bias,
-             * the two flags) */
-            static const struct { uint8_t at, n; } part[8] = {{0, 8}, {0x40, 4}, {0x44, 4}, {0x48, 8}, {0x50, 0x18},
-                                                              {0x68, 4}, {0x74, 0x14}, {0xb0, 2}};
-            uint8_t nv[NVN_STATE_BYTES];
-            const uint8_t *eng = (const uint8_t *)(uintptr_t)(U64(cur.device + 0x10d0) + NVN_STATE_AT);
-            nvn_state(rs, nv);
-            int nsame = 1;
-            for (int q = 0; q < 8; q++)
-                if (memcmp(nv + part[q].at, eng + part[q].at, part[q].n)) prog_st[l].nv_regions[q]++, nsame = 0;
-            prog_st[l].nv_ok += nsame;
-            /* the model material block, against what the game bound at its slot (list+0x74), in the
-             * stage(s) whose shader reads it; rows 4-21 only for this draw's textures */
-            unsigned mslot = U16(cur.list + 0x74), ntex;
-            for (int st = 0; st < 2 && mslot < 16; st++) {
-                if (!p || !(cbuf_slots(p->stages[st].key) >> mslot & 1) || !cb->trace_ub[st][mslot]) continue;
-                uint8_t mm[0x160];
-                uint8_t mat_state[33];
-                render_state(cur.item, mat_state);
-                model_material(cur.item, mat_state, mm, &ntex);
-                const uint8_t *g = (const uint8_t *)(uintptr_t)cb->trace_ub[st][mslot];
-                int msame = 1;
-                for (int row = 0; row < 22; row++) {
-                    if (row >= 4 && row < 16 && (unsigned)(row - 4) / 2 >= ntex) continue;
-                    if (row >= 16 && (unsigned)(row - 16) >= ntex) continue;
-                    if (memcmp(mm + 16 * row, g + 16 * row, 16)) prog_st[l].mm_rows[row]++, msame = 0;
-                }
-                prog_st[l].mm_n++;
-                prog_st[l].mm_ok += msame;
-                static int shown;
-                if (!msame && shown++ < 6) {
-                    fprintf(stderr, "yw4: gbuffer: model material differs (stage %d, %u textures):", st, ntex);
-                    for (int row = 0; row < 4; row++) {
-                        const float *a = (const float *)(g + 16 * row), *b = (const float *)(mm + 16 * row);
-                        fprintf(stderr, " | row %d game %g %g %g %g ours %g %g %g %g", row, a[0], a[1], a[2], a[3], b[0], b[1],
-                                b[2], b[3]);
-                    }
-                    fprintf(stderr, "\n");
-                }
-                break;
-            }
-            /* the vertex layout, against the attribute and stream states the game bound */
-            uint32_t attrs[16];
-            int other;
-            uint32_t used = vertex_layout(cur.item, attrs, &other), stride = U8(cur.submesh + 0x3e);
-            if (used) {
-                int vsame = !other && cb->trace_nattribs <= 16;
-                for (uint32_t a = 0; vsame && a < cb->trace_nattribs; a++)
-                    vsame = attrs[a] == cb->trace_attribs[a] && (!(used >> a & 1) || a >= 8 ||
-                                                                 (uint32_t)cb->trace_streams[a] == stride);
-                prog_st[l].vl_n++;
-                prog_st[l].vl_ok += vsame;
-                prog_st[l].vl_other += other != 0;
-                static int shown;
-                if (!vsame && !other && shown++ < 6) {
-                    fprintf(stderr, "yw4: gbuffer: vertex layout differs: stride %u, game:", stride);
-                    for (uint32_t a = 0; a < cb->trace_nattribs; a++)
-                        fprintf(stderr, " %#x/%u", cb->trace_attribs[a], a < 8 ? (uint32_t)cb->trace_streams[a] : 0);
-                    fprintf(stderr, "; ours:");
-                    for (int a = 0; a < 16; a++) if (attrs[a]) fprintf(stderr, " %d=%#x", a, attrs[a]);
-                    fprintf(stderr, "\n");
-                }
-            }
-        }
-        /* the material constants, against what the game bound at the draw list's slot (+0x7a) */
-        uint8_t mat[0x80];
-        unsigned slot = U16(cur.list + 0x7a);
-        if (cur.item && slot < 16 && material_constants(cur.item, mat)) {
-            prog_st[l].mat_n++;
-            int reads = 0, eq_all = 1;
-            for (int stage = 0; stage < 2; stage++) {
-                int eq = cb->trace_ub[stage][slot] && !memcmp((const void *)(uintptr_t)cb->trace_ub[stage][slot], mat, 0x80);
-                prog_st[l].mat_ok[stage] += eq;
-                /* only the stages whose shader reads the slot: the other may hold an older block */
-                if (p && cbuf_slots(p->stages[stage].key) >> slot & 1) reads = 1, eq_all &= eq;
-            }
-            prog_st[l].mat_read += reads;
-            prog_st[l].mat_any += reads && eq_all;
-        }
-        prog_st[l].item += cur.item != 0;
-        uint64_t bufs = U64(cur.geometry + 0x20);
-        int ib_ok = U32(cur.submesh + 0xc) ? index_addr && index_addr == indices_of(cur.geometry, cur.submesh)
-                                           : !index_addr;  /* no indices: drawn as the vertices */
-        prog_st[l].ib += ib_ok;
-        if (!ib_ok) show_ib(bufs, cb->trace_vb0, index_addr, type, count);
-        static _Thread_local int shown;
-        if (!same_rows(rows, game, ours) && shown < 6) {
-            shown++;
-            fprintf(stderr, "yw4: gbuffer: vs %016" PRIx64 " constants 2 rows read %#" PRIx64 " (game, then ours):\n",
-                    p->stages[0].key, rows);
-            for (int r = 0; r < LOCAL_ROWS; r++)
-                fprintf(stderr, "yw4: gbuffer:   %2d: %g %g %g %g | %g %g %g %g\n", r, game[4 * r], game[4 * r + 1],
-                        game[4 * r + 2], game[4 * r + 3], ours[4 * r], ours[4 * r + 1], ours[4 * r + 2], ours[4 * r + 3]);
+            sampler_desc(cur.hook_samp[k], &ours);
+            ours.reduction = game.reduction;
+            prog_st[l].st_n++;
+            prog_st[l].st_tex += ((const NvnTexEntry *)cb->trace_texpool->entries)[id].guest == cur.hook_tex[k];
+            prog_st[l].st_samp += !memcmp(&ours, &game, sizeof ours);
         }
     }
-    if (!p || p->stages[0].key != GBUFFER_VS || !cb->trace_ub[0][2]) {
-        summary();
-        return;
+}
+
+/* Check-mode bones, render/NVN state, material/vertex layout, and index-buffer comparisons. */
+static inline void gbuffer_check_state(const NvnCmdBuf *cb, const NvnProgram *p, int l, uint64_t index_addr,
+                                       uint32_t type, uint32_t count) {
+    /* the bone palettes, against vertex constants 4 (this frame's) and 5 (last frame's) the game bound */
+    uint64_t prev;
+    if (cur.bones_size && cb->trace_ub[0][4] && cur.item) {
+        prog_st[l].bn_n++;
+        prog_st[l].bn_hook += !memcmp(cur.bones, (const void *)(uintptr_t)cb->trace_ub[0][4], cur.bones_size);
+        if (cb->trace_ub[0][5] && bone_palette_previous(cur.item, &prev)) {  /* as captured at the hook */
+            prog_st[l].bn_old_n++;
+            prog_st[l].bn_late += !memcmp(cur.hook_old_bones, (const void *)(uintptr_t)cb->trace_ub[0][5], cur.bones_size);
+        }
     }
+    /* the shader effect, the program and the render state block, against the engine's at the draw */
+    if (cur.item) {
+        uint8_t rs[33];
+        uint64_t effect = effect_of(cur.item), vs = 0, fs = 0;
+        draw_state(cur.item, effect, rs);
+        prog_st[l].pg_n++;
+        prog_st[l].pg_eff += effect == U64(cur.device + 0x27a0);
+        prog_st[l].pg_stages += pass_shaders(effect, &vs, &fs) && cb->program && vs == cb->program->stages[0].code &&
+                                fs == cb->program->stages[1].code;
+        int same = 1;
+        for (int b = 0; b < 33; b++)
+            if (rs[b] != U8(cur.device + 0xeb9 + b)) prog_st[l].rs_bytes[b]++, same = 0;
+        prog_st[l].rs_ok += same;
+        /* the NVN state objects made from our block, against the engine's (blend 0, channel mask,
+         * colour, depth stencil, multisample, polygon, stencil reference and mask and depth bias,
+         * the two flags) */
+        static const struct { uint8_t at, n; } part[8] = {{0, 8}, {0x40, 4}, {0x44, 4}, {0x48, 8}, {0x50, 0x18},
+                                                          {0x68, 4}, {0x74, 0x14}, {0xb0, 2}};
+        uint8_t nv[NVN_STATE_BYTES];
+        const uint8_t *eng = (const uint8_t *)(uintptr_t)(U64(cur.device + 0x10d0) + NVN_STATE_AT);
+        nvn_state(rs, nv);
+        int nsame = 1;
+        for (int q = 0; q < 8; q++)
+            if (memcmp(nv + part[q].at, eng + part[q].at, part[q].n)) prog_st[l].nv_regions[q]++, nsame = 0;
+        prog_st[l].nv_ok += nsame;
+        /* the model material block, against what the game bound at its slot (list+0x74), in the
+         * stage(s) whose shader reads it; rows 4-21 only for this draw's textures */
+        unsigned mslot = U16(cur.list + 0x74), ntex;
+        for (int st = 0; st < 2 && mslot < 16; st++) {
+            if (!p || !(cbuf_slots(p->stages[st].key) >> mslot & 1) || !cb->trace_ub[st][mslot]) continue;
+            uint8_t mm[0x160];
+            uint8_t mat_state[33];
+            render_state(cur.item, mat_state);
+            model_material(cur.item, mat_state, mm, &ntex);
+            const uint8_t *g = (const uint8_t *)(uintptr_t)cb->trace_ub[st][mslot];
+            int msame = 1;
+            for (int row = 0; row < 22; row++) {
+                if (row >= 4 && row < 16 && (unsigned)(row - 4) / 2 >= ntex) continue;
+                if (row >= 16 && (unsigned)(row - 16) >= ntex) continue;
+                if (memcmp(mm + 16 * row, g + 16 * row, 16)) prog_st[l].mm_rows[row]++, msame = 0;
+            }
+            prog_st[l].mm_n++;
+            prog_st[l].mm_ok += msame;
+            static int shown;
+            if (!msame && shown++ < 6) {
+                fprintf(stderr, "yw4: gbuffer: model material differs (stage %d, %u textures):", st, ntex);
+                for (int row = 0; row < 4; row++) {
+                    const float *a = (const float *)(g + 16 * row), *b = (const float *)(mm + 16 * row);
+                    fprintf(stderr, " | row %d game %g %g %g %g ours %g %g %g %g", row, a[0], a[1], a[2], a[3], b[0], b[1],
+                            b[2], b[3]);
+                }
+                fprintf(stderr, "\n");
+            }
+            break;
+        }
+        /* the vertex layout, against the attribute and stream states the game bound */
+        uint32_t attrs[16];
+        int other;
+        uint32_t used = vertex_layout(cur.item, attrs, &other), stride = U8(cur.submesh + 0x3e);
+        if (used) {
+            int vsame = !other && cb->trace_nattribs <= 16;
+            for (uint32_t a = 0; vsame && a < cb->trace_nattribs; a++)
+                vsame = attrs[a] == cb->trace_attribs[a] && (!(used >> a & 1) || a >= 8 ||
+                                                             (uint32_t)cb->trace_streams[a] == stride);
+            prog_st[l].vl_n++;
+            prog_st[l].vl_ok += vsame;
+            prog_st[l].vl_other += other != 0;
+            static int shown;
+            if (!vsame && !other && shown++ < 6) {
+                fprintf(stderr, "yw4: gbuffer: vertex layout differs: stride %u, game:", stride);
+                for (uint32_t a = 0; a < cb->trace_nattribs; a++)
+                    fprintf(stderr, " %#x/%u", cb->trace_attribs[a], a < 8 ? (uint32_t)cb->trace_streams[a] : 0);
+                fprintf(stderr, "; ours:");
+                for (int a = 0; a < 16; a++) if (attrs[a]) fprintf(stderr, " %d=%#x", a, attrs[a]);
+                fprintf(stderr, "\n");
+            }
+        }
+    }
+    /* the material constants, against what the game bound at the draw list's slot (+0x7a) */
+    uint8_t mat[0x80];
+    unsigned slot = U16(cur.list + 0x7a);
+    if (cur.item && slot < 16 && material_constants(cur.item, mat)) {
+        prog_st[l].mat_n++;
+        int reads = 0, eq_all = 1;
+        for (int stage = 0; stage < 2; stage++) {
+            int eq = cb->trace_ub[stage][slot] && !memcmp((const void *)(uintptr_t)cb->trace_ub[stage][slot], mat, 0x80);
+            prog_st[l].mat_ok[stage] += eq;
+            /* only the stages whose shader reads the slot: the other may hold an older block */
+            if (p && cbuf_slots(p->stages[stage].key) >> slot & 1) reads = 1, eq_all &= eq;
+        }
+        prog_st[l].mat_read += reads;
+        prog_st[l].mat_any += reads && eq_all;
+    }
+    prog_st[l].item += cur.item != 0;
+    uint64_t bufs = U64(cur.geometry + 0x20);
+    int ib_ok = U32(cur.submesh + 0xc) ? index_addr && index_addr == indices_of(cur.geometry, cur.submesh)
+                                       : !index_addr;  /* no indices: drawn as the vertices */
+    prog_st[l].ib += ib_ok;
+    if (!ib_ok) show_ib(bufs, cb->trace_vb0, index_addr, type, count);
+}
+
+/* Check-mode vertex/index buffer and world/WVP/last-frame matrix checks for GBUFFER_VS draws. */
+static inline void gbuffer_check_main_vs(const NvnCmdBuf *cb, uint64_t index_addr, uint32_t type, uint32_t count) {
     st.main_vs++;
     uint64_t bufs = U64(cur.geometry + 0x20);
     if (bufs && cb->trace_vb0 == U64(bufs) + U32(cur.submesh)) st.vb_ok++;
@@ -1634,6 +1614,42 @@ void gbuffer_check_draw(const NvnCmdBuf *cb, uint64_t index_addr, uint32_t type,
                 models ? U64(models + 0x80) : 0, c2[0], c2[1], c2[2], c2[3], world.m[0], world.m[1], world.m[2],
                 world.m[3]);
     }
+}
+
+void gbuffer_check_draw(const NvnCmdBuf *cb, uint64_t index_addr, uint32_t type, uint32_t count) {
+    if (!cur.armed) return;
+    cur.armed = 0;
+    learn_program(cb);  /* the takeover may run in check mode too */
+    st.draws++;
+    const NvnProgram *p = cb->program;
+    uint64_t rows = local_rows(p);
+    if (rows && cb->trace_ub[0][2] && cur.have_world) {  /* our constants against the game's, bit for bit */
+        const float *game = (const float *)(uintptr_t)cb->trace_ub[0][2];
+        float ours[GBUFFER_OBJECT_FLOATS];
+        object_constants(game, ours);
+        int l = 0;
+        while (l < PROGRAM_STATS && prog_st[l].n && prog_st[l].vs != p->stages[0].key) l++;
+        if (l == PROGRAM_STATS) l = PROGRAM_STATS - 1;  /* full: the last one counts the rest */
+        prog_st[l].vs = p->stages[0].key;
+        prog_st[l].n++;
+        prog_st[l].exact += same_rows(rows, game, cur.hook_object);  /* as captured at the hook */
+        gbuffer_check_textures(cb, p, l);
+        gbuffer_check_state(cb, p, l, index_addr, type, count);
+        static _Thread_local int shown;
+        if (!same_rows(rows, game, ours) && shown < 6) {
+            shown++;
+            fprintf(stderr, "yw4: gbuffer: vs %016" PRIx64 " constants 2 rows read %#" PRIx64 " (game, then ours):\n",
+                    p->stages[0].key, rows);
+            for (int r = 0; r < LOCAL_ROWS; r++)
+                fprintf(stderr, "yw4: gbuffer:   %2d: %g %g %g %g | %g %g %g %g\n", r, game[4 * r], game[4 * r + 1],
+                        game[4 * r + 2], game[4 * r + 3], ours[4 * r], ours[4 * r + 1], ours[4 * r + 2], ours[4 * r + 3]);
+        }
+    }
+    if (!p || p->stages[0].key != GBUFFER_VS || !cb->trace_ub[0][2]) {
+        summary();
+        return;
+    }
+    gbuffer_check_main_vs(cb, index_addr, type, count);
     summary();
 }
 
