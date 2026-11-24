@@ -967,18 +967,26 @@ static void hud_place(int w, int h, uint32_t bw, uint32_t bh, float s, int32_t *
  * corner, blended src + dst * (1 - src.a), into the window's image (swap_views). */
 VkShaderModule gpu_native_shader(const char *name);  /* gpu_aa.c: our SPIR-V from work/build/shaders */
 
-static struct {
-    VkBuffer buf;          /* the upload: drawn into `cpu` (fast memory), then copied here */
+/* Shared GPU resources for the three CPU-rendered blended overlays (HUD, corner notice, quick look): one setup,
+ * one upload, one draw, and one error path that frees partial objects on failure. Present thread only. */
+typedef struct {
+    VkBuffer buf;
     VkDeviceMemory buf_mem;
     void *ptr;
-    uint8_t *cpu;
-    VkImage image;         /* HUD_W x HUD_H, sampled */
+    VkImage image;
     VkDeviceMemory mem;
     VkImageView view;
-    VkSampler sampler;
-    VkDescriptorSetLayout dsl;
     VkDescriptorPool pool;
     VkDescriptorSet set;
+    uint32_t w, h;
+    int failed;
+} BlendedQuad;
+
+static struct {
+    BlendedQuad q;         /* HUD_W x HUD_H, sampled */
+    uint8_t *cpu;          /* drawn into fast memory, then copied into q.ptr */
+    VkSampler sampler;
+    VkDescriptorSetLayout dsl;
     VkPipelineLayout layout;
     struct { VkFormat format; VkPipeline pipe; } pipes[4];  /* one per window format (kept: it rarely changes) */
     int npipes, failed;
@@ -993,63 +1001,144 @@ static void hb_barrier(VkImage image, VkImageLayout from, VkImageLayout to, VkAc
                          NULL, 1, &b);
 }
 
-static int hb_resources(void) {
-    if (hb.set) return 0;
-    if (hb.failed) return -1;
-    hb.failed = 1;  /* until everything below is made */
-    VkBufferCreateInfo bci = {.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO, .size = (VkDeviceSize)HUD_W * HUD_H * 4,
+/* Destroys what there is and zeroes the handles: a failed make leaves none stale (same pattern as frame_free).
+ * Keeps q->pool alive and resets it (vk.h does not load vkDestroyDescriptorPool); quad_make reuses it if non-null. */
+static void quad_free(BlendedQuad *q) {
+    if (q->pool) vkResetDescriptorPool(vk.device, q->pool, 0);  /* frees q->set without destroying the pool */
+    if (q->view) vkDestroyImageView(vk.device, q->view, NULL);
+    if (q->image) vkDestroyImage(vk.device, q->image, NULL);
+    if (q->mem) vkFreeMemory(vk.device, q->mem, NULL);
+    if (q->buf) vkDestroyBuffer(vk.device, q->buf, NULL);
+    if (q->buf_mem) vkFreeMemory(vk.device, q->buf_mem, NULL);  /* freeing it unmaps it */
+    q->set = VK_NULL_HANDLE, q->view = VK_NULL_HANDLE;
+    q->image = VK_NULL_HANDLE, q->mem = VK_NULL_HANDLE, q->buf = VK_NULL_HANDLE, q->buf_mem = VK_NULL_HANDLE;
+    q->ptr = NULL, q->w = q->h = 0;
+}
+
+/* Allocates (or re-creates for a new size) the staging buffer, sampled image and descriptor set for one overlay quad.
+ * Requires hb.sampler and hb.dsl to exist. Sets q->failed on error so a failure is not retried every frame. */
+static int quad_make(BlendedQuad *q, uint32_t w, uint32_t h) {
+    if (q->set && q->w == w && q->h == h) return 0;
+    if (q->failed) return -1;
+    if (q->set) {
+        vkDeviceWaitIdle(vk.device);
+        quad_free(q);
+    }
+    q->failed = 1;  /* until everything below is made */
+    VkBufferCreateInfo bci = {.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO, .size = (VkDeviceSize)w * h * 4,
                               .usage = VK_BUFFER_USAGE_TRANSFER_SRC_BIT};
-    if (vkCreateBuffer(vk.device, &bci, NULL, &hb.buf) != VK_SUCCESS) return -1;
+    if (vkCreateBuffer(vk.device, &bci, NULL, &q->buf) != VK_SUCCESS) return quad_free(q), -1;
     VkMemoryRequirements mr;
-    vkGetBufferMemoryRequirements(vk.device, hb.buf, &mr);
+    vkGetBufferMemoryRequirements(vk.device, q->buf, &mr);
     VkMemoryAllocateInfo mai = {.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO, .allocationSize = mr.size,
                                 .memoryTypeIndex = vk_memory_type(mr.memoryTypeBits, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT |
                                                                                       VK_MEMORY_PROPERTY_HOST_COHERENT_BIT)};
-    if (vkAllocateMemory(vk.device, &mai, NULL, &hb.buf_mem) != VK_SUCCESS) return -1;
-    vkBindBufferMemory(vk.device, hb.buf, hb.buf_mem, 0);
-    vkMapMemory(vk.device, hb.buf_mem, 0, VK_WHOLE_SIZE, 0, &hb.ptr);
-    if (!(hb.cpu = malloc((size_t)HUD_W * HUD_H * 4))) return -1;
+    if (vkAllocateMemory(vk.device, &mai, NULL, &q->buf_mem) != VK_SUCCESS) return quad_free(q), -1;
+    if (vkBindBufferMemory(vk.device, q->buf, q->buf_mem, 0) != VK_SUCCESS ||
+        vkMapMemory(vk.device, q->buf_mem, 0, VK_WHOLE_SIZE, 0, &q->ptr) != VK_SUCCESS)
+        return quad_free(q), -1;
     VkImageCreateInfo ici = {.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO, .imageType = VK_IMAGE_TYPE_2D,
-                             .format = VK_FORMAT_R8G8B8A8_UNORM, .extent = {HUD_W, HUD_H, 1}, .mipLevels = 1,
+                             .format = VK_FORMAT_R8G8B8A8_UNORM, .extent = {w, h, 1}, .mipLevels = 1,
                              .arrayLayers = 1, .samples = VK_SAMPLE_COUNT_1_BIT, .tiling = VK_IMAGE_TILING_OPTIMAL,
                              .usage = VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT};
-    if (vkCreateImage(vk.device, &ici, NULL, &hb.image) != VK_SUCCESS) return -1;
-    vkGetImageMemoryRequirements(vk.device, hb.image, &mr);
+    if (vkCreateImage(vk.device, &ici, NULL, &q->image) != VK_SUCCESS) return quad_free(q), -1;
+    vkGetImageMemoryRequirements(vk.device, q->image, &mr);
     mai.allocationSize = mr.size;
     mai.memoryTypeIndex = vk_memory_type(mr.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
-    if (vkAllocateMemory(vk.device, &mai, NULL, &hb.mem) != VK_SUCCESS) return -1;
-    vkBindImageMemory(vk.device, hb.image, hb.mem, 0);
-    VkImageViewCreateInfo vi = {.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO, .image = hb.image,
+    if (vkAllocateMemory(vk.device, &mai, NULL, &q->mem) != VK_SUCCESS) return quad_free(q), -1;
+    if (vkBindImageMemory(vk.device, q->image, q->mem, 0) != VK_SUCCESS) return quad_free(q), -1;
+    VkImageViewCreateInfo vi = {.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO, .image = q->image,
                                 .viewType = VK_IMAGE_VIEW_TYPE_2D, .format = VK_FORMAT_R8G8B8A8_UNORM,
                                 .subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1}};
-    if (vkCreateImageView(vk.device, &vi, NULL, &hb.view) != VK_SUCCESS) return -1;
-    VkSamplerCreateInfo si = {.sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO, .magFilter = VK_FILTER_NEAREST,
-                              .minFilter = VK_FILTER_NEAREST, .addressModeU = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE,
-                              .addressModeV = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE,
-                              .addressModeW = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE};
-    if (vkCreateSampler(vk.device, &si, NULL, &hb.sampler) != VK_SUCCESS) return -1;
-    VkDescriptorSetLayoutBinding bd = {0, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 1, VK_SHADER_STAGE_FRAGMENT_BIT, NULL};
-    VkDescriptorSetLayoutCreateInfo lci = {.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
-                                           .bindingCount = 1, .pBindings = &bd};
-    if (vkCreateDescriptorSetLayout(vk.device, &lci, NULL, &hb.dsl) != VK_SUCCESS) return -1;
-    VkDescriptorPoolSize ps = {VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 1};
-    VkDescriptorPoolCreateInfo pci = {.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO, .maxSets = 1,
-                                      .poolSizeCount = 1, .pPoolSizes = &ps};
-    if (vkCreateDescriptorPool(vk.device, &pci, NULL, &hb.pool) != VK_SUCCESS) return -1;
-    VkPushConstantRange pc = {VK_SHADER_STAGE_VERTEX_BIT, 0, 32};
-    VkPipelineLayoutCreateInfo pli = {.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO, .setLayoutCount = 1,
-                                      .pSetLayouts = &hb.dsl, .pushConstantRangeCount = 1, .pPushConstantRanges = &pc};
-    if (vkCreatePipelineLayout(vk.device, &pli, NULL, &hb.layout) != VK_SUCCESS) return -1;
-    VkDescriptorSetAllocateInfo dai = {.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO, .descriptorPool = hb.pool,
+    if (vkCreateImageView(vk.device, &vi, NULL, &q->view) != VK_SUCCESS) return quad_free(q), -1;
+    if (!q->pool) {
+        VkDescriptorPoolSize ps = {VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 1};
+        VkDescriptorPoolCreateInfo pci = {.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO, .maxSets = 1,
+                                          .poolSizeCount = 1, .pPoolSizes = &ps};
+        if (vkCreateDescriptorPool(vk.device, &pci, NULL, &q->pool) != VK_SUCCESS) return quad_free(q), -1;
+    }
+    VkDescriptorSetAllocateInfo dai = {.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO, .descriptorPool = q->pool,
                                        .descriptorSetCount = 1, .pSetLayouts = &hb.dsl};
     VkDescriptorSet set;
-    if (vkAllocateDescriptorSets(vk.device, &dai, &set) != VK_SUCCESS) return -1;
-    VkDescriptorImageInfo ii = {hb.sampler, hb.view, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL};
+    if (vkAllocateDescriptorSets(vk.device, &dai, &set) != VK_SUCCESS) return quad_free(q), -1;
+    VkDescriptorImageInfo ii = {hb.sampler, q->view, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL};
     VkWriteDescriptorSet wr = {.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET, .dstSet = set, .dstBinding = 0,
                                .descriptorCount = 1, .descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
                                .pImageInfo = &ii};
     vkUpdateDescriptorSets(vk.device, 1, &wr, 0, NULL);
-    hb.set = set, hb.failed = 0;
+    q->set = set, q->w = w, q->h = h, q->failed = 0;
+    return 0;
+}
+
+/* Uploads the top-left (w x h) of q from q->ptr into q->image; if src is non-NULL, copies w x h rows from src
+ * (stride src_stride pixels) into q->ptr first. Leaves q->image in SHADER_READ_ONLY_OPTIMAL. */
+static void quad_upload(const BlendedQuad *q, const uint8_t *src, uint32_t src_stride, uint32_t w, uint32_t h) {
+    if (src) {
+        for (uint32_t j = 0; j < h; j++)
+            memcpy((uint8_t *)q->ptr + (size_t)j * q->w * 4, src + (size_t)j * src_stride * 4, (size_t)w * 4);
+    }
+    hb_barrier(q->image, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 0, VK_ACCESS_TRANSFER_WRITE_BIT);
+    VkBufferImageCopy copy = {.bufferRowLength = q->w, .imageSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1},
+                              .imageExtent = {w, h, 1}};
+    vkCmdCopyBufferToImage(cmd, q->buf, q->image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &copy);
+    hb_barrier(q->image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+               VK_ACCESS_TRANSFER_WRITE_BIT, VK_ACCESS_SHADER_READ_BIT);
+}
+
+/* Blends the top-left (w x h) of q onto dst at (px, py) in swapchain pixels. dst enters and leaves TRANSFER_DST. */
+static void quad_draw(const BlendedQuad *q, VkImage dst, uint32_t index, VkPipeline pipe, float px, float py,
+                      uint32_t w, uint32_t h) {
+    hb_barrier(dst, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+               VK_ACCESS_TRANSFER_WRITE_BIT, VK_ACCESS_COLOR_ATTACHMENT_READ_BIT | VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT);
+    VkRenderingAttachmentInfo att = {.sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO, .imageView = swap_views[index],
+                                     .imageLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+                                     .loadOp = VK_ATTACHMENT_LOAD_OP_LOAD, .storeOp = VK_ATTACHMENT_STORE_OP_STORE};
+    VkRenderingInfo ri = {.sType = VK_STRUCTURE_TYPE_RENDERING_INFO, .renderArea = {{0, 0}, swap_extent},
+                          .layerCount = 1, .colorAttachmentCount = 1, .pColorAttachments = &att};
+    vkCmdBeginRendering(cmd, &ri);
+    vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, pipe);
+    VkViewport v = {0, 0, (float)swap_extent.width, (float)swap_extent.height, 0, 1};
+    VkRect2D sc = {{0, 0}, swap_extent};
+    vkCmdSetViewport(cmd, 0, 1, &v);
+    vkCmdSetScissor(cmd, 0, 1, &sc);
+    vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, hb.layout, 0, 1, &q->set, 0, NULL);
+    float W = (float)swap_extent.width, H = (float)swap_extent.height;
+    float push[8] = {px / W * 2 - 1, py / H * 2 - 1, (px + (float)w) / W * 2 - 1, (py + (float)h) / H * 2 - 1,
+                     (float)w / (float)q->w, (float)h / (float)q->h, 0, 0};
+    vkCmdPushConstants(cmd, hb.layout, VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof push, push);
+    vkCmdDraw(cmd, 6, 1, 0, 0);
+    vkCmdEndRendering(cmd);
+    hb_barrier(dst, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+               VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT, VK_ACCESS_TRANSFER_WRITE_BIT | VK_ACCESS_TRANSFER_READ_BIT);
+}
+
+static int hb_resources(void) {
+    if (hb.q.set) return 0;
+    if (hb.failed) return -1;
+    hb.failed = 1;  /* until everything below is made */
+    if (!hb.sampler) {
+        VkSamplerCreateInfo si = {.sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO, .magFilter = VK_FILTER_NEAREST,
+                                  .minFilter = VK_FILTER_NEAREST, .addressModeU = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE,
+                                  .addressModeV = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE,
+                                  .addressModeW = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE};
+        if (vkCreateSampler(vk.device, &si, NULL, &hb.sampler) != VK_SUCCESS) return -1;
+    }
+    if (!hb.dsl) {
+        VkDescriptorSetLayoutBinding bd = {0, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 1,
+                                           VK_SHADER_STAGE_FRAGMENT_BIT, NULL};
+        VkDescriptorSetLayoutCreateInfo lci = {.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
+                                               .bindingCount = 1, .pBindings = &bd};
+        if (vkCreateDescriptorSetLayout(vk.device, &lci, NULL, &hb.dsl) != VK_SUCCESS) return -1;
+    }
+    if (!hb.layout) {
+        VkPushConstantRange pc = {VK_SHADER_STAGE_VERTEX_BIT, 0, 32};
+        VkPipelineLayoutCreateInfo pli = {.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO, .setLayoutCount = 1,
+                                          .pSetLayouts = &hb.dsl, .pushConstantRangeCount = 1, .pPushConstantRanges = &pc};
+        if (vkCreatePipelineLayout(vk.device, &pli, NULL, &hb.layout) != VK_SUCCESS) return -1;
+    }
+    if (!hb.cpu && !(hb.cpu = malloc((size_t)HUD_W * HUD_H * 4))) return -1;
+    if (quad_make(&hb.q, HUD_W, HUD_H)) return -1;
+    hb.failed = 0;
     return 0;
 }
 
@@ -1104,17 +1193,10 @@ static VkPipeline hb_pipeline(VkFormat format) {
  * pipeline (its layout, sampler and pipelines) from an image of its own. */
 enum { NOTE_W = 2048, NOTE_H = 256 };
 static struct {
-    VkBuffer buf;
-    VkDeviceMemory buf_mem;
-    void *ptr;
-    uint8_t *cpu;  /* the card at full strength (premultiplied RGBA); faded into ptr each frame */
-    VkImage image;
-    VkDeviceMemory mem;
-    VkImageView view;
-    VkDescriptorPool pool;
-    VkDescriptorSet set;
-    int failed, w, h;  /* w x h: the card's pixels, at its top-left */
-    float s;           /* the scale it was drawn at */
+    BlendedQuad q;
+    uint8_t *cpu;  /* the card at full strength (premultiplied RGBA); faded into q.ptr each frame */
+    int w, h;      /* w x h: the card's pixels, at its top-left */
+    float s;       /* the scale it was drawn at */
 } nb;
 static char note_title[96], note_text[256];
 static int note_on, note_high;
@@ -1176,50 +1258,13 @@ static void window_notice_keys(void) {
 }
 
 static int nb_resources(void) {
-    if (nb.set) return 0;
-    if (nb.failed) return -1;
-    nb.failed = 1;
-    VkBufferCreateInfo bci = {.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO, .size = (VkDeviceSize)NOTE_W * NOTE_H * 4,
-                              .usage = VK_BUFFER_USAGE_TRANSFER_SRC_BIT};
-    if (vkCreateBuffer(vk.device, &bci, NULL, &nb.buf) != VK_SUCCESS) return -1;
-    VkMemoryRequirements mr;
-    vkGetBufferMemoryRequirements(vk.device, nb.buf, &mr);
-    VkMemoryAllocateInfo mai = {.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO, .allocationSize = mr.size,
-                                .memoryTypeIndex = vk_memory_type(mr.memoryTypeBits, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT |
-                                                                                      VK_MEMORY_PROPERTY_HOST_COHERENT_BIT)};
-    if (vkAllocateMemory(vk.device, &mai, NULL, &nb.buf_mem) != VK_SUCCESS) return -1;
-    vkBindBufferMemory(vk.device, nb.buf, nb.buf_mem, 0);
-    vkMapMemory(vk.device, nb.buf_mem, 0, VK_WHOLE_SIZE, 0, &nb.ptr);
-    if (!(nb.cpu = calloc((size_t)NOTE_W * NOTE_H, 4))) return -1;
-    VkImageCreateInfo ici = {.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO, .imageType = VK_IMAGE_TYPE_2D,
-                             .format = VK_FORMAT_R8G8B8A8_UNORM, .extent = {NOTE_W, NOTE_H, 1}, .mipLevels = 1,
-                             .arrayLayers = 1, .samples = VK_SAMPLE_COUNT_1_BIT, .tiling = VK_IMAGE_TILING_OPTIMAL,
-                             .usage = VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT};
-    if (vkCreateImage(vk.device, &ici, NULL, &nb.image) != VK_SUCCESS) return -1;
-    vkGetImageMemoryRequirements(vk.device, nb.image, &mr);
-    mai.allocationSize = mr.size;
-    mai.memoryTypeIndex = vk_memory_type(mr.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
-    if (vkAllocateMemory(vk.device, &mai, NULL, &nb.mem) != VK_SUCCESS) return -1;
-    vkBindImageMemory(vk.device, nb.image, nb.mem, 0);
-    VkImageViewCreateInfo vi = {.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO, .image = nb.image,
-                                .viewType = VK_IMAGE_VIEW_TYPE_2D, .format = VK_FORMAT_R8G8B8A8_UNORM,
-                                .subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1}};
-    if (vkCreateImageView(vk.device, &vi, NULL, &nb.view) != VK_SUCCESS) return -1;
-    VkDescriptorPoolSize ps = {VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 1};
-    VkDescriptorPoolCreateInfo pci = {.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO, .maxSets = 1,
-                                      .poolSizeCount = 1, .pPoolSizes = &ps};
-    if (vkCreateDescriptorPool(vk.device, &pci, NULL, &nb.pool) != VK_SUCCESS) return -1;
-    VkDescriptorSetAllocateInfo dai = {.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO, .descriptorPool = nb.pool,
-                                       .descriptorSetCount = 1, .pSetLayouts = &hb.dsl};
-    VkDescriptorSet set;
-    if (vkAllocateDescriptorSets(vk.device, &dai, &set) != VK_SUCCESS) return -1;
-    VkDescriptorImageInfo ii = {hb.sampler, nb.view, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL};
-    VkWriteDescriptorSet wr = {.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET, .dstSet = set, .dstBinding = 0,
-                               .descriptorCount = 1, .descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-                               .pImageInfo = &ii};
-    vkUpdateDescriptorSets(vk.device, 1, &wr, 0, NULL);
-    nb.set = set, nb.failed = 0;
-    return 0;
+    if (nb.q.set) return 0;
+    if (nb.q.failed) return -1;
+    if (!nb.cpu && !(nb.cpu = calloc((size_t)NOTE_W * NOTE_H, 4))) {
+        nb.q.failed = 1;
+        return -1;
+    }
+    return quad_make(&nb.q, NOTE_W, NOTE_H);
 }
 
 /* The card, at scale s, into nb.cpu (the owner's pick, option C of the mockup, 2026-11-11): a corner toast, a
@@ -1289,39 +1334,13 @@ static void note_draw(VkImage dst, uint32_t index, int32_t x0, int32_t y0, uint3
     uint32_t k = (uint32_t)(a * 256.0f);
     for (int j = 0; j < nb.h; j++) {
         const uint8_t *src = nb.cpu + (size_t)j * NOTE_W * 4;
-        uint8_t *row = (uint8_t *)nb.ptr + (size_t)j * NOTE_W * 4;
+        uint8_t *row = (uint8_t *)nb.q.ptr + (size_t)j * NOTE_W * 4;
         for (int i = 0; i < nb.w * 4; i++) row[i] = (uint8_t)((src[i] * k) >> 8);
     }
-    hb_barrier(nb.image, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 0, VK_ACCESS_TRANSFER_WRITE_BIT);
-    VkBufferImageCopy copy = {.bufferRowLength = NOTE_W, .imageSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1},
-                              .imageExtent = {(uint32_t)nb.w, (uint32_t)nb.h, 1}};
-    vkCmdCopyBufferToImage(cmd, nb.buf, nb.image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &copy);
-    hb_barrier(nb.image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
-               VK_ACCESS_TRANSFER_WRITE_BIT, VK_ACCESS_SHADER_READ_BIT);
-    hb_barrier(dst, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
-               VK_ACCESS_TRANSFER_WRITE_BIT, VK_ACCESS_COLOR_ATTACHMENT_READ_BIT | VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT);
-    VkRenderingAttachmentInfo att = {.sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO, .imageView = swap_views[index],
-                                     .imageLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
-                                     .loadOp = VK_ATTACHMENT_LOAD_OP_LOAD, .storeOp = VK_ATTACHMENT_STORE_OP_STORE};
-    VkRenderingInfo ri = {.sType = VK_STRUCTURE_TYPE_RENDERING_INFO, .renderArea = {{0, 0}, swap_extent},
-                          .layerCount = 1, .colorAttachmentCount = 1, .pColorAttachments = &att};
-    vkCmdBeginRendering(cmd, &ri);
-    vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, pipe);
-    VkViewport v = {0, 0, (float)swap_extent.width, (float)swap_extent.height, 0, 1};
-    VkRect2D sc = {{0, 0}, swap_extent};
-    vkCmdSetViewport(cmd, 0, 1, &v);
-    vkCmdSetScissor(cmd, 0, 1, &sc);
-    vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, hb.layout, 0, 1, &nb.set, 0, NULL);
-    float W = (float)swap_extent.width, H = (float)swap_extent.height;
+    quad_upload(&nb.q, NULL, 0, (uint32_t)nb.w, (uint32_t)nb.h);
     /* the bottom-left corner: the card 40 units in from the left, 48 up from the bottom (its image has a margin) */
     float px = (float)x0 + (40 - 24) * nb.s, py = (float)y0 + (float)bh - 48 * nb.s - (float)note_bottom;
-    float push[8] = {px / W * 2 - 1, py / H * 2 - 1, (px + (float)nb.w) / W * 2 - 1, (py + (float)nb.h) / H * 2 - 1,
-                     (float)nb.w / NOTE_W, (float)nb.h / NOTE_H, 0, 0};
-    vkCmdPushConstants(cmd, hb.layout, VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof push, push);
-    vkCmdDraw(cmd, 6, 1, 0, 0);
-    vkCmdEndRendering(cmd);
-    hb_barrier(dst, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
-               VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT, VK_ACCESS_TRANSFER_WRITE_BIT | VK_ACCESS_TRANSFER_READ_BIT);
+    quad_draw(&nb.q, dst, index, pipe, px, py, (uint32_t)nb.w, (uint32_t)nb.h);
 }
 
 static void hud_draw(VkImage dst, uint32_t index, int32_t x0, int32_t y0, uint32_t bw, uint32_t bh) {
@@ -1349,7 +1368,7 @@ static void hud_draw(VkImage dst, uint32_t index, int32_t x0, int32_t y0, uint32
         yw4_perf_hud(&content, compact, parts);
         hud_style_render(hb.cpu, HUD_W, HUD_H, &content, compact, parts, s, &w, &h);  /* w, h: last time's part */
         for (int j = 0; j < h; j++)  /* the drawn rows into the upload: bulk copies, the mapped memory is slow to read */
-            memcpy((uint8_t *)hb.ptr + (size_t)j * HUD_W * 4, hb.cpu + (size_t)j * HUD_W * 4, (size_t)w * 4);
+            memcpy((uint8_t *)hb.q.ptr + (size_t)j * HUD_W * 4, hb.cpu + (size_t)j * HUD_W * 4, (size_t)w * 4);
     }
     {  /* YW4_HUD_TIME=1: what the HUD's drawing costs per frame, redraws shared out, every 600 frames in the log */
         static int on = -1, n, redraws;
@@ -1366,36 +1385,8 @@ static void hud_draw(VkImage dst, uint32_t index, int32_t x0, int32_t y0, uint32
     hud_shot.content = content, hud_shot.compact = compact, hud_shot.parts = parts, hud_shot.s = s, hud_shot.bh = bh;
     int32_t hx, hy;
     hud_place(w, h, bw, bh, s, &hx, &hy);
-    if (redraw) {
-        hb_barrier(hb.image, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 0, VK_ACCESS_TRANSFER_WRITE_BIT);
-        VkBufferImageCopy copy = {.bufferRowLength = HUD_W, .imageSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1},
-                                  .imageExtent = {(uint32_t)w, (uint32_t)h, 1}};
-        vkCmdCopyBufferToImage(cmd, hb.buf, hb.image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &copy);
-        hb_barrier(hb.image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
-                   VK_ACCESS_TRANSFER_WRITE_BIT, VK_ACCESS_SHADER_READ_BIT);
-    }
-    hb_barrier(dst, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
-               VK_ACCESS_TRANSFER_WRITE_BIT, VK_ACCESS_COLOR_ATTACHMENT_READ_BIT | VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT);
-    VkRenderingAttachmentInfo att = {.sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO, .imageView = swap_views[index],
-                                     .imageLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
-                                     .loadOp = VK_ATTACHMENT_LOAD_OP_LOAD, .storeOp = VK_ATTACHMENT_STORE_OP_STORE};
-    VkRenderingInfo ri = {.sType = VK_STRUCTURE_TYPE_RENDERING_INFO, .renderArea = {{0, 0}, swap_extent},
-                          .layerCount = 1, .colorAttachmentCount = 1, .pColorAttachments = &att};
-    vkCmdBeginRendering(cmd, &ri);
-    vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, pipe);
-    VkViewport v = {0, 0, (float)swap_extent.width, (float)swap_extent.height, 0, 1};
-    VkRect2D sc = {{0, 0}, swap_extent};
-    vkCmdSetViewport(cmd, 0, 1, &v);
-    vkCmdSetScissor(cmd, 0, 1, &sc);
-    vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, hb.layout, 0, 1, &hb.set, 0, NULL);
-    float W = (float)swap_extent.width, H = (float)swap_extent.height, px = (float)(x0 + hx), py = (float)(y0 + hy);
-    float push[8] = {px / W * 2 - 1, py / H * 2 - 1, (px + (float)w) / W * 2 - 1, (py + (float)h) / H * 2 - 1,
-                     (float)w / HUD_W, (float)h / HUD_H, 0, 0};
-    vkCmdPushConstants(cmd, hb.layout, VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof push, push);
-    vkCmdDraw(cmd, 6, 1, 0, 0);
-    vkCmdEndRendering(cmd);
-    hb_barrier(dst, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
-               VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT, VK_ACCESS_TRANSFER_WRITE_BIT | VK_ACCESS_TRANSFER_READ_BIT);
+    if (redraw) quad_upload(&hb.q, NULL, 0, (uint32_t)w, (uint32_t)h);
+    quad_draw(&hb.q, dst, index, pipe, (float)(x0 + hx), (float)(y0 + hy), (uint32_t)w, (uint32_t)h);
 }
 
 /* The HUD as it would show now, drawn into rgba (w x h, straight RGBA: the overlay's Overlay page previews it on
@@ -1761,65 +1752,17 @@ static int overlay_background(uint32_t bw, uint32_t bh) {
     return 0;
 }
 
-/* The quick look's card through the HUD's blend pipeline (see-through around its rounded corners): an image the
- * card's size, made again when the card grows, uploaded from the overlay's canvas when it was drawn again. */
-static struct {
-    VkBuffer buf;
-    VkDeviceMemory buf_mem;
-    void *ptr;
-    VkImage image;
-    VkDeviceMemory mem;
-    VkImageView view;
-    VkDescriptorPool pool;
-    VkDescriptorSet set;
-    uint32_t w, h;
-} pk;
+/* The quick look's card through the HUD's blend pipeline (see-through around its rounded corners): an image made
+ * once at least 4K, uploaded from the overlay's canvas when it was drawn again. */
+static BlendedQuad pk;
 
 static int pk_resources(uint32_t w, uint32_t h) {
     if (pk.set) return pk.w >= w && pk.h >= h ? 0 : -1;  /* made once; a bigger card than that: the blit instead */
-    if (hb_resources()) return -1;
+    if (pk.failed || hb_resources()) return -1;
     /* the size of the largest window it could be drawn in: a 4K one (or this one, if larger) */
     if (w < 3840) w = 3840;
     if (h < 2160) h = 2160;
-    VkBufferCreateInfo bci = {.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO, .size = (VkDeviceSize)w * h * 4,
-                              .usage = VK_BUFFER_USAGE_TRANSFER_SRC_BIT};
-    if (vkCreateBuffer(vk.device, &bci, NULL, &pk.buf) != VK_SUCCESS) return -1;
-    VkMemoryRequirements mr;
-    vkGetBufferMemoryRequirements(vk.device, pk.buf, &mr);
-    VkMemoryAllocateInfo mai = {.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO, .allocationSize = mr.size,
-                                .memoryTypeIndex = vk_memory_type(mr.memoryTypeBits, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT |
-                                                                                      VK_MEMORY_PROPERTY_HOST_COHERENT_BIT)};
-    if (vkAllocateMemory(vk.device, &mai, NULL, &pk.buf_mem) != VK_SUCCESS) return -1;
-    vkBindBufferMemory(vk.device, pk.buf, pk.buf_mem, 0);
-    vkMapMemory(vk.device, pk.buf_mem, 0, VK_WHOLE_SIZE, 0, &pk.ptr);
-    VkImageCreateInfo ici = {.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO, .imageType = VK_IMAGE_TYPE_2D,
-                             .format = VK_FORMAT_R8G8B8A8_UNORM, .extent = {w, h, 1}, .mipLevels = 1, .arrayLayers = 1,
-                             .samples = VK_SAMPLE_COUNT_1_BIT, .tiling = VK_IMAGE_TILING_OPTIMAL,
-                             .usage = VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT};
-    if (vkCreateImage(vk.device, &ici, NULL, &pk.image) != VK_SUCCESS) return -1;
-    vkGetImageMemoryRequirements(vk.device, pk.image, &mr);
-    mai.allocationSize = mr.size;
-    mai.memoryTypeIndex = vk_memory_type(mr.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
-    if (vkAllocateMemory(vk.device, &mai, NULL, &pk.mem) != VK_SUCCESS) return -1;
-    vkBindImageMemory(vk.device, pk.image, pk.mem, 0);
-    VkImageViewCreateInfo vi = {.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO, .image = pk.image,
-                                .viewType = VK_IMAGE_VIEW_TYPE_2D, .format = VK_FORMAT_R8G8B8A8_UNORM,
-                                .subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1}};
-    if (vkCreateImageView(vk.device, &vi, NULL, &pk.view) != VK_SUCCESS) return -1;
-    VkDescriptorPoolSize ps = {VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 1};
-    VkDescriptorPoolCreateInfo pci = {.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO, .maxSets = 1,
-                                      .poolSizeCount = 1, .pPoolSizes = &ps};
-    if (vkCreateDescriptorPool(vk.device, &pci, NULL, &pk.pool) != VK_SUCCESS) return -1;
-    VkDescriptorSetAllocateInfo dai = {.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO, .descriptorPool = pk.pool,
-                                       .descriptorSetCount = 1, .pSetLayouts = &hb.dsl};
-    if (vkAllocateDescriptorSets(vk.device, &dai, &pk.set) != VK_SUCCESS) return -1;
-    VkDescriptorImageInfo ii = {hb.sampler, pk.view, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL};
-    VkWriteDescriptorSet wr = {.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET, .dstSet = pk.set, .dstBinding = 0,
-                               .descriptorCount = 1, .descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
-                               .pImageInfo = &ii};
-    vkUpdateDescriptorSets(vk.device, 1, &wr, 0, NULL);
-    pk.w = w, pk.h = h;
-    return 0;
+    return quad_make(&pk, w, h);
 }
 
 /* The card's part of the canvas (rx, ry, rw x rh of a bw-wide RGBA canvas, premultiplied) blended onto dst at
@@ -1831,38 +1774,10 @@ static int pk_draw(VkImage dst, uint32_t index, const uint8_t *px, uint32_t bw, 
     if (!pipe) return -1;
     static int32_t last_w, last_h;
     if (upload || last_w != rw || last_h != rh) {
-        for (int32_t j = 0; j < rh; j++)
-            memcpy((uint8_t *)pk.ptr + (size_t)j * pk.w * 4, px + ((size_t)(ry + j) * bw + (size_t)rx) * 4, (size_t)rw * 4);
-        hb_barrier(pk.image, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 0, VK_ACCESS_TRANSFER_WRITE_BIT);
-        VkBufferImageCopy copy = {.bufferRowLength = pk.w, .imageSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1},
-                                  .imageExtent = {(uint32_t)rw, (uint32_t)rh, 1}};
-        vkCmdCopyBufferToImage(cmd, pk.buf, pk.image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &copy);
-        hb_barrier(pk.image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
-                   VK_ACCESS_TRANSFER_WRITE_BIT, VK_ACCESS_SHADER_READ_BIT);
+        quad_upload(&pk, px + ((size_t)ry * bw + (size_t)rx) * 4, bw, (uint32_t)rw, (uint32_t)rh);
         last_w = rw, last_h = rh;
     }
-    hb_barrier(dst, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
-               VK_ACCESS_TRANSFER_WRITE_BIT, VK_ACCESS_COLOR_ATTACHMENT_READ_BIT | VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT);
-    VkRenderingAttachmentInfo att = {.sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO, .imageView = swap_views[index],
-                                     .imageLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
-                                     .loadOp = VK_ATTACHMENT_LOAD_OP_LOAD, .storeOp = VK_ATTACHMENT_STORE_OP_STORE};
-    VkRenderingInfo ri = {.sType = VK_STRUCTURE_TYPE_RENDERING_INFO, .renderArea = {{0, 0}, swap_extent},
-                          .layerCount = 1, .colorAttachmentCount = 1, .pColorAttachments = &att};
-    vkCmdBeginRendering(cmd, &ri);
-    vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, pipe);
-    VkViewport v = {0, 0, (float)swap_extent.width, (float)swap_extent.height, 0, 1};
-    VkRect2D sc = {{0, 0}, swap_extent};
-    vkCmdSetViewport(cmd, 0, 1, &v);
-    vkCmdSetScissor(cmd, 0, 1, &sc);
-    vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, hb.layout, 0, 1, &pk.set, 0, NULL);
-    float W = (float)swap_extent.width, H = (float)swap_extent.height, px0 = (float)(x0 + rx), py0 = (float)(y0 + ry);
-    float push[8] = {px0 / W * 2 - 1, py0 / H * 2 - 1, (px0 + (float)rw) / W * 2 - 1, (py0 + (float)rh) / H * 2 - 1,
-                     (float)rw / (float)pk.w, (float)rh / (float)pk.h, 0, 0};
-    vkCmdPushConstants(cmd, hb.layout, VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof push, push);
-    vkCmdDraw(cmd, 6, 1, 0, 0);
-    vkCmdEndRendering(cmd);
-    hb_barrier(dst, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
-               VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT, VK_ACCESS_TRANSFER_WRITE_BIT | VK_ACCESS_TRANSFER_READ_BIT);
+    quad_draw(&pk, dst, index, pipe, (float)(x0 + rx), (float)(y0 + ry), (uint32_t)rw, (uint32_t)rh);
     return 0;
 }
 
@@ -2110,13 +2025,13 @@ static void hud_onto(uint8_t *rgba, uint32_t w, uint32_t h) {
         const char *e = getenv("YW4_SHOT_MENU");
         shot_menu = !(e && e[0] == '0');
     }
-    if (shot_menu && __atomic_load_n(&note_on, __ATOMIC_ACQUIRE) && nb.ptr && nb.w) {  /* the notice too, as faded now, at the window's pixel size */
+    if (shot_menu && __atomic_load_n(&note_on, __ATOMIC_ACQUIRE) && nb.q.ptr && nb.w) {  /* the notice too, as faded now, at the window's pixel size */
         int32_t nx = (int32_t)((40 - 24) * nb.s), ny = (int32_t)h - (int32_t)(48 * nb.s) - note_bottom;
         for (int j = 0; j < nb.h && ny + j < (int32_t)h; j++)
             for (int i = 0; i < nb.w; i++) {
                 if (ny + j < 0) break;  /* a short window: the notice starts above the top */
                 if (nx + i < 0 || nx + i >= (int32_t)w) continue;
-                const uint8_t *sp = (const uint8_t *)nb.ptr + ((size_t)j * NOTE_W + (size_t)i) * 4;
+                const uint8_t *sp = (const uint8_t *)nb.q.ptr + ((size_t)j * NOTE_W + (size_t)i) * 4;
                 uint8_t *dp = rgba + ((size_t)(ny + j) * w + (size_t)(nx + i)) * 4;
                 for (int k = 0; k < 3; k++) dp[k] = (uint8_t)(sp[k] + dp[k] * (255 - sp[3]) / 255);
             }
