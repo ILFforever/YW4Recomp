@@ -2340,23 +2340,15 @@ void gpu_dynamic_state(VkCommandBuffer cb, const GpuState *s, VkFormat depth, ui
     dyn_last = d, dyn_cb = cb;
 }
 
-static void draw(VkCommandBuffer cb, GpuState *s, const CmdRec *r) {
-    Program *g = s->program ? program_of(s->program) : NULL;
-    if (!g) {
-        static int logged;
-        if (logged++ < 8)
-            fprintf(stderr, "yw4: gpu: draw skipped: %s (stage mask %#x, stage keys %016" PRIx64 " %016" PRIx64 ")\n",
-                    s->program ? "program without a vertex stage" : "no program bound",
-                    s->program ? s->program->stage_mask : 0, s->program ? s->program->stages[0].key : 0,
-                    s->program ? s->program->stages[5].key : 0);
-        return;
-    }
+/* draw(), first: the distance blur's image sizes (and its switch), the alpha test's note and the lamp shadows'
+ * inputs, before anything is bound. Returns 0 when the draw is skipped (the distance blur is off). */
+static inline int draw_effects_prep(VkCommandBuffer cb, GpuState *s, Program *g) {
     if (g->sh[ST_FRAG] && (g->sh[ST_FRAG]->dof || g->sh[ST_FRAG]->key == DOF_BLUR_SHADER)) {
         /* the distance blur's images keep the game's size ratio (gpu.c, effects resolution) */
         NvnTexEntry *e = tex_entry(s, s->tex[nvn_stage[ST_FRAG]][0]);
         if (e) gpu_keep_game_ratio(e->tex);
         if (!g->sh[ST_FRAG]->dof && s->ncolor) gpu_keep_game_ratio(s->rt.color[0]);
-        if (g->sh[ST_FRAG]->dof && !gpu_dof()) return;  /* distance blur off */
+        if (g->sh[ST_FRAG]->dof && !gpu_dof()) return 0;  /* distance blur off */
     }
     if (s->color[2] != 8) {
         static int logged;
@@ -2372,41 +2364,48 @@ static void draw(VkCommandBuffer cb, GpuState *s, const CmdRec *r) {
                                 (uint32_t)(s->vbuf[st].size / s->streams[st][0]), s->streams[st][0]);
         gpu_lamp_maps_prepare(cb, s);
     }
-    if (gpu_watch_on()) {  /* the minimap watch (gpu_watch.c): before the uploads, to see which are this draw's */
-        GpuWatchTex wt[16];
-        int nwt = 0;
-        const Shader *fs = g->sh[ST_FRAG];
-        for (int i = 0; fs && i < fs->nb && nwt < 16; i++) {
-            const Binding *b = &fs->b[i];
-            if (b->kind != 't' && b->kind != 'd') continue;
-            uint64_t handle = b->slot < TEXTURES ? s->tex[nvn_stage[ST_FRAG]][b->slot] : 0;
-            NvnTexEntry *e = tex_entry(s, handle);
-            wt[nwt++] = (GpuWatchTex){e ? e->tex : NULL, b->slot, handle, e ? gpu_needs_transfer(e->tex) : 0};
-        }
-        GpuWatchData wd;
-        memset(&wd, 0, sizeof wd);
-        const Shader *wvs = g->sh[ST_VERT];
-        uint32_t stream = 16;  /* the lowest stream the vertex program reads */
-        for (uint32_t loc = 0; wvs && loc < 32; loc++) {
-            uint32_t a = loc < s->nattribs ? s->attribs[loc] : 0;
-            if (wvs->inputs[loc] && a & 0xFF && (a >> 8 & 0x1F) < stream) stream = a >> 8 & 0x1F;
-        }
-        int wanted = gpu_watch_wants(s, wt, nwt);  /* the rest only for the minimap's draws: 110 ms a frame for all */
-        if (wanted && stream < 16) {
-            wd.vb_addr = s->vbuf[stream].addr, wd.vb_size = s->vbuf[stream].size;
-            wd.stride = stream < s->nstreams ? s->streams[stream][0] : 0;
-            wd.first = r->op == CMD_DRAW_ARRAYS ? (uint32_t)r->x[1] : 0;
-            wd.stale = gpu_vram_geometry() && wd.vb_size && gpu_geometry_needs_copy(wd.vb_addr, wd.vb_size);
-        }
-        for (int st = ST_VERT; wanted && st <= ST_FRAG; st++)
-            for (int i = 0; g->sh[st] && i < g->sh[st]->nb && wd.ncb < 4; i++) {
-                const Binding *b = &g->sh[st]->b[i];
-                if (b->kind != 'c' || b->slot >= UBOS) continue;
-                GpuRange ub = s->ubo[nvn_stage[st]][b->slot];
-                wd.cb[wd.ncb++] = (GpuWatchBuf){(uint8_t)st, (uint8_t)b->slot, ub.addr, ub.size};
-            }
-        if (wanted) gpu_watch_draw(s, wvs ? wvs->key : 0, fs ? fs->key : 0, r->x[2], wt, nwt, &wd);
+    return 1;
+}
+
+/* draw(): the minimap watch (gpu_watch.c) of this draw: before the uploads, to see which are this draw's */
+static inline void draw_watch(GpuState *s, const CmdRec *r, Program *g) {
+    GpuWatchTex wt[16];
+    int nwt = 0;
+    const Shader *fs = g->sh[ST_FRAG];
+    for (int i = 0; fs && i < fs->nb && nwt < 16; i++) {
+        const Binding *b = &fs->b[i];
+        if (b->kind != 't' && b->kind != 'd') continue;
+        uint64_t handle = b->slot < TEXTURES ? s->tex[nvn_stage[ST_FRAG]][b->slot] : 0;
+        NvnTexEntry *e = tex_entry(s, handle);
+        wt[nwt++] = (GpuWatchTex){e ? e->tex : NULL, b->slot, handle, e ? gpu_needs_transfer(e->tex) : 0};
     }
+    GpuWatchData wd;
+    memset(&wd, 0, sizeof wd);
+    const Shader *wvs = g->sh[ST_VERT];
+    uint32_t stream = 16;  /* the lowest stream the vertex program reads */
+    for (uint32_t loc = 0; wvs && loc < 32; loc++) {
+        uint32_t a = loc < s->nattribs ? s->attribs[loc] : 0;
+        if (wvs->inputs[loc] && a & 0xFF && (a >> 8 & 0x1F) < stream) stream = a >> 8 & 0x1F;
+    }
+    int wanted = gpu_watch_wants(s, wt, nwt);  /* the rest only for the minimap's draws: 110 ms a frame for all */
+    if (wanted && stream < 16) {
+        wd.vb_addr = s->vbuf[stream].addr, wd.vb_size = s->vbuf[stream].size;
+        wd.stride = stream < s->nstreams ? s->streams[stream][0] : 0;
+        wd.first = r->op == CMD_DRAW_ARRAYS ? (uint32_t)r->x[1] : 0;
+        wd.stale = gpu_vram_geometry() && wd.vb_size && gpu_geometry_needs_copy(wd.vb_addr, wd.vb_size);
+    }
+    for (int st = ST_VERT; wanted && st <= ST_FRAG; st++)
+        for (int i = 0; g->sh[st] && i < g->sh[st]->nb && wd.ncb < 4; i++) {
+            const Binding *b = &g->sh[st]->b[i];
+            if (b->kind != 'c' || b->slot >= UBOS) continue;
+            GpuRange ub = s->ubo[nvn_stage[st]][b->slot];
+            wd.cb[wd.ncb++] = (GpuWatchBuf){(uint8_t)st, (uint8_t)b->slot, ub.addr, ub.size};
+        }
+    if (wanted) gpu_watch_draw(s, wvs ? wvs->key : 0, fs ? fs->key : 0, r->x[2], wt, nwt, &wd);
+}
+
+/* draw(): the images and the geometry the draw reads made or copied, outside rendering */
+static inline void draw_uploads(VkCommandBuffer cb, GpuState *s, const CmdRec *r, Program *g) {
     if (needs_transfers(s, g)) gpu_end_rendering(cb, s);
     /* Images and uploads first (outside rendering), then rendering. */
     for (int st = 0; st < NSETS; st++)
@@ -2441,34 +2440,26 @@ static void draw(VkCommandBuffer cb, GpuState *s, const CmdRec *r) {
             full_barrier(cb);
         }
     }
+}
 
-    PipeKey k;
-    memset(&k, 0, sizeof k);
-    uint32_t w, h;
-    if (!begin_rendering(cb, s, k.color, &k.depth, &w, &h)) {
-        static int logged;
-        if (logged++ < 8)
-            fprintf(stderr, "yw4: gpu: draw without render targets skipped (colour targets %d, depth %p, shaders %016" PRIx64
-                            " %016" PRIx64 ", rasterizer discard %d, frame %" PRIu64 ")\n",
-                    s->ncolor, (void *)s->rt.depth, g->sh[ST_VERT] ? g->sh[ST_VERT]->key : 0,
-                    g->sh[ST_FRAG] ? g->sh[ST_FRAG]->key : 0, s->rasterizer_discard, gpu_frames());
-        return;
-    }
-    k.ncolor = (uint8_t)s->ncolor;
+/* draw(): the pipeline key's state (all but the vertex input) once rendering has begun; returns whether the
+ * draw is of quads (drawn as indexed triangles) */
+static inline int draw_pipeline_key(GpuState *s, const CmdRec *r, Program *g, PipeKey *k) {
+    k->ncolor = (uint8_t)s->ncolor;
     /* our G-buffer programs in place of the game's (decision 0026; F6); the shadow mask's has its own switch */
     if (g->sh[ST_FRAG] && g->sh[ST_FRAG]->key == SHADOW_MASK_FS)
-        k.ours = g->sh[ST_FRAG]->ours && shadow_mask_native() && !gpu_ab_game;
+        k->ours = g->sh[ST_FRAG]->ours && shadow_mask_native() && !gpu_ab_game;
     else if (g->sh[ST_FRAG] && is_screen_fs(g->sh[ST_FRAG]->key))
-        k.ours = g->sh[ST_FRAG]->ours && screen_native() && !gpu_ab_game;
+        k->ours = g->sh[ST_FRAG]->ours && screen_native() && !gpu_ab_game;
     else
-        k.ours = (own || gbuffer_native_frame(gpu_frames())) &&
+        k->ours = (own || gbuffer_native_frame(gpu_frames())) &&
                  ((g->sh[ST_VERT] && g->sh[ST_VERT]->ours) || (g->sh[ST_FRAG] && g->sh[ST_FRAG]->ours));
-    memcpy(k.blend, s->blend, sizeof k.blend);
-    for (int i = 0; i < 8; i++) k.blend[i][0] = 0;
-    memcpy(k.color_state, s->color, 4);
-    k.channel_mask = s->channel_mask;
-    k.polygon_mode = s->polygon[2];
-    k.depth_clamp = (uint8_t)(s->depth_clamp != 0);
+    memcpy(k->blend, s->blend, sizeof k->blend);
+    for (int i = 0; i < 8; i++) k->blend[i][0] = 0;
+    memcpy(k->color_state, s->color, 4);
+    k->channel_mask = s->channel_mask;
+    k->polygon_mode = s->polygon[2];
+    k->depth_clamp = (uint8_t)(s->depth_clamp != 0);
     VkPrimitiveTopology topo;
     int quads = r->x[0] == 7;
     if (quads) {
@@ -2477,8 +2468,12 @@ static void draw(VkCommandBuffer cb, GpuState *s, const CmdRec *r) {
     } else if (!topology((uint32_t)r->x[0], &topo)) {
         gpu_stop("primitive type %u", (unsigned)r->x[0]);
     }
-    k.topology = (uint8_t)topo;
+    k->topology = (uint8_t)topo;
+    return quads;
+}
 
+/* draw(): the pipeline key's vertex input, and the vertex buffers bound */
+static inline void draw_vertex_input(VkCommandBuffer cb, GpuState *s, Program *g, PipeKey *k) {
     /* Vertex input: the shader's inputs, from the bound attribute and stream state. */
     const Shader *vs = g->sh[ST_VERT];
     uint32_t streams_used = 0;
@@ -2494,16 +2489,16 @@ static void draw(VkCommandBuffer cb, GpuState *s, const CmdRec *r) {
         VkFormat f = vertex_format(a & 0xFF);
         if (f == VK_FORMAT_UNDEFINED) gpu_stop("vertex format %#x", a & 0xFF);
         uint32_t stream = a >> 8 & 0x1F;
-        k.attr[k.nattr++] = (VkVertexInputAttributeDescription){loc, stream, input_format(f, vs->inputs[loc], loc),
+        k->attr[k->nattr++] = (VkVertexInputAttributeDescription){loc, stream, input_format(f, vs->inputs[loc], loc),
                                                                 a >> 13};
-        gpu_vertex_format_ok(k.attr[k.nattr - 1].format, "a game draw", loc);
+        gpu_vertex_format_ok(k->attr[k->nattr - 1].format, "a game draw", loc);
         streams_used |= 1u << stream;
     }
     for (uint32_t i = 0; i < 16; i++) {
         if (!(streams_used & 1u << i)) continue;
         uint32_t stride = i < s->nstreams ? s->streams[i][0] : 0, divisor = i < s->nstreams ? s->streams[i][1] : 0;
         if (divisor > 1) gpu_stop("vertex stream divisor %u", divisor);
-        k.bind[k.nbind++] = (VkVertexInputBindingDescription){
+        k->bind[k->nbind++] = (VkVertexInputBindingDescription){
             i, stride, divisor ? VK_VERTEX_INPUT_RATE_INSTANCE : VK_VERTEX_INPUT_RATE_VERTEX};
         VkBuffer buf;
         VkDeviceSize off;
@@ -2511,13 +2506,10 @@ static void draw(VkCommandBuffer cb, GpuState *s, const CmdRec *r) {
         if (!vr.size || !gpu_geometry_at(vr.addr, vr.size, &buf, &off)) buf = dummy_buffer(), off = 0;
         vkCmdBindVertexBuffers(cb, i, 1, &buf, &off);
     }
+}
 
-    VkPipeline pl = pipeline(g, &k);
-    if (!pl) return;  /* a 3D object whose new pipeline is being built in the background: drawn from the next frame */
-    vkCmdBindPipeline(cb, VK_PIPELINE_BIND_POINT_GRAPHICS, pl);
-    bind_unjitter = !(g->sh[ST_VERT] && g->sh[ST_VERT]->model) && !s->after_composite;
-    bind_sets(cb, s, g);
-
+/* draw(): the movie program's pacing note and log (YW4_MOVIE_LOG) */
+static inline void draw_movie_log(GpuState *s, Program *g) {
     /* YW4_MOVIE_LOG=1 (testing video pacing): when the movie program's luma texture shows a new picture (a
      * fingerprint of its memory changes), the GPU frame, the host time and how many frames the last one stayed */
     if (g->sh[ST_FRAG] && g->sh[ST_FRAG]->key == 0x2e2b3b7ac92f7848ull) gpu_note_movie_draw();  /* framerate.c: 30 */
@@ -2538,7 +2530,11 @@ static void draw(VkCommandBuffer cb, GpuState *s, const CmdRec *r) {
             }
         }
     }
+}
 
+/* draw(): the draw described in the log (YW4_GPU_TRACE, F11), w x h: the rendering's size */
+static inline void draw_trace(GpuState *s, const CmdRec *r, Program *g, uint32_t w, uint32_t h) {
+    const Shader *vs = g->sh[ST_VERT];
     /* YW4_GPU_TRACE=<n>: describe n draws, from frame YW4_GPU_TRACE_AT (default 0) on */
     static long trace = -1, trace_at;
     if (trace < 0) {
@@ -2650,10 +2646,13 @@ static void draw(VkCommandBuffer cb, GpuState *s, const CmdRec *r) {
             fprintf(stderr, "\n");
         }
     }
+}
 
-    gpu_taa_note_targets(s);
-    dyn_model = g->sh[ST_VERT] && g->sh[ST_VERT]->model;
-    if (dyn_model && !s->after_composite) gpu_note_model_draw();
+/* draw(): widescreen and 16:10 (the UI layers over the whole screen), the dynamic state, the black bars; returns
+ * how many more times the draw runs for the strips above and below (dyn_edge) */
+static inline int draw_layout(VkCommandBuffer cb, GpuState *s, const CmdRec *r, Program *g, VkFormat depth,
+                              uint32_t w, uint32_t h) {
+    const Shader *vs = g->sh[ST_VERT];
     /* A layer over the whole screen (widescreen), by the textures it samples:
      * - a 16:9 texture from the game's files, a picture made for the screen (the map's backdrop 960x540,
      *   the copyright notice 1920x1080, movies: 1920x1080 and 960x540 planes): kept 16:9 in the middle
@@ -2701,7 +2700,7 @@ static void draw(VkCommandBuffer cb, GpuState *s, const CmdRec *r) {
         dyn_full_screen = 0;
         edges = full ? 2 : 0;
     }
-    gpu_dynamic_state(cb, s, k.depth, w, h);
+    gpu_dynamic_state(cb, s, depth, w, h);
     if (bars) {  /* the sides black, then the picture in the middle */
         uint32_t inner = gpu_scaled(ti->key.width, ti->scale_num, ti->scale_den), side = w > inner ? (w - inner) / 2 : 0;
         VkClearAttachment ca = {.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT, .colorAttachment = 0,
@@ -2714,12 +2713,14 @@ static void draw(VkCommandBuffer cb, GpuState *s, const CmdRec *r) {
         }
         if (side) vkCmdClearAttachments(cb, 1, &ca, 2, cr);
     }
-    uint32_t pos_fix = nvn_depth_mode == 0 ? (g->sh[ST_GEOM] ? 2u : 1u) : 0u;
-    vkCmdPushConstants(cb, g->layout, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_GEOMETRY_BIT, 0, 4, &pos_fix);
+    return edges;
+}
 
-    gpu_query_before_draw(cb, s);  /* the game's occlusion query or condition around this draw, if any */
+/* draw(): the draw call itself (quads, arrays or indexed), once and once per strip (edges) */
+static inline void draw_issue(VkCommandBuffer cb, GpuState *s, const CmdRec *r, VkFormat depth, uint32_t w,
+                              uint32_t h, int quads, int edges) {
     for (int pass = 0; pass <= edges; pass++) {  /* edges: the strips above and below too (16:10) */
-    if (pass) dyn_edge = pass, gpu_dynamic_state(cb, s, k.depth, w, h);
+    if (pass) dyn_edge = pass, gpu_dynamic_state(cb, s, depth, w, h);
     if (quads) {  /* (primitive, first, count, base instance, instances) */
         uint32_t nquads = (uint32_t)r->x[2] / 4;
         if (nquads > QUADS) gpu_stop("%u quads in one draw", nquads);
@@ -2741,6 +2742,56 @@ static void draw(VkCommandBuffer cb, GpuState *s, const CmdRec *r) {
                          (uint32_t)r->x[5]);
     }
     }
+}
+
+static void draw(VkCommandBuffer cb, GpuState *s, const CmdRec *r) {
+    Program *g = s->program ? program_of(s->program) : NULL;
+    if (!g) {
+        static int logged;
+        if (logged++ < 8)
+            fprintf(stderr, "yw4: gpu: draw skipped: %s (stage mask %#x, stage keys %016" PRIx64 " %016" PRIx64 ")\n",
+                    s->program ? "program without a vertex stage" : "no program bound",
+                    s->program ? s->program->stage_mask : 0, s->program ? s->program->stages[0].key : 0,
+                    s->program ? s->program->stages[5].key : 0);
+        return;
+    }
+    if (!draw_effects_prep(cb, s, g)) return;
+    if (gpu_watch_on()) draw_watch(s, r, g);  /* before the uploads, to see which are this draw's */
+    draw_uploads(cb, s, r, g);
+
+    PipeKey k;
+    memset(&k, 0, sizeof k);
+    uint32_t w, h;
+    if (!begin_rendering(cb, s, k.color, &k.depth, &w, &h)) {
+        static int logged;
+        if (logged++ < 8)
+            fprintf(stderr, "yw4: gpu: draw without render targets skipped (colour targets %d, depth %p, shaders %016" PRIx64
+                            " %016" PRIx64 ", rasterizer discard %d, frame %" PRIu64 ")\n",
+                    s->ncolor, (void *)s->rt.depth, g->sh[ST_VERT] ? g->sh[ST_VERT]->key : 0,
+                    g->sh[ST_FRAG] ? g->sh[ST_FRAG]->key : 0, s->rasterizer_discard, gpu_frames());
+        return;
+    }
+    int quads = draw_pipeline_key(s, r, g, &k);
+    draw_vertex_input(cb, s, g, &k);
+
+    VkPipeline pl = pipeline(g, &k);
+    if (!pl) return;  /* a 3D object whose new pipeline is being built in the background: drawn from the next frame */
+    vkCmdBindPipeline(cb, VK_PIPELINE_BIND_POINT_GRAPHICS, pl);
+    bind_unjitter = !(g->sh[ST_VERT] && g->sh[ST_VERT]->model) && !s->after_composite;
+    bind_sets(cb, s, g);
+
+    draw_movie_log(s, g);
+    draw_trace(s, r, g, w, h);
+
+    gpu_taa_note_targets(s);
+    dyn_model = g->sh[ST_VERT] && g->sh[ST_VERT]->model;
+    if (dyn_model && !s->after_composite) gpu_note_model_draw();
+    int edges = draw_layout(cb, s, r, g, k.depth, w, h);
+    uint32_t pos_fix = nvn_depth_mode == 0 ? (g->sh[ST_GEOM] ? 2u : 1u) : 0u;
+    vkCmdPushConstants(cb, g->layout, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_GEOMETRY_BIT, 0, 4, &pos_fix);
+
+    gpu_query_before_draw(cb, s);  /* the game's occlusion query or condition around this draw, if any */
+    draw_issue(cb, s, r, k.depth, w, h, quads, edges);
     gpu_query_after_draw(cb);
     capture_after_draw(cb, s, g);
     /* the bloom composite, the last 3D pass before the UI: anti-aliasing here (gpu_aa.c) */
