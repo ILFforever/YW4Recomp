@@ -296,6 +296,14 @@ int mousemenu_stopwatch(void) {
     return __atomic_load_n(&stopwatch, __ATOMIC_ACQUIRE);
 }
 
+/* None of the menus this file follows is up (HUD LAYOUT, gpu_draw.c). Not "the field's HUD has the focus": after a
+ * save loads another menu (vt main+0x14bf268, hash 0xa5d50e5d) takes the focus last and keeps it while exploring
+ * (YW4_MOUSE_LOG, 2026-11-25). With YW4_MOUSE_MENUS=0 nothing is followed and this is always 1. */
+int mousemenu_field(void) {
+    return !(mousemenu_open() || mousemenu_talking() || mousemenu_map() || mousemenu_naviwoof() ||
+             mousemenu_stopwatch());
+}
+
 static void talk_note(uint64_t vt) {
     if (vt == TALK_VTABLE) __atomic_store_n(&talking, 1, __ATOMIC_RELEASE);
     else if (vt == MAP_VTABLE) {

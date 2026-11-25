@@ -33,6 +33,8 @@
 #include "host.h"
 #include "kernel.h"
 #include "lamp_shadow.h"
+#include "battle.h"
+#include "mousemenu.h"
 
 enum { ST_VERT, ST_FRAG, ST_GEOM, NSETS = 3, ST_COMP = 3 };  /* NSETS: the graphics stages; compute is separate */
 static const char *const stage_names[4] = {"vert", "frag", "geom", "comp"};
@@ -85,6 +87,7 @@ static int dyn_full_screen;
  * below: the next gpu_dynamic_state is for a whole-screen layer's second or third drawing, which fills the strip
  * at the top (1) or the bottom (2) from the layer's edge */
 static int dyn_edge;
+static int dyn_hud_side;  /* HUD at the screen's edges (YW4_HUD_EDGES): -1 left, 1 right, 0 middle */
 
 /* Distance blur (depth of field): the game blurs the scene by distance. Fragment shader 27b63a2b... reads
  * depth, turns it into an amount with cbuf 6 row 0 (a, b, c, w: clamp((a / (b z + cam) + c) w)) and draws
@@ -2137,10 +2140,12 @@ void gpu_cull(VkCommandBuffer cb, uint8_t cull_mode, uint8_t front_face) {
  * The reads are checked against the memory pools (gpu_buffer_at), not with host_readable: calling
  * host_readable (VirtualQuery) on these vertex and index addresses every frame stopped the game at
  * the title screen in every test run (2026-10-28; cause not found). */
-static int covers_screen(const GpuState *s, const Shader *vs, const CmdRec *r) {
+/* The draw's box in clip space (lo, hi: x and y), from its vertices through the position rows the shader
+ * translator found; 0 when it can't be told (more than max vertices, a format or buffer it can't read). */
+static int draw_box(const GpuState *s, const Shader *vs, const CmdRec *r, uint32_t max, float lo[2], float hi[2]) {
     if (!vs || !(vs->pos_cbuf || vs->pos_input) || !s->nattribs || !(s->attribs[0] & 0xFF)) return 0;
     uint32_t count = (uint32_t)r->x[2];
-    if (count < 3 || count > 24) return 0;
+    if (count < 3 || count > max) return 0;
     VkBuffer pb;
     VkDeviceSize po;
     static const float identity[16] = {1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1};
@@ -2164,7 +2169,7 @@ static int covers_screen(const GpuState *s, const Shader *vs, const CmdRec *r) {
     }
     uint32_t stride = stream < s->nstreams ? s->streams[stream][0] : 0;
     GpuRange vb = s->vbuf[stream];
-    float lo[2] = {1e9f, 1e9f}, hi[2] = {-1e9f, -1e9f};
+    lo[0] = lo[1] = 1e9f, hi[0] = hi[1] = -1e9f;
     for (uint32_t i = 0; i < count; i++) {
         uint64_t v;
         if (r->op == CMD_DRAW_ARRAYS) {
@@ -2189,6 +2194,12 @@ static int covers_screen(const GpuState *s, const Shader *vs, const CmdRec *r) {
             lo[c] = q < lo[c] ? q : lo[c], hi[c] = q > hi[c] ? q : hi[c];
         }
     }
+    return 1;
+}
+
+static int covers_screen(const GpuState *s, const Shader *vs, const CmdRec *r) {
+    float lo[2], hi[2];
+    if (!draw_box(s, vs, r, 24, lo, hi)) return 0;
     if (!(lo[0] <= -0.99f && hi[0] >= 0.99f)) return 0;
     return lo[1] <= -0.99f && hi[1] >= 0.99f ? 2 : 1;
 }
@@ -2245,6 +2256,9 @@ void gpu_dynamic_state(VkCommandBuffer cb, const GpuState *s, VkFormat depth, ui
         } else {
             xn = kn, xd = kd;
             xoff = ((float)tg->width - (float)tg->key.width * (float)kn / (float)kd) * 0.5f;
+            /* HUD at the screen's edges (feasibility test, YW4_HUD_EDGES=1): a draw wholly in the left (right)
+             * third of the 16:9 area goes to the left (right) edge instead of the middle */
+            if (dyn_hud_side) xoff = dyn_hud_side < 0 ? 0 : xoff * 2;
         }
     }
     float vx = 0, vy = 0, vw = (float)w, vh = (float)h, xf = (float)xn / (float)xd, yf = (float)yn / (float)yd;
@@ -2253,7 +2267,7 @@ void gpu_dynamic_state(VkCommandBuffer cb, const GpuState *s, VkFormat depth, ui
     d.viewport = (VkViewport){vx, flip ? vy + vh : vy, vw, flip ? -vh : vh, s->depth_range[0], s->depth_range[1]};
     float jx, jy;
     if (dyn_model && !s->after_composite && gpu_taa_jitter(w, h, &jx, &jy)) d.viewport.x += jx, d.viewport.y += jy;
-    dyn_model = dyn_reads_screen = dyn_full_screen = 0;
+    dyn_model = dyn_reads_screen = dyn_full_screen = dyn_hud_side = 0;
     int edge = yoff > 0 ? dyn_edge : 0;
     dyn_edge = 0;
     if (edge) {
@@ -2674,6 +2688,22 @@ static inline int draw_layout(VkCommandBuffer cb, GpuState *s, const CmdRec *r, 
         }
     }
     int cover = s->after_composite && gpu_wide() && !dyn_reads_screen && !layer ? covers_screen(s, vs, r) : 0;
+    /* HUD LAYOUT, screen edges (owner, 2026-11-25): while exploring (the field's HUD menu has the focus, no battle),
+     * a UI draw whose middle is in the left (right) third of the 16:9 area and that stays on its side of the centre
+     * goes to the left (right) edge of the wider image (gpu_dynamic_state). By the middle, not the whole box: the
+     * quest banner's "!" and line start just inside the right third and must move with its text. Menus, maps,
+     * conversations and battles keep everything in the middle, so their layouts never split. ("No layer over the
+     * whole width this frame" can't tell a menu: the field draws one every frame, 2026-11-25.) */
+    if (s->after_composite && !dyn_reads_screen && !layer && !cover && gpu_hud_edges() && mousemenu_field() &&
+        !battle_active()) {
+        uint32_t wn, wd;
+        gpu_wide_factor(&wn, &wd);
+        float lo[2], hi[2];
+        if (wn > wd && draw_box(s, vs, r, 4096, lo, hi)) {
+            float mid = (lo[0] + hi[0]) * 0.5f;
+            dyn_hud_side = mid < -1.0f / 3 && hi[0] <= 0 ? -1 : mid > 1.0f / 3 && lo[0] >= 0 ? 1 : 0;
+        }
+    }
     int full = cover == 2;  /* a 16:9 picture gets bars only when it fills the screen; a band of one stays 16:9 */
     /* a band across the width stays 16:9 in a frame whose picture got black bars (the map's bar at the bottom) */
     static uint64_t bars_frame = UINT64_MAX;

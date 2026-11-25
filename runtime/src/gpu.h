@@ -71,6 +71,8 @@ int gpu_wide(void);         /* the aspect ratio in use (follows the choice, gpu_
 int gpu_wide_choice(void);  /* the panel's choice */
 void gpu_wide_settle(void);
 void gpu_wide_cycle(void);
+int gpu_hud_edges(void);  /* HUD LAYOUT: 1 the field HUD's side pieces at the screen's edges (wider than 16:9) */
+void gpu_hud_edges_cycle(void);
 /* The images follow the size choices once they have rested a few frames (gpu.c, every present). */
 void gpu_sizes_settle(uint64_t frame);
 void gpu_wide_factor(uint32_t *num, uint32_t *den);

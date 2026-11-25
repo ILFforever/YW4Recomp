@@ -6,6 +6,10 @@
 /* Returns 1 while the Yo-kai Pad or any of its sub-pages is open, 0 otherwise. */
 int mousemenu_open(void);
 
+/* Returns 1 while none of the menus followed here is up: no Pad, map, conversation (shops open from one), Naviwoof
+ * Guide or battle Stopwatching menu. The HUD at the screen's edges (gpu_draw.c) uses it. */
+int mousemenu_field(void);
+
 /* Returns 1 during a conversation (the talk window, from its first focus until the field's HUD comes back): the
  * mouse works it as a menu (bindings.c): the wheel moves between choices, left confirms, right cancels. */
 int mousemenu_talking(void);

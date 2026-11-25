@@ -87,6 +87,23 @@ draw copies that into one of **two** window images (1920×1080) that it presents
    memory within a few battles (`vkAllocateMemory` -2, frames up to 450 ms before it): every step is a new size,
    so a new set of images.
 
+7. **The field HUD at the screen's edges** (added 2026-11-25, owner: "move the minimap and quick settings further
+   to the sides"). HUD LAYOUT in the panel: SCREEN EDGES (default) or CENTRED (`YW4_HUD_EDGES`). At shapes wider
+   than 16:9, while exploring, a UI draw goes to an edge of the wider image instead of the 16:9 middle when the
+   middle of its box (clip space, the corners through the position rows the shader translator found: `draw_box`,
+   the vertex reading `covers_screen` already did, now up to 4096 vertices) is in the outer third of the 16:9 area
+   and the box doesn't cross the centre. The shortcut cross and the "Today's cranks" banner go left; the minimap
+   (with its clock and search icon) and the quest banner go right; the compass at the top stays. The rule uses the
+   box's middle, not "wholly inside the third": the quest banner's "!" and its line start just inside the right
+   third (clip x 0.33) and stayed behind while its text moved.
+   **Only while exploring:** none of the menus mousemenu.c follows is up (the Pad and its pages, a conversation and
+   the shops it opens, the map, Naviwoof Guide, the battle's Stopwatching menu) and no battle (`battle_active`).
+   Two gates failed first: "the field HUD menu (vt `main+0x14c5698`) had the last focus" (after a save loads, menu
+   vt `main+0x14bf268` hash `0xa5d50e5d` focuses last and keeps it), and "no layer over the whole width this frame"
+   (the field draws one every frame). With `YW4_MOUSE_MENUS=0` the menus aren't followed, so menus would split too.
+   Checked 2026-11-25 in the bamboo forest at 21:9 and 32:9 (the pieces at the edges) and the Yo-kai Pad at 21:9
+   (unchanged). Not checked: a battle, a conversation, shops, the diary, the town.
+
 ## How it was checked
 
 Schoolyard, standing still and walking: 21:9 is 2133×900 at the 900 setting with the UI centred and the right size;

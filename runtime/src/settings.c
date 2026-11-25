@@ -345,6 +345,13 @@ static void gpu_card_cycle(void) { gpu_card_set(gpu_card_index() + 1); }
 static void gpu_card_step(int dir) { gpu_card_set(gpu_card_index() + dir); }
 static const char *gpu_card_disabled(void) { return window_gpu_count() < 2 ? "THIS PC HAS ONE GRAPHICS CARD" : NULL; }
 
+/* HUD LAYOUT changes nothing at 16:9 and 16:10 (the HUD fills the width there). */
+static const char *hud_edges_disabled(void) {
+    uint32_t num, den;
+    gpu_wide_factor(&num, &den);
+    return num > den ? NULL : "ONLY FOR SHAPES WIDER THAN 16:9";
+}
+
 /* The row's names and notes from the cards found (fill_rows): Auto says which card it picks. */
 static void gpu_card_fill(SettingRow *r) {
     int n = gpu_card_options(), used = window_gpu_used(), autopick = window_gpu_auto();
@@ -429,6 +436,11 @@ static const Setting player[] = {
       "SUPER ULTRAWIDE"},
      8, gpu_wide_choice, gpu_wide_cycle, "YW4_ASPECT",
      {"16:9", "16:10", "18:9", "19:9", "19.5:9", "20:9", "21:9", "32:9"}},
+    {"DISPLAY", "HUD LAYOUT",
+     "WHERE THE GAME'S HUD SITS ON A SCREEN WIDER THAN 16:9 WHILE YOU EXPLORE: THE SHORTCUTS AND MINIMAP AT THE "
+     "SCREEN'S EDGES, OR IN THE 16:9 MIDDLE. MENUS AND BATTLES STAY IN THE MIDDLE.",
+     {"CENTRED", "SCREEN EDGES"}, {"AS ON THE SWITCH", "SHORTCUTS LEFT, MINIMAP RIGHT"}, 2, gpu_hud_edges,
+     gpu_hud_edges_cycle, "YW4_HUD_EDGES", {"0", "1"}, hud_edges_disabled},
     {"DISPLAY", "FRAME RATE",
      "HOW MANY PICTURES A SECOND. THE GAME MOVES BY REAL TIME, SO IT PLAYS AT THE SAME SPEED AT ANY RATE. HIGHER "
      "COSTS MORE GPU AND CPU TIME.",

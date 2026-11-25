@@ -58,6 +58,21 @@ void gpu_wide_cycle(void) {
     fprintf(stderr, "yw4: gpu: aspect ratio %s\n", shapes[s].name);
 }
 
+/* HUD LAYOUT (owner, 2026-11-25): at shapes wider than 16:9, the field HUD's side pieces (the shortcut cross and
+ * the banners on the left, the minimap and the quest on the right) at the screen's edges instead of the 16:9 middle
+ * (gpu_draw.c). YW4_HUD_EDGES=1 (default) / 0. */
+static int hud_edges = -1;
+int gpu_hud_edges(void) {
+    int e = __atomic_load_n(&hud_edges, __ATOMIC_ACQUIRE);
+    if (e < 0) {
+        const char *v = getenv("YW4_HUD_EDGES");
+        e = !(v && *v == '0');
+        __atomic_store_n(&hud_edges, e, __ATOMIC_RELEASE);
+    }
+    return e;
+}
+void gpu_hud_edges_cycle(void) { __atomic_store_n(&hud_edges, !gpu_hud_edges(), __ATOMIC_RELEASE); }
+
 void gpu_wide_factor(uint32_t *num, uint32_t *den) {
     int s = gpu_wide();
     *num = shapes[s].num, *den = shapes[s].den;
