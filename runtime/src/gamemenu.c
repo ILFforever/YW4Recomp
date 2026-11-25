@@ -1481,6 +1481,7 @@ void gamemenu_wheel(int dy) {
 static const Theme *TH;
 #define INK (TH->ink)
 #define NIGHT (TH->night)
+#define TITLE (TH->title)  /* the darkest text on the page: titles, chosen values (a dark theme: light) */
 #define PLUM (TH->plum)
 #define PAPER (TH->paper)
 #define GOLD (TH->gold)
@@ -1797,7 +1798,7 @@ static void row_slider(const UiCanvas *c, const SettingRow *r, int row, float x,
     ui_box(c, tx + tw * f - 11, cy - 11, 22, 22, 11, hv ? NIGHT : ink, 2, WHITE);
     if (!off) hit_add(tx - ROW_SLIDER_PAD, y, tw + 2 * ROW_SLIDER_PAD, h, HIT_ROW_SLIDER, row, 0);
     sentence_case(r->value, t, sizeof t);  /* the level's name, as the settings give it ("MEDIUM") */
-    ui_text_in(c, UI_ROUNDED_700, fs, tx + tw + gap, y, vw, h, 1, t, off ? MUTED : NIGHT);
+    ui_text_in(c, UI_ROUNDED_700, fs, tx + tw + gap, y, vw, h, 1, t, off ? MUTED : TITLE);
 }
 
 /* The settings page (the design's isSettings section): the sections on the left (the chosen row's lit), its
@@ -1810,7 +1811,7 @@ static void draw_settings_page(const UiCanvas *c, const GameMenuInfo *in) {
     const char *sec = rows[cur].category;
     char t[160];
     ui_box(c, 448, 40, 1104, 764, 20, PAPER, 0, 0);
-    ui_text(c, UI_ROUNDED_800, 34, 488, 76, 34 * 1.25f, "Settings", NIGHT);
+    ui_text(c, UI_ROUNDED_800, 34, 488, 76, 34 * 1.25f, "Settings", TITLE);
     {  /* Preview, at the right of the title (canvas board "Settings page: the Preview button"): an eye, its name, its
         * key; greyed where there is nothing to see */
         int pf, pl, can = look_span(rows, n, cur, &pf, &pl);
@@ -1890,7 +1891,7 @@ static void draw_settings_page(const UiCanvas *c, const GameMenuInfo *in) {
             float ew = 22 + 8 + ui_text_w(UI_ROUNDED_800, 16, "Edit") + 2 * 16, ex = nx + 44 - ew;
             float fx = px, fw = ex - 10 - px, fh = 44, fy = y + (72 - fh) / 2;
             ui_box(c, fx, fy, fw, fh, 10, WHITE, 2, LINE);
-            ui_text_in(c, UI_ROUNDED_700, 18, fx + 16, fy, fw - 32, fh, 0, value, off ? MUTED : NIGHT);
+            ui_text_in(c, UI_ROUNDED_700, 18, fx + 16, fy, fw - 32, fh, 0, value, off ? MUTED : TITLE);
             int hv = !off && hovered(HIT_ROW_NEXT, i, 0);
             ui_box(c, ex, fy, ew, fh, 10, hv ? LILAC : SOFT, 2, hv ? PLUM : LINE);
             ui_icon(c, ICON_EDIT, ex + 16, fy + (fh - 22) / 2, 22, 2.2f, off ? MUTED : PLUM);
@@ -1921,7 +1922,7 @@ static void draw_settings_page(const UiCanvas *c, const GameMenuInfo *in) {
         float vh = 18 * 1.4f, nh = *prose ? ui_text_wrap(NULL, UI_GOTHIC_500, 13, 0, 0, 0, 280, 13 * 1.3f, 1, prose, 0) : 0;
         float bh2 = vh + (th || nh ? 2 + th + gap + nh : 0);
         float vy = y + (72 - bh2) / 2;
-        ui_text_in(c, UI_ROUNDED_700, 18, vx, vy, 300, vh, 1, t, off ? MUTED : NIGHT);
+        ui_text_in(c, UI_ROUNDED_700, 18, vx, vy, 300, vh, 1, t, off ? MUTED : TITLE);
         float ny = vy + vh + 2;
         if (tags) {
             float tx = vx + (300 - tw) / 2;
@@ -1952,7 +1953,7 @@ static void draw_cheats_page(const UiCanvas *c, const GameMenuInfo *in) {
     int n = settings_cheat_rows(rows, 8);
     char t[160];
     ui_box(c, 448, 40, 1104, 764, 20, PAPER, 0, 0);
-    ui_text(c, UI_ROUNDED_800, 34, 488, 76, 34 * 1.25f, "Cheats", NIGHT);
+    ui_text(c, UI_ROUNDED_800, 34, 488, 76, 34 * 1.25f, "Cheats", TITLE);
     float x = 488, w = 1104 - 80, lead = 15 * 1.5f, top = 76 + 34 * 1.25f + 6;
     ui_text_wrap(c, UI_GOTHIC_500, 15, 0, x, top, w, lead, 0,
                  "All off by default. They change the game while it runs; turn one off and the game goes back to its own "
@@ -1979,7 +1980,7 @@ static void draw_cheats_page(const UiCanvas *c, const GameMenuInfo *in) {
         sentence_case(r->options[r->current] ? r->options[r->current] : "", t, sizeof t);
         prose_case(r->notes[r->current] ? r->notes[r->current] : "", prose, sizeof prose);
         float vh = 18 * 1.4f, nh = *prose ? 13 * 1.3f : 0, vy = y + (72 - vh - (nh ? 2 + nh : 0)) / 2;
-        ui_text_in(c, UI_ROUNDED_700, 18, vx, vy, 340, vh, 1, t, NIGHT);
+        ui_text_in(c, UI_ROUNDED_700, 18, vx, vy, 340, vh, 1, t, TITLE);
         if (nh) ui_text_in(c, UI_GOTHIC_500, 13, vx, vy + vh + 2, 340, nh, 1, prose, MUTED);
         y += 72 + 10;
     }
@@ -2794,7 +2795,7 @@ static void draw_mouse_page(const UiCanvas *c, const GameMenuInfo *in) {
     ui_icon(c, ICON_PREV, 488 + 14, by + 13, 22, 2.4f, PLUM);
     ui_text_in(c, UI_ROUNDED_700, 16, 488 + 38, by, bw - 50, 48, 0, "Controls", PLUM);
     hit_add(488, by, bw, 48, HIT_MB_BACK, 0, 0);
-    ui_text(c, UI_ROUNDED_800, 34, 488 + bw + 18, 76, 34 * 1.25f, "Mouse buttons", NIGHT);
+    ui_text(c, UI_ROUNDED_800, 34, 488 + bw + 18, 76, 34 * 1.25f, "Mouse buttons", TITLE);
     static const char *const sets[2] = {"Exploring", "Battle"};
     float sw2 = kv_seg(NULL, 0, 0, sets, 2, mb_set, HIT_MB_SET);
     kv_seg(c, 1512 - sw2, 76 + (34 * 1.25f - 48) / 2, sets, 2, mb_set, HIT_MB_SET);
@@ -2848,7 +2849,7 @@ static void draw_mouse_page(const UiCanvas *c, const GameMenuInfo *in) {
             hit_add(ax - 4, y, 42, rh, HIT_MB_STEP, p, k ? 1 : -1);
         }
         if (*sw) {
-            ui_text_in(c, UI_GOTHIC_700, 17, vx + 40, y + 9, vw - 80, 26, 1, act, NIGHT);
+            ui_text_in(c, UI_GOTHIC_700, 17, vx + 40, y + 9, vw - 80, 26, 1, act, TITLE);
             ui_text_in(c, UI_GOTHIC_500, 13, vx + 40, y + 36, vw - 80, 20, 1, sw, MUTED);
         } else {
             ui_text_in(c, UI_GOTHIC_500, 17, vx + 40, y, vw - 80, rh, 1, act, MUTED);
@@ -2879,7 +2880,7 @@ static void draw_mouse_page(const UiCanvas *c, const GameMenuInfo *in) {
     ui_box(c, px, py, pw, ph, 20, PAPER, 0, 0);
     hit_add(px, py, pw, ph, HIT_MB_POP, 0, 0);  /* the list itself: not a click beside it */
     snprintf(t, sizeof t, "%s in %s", mb_part_name[mb_row], mb_set ? "battles" : "exploring");
-    ui_text(c, UI_ROUNDED_800, 22, px + 24, py + 22, 22 * 1.3f, t, NIGHT);
+    ui_text(c, UI_ROUNDED_800, 22, px + 24, py + 22, 22 * 1.3f, t, TITLE);
     snprintf(t, sizeof t, "The Switch button it presses, named by what it does %s.", mb_set ? "in battles" : "while exploring");
     ui_text_in(c, UI_GOTHIC_500, 14, px + 24, py + 54, pw - 48, 22, 0, t, MUTED);
     for (int i = 0; i < n; i++) {
@@ -2911,7 +2912,7 @@ static void draw_controls_page(const UiCanvas *c, const GameMenuInfo *in) {
         draw_mouse_page(c, in);
         return;
     }
-    ui_text(c, UI_ROUNDED_800, 34, 488, 76, 34 * 1.25f, "Controls", NIGHT);
+    ui_text(c, UI_ROUNDED_800, 34, 488, 76, 34 * 1.25f, "Controls", TITLE);
     /* one button at the right of the title: to the keyboard view, or back to the bindings (P, Y / Triangle) */
     const char *other = !ctrl_view ? "Bindings" : in->pad ? "Controller view" : "Keyboard view";
     float vw = ui_text_w(UI_ROUNDED_700, 17, other) + 40, vh = 48, vx = 488 + 1024 - vw, vy = 76 + (34 * 1.25f - vh) / 2;
@@ -3035,7 +3036,7 @@ static void draw_controls_page(const UiCanvas *c, const GameMenuInfo *in) {
             /* ‹ value ›: the arrows either side of the value (as the set's pill), Left / Right; a box under the mouse */
             sentence_case(r->cells[0], t, sizeof t);
             float lx = x + cw[0] + 14, vw = 110, by = y + (rh - 26) / 2;
-            ui_text_in(c, UI_GOTHIC_500, 17, lx + 30, y, vw, rh, 1, t, NIGHT);
+            ui_text_in(c, UI_GOTHIC_500, 17, lx + 30, y, vw, rh, 1, t, TITLE);
             for (int k = 0; k < 2; k++) {
                 float bx = k ? lx + 30 + vw + 4 : lx;
                 int hv = hovered(HIT_BIND_STEP, i, k ? 1 : -1);
@@ -3136,7 +3137,7 @@ static void perf_preview_picture(const UiCanvas *c, const GameMenuInfo *in, floa
  * corner, the detailed one's parts, a preview of the HUD over the paused game, its scale and opacity. */
 static void draw_perf_page(const UiCanvas *c, const GameMenuInfo *in) {
     ui_box(c, 448, 40, 1104, 764, 20, PAPER, 0, 0);
-    ui_text(c, UI_ROUNDED_800, 34, 488, 76, 34 * 1.25f, "Overlay", NIGHT);
+    ui_text(c, UI_ROUNDED_800, 34, 488, 76, 34 * 1.25f, "Overlay", TITLE);
     float y = 76 + 34 * 1.25f + 24, x = 488, lh = 16 * 1.45f;
     int mode = window_hud_mode(), corner = window_hud_corner();
     unsigned parts = window_hud_parts();
@@ -3210,7 +3211,7 @@ static void online_edit_box(const UiCanvas *c, float x, float y, float w, float 
     int ring = focus && orow == item && !off;
     float ew = 22 + 8 + ui_text_w(UI_ROUNDED_800, 16, "Edit") + 2 * 16, ex = x + w - ew;
     ui_box(c, x, y, ex - 10 - x, h, 10, WHITE, ring ? 3 : 2, ring ? RING : LINE);
-    ui_text_in(c, UI_ROUNDED_700, 18, x + 16, y, ex - 10 - x - 32, h, 0, text, off ? MUTED : NIGHT);
+    ui_text_in(c, UI_ROUNDED_700, 18, x + 16, y, ex - 10 - x - 32, h, 0, text, off ? MUTED : TITLE);
     int hv = !off && hovered(HIT_ON_ITEM, item, -1);
     ui_box(c, ex, y, ew, h, 10, hv ? LILAC : SOFT, 2, hv ? PLUM : LINE);
     ui_icon(c, ICON_EDIT, ex + 16, y + (h - 22) / 2, 22, 2.2f, off ? MUTED : PLUM);
@@ -3237,7 +3238,7 @@ static void online_switch(const UiCanvas *c, float x, float y, float w, const ch
 static void draw_online_page(const UiCanvas *c, const GameMenuInfo *in) {
     (void)in;
     ui_box(c, 448, 40, 1104, 764, 20, PAPER, 0, 0);
-    ui_text(c, UI_ROUNDED_800, 34, 488, 76, 34 * 1.25f, "Online", NIGHT);
+    ui_text(c, UI_ROUNDED_800, 34, 488, 76, 34 * 1.25f, "Online", TITLE);
     float lh = 16 * 1.45f, x = 488, w = 1024, y = 76 + 34 * 1.25f + 6;
     int locked = online_locked();
     ui_text(c, locked ? UI_GOTHIC_700 : UI_GOTHIC_500, 15, x, y, 15 * 1.45f,
@@ -3280,7 +3281,7 @@ static void draw_online_page(const UiCanvas *c, const GameMenuInfo *in) {
         if (ms >= 0) snprintf(p, sizeof p, "%d ms", ms);
         else snprintf(p, sizeof p, "%s", ms == -1 ? "Measuring..." : "No answer");
         float pw = ui_text_w(UI_GOTHIC_700, 16, p);
-        ui_text_in(c, UI_GOTHIC_700, 16, rx + rw - 20 - pw, ry, pw, 52, 0, p, ms == -2 ? WINE : NIGHT);
+        ui_text_in(c, UI_GOTHIC_700, 16, rx + rw - 20 - pw, ry, pw, 52, 0, p, ms == -2 ? WINE : TITLE);
         if (i == best && n > 1) {
             float tw = tag(c, 0, 0, "Nearest", 0, 0, 1);
             tag(c, rx + rw - 20 - pw - 12 - tw, ry + 17, "Nearest", GOLD, ON_GOLD, 0);
@@ -3337,7 +3338,7 @@ static float bug_button(const UiCanvas *c, float x, float y, const char *label, 
 static void draw_bug_page(const UiCanvas *c, const GameMenuInfo *in) {
     ui_box(c, 448, 40, 1104, 764, 20, PAPER, 0, 0);
     float th = 34 * 1.25f, x = 488, w = 1024, lh = 16 * 1.45f;
-    ui_text(c, UI_ROUNDED_800, 34, x, 76, th, "Report a bug", NIGHT);
+    ui_text(c, UI_ROUNDED_800, 34, x, 76, th, "Report a bug", TITLE);
     if (bug_page < 2) ui_text_in(c, UI_ROUNDED_700, 16, x, 76, w, th, 2, bug_page ? "2 of 2" : "1 of 2", MUTED);
     float y = 76 + th + 24;
     int on = focus;  /* rings only while the page has the focus */
@@ -3345,7 +3346,7 @@ static void draw_bug_page(const UiCanvas *c, const GameMenuInfo *in) {
         ui_box(c, x, y, w, 96, 14, TAGFILL, 0, 0);
         ui_box(c, x + 24, y + 24, 48, 48, 24, PLUM, 0, 0);
         ui_text_in(c, UI_ROUNDED_800, 26, x + 24, y + 24, 48, 48, 1, "\xe2\x9c\x93", SNOW);  /* ✓ */
-        ui_text(c, UI_ROUNDED_800, 22, x + 96, y + 16, 22 * 1.3f, "Report saved", NIGHT);
+        ui_text(c, UI_ROUNDED_800, 22, x + 96, y + 16, 22 * 1.3f, "Report saved", TITLE);
         const char *name = strrchr(bug_zip, '\\') ? strrchr(bug_zip, '\\') + 1 : strrchr(bug_zip, '/') ? strrchr(bug_zip, '/') + 1 : bug_zip;
         char where[400];
         snprintf(where, sizeof where, "reports\\%s", name);
@@ -3489,7 +3490,7 @@ static void draw_preview(const UiCanvas *c, const GameMenuInfo *in) {
     ui_box(c, cx, cy, cw, ch, 14, WHITE, 2, LINE);
     tag(c, cx + 16, cy + 14, "Preview", GOLD, ON_GOLD, 0);
     sentence_case(rows[cur].category, t, sizeof t);
-    ui_text_wrap(c, UI_ROUNDED_800, 20, 0, cx + 16, cy + 14 + 18 + 8, cw - 32, 20 * 1.25f, 0, t, NIGHT);
+    ui_text_wrap(c, UI_ROUNDED_800, 20, 0, cx + 16, cy + 14 + 18 + 8, cw - 32, 20 * 1.25f, 0, t, TITLE);
     int nsec = 0, isec = 0;
     for (int i = 0; i < n; i++) {
         int f, l;
@@ -3536,7 +3537,7 @@ static void draw_preview(const UiCanvas *c, const GameMenuInfo *in) {
         }
         if (r->verbatim) snprintf(t, sizeof t, "%s", r->options[r->current] ? r->options[r->current] : "");
         else sentence_case(r->options[r->current] ? r->options[r->current] : "", t, sizeof t);
-        ui_text_in(c, UI_ROUNDED_700, 17, vx, ry, 170, rh, 1, t, off ? MUTED : NIGHT);
+        ui_text_in(c, UI_ROUNDED_700, 17, vx, ry, 170, rh, 1, t, off ? MUTED : TITLE);
     }
     /* the chosen row: name and value, its tags, then its note and what it does */
     const SettingRow *r = &rows[cur];
@@ -3943,12 +3944,12 @@ static void draw_peek(const UiCanvas *c, const GameMenuInfo *in) {
         hx += hint(c, hx, hb, pv_chip(PV_MINUS, bindings_pad_style()), "Next page") + 28;
         hx += hint(c, hx, hb, pv_chip(PV_MINUS, bindings_pad_style()), "Hold: hide") + 28;
         hint(c, hx, hb, in->close, "Menu");
-        ui_text(c, UI_ROUNDED_800, 30, px + 40, py + 30, 30 * 1.25f, ptitle[KV_GET()], NIGHT);
+        ui_text(c, UI_ROUNDED_800, 30, px + 40, py + 30, 30 * 1.25f, ptitle[KV_GET()], TITLE);
         draw_controls_pad(c, in, px + 40, py + 30 + 30 * 1.25f + 6, pw - 80, 1);
     } else {
         hx += hint(c, hx, hb, "F2", "Hide") + 28;
         hint(c, hx, hb, "Esc", "Menu, to change the keys");
-        ui_text(c, UI_ROUNDED_800, 30, px + 40, py + 30, 30 * 1.25f, "Controls", NIGHT);
+        ui_text(c, UI_ROUNDED_800, 30, px + 40, py + 30, 30 * 1.25f, "Controls", TITLE);
         draw_controls_overview(c, px + 40, py + 30 + 30 * 1.25f + 18, pw - 80, 1);
     }
     KV_SET(saved);

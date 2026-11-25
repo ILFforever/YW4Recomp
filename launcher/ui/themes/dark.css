@@ -1,0 +1,49 @@
+/* name: Dark */
+/* Dark: the built-in lilac and gold, at night. Easy on the eyes in a dark room. Overrides the tokens in style.css
+ * only; the in-game overlay reads the same file (runtime/src/theme.c). */
+:root {
+  --lilac-0: #16131e;   /* page background */
+  --lilac-1: #221d2e;   /* hover, soft fills */
+  --lilac-2: #332c45;   /* lines */
+  --lilac-3: #4b4163;   /* card and button outlines */
+  --violet: #8a74d0;    /* headings, and the fill of chosen chips (light text on it): a middle purple for both */
+  --violet-deep: #0d0b13; /* title bar, darkest */
+  --violet-soft: #6e5bab;
+  --ink: #ebe7f3;       /* body text */
+  --ink-2: #aaa2be;     /* secondary text */
+  --ink-3: #7e7695;
+  --white: #1e1a28;     /* cards and boxes */
+  --cream: #262033;
+  --snow: #f5f2fb;      /* text and rings on the dark (title bar, popup heads, chosen chips) */
+  --title-ink: #f5f2fb; /* the game overlay's page titles and chosen values (its darkest text on light themes) */
+  --gold: #e0b64a;      /* primary button */
+  --gold-deep: #b48d2d;
+  --gold-hi: #ebc762;
+  --gold-press: #c89f39;
+  --gold-ink: #1a1424;  /* text on gold */
+  --gold-soft-press: #3a3122;
+  --line-gold: #4a3f2b;
+  --line-gold-strong: #5b4d31;
+  --select: #a58ff2;    /* selected: outline, on-toggle, chosen radio */
+  --select-ink: #15111d; /* text on it: light purple needs dark text */
+  --ok: #5fcf95;
+  --ok-bg: #1a3227;
+  --bad: #ff8a7f;
+  --bad-text: #ff9b91;
+  --bad-bg: #3a1c1f;
+  --danger: #c4423a;
+  --danger-hi: #d4534a;
+  --danger-press: #a3352e;
+  --warn-icon: #e8ad45; /* the clash box sits on --cream, dark here */
+  --warn-ink: #f0c46a;
+  --bar: rgb(13 11 19 / .92);
+  --bar-btn: #241e31;
+  --bar-btn-hover: #31293f;
+  --bar-hover: #2b2439;
+  --bar-ink: #ddd6ec;
+  --dot: #0d0b13;
+  --track: #3b3352;
+  --shadow: rgb(0 0 0 / .35);
+  --shadow-strong: rgb(0 0 0 / .6);
+  --play-ink: #1a1424;  /* Play: the gold, dark text */
+}

@@ -39,6 +39,17 @@ that folder. The overlay and the HUD had their colours fixed in the code (the ov
   settings.ini line back and takes that theme (`launcher/src-tauri/src/ready.rs` game_theme, the `game-theme`
   event). A theme picked in either place is the other's too.
 
+**A dark theme (2026-11-25, owner: the launcher and settings "have me blind").** `themes/dark.css` ("Dark"). A
+dark page needs three colours that the light themes shared with others: text on the dark bars was `--white` (the
+cards' fill, dark here) in both the launcher (`color: var(--white)`) and the overlay (`snow`, `hud_text`); the
+overlay's page titles and chosen values were `night` (the bars' fill, darkest here); text on gold was `--ink`
+(light here). Three new tokens: `--snow` (launcher: defaults to `var(--white)`; overlay roles `snow`,
+`hud_text`), `--title-ink` (overlay role `title`, 21 text calls in gamemenu.c that drew `NIGHT` on the page) and
+`--gold-ink` (already the launcher's; now also the overlay's `on_gold`). A theme without them keeps exactly what
+those roles took before (its night, `--white`, `--ink`: `load_file`), so the light themes don't change. Checked:
+the launcher's Play screen and the overlay's Settings page in Dark. Not checked: the launcher's other pages and
+popups, the overlay's other pages.
+
 ## Why not build them in
 
 Built in, a new theme needs a rebuild of the game, and the two lists drift apart. Reading about ten small files at

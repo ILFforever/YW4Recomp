@@ -12,7 +12,7 @@
 
 /* the built-in look: the overlay's design colours (gamemenu.c's before themes) and the HUD's (hud_style.c) */
 static const Theme recomp = {
-    .ink = 0x2b2338, .night = 0x2a1b4c, .plum = 0x3e2a6e, .paper = 0xf8f4fc, .gold = 0xe3be5c, .ring = 0xe3be5c, .line = 0xe2d5ef,
+    .ink = 0x2b2338, .night = 0x2a1b4c, .title = 0x2a1b4c, .plum = 0x3e2a6e, .paper = 0xf8f4fc, .gold = 0xe3be5c, .ring = 0xe3be5c, .line = 0xe2d5ef,
     .white = 0xffffff, .snow = 0xfdfcfe, .lilac = 0xd9cdea, .on_dark = 0xd9cdea, .muted = 0x605673, .wine = 0x8c1f3f,
     .shade = 0x160e26, .soft = 0xefe7f7, .edge = 0xc6b2da, .tag = 0xe8dff4, .vsoft = 0x5b4691, .on_gold = 0x2a1b4c,
     .pop_deep = 0x2b1a4d, .pop_gold = 0xe1b75c, .pop_white = 0xfdfcff, .pop_ink = 0x231e33, .pop_lilac = 0xf8f5fd,
@@ -27,13 +27,13 @@ static const struct {
     size_t at;
     const char *token;
 } roles[] = {
-    ROLE(ink, "--ink"), ROLE(night, "--violet-deep"), ROLE(plum, "--violet"), ROLE(paper, "--lilac-0"),
-    ROLE(gold, "--gold"), ROLE(ring, "--select"), ROLE(line, "--lilac-2"), ROLE(white, "--white"), ROLE(snow, "--white"),
+    ROLE(ink, "--ink"), ROLE(night, "--violet-deep"), ROLE(title, "--title-ink"), ROLE(plum, "--violet"), ROLE(paper, "--lilac-0"),
+    ROLE(gold, "--gold"), ROLE(ring, "--select"), ROLE(line, "--lilac-2"), ROLE(white, "--white"), ROLE(snow, "--snow"),
     ROLE(lilac, "--lilac-2"), ROLE(on_dark, "--bar-ink"), ROLE(muted, "--ink-2"), ROLE(wine, "--danger"),
     ROLE(soft, "--lilac-1"), ROLE(edge, "--lilac-3"), ROLE(tag, "--lilac-1"), ROLE(vsoft, "--violet-soft"),
-    ROLE(on_gold, "--ink"), ROLE(pop_deep, "--violet-deep"), ROLE(pop_gold, "--gold"),
+    ROLE(on_gold, "--gold-ink"), ROLE(pop_deep, "--violet-deep"), ROLE(pop_gold, "--gold"),
     ROLE(pop_white, "--white"), ROLE(pop_ink, "--ink"), ROLE(pop_lilac, "--lilac-0"), ROLE(pop_line, "--lilac-2"),
-    ROLE(pop_border, "--violet"), ROLE(hud_text, "--white"), ROLE(hud_label, "--bar-ink"),
+    ROLE(pop_border, "--violet"), ROLE(hud_text, "--snow"), ROLE(hud_label, "--bar-ink"),
     ROLE(hud_card, "--violet-deep"), ROLE(hud_plot, "--violet"), ROLE(hud_target, "--lilac-3"),
 };
 
@@ -134,6 +134,10 @@ static int load_file(const char *path, Theme *t, char *name, size_t nn) {
         while (k && nm[k - 1] == ' ') k--;
         memcpy(name, nm, k), name[k] = 0;
     }
+    /* roles a dark theme needs apart (2026-11-25): a theme that leaves their token out keeps what they took before,
+     * its own night, --white and --ink (UNSET: no colour has bit 24) */
+    enum { UNSET = 0x1000000 };
+    t->title = t->snow = t->hud_text = t->on_gold = UNSET;
     for (size_t r = 0; r < sizeof roles / sizeof *roles; r++) {
         size_t tl = strlen(roles[r].token);
         for (const char *p = text; (p = strstr(p, roles[r].token)); p += tl) {
@@ -146,6 +150,10 @@ static int load_file(const char *path, Theme *t, char *name, size_t nn) {
             break;
         }
     }
+    if (t->title == UNSET) t->title = t->night;
+    if (t->snow == UNSET) t->snow = t->white;
+    if (t->hud_text == UNSET) t->hud_text = t->white;
+    if (t->on_gold == UNSET) t->on_gold = t->ink;
     /* the tint and the popup's shadow: the dark, darker */
     uint32_t n = t->night;
     t->shade = t->pop_shadow = t->pop_backdrop = ((n >> 16 & 255) * 2 / 5) << 16 | ((n >> 8 & 255) * 2 / 5) << 8 | (n & 255) * 2 / 5;

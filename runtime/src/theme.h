@@ -14,6 +14,8 @@
 typedef struct {
     uint32_t ink;      /* body text */
     uint32_t night;    /* the darkest: the side panel's header, the hint bar, titles, description boxes */
+    uint32_t title;    /* the darkest TEXT on the page: titles, chosen values (night unless a theme sets --title-ink:
+                        * a dark theme's night is a fill, too dark to read on its dark page) */
     uint32_t plum;     /* headings, outlines of the chosen, filled chips */
     uint32_t paper;    /* the page and side panel background */
     uint32_t gold;     /* gold fills: the chosen side button, tags, the gold rules */

@@ -13,6 +13,8 @@
   --violet: oklch(36% 0.11 295); --violet-deep: oklch(27% 0.09 295); --violet-soft: oklch(50% 0.11 300);
   --select: oklch(50% 0.11 300); /* selected: the outline, the on-toggle, the chosen radio */
   --select-ink: var(--white);    /* text on --select (the Mods tab's Used tag); a theme with a light --select sets its ink */
+  --snow: var(--white);          /* text and rings on the dark (title bar, popup heads, filled chips): a dark theme,
+                                  * whose --white (the cards) is dark, sets it light */
   --ink: oklch(25% 0.04 295); --ink-2: oklch(45% 0.04 295);
   --gold: oklch(80% 0.12 85); --gold-deep: oklch(62% 0.12 75); --cream: oklch(96.5% 0.03 90);
   --white: oklch(99.2% 0.004 305); --ok: oklch(50% 0.12 160); --ok-bg: oklch(94% 0.05 160);
@@ -87,12 +89,12 @@ body.pointer :focus-visible { outline: none; }
 
 .app { height: 100%; display: flex; flex-direction: column; }
 .bar { flex-shrink: 0; display: flex; align-items: center; gap: 8px; height: 64px; padding: 0 16px 0 28px;
-  background: var(--violet-deep); color: var(--white); border-bottom: 3px solid var(--gold); }
+  background: var(--violet-deep); color: var(--snow); border-bottom: 3px solid var(--gold); }
 .brand { font: 800 20px/1 var(--display); letter-spacing: -.01em; margin-right: auto; }
 /* no transparent buttons (owner's rule): the top-bar icons sit on a solid chip a step lighter than the bar */
 .icon-btn { display: grid; place-items: center; width: 44px; height: 44px; border-radius: 12px; border: 0;
   background: var(--bar-btn); color: var(--bar-ink); cursor: pointer; }
-.icon-btn:hover { background: var(--bar-btn-hover); color: var(--white); }
+.icon-btn:hover { background: var(--bar-btn-hover); color: var(--snow); }
 /* a button that can't be used yet (the gear before the game is built): the chip keeps the theme's colour, the icon is
    dimmed toward the chip (no grey filter, no transparency), no hover, not-allowed cursor */
 .icon-btn:disabled { color: color-mix(in oklab, var(--bar-ink) 45%, var(--bar-btn)); cursor: not-allowed; }
@@ -106,9 +108,9 @@ body.pointer :focus-visible { outline: none; }
 /* part of the glass until hovered, like Windows' own (the one exception to "no transparent buttons": these are
    the window's, not the launcher's) */
 .win-btn { display: grid; place-items: center; width: 46px; border: 0; border-radius: 0; background: transparent;
-  color: var(--white); cursor: pointer; }
-.win-btn:hover { background: var(--bar-hover); color: var(--white); }
-.win-close:hover { background: var(--close-hover); color: var(--white); }
+  color: var(--snow); cursor: pointer; }
+.win-btn:hover { background: var(--bar-hover); color: var(--snow); }
+.win-close:hover { background: var(--close-hover); color: var(--snow); }
 
 [hidden] { display: none !important; }
 /* Linux (app.js LINUX, decision 0071): what only Windows has (FSR, DLSS, frame generation) isn't mentioned */
@@ -341,18 +343,18 @@ body.pointer :focus-visible { outline: none; }
 .band img.blurred { inset: -60px; width: calc(100% + 120px); height: calc(100% + 120px); filter: blur(40px) saturate(1.2); }
 .band::after { content: ""; position: absolute; inset: 0; pointer-events: none;
   background: linear-gradient(90deg, var(--scrim-strong), var(--scrim)); }
-.stats { position: absolute; z-index: 1; left: 26px; top: 20px; display: flex; gap: 30px; margin: 0; color: var(--white); }
+.stats { position: absolute; z-index: 1; left: 26px; top: 20px; display: flex; gap: 30px; margin: 0; color: var(--snow); }
 .stats dt { font: 700 11px/1 var(--display); letter-spacing: .06em; text-transform: uppercase; color: var(--ink-soft); }
 .stats dd { margin: 6px 0 0; font: 800 18px/1 var(--display); }
 .tabs { position: absolute; z-index: 1; left: 22px; right: 22px; bottom: 0; display: flex; gap: 4px; }
 .tabs button { height: 42px; padding: 0 18px; border: 0; border-radius: 12px 12px 0 0; background: var(--violet-deep);
-  color: var(--white); font: 800 15px/1 var(--display); cursor: pointer; }
+  color: var(--snow); font: 800 15px/1 var(--display); cursor: pointer; }
 .tabs button:hover { background: var(--bar-btn); }
 .tabs button[aria-selected="true"] { background: var(--lilac-0); color: var(--violet); }
 /* the dot on the Mods tab while mods clash. On an unselected tab it has a ring in the tab's text colour: a theme's tab
    can be as yellow as the dot (Happierre) */
 .tab-dot { display: inline-block; width: 9px; height: 9px; margin-left: 8px; border-radius: 50%; background: var(--state-warn);
-  box-shadow: 0 0 0 2px var(--white); }
+  box-shadow: 0 0 0 2px var(--snow); }
 .tabs button[aria-selected="true"] .tab-dot { box-shadow: 0 0 0 2px var(--lilac-0); }
 
 .tab-body { flex: 1; min-height: 0; display: flex; flex-direction: column; gap: 14px; padding: 18px 24px 20px; overflow: auto; }
@@ -367,7 +369,7 @@ body.pointer :focus-visible { outline: none; }
 .card-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 6px; }
 .card-head h2 { margin: 0; }
 .news { display: flex; flex-direction: column; gap: 8px; border-color: var(--lilac-2); }
-.news .tag { align-self: flex-start; padding: 5px 9px; border-radius: 999px; background: var(--violet); color: var(--white);
+.news .tag { align-self: flex-start; padding: 5px 9px; border-radius: 999px; background: var(--violet); color: var(--snow);
   font: 800 11px/1 var(--display); }
 .news h2 { margin: 0; font-size: 21px; }
 .news ul { margin: 0; padding-left: 18px; display: flex; flex-direction: column; gap: 6px; font-size: 14px; }
@@ -454,7 +456,7 @@ p.list-card { padding: 14px 18px; }
   background: var(--white); border: 1px solid var(--lilac-3); }
 /* Before setup there is no picture of the game (none can ship with the launcher): the website's wave pattern */
 .art { flex: 1; min-height: 0; position: relative; display: flex; flex-direction: column; justify-content: flex-end;
-  padding: 28px 30px; color: var(--white); background-color: var(--violet-deep); }
+  padding: 28px 30px; color: var(--snow); background-color: var(--violet-deep); }
 .art::before { content: ""; position: absolute; inset: 0; opacity: .14;
   background-image: radial-gradient(circle at 50% 100%, transparent 38%, var(--gold) 39% 42%, transparent 43% 55%, var(--gold) 56% 59%, transparent 60%);
   background-size: 56px 28px; }
@@ -468,7 +470,7 @@ p.list-card { padding: 14px 18px; }
 .art-cap { position: relative; z-index: 1; align-self: flex-start; margin-bottom: 10px; padding: 6px 11px; border-radius: 999px;
   background: var(--gold); color: var(--gold-ink); font: 800 13px/1 var(--display); }
 .dots { position: absolute; z-index: 1; right: 24px; bottom: 26px; display: flex; gap: 8px; }
-.dots button { width: 12px; height: 12px; padding: 0; border-radius: 50%; border: 2px solid var(--white); background: var(--dot);
+.dots button { width: 12px; height: 12px; padding: 0; border-radius: 50%; border: 2px solid var(--snow); background: var(--dot);
   cursor: pointer; }
 .dots button[aria-current="true"] { background: var(--gold); border-color: var(--gold); }
 .art-title { position: relative; z-index: 1; font: 800 44px/1.05 var(--display); text-shadow: 0 2px 12px var(--shadow-text); }
@@ -506,7 +508,7 @@ dialog { width: 460px; padding: 0; overflow: hidden; border: 1px solid var(--lin
   background: var(--white); color: var(--ink); box-shadow: 0 14px 36px var(--shadow-strong); }
 dialog::backdrop { background: var(--backdrop); }
 dialog:not(.welcome-dialog) > h2 { margin: 0; padding: 15px 22px 13px; background: var(--violet-deep);
-  border-bottom: 3px solid var(--gold); font: 800 17px/1.25 var(--display); color: var(--white); }
+  border-bottom: 3px solid var(--gold); font: 800 17px/1.25 var(--display); color: var(--snow); }
 dialog:not(.welcome-dialog) > :not(h2):not(.dialog-buttons) { margin-left: 22px; margin-right: 22px; }
 dialog:not(.welcome-dialog) > h2 + * { margin-top: 18px; }
 dialog p { margin: 0 0 10px; font-size: 14px; overflow-wrap: anywhere; }
@@ -522,12 +524,12 @@ dialog p { margin: 0 0 10px; font-size: 14px; overflow-wrap: anywhere; }
 .btn.coffee { flex-shrink: 0; gap: 8px; color: #000; background: #ffdd00; border-color: #e6c700; }
 .btn.coffee:hover { color: #000; background: #ffe633; border-color: #ffdd00; }
 .update-icon { flex-shrink: 0; }
-.welcome-head { position: relative; padding: 26px 28px 22px; background: var(--violet-deep); color: var(--white);
+.welcome-head { position: relative; padding: 26px 28px 22px; background: var(--violet-deep); color: var(--snow);
   border-bottom: 3px solid var(--gold); }
 .welcome-head::before { content: ""; position: absolute; inset: 0; opacity: .14; pointer-events: none;
   background-image: radial-gradient(circle at 50% 100%, transparent 38%, var(--gold) 39% 42%, transparent 43% 55%, var(--gold) 56% 59%, transparent 60%);
   background-size: 56px 28px; }
-.welcome-head h2 { position: relative; margin: 0 0 4px; font: 800 24px/1.15 var(--display); color: var(--white); }
+.welcome-head h2 { position: relative; margin: 0 0 4px; font: 800 24px/1.15 var(--display); color: var(--snow); }
 .welcome-head span { position: relative; font-size: 13px; color: var(--ink-welcome); }
 .welcome-body { padding: 20px 28px 4px; }
 .steps { margin: 0 0 14px; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 12px; }
@@ -552,7 +554,7 @@ dialog p { margin: 0 0 10px; font-size: 14px; overflow-wrap: anywhere; }
 .pick { height: 36px; padding: 0 15px; border-radius: 999px; border: 1.5px solid var(--lilac-3); background: var(--white);
   color: var(--violet); font: 700 14px/1 var(--display); cursor: pointer; }
 .pick:hover { background: var(--lilac-1); border-color: var(--violet-soft); }
-.pick[aria-pressed="true"] { background: var(--violet); border-color: var(--violet); color: var(--white); }
+.pick[aria-pressed="true"] { background: var(--violet); border-color: var(--violet); color: var(--snow); }
 #report-oftens .pick { min-width: 130px; }
 #report-text { height: 120px; box-sizing: border-box; resize: none; padding: 10px 12px; border-radius: 12px;
   border: 1.5px solid var(--lilac-3); background: var(--white); color: var(--ink); font: 500 14px/1.5 var(--body); }
@@ -561,7 +563,7 @@ dialog p { margin: 0 0 10px; font-size: 14px; overflow-wrap: anywhere; }
 .report-note { margin-top: 6px; }
 .report-done { display: flex; gap: 16px; align-items: flex-start; }
 .report-done .done-mark { flex: none; display: flex; align-items: center; justify-content: center; width: 44px; height: 44px;
-  border-radius: 50%; background: var(--ok); color: var(--white); }
+  border-radius: 50%; background: var(--ok); color: var(--snow); }
 .report-done code { display: block; margin-bottom: 6px; font: 13px/1.4 ui-monospace, Consolas, monospace; color: var(--ink-2);
   overflow-wrap: anywhere; }
 .dialog-buttons .spacer { flex: 1; }
@@ -623,7 +625,7 @@ dialog p { margin: 0 0 10px; font-size: 14px; overflow-wrap: anywhere; }
 .set-chips button { display: inline-flex; align-items: center; gap: 8px; height: 34px; padding: 0 15px; border-radius: 999px;
   border: 1.5px solid var(--lilac-3); background: var(--white); color: var(--violet); font: 700 13px/1 var(--display); cursor: pointer; }
 .set-chips button:hover { background: var(--lilac-1); }
-.set-chips button[aria-pressed="true"] { background: var(--violet); border-color: var(--violet); color: var(--white); }
+.set-chips button[aria-pressed="true"] { background: var(--violet); border-color: var(--violet); color: var(--snow); }
 .settings-scroll { flex: 1; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; gap: 18px; padding: 2px 8px 4px 0; }
 .set-count { margin: 0 4px; font: 800 16px/1.2 var(--display); color: var(--violet); }
 .set-gh { display: flex; align-items: center; gap: 12px; margin: 0 0 8px; font: 800 19px/1.2 var(--display); color: var(--violet); }
@@ -678,7 +680,7 @@ dialog p { margin: 0 0 10px; font-size: 14px; overflow-wrap: anywhere; }
 .check-list { display: flex; flex-direction: column; gap: 8px; margin-bottom: 4px; }
 .check-list .check { margin: 0; color: var(--ink); font-size: 14px; }
 .check-list .check span { color: var(--ink-2); font-size: 12px; }
-.btn.danger { border: 0; background: var(--danger); color: var(--white); font-weight: 800; }
+.btn.danger { border: 0; background: var(--danger); color: var(--snow); font-weight: 800; }
 .btn.danger:not(:disabled):not(.x):hover { background: var(--danger-hi); }
 .btn.danger:not(:disabled):not(.x):active { background: var(--danger-press); }
 
