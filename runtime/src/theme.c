@@ -54,6 +54,51 @@ static uint32_t oklch(double L, double C, double H) {
     return (uint32_t)to8(encode(r)) << 16 | (uint32_t)to8(encode(g)) << 8 | to8(encode(bl));
 }
 
+/* sRGB (0xRRGGBB) -> OKLCH: L 0..1, C, H in degrees */
+static double decode(double c) { return c <= 0.04045 ? c / 12.92 : pow((c + 0.055) / 1.055, 2.4); }
+static void to_oklch(uint32_t rgb, double out[3]) {
+    double r = decode((rgb >> 16 & 255) / 255.0), g = decode((rgb >> 8 & 255) / 255.0), b = decode((rgb & 255) / 255.0);
+    double l = cbrt(0.4122214708 * r + 0.5363325363 * g + 0.0514459929 * b);
+    double m = cbrt(0.2119034982 * r + 0.6806995451 * g + 0.1073969566 * b);
+    double s = cbrt(0.0883024619 * r + 0.2817188376 * g + 0.6299787005 * b);
+    double L = 0.2104542553 * l + 0.7936177850 * m - 0.0040720468 * s;
+    double A = 1.9779984951 * l - 2.4285922050 * m + 0.4505937099 * s;
+    double B = 0.0259040371 * l + 0.7827717662 * m - 0.8086757660 * s;
+    double h = atan2(B, A) * 180 / 3.14159265358979;
+    out[0] = L, out[1] = sqrt(A * A + B * B), out[2] = h < 0 ? h + 360 : h;
+}
+
+/* Dark mode (owner, 2026-11-26: "a dark mode toggle which switches every theme to dark"): the theme's accents stay
+ * (gold, the focus ring, the hue of its purple); the page, boxes, lines and text become dark ones tinted with the
+ * hue of its darkest colour. The same sums as the launcher's (launcher/ui/themes.js darkTokens): change both. */
+static void darken(const Theme *src, Theme *t) {
+    double deep[3], violet[3], gold[3], sel[3], gi[3];
+    to_oklch(src->night, deep), to_oklch(src->plum, violet), to_oklch(src->gold, gold), to_oklch(src->ring, sel);
+    double hn = deep[1] >= 0.01 ? deep[2] : violet[2];
+    double cn = deep[1] >= 0.01 ? (deep[1] < 0.03 ? deep[1] : 0.03) : (violet[1] < 0.02 ? violet[1] : 0.02);
+    double vc = violet[1] < 0.06 ? 0.06 : violet[1] > 0.14 ? 0.14 : violet[1];
+#define N(L, k) oklch(L, cn * (k), hn)
+    *t = *src;
+    t->paper = t->pop_lilac = N(0.17, 0.8);
+    t->soft = t->tag = N(0.215, 1);
+    t->line = t->lilac = t->pop_line = N(0.29, 1);
+    t->edge = t->hud_target = N(0.4, 1.2);
+    t->white = t->pop_white = N(0.2, 1);
+    t->ink = t->pop_ink = N(0.93, 0.4);
+    t->muted = N(0.75, 0.6);
+    t->plum = t->pop_border = t->hud_plot = oklch(0.66, vc, violet[2]);
+    t->vsoft = oklch(0.55, vc, violet[2]);
+    t->night = t->pop_deep = t->hud_card = N(0.12, 1);
+    t->snow = t->title = t->hud_text = N(0.97, 0.3);
+    t->on_dark = t->hud_label = N(0.88, 0.6);
+    t->ring = oklch(sel[0] > 0.7 ? sel[0] : 0.7, sel[1], sel[2]);
+    to_oklch(src->on_gold, gi);
+    if (gi[0] > 0.5) t->on_gold = oklch(0.16, 0.03, gold[2]);
+#undef N
+    uint32_t n = t->night;  /* the tint and the popup's shadow: the dark, darker (load_file) */
+    t->shade = t->pop_shadow = t->pop_backdrop = ((n >> 16 & 255) * 2 / 5) << 16 | ((n >> 8 & 255) * 2 / 5) << 8 | (n & 255) * 2 / 5;
+}
+
 /* the numbers in "( ... )": up to 3 before any '/', a percent sign marks one (as 0..1) */
 static int numbers(const char *p, double v[3], int pct[3]) {
     int n = 0;
@@ -113,6 +158,7 @@ static struct {
     Theme colours;
 } themes[MAX_THEMES];
 static int nthemes = -1, chosen, loaded;
+static int dark = -1;  /* dark mode (YW4_DARK=1); under theme_lock */
 static HostLock theme_lock = HOST_LOCK_INIT;  /* nthemes, chosen, themes[] while loading; leaf lock, calls nothing of ours */
 /* What the overlay and the HUD read (a copy: changed on the window's thread, read on the present's). Two copies and
  * an index: the readers keep the pointer, so a step writes the copy nobody is shown and then flips the index. */
@@ -206,7 +252,10 @@ static void load_all_locked(void) {
     chosen = 0;
     for (int i = 0; want && i < nthemes; i++)
         if (!strcmp(themes[i].id, want)) chosen = i;
-    current[0] = themes[chosen].colours;
+    const char *d = getenv("YW4_DARK");
+    dark = d && *d == '1';
+    if (dark) darken(&themes[chosen].colours, &current[0]);
+    else current[0] = themes[chosen].colours;
     fprintf(stderr, "yw4: themes: %d (%s), %s\n", nthemes, dir ? dir : "no themes folder", themes[chosen].id);
 }
 
@@ -235,12 +284,34 @@ int theme_index(void) {
 const char *theme_name(int i) { return load_all(), i >= 0 && i < nthemes ? themes[i].name : ""; }
 const char *theme_id(void) { return themes[theme_index()].id; }
 
+/* the chosen theme, dark or not, into the copy nobody is shown, then shown (under theme_lock) */
+static void show_locked(void) {
+    int next = 1 - current_at;
+    if (dark) darken(&themes[chosen].colours, &current[next]);
+    else current[next] = themes[chosen].colours;
+    __atomic_store_n(&current_at, next, __ATOMIC_RELEASE);
+}
+
 void theme_step(int dir) {
     load_all();
     host_lock(&theme_lock);
     chosen = (chosen + (dir < 0 ? nthemes - 1 : 1)) % nthemes;
-    int next = 1 - current_at;
-    current[next] = themes[chosen].colours;
-    __atomic_store_n(&current_at, next, __ATOMIC_RELEASE);
+    show_locked();
+    host_unlock(&theme_lock);
+}
+
+int theme_dark(void) {
+    load_all();
+    host_lock(&theme_lock);
+    int d = dark;
+    host_unlock(&theme_lock);
+    return d;
+}
+
+void theme_dark_toggle(void) {
+    load_all();
+    host_lock(&theme_lock);
+    dark = !dark;
+    show_locked();
     host_unlock(&theme_lock);
 }

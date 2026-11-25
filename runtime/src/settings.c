@@ -556,6 +556,13 @@ static const Setting player[] = {
       "DARKEST SHADOWS"}, 5, gpu_lamp_shadow_level,
      gpu_lamp_shadow_cycle, "YW4_LAMP_SHADOWS", {"0", "0.25", "0.4", "0.6", "1"}, lamp_shadows_disabled},
     /* Advanced: before the developer page's rows (owner, 2026-11-19: back from General) */
+    /* (owner, 2026-11-26: a switch that turns every theme dark, instead of a dark theme; the launcher's Settings has
+     * the same switch and they follow each other through settings.ini) */
+    {"LOOK", "DARK MODE",
+     "EVERY THEME IN DARK COLOURS: THIS MENU AND THE PERFORMANCE HUD. THE THEME KEEPS ITS OWN ACCENT COLOURS. THE "
+     "LAUNCHER HAS THE SAME SWITCH.",
+     {"OFF", "ON"}, {"THE THEME'S OWN LIGHT COLOURS", "DARK, EASY ON THE EYES AT NIGHT"}, 2, theme_dark,
+     theme_dark_toggle, "YW4_DARK", {"0", "1"}},
     {"ADVANCED", "LEGACY MENUS",
      "THE OLD KEYS: F1 OPENS THE OLD SETTINGS PANEL AND ITS DEVELOPER OPTIONS, F2 THE OLD CONTROLS PAGE, F3 SHOWS OR "
      "HIDES THE PERFORMANCE HUD. OFF, F1 AND F2 OPEN THIS MENU'S SETTINGS AND CONTROLS PAGES (IT HAS ALL OF IT, THE "
@@ -974,9 +981,10 @@ static int overlay_row(const Setting *s) { return !hud_slider_row(s) && !(s->hid
  * (the old panel keeps them). */
 /* The overlay's Look > Theme row (theme.h): after the player's settings, before Advanced, overlay only (the old panel's pixel font has no lower
  * case for the names); its value one theme's name, Left / Right step through them. */
+static int after_theme(const char *category) { return !strcmp(category, "LOOK") || !strcmp(category, "ADVANCED"); }
 static int theme_row(void) {
     int n = 0;
-    for (int i = 0; i < NPLAYER && strcmp(player[i].category, "ADVANCED"); i++) n += overlay_row(&player[i]);
+    for (int i = 0; i < NPLAYER && !after_theme(player[i].category); i++) n += overlay_row(&player[i]);
     return n;
 }
 
@@ -997,7 +1005,7 @@ int settings_player_rows(SettingRow *rows, int max) {
     int n = 0, at = theme_row();
     int themed = 0;
     for (int i = 0; i < NPLAYER && n < max; i++) {
-        if (!themed && !strcmp(player[i].category, "ADVANCED") && n == at)  /* Look > Theme just before Advanced */
+        if (!themed && after_theme(player[i].category) && n == at)  /* Look > Theme, then Look's own rows, Advanced */
             fill_theme_row(&rows[n++]), rows[n - 1].look = 1, themed = 1;
         if (n < max && overlay_row(&player[i])) {
             n += fill_rows(rows + n, 1, &player[i], 1);

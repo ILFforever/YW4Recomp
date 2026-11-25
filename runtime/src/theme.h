@@ -43,5 +43,7 @@ int theme_index(void);            /* the chosen one */
 const char *theme_name(int i);    /* "YW4 Recomp", "Jibanyan" */
 void theme_step(int dir);         /* the next (1) or the one before (-1), wrapping (settings.c saves it) */
 const char *theme_id(void);       /* the chosen one's id, for settings.ini ("recomp") */
+int theme_dark(void);             /* dark mode: every theme in dark colours (YW4_DARK=1, Look > Dark mode) */
+void theme_dark_toggle(void);     /* on / off, live (settings.c saves it) */
 
 #endif

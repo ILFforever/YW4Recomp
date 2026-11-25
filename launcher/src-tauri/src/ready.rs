@@ -606,7 +606,7 @@ pub fn set_mod_enabled(mod_name: String, enabled: bool) -> Result<Vec<String>, S
 /// Settings (Play): with `mods` off the game starts with none (YW4_MODS=none: an environment variable wins over
 /// game.ini's line); `on_play` says what the launcher's window does meanwhile, and "hide" brings it back afterwards.
 #[tauri::command]
-pub fn play(app: tauri::AppHandle, install: String, mods: Option<bool>, on_play: Option<String>, theme: Option<String>, show_log: Option<bool>, disabled_mods: Option<Vec<String>>, controls_hint: Option<bool>, cheats: Option<bool>, update_notice: Option<String>) -> Result<(), String> {
+pub fn play(app: tauri::AppHandle, install: String, mods: Option<bool>, on_play: Option<String>, theme: Option<String>, dark: Option<bool>, show_log: Option<bool>, disabled_mods: Option<Vec<String>>, controls_hint: Option<bool>, cheats: Option<bool>, update_notice: Option<String>) -> Result<(), String> {
     use tauri::{Emitter, Manager};
     crate::buildrun::ensure_dlc_extracted(&app, Path::new(&install));
     let e = exe(&install);
@@ -634,6 +634,8 @@ pub fn play(app: tauri::AppHandle, install: String, mods: Option<bool>, on_play:
     // the theme goes both ways: the game opens in the launcher's theme, and a theme chosen in the game comes back
     // to the launcher when the game closes (the 'game-theme' event)
     if let Some(t) = theme.as_deref().filter(|t| !t.is_empty()) { cmd.env("YW4_THEME", t); }
+    // dark mode goes both ways like the theme (the game's Look > Dark mode, its settings.ini line YW4_DARK)
+    if let Some(d) = dark { cmd.env("YW4_DARK", if d { "1" } else { "0" }); }
     let started = std::time::SystemTime::now();
     let mut child = cmd.spawn().map_err(|e| format!("couldn't start the game ({e})"))?;
     let start = now();
@@ -657,6 +659,7 @@ pub fn play(app: tauri::AppHandle, install: String, mods: Option<bool>, on_play:
             if let Some(w) = app.get_webview_window("main") { let _ = w.show(); let _ = w.unminimize(); let _ = w.set_focus(); }
         }
         if let Some(id) = game_theme(&install, started) { let _ = app.emit("game-theme", id); }
+        if let Some(d) = game_setting(&install, started, "YW4_DARK=") { let _ = app.emit("game-dark", d == "1"); }
         let _ = app.emit("played", ());
         // the game ends with 0 when the player quits (or closes the window); anything else is a crash or a stop
         // (3: the recompiled code stopped, kernel.c): offer to report it, with this play's log (the Report a bug form, save_report)
@@ -893,6 +896,15 @@ fn game_theme(install: &str, since: std::time::SystemTime) -> Option<String> {
     let settings = std::fs::read_to_string(path).ok()?;
     let id = settings.lines().find_map(|l| l.trim().strip_prefix("YW4_THEME="))?.trim().to_string();
     (!id.is_empty() && id.chars().all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-')).then_some(id)
+}
+
+/// One line of the game's settings.ini (`key` with its '='), on the same terms as game_theme: only a file written since
+/// `since` counts.
+fn game_setting(install: &str, since: std::time::SystemTime, key: &str) -> Option<String> {
+    let path = game_ini_path(install, "YW4_SETTINGS_FILE")?;
+    if std::fs::metadata(&path).ok()?.modified().ok()? < since { return None; }
+    let settings = std::fs::read_to_string(path).ok()?;
+    settings.lines().find_map(|l| l.trim().strip_prefix(key)).map(|v| v.trim().to_string())
 }
 
 /// Opens one of the install's folders in Explorer (a fixed set: nothing else can be named).

@@ -892,8 +892,8 @@ let inst = null;  // the launcher's state of the install (Rust: ready.rs, %AppDa
 
 // What's new: written for each release (the launcher ships with the notes of the version it builds)
 const NEWS = {
-  version: '1.6.2',
-  items: ['Settings > Updates: Update game from file takes a game update zip you already have', 'Free up space shows the space used once there is nothing left to free', 'Settings > Cheats: Manage is a link'],
+  version: '1.7.0',
+  items: ['Dark mode: one switch in Settings turns any theme dark, the game's overlay too', 'Play any game version: Update game from file takes any game update zip, older ones too', 'Check for updates switch: off stops new game offers, Check now still works', 'Settings is one page with search (Ctrl+F) and group chips', 'Options: Intel XeSS switch (Windows) to skip its download'],
 };
 
 function showNews(version, items) {
@@ -1262,6 +1262,8 @@ let reclaimable = 0;
 // the game closed: new play time, maybe new screenshots
 if (T && T.event) T.event.listen('played', () => { if (inst && !document.querySelector('[data-screen="ready"]').hidden) showReady(); });
 // a theme chosen in the game comes back here when it closes (game-theme: its settings.ini's YW4_THEME)
+// dark mode switched in the game comes back the same way (game-dark: its settings.ini's YW4_DARK)
+if (T && T.event) T.event.listen('game-dark', ({ payload }) => { if (!!payload !== darkOn()) setDark(!!payload); });
 if (T && T.event) T.event.listen('game-theme', async ({ payload }) => {
   await refreshThemes();
   const i = THEMES.findIndex((t) => t.id === payload);
@@ -1376,7 +1378,7 @@ $('play').addEventListener('click', async () => {
   }
   try {
     await invoke('play', { install: inst.install, mods: inst.mods !== false, showLog: !!inst.showLog, onPlay: inst.onPlay || 'hide',
-      controlsHint: inst.controlsHint !== false, cheats: inst.cheats !== false, theme: THEMES[themeAt] ? THEMES[themeAt].id : 'recomp', disabledMods: (inst && inst.disabledMods) || [] });
+      controlsHint: inst.controlsHint !== false, cheats: inst.cheats !== false, theme: THEMES[themeAt] ? THEMES[themeAt].id : 'recomp', dark: darkOn(), disabledMods: (inst && inst.disabledMods) || [] });
     $('stat-last').textContent = 'Today';
   } catch (e) { popup('Something went wrong', String(e)); }
 });
@@ -1405,7 +1407,7 @@ async function straightToGame() {
     if (u && (u.game || u.rebuild)) say.push('Game ' + (u.game ? u.game.version : u.rebuild));
     if (u && u.launcher) say.push((say.length ? 'launcher ' : 'Launcher ') + u.launcher.version);
     await invoke('play', { install: inst.install, mods: inst.mods !== false, showLog: !!inst.showLog, onPlay: 'hide',
-      controlsHint: inst.controlsHint !== false, cheats: inst.cheats !== false, theme: THEMES[themeAt] ? THEMES[themeAt].id : 'recomp',
+      controlsHint: inst.controlsHint !== false, cheats: inst.cheats !== false, theme: THEMES[themeAt] ? THEMES[themeAt].id : 'recomp', dark: darkOn(),
       disabledMods: (inst && inst.disabledMods) || [], updateNotice: say.join(' and ') });
     $('stat-last').textContent = 'Today';
   } catch (e) {
