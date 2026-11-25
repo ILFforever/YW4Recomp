@@ -60,13 +60,13 @@ void gpu_wide_cycle(void) {
 
 /* HUD LAYOUT (owner, 2026-11-25): at shapes wider than 16:9, the field HUD's side pieces (the shortcut cross and
  * the banners on the left, the minimap and the quest on the right) at the screen's edges instead of the 16:9 middle
- * (gpu_draw.c). YW4_HUD_EDGES=1 (default) / 0. */
+ * (gpu_draw.c). YW4_HUD_EDGES=1 (opt-in: off by default) / 0. */
 static int hud_edges = -1;
 int gpu_hud_edges(void) {
     int e = __atomic_load_n(&hud_edges, __ATOMIC_ACQUIRE);
     if (e < 0) {
         const char *v = getenv("YW4_HUD_EDGES");
-        e = !(v && *v == '0');
+        e = v && *v == '1';  /* opt-in (owner, 2026-11-26): off unless set */
         __atomic_store_n(&hud_edges, e, __ATOMIC_RELEASE);
     }
     return e;

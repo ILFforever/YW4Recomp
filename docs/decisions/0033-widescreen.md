@@ -88,7 +88,8 @@ draw copies that into one of **two** window images (1920×1080) that it presents
    so a new set of images.
 
 7. **The field HUD at the screen's edges** (added 2026-11-25, owner: "move the minimap and quick settings further
-   to the sides"). HUD LAYOUT in the panel: SCREEN EDGES (default) or CENTRED (`YW4_HUD_EDGES`). At shapes wider
+   to the sides"). HUD LAYOUT in the panel: CENTRED (the default, as on the Switch) or SCREEN EDGES (`YW4_HUD_EDGES=1`, opt-in: changed
+   2026-11-26, the owner asked for it to be off by default). At shapes wider
    than 16:9, while exploring, a UI draw goes to an edge of the wider image instead of the 16:9 middle when the
    middle of its box (clip space, the corners through the position rows the shader translator found: `draw_box`,
    the vertex reading `covers_screen` already did, now up to 4096 vertices) is in the outer third of the 16:9 area
