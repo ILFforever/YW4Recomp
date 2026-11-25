@@ -88,6 +88,9 @@ static int dyn_full_screen;
  * at the top (1) or the bottom (2) from the layer's edge */
 static int dyn_edge;
 static int dyn_hud_side;  /* HUD at the screen's edges (YW4_HUD_EDGES): -1 left, 1 right, 0 middle */
+/* a UI box (clip y lo..hi) wholly in the screen's lower half: for the UI clip y runs up (the minimap at the bottom
+ * right logs y -0.90..-0.51, 2026-11-25) */
+#define HUD_LOW_Y(lo, hi) ((hi) <= 0)
 
 /* Distance blur (depth of field): the game blurs the scene by distance. Fragment shader 27b63a2b... reads
  * depth, turns it into an amount with cbuf 6 row 0 (a, b, c, w: clamp((a / (b z + cam) + c) w)) and draws
@@ -2694,14 +2697,22 @@ static inline int draw_layout(VkCommandBuffer cb, GpuState *s, const CmdRec *r, 
      * quest banner's "!" and line start just inside the right third and must move with its text. Menus, maps,
      * conversations and battles keep everything in the middle, so their layouts never split. ("No layer over the
      * whole width this frame" can't tell a menu: the field draws one every frame, 2026-11-25.) */
-    if (s->after_composite && !dyn_reads_screen && !layer && !cover && gpu_hud_edges() && mousemenu_field() &&
-        !battle_active()) {
+    /* In a battle (owner, 2026-11-25: the party list and the moves bunched in the middle at 19.5:9) only the lower
+     * part moves: the party list, the moves, Auto Battle / Stopwatching. The enemies' name banners are flat UI
+     * placed over them, higher up; moved they would leave their enemy. Its menus (Stopwatching) still stop it. */
+    int battle = battle_active();
+    /* in a battle only its own menus count: the conversation flag stays on through the fight (the battle's start uses
+     * the talk window and the field's HUD doesn't focus until it ends; YW4 log 2026-11-25: talk 1 in every battle
+     * draw), as can the map's and Naviwoof's */
+    int menus = battle ? mousemenu_open() || mousemenu_stopwatch() : !mousemenu_field();
+    if (s->after_composite && !dyn_reads_screen && !layer && !cover && gpu_hud_edges() && !menus) {
         uint32_t wn, wd;
         gpu_wide_factor(&wn, &wd);
         float lo[2], hi[2];
         if (wn > wd && draw_box(s, vs, r, 4096, lo, hi)) {
             float mid = (lo[0] + hi[0]) * 0.5f;
             dyn_hud_side = mid < -1.0f / 3 && hi[0] <= 0 ? -1 : mid > 1.0f / 3 && lo[0] >= 0 ? 1 : 0;
+            if (battle && !(HUD_LOW_Y(lo[1], hi[1]))) dyn_hud_side = 0;
         }
     }
     int full = cover == 2;  /* a 16:9 picture gets bars only when it fills the screen; a band of one stays 16:9 */

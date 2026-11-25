@@ -102,7 +102,14 @@ draw copies that into one of **two** window images (1920×1080) that it presents
    vt `main+0x14bf268` hash `0xa5d50e5d` focuses last and keeps it), and "no layer over the whole width this frame"
    (the field draws one every frame). With `YW4_MOUSE_MENUS=0` the menus aren't followed, so menus would split too.
    Checked 2026-11-25 in the bamboo forest at 21:9 and 32:9 (the pieces at the edges) and the Yo-kai Pad at 21:9
-   (unchanged). Not checked: a battle, a conversation, shops, the diary, the town.
+   (unchanged). Not checked: a conversation, shops, the diary, the town.
+   **Battles** (owner, same day: the party list and the moves bunched in the middle at 19.5:9): only the lower half
+   moves there (the box wholly below the centre; for the UI clip y runs up, the minimap logs y -0.90..-0.51), so
+   the party list, the "enemy stunned" banner and Auto Battle go left, the moves right, and the enemies' name
+   banners (flat UI over the enemy, higher up) stay over their enemy. In a battle only the Pad and the
+   Stopwatching menu stop it: the conversation flag stays on through the fight (its start uses the talk window and
+   the field's HUD doesn't focus until it ends: a log showed talk 1 in every battle draw). Checked by the owner in
+   a bamboo forest battle at 19.5:9, against Centred in the same fight.
 
 ## How it was checked
 
