@@ -892,8 +892,8 @@ let inst = null;  // the launcher's state of the install (Rust: ready.rs, %AppDa
 
 // What's new: written for each release (the launcher ships with the notes of the version it builds)
 const NEWS = {
-  version: '1.7.0',
-  items: ['Dark mode: one switch in Settings turns any theme dark, the game\'s overlay too', 'Play any game version: Update game from file takes any game update zip, older ones too', 'Check for updates switch: off stops new game offers, Check now still works', 'Settings is one page with search (Ctrl+F) and group chips', 'Options: Intel XeSS switch (Windows) to skip its download'],
+  version: '1.7.1',
+  items: ['Fixed: in 1.7.0 no button worked and updates could go to another install folder', 'Dark mode: one switch in Settings turns any theme dark, the game\'s overlay too', 'Play any game version: Update game from file takes any game update zip, older ones too', 'Check for updates switch: off stops new game offers, Check now still works', 'Settings is one page with search (Ctrl+F) and group chips', 'Options: Intel XeSS switch (Windows) to skip its download'],
 };
 
 function showNews(version, items) {
