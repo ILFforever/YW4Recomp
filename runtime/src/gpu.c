@@ -290,14 +290,18 @@ static VkCommandBuffer begin(void) {
 static void submit(VkCommandBuffer cb) {
     gpu_passes_end(cb);
     if (ts_period_ns && cur) vkCmdWriteTimestamp(cb, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, qpool, (uint32_t)(cur - ring) * 2 + 1);
+    int64_t te = host_now_ns();
     CHECK(vkEndCommandBuffer(cb));
+    gpu_stall_add(STALL_END, host_now_ns() - te);
     uint64_t seq = submitted + 1;
     VkTimelineSemaphoreSubmitInfo ts = {.sType = VK_STRUCTURE_TYPE_TIMELINE_SEMAPHORE_SUBMIT_INFO,
                                         .signalSemaphoreValueCount = 1, .pSignalSemaphoreValues = &seq};
     VkSubmitInfo si = {.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO, .pNext = &ts, .commandBufferCount = 1,
                        .pCommandBuffers = &cb, .signalSemaphoreCount = 1, .pSignalSemaphores = &timeline};
     host_lock(&vk.queue_lock);
+    int64_t tq = host_now_ns();  /* after the queue lock: the driver's time alone (issue #30) */
     VkResult r = vkQueueSubmit(vk.queue, 1, &si, VK_NULL_HANDLE);
+    gpu_stall_add(STALL_SUBMIT, host_now_ns() - tq);
     host_unlock(&vk.queue_lock);
     if (r == VK_ERROR_DEVICE_LOST) {
         fprintf(stderr, "yw4: gpu: device lost in submission %" PRIu64 "\n", seq);
@@ -2610,6 +2614,7 @@ void gpu_execute(uint64_t handle) {
     uint64_t at = handle;
     static uint64_t exec;  /* which run of a list this is (gpu_ab.c) */
     exec++;
+    int64_t tr = host_now_ns();
     for (int n = 0;; n++) {
         const CmdRec *r = (const CmdRec *)(uintptr_t)at;
         if (r->op >= CMD_COUNT || r->size < sizeof(CmdRec) || r->size & 7 || n > 10000000) {
@@ -2660,6 +2665,7 @@ void gpu_execute(uint64_t handle) {
         }
         at += r->size;
     }
+    gpu_stall_add(STALL_RECORD, host_now_ns() - tr);
     gpu_end_rendering(cb, &s);
     gpu_query_flush(cb, &s);
     submit(cb);
@@ -2672,10 +2678,45 @@ void gpu_execute(uint64_t handle) {
 
 static int64_t stall_ns[STALL_KINDS];
 static long stall_n[STALL_KINDS];
+static int64_t thread_ns[STALL_KINDS];  /* the same, summed over the 600 frames of thread_report's lines */
 
 void gpu_stall_add(int kind, int64_t ns) {
     __atomic_add_fetch(&stall_ns[kind], ns, __ATOMIC_RELAXED);
     __atomic_add_fetch(&stall_n[kind], 1, __ATOMIC_RELAXED);
+    __atomic_add_fetch(&thread_ns[kind], ns, __ATOMIC_RELAXED);
+}
+
+/* gpu_present, on the GPU thread: every 600 frames, the average frame's GPU-thread time by part, and how much of
+ * the thread's CPU time was the kernel's (issue #30, 2026-11-27: on a RX 9060 XT under Linux 7.3 this thread was
+ * 99% kernel time and ~45 ms a frame of "other"; this line says whether that is vkQueueSubmit, vkEndCommandBuffer,
+ * the recording (page faults show there) or something else). */
+static void thread_report(uint64_t frame) {
+    static HostThreadUsage last;
+    static int64_t last_t;
+    static int have;
+    if (frame % 600) return;
+    int64_t ns[STALL_KINDS];
+    for (int k = 0; k < STALL_KINDS; k++) ns[k] = __atomic_exchange_n(&thread_ns[k], 0, __ATOMIC_RELAXED);
+    HostThreadUsage u;
+    int64_t now = host_now_ns();
+    int ok = host_thread_usage(&u) == 0;
+    if (have && ok) {
+        double f = 600.0, wall = (double)(now - last_t) / 1e6;
+        double user = (double)(u.user_ns - last.user_ns) / 1e6, sys = (double)(u.sys_ns - last.sys_ns) / 1e6;
+        fprintf(stderr, "yw4: gpu thread: frames %" PRIu64 "-%" PRIu64 ", per frame: command lists %.2f ms (recording %.2f, "
+                "of it images %.2f pipelines %.2f uploads %.2f GPU waits %.2f; end %.2f, vkQueueSubmit %.2f), present %.2f; "
+                "CPU %.0f%% of %.0f ms: user %.2f ms, kernel %.2f ms",
+                frame - 600, frame, ns[STALL_EXEC] / 1e6 / f, ns[STALL_RECORD] / 1e6 / f, ns[STALL_IMAGE] / 1e6 / f,
+                ns[STALL_PIPE] / 1e6 / f, ns[STALL_UPLOAD] / 1e6 / f, ns[STALL_WAIT] / 1e6 / f, ns[STALL_END] / 1e6 / f,
+                ns[STALL_SUBMIT] / 1e6 / f, ns[STALL_PRESENT] / 1e6 / f, wall > 0 ? (user + sys) * 100 / wall : 0, wall,
+                user / f, sys / f);
+        if (u.minflt >= 0)
+            fprintf(stderr, "; page faults %.1f (+%.2f from disk), context switches %.1f waited + %.1f preempted",
+                    (u.minflt - last.minflt) / f, (u.majflt - last.majflt) / f, (u.nvcsw - last.nvcsw) / f,
+                    (u.nivcsw - last.nivcsw) / f);
+        fputc('\n', stderr);
+    }
+    if (ok) last = u, last_t = now, have = 1;
 }
 
 /* ---- video memory (VK_EXT_memory_budget): this process's use of the device-local heaps and the budget the
@@ -3014,6 +3055,7 @@ void gpu_present(NvnTexture *t, uint64_t frame, const int crop[4]) {
     gpu_in_work = 0;
     gpu_stall_add(STALL_PRESENT, host_now_ns() - present_t0);  /* not the window's wait for the display */
     stall_report(present_count);
+    thread_report(present_count);
     vram_sample(present_count);
     VkRect2D r = {{0, 0}, {g->width, g->height}};
     /* the crop, in the game's pixels: scaled with the window image (YW4_RES) */

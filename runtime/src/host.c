@@ -14,6 +14,7 @@
 #ifndef _WIN32
 #include <dlfcn.h>
 #include <signal.h>
+#include <sys/resource.h>  /* getrusage(RUSAGE_THREAD): host_thread_usage */
 #include <ucontext.h>
 #endif
 
@@ -50,6 +51,26 @@ int host_file_sync(FILE *f) {
     return _commit(_fileno(f));
 #else
     return fsync(fileno(f));
+#endif
+}
+
+int host_thread_usage(HostThreadUsage *u) {
+    *u = (HostThreadUsage){0, 0, -1, -1, -1, -1};
+#ifdef _WIN32
+    FILETIME c, e, k, us;
+    if (!GetThreadTimes(GetCurrentThread(), &c, &e, &k, &us)) return -1;
+    u->sys_ns = (int64_t)(((uint64_t)k.dwHighDateTime << 32 | k.dwLowDateTime) * 100);
+    u->user_ns = (int64_t)(((uint64_t)us.dwHighDateTime << 32 | us.dwLowDateTime) * 100);
+    return 0;
+#elif defined(RUSAGE_THREAD)
+    struct rusage r;
+    if (getrusage(RUSAGE_THREAD, &r)) return -1;
+    u->user_ns = (int64_t)r.ru_utime.tv_sec * 1000000000 + (int64_t)r.ru_utime.tv_usec * 1000;
+    u->sys_ns = (int64_t)r.ru_stime.tv_sec * 1000000000 + (int64_t)r.ru_stime.tv_usec * 1000;
+    u->minflt = r.ru_minflt, u->majflt = r.ru_majflt, u->nvcsw = r.ru_nvcsw, u->nivcsw = r.ru_nivcsw;
+    return 0;
+#else
+    return -1;
 #endif
 }
 

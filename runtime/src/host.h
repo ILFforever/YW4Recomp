@@ -52,6 +52,11 @@ void host_timer_init(void);
 
 /* Nanoseconds from an arbitrary start, never going backwards. */
 int64_t host_now_ns(void);
+/* The calling thread's CPU time so far, split into its own code (user) and the kernel's on its behalf (sys), plus its
+ * page faults (minor = no disk, major = disk) and context switches (voluntary = it waited, involuntary = it was
+ * preempted). Windows has no per-thread faults or switches: those are -1. Returns -1 when nothing is known. */
+typedef struct { int64_t user_ns, sys_ns; long minflt, majflt, nvcsw, nivcsw; } HostThreadUsage;
+int host_thread_usage(HostThreadUsage *u);
 /* Nanoseconds since this process was created (Windows: before its DLLs loaded; elsewhere: since the first call). */
 int64_t host_process_age_ns(void);
 /* Start-up timing (log.c): a "yw4: boot: <ms since the process was created> ms: <what>" line. */
