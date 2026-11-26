@@ -443,10 +443,21 @@ pub async fn download_launcher_update(app: tauri::AppHandle, version: String, ur
 /// @tauri-apps/cli 2.12.4): /P passive (a progress window, no questions, closes when done), /UPDATE over the
 /// installed launcher without its reinstall questions, /R the new launcher started again afterwards, as the user.
 /// If this launcher hasn't quit by the time the installer looks, the installer closes it (Restart Manager).
+/// /D= the folder this launcher runs from. Without it the installer takes the folder in Windows' installed-apps entry,
+/// which is the LAST install's: with two installs (W:\YW4 Recomp and a later one in AppData) the update went to the
+/// other one, and this launcher stayed old and offered the update again (owner, 2026-11-26).
 #[tauri::command]
 pub fn run_launcher_update(app: tauri::AppHandle) -> Result<(), String> {
     let exe = CHECKED_INSTALLER.lock().map_err(|e| e.to_string())?.take().ok_or("no checked installer")?;
-    crate::platform::command(&exe).args(["/P", "/UPDATE", "/R"]).spawn().map_err(|e| format!("couldn't start the installer: {e}"))?;
+    let mut cmd = crate::platform::command(&exe);
+    cmd.args(["/P", "/UPDATE", "/R"]);
+    #[cfg(windows)]
+    if let Some(dir) = std::env::current_exe().ok().and_then(|e| e.parent().map(Path::to_path_buf)) {
+        // NSIS reads /D= only as the last argument and unquoted, spaces and all: arg() would quote it
+        use std::os::windows::process::CommandExt;
+        cmd.raw_arg(installer_dir_arg(&dir));
+    }
+    cmd.spawn().map_err(|e| format!("couldn't start the installer: {e}"))?;
     std::thread::spawn(move || {
         std::thread::sleep(std::time::Duration::from_millis(300));  // the page's answer gets back first
         app.exit(0);
@@ -454,9 +465,19 @@ pub fn run_launcher_update(app: tauri::AppHandle) -> Result<(), String> {
     Ok(())
 }
 
+/// The installer's folder argument: `/D=` and the path as it is (NSIS takes the rest of the line).
+fn installer_dir_arg(dir: &Path) -> String {
+    format!("/D={}", dir.display())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn installer_dir_is_unquoted_with_spaces() {
+        assert_eq!(installer_dir_arg(Path::new(r"W:\YW4 Recomp")), r"/D=W:\YW4 Recomp");
+    }
 
     #[test]
     fn game_notes_for_code_that_came_with_the_launcher() {
