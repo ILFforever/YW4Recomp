@@ -1669,6 +1669,7 @@ static void note_other(const NvnProgram *p) {
 }
 
 static long motion_objects, motion_moved;  /* draws with a last-frame world, how many of them moved (last_world) */
+static long motion_shared;  /* draws left at the camera's motion because their key is shared (last_world) */
 
 static void native_summary(void) {
     static _Thread_local uint64_t last;
@@ -1683,8 +1684,10 @@ static void native_summary(void) {
                 nat.other[i].vs, nat.other[i].fs, nat.other[i].n);
     long mo = __atomic_exchange_n(&motion_objects, 0, __ATOMIC_RELAXED);
     long mm = __atomic_exchange_n(&motion_moved, 0, __ATOMIC_RELAXED);  /* other threads add under history_lock */
-    if (mo)
-        fprintf(stderr, "yw4: %s: motion: %ld draws with last frame's world, %ld of them moved\n", pass_name, mo, mm);
+    long ms = __atomic_exchange_n(&motion_shared, 0, __ATOMIC_RELAXED);
+    if (mo || ms)
+        fprintf(stderr, "yw4: %s: motion: %ld draws with last frame's world, %ld of them moved; %ld with a shared key "
+                        "(camera motion only)\n", pass_name, mo, mm, ms);
     memset(&nat, 0, sizeof nat);
 }
 
@@ -1701,28 +1704,62 @@ static void native_summary(void) {
 enum { HISTORY = 1 << 13 };
 static struct {
     uint64_t object, frame;
+    uint64_t shared_until;      /* the key was seen with two different worlds in one frame: camera motion only */
     float world[16], last[16];  /* 3x4 rows and the stored bottom row */
 } history[HISTORY];
 static HostLock history_lock = HOST_LOCK_INIT;
 
+/* Further in one frame than anything walks or flies (a warp, or a key that changed hands): no motion from it, the
+ * camera's only. The world's rows are 3x4 with the translation in the last column; the game's units are metres. */
+static int moved_far(const float a[16], const float b[16]) {
+    float dx = a[3] - b[3], dy = a[7] - b[7], dz = a[11] - b[11];
+    return dx * dx + dy * dy + dz * dz > 4.0f;  /* 2 m */
+}
+
+/* OBJECT MOTION (developer row, YW4_OBJECT_MOTION): 1 on (the default since 2026-11-28: the owner watched FSR frame
+ * generation's trail behind the walking player go away), 0 off (the camera's motion only, as before) */
+static int object_motion = -1;
+int gbuffer_object_motion(void) {
+    int v = __atomic_load_n(&object_motion, __ATOMIC_RELAXED);
+    if (v < 0) {
+        const char *e = getenv("YW4_OBJECT_MOTION");
+        v = !e || *e != '0';
+        __atomic_store_n(&object_motion, v, __ATOMIC_RELAXED);
+    }
+    return v;
+}
+void gbuffer_object_motion_toggle(void) { __atomic_store_n(&object_motion, !gbuffer_object_motion(), __ATOMIC_RELAXED); }
+
 static void last_world(const float now[16], float last[16]) {
-    static int off = -1;
-    if (off < 0) off = !(getenv("YW4_OBJECT_MOTION") && *getenv("YW4_OBJECT_MOTION") == '1');  /* off until checked */
     memcpy(last, now, 16 * sizeof(float));
-    if (off || !cur.world_rec) return;
+    if (!gbuffer_object_motion() || !cur.world_rec) return;
     uint64_t frame = __atomic_load_n(&yw4_frames_presented, __ATOMIC_RELAXED);
     uint32_t h = (uint32_t)((cur.world_rec * 0x9E3779B97F4A7C15ull) >> 51);
     host_lock(&history_lock);
     for (uint32_t i = 0; i < 8; i++, h = (h + 1) & (HISTORY - 1)) {
         if (history[h].object && history[h].object != cur.world_rec && history[h].frame + 2 >= frame) continue;
-        if (history[h].object == cur.world_rec && history[h].frame == frame) {  /* another submesh this frame */
-            memcpy(last, history[h].last, 16 * sizeof(float));
+        if (history[h].object == cur.world_rec && history[h].frame == frame) {
+            if (memcmp(history[h].world, now, 12 * sizeof(float))) {
+                /* another object with the same key (scenery pieces of one model, 2026-11-28: lawn, hedges and path
+                 * got another piece's world as last frame's, bright wrong motion): this key gets no history while
+                 * it keeps its slot, as the order the pieces come in can change from frame to frame */
+                history[h].shared_until = UINT64_MAX;
+            } else if (history[h].shared_until < frame) {  /* another submesh of the same object this frame */
+                memcpy(last, history[h].last, 16 * sizeof(float));
+            }
+            if (history[h].shared_until >= frame) __atomic_add_fetch(&motion_shared, 1, __ATOMIC_RELAXED);
+        } else if (history[h].object == cur.world_rec && history[h].shared_until >= frame) {
+            history[h].frame = frame;  /* shared: keep the key's slot, leave this frame's world as last frame's */
+            memcpy(history[h].world, now, 16 * sizeof(float));
+            memcpy(history[h].last, now, 16 * sizeof(float));
+            __atomic_add_fetch(&motion_shared, 1, __ATOMIC_RELAXED);
         } else {
-            if (history[h].object == cur.world_rec && history[h].frame + 1 == frame) {
+            if (history[h].object == cur.world_rec && history[h].frame + 1 == frame && !moved_far(history[h].world, now)) {
                 memcpy(last, history[h].world, 16 * sizeof(float));
                 __atomic_add_fetch(&motion_objects, 1, __ATOMIC_RELAXED);
                 __atomic_add_fetch(&motion_moved, memcmp(last, now, 12 * sizeof(float)) != 0, __ATOMIC_RELAXED);
             }
+            if (history[h].object != cur.world_rec) history[h].shared_until = 0;  /* a new key in the slot */
             history[h].object = cur.world_rec, history[h].frame = frame;
             memcpy(history[h].world, now, 16 * sizeof(float));
             memcpy(history[h].last, last, 16 * sizeof(float));

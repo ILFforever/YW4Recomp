@@ -111,8 +111,8 @@ this is where FSR blends instead of moving the pixels.
 
 ## Not done yet
 
-- Objects moved by their world matrix (not bones) have only the camera's motion; a history of each object's world
-  is in `gbuffer.c` (`YW4_OBJECT_MOTION=1`), off until objects sharing a model get keys of their own.
+- ~~Objects moved by their world matrix (not bones) have only the camera's motion~~: done 2026-11-28, see the
+  change below.
 - The game's real camera matrices for DLSS-G (from the G-buffer pass's constant buffers).
 - Frame generation off in menus and loading screens (NVIDIA's advice).
 - The FRAME RATE setting counts the game's frames; what is shown is about twice that.
@@ -151,3 +151,25 @@ the generated frames are sharp and only shifted; with `YW4_FG_CROP=0` (the old w
 With it, two changes of the same day, correct by FSR's API but with no visible effect in that test: FSR gets the
 camera's position and axes (`YW4_FG_CAM_VEC=0`: origin and identity axes, as before), and an NVIDIA D24S8 depth
 goes to FSR as a D32 copy like AMD's D32S8 (`YW4_FSR_D24_COPY=0`: as it is, through FSR's own invalid view).
+
+## Change 2026-11-28: each object's own motion (OBJECT MOTION, on)
+
+FSR frame generation left a trail behind the walking player (owner). The motion view (`YW4_AA=3 YW4_AA_DEBUG=4`,
+`tools.dev.scene walk`, frame 3600) showed why: the player's body and Whisper had the ground's colour, the camera's
+motion only, though the following camera keeps them almost still on screen. They are moved by their world matrix,
+and the game puts this frame's world in the "last frame's" rows; FSR moved them with the background.
+
+`gbuffer.c` already kept each object's world from the frame before (`last_world`), off because it painted parts of
+the lawn, hedges and path with bright wrong motion. Those are pieces of one model sharing the key (the record the
+world is read from), drawn with different worlds, so one piece got another's world as last frame's. Now a key seen
+with two different worlds in one frame keeps the camera's motion only, for as long as it keeps its slot, and a world
+that moved over 2 m in one frame gives no motion (a warp, or a key that changed hands). Against the old way, the
+motion view differed only on the player and Whisper (and swaying leaves); in the walk, ~6-8 thousand draws had their
+own last world per 300 frames and ~27 thousand shared keys stayed at the camera's motion.
+
+The owner watched it in play (late-game save, 4K, FSR frame generation): "object motion alone cleans it up". So it
+is on by default, the developer row OBJECT MOTION (`YW4_OBJECT_MOTION=0`: off). The motion also reaches TAA, FSR,
+DLSS and XeSS, which get the same motion target.
+
+Tried the same day and dropped: pacing the generated frame halfway between the two game frames' times. It waited a
+whole game frame step on top of each present, held the game back and lowered the frame rate (owner).
