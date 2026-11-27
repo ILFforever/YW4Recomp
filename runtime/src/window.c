@@ -365,6 +365,19 @@ static int vk_init_instance(int *sl_out) {
     }
     const char *layers[1];
     uint32_t nlayers = 0;
+    {  /* the layers installed: implicit ones (overlays, capture tools) load into the game unasked (issue #30) */
+        uint32_t n = 0;
+        VkLayerProperties props[64];
+        vkEnumerateInstanceLayerProperties(&n, NULL);
+        if (n > 64) n = 64;
+        if (n) vkEnumerateInstanceLayerProperties(&n, props);
+        char line[1600];
+        size_t len = 0;
+        line[0] = 0;
+        for (uint32_t i = 0; i < n && len + 80 < sizeof line; i++)
+            len += (size_t)snprintf(line + len, sizeof line - len, "%s%s", i ? ", " : "", props[i].layerName);
+        fprintf(stderr, "yw4: window: Vulkan layers installed (implicit ones load unasked): %s\n", n ? line : "none");
+    }
     const char *v = getenv("YW4_VULKAN_VALIDATION");
     if (v && *v && *v != '0') {
         uint32_t n = 0;

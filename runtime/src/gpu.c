@@ -29,6 +29,7 @@
 #include "gbuffer.h"
 #include "gpu_dlssg.h"
 #include "gpu_fg.h"
+#include "gpu_sample.h"
 #include "post.h"
 #include "gpu_internal.h"
 #include "host.h"
@@ -287,9 +288,17 @@ static VkCommandBuffer begin(void) {
     return s->cb;
 }
 
+/* the slowest single vkQueueSubmit since the last stall line / thread line (issue #30: one slow list, or all?) */
+static int64_t submit_max_stall, submit_max_thread;
+static void gpu_submit_max(int64_t ns) {
+    if (ns > submit_max_stall) submit_max_stall = ns;  /* the GPU thread only (under gpu_lock) */
+    if (ns > submit_max_thread) submit_max_thread = ns;
+}
+
 static void submit(VkCommandBuffer cb) {
     gpu_passes_end(cb);
     if (ts_period_ns && cur) vkCmdWriteTimestamp(cb, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, qpool, (uint32_t)(cur - ring) * 2 + 1);
+    int phase_was = gpu_phase_set(GPU_PHASE_END);
     int64_t te = host_now_ns();
     CHECK(vkEndCommandBuffer(cb));
     gpu_stall_add(STALL_END, host_now_ns() - te);
@@ -299,10 +308,14 @@ static void submit(VkCommandBuffer cb) {
     VkSubmitInfo si = {.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO, .pNext = &ts, .commandBufferCount = 1,
                        .pCommandBuffers = &cb, .signalSemaphoreCount = 1, .pSignalSemaphores = &timeline};
     host_lock(&vk.queue_lock);
+    gpu_phase_set(GPU_PHASE_SUBMIT);
     int64_t tq = host_now_ns();  /* after the queue lock: the driver's time alone (issue #30) */
     VkResult r = vkQueueSubmit(vk.queue, 1, &si, VK_NULL_HANDLE);
-    gpu_stall_add(STALL_SUBMIT, host_now_ns() - tq);
+    int64_t took = host_now_ns() - tq;
+    gpu_stall_add(STALL_SUBMIT, took);
+    gpu_submit_max(took);
     host_unlock(&vk.queue_lock);
+    gpu_phase_set(phase_was);
     if (r == VK_ERROR_DEVICE_LOST) {
         fprintf(stderr, "yw4: gpu: device lost in submission %" PRIu64 "\n", seq);
         gpu_crash_report(r);
@@ -2598,6 +2611,8 @@ static inline void gpu_exec_query(VkCommandBuffer cb, GpuState *s, const CmdRec 
 }
 
 void gpu_execute(uint64_t handle) {
+    gpu_sample_start();
+    gpu_phase_set(GPU_PHASE_OTHER);
     int64_t t0 = host_now_ns();
     host_lock(&gpu_lock);
     int64_t t1 = host_now_ns();
@@ -2615,6 +2630,7 @@ void gpu_execute(uint64_t handle) {
     static uint64_t exec;  /* which run of a list this is (gpu_ab.c) */
     exec++;
     int64_t tr = host_now_ns();
+    gpu_phase_set(GPU_PHASE_RECORD);
     for (int n = 0;; n++) {
         const CmdRec *r = (const CmdRec *)(uintptr_t)at;
         if (r->op >= CMD_COUNT || r->size < sizeof(CmdRec) || r->size & 7 || n > 10000000) {
@@ -2666,6 +2682,7 @@ void gpu_execute(uint64_t handle) {
         at += r->size;
     }
     gpu_stall_add(STALL_RECORD, host_now_ns() - tr);
+    gpu_phase_set(GPU_PHASE_OTHER);
     gpu_end_rendering(cb, &s);
     gpu_query_flush(cb, &s);
     submit(cb);
@@ -2679,11 +2696,13 @@ void gpu_execute(uint64_t handle) {
 static int64_t stall_ns[STALL_KINDS];
 static long stall_n[STALL_KINDS];
 static int64_t thread_ns[STALL_KINDS];  /* the same, summed over the 600 frames of thread_report's lines */
+static long thread_submits;
 
 void gpu_stall_add(int kind, int64_t ns) {
     __atomic_add_fetch(&stall_ns[kind], ns, __ATOMIC_RELAXED);
     __atomic_add_fetch(&stall_n[kind], 1, __ATOMIC_RELAXED);
     __atomic_add_fetch(&thread_ns[kind], ns, __ATOMIC_RELAXED);
+    if (kind == STALL_SUBMIT) __atomic_add_fetch(&thread_submits, 1, __ATOMIC_RELAXED);
 }
 
 /* gpu_present, on the GPU thread: every 600 frames, the average frame's GPU-thread time by part, and how much of
@@ -2697,6 +2716,13 @@ static void thread_report(uint64_t frame) {
     if (frame % 600) return;
     int64_t ns[STALL_KINDS];
     for (int k = 0; k < STALL_KINDS; k++) ns[k] = __atomic_exchange_n(&thread_ns[k], 0, __ATOMIC_RELAXED);
+    long nsub = __atomic_exchange_n(&thread_submits, 0, __ATOMIC_RELAXED);
+    int np;
+    double pool_mib = 0;
+    host_lock(&pool_lock);
+    np = npools;
+    for (int i = 0; i < npools; i++) pool_mib += (double)pools[i]->size / (1 << 20);
+    host_unlock(&pool_lock);
     HostThreadUsage u;
     int64_t now = host_now_ns();
     int ok = host_thread_usage(&u) == 0;
@@ -2704,12 +2730,14 @@ static void thread_report(uint64_t frame) {
         double f = 600.0, wall = (double)(now - last_t) / 1e6;
         double user = (double)(u.user_ns - last.user_ns) / 1e6, sys = (double)(u.sys_ns - last.sys_ns) / 1e6;
         fprintf(stderr, "yw4: gpu thread: frames %" PRIu64 "-%" PRIu64 ", per frame: command lists %.2f ms (recording %.2f, "
-                "of it images %.2f pipelines %.2f uploads %.2f GPU waits %.2f; end %.2f, vkQueueSubmit %.2f), present %.2f; "
-                "CPU %.0f%% of %.0f ms: user %.2f ms, kernel %.2f ms",
+                "of it images %.2f pipelines %.2f uploads %.2f GPU waits %.2f; end %.2f, vkQueueSubmit %.2f in %.1f submits, "
+                "slowest %.2f), present %.2f, window present %.2f; CPU %.0f%% of %.0f ms: user %.2f ms, kernel %.2f ms; "
+                "%d memory pools imported, %.0f MiB",
                 frame - 600, frame, ns[STALL_EXEC] / 1e6 / f, ns[STALL_RECORD] / 1e6 / f, ns[STALL_IMAGE] / 1e6 / f,
                 ns[STALL_PIPE] / 1e6 / f, ns[STALL_UPLOAD] / 1e6 / f, ns[STALL_WAIT] / 1e6 / f, ns[STALL_END] / 1e6 / f,
-                ns[STALL_SUBMIT] / 1e6 / f, ns[STALL_PRESENT] / 1e6 / f, wall > 0 ? (user + sys) * 100 / wall : 0, wall,
-                user / f, sys / f);
+                ns[STALL_SUBMIT] / 1e6 / f, nsub / f, submit_max_thread / 1e6, ns[STALL_PRESENT] / 1e6 / f,
+                ns[STALL_WINDOW] / 1e6 / f, wall > 0 ? (user + sys) * 100 / wall : 0, wall, user / f, sys / f, np,
+                pool_mib);
         if (u.minflt >= 0)
             fprintf(stderr, "; page faults %.1f (+%.2f from disk), context switches %.1f waited + %.1f preempted",
                     (u.minflt - last.minflt) / f, (u.majflt - last.majflt) / f, (u.nvcsw - last.nvcsw) / f,
@@ -2717,6 +2745,8 @@ static void thread_report(uint64_t frame) {
         fputc('\n', stderr);
     }
     if (ok) last = u, last_t = now, have = 1;
+    submit_max_thread = 0;
+    gpu_sample_report(frame);
 }
 
 /* ---- video memory (VK_EXT_memory_budget): this process's use of the device-local heaps and the budget the
@@ -2797,6 +2827,8 @@ static void stall_report(uint64_t frame) {
         ns[k] = __atomic_exchange_n(&stall_ns[k], 0, __ATOMIC_RELAXED), n[k] = __atomic_exchange_n(&stall_n[k], 0, __ATOMIC_RELAXED);
     long busy = detile_busy, busy_bytes = detile_busy_bytes;
     detile_busy = detile_busy_bytes = 0;
+    int64_t submit_max = submit_max_stall;
+    submit_max_stall = 0;
     if (!limit || ns[STALL_EXEC] + ns[STALL_PRESENT] < limit) return;
     if (busy) fprintf(stderr, "yw4: stall: frame %" PRIu64 ": %ld textures (%ld MiB) found the de-tiling ring busy: on the CPU\n",
                       frame, busy, busy_bytes >> 20);
@@ -2809,11 +2841,12 @@ static void stall_report(uint64_t frame) {
               ns[STALL_PIPE] / 1e6, (long)n[STALL_IMAGE], ns[STALL_IMAGE] / 1e6, ns[STALL_WAIT] / 1e6);
     fprintf(stderr, "yw4: stall: frame %" PRIu64 ": %.1f ms of GPU-thread work: %ld command lists %.1f ms, present %.1f; in them: "
             "waiting for the lock %.1f, waiting for the GPU %.1f (for a command buffer %.1f), %ld pipelines built %.1f, "
-            "%ld shaders loaded %.1f, %ld images made %.1f with their uploads (%ld texture uploads %.1f), other %.1f\n",
+            "%ld shaders loaded %.1f, %ld images made %.1f with their uploads (%ld texture uploads %.1f), "
+            "vkQueueSubmit %.1f (slowest %.1f), vkEndCommandBuffer %.1f, other %.1f\n",
             frame, (ns[STALL_EXEC] + ns[STALL_PRESENT]) / 1e6, n[STALL_EXEC], ns[STALL_EXEC] / 1e6,
             ns[STALL_PRESENT] / 1e6, ns[STALL_LOCK] / 1e6, ns[STALL_WAIT] / 1e6, ns[STALL_BEGIN] / 1e6, n[STALL_PIPE],
             ns[STALL_PIPE] / 1e6, n[STALL_SHADER], ns[STALL_SHADER] / 1e6, n[STALL_IMAGE], ns[STALL_IMAGE] / 1e6,
-            n[STALL_UPLOAD], ns[STALL_UPLOAD] / 1e6, other);
+            n[STALL_UPLOAD], ns[STALL_UPLOAD] / 1e6, ns[STALL_SUBMIT] / 1e6, submit_max / 1e6, ns[STALL_END] / 1e6, other);
 }
 
 /* ================================================================== present */
@@ -2981,6 +3014,7 @@ int gpu_is_presented(uint64_t addr) {
 }
 
 void gpu_present(NvnTexture *t, uint64_t frame, const int crop[4]) {
+    gpu_phase_set(GPU_PHASE_PRESENT);
     int64_t present_t0 = host_now_ns();
     host_lock(&gpu_lock);
     gpu_in_work = 1;
@@ -3074,11 +3108,14 @@ void gpu_present(NvnTexture *t, uint64_t frame, const int crop[4]) {
         return;
     }
     gpu_fg_drain();  /* frames it still has go first */
+    gpu_phase_set(GPU_PHASE_WINDOW);
     int64_t wt0 = host_now_ns();
     window_present_image(g->image, g->format, r, frame);
     int64_t wt1 = host_now_ns();
     dlssg_frame_begin();  /* DLSS frame generation: the next frame starts (Reflex's sleep) */
     int64_t wt2 = host_now_ns();
+    gpu_stall_add(STALL_WINDOW, wt2 - wt0);  /* thread_report only: the stall line has its own window line */
+    gpu_phase_set(GPU_PHASE_OTHER);
     if (wt2 - wt0 > 30000000)  /* hitches outside the stall log: the window's present and Reflex's sleep */
         yw4_event("stall", present_count, "\"ms\":%.1f,\"where\":\"window present\"", (double)(wt2 - wt0) / 1e6);
     if (wt2 - wt0 > 30000000)

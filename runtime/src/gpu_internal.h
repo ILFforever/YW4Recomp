@@ -14,7 +14,7 @@ YW4_NORETURN void gpu_stop(const char *fmt, ...);  /* something the draw path ca
 
 /* ---- gpu.c: where a frame's time on the GPU thread went, logged when it is long (hitches; YW4_STALL_MS) */
 enum { STALL_EXEC, STALL_LOCK, STALL_BEGIN, STALL_PIPE, STALL_IMAGE, STALL_UPLOAD, STALL_PRESENT, STALL_SHADER, STALL_WAIT,
-       STALL_RECORD, STALL_END, STALL_SUBMIT, STALL_KINDS };
+       STALL_RECORD, STALL_END, STALL_SUBMIT, STALL_WINDOW, STALL_KINDS };
 void gpu_stall_add(int kind, int64_t ns);
 extern _Thread_local int gpu_in_work;  /* the GPU thread is executing or presenting: its gpu_waits are stalls */
 

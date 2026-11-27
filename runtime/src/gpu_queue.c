@@ -21,6 +21,7 @@
 
 #include "gpu.h"
 #include "gpu_internal.h"
+#include "gpu_sample.h"
 #include "host.h"
 #include "kernel.h"
 #include "nvn.h"
@@ -71,10 +72,12 @@ static void worker(void *arg) {
     host_thread_set_priority(NULL, 39);  /* same priority as guest render workers */
     __atomic_store_n(&worker_host, host_thread_self(), __ATOMIC_RELEASE);
     for (;;) {
+        gpu_phase_set(GPU_PHASE_IDLE);
         host_lock(&lock);
         while (done == queued) host_cond_wait(&work, &lock, -1);
         Job j = jobs[done % JOBS];
         host_unlock(&lock);
+        gpu_phase_set(GPU_PHASE_OTHER);
         yw4_profile_thread(YW4_ROLE_SUBMIT, gpu_frames());
         run(&j);
         uint64_t seq = gpu_submitted();
