@@ -19,8 +19,10 @@
 #include "gpu_dlss.h"
 #include "gpu_dlssg.h"
 #include "gpu_fg.h"
+#include "gamemenu.h"
 #include "gpu_fsr.h"
 #include "gpu_internal.h"
+#include "post.h"
 #include "host.h"
 #include "window.h"
 
@@ -184,7 +186,12 @@ static int available(void) {
 
 /* On, and a 3D scene drawn lately (gpu_scene_recent): 2D screens such as the title menu's video bypass it, as DLSS
  * frame generation does on frames without its tags (gpu_dlssg.cpp). */
-int gpu_fg_active(void) { return gpu_fg() == 1 && gpu_aa() >= 3 && available() == 1 && gpu_scene_recent(); }
+int gpu_fg_active(void) {
+    /* and not while the overlay shows (its Preview aside), as DLSS's (gpu_dlssg.cpp): its text and buttons ghosted;
+     * nor while the battles' blur runs as a battle starts (dof.c) */
+    return gpu_fg() == 1 && gpu_aa() >= 3 && available() == 1 && gpu_scene_recent() &&
+           (!gamemenu_open() || gamemenu_previewing()) && !battle_blur_running();
+}
 
 static uint32_t surface_format(VkFormat f) {
     switch (f) {

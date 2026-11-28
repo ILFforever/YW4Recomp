@@ -624,13 +624,6 @@ static const Setting developer[] = {
      {"16", "8"},
      {"16 SAMPLES", "8 SAMPLES, TURNED EACH FRAME"}, 2, gpu_pcss_filter8, gpu_pcss_filter8_toggle, "YW4_PCSS_FILTER_TAPS",
      {"16", "8"}, mask_speedup_disabled},
-    {"FRAME GENERATION", "OBJECT MOTION",
-     "TELLS FRAME GENERATION AND THE ANTI-ALIASING HOW THE PLAYER, WHISPER AND OTHER THINGS MOVED BY THE GAME MOVE. "
-     "OFF, THEY GET ONLY THE CAMERA'S MOTION: WHILE THE CAMERA FOLLOWS YOU, FRAME GENERATION LEAVES A TRAIL BEHIND "
-     "YOUR CHARACTER.",
-     {"OFF", "ON"},
-     {"THE CAMERA'S MOTION ONLY", "EACH OBJECT'S OWN MOTION (RECOMMENDED)"}, 2, gbuffer_object_motion, gbuffer_object_motion_toggle,
-     "YW4_OBJECT_MOTION", {"0", "1"}},
 };
 /* The overlay's Cheats page (gamemenu.c; owner, 2026-11-15, canvas https://claude.ai/artifact/XcwzdE1gju4aNQJgxgE2e5
  * option B): its own page in the side menu, never on the Settings page or the old panel; hidden, and every cheat off,

@@ -21,9 +21,8 @@ int gbuffer_hook_world(const CPUState *ctx, float out[12]);
  * step 2a): gpu_draw.c asks per draw whether our programs replace the game's. The settings panel switches
  * between native and the game's. */
 int gbuffer_native(void);
-/* Objects moved by their world matrix get their own motion (developer row OBJECT MOTION, YW4_OBJECT_MOTION) */
+/* Objects moved by their world matrix get their own motion (always; YW4_OBJECT_MOTION=0 for tests) */
 int gbuffer_object_motion(void);
-void gbuffer_object_motion_toggle(void);
 int gbuffer_native_frame(uint64_t gpu_frame);  /* the same, with YW4_GBUFFER_ALTERNATE applied */
 void gbuffer_toggle(void);
 /* Step 2b, YW4_GBUFFER=native: a G-buffer draw of ours, recorded in place of the game's

@@ -74,6 +74,8 @@ typedef struct {
 int blur_native(void);
 /* The fast blur rounds (YW4_BLUR_FAST, the settings panel's BATTLE BLUR): fewer, wider rounds; ours draw them. */
 int blur_fast(void);
+/* 1 while the battles' blur runs (it ran in the last 0.1 s): frame generation steps aside (gpu_fg.c, gpu_dlssg.cpp) */
+int battle_blur_running(void);
 void blur_fast_toggle(void);
 void gpu_blur_pass(void *vk_cb, void *gpu_state, const void *data, uint32_t size);
 void gpu_blur_check_end(void *vk_cb, void *gpu_state, const void *data, uint32_t size);  /* after the game's rounds */

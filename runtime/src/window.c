@@ -86,7 +86,10 @@ static VkSemaphore acquired;
 static VkSwapchainKHR swapchain;
 static VkExtent2D swap_extent;
 static VkImage swap_images[8];
-static VkImageView swap_views[8];  /* to draw into (the HUD, blended) */
+static VkImageView swap_views[9];  /* to draw into (the HUD, blended); [UI_VIEW]: the UI layer's (uil) */
+enum { UI_VIEW = 8 };
+int battle_active(void);        /* battle.c */
+int battle_blur_running(void);  /* post.h (dof.c) */
 static VkSemaphore rendered[8];  /* one per swapchain image: reused only after that image is presented */
 static uint32_t nswap;
 static VkFormat swap_format;
@@ -1370,7 +1373,7 @@ static void note_render(float s) {
 
 static void note_draw(VkImage dst, uint32_t index, int32_t x0, int32_t y0, uint32_t bw, uint32_t bh) {
     (void)bw;
-    if (!__atomic_load_n(&note_on, __ATOMIC_ACQUIRE) || index >= 8 || !swap_views[index]) return;
+    if (!__atomic_load_n(&note_on, __ATOMIC_ACQUIRE) || index > UI_VIEW || !swap_views[index]) return;
     if (hb_resources() || nb_resources()) {
         note_keys_wait = 0;
         __atomic_store_n(&note_on, 0, __ATOMIC_RELEASE);
@@ -1408,7 +1411,7 @@ static void note_draw(VkImage dst, uint32_t index, int32_t x0, int32_t y0, uint3
 
 static void hud_draw(VkImage dst, uint32_t index, int32_t x0, int32_t y0, uint32_t bw, uint32_t bh) {
     hud_shown_w = hud_shown_h = 0;
-    if (!hud_enabled() || hb_resources() || index >= 8 || !swap_views[index]) return;
+    if (!hud_enabled() || hb_resources() || index > UI_VIEW || !swap_views[index]) return;
     VkPipeline pipe = hb_pipeline(swap_format);
     if (!pipe) return;
     /* Drawn again 4 times a second, or at once when its form, parts or size change; the frames between show the
@@ -1832,7 +1835,7 @@ static int pk_resources(uint32_t w, uint32_t h) {
  * (x0 + rx, y0 + ry). upload: the canvas was drawn again. 0 when drawn. */
 static int pk_draw(VkImage dst, uint32_t index, const uint8_t *px, uint32_t bw, int32_t rx, int32_t ry, int32_t rw,
                    int32_t rh, int32_t x0, int32_t y0, int upload) {
-    if (index >= 8 || !swap_views[index] || pk_resources((uint32_t)rw, (uint32_t)rh)) return -1;
+    if (index > UI_VIEW || !swap_views[index] || pk_resources((uint32_t)rw, (uint32_t)rh)) return -1;
     VkPipeline pipe = hb_pipeline(swap_format);
     if (!pipe) return -1;
     static int32_t last_w, last_h;
@@ -2162,6 +2165,73 @@ static int hudless_window_image(uint32_t w, uint32_t h) {
     return 1;
 }
 
+/* DLSS frame generation's UI layer (owner, 2026-11-28: with the 3D running, the Preview bar and our HUD ghosted, as
+ * DLSS-G made frames between pictures that had them drawn in): our layers are drawn into this image instead
+ * (cleared to nothing each present), laid over the window image with one blended draw, and tagged for DLSS-G
+ * (dlssg_ui), which lays it over every frame it shows instead of moving it with the picture. Not in battles nor
+ * while the battle blur runs: with it the battles flickered as they start (the game's own battle pictures are in
+ * neither the HUD-less copy nor this layer). Window size and format; its view is swap_views[UI_VIEW], so the
+ * layers' drawing (quad_draw) needs no change. YW4_DLSSG_UI_LAYER=0: never. */
+static struct {
+    VkImage image;
+    VkDeviceMemory mem;
+    uint32_t w, h;
+    VkFormat format;
+    VkDescriptorPool pool;
+    VkDescriptorSet set;  /* hb.dsl: the image sampled, to lay it over */
+    int failed;
+} uil;
+static int hb_resources(void);  /* below */
+
+static int ui_layer_image(uint32_t w, uint32_t h) {
+    if (uil.image && uil.w == w && uil.h == h && uil.format == swap_format) return 1;
+    if (uil.failed || hb_resources()) return 0;
+    if (uil.image) {
+        vkDeviceWaitIdle(vk.device);
+        vkDestroyImageView(vk.device, swap_views[UI_VIEW], NULL), swap_views[UI_VIEW] = VK_NULL_HANDLE;
+        vkDestroyImage(vk.device, uil.image, NULL), uil.image = VK_NULL_HANDLE;
+        vkFreeMemory(vk.device, uil.mem, NULL), uil.mem = VK_NULL_HANDLE;
+        vkResetDescriptorPool(vk.device, uil.pool, 0), uil.set = VK_NULL_HANDLE;
+    }
+    uil.failed = 1;  /* until everything below is made */
+    VkImageCreateInfo ici = {.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO, .imageType = VK_IMAGE_TYPE_2D,
+                             .format = swap_format, .extent = {w, h, 1}, .mipLevels = 1, .arrayLayers = 1,
+                             .samples = VK_SAMPLE_COUNT_1_BIT, .tiling = VK_IMAGE_TILING_OPTIMAL,
+                             .usage = VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT |
+                                      VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT};
+    if (vkCreateImage(vk.device, &ici, NULL, &uil.image) != VK_SUCCESS) return uil.image = VK_NULL_HANDLE, 0;
+    VkMemoryRequirements mr;
+    vkGetImageMemoryRequirements(vk.device, uil.image, &mr);
+    VkMemoryAllocateInfo mai = {.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO, .allocationSize = mr.size,
+                                .memoryTypeIndex = vk_memory_type(mr.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT)};
+    if (vkAllocateMemory(vk.device, &mai, NULL, &uil.mem) != VK_SUCCESS ||
+        vkBindImageMemory(vk.device, uil.image, uil.mem, 0) != VK_SUCCESS) {
+        vkDestroyImage(vk.device, uil.image, NULL), uil.image = VK_NULL_HANDLE;
+        return 0;
+    }
+    VkImageViewCreateInfo vci = {.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO, .image = uil.image,
+                                 .viewType = VK_IMAGE_VIEW_TYPE_2D, .format = swap_format,
+                                 .subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1}};
+    if (vkCreateImageView(vk.device, &vci, NULL, &swap_views[UI_VIEW]) != VK_SUCCESS) return 0;
+    if (!uil.pool) {
+        VkDescriptorPoolSize ps = {VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 1};
+        VkDescriptorPoolCreateInfo pci = {.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO, .maxSets = 1,
+                                          .poolSizeCount = 1, .pPoolSizes = &ps};
+        if (vkCreateDescriptorPool(vk.device, &pci, NULL, &uil.pool) != VK_SUCCESS) return 0;
+    }
+    VkDescriptorSetAllocateInfo dai = {.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO, .descriptorPool = uil.pool,
+                                       .descriptorSetCount = 1, .pSetLayouts = &hb.dsl};
+    if (vkAllocateDescriptorSets(vk.device, &dai, &uil.set) != VK_SUCCESS) return 0;
+    VkDescriptorImageInfo ii = {hb.sampler, swap_views[UI_VIEW], VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL};
+    VkWriteDescriptorSet wr = {.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET, .dstSet = uil.set, .dstBinding = 0,
+                               .descriptorCount = 1, .descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER,
+                               .pImageInfo = &ii};
+    vkUpdateDescriptorSets(vk.device, 1, &wr, 0, NULL);
+    uil.w = w, uil.h = h, uil.format = swap_format, uil.failed = 0;
+    fprintf(stderr, "yw4: window: UI layer for DLSS frame generation, %ux%u\n", w, h);
+    return 1;
+}
+
 /* Flash detector (YW4_FLASH=1, docs/debugging.md): each presented frame is also scaled to a small thumbnail and
  * read back one frame later (after the fence the next present waits for anyway: no stall). A frame where many
  * thumbnail texels are brighter than in both the frame before and the frame after is logged ("yw4: flash:") and
@@ -2397,6 +2467,7 @@ static int present_image(VkImage src, VkImageLayout layout, VkRect2D r0, int rea
     /* DLSS frame generation works on this window image: its HUD-less copy the same, the picture before the UI
      * (gpu_fg.c) scaled into the same place, so DLSS-G keeps the menus, our HUD and the panel still */
     VkImage hl = layout == VK_IMAGE_LAYOUT_GENERAL && dlssg_on() && !paused_view ? gpu_fg_hudless() : VK_NULL_HANDLE;
+    int ui_layer = 0;  /* our layers go into the UI layer (uil) this present */
     if (hl && hudless_window_image(ww, wh)) {
         barrier(hl, VK_IMAGE_LAYOUT_GENERAL, VK_IMAGE_LAYOUT_GENERAL, VK_ACCESS_MEMORY_WRITE_BIT, VK_ACCESS_TRANSFER_READ_BIT);
         barrier(hlw.image, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 0, VK_ACCESS_TRANSFER_WRITE_BIT);
@@ -2408,13 +2479,38 @@ static int present_image(VkImage src, VkImageLayout layout, VkRect2D r0, int rea
         barrier(hlw.image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_GENERAL, VK_ACCESS_TRANSFER_WRITE_BIT,
                 VK_ACCESS_MEMORY_READ_BIT);
         dlssg_hudless(hlw.image, hlw.view, swap_format, ww, wh);
+        static int ui_layer_on = -1;
+        if (ui_layer_on < 0) ui_layer_on = !getenv("YW4_DLSSG_UI_LAYER") || atoi(getenv("YW4_DLSSG_UI_LAYER"));
+        ui_layer = ui_layer_on && !gamemenu_peeking() && !battle_active() && !battle_blur_running() &&
+                   ui_layer_image(ww, wh) && hb_pipeline(swap_format);
     } else {
         dlssg_hudless(VK_NULL_HANDLE, VK_NULL_HANDLE, swap_format, 0, 0);
     }
-    hud_draw(dst, index, x0, y0, bw, bh);
-    note_draw(dst, index, x0, y0, bw, bh);
-    menu_draw(dst, index, x0, y0, bw, bh);
-    legacy_panel_draw(dst, x0, y0, bw, bh);
+    VkImage ldst = dst;  /* where our layers are drawn: the window image, or the UI layer */
+    uint32_t lindex = index;
+    if (ui_layer) {
+        VkClearColorValue none = {{0, 0, 0, 0}};
+        barrier(uil.image, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 0, VK_ACCESS_TRANSFER_WRITE_BIT);
+        vkCmdClearColorImage(cmd, uil.image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, &none, 1, &all);
+        barrier(uil.image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+                VK_ACCESS_TRANSFER_WRITE_BIT, VK_ACCESS_TRANSFER_WRITE_BIT);
+        ldst = uil.image, lindex = UI_VIEW;
+    }
+    hud_draw(ldst, lindex, x0, y0, bw, bh);
+    note_draw(ldst, lindex, x0, y0, bw, bh);
+    menu_draw(ldst, lindex, x0, y0, bw, bh);
+    legacy_panel_draw(ldst, x0, y0, bw, bh);
+    if (ui_layer) {  /* laid over the window image (premultiplied: src + dst x (1 - src.a)), then tagged */
+        hb_barrier(uil.image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+                   VK_ACCESS_TRANSFER_WRITE_BIT | VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT, VK_ACCESS_SHADER_READ_BIT);
+        BlendedQuad whole = {.set = uil.set, .w = ww, .h = wh};
+        quad_draw(&whole, dst, index, hb_pipeline(swap_format), 0.0f, 0.0f, ww, wh);
+        hb_barrier(uil.image, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, VK_IMAGE_LAYOUT_GENERAL, VK_ACCESS_SHADER_READ_BIT,
+                   VK_ACCESS_MEMORY_READ_BIT);
+        dlssg_ui(uil.image, swap_views[UI_VIEW], swap_format, ww, wh);
+    } else {
+        dlssg_ui(VK_NULL_HANDLE, VK_NULL_HANDLE, swap_format, 0, 0);
+    }
     barrier(dst, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR, VK_ACCESS_TRANSFER_WRITE_BIT, 0);
     vkEndCommandBuffer(cmd);
 

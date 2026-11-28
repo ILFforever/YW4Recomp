@@ -152,7 +152,7 @@ With it, two changes of the same day, correct by FSR's API but with no visible e
 camera's position and axes (`YW4_FG_CAM_VEC=0`: origin and identity axes, as before), and an NVIDIA D24S8 depth
 goes to FSR as a D32 copy like AMD's D32S8 (`YW4_FSR_D24_COPY=0`: as it is, through FSR's own invalid view).
 
-## Change 2026-11-28: each object's own motion (OBJECT MOTION, on)
+## Change 2026-11-28: each object's own motion (always on)
 
 FSR frame generation left a trail behind the walking player (owner). The motion view (`YW4_AA=3 YW4_AA_DEBUG=4`,
 `tools.dev.scene walk`, frame 3600) showed why: the player's body and Whisper had the ground's colour, the camera's
@@ -168,8 +168,32 @@ motion view differed only on the player and Whisper (and swaying leaves); in the
 own last world per 300 frames and ~27 thousand shared keys stayed at the camera's motion.
 
 The owner watched it in play (late-game save, 4K, FSR frame generation): "object motion alone cleans it up". So it
-is on by default, the developer row OBJECT MOTION (`YW4_OBJECT_MOTION=0`: off). The motion also reaches TAA, FSR,
+is always on, with no menu row: off breaks frame generation and the anti-aliasing on moving objects (owner);
+`YW4_OBJECT_MOTION=0` turns it off for tests. The motion also reaches TAA, FSR,
 DLSS and XeSS, which get the same motion target.
 
 Tried the same day and dropped: pacing the generated frame halfway between the two game frames' times. It waited a
 whole game frame step on top of each present, held the game back and lowered the frame rate (owner).
+
+## Change 2026-11-28: when frame generation steps aside, and DLSS's UI layer
+
+The owner saw DLSS frame generation smear our own pictures and the battles' start:
+
+- **The overlay** (Escape): the game pauses but its 3D stays behind the panel, so frames were still tagged and DLSS
+  made frames between overlay pictures, ghosting its text and buttons. Both frame generators now step aside while
+  the overlay is open, F2's quick look included (`gamemenu_open`, `gamemenu_peeking`).
+- **Our layers while the 3D runs** (the Preview bar, the HUD, notices): drawn into the window image, DLSS moved
+  them with the picture. They are now drawn into a UI layer of their own (`window.c` `uil`, cleared each present,
+  colour premultiplied), laid over the window image with one blended draw and tagged for DLSS
+  (`kBufferTypeUIColorAndAlpha`, the backbuffer's rectangle) with user interface recomposition on, so DLSS lays it
+  over every frame instead of interpolating it. Preview keeps frame generation on with it. FSR never had this: we
+  draw our layers onto each of its frames after it made them.
+- **Battles**: with the UI layer tagged the battles flickered as they start (the game's own battle pictures are in
+  neither the HUD-less copy nor the UI layer), so it is not used in battles (`battle_active`), where our layers go
+  into the picture as before; Preview in a battle turns frame generation off.
+- **The battle's start blur** (the render job `main+0x897d90`, `dof.c`): a whole-screen blur growing each frame,
+  which DLSS turned into ghosting. Frame generation (both) steps aside while a blur of 2 rounds or more ran in the
+  last 0.1 s, about 1.3 s per battle start. The game also keeps a faint one-round blur (strength 0.04) for long
+  parts of a battle (22 s in one), which doesn't count.
+
+Owner, after each step in play (late-game save, 4K, DLSS, DLSS frame generation): "looks amazing", "looks good".

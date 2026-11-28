@@ -1716,8 +1716,9 @@ static int moved_far(const float a[16], const float b[16]) {
     return dx * dx + dy * dy + dz * dz > 4.0f;  /* 2 m */
 }
 
-/* OBJECT MOTION (developer row, YW4_OBJECT_MOTION): 1 on (the default since 2026-11-28: the owner watched FSR frame
- * generation's trail behind the walking player go away), 0 off (the camera's motion only, as before) */
+/* Each object's own motion, always on since 2026-11-28 (the owner watched FSR frame generation's trail behind the
+ * walking player go away; no menu row: off breaks frame generation and the anti-aliasing's moving objects).
+ * YW4_OBJECT_MOTION=0 (testing): the camera's motion only, as before. */
 static int object_motion = -1;
 int gbuffer_object_motion(void) {
     int v = __atomic_load_n(&object_motion, __ATOMIC_RELAXED);
@@ -1728,7 +1729,6 @@ int gbuffer_object_motion(void) {
     }
     return v;
 }
-void gbuffer_object_motion_toggle(void) { __atomic_store_n(&object_motion, !gbuffer_object_motion(), __ATOMIC_RELAXED); }
 
 static void last_world(const float now[16], float last[16]) {
     memcpy(last, now, 16 * sizeof(float));

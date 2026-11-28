@@ -35,6 +35,11 @@ extern "C" {
 #include "gpu_fg.h"
 #include "host.h"
 #include "vk.h"
+int gamemenu_open(void);        /* gamemenu.h */
+int gamemenu_previewing(void);
+int gamemenu_peeking(void);     /* F2's quick look */
+int battle_blur_running(void);  /* post.h */
+int battle_active(void);        /* battle.h */
 }
 
 /* ---- Streamline's core functions, from sl.interposer.dll */
@@ -288,6 +293,15 @@ static VkImageView hudless_view;
 static VkFormat hudless_format;
 static uint32_t hudless_w, hudless_h;
 
+static VkImage ui_image;  /* this present's UI layer (window.c), or none */
+static VkImageView ui_view;
+static VkFormat ui_format;
+static uint32_t ui_w, ui_h;
+
+extern "C" void dlssg_ui(VkImage image, VkImageView view, VkFormat format, uint32_t w, uint32_t h) {
+    ui_image = image, ui_view = view, ui_format = format, ui_w = w, ui_h = h;
+}
+
 extern "C" void dlssg_hudless(VkImage image, VkImageView view, VkFormat format, uint32_t w, uint32_t h) {
     hudless_image = image, hudless_view = view, hudless_format = format, hudless_w = w, hudless_h = h;
 }
@@ -414,11 +428,20 @@ extern "C" void dlssg_present_begin(int32_t x, int32_t y, uint32_t w, uint32_t h
      * player chose another setting: give the memory back (slFreeResources), as NVIDIA's guide asks. */
     static int retained;  /* off with its memory kept */
     int chosen = avail && gpu_fg() == 2;
-    int want = chosen && tagged;
+    /* also off while the overlay shows (its Preview aside: the bar goes in the UI layer, window.c): the paused game's
+     * 3D stays behind it, so the frames were tagged and DLSS-G made frames between overlay pictures, ghosting its text
+     * and buttons (owner, 2026-11-28); F2's quick look too (its blurred picture isn't in the UI layer); and while the
+     * battles' blur runs as a battle starts (dof.c: ghosting and flicker) */
+    int want = chosen && tagged && (!gamemenu_open() || (gamemenu_previewing() && !battle_active())) &&
+               !gamemenu_peeking() && !battle_blur_running();  /* Preview in a battle: no UI layer there, off */
     if ((want != mode_on || (retained && !chosen)) && (avail || mode_on == 1)) {
         sl::DLSSGOptions o{};
         o.mode = want ? sl::DLSSGMode::eOn : sl::DLSSGMode::eOff;
         o.numFramesToGenerate = 1;
+        /* our UI layer (dlssg_ui) laid over each frame on its own, not interpolated with the picture: without this
+         * DLSS-G still blended the Preview bar between frames (owner, 2026-11-28). YW4_DLSSG_UI_RECOMPOSE=0: off */
+        if (!getenv("YW4_DLSSG_UI_RECOMPOSE") || atoi(getenv("YW4_DLSSG_UI_RECOMPOSE")))
+            o.enableUserInterfaceRecomposition = sl::Boolean::eTrue;
         if (chosen && !getenv("YW4_DLSSG_FREE_IN_MENUS")) o.flags = sl::DLSSGFlags::eRetainResourcesWhenOff;
         if (getenv("YW4_DLSSG_SHOW_GENERATED"))  /* tests: only the generated frames on screen (for screen captures) */
             o.flags |= sl::DLSSGFlags::eShowOnlyInterpolatedFrame;
@@ -435,9 +458,12 @@ extern "C" void dlssg_present_begin(int32_t x, int32_t y, uint32_t w, uint32_t h
     }
     if (want) {
         sl::Extent sub{(uint32_t)y, (uint32_t)x, w, h};
-        sl::ResourceTag tags[2] = {
+        sl::ResourceTag tags[3] = {
             sl::ResourceTag(nullptr, sl::kBufferTypeBackbuffer, sl::ResourceLifecycle::eValidUntilPresent, &sub),
-            sl::ResourceTag(nullptr, sl::kBufferTypeHUDLessColor, sl::ResourceLifecycle::eValidUntilPresent, &sub)};
+            sl::ResourceTag(nullptr, sl::kBufferTypeHUDLessColor, sl::ResourceLifecycle::eValidUntilPresent, &sub),
+            /* the same rectangle as the backbuffer's and the HUD-less copy's, as DLSS-G requires (the image is the
+             * window's) */
+            sl::ResourceTag(nullptr, sl::kBufferTypeUIColorAndAlpha, sl::ResourceLifecycle::eValidUntilPresent, &sub)};
         /* the HUD-less copy at the window image's size (window.c), the same rectangle as the backbuffer's; without
          * it a null tag, so Streamline doesn't use an old one */
         sl::Resource hl(sl::ResourceType::eTex2d, (void *)hudless_image, nullptr, (void *)hudless_view,
@@ -446,7 +472,15 @@ extern "C" void dlssg_present_begin(int32_t x, int32_t y, uint32_t w, uint32_t h
         hl.mipLevels = 1, hl.arrayLayers = 1, hl.flags = 0;
         hl.usage = VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_SAMPLED_BIT;
         if (hudless_image) tags[1].resource = &hl;
-        slSetTagForFrame(*token, viewport, tags, 2, nullptr);
+        /* our UI layer (dlssg_ui), so DLSS-G lays it over each frame instead of moving it with the picture (owner,
+         * 2026-11-28: the Preview bar and the HUD ghosted while the 3D ran); none in battles (window.c) */
+        sl::Resource ui(sl::ResourceType::eTex2d, (void *)ui_image, nullptr, (void *)ui_view, VK_IMAGE_LAYOUT_GENERAL);
+        ui.width = ui_w, ui.height = ui_h, ui.nativeFormat = (uint32_t)ui_format;
+        ui.mipLevels = 1, ui.arrayLayers = 1, ui.flags = 0;
+        ui.usage = VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_SAMPLED_BIT |
+                   VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT;
+        if (ui_image) tags[2].resource = &ui;
+        slSetTagForFrame(*token, viewport, tags, 3, nullptr);
     }
     slPCLSetMarker(sl::PCLMarker::ePresentStart, *token);
 }
@@ -498,6 +532,9 @@ extern "C" void dlssg_present_begin(int32_t x, int32_t y, uint32_t w, uint32_t h
 extern "C" void dlssg_present_end(void) {}
 extern "C" float dlssg_shown_per_frame(void) { return 0.0f; }
 extern "C" void dlssg_hudless(VkImage i, VkImageView v, VkFormat f, uint32_t w, uint32_t h) {
+    (void)i, (void)v, (void)f, (void)w, (void)h;
+}
+extern "C" void dlssg_ui(VkImage i, VkImageView v, VkFormat f, uint32_t w, uint32_t h) {
     (void)i, (void)v, (void)f, (void)w, (void)h;
 }
 extern "C" int dlssg_on(void) { return 0; }

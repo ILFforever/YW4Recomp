@@ -22,6 +22,7 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "host.h"
 #include "post.h"
 #include "yw4rt.h"
 
@@ -195,6 +196,16 @@ void blur_fast_toggle(void) {
  * BATTLE BLUR fast: the game draws it from a copy of the job with m = ceil(n / 4) rounds, strength 1 and the
  * spreads times strength * sqrt(n / m): the same total width (a Gaussian's width grows with the square root of
  * the rounds) for a quarter of the passes. Guest addresses are host addresses, so the copy can live here. */
+/* When the battle blur last ran (host ns): frame generation steps aside while it runs (battle_blur_running). A
+ * whole-screen blur growing each frame is what DLSS frame generation made ghosting and flicker of as battles
+ * start (owner, 2026-11-28). */
+static int64_t blur_last_ns, blur_first_ns;
+
+int battle_blur_running(void) {
+    int64_t t = __atomic_load_n(&blur_last_ns, __ATOMIC_RELAXED);
+    return t && host_now_ns() - t < 100000000;  /* 0.1 s: a frame or two at the slowest */
+}
+
 int yw4_hook_battle_blur(CPUState *ctx) {
     static _Thread_local uint8_t copy[0x20] __attribute__((aligned(16)));
     uint64_t job = ctx->x[1];
@@ -202,6 +213,15 @@ int yw4_hook_battle_blur(CPUState *ctx) {
     float strength = F32(job + 4);
     int32_t max = (int32_t)U32(job + 0x14);
     uint32_t n = (uint32_t)(strength * (float)(max - 1) + 1.0f);
+    if (n >= 2) {  /* a real blur (a battle starting: 7-16 rounds); the game also keeps a faint one-round blur running
+                    * through parts of a battle (strength 0.04, 22 s in one: 2026-11-28), which isn't counted */
+        int64_t now = host_now_ns(), last = __atomic_load_n(&blur_last_ns, __ATOMIC_RELAXED);
+        if (!last || now - last > 100000000) {  /* a new run of the blur: how long the last one lasted */
+            if (last) fprintf(stderr, "yw4: battle blur: ran %.0f ms\n", (double)(last - blur_first_ns) / 1e6);
+            blur_first_ns = now;
+        }
+        __atomic_store_n(&blur_last_ns, now, __ATOMIC_RELAXED);
+    }
     int fast = blur_fast() && n >= 2;
     uint32_t m = fast ? (n + 3) / 4 : n;
     {   /* what it blurs and how, when that changes, the first 64 times */

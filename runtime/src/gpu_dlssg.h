@@ -41,6 +41,10 @@ void dlssg_present_end(void);
 /* Before dlssg_present_begin (window.c): this present's HUD-less copy at the window image's size, the picture before
  * the UI scaled into the game's rectangle; VK_NULL_HANDLE: none this frame. */
 void dlssg_hudless(VkImage image, VkImageView view, VkFormat format, uint32_t w, uint32_t h);
+/* This present's UI layer (window.c: our HUD, notices, the overlay's Preview bar ...) at the window's size, colour
+ * premultiplied by alpha, alpha 0 where there is none, layout GENERAL; DLSS-G lays it over every frame it shows,
+ * generated ones too, instead of moving it with the picture. VK_NULL_HANDLE: none this present. */
+void dlssg_ui(VkImage image, VkImageView view, VkFormat format, uint32_t w, uint32_t h);
 /* Frames on screen per game frame while DLSS frame generation runs (2: one generated each), else 0. */
 float dlssg_shown_per_frame(void);
 /* 1 while frame generation is switched on in Streamline (the window doesn't wait for the monitor then). */

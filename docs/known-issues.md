@@ -15,7 +15,7 @@ move to [progress.md](progress.md).
   large steps between frames; real play at ~40 game frames/s has larger steps than the replays (1/60 s). Ruled out:
   late motion (`YW4_FG_MOTION_LOG=1`: always this frame's), the HUD-less copy, depth inverted / raw / placeholder
   camera (no change). The trail behind the whole player and Whisper, and the jitter with it, were the camera-only
-  motion: fixed 2026-11-28 (OBJECT MOTION, [decision 0041](decisions/0041-frame-generation.md)).
+  motion: fixed 2026-11-28 (each object's own motion, [decision 0041](decisions/0041-frame-generation.md)).
 - **A short shadow flash after unpausing from the game's own pause menu** (the Plus button), only in the bamboo
   forest and not after closing our overlay (owner, 2026-11-06 and 2026-11-13). Minor; not looked into.
 - **PCSS (soft shadows) only reaches what the shadow mask covers.** Objects the game draws forward (6 other shadow
