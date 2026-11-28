@@ -171,22 +171,21 @@ First built by [Quandiy](https://github.com/Quandiy) in their fork. [How to play
 </details>
 
 <details>
-<summary><b>Ongoing</b> (7)</summary>
+<summary><b>Ongoing</b> (6)</summary>
 
 | Goal | Where it stands |
 |---|---|
 | **Performance (CPU)** | Less work per frame on the CPU, so busy places hold their frame rate on slower PCs: the renderer's GPU commands are being made cheaper to build (in testing) |
 | **Our own renderer** | Ours: shadows, surfaces, bloom, distance blur, lighting, sky, tone mapping. **Left:** choosing what to draw, two screen passes, the UI and menus |
 | **Steadier shadows** | Shadows still shimmer a little as the camera moves; steadier cascades next |
-| **Shadows on AMD graphics cards** | Our shadow mask still draws streaks on some AMD cards as the camera turns ([#8](https://github.com/ILFforever/YW4Recomp/issues/8)); a fix tried in 1.6.0 didn't cure it, and it doesn't happen on NVIDIA. Next: testing on an AMD card. Until then, Shadow mask → Game avoids it |
-| **Better anti-aliasing** | FXAA, SMAA and TAA (steady thin edges: fences, nets, leaves) on the 3D scene before the UI is drawn, so text stays crisp; per-object motion for TAA next (a first version is in, off by default) |
-| **Clean moving characters with frame generation** | DLSS's red trail behind characters in the rain is gone with the new DLSS MODEL: HIGH QUALITY setting. Still open: with frame generation on (DLSS or FSR), a fine noisy outline around characters while the camera turns |
-| **Mouse in the game's menus** | Pointing, clicking and wheel scrolling work on the Yo-kai Pad and the pages opened from it, such as the item and quest lists, Ukiukipedia and Members ([decision 0057](docs/decisions/0057-mouse-menu-lists.md)). Clicks and the wheel also work on the title screen, in conversations and shops, on the map, in the battle's Stopwatching menu and on Naviwoof Guide (see [Keyboard, mouse and controllers](#features)). Some Pad pages still had open issues on 2026-11-08 (Watch skills, Soulmate, Trophies, Treasure photos, Switch moves) |
+| **Better anti-aliasing** | FXAA, SMAA and TAA (steady thin edges: fences, nets, leaves) on the 3D scene before the UI is drawn, so text stays crisp; the player, Whisper and other things the game moves now carry their own motion, not just the camera's |
+| **Clean moving characters with frame generation** | DLSS's red trail behind characters in the rain is gone with the new DLSS MODEL: HIGH QUALITY setting, and FSR's trail behind the walking player with each object's own motion. Still open: with frame generation on (DLSS or FSR), a fine noisy outline around characters while the camera turns |
+| **Mouse in the game's menus** | Pointing, clicking and wheel scrolling work on the Yo-kai Pad and the pages opened from it, such as the item and quest lists, Ukiukipedia and Members ([decision 0057](docs/decisions/0057-mouse-menu-lists.md)). Clicks and the wheel also work on the title screen, in conversations and shops, on the map, in the battle's Stopwatching menu and on Naviwoof Guide (see [Keyboard, mouse and controllers](#features)). Two Pad pages are still open: Watch skills and Switch moves |
 
 </details>
 
 <details>
-<summary><b>Finished</b> (21)</summary>
+<summary><b>Finished</b> (22)</summary>
 
 | Goal | Where it stands |
 |---|---|
@@ -194,6 +193,7 @@ First built by [Quandiy](https://github.com/Quandiy) in their fork. [How to play
 | **Higher frame rates** | 30, 60, 120, 144, VSYNC or no limit, switchable while playing (FRAME RATE in the panel; VSYNC after a restart): the game already moves by the real time between frames, so walking, battles, menus and cutscenes all work (~140 frames/s at 1600×900). At 4K the GPU is the limit; upscaling lifts it, frame generation doubles what is shown |
 | **Sharper distance** | Anisotropic texture filtering and a softer distance blur: distant ground, roads and buildings stay sharp without 4K |
 | **Better shadows** | Bigger shadow maps (up to 4096), PCSS soft shadows and contact shadows ([decisions 0025](docs/decisions/0025-pcss-soft-shadows.md), [0045](docs/decisions/0045-contact-shadows.md)) |
+| **Shadows on AMD graphics cards** | The streaks our shadow mask drew on AMD cards as the camera turned are gone: AMD and NVIDIA rounded one shadow-blend step differently ([#8](https://github.com/ILFforever/YW4Recomp/issues/8), [decision 0088](docs/decisions/0088-amd-shadow-mask-blend.md)) |
 | **Higher resolution** | The 3D view at 1080p, 1440p or 4K instead of the game's 1600×900 (30 frames/s at 4K on an RTX 4070 laptop) |
 | **Ultrawide and other aspect ratios** | 16:10, 21:9 and 32:9 in the panel: a wider view of the world with the UI kept 16:9 in the middle; exploring, battles and cutscenes work; dialog dimming and the loading screen cover the full width |
 | **Upscaling (NVIDIA DLSS, AMD FSR)** | The world drawn smaller and rebuilt at full size, menus and text kept full size. **DLSS for the cleanest picture (NVIDIA RTX), FSR for the most frames (any GPU).** At 4K 21:9 on an RTX 4070 laptop, instead of ~81 frames/s with TAA: DLSS ~85 / ~92 / ~82 (quality / balanced / performance), FSR ~94 / ~106 / ~118. DLSS keeps fine patterns (far nets, perforated fences) clean where FSR gets grainy ([decisions 0039](docs/decisions/0039-fsr-upscaling.md), [0040](docs/decisions/0040-dlss-upscaling.md)) |
